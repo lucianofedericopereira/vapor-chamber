@@ -1,0 +1,65 @@
+{
+  "name": "vapor-chamber",
+  "version": "0.1.0",
+  "description": "Lightweight command bus for Vue Vapor - plugins, hooks, undo/redo",
+  "type": "module",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "npm run build && npm run test:run"
+  },
+  "keywords": [
+    "vue",
+    "vapor",
+    "vue-vapor",
+    "command-bus",
+    "commands",
+    "plugins",
+    "middleware",
+    "undo-redo",
+    "state-management",
+    "signals",
+    "reactive"
+  ],
+  "author": "Luciano Federico Pereira",
+  "license": "LGPL-2.1",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lucianopereira/vapor-chamber.git"
+  },
+  "bugs": {
+    "url": "https://github.com/lucianopereira/vapor-chamber/issues"
+  },
+  "homepage": "https://github.com/lucianopereira/vapor-chamber#readme",
+  "peerDependencies": {
+    "vue": ">=3.5.0"
+  },
+  "peerDependenciesMeta": {
+    "vue": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^4.0.18",
+    "typescript": "^5.0.0",
+    "vitest": "^4.0.18"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
