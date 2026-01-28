@@ -1,6 +1,10 @@
-# Vapor Chamber
+<p align="center">
+  <img src="assets/vapor-chamber.png" alt="Vapor Chamber">
+</p>
 
-A lightweight command bus designed for [Vue Vapor](https://github.com/vuejs/vue-vapor). ~1KB core.
+<p align="center">
+  A lightweight command bus designed for <a href="https://github.com/vuejs/vue-vapor">Vue Vapor</a>. ~1KB core.
+</p>
 
 ## What is Vue Vapor?
 
