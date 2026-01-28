@@ -40,12 +40,12 @@
   "license": "LGPL-2.1",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/lucianopereira/vapor-chamber.git"
+    "url": "git+https://github.com/lucianofedericopereira/vapor-chamber.git"
   },
   "bugs": {
-    "url": "https://github.com/lucianopereira/vapor-chamber/issues"
+    "url": "https://github.com/lucianofedericopereira/vapor-chamber/issues"
   },
-  "homepage": "https://github.com/lucianopereira/vapor-chamber#readme",
+  "homepage": "https://github.com/lucianofedericopereira/vapor-chamber#readme",
   "peerDependencies": {
     "vue": ">=3.5.0"
   },
