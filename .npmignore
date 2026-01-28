@@ -1,0 +1,18 @@
+# Source and config
+src/
+tests/
+docs/
+examples/
+assets/
+
+# Config files
+tsconfig.json
+vitest.config.ts
+.gitignore
+.github/
+
+# Dev files
+*.log
+*.tgz
+coverage/
+node_modules/
