@@ -1,7 +1,7 @@
 /**
  * vapor-chamber - Lightweight command bus for Vue Vapor
  *
- * A ~1KB command bus with plugins, hooks, and Vapor-native reactivity.
+ * ~2KB gzipped (core + plugins + composables). DevTools loaded dynamically.
  */
 
 // Core
@@ -32,9 +32,16 @@ export {
 
 // Vapor integration
 export {
+  signal,
+  configureSignal,
+  type Signal,
+  type CreateSignal,
   getCommandBus,
   setCommandBus,
   useCommand,
   useCommandState,
   useCommandHistory,
 } from './chamber';
+
+// DevTools integration (optional — requires @vue/devtools-api)
+export { setupDevtools } from './devtools';

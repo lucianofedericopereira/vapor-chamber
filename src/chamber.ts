@@ -9,34 +9,39 @@ import { createCommandBus, type CommandBus, type Command, type CommandResult, ty
 
 // Vapor's signal API (expected shape - adjust when Vapor releases)
 // For now, we'll use a shim that works with both Vapor and standard Vue
-type Signal<T> = { value: T };
-type CreateSignal = <T>(initial: T) => Signal<T>;
+export type Signal<T> = { value: T };
+export type CreateSignal = <T>(initial: T) => Signal<T>;
 
-// Detect environment and get signal function
-function getSignalFn(): CreateSignal {
-  // Try Vapor's signal first (when available)
-  // @ts-ignore - Vapor not yet typed
-  if (typeof window !== 'undefined' && window.__VUE_VAPOR__?.signal) {
-    // @ts-ignore
-    return window.__VUE_VAPOR__.signal;
-  }
-
-  // Fallback: simple signal implementation for testing/non-Vapor
-  return <T>(initial: T): Signal<T> => {
-    let _value = initial;
-    const listeners: Array<(v: T) => void> = [];
-
-    return {
-      get value() { return _value; },
-      set value(v: T) {
-        _value = v;
-        listeners.forEach(fn => fn(v));
-      }
-    };
+// Fallback signal implementation used when Vapor is not available.
+// Uses a plain getter/setter — Vapor's compiler tracks reads/writes itself,
+// so no listener array is needed here.
+const fallbackSignal: CreateSignal = <T>(initial: T): Signal<T> => {
+  let _value = initial;
+  return {
+    get value() { return _value; },
+    set value(v: T) { _value = v; }
   };
+};
+
+// Allow explicit configuration of the signal factory — avoids probing
+// private/internal globals (e.g. window.__VUE_VAPOR__) which can break
+// proxy traps and is not a stable public API.
+let _signalFn: CreateSignal = fallbackSignal;
+
+/**
+ * Configure the signal factory used by vapor-chamber composables.
+ * Call this once at app setup when Vue Vapor's signal API is available.
+ *
+ * @example
+ * import { signal } from 'vue-vapor';
+ * import { configureSignal } from 'vapor-chamber';
+ * configureSignal(signal);
+ */
+export function configureSignal(fn: CreateSignal): void {
+  _signalFn = fn;
 }
 
-const signal = getSignalFn();
+export const signal: CreateSignal = <T>(initial: T) => _signalFn(initial);
 
 /**
  * Shared command bus instance
@@ -76,12 +81,32 @@ export function useCommand() {
     return result;
   }
 
+  const cleanups: Array<() => void> = [];
+
+  function register(action: string, handler: Handler): () => void {
+    const unregister = bus.register(action, handler);
+    cleanups.push(unregister);
+    return unregister;
+  }
+
+  function use(plugin: Plugin): () => void {
+    const remove = bus.use(plugin);
+    cleanups.push(remove);
+    return remove;
+  }
+
+  function dispose() {
+    cleanups.forEach(fn => fn());
+    cleanups.length = 0;
+  }
+
   return {
     dispatch,
     loading,
     lastError,
-    register: bus.register,
-    use: bus.use,
+    register,
+    use,
+    dispose,
   };
 }
 

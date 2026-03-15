@@ -47,10 +47,14 @@
   },
   "homepage": "https://github.com/lucianofedericopereira/vapor-chamber#readme",
   "peerDependencies": {
-    "vue": ">=3.5.0"
+    "vue": ">=3.5.0",
+    "@vue/devtools-api": ">=6.0.0"
   },
   "peerDependenciesMeta": {
     "vue": {
+      "optional": true
+    },
+    "@vue/devtools-api": {
       "optional": true
     }
   },

@@ -1,6 +1,6 @@
 /**
  * vapor-chamber - Command Bus for Vue Vapor
- * ~1KB - Commands + Plugins + Hooks
+ * ~2KB gzipped (core + plugins + composables) — DevTools loaded dynamically
  */
 
 export type Command = {
@@ -16,7 +16,7 @@ export type CommandResult = {
 };
 
 export type Handler = (cmd: Command) => any;
-export type AsyncHandler = (cmd: Command) => any | Promise<any>;
+export type AsyncHandler = (cmd: Command) => Promise<any>;
 export type Plugin = (cmd: Command, next: () => CommandResult) => CommandResult;
 export type AsyncPlugin = (cmd: Command, next: () => CommandResult | Promise<CommandResult>) => CommandResult | Promise<CommandResult>;
 export type Hook = (cmd: Command, result: CommandResult) => void;
@@ -36,37 +36,44 @@ export interface AsyncCommandBus {
   onAfter: (hook: AsyncHook) => () => void;
 }
 
+// Build a runner once per plugin-list change. On each dispatch the runner
+// receives cmd and execute as arguments — no per-dispatch closure allocation.
+function buildRunner(plugins: Plugin[]) {
+  return function run(cmd: Command, execute: () => CommandResult): CommandResult {
+    let i = 0;
+    function next(): CommandResult {
+      const plugin = plugins[i++];
+      return plugin ? plugin(cmd, next) : execute();
+    }
+    return next();
+  };
+}
+
 export function createCommandBus(): CommandBus {
   const handlers = new Map<string, Handler>();
   const plugins: Plugin[] = [];
   const afterHooks: Hook[] = [];
 
+  // Cached runner — rebuilt only when plugins are added or removed
+  let runner = buildRunner(plugins);
+
   function dispatch(action: string, target: any, payload?: any): CommandResult {
     const cmd: Command = { action, target, payload };
     const handler = handlers.get(action);
 
-    // Build execution chain: plugins wrap the handler
     const execute = (): CommandResult => {
       if (!handler) {
         return { ok: false, error: new Error(`No handler: ${action}`) };
       }
       try {
-        const value = handler(cmd);
-        return { ok: true, value };
+        return { ok: true, value: handler(cmd) };
       } catch (e) {
         return { ok: false, error: e as Error };
       }
     };
 
-    // Apply plugins (right to left, so first plugin is outermost)
-    const chain = plugins.reduceRight<() => CommandResult>(
-      (next, plugin) => () => plugin(cmd, next),
-      execute
-    );
+    const result = runner(cmd, execute);
 
-    const result = chain();
-
-    // Run after hooks
     for (const hook of afterHooks) {
       try {
         hook(cmd, result);
@@ -85,9 +92,13 @@ export function createCommandBus(): CommandBus {
 
   function use(plugin: Plugin): () => void {
     plugins.push(plugin);
+    runner = buildRunner(plugins);
     return () => {
       const i = plugins.indexOf(plugin);
-      if (i !== -1) plugins.splice(i, 1);
+      if (i !== -1) {
+        plugins.splice(i, 1);
+        runner = buildRunner(plugins);
+      }
     };
   }
 
@@ -102,6 +113,20 @@ export function createCommandBus(): CommandBus {
   return { dispatch, register, use, onAfter };
 }
 
+function buildAsyncRunner(plugins: AsyncPlugin[]) {
+  return function run(
+    cmd: Command,
+    execute: () => Promise<CommandResult>
+  ): Promise<CommandResult> {
+    let i = 0;
+    function next(): CommandResult | Promise<CommandResult> {
+      const plugin = plugins[i++];
+      return plugin ? plugin(cmd, next) : execute();
+    }
+    return Promise.resolve(next());
+  };
+}
+
 /**
  * Async command bus - supports async handlers, plugins, and hooks
  */
@@ -110,32 +135,26 @@ export function createAsyncCommandBus(): AsyncCommandBus {
   const plugins: AsyncPlugin[] = [];
   const afterHooks: AsyncHook[] = [];
 
+  // Cached runner — rebuilt only when plugins are added or removed
+  let runner = buildAsyncRunner(plugins);
+
   async function dispatch(action: string, target: any, payload?: any): Promise<CommandResult> {
     const cmd: Command = { action, target, payload };
     const handler = handlers.get(action);
 
-    // Build execution chain: plugins wrap the handler
     const execute = async (): Promise<CommandResult> => {
       if (!handler) {
         return { ok: false, error: new Error(`No handler: ${action}`) };
       }
       try {
-        const value = await handler(cmd);
-        return { ok: true, value };
+        return { ok: true, value: await handler(cmd) };
       } catch (e) {
         return { ok: false, error: e as Error };
       }
     };
 
-    // Apply plugins (right to left, so first plugin is outermost)
-    const chain = plugins.reduceRight<() => CommandResult | Promise<CommandResult>>(
-      (next, plugin) => () => plugin(cmd, next),
-      execute
-    );
+    const result = await runner(cmd, execute);
 
-    const result = await chain();
-
-    // Run after hooks
     for (const hook of afterHooks) {
       try {
         await hook(cmd, result);
@@ -154,9 +173,13 @@ export function createAsyncCommandBus(): AsyncCommandBus {
 
   function use(plugin: AsyncPlugin): () => void {
     plugins.push(plugin);
+    runner = buildAsyncRunner(plugins);
     return () => {
       const i = plugins.indexOf(plugin);
-      if (i !== -1) plugins.splice(i, 1);
+      if (i !== -1) {
+        plugins.splice(i, 1);
+        runner = buildAsyncRunner(plugins);
+      }
     };
   }
 

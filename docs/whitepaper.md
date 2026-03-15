@@ -6,7 +6,7 @@
 
 ## Abstract
 
-Vapor Chamber is a lightweight (~1KB) command bus designed specifically for Vue Vapor, Vue's upcoming Virtual DOM-less compilation strategy. This document describes the design philosophy, architectural decisions, and technical implementation of the library.
+Vapor Chamber is a lightweight (~2KB gzipped) command bus designed specifically for Vue Vapor, Vue's upcoming Virtual DOM-less compilation strategy. This document describes the design philosophy, architectural decisions, and technical implementation of the library.
 
 ## 1. Introduction
 
@@ -34,7 +34,7 @@ A command bus centralizes action handling while remaining lightweight and compos
 
 ### 2.1 Minimal by Default
 
-The core library weighs approximately 1KB minified. This is achieved through:
+The core library (command bus + plugins + Vapor composables) weighs approximately 4KB minified / 2KB gzipped. The DevTools integration is loaded dynamically and adds zero cost to production bundles. This is achieved through:
 
 - Zero external dependencies
 - No runtime framework abstractions
@@ -192,19 +192,19 @@ const analyticsPlugin: Plugin = (cmd, next) => {
 
 ## 5. Vue Vapor Integration
 
-### 5.1 Signal Detection
+### 5.1 Signal Configuration
 
-Vapor Chamber detects Vue Vapor's signal API at runtime:
+Vapor Chamber uses an explicit configuration API instead of probing internal globals. Accessing private properties such as `window.__VUE_VAPOR__` bypasses proxy traps and couples the library to unstable implementation details.
 
 ```typescript
-function getSignalFn(): CreateSignal {
-  if (window.__VUE_VAPOR__?.signal) {
-    return window.__VUE_VAPOR__.signal;
-  }
-  // Fallback for non-Vapor environments
-  return createFallbackSignal;
-}
+// At app setup, inject Vapor's signal factory once:
+import { signal } from 'vue-vapor';
+import { configureSignal } from 'vapor-chamber';
+
+configureSignal(signal);
 ```
+
+A built-in fallback implementation is used automatically in non-Vapor environments (testing, SSR, standard Vue 3), so `configureSignal` is only required when opting into Vapor's native signals.
 
 ### 5.2 Composables
 
@@ -293,7 +293,7 @@ Handlers are stored in a `Map<string, Handler>` for O(1) lookup.
 
 ### 8.2 Plugin Chain
 
-The plugin chain is built on each dispatch using `reduceRight`. For applications with many plugins and high-frequency dispatches, consider caching the chain.
+The plugin chain is built once per plugin-list change and cached as a stateful runner. On each dispatch, `cmd` and `execute` are passed as arguments — no per-dispatch closure allocation or `reduceRight` traversal occurs. The runner is invalidated and rebuilt only when plugins are added or removed, which is rare at runtime.
 
 ### 8.3 Memory
 

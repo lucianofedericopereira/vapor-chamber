@@ -140,6 +140,8 @@ export function debounce(
       const result = next();
       results.set(key, result);
       timers.delete(key);
+      // Clean up result after one render cycle to avoid unbounded map growth
+      setTimeout(() => results.delete(key), 0);
     }, wait));
 
     // Return pending status synchronously (check results map for actual result)
@@ -167,6 +169,8 @@ export function throttle(
 
     if (now - last >= wait) {
       lastRun.set(key, now);
+      // Schedule removal after the window so the map doesn't grow unbounded
+      setTimeout(() => lastRun.delete(key), wait);
       return next();
     }
 

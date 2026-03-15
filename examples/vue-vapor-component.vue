@@ -13,7 +13,8 @@ import {
   useCommandState,
   useCommandHistory,
   getCommandBus,
-  validator
+  validator,
+  signal
 } from '../src';
 
 // Get shared bus and add validation
@@ -82,26 +83,26 @@ const { canUndo, canRedo, undo, redo } = useCommandHistory({
   filter: (cmd) => cmd.action.startsWith('todo.') && cmd.action !== 'todo.filter'
 });
 
-// Computed filtered items
+// Computed filtered items — access todos.value properties directly without
+// destructuring, so reads always go through the signal getter and remain reactive.
 function getFilteredItems() {
-  const { items, filter } = todos.value;
-  switch (filter) {
-    case 'active': return items.filter(t => !t.done);
-    case 'completed': return items.filter(t => t.done);
-    default: return items;
+  switch (todos.value.filter) {
+    case 'active': return todos.value.items.filter(t => !t.done);
+    case 'completed': return todos.value.items.filter(t => t.done);
+    default: return todos.value.items;
   }
 }
 
-// Form state
-let newTodoText = '';
+// Form state - must be a signal so v-model triggers reactivity
+const newTodoText = signal('');
 
 // Actions
 function addTodo() {
-  if (!newTodoText.trim()) return;
+  if (!newTodoText.value.trim()) return;
 
-  const result = dispatch('todo.add', newTodoText.trim());
+  const result = dispatch('todo.add', newTodoText.value.trim());
   if (result.ok) {
-    newTodoText = '';
+    newTodoText.value = '';
   }
 }
 
@@ -121,15 +122,21 @@ function setFilter(filter: TodoState['filter']) {
   dispatch('todo.filter', filter);
 }
 
-// Stats
-function getStats() {
+// Stats as a reactive signal — updated after every todo command so the template
+// reads a single signal instead of re-running filter() for every binding.
+const stats = signal({ total: 0, active: 0, completed: 0 });
+
+// Store the unsubscribe so the hook is removed when the component unmounts.
+const unsubscribeStats = bus.onAfter((cmd) => {
+  if (!cmd.action.startsWith('todo.')) return;
   const items = todos.value.items;
-  return {
-    total: items.length,
-    active: items.filter(t => !t.done).length,
-    completed: items.filter(t => t.done).length
-  };
-}
+  const active = items.filter(t => !t.done).length;
+  stats.value = { total: items.length, active, completed: items.length - active };
+});
+
+// Wire cleanup to the component lifecycle so the hook doesn't leak.
+// Replace with Vapor's equivalent when its lifecycle API stabilises.
+// onUnmounted(unsubscribeStats);
 </script>
 
 <template>
@@ -139,11 +146,12 @@ function getStats() {
     <!-- Add form -->
     <form @submit.prevent="addTodo" class="add-form">
       <input
-        v-model="newTodoText"
+        :value="newTodoText.value"
+        @input="newTodoText.value = ($event.target as HTMLInputElement).value"
         placeholder="What needs to be done?"
         :disabled="loading.value"
       />
-      <button type="submit" :disabled="loading.value || !newTodoText.trim()">
+      <button type="submit" :disabled="loading.value || !newTodoText.value.trim()">
         Add
       </button>
     </form>
@@ -169,19 +177,19 @@ function getStats() {
         @click="setFilter('all')"
         :class="{ active: todos.value.filter === 'all' }"
       >
-        All ({{ getStats().total }})
+        All ({{ stats.value.total }})
       </button>
       <button
         @click="setFilter('active')"
         :class="{ active: todos.value.filter === 'active' }"
       >
-        Active ({{ getStats().active }})
+        Active ({{ stats.value.active }})
       </button>
       <button
         @click="setFilter('completed')"
         :class="{ active: todos.value.filter === 'completed' }"
       >
-        Completed ({{ getStats().completed }})
+        Completed ({{ stats.value.completed }})
       </button>
     </div>
 
@@ -206,11 +214,11 @@ function getStats() {
 
     <!-- Clear completed -->
     <button
-      v-if="getStats().completed > 0"
+      v-if="stats.value.completed > 0"
       @click="clearCompleted"
       class="clear-completed"
     >
-      Clear completed ({{ getStats().completed }})
+      Clear completed ({{ stats.value.completed }})
     </button>
   </div>
 </template>

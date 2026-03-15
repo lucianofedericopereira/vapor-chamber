@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  A lightweight command bus designed for <a href="https://github.com/vuejs/vue-vapor">Vue Vapor</a>. ~1KB core.
+  A lightweight command bus designed for <a href="https://github.com/vuejs/vue-vapor">Vue Vapor</a>. ~2KB gzipped. Optional DevTools integration.
 </p>
 
 ## What is Vue Vapor?
@@ -240,6 +240,36 @@ const { canUndo, canRedo, undo, redo } = useCommandHistory({
 </script>
 ```
 
+### configureSignal
+
+Inject Vue Vapor's native signal factory once at app setup. Falls back to a built-in shim automatically in non-Vapor environments (standard Vue 3, tests, SSR):
+
+```typescript
+import { signal } from 'vue-vapor';
+import { configureSignal } from 'vapor-chamber';
+
+configureSignal(signal);
+```
+
+### setupDevtools
+
+Connect a bus to Vue DevTools. Adds a **Commands** timeline layer and a **Vapor Chamber** inspector panel. Requires `@vue/devtools-api` — silently no-ops if not installed:
+
+```typescript
+import { createApp } from 'vue';
+import { getCommandBus, setupDevtools } from 'vapor-chamber';
+
+const app = createApp(App);
+setupDevtools(getCommandBus(), app);
+app.mount('#app');
+```
+
+The inspector shows:
+- Every dispatched command with its action, target, payload, and result
+- Green `ok` / red `error` tags at a glance
+- Full detail (value or error message) when a command is selected
+- Filterable tree by action name
+
 ## Examples
 
 See the [`examples/`](./examples) folder for complete, runnable examples:
@@ -280,11 +310,23 @@ npx ts-node examples/shopping-cart.ts
 
 | Composable | Description |
 |------------|-------------|
-| `useCommand()` | Dispatch with reactive loading/error state |
-| `useCommandState(initial, handlers)` | State managed by commands |
-| `useCommandHistory(options?)` | Reactive undo/redo |
+| `useCommand()` | Dispatch with reactive loading/error state. Returns `dispose()` to clean up registered handlers/plugins |
+| `useCommandState(initial, handlers)` | State managed by commands. Returns `dispose()` to unregister handlers |
+| `useCommandHistory(options?)` | Reactive undo/redo. Returns `dispose()` to unsubscribe |
 | `getCommandBus()` | Get shared bus instance |
 | `setCommandBus(bus)` | Set shared bus instance |
+| `configureSignal(fn)` | Inject a custom signal factory (e.g. Vue Vapor's native `signal`) |
+| `setupDevtools(bus, app)` | Connect bus to Vue DevTools (optional, requires `@vue/devtools-api`) |
+
+## Roadmap
+
+| Feature | Status |
+|---------|--------|
+| DevTools integration | 🚧 In progress |
+| Persistence plugin (localStorage / IndexedDB) | Planned |
+| Command batching | Planned |
+| Middleware ordering API | Planned |
+| SSR support | Planned (pending Vue Vapor stabilization) |
 
 ## Documentation
 
