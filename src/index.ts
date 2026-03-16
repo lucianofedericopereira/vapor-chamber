@@ -18,7 +18,15 @@ export {
   type AsyncPlugin,
   type Hook,
   type AsyncHook,
+  type PluginOptions,
+  type BatchCommand,
+  type BatchResult,
+  type DeadLetterMode,
+  type CommandBusOptions,
 } from './command-bus';
+
+// Testing utilities
+export { createTestBus, type TestBus, type RecordedDispatch } from './testing';
 
 // Plugins
 export {
@@ -38,6 +46,7 @@ export {
   type CreateSignal,
   getCommandBus,
   setCommandBus,
+  useCommandBus,
   useCommand,
   useCommandState,
   useCommandHistory,

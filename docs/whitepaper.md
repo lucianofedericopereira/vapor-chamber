@@ -303,18 +303,23 @@ The plugin chain is built once per plugin-list change and cached as a stateful r
 
 ## 9. Future Directions
 
-### 9.1 Planned Features
+### 9.1 Implemented Features
+
+- **DevTools integration** — timeline + inspector panel, 0KB in prod via `process.env.NODE_ENV` guard
+- **Command batching** — `dispatchBatch()` stops on first failure and reports partial results
+- **Middleware priority** — `use(plugin, { priority })` controls ordering independently of registration order
+- **Dead letter handling** — `onMissing` option: `'error'`, `'throw'`, `'ignore'`, or custom function
+- **Testing utilities** — `createTestBus()` records dispatches without executing handlers
+
+### 9.2 Planned Features
 
 - Persistence plugin for localStorage/IndexedDB
-- DevTools integration
-- Command batching
-- Middleware ordering API
 
-### 9.2 Vue Vapor Stabilization
+### 9.3 Vue Vapor Stabilization
 
 As Vue Vapor stabilizes, Vapor Chamber will:
 - Update signal detection for official API
-- Add SSR support
+- Add full SSR support (see [docs/ssr.md](./ssr.md) for the intended approach)
 - Optimize for Vapor's compilation output
 
 ## 10. Conclusion

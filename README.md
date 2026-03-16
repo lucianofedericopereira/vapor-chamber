@@ -12,6 +12,45 @@ Vue Vapor is Vue's upcoming compilation strategy that eliminates the Virtual DOM
 
 **Vapor Chamber** embraces this philosophy: minimal abstraction, direct updates, signal-native reactivity.
 
+## Migrating from Vue 3 emitters
+
+If you're already using Vue 3's `emit` / `eventBus` pattern, here's the before and after:
+
+```
+// Before — Vue 3 emitter
+// cart.vue
+emit('cart:add', product);
+
+// App.vue
+bus.on('cart:add', (product) => {
+  cart.items.push(product);
+  analytics.track('add');
+  validate(product);  // where does this live?
+});
+
+// ProductList.vue — also listens?
+bus.on('cart:add', updateBadge);  // now two handlers, hard to trace
+```
+
+```
+// After — Vapor Chamber
+// Anywhere in the app
+bus.dispatch('cart.add', product, { quantity: 1 });
+
+// One place, once:
+bus.register('cart.add', (cmd) => {
+  cart.items.push(cmd.target);
+  return cart.items;
+});
+
+// Cross-cutting concerns as plugins, not scattered listeners:
+bus.use(logger());
+bus.use(validator({ 'cart.add': (cmd) => cmd.target.id ? null : 'Missing ID' }));
+bus.use(analyticsPlugin);
+```
+
+**The key difference:** `emit` is fire-and-forget with many listeners. `dispatch` has one handler and a composable plugin pipeline — one place to look, debug, and test.
+
 ## Why a Command Bus?
 
 Traditional event systems scatter logic across components. A command bus centralizes it:
@@ -122,7 +161,13 @@ const timingPlugin: Plugin = (cmd, next) => {
 bus.use(timingPlugin);
 ```
 
-Plugins execute in order: first added = outermost wrapper.
+Plugins execute by priority (highest first), then registration order for equal priorities:
+
+```typescript
+bus.use(validatorPlugin, { priority: 10 }); // runs first
+bus.use(analyticsPlugin, { priority: 1 });  // runs after validation
+bus.use(loggerPlugin);                       // priority 0 (default, runs last)
+```
 
 ## Built-in Plugins
 
@@ -172,6 +217,50 @@ bus.use(debounce(['search.query'], 300)); // wait 300ms after last call
 
 ```typescript
 bus.use(throttle(['ui.scroll'], 100)); // max once per 100ms
+```
+
+## Batch Dispatch
+
+Dispatch multiple commands as a unit. Stops on the first failure:
+
+```typescript
+const result = bus.dispatchBatch([
+  { action: 'cart.add',        target: cart, payload: item },
+  { action: 'totals.update',   target: cart },
+  { action: 'analytics.track', target: session, payload: item },
+]);
+
+if (result.ok) {
+  console.log('All succeeded:', result.results);
+} else {
+  console.error('Stopped at failure:', result.error);
+  console.log('Partial results:', result.results);
+}
+```
+
+Works on both sync and async buses.
+
+## Dead Letter Handling
+
+Configure what happens when a command has no registered handler:
+
+```typescript
+// Default: returns { ok: false, error }
+createCommandBus()
+
+// Throw instead of returning an error result
+createCommandBus({ onMissing: 'throw' })
+
+// Silently succeed (useful for optional commands)
+createCommandBus({ onMissing: 'ignore' })
+
+// Custom fallback
+createCommandBus({
+  onMissing: (cmd) => {
+    console.warn(`Unhandled: ${cmd.action}`);
+    return { ok: true, value: null };
+  }
+})
 ```
 
 ## Async Command Bus
@@ -240,6 +329,19 @@ const { canUndo, canRedo, undo, redo } = useCommandHistory({
 </script>
 ```
 
+### useCommandBus
+
+Lightweight composable for the "toolbox" pattern — import only when needed, tree-shaken out of builds that don't use it. Returns the shared bus directly:
+
+```typescript
+import { useCommandBus } from 'vapor-chamber';
+
+const bus = useCommandBus();
+bus.dispatch('cart.add', product, { quantity: 1 });
+```
+
+Use `useCommand()` when you need reactive `loading`/`lastError` signals. Use `useCommandBus()` when you just need to dispatch.
+
 ### configureSignal
 
 Inject Vue Vapor's native signal factory once at app setup. Falls back to a built-in shim automatically in non-Vapor environments (standard Vue 3, tests, SSR):
@@ -249,6 +351,38 @@ import { signal } from 'vue-vapor';
 import { configureSignal } from 'vapor-chamber';
 
 configureSignal(signal);
+```
+
+### Testing
+
+`createTestBus()` records all dispatched commands without executing real handlers. Use it to test components that call `dispatch` without wiring up the full application:
+
+```typescript
+import { createTestBus, setCommandBus } from 'vapor-chamber';
+import { describe, it, expect, beforeEach } from 'vitest';
+
+describe('CartButton', () => {
+  let bus: TestBus;
+
+  beforeEach(() => {
+    bus = createTestBus();
+    setCommandBus(bus);
+  });
+
+  it('dispatches cart.add on click', () => {
+    // ... render component, click button ...
+    expect(bus.wasDispatched('cart.add')).toBe(true);
+    expect(bus.getDispatched('cart.add')[0].cmd.payload).toEqual({ quantity: 1 });
+  });
+});
+```
+
+Register real handlers for actions you want to test deeply:
+
+```typescript
+bus.register('cart.add', (cmd) => {
+  // real handler logic
+});
 ```
 
 ### setupDevtools
@@ -294,38 +428,50 @@ npx ts-node examples/shopping-cart.ts
 
 | Function | Description |
 |----------|-------------|
-| `createCommandBus()` | Create a synchronous command bus |
-| `createAsyncCommandBus()` | Create an async command bus |
+| `createCommandBus(options?)` | Create a synchronous command bus |
+| `createAsyncCommandBus(options?)` | Create an async command bus |
+| `createTestBus(options?)` | Create a test bus that records dispatches (see [Testing](#testing)) |
+
+**`CommandBusOptions`**
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `onMissing` | `'error' \| 'throw' \| 'ignore' \| fn` | `'error'` | Behavior when no handler is registered for an action |
 
 ### Command Bus Methods
 
 | Method | Description |
 |--------|-------------|
 | `dispatch(action, target, payload?)` | Execute a command |
+| `dispatchBatch(commands[])` | Execute multiple commands; stops on first failure |
 | `register(action, handler)` | Register a handler (returns unregister fn) |
-| `use(plugin)` | Add a plugin (returns unsubscribe fn) |
+| `use(plugin, options?)` | Add a plugin (returns unsubscribe fn). `options.priority` controls order — higher runs first |
 | `onAfter(hook)` | Run callback after every command |
 
 ### Composables
 
 | Composable | Description |
 |------------|-------------|
+| `useCommandBus()` | Get the shared bus — lightweight, tree-shakeable |
 | `useCommand()` | Dispatch with reactive loading/error state. Returns `dispose()` to clean up registered handlers/plugins |
 | `useCommandState(initial, handlers)` | State managed by commands. Returns `dispose()` to unregister handlers |
 | `useCommandHistory(options?)` | Reactive undo/redo. Returns `dispose()` to unsubscribe |
 | `getCommandBus()` | Get shared bus instance |
 | `setCommandBus(bus)` | Set shared bus instance |
 | `configureSignal(fn)` | Inject a custom signal factory (e.g. Vue Vapor's native `signal`) |
-| `setupDevtools(bus, app)` | Connect bus to Vue DevTools (optional, requires `@vue/devtools-api`) |
+| `setupDevtools(bus, app)` | Connect bus to Vue DevTools. No-ops automatically in production builds |
 
 ## Roadmap
 
 | Feature | Status |
 |---------|--------|
-| DevTools integration | 🚧 In progress |
+| DevTools integration | ✅ Done |
+| DevTools production strip (0KB in prod) | ✅ Done |
+| Command batching (`dispatchBatch`) | ✅ Done |
+| Middleware priority/ordering | ✅ Done |
+| Dead letter handling (`onMissing`) | ✅ Done |
+| Testing utilities (`createTestBus`) | ✅ Done |
 | Persistence plugin (localStorage / IndexedDB) | Planned |
-| Command batching | Planned |
-| Middleware ordering API | Planned |
 | SSR support | Planned (pending Vue Vapor stabilization) |
 
 ## Documentation
@@ -333,6 +479,7 @@ npx ts-node examples/shopping-cart.ts
 See the [`docs/`](./docs) folder for detailed documentation:
 
 - [Whitepaper](./docs/whitepaper.md) - Design philosophy and architecture
+- [SSR Guide](./docs/ssr.md) - Server-side rendering and hydration
 
 ## Design Goals
 

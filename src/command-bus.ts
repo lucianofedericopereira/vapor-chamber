@@ -22,17 +22,41 @@ export type AsyncPlugin = (cmd: Command, next: () => CommandResult | Promise<Com
 export type Hook = (cmd: Command, result: CommandResult) => void;
 export type AsyncHook = (cmd: Command, result: CommandResult) => void | Promise<void>;
 
+/** Options for plugin registration. Higher priority runs first (outermost). Default: 0. */
+export type PluginOptions = { priority?: number };
+
+/** Batch dispatch input */
+export type BatchCommand = { action: string; target: any; payload?: any };
+
+/** Result of a batch dispatch */
+export type BatchResult = { ok: boolean; results: CommandResult[]; error?: Error };
+
+/**
+ * Dead letter mode — what to do when a command has no registered handler.
+ * - `'error'` (default): returns `{ ok: false, error }`
+ * - `'throw'`: throws the error
+ * - `'ignore'`: returns `{ ok: true, value: undefined }`
+ * - function: called with the command, return value used as result
+ */
+export type DeadLetterMode = 'error' | 'throw' | 'ignore' | ((cmd: Command) => CommandResult);
+
+export type CommandBusOptions = {
+  onMissing?: DeadLetterMode;
+};
+
 export interface CommandBus {
   dispatch: (action: string, target: any, payload?: any) => CommandResult;
+  dispatchBatch: (commands: BatchCommand[]) => BatchResult;
   register: (action: string, handler: Handler) => () => void;
-  use: (plugin: Plugin) => () => void;
+  use: (plugin: Plugin, options?: PluginOptions) => () => void;
   onAfter: (hook: Hook) => () => void;
 }
 
 export interface AsyncCommandBus {
   dispatch: (action: string, target: any, payload?: any) => Promise<CommandResult>;
+  dispatchBatch: (commands: BatchCommand[]) => Promise<BatchResult>;
   register: (action: string, handler: AsyncHandler) => () => void;
-  use: (plugin: AsyncPlugin) => () => void;
+  use: (plugin: AsyncPlugin, options?: PluginOptions) => () => void;
   onAfter: (hook: AsyncHook) => () => void;
 }
 
@@ -49,22 +73,37 @@ function buildRunner(plugins: Plugin[]) {
   };
 }
 
-export function createCommandBus(): CommandBus {
+export function createCommandBus(options: CommandBusOptions = {}): CommandBus {
   const handlers = new Map<string, Handler>();
-  const plugins: Plugin[] = [];
+  const pluginEntries: Array<{ plugin: Plugin; priority: number }> = [];
   const afterHooks: Hook[] = [];
 
   // Cached runner — rebuilt only when plugins are added or removed
-  let runner = buildRunner(plugins);
+  let runner = buildRunner([]);
+
+  function handleMissing(cmd: Command): CommandResult {
+    const mode = options.onMissing ?? 'error';
+    if (mode === 'ignore') return { ok: true, value: undefined };
+    if (mode === 'throw') throw new Error(`No handler: ${cmd.action}`);
+    if (typeof mode === 'function') return mode(cmd);
+    // 'error' (default)
+    return { ok: false, error: new Error(`No handler: ${cmd.action}`) };
+  }
+
+  function rebuildRunner() {
+    const sorted = pluginEntries
+      .slice()
+      .sort((a, b) => b.priority - a.priority)
+      .map(e => e.plugin);
+    runner = buildRunner(sorted);
+  }
 
   function dispatch(action: string, target: any, payload?: any): CommandResult {
     const cmd: Command = { action, target, payload };
     const handler = handlers.get(action);
 
     const execute = (): CommandResult => {
-      if (!handler) {
-        return { ok: false, error: new Error(`No handler: ${action}`) };
-      }
+      if (!handler) return handleMissing(cmd);
       try {
         return { ok: true, value: handler(cmd) };
       } catch (e) {
@@ -85,19 +124,30 @@ export function createCommandBus(): CommandBus {
     return result;
   }
 
+  function dispatchBatch(commands: BatchCommand[]): BatchResult {
+    const results: CommandResult[] = [];
+    for (const { action, target, payload } of commands) {
+      const result = dispatch(action, target, payload);
+      results.push(result);
+      if (!result.ok) return { ok: false, results, error: result.error };
+    }
+    return { ok: true, results };
+  }
+
   function register(action: string, handler: Handler): () => void {
     handlers.set(action, handler);
     return () => handlers.delete(action);
   }
 
-  function use(plugin: Plugin): () => void {
-    plugins.push(plugin);
-    runner = buildRunner(plugins);
+  function use(plugin: Plugin, opts: PluginOptions = {}): () => void {
+    const entry = { plugin, priority: opts.priority ?? 0 };
+    pluginEntries.push(entry);
+    rebuildRunner();
     return () => {
-      const i = plugins.indexOf(plugin);
+      const i = pluginEntries.indexOf(entry);
       if (i !== -1) {
-        plugins.splice(i, 1);
-        runner = buildRunner(plugins);
+        pluginEntries.splice(i, 1);
+        rebuildRunner();
       }
     };
   }
@@ -110,7 +160,7 @@ export function createCommandBus(): CommandBus {
     };
   }
 
-  return { dispatch, register, use, onAfter };
+  return { dispatch, dispatchBatch, register, use, onAfter };
 }
 
 function buildAsyncRunner(plugins: AsyncPlugin[]) {
@@ -130,22 +180,36 @@ function buildAsyncRunner(plugins: AsyncPlugin[]) {
 /**
  * Async command bus - supports async handlers, plugins, and hooks
  */
-export function createAsyncCommandBus(): AsyncCommandBus {
+export function createAsyncCommandBus(options: CommandBusOptions = {}): AsyncCommandBus {
   const handlers = new Map<string, AsyncHandler>();
-  const plugins: AsyncPlugin[] = [];
+  const pluginEntries: Array<{ plugin: AsyncPlugin; priority: number }> = [];
   const afterHooks: AsyncHook[] = [];
 
   // Cached runner — rebuilt only when plugins are added or removed
-  let runner = buildAsyncRunner(plugins);
+  let runner = buildAsyncRunner([]);
+
+  function handleMissing(cmd: Command): CommandResult {
+    const mode = options.onMissing ?? 'error';
+    if (mode === 'ignore') return { ok: true, value: undefined };
+    if (mode === 'throw') throw new Error(`No handler: ${cmd.action}`);
+    if (typeof mode === 'function') return mode(cmd);
+    return { ok: false, error: new Error(`No handler: ${cmd.action}`) };
+  }
+
+  function rebuildRunner() {
+    const sorted = pluginEntries
+      .slice()
+      .sort((a, b) => b.priority - a.priority)
+      .map(e => e.plugin);
+    runner = buildAsyncRunner(sorted);
+  }
 
   async function dispatch(action: string, target: any, payload?: any): Promise<CommandResult> {
     const cmd: Command = { action, target, payload };
     const handler = handlers.get(action);
 
     const execute = async (): Promise<CommandResult> => {
-      if (!handler) {
-        return { ok: false, error: new Error(`No handler: ${action}`) };
-      }
+      if (!handler) return handleMissing(cmd);
       try {
         return { ok: true, value: await handler(cmd) };
       } catch (e) {
@@ -166,19 +230,30 @@ export function createAsyncCommandBus(): AsyncCommandBus {
     return result;
   }
 
+  async function dispatchBatch(commands: BatchCommand[]): Promise<BatchResult> {
+    const results: CommandResult[] = [];
+    for (const { action, target, payload } of commands) {
+      const result = await dispatch(action, target, payload);
+      results.push(result);
+      if (!result.ok) return { ok: false, results, error: result.error };
+    }
+    return { ok: true, results };
+  }
+
   function register(action: string, handler: AsyncHandler): () => void {
     handlers.set(action, handler);
     return () => handlers.delete(action);
   }
 
-  function use(plugin: AsyncPlugin): () => void {
-    plugins.push(plugin);
-    runner = buildAsyncRunner(plugins);
+  function use(plugin: AsyncPlugin, opts: PluginOptions = {}): () => void {
+    const entry = { plugin, priority: opts.priority ?? 0 };
+    pluginEntries.push(entry);
+    rebuildRunner();
     return () => {
-      const i = plugins.indexOf(plugin);
+      const i = pluginEntries.indexOf(entry);
       if (i !== -1) {
-        plugins.splice(i, 1);
-        runner = buildAsyncRunner(plugins);
+        pluginEntries.splice(i, 1);
+        rebuildRunner();
       }
     };
   }
@@ -191,5 +266,5 @@ export function createAsyncCommandBus(): AsyncCommandBus {
     };
   }
 
-  return { dispatch, register, use, onAfter };
+  return { dispatch, dispatchBatch, register, use, onAfter };
 }

@@ -44,6 +44,15 @@ interface CommandEntry {
  * app.mount('#app');
  */
 export function setupDevtools(bus: Observable, app: unknown): () => void {
+  // Guard: no-op in production. Bundlers (Vite, webpack, Rollup) replace
+  // process.env.NODE_ENV with 'production' in prod builds, making this entire
+  // function body dead code that tree-shakers eliminate for a true 0KB footprint.
+  // globalThis cast avoids requiring @types/node while preserving the replacement target.
+  const env = (globalThis as any).process?.env?.NODE_ENV as string | undefined;
+  if (env === 'production') {
+    return () => {};
+  }
+
   const entries: CommandEntry[] = [];
   let counter = 0;
   let devApi: any = null;
@@ -83,8 +92,11 @@ export function setupDevtools(bus: Observable, app: unknown): () => void {
     }
   });
 
-  // Dynamic import — zero cost if @vue/devtools-api is not installed
-  import('@vue/devtools-api')
+  // Dynamic import — zero cost if @vue/devtools-api is not installed.
+  // Using a variable prevents TypeScript from attempting module resolution
+  // on an optional peer dependency that may not be installed.
+  const devtoolsModule = '@vue/devtools-api';
+  import(devtoolsModule)
     .then(({ setupDevtoolsPlugin }: any) => {
       setupDevtoolsPlugin(
         {

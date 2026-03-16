@@ -4,6 +4,8 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-03-16
+
 ### Fixed
 
 - **`newTodoText` reactivity bug** (`examples/vue-vapor-component.vue`): Form input was declared as a plain `let` variable. Mutations to it never triggered re-renders because the value was outside the signal system. Changed to `const newTodoText = signal('')` so input changes propagate correctly through Vapor's reactivity.

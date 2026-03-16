@@ -142,6 +142,22 @@ export function useCommandState<T>(
 }
 
 /**
+ * useCommandBus - lightweight composable wrapper around the shared bus.
+ *
+ * Designed for the "toolbox" pattern: import only when needed, tree-shaken
+ * out of builds that don't use it. Provides the full bus API plus reactive
+ * loading/error signals — without the automatic cleanup tracking of useCommand.
+ *
+ * @example
+ * import { useCommandBus } from 'vapor-chamber';
+ * const bus = useCommandBus();
+ * bus.dispatch('cart.add', product, { quantity: 1 });
+ */
+export function useCommandBus() {
+  return getCommandBus();
+}
+
+/**
  * useCommandHistory - undo/redo with reactive state
  */
 export function useCommandHistory(options: {
