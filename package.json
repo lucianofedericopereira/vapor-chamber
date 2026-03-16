@@ -1,6 +1,6 @@
 {
   "name": "vapor-chamber",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Lightweight command bus for Vue Vapor - plugins, hooks, undo/redo",
   "type": "module",
   "main": "./dist/index.js",
