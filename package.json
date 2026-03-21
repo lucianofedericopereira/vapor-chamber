@@ -1,7 +1,7 @@
 {
   "name": "vapor-chamber",
-  "version": "0.2.0",
-  "description": "Lightweight command bus for Vue Vapor - plugins, hooks, undo/redo",
+  "version": "0.4.0",
+  "description": "Lightweight command bus for Vue Vapor - plugins, hooks, undo/redo, Vue 3.6 Vapor aligned",
   "type": "module",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -35,7 +35,10 @@
     "undo-redo",
     "state-management",
     "signals",
-    "reactive"
+    "reactive",
+    "alien-signals",
+    "vue-3.6",
+    "vapor-mode"
   ],
   "author": "Luciano Federico Pereira",
   "license": "LGPL-2.1",
@@ -65,6 +68,6 @@
     "vitest": "^4.0.18"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.19.0"
   }
 }

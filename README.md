@@ -3,12 +3,14 @@
 </p>
 
 <p align="center">
-  A lightweight command bus designed for <a href="https://github.com/vuejs/vue-vapor">Vue Vapor</a>. ~2KB gzipped. Optional DevTools integration.
+  A lightweight command bus designed for <a href="https://github.com/vuejs/vue-vapor">Vue Vapor</a>. ~2KB gzipped. Vue 3.6 Vapor aligned. Optional DevTools integration.
 </p>
 
 ## What is Vue Vapor?
 
-Vue Vapor is Vue's upcoming compilation strategy that eliminates the Virtual DOM. Instead of diffing virtual trees, Vapor compiles templates to direct DOM operations using **signals** - reactive primitives that update only what changed.
+Vue Vapor is Vue's compilation strategy that eliminates the Virtual DOM. Instead of diffing virtual trees, Vapor compiles templates to direct DOM operations using **signals** — reactive primitives that update only what changed.
+
+**As of Vue 3.6 beta**, Vapor mode is feature-complete for all stable APIs. The reactivity engine has been rewritten atop [alien-signals](https://github.com/stackblitz/alien-signals), delivering ~14% less memory and faster dependency tracking. `ref()` is now a signal internally.
 
 **Vapor Chamber** embraces this philosophy: minimal abstraction, direct updates, signal-native reactivity.
 
@@ -35,17 +37,17 @@ bus.on('cart:add', updateBadge);  // now two handlers, hard to trace
 ```
 // After — Vapor Chamber
 // Anywhere in the app
-bus.dispatch('cart.add', product, { quantity: 1 });
+bus.dispatch('cart_add', product, { quantity: 1 });
 
 // One place, once:
-bus.register('cart.add', (cmd) => {
+bus.register('cart_add', (cmd) => {
   cart.items.push(cmd.target);
   return cart.items;
 });
 
 // Cross-cutting concerns as plugins, not scattered listeners:
 bus.use(logger());
-bus.use(validator({ 'cart.add': (cmd) => cmd.target.id ? null : 'Missing ID' }));
+bus.use(validator({ 'cart_add': (cmd) => cmd.target.id ? null : 'Missing ID' }));
 bus.use(analyticsPlugin);
 ```
 
@@ -58,7 +60,7 @@ Traditional event systems scatter logic across components. A command bus central
 ```
 Event-driven (scattered)          Command bus (centralized)
 ─────────────────────────         ─────────────────────────
-Component A emits 'add'    →      dispatch('cart.add', product)
+Component A emits 'add'    →      dispatch('cart_add', product)
 Component B listens...            ↓
 Component C also listens...       Handler executes once
 Who handles what? When?           Plugins observe/modify
@@ -66,16 +68,18 @@ Who handles what? When?           Plugins observe/modify
 ```
 
 **Benefits:**
-- **Semantic actions** - `cart.add` is clearer than `emit('add')`
-- **Single handler** - One place to look, debug, test
-- **Plugin pipeline** - Cross-cutting concerns (logging, validation, analytics) without cluttering handlers
-- **Undo/redo** - Command history is natural when actions are explicit
+- **Semantic actions** — `cart_add` is clearer than `emit('add')`
+- **Single handler** — One place to look, debug, test
+- **Plugin pipeline** — Cross-cutting concerns (logging, validation, analytics) without cluttering handlers
+- **Undo/redo** — Command history is natural when actions are explicit
 
 ## Install
 
 ```bash
 npm install vapor-chamber
 ```
+
+**Requirements:** Node.js ≥20.19.0 | Vue ≥3.5.0 (optional peer dep) | Vite 7/8 compatible
 
 ## Quick Start
 
@@ -87,21 +91,71 @@ const bus = createCommandBus();
 // Add plugins
 bus.use(logger());
 bus.use(validator({
-  'cart.add': (cmd) => cmd.payload?.quantity > 0 ? null : 'Quantity required'
+  'cart_add': (cmd) => cmd.payload?.quantity > 0 ? null : 'Quantity required'
 }));
 
 // Register handler
-bus.register('cart.add', (cmd) => {
+bus.register('cart_add', (cmd) => {
   cart.items.push({ ...cmd.target, quantity: cmd.payload.quantity });
   return cart.items;
 });
 
 // Dispatch
-const result = bus.dispatch('cart.add', product, { quantity: 2 });
+const result = bus.dispatch('cart_add', product, { quantity: 2 });
 if (result.ok) {
   console.log('Added:', result.value);
 } else {
   console.error('Failed:', result.error);
+}
+```
+
+## Vue 3.6 Vapor Mode
+
+Vapor Chamber v0.4.0 is aligned with Vue 3.6 beta. It works in three contexts:
+
+### 1. Pure Vapor App (smallest bundle)
+
+```typescript
+import { createVaporChamberApp, getCommandBus } from 'vapor-chamber';
+import App from './App.vue';
+
+// No VDOM runtime — ~10KB baseline
+createVaporChamberApp(App).mount('#app');
+```
+
+```vue
+<script setup vapor>
+import { useCommand } from 'vapor-chamber';
+
+const { dispatch, loading } = useCommand();
+</script>
+```
+
+### 2. Mixed VDOM + Vapor (gradual migration)
+
+```typescript
+import { createApp } from 'vue';
+import { getVaporInteropPlugin } from 'vapor-chamber';
+
+const app = createApp(App);
+const interop = getVaporInteropPlugin();
+if (interop) app.use(interop);
+app.mount('#app');
+```
+
+Now Vapor and VDOM components can nest inside each other. Useful for incremental migration.
+
+### 3. Standard Vue 3 (no Vapor)
+
+Everything works without Vapor. The signal shim auto-detects Vue's `ref()` for reactivity. In Vue 3.6+ this is alien-signals backed.
+
+### Vapor Detection
+
+```typescript
+import { isVaporAvailable } from 'vapor-chamber';
+
+if (isVaporAvailable()) {
+  // Vue 3.6+ with createVaporApp available
 }
 ```
 
@@ -113,10 +167,26 @@ A command has three parts:
 
 ```typescript
 bus.dispatch(
-  'cart.add',      // action - what to do
+  'cart_add',      // action - what to do
   product,         // target - what to act on
   { quantity: 2 }  // payload - additional data (optional)
 );
+```
+
+### Naming Convention
+
+Enforce consistent action names at register and dispatch time:
+
+```typescript
+const bus = createCommandBus({
+  naming: {
+    pattern: /^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)+$/,  // snake_case
+    onViolation: 'throw'  // or 'warn' or 'ignore'
+  }
+});
+
+bus.register('cart_add', handler);       // ✓ passes
+bus.register('cartAdd', handler);        // ✗ throws
 ```
 
 ### Handlers
@@ -124,13 +194,18 @@ bus.dispatch(
 One handler per action. Returns a value or throws:
 
 ```typescript
-bus.register('cart.add', (cmd) => {
-  // cmd.action  = 'cart.add'
-  // cmd.target  = product
-  // cmd.payload = { quantity: 2 }
-
+bus.register('cart_add', (cmd) => {
   cart.items.push(cmd.target);
   return cart.items; // becomes result.value
+});
+```
+
+Register with options for undo support and per-command throttling:
+
+```typescript
+bus.register('cart_add', addHandler, {
+  undo: (cmd) => { cart.items.pop(); },
+  throttle: 300,  // max once per 300ms per target
 });
 ```
 
@@ -169,6 +244,38 @@ bus.use(analyticsPlugin, { priority: 1 });  // runs after validation
 bus.use(loggerPlugin);                       // priority 0 (default, runs last)
 ```
 
+### Wildcard Listeners
+
+Subscribe to command patterns without being a handler:
+
+```typescript
+// All commands
+bus.on('*', (cmd, result) => analytics.track(cmd.action));
+
+// Prefix matching
+bus.on('shop_*', (cmd, result) => console.log('Shop event:', cmd.action));
+
+// Exact match
+bus.on('cart_add', (cmd, result) => updateBadge());
+```
+
+### Request / Response
+
+Async request/response pattern with timeout:
+
+```typescript
+// Register a responder
+bus.respond('get_auth_token', async (cmd) => {
+  const response = await fetch('/api/token');
+  return response.json();
+});
+
+// Request with timeout
+const result = await bus.request('get_auth_token', { userId: 42 }, { timeout: 3000 });
+```
+
+Falls back to normal `dispatch()` if no responder is registered.
+
 ## Built-in Plugins
 
 | Plugin | Description |
@@ -178,18 +285,20 @@ bus.use(loggerPlugin);                       // priority 0 (default, runs last)
 | `history(options?)` | Track command history for undo/redo |
 | `debounce(actions, wait)` | Delay execution until activity stops |
 | `throttle(actions, wait)` | Limit execution frequency |
+| `authGuard(options)` | Block protected commands when unauthenticated |
+| `optimistic(handlers)` | Apply optimistic updates, rollback on failure |
 
 ### logger
 
 ```typescript
-bus.use(logger({ collapsed: true, filter: (cmd) => cmd.action.startsWith('cart.') }));
+bus.use(logger({ collapsed: true, filter: (cmd) => cmd.action.startsWith('cart_') }));
 ```
 
 ### validator
 
 ```typescript
 bus.use(validator({
-  'cart.add': (cmd) => {
+  'cart_add': (cmd) => {
     if (!cmd.target?.id) return 'Product must have an ID';
     return null;  // null = valid
   }
@@ -207,16 +316,49 @@ historyPlugin.redo();
 historyPlugin.getState(); // { past, future, canUndo, canRedo }
 ```
 
+With bus-backed undo (executes inverse handlers):
+
+```typescript
+const historyPlugin = history({ maxSize: 100, bus });
+bus.use(historyPlugin);
+
+// If cart_add was registered with { undo: fn }, calling undo() executes it
+historyPlugin.undo();
+```
+
 ### debounce
 
 ```typescript
-bus.use(debounce(['search.query'], 300)); // wait 300ms after last call
+bus.use(debounce(['search_query'], 300)); // wait 300ms after last call
 ```
 
 ### throttle
 
 ```typescript
-bus.use(throttle(['ui.scroll'], 100)); // max once per 100ms
+bus.use(throttle(['ui_scroll'], 100)); // max once per 100ms
+```
+
+### authGuard
+
+```typescript
+bus.use(authGuard({
+  isAuthenticated: () => !!user.value,
+  protected: ['shop_cart_', 'shop_wishlist_'],
+  onUnauthenticated: (cmd) => router.push('/login'),
+}));
+```
+
+### optimistic
+
+```typescript
+bus.use(optimistic({
+  'cart_add': {
+    apply: (cmd) => {
+      cartCount.value++;
+      return () => { cartCount.value--; };  // rollback function
+    }
+  }
+}));
 ```
 
 ## Batch Dispatch
@@ -225,42 +367,27 @@ Dispatch multiple commands as a unit. Stops on the first failure:
 
 ```typescript
 const result = bus.dispatchBatch([
-  { action: 'cart.add',        target: cart, payload: item },
-  { action: 'totals.update',   target: cart },
-  { action: 'analytics.track', target: session, payload: item },
+  { action: 'cart_add',        target: cart, payload: item },
+  { action: 'totals_update',   target: cart },
+  { action: 'analytics_track', target: session, payload: item },
 ]);
 
 if (result.ok) {
   console.log('All succeeded:', result.results);
 } else {
   console.error('Stopped at failure:', result.error);
-  console.log('Partial results:', result.results);
 }
 ```
-
-Works on both sync and async buses.
 
 ## Dead Letter Handling
 
 Configure what happens when a command has no registered handler:
 
 ```typescript
-// Default: returns { ok: false, error }
-createCommandBus()
-
-// Throw instead of returning an error result
-createCommandBus({ onMissing: 'throw' })
-
-// Silently succeed (useful for optional commands)
-createCommandBus({ onMissing: 'ignore' })
-
-// Custom fallback
-createCommandBus({
-  onMissing: (cmd) => {
-    console.warn(`Unhandled: ${cmd.action}`);
-    return { ok: true, value: null };
-  }
-})
+createCommandBus()                                    // default: returns { ok: false, error }
+createCommandBus({ onMissing: 'throw' })              // throws the error
+createCommandBus({ onMissing: 'ignore' })             // returns { ok: true, value: undefined }
+createCommandBus({ onMissing: (cmd) => { ... } })     // custom fallback
 ```
 
 ## Async Command Bus
@@ -272,22 +399,22 @@ import { createAsyncCommandBus } from 'vapor-chamber';
 
 const bus = createAsyncCommandBus();
 
-bus.register('user.fetch', async (cmd) => {
+bus.register('user_fetch', async (cmd) => {
   const response = await fetch(`/api/users/${cmd.target.id}`);
   return response.json();
 });
 
-const result = await bus.dispatch('user.fetch', { id: 123 });
+const result = await bus.dispatch('user_fetch', { id: 123 });
 ```
 
 ## Vapor Composables
 
-For Vue Vapor components:
-
 ### useCommand
 
+Dispatch commands with reactive loading/error state:
+
 ```vue
-<script setup>
+<script setup vapor>
 import { useCommand } from 'vapor-chamber';
 
 const { dispatch, loading, lastError } = useCommand();
@@ -299,16 +426,36 @@ const { dispatch, loading, lastError } = useCommand();
 </template>
 ```
 
-### useCommandState
+### defineVaporCommand
+
+Zero-overhead dispatch for hot paths — no reactive `loading`/`lastError` signals created.
+Ideal for GA4 tracking, scroll events, debounced search, fire-and-forget patterns:
 
 ```vue
-<script setup>
+<script setup vapor>
+import { defineVaporCommand } from 'vapor-chamber';
+
+const { dispatch } = defineVaporCommand('analytics_track', (cmd) => {
+  gtag('event', cmd.target.event, cmd.target.params);
+});
+
+// Fire-and-forget — no reactive overhead in the alien-signals graph
+dispatch({ event: 'page_view', params: { page: '/shop' } });
+</script>
+```
+
+### useCommandState
+
+State managed by commands:
+
+```vue
+<script setup vapor>
 import { useCommandState } from 'vapor-chamber';
 
 const { state: cart } = useCommandState(
   { items: [], total: 0 },
   {
-    'cart.add': (state, cmd) => ({
+    'cart_add': (state, cmd) => ({
       items: [...state.items, cmd.target],
       total: state.total + cmd.target.price
     })
@@ -319,47 +466,50 @@ const { state: cart } = useCommandState(
 
 ### useCommandHistory
 
+Reactive undo/redo:
+
 ```vue
-<script setup>
+<script setup vapor>
 import { useCommandHistory } from 'vapor-chamber';
 
 const { canUndo, canRedo, undo, redo } = useCommandHistory({
-  filter: (cmd) => cmd.action.startsWith('editor.')
+  filter: (cmd) => cmd.action.startsWith('editor_')
 });
 </script>
 ```
 
 ### useCommandBus
 
-Lightweight composable for the "toolbox" pattern — import only when needed, tree-shaken out of builds that don't use it. Returns the shared bus directly:
+Lightweight access to the shared bus — tree-shakeable:
 
 ```typescript
 import { useCommandBus } from 'vapor-chamber';
 
 const bus = useCommandBus();
-bus.dispatch('cart.add', product, { quantity: 1 });
+bus.dispatch('cart_add', product, { quantity: 1 });
 ```
 
-Use `useCommand()` when you need reactive `loading`/`lastError` signals. Use `useCommandBus()` when you just need to dispatch.
+Use `useCommand()` when you need reactive `loading`/`lastError` signals. Use `defineVaporCommand()` for zero-overhead hot paths. Use `useCommandBus()` when you just need to dispatch.
 
 ### configureSignal
 
-Inject Vue Vapor's native signal factory once at app setup. Falls back to a built-in shim automatically in non-Vapor environments (standard Vue 3, tests, SSR):
+Inject a custom signal factory. In Vue 3.6+, `ref()` is auto-detected and backed by alien-signals — calling `configureSignal` is only needed for custom signal implementations:
 
 ```typescript
-import { signal } from 'vue-vapor';
+import { ref } from 'vue';
 import { configureSignal } from 'vapor-chamber';
 
-configureSignal(signal);
+configureSignal(ref); // explicit — usually auto-detected
 ```
 
 ### Testing
 
-`createTestBus()` records all dispatched commands without executing real handlers. Use it to test components that call `dispatch` without wiring up the full application:
+`createTestBus()` records all dispatched commands without executing real handlers:
 
 ```typescript
 import { createTestBus, setCommandBus } from 'vapor-chamber';
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { resetCommandBus } from 'vapor-chamber';
 
 describe('CartButton', () => {
   let bus: TestBus;
@@ -369,19 +519,15 @@ describe('CartButton', () => {
     setCommandBus(bus);
   });
 
-  it('dispatches cart.add on click', () => {
-    // ... render component, click button ...
-    expect(bus.wasDispatched('cart.add')).toBe(true);
-    expect(bus.getDispatched('cart.add')[0].cmd.payload).toEqual({ quantity: 1 });
+  afterEach(() => {
+    resetCommandBus();
   });
-});
-```
 
-Register real handlers for actions you want to test deeply:
-
-```typescript
-bus.register('cart.add', (cmd) => {
-  // real handler logic
+  it('dispatches cart_add on click', () => {
+    // ... render component, click button ...
+    expect(bus.wasDispatched('cart_add')).toBe(true);
+    expect(bus.getDispatched('cart_add')[0].cmd.payload).toEqual({ quantity: 1 });
+  });
 });
 ```
 
@@ -398,12 +544,6 @@ setupDevtools(getCommandBus(), app);
 app.mount('#app');
 ```
 
-The inspector shows:
-- Every dispatched command with its action, target, payload, and result
-- Green `ok` / red `error` tags at a glance
-- Full detail (value or error message) when a command is selected
-- Filterable tree by action name
-
 ## Examples
 
 See the [`examples/`](./examples) folder for complete, runnable examples:
@@ -417,11 +557,6 @@ See the [`examples/`](./examples) folder for complete, runnable examples:
 | [`custom-plugins.ts`](./examples/custom-plugins.ts) | Analytics, auth guard, rate limiter plugins |
 | [`vue-vapor-component.vue`](./examples/vue-vapor-component.vue) | Full Vue Vapor todo app |
 
-Run TypeScript examples with:
-```bash
-npx ts-node examples/shopping-cart.ts
-```
-
 ## API Reference
 
 ### Core
@@ -430,13 +565,14 @@ npx ts-node examples/shopping-cart.ts
 |----------|-------------|
 | `createCommandBus(options?)` | Create a synchronous command bus |
 | `createAsyncCommandBus(options?)` | Create an async command bus |
-| `createTestBus(options?)` | Create a test bus that records dispatches (see [Testing](#testing)) |
+| `createTestBus(options?)` | Create a test bus that records dispatches |
 
 **`CommandBusOptions`**
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `onMissing` | `'error' \| 'throw' \| 'ignore' \| fn` | `'error'` | Behavior when no handler is registered for an action |
+| `onMissing` | `'error' \| 'throw' \| 'ignore' \| fn` | `'error'` | Behavior when no handler is registered |
+| `naming` | `{ pattern: RegExp, onViolation?: string }` | — | Enforce naming convention on actions |
 
 ### Command Bus Methods
 
@@ -444,22 +580,31 @@ npx ts-node examples/shopping-cart.ts
 |--------|-------------|
 | `dispatch(action, target, payload?)` | Execute a command |
 | `dispatchBatch(commands[])` | Execute multiple commands; stops on first failure |
-| `register(action, handler)` | Register a handler (returns unregister fn) |
-| `use(plugin, options?)` | Add a plugin (returns unsubscribe fn). `options.priority` controls order — higher runs first |
+| `register(action, handler, options?)` | Register a handler. Options: `{ undo?, throttle?, debounce? }` |
+| `use(plugin, options?)` | Add a plugin. `options.priority` controls order |
 | `onAfter(hook)` | Run callback after every command |
+| `on(pattern, listener)` | Subscribe to commands matching a pattern (`*`, `prefix_*`, exact) |
+| `request(action, target, options?)` | Async request/response with timeout |
+| `respond(action, handler)` | Register a responder for `request()` calls |
+| `getUndoHandler(action)` | Get the undo handler for an action |
 
 ### Composables
 
 | Composable | Description |
 |------------|-------------|
-| `useCommandBus()` | Get the shared bus — lightweight, tree-shakeable |
-| `useCommand()` | Dispatch with reactive loading/error state. Returns `dispose()` to clean up registered handlers/plugins |
-| `useCommandState(initial, handlers)` | State managed by commands. Returns `dispose()` to unregister handlers |
-| `useCommandHistory(options?)` | Reactive undo/redo. Returns `dispose()` to unsubscribe |
-| `getCommandBus()` | Get shared bus instance |
+| `useCommand()` | Dispatch with reactive loading/error state |
+| `defineVaporCommand(action, handler, options?)` | Zero-overhead dispatch for hot paths |
+| `useCommandState(initial, handlers)` | State managed by commands |
+| `useCommandHistory(options?)` | Reactive undo/redo |
+| `useCommandBus()` | Get shared bus instance |
+| `getCommandBus()` | Get shared bus instance (non-composable) |
 | `setCommandBus(bus)` | Set shared bus instance |
-| `configureSignal(fn)` | Inject a custom signal factory (e.g. Vue Vapor's native `signal`) |
-| `setupDevtools(bus, app)` | Connect bus to Vue DevTools. No-ops automatically in production builds |
+| `resetCommandBus()` | Reset shared bus to null (useful in tests) |
+| `configureSignal(fn)` | Inject a custom signal factory |
+| `isVaporAvailable()` | Returns true if Vue 3.6+ Vapor mode is detected |
+| `createVaporChamberApp(component, props?)` | Create a Vapor app instance (requires Vue 3.6+) |
+| `getVaporInteropPlugin()` | Returns `vaporInteropPlugin` for mixed trees |
+| `setupDevtools(bus, app)` | Connect bus to Vue DevTools |
 
 ## Roadmap
 
@@ -471,6 +616,15 @@ npx ts-node examples/shopping-cart.ts
 | Middleware priority/ordering | ✅ Done |
 | Dead letter handling (`onMissing`) | ✅ Done |
 | Testing utilities (`createTestBus`) | ✅ Done |
+| Naming convention enforcement | ✅ Done (v0.3.0) |
+| Wildcard listeners (`on`) | ✅ Done (v0.3.0) |
+| Request/response pattern | ✅ Done (v0.3.0) |
+| Per-command throttle/undo at register | ✅ Done (v0.3.0) |
+| Auth guard plugin | ✅ Done (v0.3.0) |
+| Optimistic update plugin | ✅ Done (v0.3.0) |
+| Vue 3.6 Vapor alignment | ✅ Done (v0.4.0) |
+| `defineVaporCommand` zero-overhead composable | ✅ Done (v0.4.0) |
+| `onScopeDispose` lifecycle alignment | ✅ Done (v0.4.0) |
 | Persistence plugin (localStorage / IndexedDB) | Planned |
 | SSR support | Planned (pending Vue Vapor stabilization) |
 
@@ -478,16 +632,18 @@ npx ts-node examples/shopping-cart.ts
 
 See the [`docs/`](./docs) folder for detailed documentation:
 
-- [Whitepaper](./docs/whitepaper.md) - Design philosophy and architecture
-- [SSR Guide](./docs/ssr.md) - Server-side rendering and hydration
+- [Whitepaper](./docs/whitepaper.md) — Design philosophy and architecture
+- [Vue 3.6 Vapor Alignment](./docs/whitepaper-vue36.md) — Alien-signals, Vapor mode, and migration strategy
+- [SSR Guide](./docs/ssr.md) — Server-side rendering and hydration
 
 ## Design Goals
 
-1. **Minimal** - ~1KB core, no dependencies
-2. **Vapor-native** - Built for signals, not VDOM
-3. **Composable** - Plugins for everything
-4. **Type-safe** - Full TypeScript support
-5. **Predictable** - Sync by default, explicit async
+1. **Minimal** — ~1KB core, no dependencies
+2. **Vapor-native** — Built for signals, not VDOM
+3. **Composable** — Plugins for everything
+4. **Type-safe** — Full TypeScript support
+5. **Predictable** — Sync by default, explicit async
+6. **Progressive** — Works in VDOM, Vapor, and mixed trees
 
 ## License
 

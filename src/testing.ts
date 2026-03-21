@@ -5,19 +5,25 @@
  * without executing real handlers. Useful for unit-testing components that
  * use useCommand() without wiring up the full application logic.
  *
+ * v0.3.0: Added on(), request(), respond(), getUndoHandler() stubs.
+ *
  * @example
  * const bus = createTestBus();
  * setCommandBus(bus);
  *
  * // Dispatch something under test
- * bus.dispatch('cart:add', cart, { id: 1 });
+ * bus.dispatch('cart_add', cart, { id: 1 });
  *
  * // Assert
- * expect(bus.wasDispatched('cart:add')).toBe(true);
- * expect(bus.getDispatched('cart:add')[0].cmd.payload).toEqual({ id: 1 });
+ * expect(bus.wasDispatched('cart_add')).toBe(true);
+ * expect(bus.getDispatched('cart_add')[0].cmd.payload).toEqual({ id: 1 });
  */
 
-import type { Command, CommandResult, Handler, Plugin, Hook, PluginOptions, BatchCommand, BatchResult, CommandBus } from './command-bus';
+import type {
+  Command, CommandResult, Handler, Plugin, Hook,
+  PluginOptions, BatchCommand, BatchResult, CommandBus,
+  Listener, RegisterOptions,
+} from './command-bus';
 
 export interface RecordedDispatch {
   cmd: Command;
@@ -38,12 +44,10 @@ export interface TestBus extends CommandBus {
 /**
  * Creates a test bus that stubs all handlers (returning `{ ok: true }`) unless
  * you register your own via `bus.register()`. All dispatches are recorded.
- *
- * Pass `{ passthroughHandlers: true }` to execute real handlers while still
- * recording every dispatch.
  */
 export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): TestBus {
   const handlers = new Map<string, Handler>();
+  const undoHandlers = new Map<string, Handler>();
   const plugins: Array<{ plugin: Plugin; priority: number }> = [];
   const afterHooks: Hook[] = [];
   const recorded: RecordedDispatch[] = [];
@@ -78,7 +82,6 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
           return { ok: false, error: e as Error };
         }
       }
-      // Stub: return ok:true if no real handler registered, run it if one is
       if (handler) {
         try {
           return { ok: true, value: handler(cmd) };
@@ -111,9 +114,15 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
     return { ok: true, results };
   }
 
-  function register(action: string, handler: Handler): () => void {
+  function register(action: string, handler: Handler, regOpts: RegisterOptions = {}): () => void {
     handlers.set(action, handler);
-    return () => handlers.delete(action);
+    if (regOpts.undo) {
+      undoHandlers.set(action, regOpts.undo);
+    }
+    return () => {
+      handlers.delete(action);
+      undoHandlers.delete(action);
+    };
   }
 
   function use(plugin: Plugin, options: PluginOptions = {}): () => void {
@@ -134,12 +143,33 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
     };
   }
 
+  // Stub implementations for new CommandBus interface methods
+  function on(_pattern: string, _listener: Listener): () => void {
+    return () => {};
+  }
+
+  function request(action: string, target: any): Promise<CommandResult> {
+    return Promise.resolve(dispatch(action, target));
+  }
+
+  function respond(_action: string, _handler: (cmd: Command) => any): () => void {
+    return () => {};
+  }
+
+  function getUndoHandler(action: string): Handler | undefined {
+    return undoHandlers.get(action);
+  }
+
   return {
     dispatch,
     dispatchBatch,
     register,
     use,
     onAfter,
+    on,
+    request,
+    respond,
+    getUndoHandler,
     recorded,
     wasDispatched: (action) => recorded.some(r => r.cmd.action === action),
     getDispatched: (action) => recorded.filter(r => r.cmd.action === action),

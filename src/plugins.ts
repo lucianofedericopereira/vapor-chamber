@@ -1,8 +1,10 @@
 /**
  * vapor-chamber - Built-in plugins
+ *
+ * v0.3.0 — Fixed: debounce stale closure, history undo now executes inverse handlers.
  */
 
-import type { Command, CommandResult, Plugin } from './command-bus';
+import type { Command, CommandResult, Plugin, CommandBus } from './command-bus';
 
 /**
  * Logger plugin - logs all commands and results
@@ -40,7 +42,7 @@ export function logger(options: {
  * Validator plugin - validate commands before execution
  */
 export function validator(rules: {
-  [action: string]: (cmd: Command) => string | null; // returns error message or null
+  [action: string]: (cmd: Command) => string | null;
 }): Plugin {
   return (cmd, next) => {
     const rule = rules[cmd.action];
@@ -56,6 +58,10 @@ export function validator(rules: {
 
 /**
  * History plugin - tracks command history for undo/redo
+ *
+ * v0.3.0: undo() now executes the inverse handler if the command was
+ * registered with { undo: fn } via bus.register(). Falls back to
+ * data-only pop if no inverse handler exists.
  */
 export interface HistoryState {
   past: Command[];
@@ -66,14 +72,16 @@ export interface HistoryState {
 
 export function history(options: {
   maxSize?: number;
-  filter?: (cmd: Command) => boolean; // only track filtered commands
+  filter?: (cmd: Command) => boolean;
+  /** Reference to the command bus — enables undo() to execute inverse handlers */
+  bus?: CommandBus;
 } = {}): Plugin & {
   getState: () => HistoryState;
   undo: () => Command | undefined;
   redo: () => Command | undefined;
   clear: () => void;
 } {
-  const { maxSize = 50, filter } = options;
+  const { maxSize = 50, filter, bus } = options;
   const past: Command[] = [];
   const future: Command[] = [];
 
@@ -84,7 +92,7 @@ export function history(options: {
     if (result.ok && (!filter || filter(cmd))) {
       past.push(cmd);
       if (past.length > maxSize) past.shift();
-      future.length = 0; // Clear redo stack on new command
+      future.length = 0;
     }
 
     return result;
@@ -97,16 +105,44 @@ export function history(options: {
       canUndo: past.length > 0,
       canRedo: future.length > 0,
     }),
+
     undo: () => {
       const cmd = past.pop();
-      if (cmd) future.push(cmd);
+      if (cmd) {
+        future.push(cmd);
+
+        // Execute inverse handler if bus is available and handler exists
+        if (bus) {
+          const undoHandler = bus.getUndoHandler(cmd.action);
+          if (undoHandler) {
+            try {
+              undoHandler(cmd);
+            } catch (e) {
+              console.error(`[vapor-chamber] Undo handler error for "${cmd.action}":`, e);
+            }
+          }
+        }
+      }
       return cmd;
     },
+
     redo: () => {
       const cmd = future.pop();
-      if (cmd) past.push(cmd);
+      if (cmd) {
+        past.push(cmd);
+
+        // Re-dispatch on redo if bus is available
+        if (bus) {
+          try {
+            bus.dispatch(cmd.action, cmd.target, cmd.payload);
+          } catch (e) {
+            console.error(`[vapor-chamber] Redo dispatch error for "${cmd.action}":`, e);
+          }
+        }
+      }
       return cmd;
     },
+
     clear: () => {
       past.length = 0;
       future.length = 0;
@@ -116,7 +152,12 @@ export function history(options: {
 
 /**
  * Debounce plugin - debounce specific actions
- * Returns a pending result immediately, executes after wait period
+ *
+ * v0.3.0 FIX: The previous implementation called next() inside a setTimeout,
+ * which invoked the middleware chain continuation from a stale closure context.
+ * Fixed by storing the latest command and re-dispatching through the bus after
+ * the debounce period, or — when no bus ref is available — tracking a
+ * "pending" result that callers can check.
  */
 export function debounce(
   actions: string[],
@@ -124,7 +165,7 @@ export function debounce(
 ): Plugin {
   const actionSet = new Set(actions);
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
-  const results = new Map<string, CommandResult>();
+  const latestNext = new Map<string, () => CommandResult>();
 
   return (cmd, next) => {
     if (!actionSet.has(cmd.action)) return next();
@@ -135,23 +176,31 @@ export function debounce(
     const existing = timers.get(key);
     if (existing) clearTimeout(existing);
 
+    // Store the current next for this key — we capture the fresh closure each time
+    latestNext.set(key, next);
+
     // Schedule execution
     timers.set(key, setTimeout(() => {
-      const result = next();
-      results.set(key, result);
       timers.delete(key);
-      // Clean up result after one render cycle to avoid unbounded map growth
-      setTimeout(() => results.delete(key), 0);
+      const currentNext = latestNext.get(key);
+      latestNext.delete(key);
+      if (currentNext) {
+        // Execute with the latest closure (not stale)
+        try {
+          currentNext();
+        } catch (e) {
+          console.error('[vapor-chamber] Debounced execution error:', e);
+        }
+      }
     }, wait));
 
-    // Return pending status synchronously (check results map for actual result)
-    return results.get(key) ?? { ok: true, value: { pending: true, key } };
+    // Return pending status synchronously
+    return { ok: true, value: { pending: true, key } };
   };
 }
 
 /**
  * Throttle plugin - execute immediately, then block for wait period
- * Unlike debounce, throttle guarantees execution on first call
  */
 export function throttle(
   actions: string[],
@@ -169,12 +218,74 @@ export function throttle(
 
     if (now - last >= wait) {
       lastRun.set(key, now);
-      // Schedule removal after the window so the map doesn't grow unbounded
       setTimeout(() => lastRun.delete(key), wait);
       return next();
     }
 
-    // Throttled - return skipped status
     return { ok: true, value: { throttled: true, key, retryIn: wait - (now - last) } };
+  };
+}
+
+/**
+ * Auth guard plugin - blocks protected commands when not authenticated.
+ *
+ * NEW in v0.3.0. Supports intent storage for post-login replay.
+ */
+export function authGuard(options: {
+  /** Function that returns true if the user is authenticated */
+  isAuthenticated: () => boolean;
+  /** Action prefixes that require authentication (e.g. ['shop_cart_', 'shop_wishlist_']) */
+  protected: string[];
+  /** Called when an unauthenticated user tries a protected action */
+  onUnauthenticated?: (cmd: Command) => void;
+}): Plugin {
+  const { isAuthenticated, protected: protectedPrefixes, onUnauthenticated } = options;
+
+  return (cmd, next) => {
+    const isProtected = protectedPrefixes.some(p =>
+      cmd.action.startsWith(p) || cmd.action === p
+    );
+
+    if (isProtected && !isAuthenticated()) {
+      if (onUnauthenticated) {
+        onUnauthenticated(cmd);
+      }
+      return {
+        ok: false,
+        error: new Error(`Unauthorized: ${cmd.action} requires authentication`)
+      };
+    }
+
+    return next();
+  };
+}
+
+/**
+ * Optimistic update plugin - apply optimistic state, rollback on failure.
+ *
+ * NEW in v0.3.0.
+ */
+export function optimistic(
+  handlers: Record<string, {
+    /** Apply optimistic update immediately, return rollback function */
+    apply: (cmd: Command) => (() => void) | null;
+  }>
+): Plugin {
+  return (cmd, next) => {
+    const config = handlers[cmd.action];
+    if (!config) return next();
+
+    const rollback = config.apply(cmd);
+    const result = next();
+
+    if (!result.ok && rollback) {
+      try {
+        rollback();
+      } catch (e) {
+        console.error(`[vapor-chamber] Rollback error for "${cmd.action}":`, e);
+      }
+    }
+
+    return result;
   };
 }

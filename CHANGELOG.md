@@ -4,6 +4,151 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-03-20
+
+### Vue 3.6 + Vite 7/8 Alignment
+
+This release aligns vapor-chamber with the Vue 3.6 beta (Vapor mode feature-complete)
+and the Vite 7/8 toolchain (Rolldown bundler).
+
+### Added
+
+- **`isVaporAvailable()`** — runtime detection of Vue 3.6+ Vapor mode support
+- **`createVaporChamberApp()`** — helper to create a Vapor app instance (requires Vue 3.6+)
+- **`getVaporInteropPlugin()`** — returns `vaporInteropPlugin` for mixed VDOM/Vapor trees
+- **`defineVaporCommand()`** — zero-overhead composable for hot-path dispatches in Vapor mode.
+  Skips reactive `loading`/`lastError` signal creation that `useCommand()` provides.
+  Ideal for GA4 tracking, scroll events, debounced search, and fire-and-forget patterns.
+
+### Changed
+
+- **`tryAutoCleanup()` now prefers `onScopeDispose`** (Vue 3.5+) over `onUnmounted`.
+  `onScopeDispose` works in component setup, `effectScope()`, Vapor components, and SSR —
+  making it the correct lifecycle hook for library composables.
+- **Node.js requirement bumped to `>=20.19.0`** to align with Vite 7/8 minimum.
+- **`tsconfig.json` module target changed from `ESNext` to `ES2022`** for deterministic output
+  that matches Vite 7's baseline-widely-available target.
+- **Dynamic imports in `devtools.ts` now use `@vite-ignore`** comment for Rolldown compatibility.
+  Prevents Vite 8 (Rolldown) from statically analyzing the optional `@vue/devtools-api` import.
+- **Package keywords updated** with `alien-signals`, `vue-3.6`, `vapor-mode`.
+
+### Notes on Vue 3.6 Vapor + alien-signals
+
+- Vue 3.6 rewrites `@vue/reactivity` atop alien-signals (by Johnson Chu / StackBlitz).
+  `ref()` is now backed by fine-grained signals internally — **no separate signal API needed**.
+- vapor-chamber's `configureSignal()` remains available as an escape hatch but is no longer
+  required in Vue 3.6+; the auto-detected `ref()` is already alien-signals powered.
+- The command bus core (`command-bus.ts`) remains framework-agnostic — zero Vue dependency.
+- All composables work identically in VDOM, Vapor, and mixed trees.
+- For Luxury's migration: start with `vaporInteropPlugin` in `createApp()`, convert hot-path
+  components to `<script setup vapor>` incrementally, eventually move to `createVaporApp()`.
+
+## [0.3.0] - 2026-03-20
+
+### Fixed
+
+- **Debounce plugin stale closure** (`src/plugins.ts`): The previous implementation called `next()` inside a `setTimeout`, invoking the middleware chain continuation from a stale closure context. After the debounce timer fired, the `next` function still referenced the original dispatch's middleware state — not the latest one. Fixed by storing the latest `next` closure per debounce key and executing the most recent one when the timer fires.
+
+- **History undo was data-only** (`src/plugins.ts`): `history.undo()` popped the command from the stack but never executed an inverse handler, so the UI state didn't actually revert. Now accepts an optional `{ bus }` reference. When provided, `undo()` calls `bus.getUndoHandler(action)` and executes the inverse handler. `redo()` re-dispatches through the bus. Fully backward-compatible — without `{ bus }`, behavior is unchanged.
+
+- **Signal shim had no reactivity in standard Vue 3** (`src/chamber.ts`): The fallback signal was a plain getter/setter object. When Vue Vapor was not available (i.e., standard Vue 3), changing `signal.value` did not trigger Vue's reactivity system, so `useCommandState` would not update the UI. Fixed by detecting Vue's `ref()` at module load and using it as the signal implementation when available.
+
+- **Shared bus leaked between tests** (`src/chamber.ts`): The module-level `sharedBus` singleton persisted across test files. If a test forgot to call `setCommandBus(createCommandBus())` in `beforeEach`, handlers and hooks from previous tests would leak. Added `resetCommandBus()` export that sets the singleton to `null`, ensuring a clean slate in `afterEach`.
+
+### Added
+
+- **Naming convention enforcement** (`src/command-bus.ts`): New `naming` option on `createCommandBus()` validates action names at both registration and dispatch time. Supports any regex pattern with configurable violation mode (`'warn'`, `'throw'`, or `'ignore'`). Designed for Luxury's LLM-first snake_case convention (`/^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)+$/`).
+
+  ```typescript
+  const bus = createCommandBus({
+    naming: {
+      pattern: /^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)+$/,
+      onViolation: 'throw',
+    }
+  });
+  ```
+
+- **Wildcard / pattern listeners** (`src/command-bus.ts`): New `bus.on(pattern, listener)` method. Supports `'*'` (all events), `'prefix_*'` (namespace glob), or exact match. Listeners receive both the command and its result. Returns unsubscribe function. Designed for analytics subscribers and debugging.
+
+  ```typescript
+  bus.on('shop_*', (cmd, result) => trackShopEvent(cmd));
+  bus.on('*', (cmd, result) => console.log(cmd.action));
+  ```
+
+- **Request/response pattern** (`src/command-bus.ts`): New `bus.request(action, target, { timeout })` and `bus.respond(action, handler)` methods. `request()` returns a Promise that resolves with the responder's return value, or falls back to normal `dispatch()` if no responder is registered. Supports timeout (default 5s). Designed for cross-component queries: payment gateway tokens, address validation, modal confirmations.
+
+  ```typescript
+  bus.respond('payment_get_token', async (cmd) => {
+    return await stripe.createToken(cmd.target);
+  });
+  const result = await bus.request('payment_get_token', { amount: 100 });
+  ```
+
+- **Per-command debounce/throttle at register time** (`src/command-bus.ts`): `register()` now accepts an optional third argument with `{ debounce, throttle }` in milliseconds. Wraps the handler transparently — no need for a global debounce/throttle plugin for individual commands.
+
+  ```typescript
+  bus.register('shop_cart_item_updated', handler, { throttle: 500 });
+  bus.register('shop_selection_updated', trackHandler, { debounce: 3000 });
+  ```
+
+- **Undo handler registration** (`src/command-bus.ts`): `register()` now accepts `{ undo: handler }` to associate an inverse handler with a command. Retrieved via `bus.getUndoHandler(action)`. Used by the `history` plugin and `useCommandHistory` composable to execute real undo operations.
+
+  ```typescript
+  bus.register('cart_add', addHandler, {
+    undo: (cmd) => removeFromCart(cmd.target.productId)
+  });
+  ```
+
+- **Auto-cleanup on Vue component unmount** (`src/chamber.ts`): `useCommand()`, `useCommandState()`, and `useCommandHistory()` now detect if they're called inside a Vue component's `setup()` context. If so, they automatically register their `dispose()` function on `onUnmounted()`. Falls back to manual `dispose()` when called outside a component (Node, tests, non-Vue contexts).
+
+- **`resetCommandBus()` export** (`src/chamber.ts`): Resets the shared singleton bus to `null`. Call in `afterEach()` to prevent handler leaks between test files.
+
+- **`authGuard` plugin** (`src/plugins.ts`): Blocks commands matching protected action prefixes when the user is not authenticated. Calls an optional `onUnauthenticated` callback with the blocked command for intent storage / login redirect.
+
+  ```typescript
+  bus.use(authGuard({
+    isAuthenticated: () => window.isCustomer,
+    protected: ['shop_cart_', 'shop_wishlist_', 'shop_checkout_'],
+    onUnauthenticated: (cmd) => storeIntent(cmd),
+  }));
+  ```
+
+- **`optimistic` plugin** (`src/plugins.ts`): Applies optimistic state updates before the handler executes. If the handler fails, automatically calls the rollback function returned by `apply()`.
+
+  ```typescript
+  bus.use(optimistic({
+    'cart_update_qty': {
+      apply: (cmd) => {
+        const prev = cart.qty;
+        cart.qty = cmd.target.qty;
+        return () => { cart.qty = prev; }; // rollback
+      }
+    }
+  }));
+  ```
+
+- **Generic type parameters** (`src/command-bus.ts`): `Command`, `CommandResult`, and `Handler` types now accept generic type parameters for type-safe payloads and return values at the application level.
+
+### Tests
+
+- Added tests for: naming convention enforcement, wildcard listeners, request/response, undo handler registration, per-command throttle, `resetCommandBus`, `authGuard` plugin, `optimistic` plugin, history with bus-backed undo/redo.
+- All test files now use `resetCommandBus()` in `afterEach` to prevent cross-test contamination.
+
+---
+
+## [0.2.0] - 2026-03-18
+
+### Added
+
+- **Async command bus** (`createAsyncCommandBus`): Full async support for handlers, plugins, and hooks.
+- **Command batching** (`dispatchBatch`): Execute multiple commands sequentially, stops on first failure.
+- **Plugin priority** (`use(plugin, { priority })`): Higher priority runs first (outermost).
+- **Dead letter handling** (`onMissing`): Configurable behavior for unhandled commands.
+- **Testing utilities** (`createTestBus`): Record and assert dispatched commands.
+- **DevTools integration** (`setupDevtools`): Timeline + inspector panel for Vue DevTools.
+
+---
+
 ## [0.1.0] - 2026-03-16
 
 ### Fixed

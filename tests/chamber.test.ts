@@ -1,7 +1,8 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   getCommandBus,
   setCommandBus,
+  resetCommandBus,
   useCommand,
   useCommandState,
   useCommandHistory,
@@ -10,8 +11,11 @@ import { createCommandBus } from '../src/command-bus';
 
 describe('getCommandBus / setCommandBus', () => {
   beforeEach(() => {
-    // Reset shared bus
     setCommandBus(createCommandBus());
+  });
+
+  afterEach(() => {
+    resetCommandBus();
   });
 
   it('should return a command bus', () => {
@@ -43,6 +47,10 @@ describe('getCommandBus / setCommandBus', () => {
 describe('useCommand', () => {
   beforeEach(() => {
     setCommandBus(createCommandBus());
+  });
+
+  afterEach(() => {
+    resetCommandBus();
   });
 
   it('should return dispatch function', () => {
@@ -120,6 +128,10 @@ describe('useCommandState', () => {
     setCommandBus(createCommandBus());
   });
 
+  afterEach(() => {
+    resetCommandBus();
+  });
+
   it('should return initial state', () => {
     const { state } = useCommandState({ count: 0 }, {});
 
@@ -190,6 +202,10 @@ describe('useCommandState', () => {
 describe('useCommandHistory', () => {
   beforeEach(() => {
     setCommandBus(createCommandBus());
+  });
+
+  afterEach(() => {
+    resetCommandBus();
   });
 
   it('should track command history', () => {

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
-import { logger, validator, history, debounce, throttle } from '../src/plugins';
+import { logger, validator, history, debounce, throttle, authGuard, optimistic } from '../src/plugins';
 
 describe('logger plugin', () => {
   beforeEach(() => {
@@ -396,5 +396,133 @@ describe('throttle plugin', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+});
+
+// ─── history with bus (undo executes inverse handler) ─────────────────────────
+
+describe('history plugin with bus (undo/redo execution)', () => {
+  it('should execute undo handler when bus is provided', () => {
+    const bus = createCommandBus();
+    const undoFn = vi.fn();
+
+    bus.register('cart_add', () => 'added', { undo: undoFn });
+
+    const historyPlugin = history({ bus });
+    bus.use(historyPlugin);
+
+    bus.dispatch('cart_add', { id: 1 });
+    historyPlugin.undo();
+
+    expect(undoFn).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'cart_add', target: { id: 1 } })
+    );
+  });
+
+  it('should re-dispatch on redo when bus is provided', () => {
+    const bus = createCommandBus();
+    const handler = vi.fn(() => 'result');
+
+    bus.register('cart_add', handler);
+
+    const historyPlugin = history({ bus });
+    bus.use(historyPlugin);
+
+    bus.dispatch('cart_add', { id: 1 });
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    historyPlugin.undo();
+    historyPlugin.redo();
+
+    expect(handler).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ─── authGuard plugin ─────────────────────────────────────────────────────────
+
+describe('authGuard plugin', () => {
+  it('should block protected actions when not authenticated', () => {
+    const bus = createCommandBus();
+
+    bus.use(authGuard({
+      isAuthenticated: () => false,
+      protected: ['shop_cart_', 'shop_wishlist_'],
+    }));
+
+    bus.register('shop_cart_add', () => 'added');
+    bus.register('ui_toast', () => 'toasted');
+
+    const blocked = bus.dispatch('shop_cart_add', {});
+    expect(blocked.ok).toBe(false);
+    expect(blocked.error?.message).toContain('Unauthorized');
+
+    const allowed = bus.dispatch('ui_toast', {});
+    expect(allowed.ok).toBe(true);
+  });
+
+  it('should allow when authenticated', () => {
+    const bus = createCommandBus();
+
+    bus.use(authGuard({
+      isAuthenticated: () => true,
+      protected: ['shop_cart_'],
+    }));
+
+    bus.register('shop_cart_add', () => 'added');
+    expect(bus.dispatch('shop_cart_add', {}).ok).toBe(true);
+  });
+
+  it('should call onUnauthenticated callback', () => {
+    const bus = createCommandBus();
+    const callback = vi.fn();
+
+    bus.use(authGuard({
+      isAuthenticated: () => false,
+      protected: ['shop_cart_'],
+      onUnauthenticated: callback,
+    }));
+
+    bus.register('shop_cart_add', () => 'added');
+    bus.dispatch('shop_cart_add', { productId: 123 });
+
+    expect(callback).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'shop_cart_add' })
+    );
+  });
+});
+
+// ─── optimistic plugin ────────────────────────────────────────────────────────
+
+describe('optimistic plugin', () => {
+  it('should keep optimistic update on success', () => {
+    const bus = createCommandBus();
+    const state = { count: 0 };
+
+    bus.use(optimistic({
+      'counter_increment': {
+        apply: () => { state.count++; return () => { state.count--; }; }
+      }
+    }));
+
+    bus.register('counter_increment', () => 'ok');
+    bus.dispatch('counter_increment', {});
+
+    expect(state.count).toBe(1);
+  });
+
+  it('should rollback on failure', () => {
+    const bus = createCommandBus();
+    const state = { count: 0 };
+
+    bus.use(optimistic({
+      'counter_increment': {
+        apply: () => { state.count++; return () => { state.count--; }; }
+      }
+    }));
+
+    bus.register('counter_increment', () => { throw new Error('fail'); });
+    bus.dispatch('counter_increment', {});
+
+    expect(state.count).toBe(0);
   });
 });

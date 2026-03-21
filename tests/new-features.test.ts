@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { createCommandBus, createAsyncCommandBus } from '../src/command-bus';
 import { createTestBus } from '../src/testing';
-import { getCommandBus, setCommandBus, useCommandBus } from '../src/chamber';
+import { getCommandBus, setCommandBus, resetCommandBus, useCommandBus } from '../src/chamber';
 
 // ─── dispatchBatch ────────────────────────────────────────────────────────────
 
@@ -36,7 +36,7 @@ describe('dispatchBatch (sync)', () => {
 
     expect(result.ok).toBe(false);
     expect(result.error?.message).toBe('boom');
-    expect(result.results).toHaveLength(2); // a succeeded, b failed, c never ran
+    expect(result.results).toHaveLength(2);
     expect(result.results[0].ok).toBe(true);
     expect(result.results[1].ok).toBe(false);
   });
@@ -271,6 +271,10 @@ describe('useCommandBus', () => {
     setCommandBus(createCommandBus());
   });
 
+  afterEach(() => {
+    resetCommandBus();
+  });
+
   it('returns the shared bus', () => {
     const bus = useCommandBus();
     expect(bus).toBe(getCommandBus());
@@ -283,5 +287,245 @@ describe('useCommandBus', () => {
     const result = bus.dispatch('test', {});
     expect(result.ok).toBe(true);
     expect(result.value).toBe(42);
+  });
+});
+
+// ─── resetCommandBus ──────────────────────────────────────────────────────────
+
+describe('resetCommandBus', () => {
+  it('creates a fresh bus after reset', () => {
+    const bus1 = getCommandBus();
+    bus1.register('test', () => 'from-bus1');
+
+    resetCommandBus();
+
+    const bus2 = getCommandBus();
+    expect(bus2).not.toBe(bus1);
+
+    // Old handler should not exist on new bus
+    const result = bus2.dispatch('test', {});
+    expect(result.ok).toBe(false);
+  });
+});
+
+// ─── Naming convention ────────────────────────────────────────────────────────
+
+describe('naming convention', () => {
+  it('warns on invalid action names', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const bus = createCommandBus({
+      naming: {
+        pattern: /^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)+$/,
+        onViolation: 'warn',
+      }
+    });
+
+    bus.register('cart.add', () => 'result'); // dots not allowed
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('cart.add'));
+
+    warn.mockRestore();
+  });
+
+  it('throws on invalid action names when configured', () => {
+    const bus = createCommandBus({
+      naming: {
+        pattern: /^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)+$/,
+        onViolation: 'throw',
+      }
+    });
+
+    expect(() => bus.register('CART_ADD', () => 'result')).toThrow();
+  });
+
+  it('accepts valid snake_case names', () => {
+    const bus = createCommandBus({
+      naming: {
+        pattern: /^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)+$/,
+        onViolation: 'throw',
+      }
+    });
+
+    expect(() => bus.register('shop_cart_item_added', () => 'result')).not.toThrow();
+  });
+
+  it('validates at dispatch time too', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const bus = createCommandBus({
+      naming: {
+        pattern: /^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)+$/,
+        onViolation: 'warn',
+      }
+    });
+
+    bus.dispatch('InvalidName', {});
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('InvalidName'));
+
+    warn.mockRestore();
+  });
+});
+
+// ─── Wildcard / pattern listeners ─────────────────────────────────────────────
+
+describe('on() pattern listeners', () => {
+  it('wildcard * listens to all actions', () => {
+    const bus = createCommandBus();
+    const heard: string[] = [];
+
+    bus.on('*', (cmd) => heard.push(cmd.action));
+    bus.register('shop_cart_add', () => null);
+    bus.register('ui_toast', () => null);
+
+    bus.dispatch('shop_cart_add', {});
+    bus.dispatch('ui_toast', {});
+
+    expect(heard).toEqual(['shop_cart_add', 'ui_toast']);
+  });
+
+  it('prefix_* matches namespace', () => {
+    const bus = createCommandBus();
+    const heard: string[] = [];
+
+    bus.on('shop_*', (cmd) => heard.push(cmd.action));
+    bus.register('shop_cart_add', () => null);
+    bus.register('shop_filter_applied', () => null);
+    bus.register('ui_toast', () => null);
+
+    bus.dispatch('shop_cart_add', {});
+    bus.dispatch('shop_filter_applied', {});
+    bus.dispatch('ui_toast', {});
+
+    expect(heard).toEqual(['shop_cart_add', 'shop_filter_applied']);
+  });
+
+  it('exact match works', () => {
+    const bus = createCommandBus();
+    const heard: string[] = [];
+
+    bus.on('shop_cart_add', (cmd) => heard.push(cmd.action));
+    bus.register('shop_cart_add', () => null);
+    bus.register('shop_cart_remove', () => null);
+
+    bus.dispatch('shop_cart_add', {});
+    bus.dispatch('shop_cart_remove', {});
+
+    expect(heard).toEqual(['shop_cart_add']);
+  });
+
+  it('unsubscribe stops listening', () => {
+    const bus = createCommandBus();
+    const heard: string[] = [];
+
+    const unsub = bus.on('*', (cmd) => heard.push(cmd.action));
+    bus.register('test_action', () => null);
+
+    bus.dispatch('test_action', {});
+    unsub();
+    bus.dispatch('test_action', {});
+
+    expect(heard).toEqual(['test_action']);
+  });
+});
+
+// ─── Request / Response ───────────────────────────────────────────────────────
+
+describe('request/respond', () => {
+  it('request gets response from responder', async () => {
+    const bus = createCommandBus();
+
+    bus.respond('payment_get_token', (cmd) => {
+      return { token: 'tok_123', amount: cmd.target.amount };
+    });
+
+    const result = await bus.request('payment_get_token', { amount: 100 });
+
+    expect(result.ok).toBe(true);
+    expect(result.value.token).toBe('tok_123');
+  });
+
+  it('request falls back to dispatch when no responder', async () => {
+    const bus = createCommandBus();
+    bus.register('test_action', (cmd) => cmd.target.value * 2);
+
+    const result = await bus.request('test_action', { value: 5 });
+
+    expect(result.ok).toBe(true);
+    expect(result.value).toBe(10);
+  });
+
+  it('request times out', async () => {
+    const bus = createCommandBus();
+
+    bus.respond('slow_action', async () => {
+      return new Promise((resolve) => setTimeout(() => resolve('done'), 200));
+    });
+
+    await expect(
+      bus.request('slow_action', {}, { timeout: 50 })
+    ).rejects.toThrow('timed out');
+  });
+
+  it('respond can be unsubscribed', async () => {
+    const bus = createCommandBus();
+    bus.register('test_action', () => 'from_handler');
+
+    const unsub = bus.respond('test_action', () => 'from_responder');
+
+    let result = await bus.request('test_action', {});
+    expect(result.value).toBe('from_responder');
+
+    unsub();
+
+    result = await bus.request('test_action', {});
+    expect(result.value).toBe('from_handler'); // falls back to dispatch
+  });
+});
+
+// ─── Undo handlers ────────────────────────────────────────────────────────────
+
+describe('register with undo handler', () => {
+  it('stores and retrieves undo handler', () => {
+    const bus = createCommandBus();
+    const undoFn = vi.fn();
+
+    bus.register('cart_add', () => 'added', { undo: undoFn });
+
+    const handler = bus.getUndoHandler('cart_add');
+    expect(handler).toBe(undoFn);
+  });
+
+  it('undo handler removed on unregister', () => {
+    const bus = createCommandBus();
+
+    const unsub = bus.register('cart_add', () => 'added', { undo: () => {} });
+    unsub();
+
+    expect(bus.getUndoHandler('cart_add')).toBeUndefined();
+  });
+});
+
+// ─── Per-command throttle ─────────────────────────────────────────────────────
+
+describe('per-command throttle at register time', () => {
+  beforeEach(() => { vi.useFakeTimers(); });
+  afterEach(() => { vi.useRealTimers(); });
+
+  it('throttles handler execution', () => {
+    const bus = createCommandBus();
+    const handler = vi.fn(() => 'result');
+
+    bus.register('fast_action', handler, { throttle: 100 });
+
+    const r1 = bus.dispatch('fast_action', { id: 1 });
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(r1.value).toBe('result');
+
+    const r2 = bus.dispatch('fast_action', { id: 1 });
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(r2.value.throttled).toBe(true);
+
+    vi.advanceTimersByTime(100);
+
+    const r3 = bus.dispatch('fast_action', { id: 1 });
+    expect(handler).toHaveBeenCalledTimes(2);
   });
 });

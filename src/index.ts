@@ -23,6 +23,9 @@ export {
   type BatchResult,
   type DeadLetterMode,
   type CommandBusOptions,
+  type NamingConvention,
+  type RegisterOptions,
+  type Listener,
 } from './command-bus';
 
 // Testing utilities
@@ -35,6 +38,8 @@ export {
   history,
   debounce,
   throttle,
+  authGuard,
+  optimistic,
   type HistoryState,
 } from './plugins';
 
@@ -46,10 +51,16 @@ export {
   type CreateSignal,
   getCommandBus,
   setCommandBus,
+  resetCommandBus,
   useCommandBus,
   useCommand,
   useCommandState,
   useCommandHistory,
+  // v0.4.0: Vue 3.6 Vapor alignment
+  isVaporAvailable,
+  createVaporChamberApp,
+  getVaporInteropPlugin,
+  defineVaporCommand,
 } from './chamber';
 
 // DevTools integration (optional — requires @vue/devtools-api)

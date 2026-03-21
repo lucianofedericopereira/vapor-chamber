@@ -95,8 +95,10 @@ export function setupDevtools(bus: Observable, app: unknown): () => void {
   // Dynamic import — zero cost if @vue/devtools-api is not installed.
   // Using a variable prevents TypeScript from attempting module resolution
   // on an optional peer dependency that may not be installed.
+  // Variable indirection + @vite-ignore prevents Vite/Rolldown from
+  // statically analyzing and bundling this optional peer dependency.
   const devtoolsModule = '@vue/devtools-api';
-  import(devtoolsModule)
+  import(/* @vite-ignore */ devtoolsModule)
     .then(({ setupDevtoolsPlugin }: any) => {
       setupDevtoolsPlugin(
         {
