@@ -4,6 +4,142 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added — core quality & gap fixes (v0.6.0 candidate)
+
+- **`bus.onBefore(hook)`** (`command-bus.ts`) — pre-dispatch hook on both sync and async buses.
+  Throw (or reject, on async bus) to cancel the dispatch — returns `{ ok: false, error }`.
+  After hooks still fire on cancellation. Use for auth gates, loading spinners, pre-validation:
+  ```ts
+  bus.onBefore((cmd) => {
+    if (!isAuth()) throw new Error('Unauthenticated');
+  });
+  ```
+
+- **`bus.offAll(pattern?)`** — remove all `on()` listeners matching an exact pattern, or all
+  listeners if called with no argument. Useful for component teardown without tracking individual
+  unsub functions:
+  ```ts
+  bus.on('cart*', listenerA);
+  bus.on('cart*', listenerB);
+  bus.offAll('cart*');  // removes both
+  bus.offAll();         // removes everything
+  ```
+
+- **`bus.once(pattern, listener)`** — one-shot subscription on both sync and async buses.
+  Auto-unsubscribes after first matching command. The returned unsub cancels before it fires.
+  `TestBus` now also has a real `once()` implementation.
+
+- **`BatchResult.successCount` and `BatchResult.failCount`** — always present on batch results
+  regardless of `continueOnError`. Allows precise "3 of 5 succeeded" reporting:
+  ```ts
+  const { results, successCount, failCount } = bus.dispatchBatch(cmds, { continueOnError: true });
+  console.log(`${successCount}/${results.length} succeeded`);
+  ```
+
+- **`HttpError.code`** — machine-readable error code extracted from response body `{ code: '...' }`.
+  Enables pattern-matching on application errors without string comparison on `.message`:
+  ```ts
+  } catch (e) {
+    if ((e as HttpError).code === 'CART_ITEM_LIMIT_EXCEEDED') showLimitWarning();
+  }
+  ```
+
+- **`HttpBridgeOptions.noRetry: string[]`** — list of action names that must never be retried,
+  regardless of the `retry` setting. Prevents double-execution of payment and checkout commands:
+  ```ts
+  createHttpBridge({ endpoint: '/api/vc', retry: 2, noRetry: ['paymentCharge', 'orderPlace'] })
+  ```
+
+- **`WsBridgeOptions.maxQueueSize?: number`** (default: `100`) — caps the in-memory queue that
+  accumulates messages during a WebSocket disconnect. When exceeded, the oldest queued message
+  is resolved with `{ ok: false, error }` before the new message is enqueued. Prevents unbounded
+  memory growth during long disconnects or reconnect storms.
+
+- **`SynthesizeOptions.adapter?: LlmAdapter`** (`schema.ts`) — custom LLM adapter for `synthesize()`.
+  When provided, bypasses the built-in Anthropic API call entirely. Receives Anthropic-format tool
+  definitions, user text, and options; returns a `ToolCallInput`. Use for proxied APIs, OpenAI, or
+  any other provider:
+  ```ts
+  const adapter: LlmAdapter = async (tools, text) => {
+    const res = await myOpenAiProxy.complete({ tools, prompt: text });
+    return { name: res.toolName, input: res.args };
+  };
+  await bus.synthesize('add 2 of item 5', { adapter });
+  ```
+  `LlmAdapter` type exported from main entry point.
+
+- **`BaseBus` interface** — structural escape hatch for utilities that work with both sync and async
+  buses. Exported from main entry point. Use as parameter type in `createChamber`, `createWorkflow`,
+  and any cross-bus utilities to avoid `as any` casts.
+
+- **`commandKey(action, target)`** — stable `action:target` string key, exported from core.
+  Handles circular references safely. Useful for cache invalidation (TanStack Query integration).
+
+- **`buildRunner` and `matchesPattern`** — exported from `command-bus.ts` for use in utilities
+  and custom test doubles without internal duplication.
+
+- **`BeforeHook`, `AsyncBeforeHook`, `LlmAdapter`** types exported from main entry point.
+
+- **`WHITEPAPER.md`** — comprehensive architectural document covering: design decisions from
+  nine comparative analysis rounds (RTK, VueUse, XState, TanStack Query, DDD, Svelte Stores,
+  RxJS, GraphQL, ArangoDB), CQRS positioning, DDD application service layer pattern,
+  integration guide for Pinia / TanStack Query / Inertia 3 / XState / Laravel Reverb,
+  utility layer design (`createChamber`, `createWorkflow`, `createReaction`), and v1.0 roadmap.
+
+### Fixed
+
+- **419 CSRF expiry incorrectly triggered session-expired callbacks** (`http.ts`) — 419 was
+  included in `SESSION_EXPIRED_STATUS`. It is now correctly excluded: 419 is CSRF expiry,
+  not a session expiry. Only 401 fires `onSessionExpired` and dispatches the `session-expired`
+  `CustomEvent`.
+
+- **CSRF refresh was a no-op** (`http.ts`) — `refreshCsrfOnce` re-read the stale DOM token
+  instead of fetching a fresh one. Now fetches `csrfCookieUrl` (default `/sanctum/csrf-cookie`)
+  to let Laravel issue a fresh `XSRF-TOKEN` cookie before re-reading. Concurrent 419s still
+  coalesce — no duplicate refresh requests.
+
+- **`ReferenceError: installedBus is not defined`** (`transports.ts`) — leftover assignment
+  after removing the `installedBus` variable from the SSE bridge `install()` function.
+
+- **SSE bridge `install(bus)` accepted `CommandBus` (sync only)** (`transports.ts`) — the `bus`
+  parameter in `SseBridgeOptions.onEvent` and `install()` was typed as `CommandBus`. Changed to
+  `BaseBus` so both sync and async buses can be passed without `as any`.
+
+- **WS timeout was hardcoded** (`transports.ts`) — the per-message response timeout in
+  `createWsBridge` was hardcoded to 10_000ms. Now reads `WsBridgeOptions.timeout` (default
+  still 10_000).
+
+- **HTTP bridge swallowed error response bodies** (`transports.ts`) — error messages from the
+  bridge were `HTTP {status}`. Now includes `data.message ?? data.error` from the response JSON
+  when the server returns an error object.
+
+- **HTTP bridge always retried even non-idempotent actions** — mitigated by `noRetry` option
+  (see above).
+
+- **Error response bodies were never parsed** (`http.ts`) — `doFetch` only parsed JSON when
+  `raw.ok`. Now always attempts `raw.json()` so error body fields (`code`, `message`, `error`)
+  are available in `HttpError.response.data` and `HttpError.code`.
+
+- **`once()` mutation-during-iteration bug** (`command-bus.ts`) — when a `once()` listener fired
+  and called its own `unsub()` inside the loop, subsequent listeners in the same array were
+  skipped. Fixed by iterating `.slice()` of `patternListeners` and `afterHooks` in both
+  `syncRunHooks` and `asyncRunHooks`.
+
+- **`isAsyncFn` fragile in minified builds** (`command-bus.ts`) — used `fn.constructor?.name`
+  which minifiers rename to single characters. Fixed to `fn[Symbol.toStringTag]`.
+
+- **`TestBus.on()` was a no-op stub** (`testing.ts`) — stored listeners but never called them.
+  Now fires matching listeners after every dispatch, consistent with the real buses.
+
+### Changed
+
+- **`FormRules` now supports async validators** (`form.ts`) — rule functions may return
+  `string | null | Promise<string | null>`. `set()` uses sync-only rules for live per-field
+  feedback (no UI jank). `submit()` awaits all rules including async ones before gating
+  `onSubmit`. Fully backward-compatible — existing sync rules unchanged.
+
+---
+
 ### Added
 
 - **`createAsyncSchemaCommandBus<S>(schema, options?)`** (`src/schema.ts`) — async variant of

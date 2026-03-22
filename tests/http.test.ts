@@ -102,9 +102,10 @@ describe('postCommand — retry', () => {
 
     vi.useFakeTimers();
     const promise = postCommand('/api/cmd', {}, { retry: 2 });
+    const assertion = expect(promise).rejects.toMatchObject({ name: 'HttpError', status: 503 });
     await vi.runAllTimersAsync();
+    await assertion;
 
-    await expect(promise).rejects.toMatchObject({ name: 'HttpError', status: 503 });
     expect((globalThis.fetch as any).mock.calls).toHaveLength(3);
   });
 
@@ -140,9 +141,9 @@ describe('postCommand — retry', () => {
 
     vi.useFakeTimers();
     const promise = postCommand('/api/cmd', {}, { retry: 1 });
+    const assertion = expect(promise).rejects.toThrow('network down');
     await vi.runAllTimersAsync();
-
-    await expect(promise).rejects.toThrow('network down');
+    await assertion;
   });
 });
 
@@ -152,13 +153,17 @@ describe('postCommand — retry', () => {
 
 describe('postCommand — timeout', () => {
   it('throws TimeoutError when request exceeds timeout', async () => {
-    (globalThis.fetch as any).mockImplementation(() => new Promise(() => {})); // hangs forever
+    (globalThis.fetch as any).mockImplementation((_url: string, init: RequestInit) =>
+      new Promise((_, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+      })
+    );
 
     vi.useFakeTimers();
     const promise = postCommand('/api/cmd', {}, { timeout: 100 });
+    const assertion = expect(promise).rejects.toMatchObject({ name: 'TimeoutError' });
     await vi.advanceTimersByTimeAsync(200);
-
-    await expect(promise).rejects.toMatchObject({ name: 'TimeoutError' });
+    await assertion;
   });
 });
 
@@ -169,7 +174,12 @@ describe('postCommand — timeout', () => {
 describe('postCommand — user abort', () => {
   it('throws AbortError when user signal fires', async () => {
     const ctrl = new AbortController();
-    (globalThis.fetch as any).mockImplementation(() => new Promise(() => {}));
+    (globalThis.fetch as any).mockImplementation((_url: string, init: RequestInit) =>
+      new Promise((_, reject) => {
+        if (init?.signal?.aborted) { reject(new DOMException('Aborted', 'AbortError')); return; }
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+      })
+    );
 
     const promise = postCommand('/api/cmd', {}, { signal: ctrl.signal });
     ctrl.abort();
@@ -202,14 +212,13 @@ describe('postCommand — session expiry', () => {
   it('dispatches session-expired CustomEvent on 401', async () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(401));
     const events: Event[] = [];
-    window.addEventListener('session-expired', (e) => events.push(e));
+
+    vi.stubGlobal('window', { dispatchEvent: (e: Event) => { events.push(e); return true; } });
 
     await expect(postCommand('/api/cmd', {})).rejects.toBeDefined();
 
     expect(events).toHaveLength(1);
     expect((events[0] as CustomEvent).detail.status).toBe(401);
-
-    window.removeEventListener('session-expired', (e) => events.push(e));
   });
 });
 
@@ -220,20 +229,63 @@ describe('postCommand — session expiry', () => {
 describe('postCommand — CSRF 419 refresh', () => {
   it('retries once after 419 and does not count against retry budget', async () => {
     (globalThis.fetch as any)
-      .mockResolvedValueOnce(mockResponse(419))
-      .mockResolvedValueOnce(mockResponse(200, { refreshed: true }));
+      .mockResolvedValueOnce(mockResponse(419))          // original request → 419
+      .mockResolvedValueOnce(mockResponse(200, {}))      // GET /sanctum/csrf-cookie
+      .mockResolvedValueOnce(mockResponse(200, { refreshed: true })); // retry → 200
 
     const res = await postCommand('/api/cmd', {}, { retry: 0 });
 
     expect(res.ok).toBe(true);
-    expect((globalThis.fetch as any).mock.calls).toHaveLength(2);
+    // call[0] = original POST, call[1] = csrf-cookie GET, call[2] = retry POST
+    expect((globalThis.fetch as any).mock.calls).toHaveLength(3);
+    expect((globalThis.fetch as any).mock.calls[1][0]).toBe('/sanctum/csrf-cookie');
+    expect((globalThis.fetch as any).mock.calls[1][1].method).toBe('GET');
   });
 
   it('does not retry 419 a second time (csrfRetried guard)', async () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(419));
 
     await expect(postCommand('/api/cmd', {}, { retry: 0 })).rejects.toMatchObject({ status: 419 });
+    // call[0] = original POST, call[1] = csrf-cookie GET, call[2] = retry POST → 419 again → throw
+    expect((globalThis.fetch as any).mock.calls).toHaveLength(3);
+  });
+
+  it('uses custom csrfCookieUrl when provided', async () => {
+    (globalThis.fetch as any)
+      .mockResolvedValueOnce(mockResponse(419))
+      .mockResolvedValueOnce(mockResponse(200, {}))
+      .mockResolvedValueOnce(mockResponse(200, {}));
+
+    await postCommand('/api/cmd', {}, { retry: 0, csrfCookieUrl: '/custom/csrf' });
+
+    expect((globalThis.fetch as any).mock.calls[1][0]).toBe('/custom/csrf');
+  });
+
+  it('skips csrf-cookie fetch when csrfCookieUrl is empty string', async () => {
+    (globalThis.fetch as any)
+      .mockResolvedValueOnce(mockResponse(419))
+      .mockResolvedValueOnce(mockResponse(200, {}));
+
+    await postCommand('/api/cmd', {}, { retry: 0, csrfCookieUrl: '' });
+
+    // Only original POST + retry POST — no csrf-cookie fetch
     expect((globalThis.fetch as any).mock.calls).toHaveLength(2);
+  });
+
+  it('401 still triggers onSessionExpired (not 419)', async () => {
+    (globalThis.fetch as any).mockResolvedValue(mockResponse(401));
+    const onSessionExpired = vi.fn();
+
+    await expect(postCommand('/api/cmd', {}, { onSessionExpired })).rejects.toBeDefined();
+    expect(onSessionExpired).toHaveBeenCalledWith(401);
+  });
+
+  it('419 does NOT trigger onSessionExpired', async () => {
+    (globalThis.fetch as any).mockResolvedValue(mockResponse(419));
+    const onSessionExpired = vi.fn();
+
+    await expect(postCommand('/api/cmd', {}, { onSessionExpired, retry: 0 })).rejects.toBeDefined();
+    expect(onSessionExpired).not.toHaveBeenCalled();
   });
 });
 
@@ -268,18 +320,15 @@ describe('readCsrfToken', () => {
   });
 
   it('reads token from meta tag', () => {
-    const meta = document.createElement('meta');
-    meta.setAttribute('name', 'csrf-token');
-    meta.setAttribute('content', 'meta-token-123');
-    document.head.appendChild(meta);
+    vi.stubGlobal('document', {
+      querySelector: (sel: string) => sel === 'meta[name="csrf-token"]' ? { content: 'meta-token-123' } : null,
+      cookie: '',
+    });
 
     invalidateCsrfCache();
     const result = readCsrfToken();
 
     expect(result?.token).toBe('meta-token-123');
     expect(result?.headerName).toBe('X-CSRF-TOKEN');
-
-    document.head.removeChild(meta);
-    invalidateCsrfCache();
   });
 });

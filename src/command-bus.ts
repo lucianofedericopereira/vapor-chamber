@@ -25,6 +25,10 @@ export type Plugin = (cmd: Command, next: () => CommandResult) => CommandResult;
 export type AsyncPlugin = (cmd: Command, next: () => CommandResult | Promise<CommandResult>) => CommandResult | Promise<CommandResult>;
 export type Hook = (cmd: Command, result: CommandResult) => void;
 export type AsyncHook = (cmd: Command, result: CommandResult) => void | Promise<void>;
+/** Fires before the handler runs. Throw to cancel the dispatch (returns `{ ok: false }`). */
+export type BeforeHook = (cmd: Command) => void;
+/** Fires before the handler runs on an async bus. Throw or reject to cancel. */
+export type AsyncBeforeHook = (cmd: Command) => void | Promise<void>;
 
 /** Options for plugin registration. Higher priority runs first (outermost). Default: 0. */
 export type PluginOptions = { priority?: number };
@@ -36,7 +40,15 @@ export type BatchCommand = { action: string; target: any; payload?: any };
 export type BatchOptions = { continueOnError?: boolean };
 
 /** Result of a batch dispatch */
-export type BatchResult = { ok: boolean; results: CommandResult[]; error?: Error };
+export type BatchResult = {
+  ok: boolean;
+  results: CommandResult[];
+  error?: Error;
+  /** Number of commands that completed successfully */
+  successCount: number;
+  /** Number of commands that failed */
+  failCount: number;
+};
 
 /**
  * Dead letter mode — what to do when a command has no registered handler.
@@ -98,33 +110,73 @@ type _R<M extends CommandMap, A extends keyof M> = M[A] extends { result: infer 
 // Interfaces
 // ---------------------------------------------------------------------------
 
-export interface CommandBus<M extends CommandMap = CommandMap> {
+/**
+ * Structural base interface for both sync and async buses.
+ * Use this as the parameter type in utilities (createChamber, createWorkflow, etc.)
+ * to avoid `as any` casts when working with either bus variant.
+ */
+export interface BaseBus {
+  dispatch(action: string, target: any, payload?: any): any;
+  register(action: string, handler: any, options?: RegisterOptions): () => void;
+  use(plugin: any, options?: PluginOptions): () => void;
+  /** Subscribe before dispatch. Throw to cancel (returns `{ ok: false }`). */
+  onBefore(hook: any): () => void;
+  onAfter(hook: any): () => void;
+  on(pattern: string, listener: Listener): () => void;
+  once(pattern: string, listener: Listener): () => void;
+  /** Remove all `on()` listeners matching the given pattern, or all listeners if omitted. */
+  offAll(pattern?: string): void;
+  hasHandler(action: string): boolean;
+  clear(): void;
+}
+
+export interface CommandBus<M extends CommandMap = CommandMap> extends BaseBus {
   dispatch<A extends keyof M & string>(action: A, target: _T<M, A>, payload?: _P<M, A>): CommandResult<_R<M, A>>;
   dispatchBatch(commands: BatchCommand[], options?: BatchOptions): BatchResult;
   register<A extends keyof M & string>(action: A, handler: (cmd: Command<A, _T<M, A>, _P<M, A>>) => _R<M, A>, options?: RegisterOptions): () => void;
   use(plugin: Plugin, options?: PluginOptions): () => void;
+  /** Subscribe before dispatch. Throw to cancel — dispatch returns `{ ok: false }`. */
+  onBefore(hook: BeforeHook): () => void;
   onAfter(hook: Hook): () => void;
   on(pattern: string, listener: Listener): () => void;
+  /** Subscribe to the first matching command only; auto-unsubscribes after it fires. */
+  once(pattern: string, listener: Listener): () => void;
+  offAll(pattern?: string): void;
   request<A extends keyof M & string>(action: A, target: _T<M, A>, payload?: _P<M, A>, options?: { timeout?: number }): Promise<CommandResult<_R<M, A>>>;
   respond(action: string, handler: (cmd: Command) => any | Promise<any>): () => void;
   /** Returns true if a handler is registered for the given action. */
   hasHandler(action: string): boolean;
+  /**
+   * @internal Used by the history plugin to retrieve an undo handler registered alongside
+   * a command handler. Do not call this from application code — it will be moved to a
+   * plugin-private channel in a future release.
+   */
   getUndoHandler(action: string): Handler | undefined;
   /** Remove all handlers, plugins, hooks, and listeners. Useful for testing and HMR. */
   clear(): void;
 }
 
-export interface AsyncCommandBus<M extends CommandMap = CommandMap> {
+export interface AsyncCommandBus<M extends CommandMap = CommandMap> extends BaseBus {
   dispatch<A extends keyof M & string>(action: A, target: _T<M, A>, payload?: _P<M, A>): Promise<CommandResult<_R<M, A>>>;
   dispatchBatch(commands: BatchCommand[], options?: BatchOptions): Promise<BatchResult>;
   register<A extends keyof M & string>(action: A, handler: (cmd: Command<A, _T<M, A>, _P<M, A>>) => Promise<_R<M, A>>, options?: RegisterOptions): () => void;
   use(plugin: AsyncPlugin, options?: PluginOptions): () => void;
+  /** Subscribe before dispatch. Throw or reject to cancel — dispatch returns `{ ok: false }`. */
+  onBefore(hook: AsyncBeforeHook): () => void;
   onAfter(hook: AsyncHook): () => void;
   on(pattern: string, listener: Listener): () => void;
+  /** Subscribe to the first matching command only; auto-unsubscribes after it fires. */
+  once(pattern: string, listener: Listener): () => void;
+  offAll(pattern?: string): void;
   request<A extends keyof M & string>(action: A, target: _T<M, A>, payload?: _P<M, A>, options?: { timeout?: number }): Promise<CommandResult<_R<M, A>>>;
   respond(action: string, handler: (cmd: Command) => any | Promise<any>): () => void;
   /** Returns true if a handler is registered for the given action. */
   hasHandler(action: string): boolean;
+  /**
+   * @internal Used by the history plugin to retrieve an undo handler registered alongside
+   * a command handler. Do not call this from application code — it will be moved to a
+   * plugin-private channel in a future release.
+   */
   getUndoHandler(action: string): Handler | undefined;
   /** Remove all handlers, plugins, hooks, and listeners. Useful for testing and HMR. */
   clear(): void;
@@ -139,6 +191,7 @@ type SyncState = {
   handlers: Map<string, Handler>;
   undoHandlers: Map<string, Handler>;
   pluginEntries: Array<{ plugin: Plugin; priority: number }>;
+  beforeHooks: BeforeHook[];
   afterHooks: Hook[];
   patternListeners: Array<{ pattern: string; listener: Listener }>;
   responders: Map<string, (cmd: Command) => any | Promise<any>>;
@@ -150,6 +203,7 @@ type AsyncState = {
   handlers: Map<string, AsyncHandler>;
   undoHandlers: Map<string, Handler>;
   pluginEntries: Array<{ plugin: AsyncPlugin; priority: number }>;
+  beforeHooks: AsyncBeforeHook[];
   afterHooks: AsyncHook[];
   patternListeners: Array<{ pattern: string; listener: Listener }>;
   responders: Map<string, (cmd: Command) => any | Promise<any>>;
@@ -169,18 +223,21 @@ function validateNaming(action: string, naming?: NamingConvention): void {
   if (mode === 'warn') console.warn(msg);
 }
 
-function matchesPattern(pattern: string, action: string): boolean {
+export function matchesPattern(pattern: string, action: string): boolean {
   if (pattern === '*') return true;
   if (pattern.endsWith('*')) return action.startsWith(pattern.slice(0, -1));
   return pattern === action;
 }
 
 function isAsyncFn(fn: Function): boolean {
-  return fn.constructor?.name === 'AsyncFunction';
+  return (fn as any)[Symbol.toStringTag] === 'AsyncFunction';
 }
 
-/** Serialize a throttle target to a stable string key. Handles circular refs safely. */
-function throttleKey(action: string, target: any): string {
+/**
+ * Stable string key for a (action, target) pair. Handles circular refs safely.
+ * Useful for cache invalidation integration (e.g. TanStack Query).
+ */
+export function commandKey(action: string, target: any): string {
   let tkey: string;
   try { tkey = JSON.stringify(target); } catch { tkey = String(target); }
   return `${action}:${tkey}`;
@@ -191,7 +248,7 @@ function wrapThrottle(handler: AsyncHandler, wait: number): AsyncHandler;
 function wrapThrottle(handler: Handler | AsyncHandler, wait: number): Handler | AsyncHandler {
   const lastRun = new Map<string, number>();
   return (cmd: Command): any => {
-    const key = throttleKey(cmd.action, cmd.target);
+    const key = commandKey(cmd.action, cmd.target);
     const now = Date.now();
     const last = lastRun.get(key) ?? 0;
     if (now - last >= wait) {
@@ -207,7 +264,7 @@ function wrapThrottle(handler: Handler | AsyncHandler, wait: number): Handler | 
 // Sync runner
 // ---------------------------------------------------------------------------
 
-function buildRunner(plugins: Plugin[]) {
+export function buildRunner(plugins: Plugin[]) {
   return function run(cmd: Command, execute: () => CommandResult): CommandResult {
     let i = 0;
     function next(): CommandResult {
@@ -227,8 +284,8 @@ function syncRebuildRunner(s: SyncState): void {
   s.runner = buildRunner(sorted);
 }
 
-function syncHandleMissing(s: SyncState, cmd: Command): CommandResult {
-  const mode = s.opts.onMissing ?? 'error';
+function handleMissing(opts: CommandBusOptions, cmd: Command): CommandResult {
+  const mode = opts.onMissing ?? 'error';
   if (mode === 'ignore') return { ok: true, value: undefined };
   if (mode === 'throw') throw new Error(`No handler: ${cmd.action}`);
   if (typeof mode === 'function') {
@@ -239,16 +296,24 @@ function syncHandleMissing(s: SyncState, cmd: Command): CommandResult {
 }
 
 function syncRunHooks(s: SyncState, cmd: Command, result: CommandResult): void {
-  for (const hook of s.afterHooks) { try { hook(cmd, result); } catch (e) { console.error('[vapor-chamber] Hook error:', e); } }
-  for (const { pattern, listener } of s.patternListeners) { if (matchesPattern(pattern, cmd.action)) { try { listener(cmd, result); } catch (e) { console.error('[vapor-chamber] Listener error:', e); } } }
+  for (const hook of s.afterHooks.slice()) { try { hook(cmd, result); } catch (e) { console.error('[vapor-chamber] Hook error:', e); } }
+  for (const { pattern, listener } of s.patternListeners.slice()) { if (matchesPattern(pattern, cmd.action)) { try { listener(cmd, result); } catch (e) { console.error('[vapor-chamber] Listener error:', e); } } }
 }
 
 function syncDispatch(s: SyncState, action: string, target: any, payload?: any, executeOverride?: () => CommandResult): CommandResult {
   validateNaming(action, s.opts.naming);
   const cmd: Command = { action, target, payload };
+  for (const hook of s.beforeHooks.slice()) {
+    try { hook(cmd); }
+    catch (e) {
+      const result: CommandResult = { ok: false, error: e as Error };
+      syncRunHooks(s, cmd, result);
+      return result;
+    }
+  }
   const execute = executeOverride ?? ((): CommandResult => {
     const handler = s.handlers.get(action);
-    if (!handler) return syncHandleMissing(s, cmd);
+    if (!handler) return handleMissing(s.opts, cmd);
     try { return { ok: true, value: handler(cmd) }; }
     catch (e) { return { ok: false, error: e as Error }; }
   });
@@ -260,15 +325,18 @@ function syncDispatch(s: SyncState, action: string, target: any, payload?: any, 
 function syncDispatchBatch(s: SyncState, commands: BatchCommand[], opts: BatchOptions = {}): BatchResult {
   const results: CommandResult[] = [];
   let firstError: Error | undefined;
+  let failCount = 0;
   for (const { action, target, payload } of commands) {
     const result = syncDispatch(s, action, target, payload);
     results.push(result);
     if (!result.ok) {
-      if (!opts.continueOnError) return { ok: false, results, error: result.error };
+      failCount++;
+      if (!opts.continueOnError) return { ok: false, results, error: result.error, successCount: results.length - failCount, failCount };
       if (!firstError) firstError = result.error;
     }
   }
-  return firstError ? { ok: false, results, error: firstError } : { ok: true, results };
+  const successCount = results.length - failCount;
+  return firstError ? { ok: false, results, error: firstError, successCount, failCount } : { ok: true, results, successCount, failCount };
 }
 
 function syncRegister(s: SyncState, action: string, handler: Handler, opts: RegisterOptions = {}): () => void {
@@ -302,6 +370,23 @@ function syncOn(s: SyncState, pattern: string, listener: Listener): () => void {
   const entry = { pattern, listener };
   s.patternListeners.push(entry);
   return () => { const i = s.patternListeners.indexOf(entry); if (i !== -1) s.patternListeners.splice(i, 1); };
+}
+
+function syncOnce(s: SyncState, pattern: string, listener: Listener): () => void {
+  const unsub = syncOn(s, pattern, (cmd, result) => { unsub(); listener(cmd, result); });
+  return unsub;
+}
+
+function syncOnBefore(s: SyncState, hook: BeforeHook): () => void {
+  s.beforeHooks.push(hook);
+  return () => { const i = s.beforeHooks.indexOf(hook); if (i !== -1) s.beforeHooks.splice(i, 1); };
+}
+
+function syncOffAll(s: SyncState, pattern?: string): void {
+  if (pattern === undefined) { s.patternListeners.length = 0; return; }
+  for (let i = s.patternListeners.length - 1; i >= 0; i--) {
+    if (s.patternListeners[i].pattern === pattern) s.patternListeners.splice(i, 1);
+  }
 }
 
 function syncRequest(s: SyncState, action: string, target: any, payload?: any, reqOpts: { timeout?: number } = {}): Promise<CommandResult> {
@@ -353,6 +438,7 @@ function syncClear(s: SyncState): void {
   s.handlers.clear();
   s.undoHandlers.clear();
   s.pluginEntries.length = 0;
+  s.beforeHooks.length = 0;
   s.afterHooks.length = 0;
   s.patternListeners.length = 0;
   s.responders.clear();
@@ -367,7 +453,7 @@ export function createCommandBus<M extends CommandMap = CommandMap>(options: Com
   const s: SyncState = {
     opts: options,
     handlers: new Map(), undoHandlers: new Map(),
-    pluginEntries: [], afterHooks: [], patternListeners: [],
+    pluginEntries: [], beforeHooks: [], afterHooks: [], patternListeners: [],
     responders: new Map(),
     runner: buildRunner([]),
   };
@@ -376,8 +462,11 @@ export function createCommandBus<M extends CommandMap = CommandMap>(options: Com
     dispatchBatch:   (cmds, o)       => syncDispatchBatch(s, cmds, o),
     register:        (a, h, o)       => syncRegister(s, a as string, h as Handler, o),
     use:             (p, o)          => syncUse(s, p, o),
+    onBefore:        (h)             => syncOnBefore(s, h),
     onAfter:         (h)             => syncOnAfter(s, h),
     on:              (pat, l)        => syncOn(s, pat, l),
+    once:            (pat, l)        => syncOnce(s, pat, l),
+    offAll:          (pat)           => syncOffAll(s, pat),
     request:         (a, t, p, o)   => syncRequest(s, a as string, t, p, o),
     respond:         (a, h)          => syncRespond(s, a, h),
     hasHandler:      (a)             => s.handlers.has(a),
@@ -410,28 +499,25 @@ function asyncRebuildRunner(s: AsyncState): void {
   s.runner = buildAsyncRunner(sorted);
 }
 
-function asyncHandleMissing(s: AsyncState, cmd: Command): CommandResult {
-  const mode = s.opts.onMissing ?? 'error';
-  if (mode === 'ignore') return { ok: true, value: undefined };
-  if (mode === 'throw') throw new Error(`No handler: ${cmd.action}`);
-  if (typeof mode === 'function') {
-    try { return mode(cmd); }
-    catch (e) { return { ok: false, error: e as Error }; }
-  }
-  return { ok: false, error: new Error(`No handler: ${cmd.action}`) };
-}
-
 async function asyncRunHooks(s: AsyncState, cmd: Command, result: CommandResult): Promise<void> {
-  for (const hook of s.afterHooks) { try { await hook(cmd, result); } catch (e) { console.error('[vapor-chamber] Hook error:', e); } }
-  for (const { pattern, listener } of s.patternListeners) { if (matchesPattern(pattern, cmd.action)) { try { listener(cmd, result); } catch (e) { console.error('[vapor-chamber] Listener error:', e); } } }
+  for (const hook of s.afterHooks.slice()) { try { await hook(cmd, result); } catch (e) { console.error('[vapor-chamber] Hook error:', e); } }
+  for (const { pattern, listener } of s.patternListeners.slice()) { if (matchesPattern(pattern, cmd.action)) { try { listener(cmd, result); } catch (e) { console.error('[vapor-chamber] Listener error:', e); } } }
 }
 
 async function asyncDispatch(s: AsyncState, action: string, target: any, payload?: any, executeOverride?: () => Promise<CommandResult>): Promise<CommandResult> {
   validateNaming(action, s.opts.naming);
   const cmd: Command = { action, target, payload };
+  for (const hook of s.beforeHooks.slice()) {
+    try { await hook(cmd); }
+    catch (e) {
+      const result: CommandResult = { ok: false, error: e as Error };
+      await asyncRunHooks(s, cmd, result);
+      return result;
+    }
+  }
   const execute = executeOverride ?? (async (): Promise<CommandResult> => {
     const handler = s.handlers.get(action);
-    if (!handler) return asyncHandleMissing(s, cmd);
+    if (!handler) return handleMissing(s.opts, cmd);
     try { return { ok: true, value: await handler(cmd) }; }
     catch (e) { return { ok: false, error: e as Error }; }
   });
@@ -443,15 +529,18 @@ async function asyncDispatch(s: AsyncState, action: string, target: any, payload
 async function asyncDispatchBatch(s: AsyncState, commands: BatchCommand[], opts: BatchOptions = {}): Promise<BatchResult> {
   const results: CommandResult[] = [];
   let firstError: Error | undefined;
+  let failCount = 0;
   for (const { action, target, payload } of commands) {
     const result = await asyncDispatch(s, action, target, payload);
     results.push(result);
     if (!result.ok) {
-      if (!opts.continueOnError) return { ok: false, results, error: result.error };
+      failCount++;
+      if (!opts.continueOnError) return { ok: false, results, error: result.error, successCount: results.length - failCount, failCount };
       if (!firstError) firstError = result.error;
     }
   }
-  return firstError ? { ok: false, results, error: firstError } : { ok: true, results };
+  const successCount = results.length - failCount;
+  return firstError ? { ok: false, results, error: firstError, successCount, failCount } : { ok: true, results, successCount, failCount };
 }
 
 function asyncRegister(s: AsyncState, action: string, handler: AsyncHandler, opts: RegisterOptions = {}): () => void {
@@ -482,6 +571,23 @@ function asyncOn(s: AsyncState, pattern: string, listener: Listener): () => void
   const entry = { pattern, listener };
   s.patternListeners.push(entry);
   return () => { const i = s.patternListeners.indexOf(entry); if (i !== -1) s.patternListeners.splice(i, 1); };
+}
+
+function asyncOnce(s: AsyncState, pattern: string, listener: Listener): () => void {
+  const unsub = asyncOn(s, pattern, (cmd, result) => { unsub(); listener(cmd, result); });
+  return unsub;
+}
+
+function asyncOnBefore(s: AsyncState, hook: AsyncBeforeHook): () => void {
+  s.beforeHooks.push(hook);
+  return () => { const i = s.beforeHooks.indexOf(hook); if (i !== -1) s.beforeHooks.splice(i, 1); };
+}
+
+function asyncOffAll(s: AsyncState, pattern?: string): void {
+  if (pattern === undefined) { s.patternListeners.length = 0; return; }
+  for (let i = s.patternListeners.length - 1; i >= 0; i--) {
+    if (s.patternListeners[i].pattern === pattern) s.patternListeners.splice(i, 1);
+  }
 }
 
 async function asyncRequest(s: AsyncState, action: string, target: any, payload?: any, reqOpts: { timeout?: number } = {}): Promise<CommandResult> {
@@ -520,6 +626,7 @@ function asyncClear(s: AsyncState): void {
   s.handlers.clear();
   s.undoHandlers.clear();
   s.pluginEntries.length = 0;
+  s.beforeHooks.length = 0;
   s.afterHooks.length = 0;
   s.patternListeners.length = 0;
   s.responders.clear();
@@ -534,7 +641,7 @@ export function createAsyncCommandBus<M extends CommandMap = CommandMap>(options
   const s: AsyncState = {
     opts: options,
     handlers: new Map(), undoHandlers: new Map(),
-    pluginEntries: [], afterHooks: [], patternListeners: [],
+    pluginEntries: [], beforeHooks: [], afterHooks: [], patternListeners: [],
     responders: new Map(),
     runner: buildAsyncRunner([]),
   };
@@ -543,8 +650,11 @@ export function createAsyncCommandBus<M extends CommandMap = CommandMap>(options
     dispatchBatch:  (cmds, o)     => asyncDispatchBatch(s, cmds, o),
     register:       (a, h, o)     => asyncRegister(s, a as string, h as AsyncHandler, o),
     use:            (p, o)        => asyncUse(s, p, o),
+    onBefore:       (h)           => asyncOnBefore(s, h),
     onAfter:        (h)           => asyncOnAfter(s, h),
     on:             (pat, l)      => asyncOn(s, pat, l),
+    once:           (pat, l)      => asyncOnce(s, pat, l),
+    offAll:         (pat)         => asyncOffAll(s, pat),
     request:        (a, t, p, o)  => asyncRequest(s, a as string, t, p, o),
     respond:        (a, h)        => asyncRespond(s, a, h),
     hasHandler:     (a)           => s.handlers.has(a),

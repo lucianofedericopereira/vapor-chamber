@@ -7,7 +7,8 @@
  * Use with createAsyncCommandBus() for full async dispatch support.
  */
 
-import type { Command, CommandResult, CommandBus, AsyncPlugin } from './command-bus';
+import type { Command, CommandResult, AsyncPlugin, BaseBus } from './command-bus';
+import { matchesPattern } from './command-bus';
 import { postCommand } from './http';
 
 // ---------------------------------------------------------------------------
@@ -40,16 +41,27 @@ export type HttpBridgeOptions = {
    * Supports Laravel Blade and SPA setups. Handles 419 auto-refresh. Default: false
    */
   csrf?: boolean;
+  /**
+   * URL to fetch on 419 CSRF expiry to obtain a fresh token.
+   * Default: '/sanctum/csrf-cookie'. Set to '' to disable.
+   */
+  csrfCookieUrl?: string;
   /** Additional headers merged into every request */
   headers?: Record<string, string>;
   /** Request timeout in ms. Default: 10_000 */
   timeout?: number;
   /** Max retry attempts on 5xx / 429 / 408. Default: 0 */
   retry?: number;
+  /**
+   * Actions that must never be retried regardless of the `retry` setting.
+   * Use for payment and other non-idempotent commands to prevent double execution.
+   * @example noRetry: ['paymentCharge', 'orderPlace']
+   */
+  noRetry?: string[];
   /** External AbortSignal (e.g. tied to component lifecycle) */
   signal?: AbortSignal;
   /**
-   * Called when a 401 or 419 session-expired response is received.
+   * Called when a 401 session-expired response is received.
    * A `session-expired` CustomEvent is also dispatched on `window`.
    */
   onSessionExpired?: (status: number) => void;
@@ -62,11 +74,7 @@ export type HttpBridgeOptions = {
 
 function matchesActions(action: string, patterns?: string[]): boolean {
   if (!patterns || patterns.length === 0) return true;
-  return patterns.some(p => {
-    if (p === '*') return true;
-    if (p.endsWith('*')) return action.startsWith(p.slice(0, -1));
-    return p === action;
-  });
+  return patterns.some(p => matchesPattern(p, action));
 }
 
 /**
@@ -85,20 +93,22 @@ function matchesActions(action: string, patterns?: string[]): boolean {
  * await bus.dispatch('cartAdd', product, { quantity: 2 })
  */
 export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
-  const { endpoint, actions, csrf = false, headers = {}, timeout = 10_000, retry = 0, signal, onSessionExpired } = options;
+  const { endpoint, actions, csrf = false, csrfCookieUrl, headers = {}, timeout = 10_000, retry = 0, noRetry = [], signal, onSessionExpired } = options;
 
   return async (cmd: Command, next: () => CommandResult | Promise<CommandResult>) => {
     if (!matchesActions(cmd.action, actions)) return next();
 
     const envelope: CommandEnvelope = { command: cmd.action, target: cmd.target, payload: cmd.payload };
+    const effectiveRetry = noRetry.includes(cmd.action) ? 0 : retry;
 
     try {
       const res = await postCommand<BackendResponse>(endpoint, envelope, {
-        csrf, headers, timeout, retry, signal, onSessionExpired,
+        csrf, csrfCookieUrl, headers, timeout, retry: effectiveRetry, signal, onSessionExpired,
       });
 
       if (!res.ok) {
-        return { ok: false, error: new Error(`HTTP ${res.status}`) };
+        const msg = (res.data as any)?.message ?? (res.data as any)?.error ?? `HTTP ${res.status}`;
+        return { ok: false, error: new Error(msg) };
       }
 
       if (res.data?.ok === false) {
@@ -107,8 +117,7 @@ export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
 
       return { ok: true, value: res.data?.state };
     } catch (e) {
-      const err = e as Error;
-      return { ok: false, error: err };
+      return { ok: false, error: e as Error };
     }
   };
 }
@@ -137,6 +146,14 @@ export type WsBridgeOptions = {
   onDisconnect?: (event: CloseEvent) => void;
   /** Called on WebSocket error */
   onError?: (event: Event) => void;
+  /** Per-message response timeout in ms. Default: 10_000 */
+  timeout?: number;
+  /**
+   * Maximum number of messages to queue while disconnected.
+   * When exceeded, the oldest queued message is dropped with an error.
+   * Default: 100
+   */
+  maxQueueSize?: number;
 };
 
 type PendingRequest = {
@@ -171,6 +188,8 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
     onConnect,
     onDisconnect,
     onError,
+    timeout: wsTimeout = 10_000,
+    maxQueueSize = 100,
   } = options;
 
   let ws: WebSocket | null = null;
@@ -189,6 +208,15 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
     if (ws && ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ id, ...envelope }));
     } else {
+      if (queue.length >= maxQueueSize) {
+        const dropped = queue.shift()!;
+        const req = pending.get(dropped.id);
+        if (req) {
+          clearTimeout(req.timeoutId);
+          pending.delete(dropped.id);
+          req.resolve({ ok: false, error: new Error(`WS queue overflow: "${dropped.envelope.command}" dropped`) });
+        }
+      }
       queue.push({ id, envelope, timeout });
     }
   }
@@ -272,16 +300,15 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
 
     return new Promise<CommandResult>((resolve) => {
       const id = genId();
-      const timeout = 10_000;
 
       const timeoutId = setTimeout(() => {
         pending.delete(id);
-        resolve({ ok: false, error: new Error(`WS request "${cmd.action}" timed out`) });
-      }, timeout);
+        resolve({ ok: false, error: new Error(`WS request "${cmd.action}" timed out after ${wsTimeout}ms`) });
+      }, wsTimeout);
 
       pending.set(id, { resolve, reject: (e) => resolve({ ok: false, error: e }), timeoutId });
 
-      send(id, { command: cmd.action, target: cmd.target, payload: cmd.payload }, timeout);
+      send(id, { command: cmd.action, target: cmd.target, payload: cmd.payload }, wsTimeout);
     });
   };
 
@@ -308,7 +335,7 @@ export type SseBridgeOptions = {
    *   }
    * })
    */
-  onEvent: (event: MessageEvent, bus: CommandBus) => void;
+  onEvent: (event: MessageEvent, bus: BaseBus) => void;
   /** Send credentials with the SSE request. Default: false */
   withCredentials?: boolean;
   /** Reconnect automatically (EventSource does this natively). Default: true */
@@ -335,18 +362,16 @@ export type SseBridgeOptions = {
  * sse.teardown()
  */
 export function createSseBridge(options: SseBridgeOptions): {
-  install(bus: CommandBus): void;
+  install(bus: BaseBus): void;
   teardown(): void;
   isConnected(): boolean;
 } {
   const { url, onEvent, withCredentials = false } = options;
 
   let source: EventSource | null = null;
-  let installedBus: CommandBus | null = null;
 
-  function install(bus: CommandBus): void {
+  function install(bus: BaseBus): void {
     if (typeof EventSource === 'undefined') return;
-    installedBus = bus;
     source = new EventSource(url, { withCredentials });
 
     source.onmessage = (event) => {
@@ -365,7 +390,6 @@ export function createSseBridge(options: SseBridgeOptions): {
   function teardown(): void {
     source?.close();
     source = null;
-    installedBus = null;
   }
 
   function isConnected(): boolean {

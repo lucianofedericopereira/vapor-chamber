@@ -34,7 +34,7 @@ import type { CommandBus, Plugin, PluginOptions } from './command-bus';
 // ---------------------------------------------------------------------------
 
 export type FormRules<T extends Record<string, any>> = {
-  [K in keyof T]?: (value: T[K], values: T) => string | null;
+  [K in keyof T]?: (value: T[K], values: T) => string | null | Promise<string | null>;
 };
 
 export type FormBusOptions<T extends Record<string, any>> = {
@@ -77,16 +77,33 @@ export type FormBus<T extends Record<string, any>> = {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function runRules<T extends Record<string, any>>(
+/** Sync-only validation used for live per-field feedback during set(). Skips async rules. */
+function runRulesSync<T extends Record<string, any>>(
   rules: FormRules<T>,
   values: T,
 ): Partial<Record<keyof T, string>> {
   const errs: Partial<Record<keyof T, string>> = {};
   for (const key in rules) {
-    if (!(key in values)) continue; // skip rules for fields not in this form
+    if (!(key in values)) continue;
     const rule = rules[key as keyof T];
     if (!rule) continue;
     const msg = rule(values[key as keyof T], values);
+    if (typeof msg === 'string') errs[key as keyof T] = msg;
+  }
+  return errs;
+}
+
+/** Awaits all rules (sync and async). Used in submit() for full validation. */
+async function runRulesAsync<T extends Record<string, any>>(
+  rules: FormRules<T>,
+  values: T,
+): Promise<Partial<Record<keyof T, string>>> {
+  const errs: Partial<Record<keyof T, string>> = {};
+  for (const key in rules) {
+    if (!(key in values)) continue;
+    const rule = rules[key as keyof T];
+    if (!rule) continue;
+    const msg = await rule(values[key as keyof T], values);
     if (msg) errs[key as keyof T] = msg;
   }
   return errs;
@@ -127,7 +144,7 @@ export function createFormBus<T extends Record<string, any>>(
     const { field, value } = cmd.payload as { field: keyof T; value: T[keyof T] };
     const next = { ...values.value, [field]: value } as T;
     values.value  = next;
-    const errs    = runRules(rules, next);
+    const errs    = runRulesSync(rules, next);
     errors.value  = errs;
     isDirty.value = hasDiff(initial, next);
     isValid.value = Object.keys(errs).length === 0;
@@ -159,7 +176,7 @@ export function createFormBus<T extends Record<string, any>>(
     for (const k in initial) allTouched[k as keyof T] = true;
     touched.value = allTouched;
 
-    const errs   = runRules(rules, values.value);
+    const errs   = runRulesSync(rules, values.value);
     errors.value = errs;
     isValid.value = Object.keys(errs).length === 0;
     return { valid: isValid.value, errors: errs };
@@ -180,9 +197,16 @@ export function createFormBus<T extends Record<string, any>>(
   }
 
   async function submit(): Promise<boolean> {
-    const result = bus.dispatch('formValidate', {});
-    const { valid } = (result.value ?? { valid: false }) as { valid: boolean };
-    if (!valid) return false;
+    // Touch all fields so errors become visible
+    const allTouched: Partial<Record<keyof T, boolean>> = {};
+    for (const k in initial) allTouched[k as keyof T] = true;
+    touched.value = allTouched;
+
+    // Run all rules — awaits async validators too
+    const errs = await runRulesAsync(rules, values.value);
+    errors.value = errs;
+    isValid.value = Object.keys(errs).length === 0;
+    if (!isValid.value) return false;
 
     isSubmitting.value = true;
     try {

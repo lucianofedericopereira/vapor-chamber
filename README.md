@@ -99,6 +99,57 @@ Who handles what? When?           Plugins observe/modify
 - **Plugin pipeline** — Cross-cutting concerns (logging, validation, analytics) without cluttering handlers
 - **Undo/redo** — Command history is natural when actions are explicit
 
+## Module Architecture
+
+vapor-chamber is built in layers. The **core** is framework-agnostic, has zero dependencies, and is the only part required for v1.0. Everything else is optional and tree-shaken when not imported.
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  CORE  (zero deps · fully tested · framework-agnostic)  │
+│  command-bus.ts  ·  testing.ts                          │
+└────────────────────────┬────────────────────────────────┘
+                         │ optional layers (tree-shaken)
+         ┌───────────────┼───────────────┐
+         ▼               ▼               ▼
+   Vue composables    Plugins        Transport
+   chamber.ts         plugins-core   http.ts
+   chamber-vapor.ts   plugins-io     transports.ts
+         │
+         ▼
+   Extras (per-feature opt-in)
+   form.ts · schema.ts · devtools.ts · directives.ts · vite-hmr.ts
+```
+
+### Coverage & stability at v0.5.0
+
+| Layer | Module | Coverage | Status |
+|-------|--------|----------|--------|
+| **Core** | `command-bus.ts` | 90% | ✅ Stable |
+| **Core** | `testing.ts` | 96% | ✅ Stable |
+| Plugins | `plugins-core.ts` | 90% | ✅ Stable |
+| Plugins | `plugins-io.ts` | 88% | ✅ Stable |
+| Transport | `http.ts` | 80% | ✅ Stable |
+| Transport | `transports.ts` | 91% | ✅ Stable |
+| Vue | `chamber.ts` | 76% | ✅ Stable |
+| Extras | `form.ts` | 99% | ✅ Stable |
+| Extras | `schema.ts` | 92% | ✅ Stable |
+| Vue 3.6 | `chamber-vapor.ts` | — | ⚠️ Requires Vue 3.6 runtime to test |
+| Vue | `directives.ts` | — | ⚠️ Requires Vue DOM environment to test |
+| Build | `devtools.ts` | — | ⚠️ Requires browser DevTools API to test |
+| Build | `vite-hmr.ts` | — | ⚠️ Requires Vite runtime to test |
+| Build | `iife.ts` | — | 🔧 Bundle entry, not a public API |
+
+Sub-path exports avoid pulling in optional modules:
+```
+'vapor-chamber'             → core + composables + everything (tree-shaken)
+'vapor-chamber/transports'  → HTTP + WebSocket + SSE bridges only
+'vapor-chamber/directives'  → v-command Vue directive only
+'vapor-chamber/vite'        → Vite HMR plugin only
+'vapor-chamber/iife'        → IIFE bundle
+```
+
+---
+
 ## Install
 
 ```bash
@@ -270,6 +321,30 @@ bus.use(analyticsPlugin, { priority: 1 });  // runs after validation
 bus.use(loggerPlugin);                       // priority 0 (default, runs last)
 ```
 
+### Before Hooks
+
+Run logic before a command reaches its handler. Throw to cancel — the dispatch returns `{ ok: false }`:
+
+```typescript
+// Global auth gate
+bus.onBefore((cmd) => {
+  if (!user.isAuth && protectedActions.includes(cmd.action)) {
+    throw new Error('Unauthenticated');
+  }
+});
+
+// Loading indicator
+bus.onBefore(() => { isLoading.value = true; });
+bus.onAfter(()  => { isLoading.value = false; });
+```
+
+On an async bus the hook can be async:
+```typescript
+asyncBus.onBefore(async (cmd) => {
+  await rateLimiter.check(cmd.action);
+});
+```
+
 ### Wildcard Listeners
 
 Subscribe to command patterns without being a handler:
@@ -281,8 +356,14 @@ bus.on('*', (cmd, result) => analytics.track(cmd.action));
 // Prefix matching
 bus.on('cart*', (cmd, result) => console.log('Cart event:', cmd.action));
 
-// Exact match
-bus.on('cartAdd', (cmd, result) => updateBadge());
+// Exact match — fires once, then removes itself
+bus.once('cartAdd', (cmd, result) => showConfetti());
+
+// Remove all listeners for a pattern
+bus.offAll('cart*');
+
+// Remove all listeners
+bus.offAll();
 ```
 
 ### Request / Response
@@ -476,10 +557,12 @@ const bus = createAsyncCommandBus({ onMissing: 'ignore' });
 
 bus.use(createHttpBridge({
   endpoint: '/api/commands',
-  csrf: true,           // reads XSRF-TOKEN cookie / meta tag automatically
-  retry: 2,             // retry up to 2 times on 5xx / 429 / 408
-  timeout: 8000,        // ms
-  actions: ['order*'],  // only forward order* actions; others stay local
+  csrf: true,                                    // reads XSRF-TOKEN cookie / meta tag automatically
+  csrfCookieUrl: '/sanctum/csrf-cookie',         // default; set '' to disable the refresh fetch
+  retry: 2,                                      // retry up to 2 times on 5xx / 429 / 408
+  noRetry: ['paymentCharge', 'orderPlace'],      // never retry non-idempotent commands
+  timeout: 8000,                                 // ms
+  actions: ['order*'],                           // only forward order* actions; others stay local
 }));
 
 const result = await bus.dispatch('orderCreate', { items: cart });
@@ -499,10 +582,20 @@ WebSocket transport with auto-reconnect:
 ```typescript
 import { createWsBridge } from 'vapor-chamber/transports';
 
-bus.use(createWsBridge({
+const ws = createWsBridge({
   url: 'wss://api.example.com/commands',
   actions: ['chat*', 'presence*'],
-}));
+  timeout: 10_000,       // per-message response timeout, ms (default: 10_000)
+  maxQueueSize: 100,     // max queued messages during disconnect (default: 100)
+  reconnect: true,       // auto-reconnect on close (default: true)
+  maxReconnects: 10,     // give up after N reconnect attempts (default: 10)
+});
+bus.use(ws);
+ws.connect();
+
+// Lifecycle
+ws.isConnected();  // → boolean
+ws.disconnect();   // intentional close — suppresses reconnect
 ```
 
 ### createSseBridge
@@ -538,7 +631,7 @@ const response = await postCommand('/api/commands', {
 
 ## Batch Dispatch
 
-Dispatch multiple commands as a unit. Stops on the first failure:
+Dispatch multiple commands as a unit. Stops on the first failure by default:
 
 ```typescript
 const result = bus.dispatchBatch([
@@ -552,6 +645,15 @@ if (result.ok) {
 } else {
   console.error('Stopped at failure:', result.error);
 }
+```
+
+Use `continueOnError` to run all commands regardless of failures, then check counts:
+
+```typescript
+const result = bus.dispatchBatch(commands, { continueOnError: true });
+console.log(`${result.successCount} of ${result.results.length} succeeded`);
+// result.failCount — how many failed
+// result.results   — all CommandResult objects, in order
 ```
 
 ## Dead Letter Handling
@@ -706,8 +808,14 @@ import { createFormBus, logger } from 'vapor-chamber';
 const form = createFormBus({
   fields: { email: '', password: '' },
   rules: {
+    // Sync rule — runs on every set() for live feedback
     email:    (v) => v.includes('@') ? null : 'Invalid email',
     password: (v) => v.length >= 8   ? null : 'Too short',
+    // Async rule — only awaited on submit() (no UI jank during typing)
+    username: async (v) => {
+      const taken = await api.isUsernameTaken(v);
+      return taken ? 'Username already taken' : null;
+    },
   },
   onSubmit: async (values) => await api.login(values),
 });
@@ -867,14 +975,19 @@ See the [`examples/`](./examples) folder for complete, runnable examples:
 | Method | Description |
 |--------|-------------|
 | `dispatch(action, target, payload?)` | Execute a command |
-| `dispatchBatch(commands[])` | Execute multiple commands; stops on first failure |
+| `dispatchBatch(commands[], options?)` | Execute multiple commands. Returns `{ successCount, failCount, results }` |
 | `register(action, handler, options?)` | Register a handler. Options: `{ undo?, throttle? }` |
 | `use(plugin, options?)` | Add a plugin. `options.priority` controls order |
-| `onAfter(hook)` | Run callback after every command |
-| `on(pattern, listener)` | Subscribe to commands matching a pattern (`*`, `prefix*`, exact) |
-| `request(action, target, options?)` | Async request/response with timeout |
+| `onBefore(hook)` | Run hook before every command. Throw to cancel dispatch. |
+| `onAfter(hook)` | Run hook after every command |
+| `on(pattern, listener)` | Subscribe to commands matching a pattern (`*`, `prefix*`, exact). Returns unsub. |
+| `once(pattern, listener)` | Like `on()` but auto-unsubscribes after first match |
+| `offAll(pattern?)` | Remove all listeners for a pattern, or all listeners if omitted |
+| `request(action, target, payload?, options?)` | Async request/response with timeout (default 5s) |
 | `respond(action, handler)` | Register a responder for `request()` calls |
-| `getUndoHandler(action)` | Get the undo handler for an action |
+| `hasHandler(action)` | Returns true if a handler is registered for the action |
+| `clear()` | Remove all handlers, plugins, hooks, and listeners |
+| `getUndoHandler(action)` | Get the undo handler for an action (`@internal`) |
 
 ### Composables
 
@@ -898,37 +1011,107 @@ See the [`examples/`](./examples) folder for complete, runnable examples:
 
 ## Roadmap
 
-| Feature | Status |
-|---------|--------|
-| DevTools integration | ✅ Done |
-| DevTools production strip (0KB in prod) | ✅ Done |
-| Command batching (`dispatchBatch`) | ✅ Done |
-| Middleware priority/ordering | ✅ Done |
-| Dead letter handling (`onMissing`) | ✅ Done |
-| Testing utilities (`createTestBus`) | ✅ Done |
-| Naming convention enforcement | ✅ Done (v0.3.0) |
-| Wildcard listeners (`on`) | ✅ Done (v0.3.0) |
-| Request/response pattern | ✅ Done (v0.3.0) |
-| Per-command throttle/undo at register | ✅ Done (v0.3.0) |
-| Auth guard plugin | ✅ Done (v0.3.0) |
-| Optimistic update plugin | ✅ Done (v0.3.0) |
-| Vue 3.6 Vapor alignment | ✅ Done (v0.4.0) |
-| `defineVaporCommand` zero-overhead composable | ✅ Done (v0.4.0) |
-| `onScopeDispose` lifecycle alignment | ✅ Done (v0.4.0) |
-| Namespace isolation (`useCommandGroup`) | ✅ Done (v0.4.1) |
-| Error boundary (`useCommandError`) | ✅ Done (v0.4.1) |
-| Transport layer (HTTP / WebSocket / SSE) | ✅ Done (v0.4.2) |
-| Retry plugin with configurable backoff | ✅ Done (v0.4.2) |
-| Persistence plugin (localStorage / IndexedDB) | ✅ Done (v0.4.2) |
-| Cross-tab sync plugin (`BroadcastChannel`) | ✅ Done (v0.4.2) |
-| `createTestBus` snapshot & time-travel | ✅ Done (v0.4.3) |
-| camelCase action names (LLM-tokenization optimal) | ✅ Done (v0.5.0) |
-| TypeScript HTTP client (`postCommand`) | ✅ Done (v0.5.0) |
-| CDCC-compliant file splits | ✅ Done (v0.5.0) |
-| SSR concurrency tests | ✅ Done (v0.5.0) |
-| Directive plugin (`v-command`) | ✅ Done (v0.5.0) |
-| Vite HMR plugin | ✅ Done (v0.5.0) |
-| Form bus (`createFormBus`) | ✅ Done (v0.5.0) |
+### Core — target: 100% feature-complete at v1.0
+
+| Feature | Module | Status | Tests |
+|---------|--------|--------|-------|
+| Dispatch / register / unregister | `command-bus` | ✅ v0.1.0 | ✅ 90% coverage |
+| Plugin pipeline (sync + async) | `command-bus` | ✅ v0.1.0 | ✅ 90% coverage |
+| Plugin priority ordering | `command-bus` | ✅ v0.2.0 | ✅ covered |
+| `onAfter` hooks | `command-bus` | ✅ v0.2.0 | ✅ covered |
+| Dead letter handling (`onMissing`) | `command-bus` | ✅ v0.2.0 | ✅ covered |
+| Command batching + `continueOnError` + `successCount`/`failCount` | `command-bus` | ✅ v0.6.0 | ✅ covered |
+| Naming convention enforcement | `command-bus` | ✅ v0.3.0 | ✅ covered |
+| Wildcard listeners (`on`, `prefix*`) | `command-bus` | ✅ v0.3.0 | ✅ covered |
+| `once()` — one-shot listener | `command-bus` | ✅ v0.6.0 | ✅ covered |
+| `offAll(pattern?)` — mass unsubscribe | `command-bus` | ✅ v0.6.0 | ✅ covered |
+| `onBefore(hook)` — pre-dispatch hook, cancelable | `command-bus` | ✅ v0.6.0 | ✅ covered |
+| Request / response pattern + timeout | `command-bus` | ✅ v0.3.0 | ✅ covered |
+| Per-command throttle + undo at register | `command-bus` | ✅ v0.3.0 | ✅ covered |
+| `bus.hasHandler()` introspection | `command-bus` | ✅ v0.3.0 | ✅ covered |
+| `bus.clear()` | `command-bus` | ✅ v0.5.0 | ✅ covered |
+| `BaseBus` structural interface | `command-bus` | ✅ v0.6.0 | ✅ covered |
+| `commandKey(action, target)` export | `command-bus` | ✅ v0.6.0 | ✅ covered |
+| SSR isolation (independent bus instances) | `command-bus` | ✅ v0.5.0 | ✅ covered |
+| `createTestBus` record + assert | `testing` | ✅ v0.2.0 | ✅ 96% coverage |
+| `createTestBus` snapshot & time-travel | `testing` | ✅ v0.4.3 | ✅ covered |
+| `TestBus.on()` / `once()` / `offAll()` real implementations | `testing` | ✅ v0.6.0 | ✅ covered |
+
+### Plugins — optional, fully implemented
+
+| Feature | Module | Status | Tests |
+|---------|--------|--------|-------|
+| `logger` | `plugins-core` | ✅ v0.1.0 | ✅ 90% coverage |
+| `validator` | `plugins-core` | ✅ v0.1.0 | ✅ covered |
+| `history` + bus-backed undo/redo | `plugins-core` | ✅ v0.3.0 | ✅ covered |
+| `debounce` (stale-closure fix) | `plugins-core` | ✅ v0.3.0 | ✅ covered |
+| `throttle` | `plugins-core` | ✅ v0.3.0 | ✅ covered |
+| `authGuard` | `plugins-core` | ✅ v0.3.0 | ✅ covered |
+| `optimistic` | `plugins-core` | ✅ v0.3.0 | ✅ covered |
+| `retry` with configurable backoff + glob filter | `plugins-io` | ✅ v0.4.2 | ✅ 88% coverage |
+| `persist` (localStorage / custom storage) | `plugins-io` | ✅ v0.4.2 | ✅ covered |
+| `sync` (BroadcastChannel cross-tab) | `plugins-io` | ✅ v0.4.2 | ✅ covered |
+
+### Transport layer — optional, fully implemented
+
+| Feature | Module | Status | Tests |
+|---------|--------|--------|-------|
+| `postCommand` — POST with retry, CSRF, timeout, session | `http` | ✅ v0.5.0 | ✅ 80% coverage |
+| `readCsrfToken` — meta / cookie / hidden input | `http` | ✅ v0.5.0 | ✅ covered |
+| `HttpError.code` — machine-readable code from response body | `http` | ✅ v0.6.0 | ✅ covered |
+| 419 vs 401 fix — CSRF expiry ≠ session expiry | `http` | ✅ v0.6.0 | ✅ covered |
+| `createHttpBridge` — fetch plugin | `transports` | ✅ v0.4.2 | ✅ 91% coverage |
+| `HttpBridgeOptions.noRetry` — per-action retry disable | `transports` | ✅ v0.6.0 | ✅ covered |
+| `createWsBridge` — WebSocket plugin + reconnect + bounded queue | `transports` | ✅ v0.6.0 | ✅ covered |
+| `createSseBridge` — server-push EventSource, accepts `BaseBus` | `transports` | ✅ v0.6.0 | ✅ covered |
+
+### Vue composables — optional, requires Vue ≥3.5
+
+| Feature | Module | Status | Tests |
+|---------|--------|--------|-------|
+| `useCommand` — reactive loading/error | `chamber` | ✅ v0.1.0 | ✅ 76% coverage |
+| `useCommandState` | `chamber` | ✅ v0.2.0 | ✅ covered |
+| `useCommandHistory` — reactive undo/redo | `chamber` | ✅ v0.2.0 | ✅ covered |
+| `useCommandGroup` — namespace isolation | `chamber` | ✅ v0.4.1 | ✅ covered |
+| `useCommandError` — error boundary | `chamber` | ✅ v0.4.1 | ✅ covered |
+| `getCommandBus` / `setCommandBus` / `resetCommandBus` | `chamber` | ✅ v0.1.0 | ✅ covered |
+| Signal shim + `configureSignal` | `chamber` | ✅ v0.3.0 | ✅ covered |
+| `onScopeDispose` lifecycle alignment | `chamber` | ✅ v0.4.0 | ✅ covered |
+| `isVaporAvailable()` | `chamber` | ✅ v0.4.0 | ✅ covered |
+| `createVaporChamberApp` / `getVaporInteropPlugin` / `defineVaporCommand` | `chamber-vapor` | ✅ v0.4.0 | ⚠️ requires Vue 3.6 runtime |
+
+### Extras — optional, per-feature opt-in
+
+| Feature | Module | Status | Tests |
+|---------|--------|--------|-------|
+| `createFormBus` — reactive form + sync/async validation | `form` | ✅ v0.6.0 | ✅ 99% coverage |
+| Schema layer — `createSchemaCommandBus`, `toTools`, `synthesize` | `schema` | ✅ v0.5.0 | ✅ 92% coverage |
+| `SynthesizeOptions.adapter` — custom LLM adapter | `schema` | ✅ v0.6.0 | ✅ covered |
+| `setupDevtools` — Vue DevTools panel | `devtools` | ✅ v0.4.0 | ⚠️ requires browser DevTools API |
+| `createDirectivePlugin` — `v-command` directive | `directives` | ✅ v0.5.0 | ⚠️ requires Vue DOM environment |
+| Vite HMR plugin | `vite-hmr` | ✅ v0.5.0 | ⚠️ requires Vite runtime |
+| IIFE / CDN bundle | `iife` | ✅ v0.5.0 | 🔧 bundle entry |
+
+### v1.0 checklist
+
+| Item | Status |
+|------|--------|
+| Core (`command-bus` + `testing`) at 90%+ coverage | ✅ Done |
+| All tests green (318/318, 0 failures) | ✅ Done |
+| Optional modules clearly marked in exports | ✅ Done |
+| Transport layer fully tested (HTTP + WS + SSE) | ✅ Done |
+| Plugins fully tested | ✅ Done |
+| camelCase naming convention locked in | ✅ Done |
+| `onBefore` / `offAll` / `once` on both buses | ✅ Done (v0.6.0) |
+| `BaseBus` structural interface for cross-bus utilities | ✅ Done (v0.6.0) |
+| CSRF / 419 / session-expiry correctness | ✅ Done (v0.6.0) |
+| Form async validation | ✅ Done (v0.6.0) |
+| `HttpError.code` structured error codes | ✅ Done (v0.6.0) |
+| WS queue cap (`maxQueueSize`) | ✅ Done (v0.6.0) |
+| `synthesize` LLM adapter (proxy / OpenAI support) | ✅ Done (v0.6.0) |
+| Architectural whitepaper | ✅ Done (v0.6.0) |
+| `chamber.ts` branch coverage | 🔄 76% → target 85% |
+| Publish to npm as `vapor-chamber@1.0.0` | ⬜ Pending |
 
 ## Documentation
 

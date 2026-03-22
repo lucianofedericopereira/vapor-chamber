@@ -1,5 +1,6 @@
 # Vapor Chamber — Whitepaper
-**Version 0.5.0-pre — March 2026**
+
+**Version 0.6.0-pre — March 2026**
 
 *Luciano Federico Pereira — ORCID 0009-0002-4591-6568 — luciano-pereira.pages.dev*
 
@@ -13,7 +14,31 @@ imposing a framework, a build system, or an opinion about your stack.
 
 ---
 
-## 1. The Problem
+## 1. What It Is
+
+vapor-chamber is a **command bus** — a thin coordination layer that sits between your Vue
+components and your application logic, without owning state. It dispatches commands, runs
+them through a plugin pipeline, and returns structured results. That is all it does.
+
+It does not replace:
+- **Pinia** — which owns application state
+- **TanStack Query** — which owns data fetching and caching
+- **XState** — which owns workflow state machines
+- **Inertia.js** — which owns page navigation and server-driven UI
+
+It coordinates between all of them through a single, consistent surface.
+
+```
+Components  →  dispatch command  →  plugin pipeline  →  handler
+                                                              ↓
+                                                    result { ok, value, error }
+                                                              ↓
+                                          Pinia / TanStack Q / Inertia react
+```
+
+---
+
+## 2. The Problem
 
 Modern frontend tooling has split into two directions:
 
@@ -30,13 +55,26 @@ CDN, expressive enough to handle real interactivity, and agnostic enough to work
 backend. It doesn't try to replace Laravel. It doesn't try to replace Vue.
 
 Vapor Chamber occupies the same position for Vue Vapor: the command bus that orchestrates
-actions across any stack, at any scale, without lock-in.
+actions across any stack, at any scale, without lock-in. Without a coordination layer, logic
+ends up scattered — in component `setup()` functions, in Pinia store actions, in ad-hoc fetch
+wrappers, in event bus hacks. One bus. One dispatch surface. Every concern is a plugin.
 
 ---
 
-## 2. Core Philosophy
+## 3. Target Stack
 
-### 2.1 Semantic over imperative
+**Primary:** Vue 3.6 Vapor + Vite frontend / Laravel backend
+**Secondary:** Node.js (server-side command buses, API services)
+**Core:** Framework-agnostic — documented as a reusable foundation for similar tools
+
+**Out of scope:** React, Svelte, Angular, other frontend frameworks.
+The core can be used in any TypeScript project. vapor-chamber is not built for them.
+
+---
+
+## 4. Core Philosophy
+
+### 4.1 Semantic over imperative
 
 Instead of scattered `emit`, `v-on`, and component-local handlers, Vapor Chamber gives every
 user action a name and one handler. The question shifts from "where did this get handled?" to
@@ -46,23 +84,23 @@ user action a name and one handler. The question shifts from "where did this get
 bus.dispatch('cartAdd', product, { quantity: 2 })
 ```
 
-### 2.2 Transport agnostic
+### 4.2 Transport agnostic
 
 The bus doesn't know or care how a command reaches the backend. HTTP fetch, WebSocket, SSE —
 all of these are plugins. The core stays minimal regardless of what transport you choose.
 
-### 2.3 Build optional
+### 4.3 Build optional
 
 Vapor Chamber ships as an ES module and as an IIFE. You can import it through a CDN inside a
 Blade template and have a reactive command bus running in under 30 seconds, zero npm involved.
 
-### 2.4 Framework agnostic at the top
+### 4.4 Framework agnostic at the top
 
 The core `command-bus.ts` has zero Vue imports. It runs anywhere: Vue 3.5 (VDOM), Vue 3.6
 Vapor, Node.js tests, Web Workers, any JavaScript runtime. The Vue-specific layer is a thin
 wrapper that adds signals, lifecycle cleanup, and shared bus management.
 
-### 2.5 camelCase action names — an empirical decision
+### 4.5 camelCase action names — an empirical decision
 
 Action names use **camelCase** (`cartAdd`, `orderCreate`, `authLogin`). This is not a stylistic
 preference — it is grounded in empirical measurement.
@@ -112,91 +150,103 @@ bus.register('cart.add', handler)  // ✗ throws
 Constraints and Tokenization Asymmetries in LLM-Assisted Software Engineering*. Zenodo.
 https://zenodo.org/records/18853783.
 
+### 4.6 The bus must not own state
+
+Nine rounds of comparative analysis (§7) produced one consistent finding. Every round that
+attempted to borrow state-centric patterns hit the same wall. Every round that worked with the
+stateless design added genuine value.
+
+This is not a limitation. It is the architecture. Pinia, TanStack Query, and Inertia already
+solve state, cache, and navigation within the Vue + Laravel stack. Adding a state layer to
+vapor-chamber would create a fourth source of truth and a competition problem.
+
 ---
 
-## 3. Architecture
+## 5. Architecture
 
-### 3.1 Layered design
+### 5.1 Layer model
 
 ```
-┌─────────────────────────────────────────┐
-│             any backend                 │
-│   Laravel · Node · Django · Go · none   │
-└────────────┬────────────────────────────┘
-             │ JSON / state diff
-┌────────────▼────────────────────────────┐
-│           transport plugin              │
-│   HTTP fetch · WebSocket · SSE · none   │
-└────────────┬────────────────────────────┘
-             │ normalized command
-┌────────────▼────────────────────────────┐
-│              CORE (~2–4KB)              │
-│  command bus · middleware · state atoms │
-│  command history · effectScope cleanup  │
-│  typed commands (TypeScript generics)   │
-└────────────┬────────────────────────────┘
-             │ reactive state
-┌────────────▼────────────────────────────┐
-│         any frontend pattern            │
-│  Blade+CDN · Inertia · Vite SFC        │
-│  Next.js · Filament islands             │
-└─────────────────────────────────────────┘
+┌─────────────────────────────────────────────────────────────────┐
+│  CORE  ·  zero deps  ·  framework-agnostic  ·  fully tested     │
+│  command-bus.ts  ·  testing.ts                                  │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │  optional layers  (tree-shaken)
+         ┌──────────────────┼──────────────────┬──────────────────┐
+         ▼                  ▼                  ▼                  ▼
+   Vue composables      Plugins          Transport           Utilities
+   chamber.ts           plugins-core     transports.ts       createChamber
+   chamber-vapor.ts     plugins-io       http.ts             createWorkflow
+   directives.ts        form.ts          inertia bridge      createReaction
+                        schema.ts        devtools.ts
+                        vite-hmr.ts
 ```
 
-### 3.2 Dispatch flow
+### 5.2 Dispatch flow
 
 ```
 dispatch(action, target, payload)
   1. validate naming convention (regex test)
   2. build Command { action, target, payload }
-  3. run plugins in priority order (cached runner — rebuilt only on use()/unuse())
-  4. execute handler (Map.get — O(1) lookup)
-  5. run afterHooks
-  6. notify pattern listeners
-  7. return CommandResult { ok, value?, error? }
+  3. run beforeHooks — throw to cancel, returns { ok: false }
+  4. run plugins in priority order (cached runner — rebuilt only on use()/unuse())
+  5. execute handler (Map.get — O(1) lookup)
+  6. run afterHooks
+  7. notify pattern listeners
+  8. return CommandResult { ok, value?, error? }
 ```
 
 The plugin chain is built once when plugins are added or removed. On each dispatch only the
 innermost `execute` closure is created — no per-dispatch allocations for the chain traversal.
 
-### 3.3 Core surface (stable API)
+### 5.3 Core surface (stable API)
 
 ```ts
-// Create and configure
-const bus = createCommandBus({ onMissing: 'error' | 'throw' | 'ignore' })
+// Two factories — same concept, different execution model
+createCommandBus(options)       // sync: zero-overhead, pure pipeline
+createAsyncCommandBus(options)  // async: await-able, plugins can be async
 
-// Register a handler with optional undo + throttle
-bus.register('cartAdd', (cmd) => {
-  state.cart.count += cmd.payload.quantity
-}, {
-  undo: (cmd) => { state.cart.count -= cmd.payload.quantity },
-  throttle: 300,
-})
-
-// Dispatch from anywhere
-bus.dispatch('cartAdd', product, { quantity: 2 })
-
-// Async bus for async handlers and transport plugins
-const asyncBus = createAsyncCommandBus()
-await asyncBus.dispatch('orderCreate', { items })
-
-// Batch dispatch — stops on first failure
-const batchResult = bus.dispatchBatch([
-  { action: 'cartAdd',        target: cart, payload: item },
-  { action: 'totalsUpdate',   target: cart },
-  { action: 'analyticsTrack', target: session },
-])
-
-// Wildcard listeners (not handlers — observe only)
-bus.on('*', (cmd, result) => analytics.track(cmd.action))
-bus.on('cart*', (cmd, result) => updateBadge())
-
-// Request / response with timeout
-bus.respond('getAuthToken', async (cmd) => fetchToken(cmd.target))
-const result = await bus.request('getAuthToken', { userId: 42 }, { timeout: 3000 })
+// Bus interface (BaseBus — both extend it)
+dispatch(action, target, payload?)    // mutation territory — fire and get result
+dispatchBatch(commands, options?)     // sequential dispatch; successCount + failCount
+register(action, handler, options?)   // bind a handler; { undo?, throttle? }
+use(plugin, options?)                 // add middleware to the pipeline
+onBefore(hook)                        // pre-dispatch; throw to cancel
+onAfter(hook)                         // post-dispatch side effects
+on(pattern, listener)                 // subscribe to matching commands
+once(pattern, listener)               // one-shot subscription — auto-unsubs after first match
+offAll(pattern?)                      // remove all listeners for pattern, or all listeners
+request(action, target, payload?)     // query territory — expects a responder
+respond(action, handler)              // register a query responder
+hasHandler(action)                    // introspect
+clear()                               // reset — useful for testing and HMR
 ```
 
-### 3.4 Transport plugins
+### 5.4 CQRS distinction
+
+`dispatch` is mutation territory. `request/respond` is query territory. These are not enforced
+by the type system but are a strong naming convention. A command that changes state goes through
+`dispatch`. A command that reads state goes through `request`.
+
+**Note:** `request/respond` on the sync bus is a known inconsistency — it returns `Promise` on
+an otherwise synchronous primitive. This will be restricted to `AsyncCommandBus` only in a
+future release.
+
+### 5.5 Plugin pipeline
+
+Plugins are middleware. They wrap every dispatch in priority order. This is where cross-cutting
+concerns live:
+
+```ts
+bus.use(logger())            // log every command
+bus.use(authGuard(check))    // block unauthorized commands
+bus.use(optimistic(opts))    // apply optimistic updates
+bus.use(retry(opts))         // retry on failure
+```
+
+The pipeline is composable, ordered by priority, and the same model for sync and async buses.
+
+### 5.6 Transport plugins
 
 ```ts
 // HTTP fetch — CSRF, retry, timeout, action filter
@@ -205,17 +255,22 @@ bus.use(createHttpBridge({
   csrf: true,
   timeout: 15_000,
   retry: 2,
-  actions: ['cart*', 'order*'],  // only forward these; others stay local
+  noRetry: ['paymentCharge', 'orderPlace'],  // never retry non-idempotent commands
+  actions: ['cart*', 'order*'],
 }))
 
-// WebSocket — reconnect
-bus.use(createWsBridge({ url: 'wss://api.example.com/vc' }))
+// WebSocket — reconnect, bounded queue
+bus.use(createWsBridge({
+  url: 'wss://api.example.com/vc',
+  timeout: 10_000,
+  maxQueueSize: 100,
+}))
 
-// SSE — server push
+// SSE — server push; accepts BaseBus (sync or async)
 bus.use(createSseBridge({ url: '/api/vc/stream' }))
 ```
 
-### 3.5 HTTP client
+### 5.7 HTTP client
 
 `postCommand` is the underlying HTTP function used by `createHttpBridge`. Also exposed directly:
 
@@ -223,7 +278,8 @@ bus.use(createSseBridge({ url: '/api/vc/stream' }))
 import { postCommand, readCsrfToken, invalidateCsrfCache } from 'vapor-chamber'
 
 const res = await postCommand('/api/commands', { command: 'cartAdd', target: product }, {
-  csrf: true,           // reads XSRF-TOKEN cookie / meta tag / hidden input; 5-min TTL cache
+  csrf: true,
+  csrfCookieUrl: '/sanctum/csrf-cookie',  // fetched on 419; set '' to disable
   timeout: 8_000,
   retry: 2,
   signal: controller.signal,
@@ -233,16 +289,87 @@ const res = await postCommand('/api/commands', { command: 'cartAdd', target: pro
 
 Key behaviours:
 - Multi-source CSRF: meta tag → `XSRF-TOKEN` cookie → hidden `_token` input; 5-minute TTL cache
-- 419 CSRF refresh coalesces concurrent requests (no duplicate refreshes)
+- **419 = CSRF expiry** — fetches `csrfCookieUrl` to refresh, retries once; concurrent 419s coalesce
+- **401 = session expiry** — fires `onSessionExpired` + dispatches `session-expired` CustomEvent; 419 does NOT
+- `HttpError.code` — machine-readable code from response body `{ code: '...' }` for pattern-matching
 - `Retry-After` / `X-RateLimit-Reset` header honoured on 429/503
 - Jittered exponential backoff (avoids thundering herd)
 - `AbortSignal.any` with manual fallback for older environments
-- `TimeoutError` is distinct from `AbortError` (timeout vs user abort)
-- `session-expired` CustomEvent dispatched on 401/419
+- `TimeoutError` is distinct from `AbortError`
+
+### 5.8 DDD positioning
+
+In Domain-Driven Design terms:
+- The bus is the **application service layer**
+- Handlers are **application services**
+- Plugins are **cross-cutting concerns**
+- Transports (HTTP, WS, SSE) are **adapters** in the hexagonal sense
+- Commands in → domain events out
 
 ---
 
-## 4. Full Plugin Catalogue
+## 6. Design Decisions
+
+### Why two factories instead of one?
+
+`createCommandBus` (sync) and `createAsyncCommandBus` (async) are different execution models,
+not different feature sets. The sync bus is a pure function pipeline — zero Promise overhead,
+predictable, suitable for in-process coordination. The async bus enables `await` in handlers
+and plugins, necessary for HTTP and I/O. Collapsing them into one factory with an option would
+reduce clarity without reducing complexity.
+
+### Why no state in the bus?
+
+Every tool that owns state also owns the responsibility for invalidation, hydration, persistence,
+and synchronization. Pinia, TanStack Query, and Inertia already solve these problems well within
+the Vue + Laravel stack. Adding a state layer to vapor-chamber would create a fourth source of
+truth and a competition problem. The bus coordinates state transitions. It does not store state.
+
+### Why `BaseBus`?
+
+Utilities (`createChamber`, `createWorkflow`, `createReaction`) operate on the bus generically.
+The typed `CommandBus<M>` and `AsyncCommandBus<M>` interfaces use generic handler types that
+diverge between sync and async, forcing `as any` casts in any utility that accepts both.
+`BaseBus` is a structural escape hatch for framework-level utilities. Application code keeps
+the fully typed interfaces.
+
+### Why `commandKey`?
+
+A stable `action:target` string key enables cache invalidation integration with TanStack Query.
+It was already internal (used by the throttle plugin). Making it public is a one-line export
+that unlocks a documented integration pattern.
+
+### Why `onBefore`?
+
+Guards belong before execution, not inside plugins. A `beforeHook` that throws cancels the
+dispatch cleanly without needing to wrap the entire plugin chain. Auth gates, rate-limit checks,
+and loading-state management are cleaner here than as plugins.
+
+---
+
+## 7. Comparative Analysis — What Survived
+
+Nine rounds of analysis against established tools. Each round confirmed the stateless design
+and contributed specific improvements.
+
+| Round | Tool | What survived |
+|---|---|---|
+| 1 | Redux Toolkit | `createChamber` — handler grouping by namespace |
+| 2 | VueUse | `useCommand` shape alignment — `{ execute, isPending, error, data }` |
+| 3 | XState | `createWorkflow` — sequential saga with compensation |
+| 4 | TanStack Query | CQRS naming, `commandKey` export, `optimistic` vocabulary alignment |
+| 5 | DDD | Bus = app service layer, bridges = adapters (vocabulary, no code) |
+| 6 | Svelte Stores | `observe(bus, pattern)` — zero-dep subscribable for non-Vue use |
+| 7 | RxJS | `toObservable(bus, pattern)` — optional `vapor-chamber/rx` adapter |
+| 8 | GraphQL clients | `useCommand` shape confirmed, `useMutation` vocabulary |
+| 9 | ArangoDB | `createReaction` — declarative cross-chamber dispatch rules |
+
+**What did not survive any round:** State in the bus, cache in the bus, full state machine on
+the bus, normalized entity storage. The wall held every time.
+
+---
+
+## 8. Full Plugin Catalogue
 
 | Plugin | Category | Purpose |
 |--------|----------|---------|
@@ -257,7 +384,7 @@ Key behaviours:
 | `persist` | Storage | Auto-save state to localStorage/sessionStorage/custom |
 | `sync` | Multi-tab | Broadcast commands to all open tabs via BroadcastChannel |
 | `createHttpBridge` | Transport | Fetch-based HTTP transport |
-| `createWsBridge` | Transport | WebSocket transport with reconnect |
+| `createWsBridge` | Transport | WebSocket transport with reconnect + bounded queue |
 | `createSseBridge` | Transport | Server-sent events (server push) |
 
 ```ts
@@ -286,9 +413,9 @@ tabSync.close()
 
 ---
 
-## 5. Vue 3.6 and alien-signals
+## 9. Vue 3.6 and alien-signals
 
-### 5.1 The reactivity rewrite
+### 9.1 The reactivity rewrite
 
 Vue 3.6 replaces Proxy-based reactivity with [alien-signals](https://github.com/stackblitz/alien-signals).
 The public API is unchanged — `ref()`, `computed()`, `watch()` work identically — but `ref()`
@@ -310,7 +437,7 @@ IS a signal now, not a Proxy wrapper around one.
 Vapor Chamber auto-detects `ref()` at module load. No configuration needed — `signal()` IS a
 Vue alien-signal in 3.6+.
 
-### 5.2 Vapor mode — the VDOM-less path
+### 9.2 Vapor mode — the VDOM-less path
 
 Under Vapor mode, the compiler generates imperative DOM code instead of a render function:
 
@@ -336,14 +463,14 @@ const plugin = getVaporInteropPlugin()
 if (plugin) app.use(plugin)
 ```
 
-### 5.3 Lifecycle cleanup
+### 9.3 Lifecycle cleanup
 
 Composables prefer `onScopeDispose` (Vue 3.5+) over `onUnmounted`. This is important because
 in Vapor mode, component instances have a different internal structure than VDOM components.
 `onScopeDispose` is the universal hook that works in component `setup()`, `effectScope()`,
 Vapor components, and SSR — it's what Vue's own composables use internally.
 
-### 5.4 Memory: useCommand vs defineVaporCommand
+### 9.4 Memory: useCommand vs defineVaporCommand
 
 Each `useCommand()` call creates 2 signals (`loading`, `lastError`):
 
@@ -355,7 +482,7 @@ Each `useCommand()` call creates 2 signals (`loading`, `lastError`):
 `defineVaporCommand()` creates 0 signals — suitable for fire-and-forget dispatches where
 loading/error state is not needed in the template.
 
-### 5.5 Rolldown / Vite 8 compatibility
+### 9.5 Rolldown / Vite 8 compatibility
 
 Dynamic imports of optional peer dependencies use `/* @vite-ignore */` to prevent Rolldown
 (Rust-based bundler in Vite 8) from treating them as required:
@@ -367,9 +494,9 @@ import(/* @vite-ignore */ vuePkg)  // optional peer dep — must not fail build
 
 ---
 
-## 6. Vue Composables
+## 10. Vue Composables
 
-### 6.1 Full reference
+### 10.1 Full reference
 
 ```ts
 // Reactive dispatch — loading + lastError signals
@@ -404,7 +531,7 @@ const { latestError, errors, clearErrors } = useCommandError({
 const bus = useCommandBus()
 ```
 
-### 6.2 When to use which
+### 10.2 When to use which
 
 | Composable | Signals created | Use case |
 |------------|-----------------|----------|
@@ -416,7 +543,7 @@ const bus = useCommandBus()
 | `useCommandState()` | `state` | Reducer-based reactive state |
 | `useCommandHistory()` | `past`, `future`, `canUndo`, `canRedo` | Undo/redo UI |
 
-### 6.3 Directive plugin (opt-in, 0KB when not imported)
+### 10.3 Directive plugin (opt-in, 0KB when not imported)
 
 ```ts
 import { createDirectivePlugin } from 'vapor-chamber/directives'
@@ -432,7 +559,7 @@ app.use(createDirectivePlugin())
 
 CSS classes applied automatically: `.vc-loading` (disables button) and `.vc-error` on failure.
 
-### 6.4 Vite HMR plugin
+### 10.4 Vite HMR plugin
 
 ```ts
 import { vaporChamberHMR } from 'vapor-chamber/vite'
@@ -443,11 +570,72 @@ Bus handlers and registered state survive Vite hot module replacement transparen
 
 ---
 
-## 7. Integration Patterns
+## 11. Integration Patterns
 
-The same bus API and mental model work identically across all stacks.
+### 11.1 With Pinia
 
-### 7.1 Blade + CDN (zero build)
+Pinia owns state. vapor-chamber dispatches commands that mutate Pinia stores. No direct
+coupling — handlers import stores and call them.
+
+```ts
+const cartChamber = createChamber('cart', {
+  add:    (cmd) => cartStore.add(cmd.payload),
+  remove: (cmd) => cartStore.remove(cmd.target.id),
+  clear:  ()    => cartStore.clear(),
+});
+cartChamber.install(bus);
+```
+
+### 11.2 With TanStack Query
+
+TanStack Query owns reads. vapor-chamber owns writes. After a command succeeds, invalidate
+the relevant query:
+
+```ts
+bus.onAfter((cmd, result) => {
+  if (cmd.action === 'cartAdd' && result.ok)
+    queryClient.invalidateQueries({ queryKey: ['cart'] });
+});
+```
+
+Use `commandKey(action, target)` as a stable TQ query key for command-specific cache entries.
+
+### 11.3 With Inertia 3
+
+Inertia handles routing and page props. vapor-chamber handles in-page actions. They do not
+overlap — commands go to a separate Laravel endpoint outside Inertia middleware.
+
+Three integration points:
+1. **CSRF** — set `csrf: 'inertia'` on the HTTP bridge to defer token management to Inertia's Axios instance
+2. **Auth redirects** — set `onRedirect: (url) => router.visit(url)` to hand 302 responses to Inertia
+3. **Page prop refresh** — after a command succeeds, call `router.reload({ only: ['flash'] })` to pull fresh props
+
+```ts
+const { dispatch } = useCommand()
+const result = await bus.request('orderCancel', { id })
+if (result.ok) router.visit('/orders')  // Inertia router
+```
+
+### 11.4 With XState
+
+XState owns workflow orchestration. vapor-chamber executes what XState decides. The integration
+point is the XState `invoke` service:
+
+```ts
+invoke: {
+  src: () => bus.dispatch('checkoutProcess', cart),
+  onDone: 'complete',
+  onError: 'failed',
+}
+```
+
+### 11.5 With Laravel Reverb / Echo
+
+The generic WS bridge works with any WebSocket server. A `createEchoBridge` adapter (v0.8.0)
+speaks the Laravel Echo protocol (channels, private channels, presence) natively. This is the
+correct transport for Laravel 13+ real-time features.
+
+### 11.6 Blade + CDN (zero build)
 
 ```html
 <script src="https://cdn.jsdelivr.net/npm/vapor-chamber/dist/vapor-chamber.iife.min.js"></script>
@@ -471,7 +659,7 @@ Route::post('/vc', function (Request $request) {
 });
 ```
 
-### 7.2 Laravel + Vite + SFC
+### 11.7 Laravel + Vite + SFC
 
 ```ts
 const bus = createCommandBus()
@@ -481,33 +669,7 @@ bus.use(createHttpBridge({ endpoint: '/api/vc', csrf: true }))
 createApp(App).use(createDirectivePlugin()).mount('#app')
 ```
 
-### 7.3 Laravel + Inertia.js (complementary)
-
-Inertia handles routing and page props. Vapor Chamber handles in-page actions.
-
-```ts
-const { dispatch } = useCommand()
-const result = await bus.request('orderCancel', { id })
-if (result.ok) router.visit('/orders')  // Inertia router
-```
-
-### 7.4 Next.js App Router
-
-```tsx
-// providers.tsx
-const bus = createAsyncCommandBus()
-bus.use(retry({ maxAttempts: 3 }))
-bus.use(createHttpBridge({ endpoint: '/api/vc' }))
-
-// app/api/vc/route.ts
-export async function POST(req: Request) {
-  const { command, target, payload } = await req.json()
-  const state = await commandRouter.handle(command, target, payload)
-  return Response.json({ state })
-}
-```
-
-### 7.5 Filament panel islands
+### 11.8 Filament panel islands
 
 ```html
 <div id="analytics-island"></div>
@@ -523,7 +685,56 @@ Livewire and Vapor Chamber never touch each other's DOM scope.
 
 ---
 
-## 8. Migration Strategy: Vue VDOM → Vapor
+## 12. The Utility Layer
+
+These ship with the package, are first-class and tested, but do not live in `command-bus.ts`.
+They use only the public `BaseBus` interface.
+
+### `createChamber`
+
+Groups related handlers under a namespace. The declarative counterpart to `useCommandGroup`.
+
+```ts
+const cartChamber = createChamber('cart', {
+  add:    handleCartAdd,
+  remove: handleCartRemove,
+  clear:  handleCartClear,
+});
+
+cartChamber.install(bus);   // registers cartAdd, cartRemove, cartClear
+                            // returns uninstall function
+```
+
+### `createWorkflow`
+
+Sequential commands with automatic compensation on failure (saga pattern).
+
+```ts
+const checkout = createWorkflow([
+  { action: 'cartValidate' },
+  { action: 'paymentReserve', compensate: 'paymentRelease' },
+  { action: 'orderCreate',    compensate: 'orderCancel' },
+  { action: 'cartClear' },
+]);
+
+const result = await checkout.run(bus, { cartId, paymentInfo });
+// If orderCreate fails → paymentRelease runs automatically
+```
+
+### `createReaction`
+
+Declarative cross-chamber dispatch rules. Explicit edges between domain modules.
+
+```ts
+createReaction('cartAdd', 'inventoryCheck', {
+  when: (cmd, result) => result.ok,
+  map:  (cmd) => ({ target: { itemId: cmd.payload.itemId } }),
+}).install(bus);
+```
+
+---
+
+## 13. Migration Strategy: Vue VDOM → Vapor
 
 ### Phase 1 — Install vaporInteropPlugin (no code changes required)
 
@@ -574,16 +785,16 @@ createVaporChamberApp(App).mount('#app')
 
 ---
 
-## 9. SSR
+## 14. SSR
 
-### 9.1 The challenge
+### 14.1 The challenge
 
 Vue Vapor's signal-based reactivity is designed for direct DOM updates. On the server there is
 no DOM, so signals work as plain values. The challenge is **hydration**: commands that ran on
 the server to populate initial state need to replay on the client so reactive signals reflect
 the same values from the start.
 
-### 9.2 Per-request bus isolation
+### 14.2 Per-request bus isolation
 
 For production SSR with concurrent requests, always create a fresh bus per request:
 
@@ -601,7 +812,7 @@ export async function handleRequest(req, res) {
 }
 ```
 
-### 9.3 Dehydrate on server, rehydrate on client
+### 14.3 Dehydrate on server, rehydrate on client
 
 ```ts
 // server-entry.ts
@@ -627,7 +838,7 @@ for (const { action, target, payload } of (window.__VAPOR_COMMANDS__ ?? [])) {
 createVaporChamberApp(App).mount('#app')
 ```
 
-### 9.4 Suppress side effects during hydration
+### 14.4 Suppress side effects during hydration
 
 ```ts
 let hydrating = true
@@ -641,7 +852,7 @@ for (const cmd of commands) bus.dispatch(cmd.action, cmd.target, cmd.payload)
 hydrating = false
 ```
 
-### 9.5 Simpler alternative: seed signals from JSON
+### 14.5 Simpler alternative: seed signals from JSON
 
 If your server renders state separately (e.g. via `useAsyncData`), skip the replay mechanism:
 
@@ -652,7 +863,7 @@ const { state } = useCommandState(
 )
 ```
 
-### 9.6 SSR recommendations
+### 14.6 SSR recommendations
 
 | Scenario | Approach |
 |----------|---------|
@@ -663,7 +874,7 @@ const { state } = useCommandState(
 
 ---
 
-## 10. Testing
+## 15. Testing
 
 ```ts
 import { createTestBus, setCommandBus, resetCommandBus } from 'vapor-chamber'
@@ -678,6 +889,10 @@ bus.dispatch('checkout', {})
 // Assertions
 expect(bus.wasDispatched('cartAdd')).toBe(true)
 expect(bus.getDispatched('cartAdd')).toHaveLength(2)
+
+// on() and once() fire listeners — same as the real bus
+bus.on('cart*', (cmd, result) => console.log(cmd.action))
+bus.once('checkout', (cmd) => { /* fires exactly once */ })
 
 // Immutable snapshot — mutations don't affect bus.recorded
 const snap = bus.snapshot()
@@ -694,7 +909,7 @@ resetCommandBus()
 
 ---
 
-## 11. What Vapor Chamber Is Not
+## 16. What Vapor Chamber Is Not
 
 **Not a Livewire replacement.** Livewire owns its component model end-to-end. Vapor Chamber
 provides the data flow layer.
@@ -702,15 +917,14 @@ provides the data flow layer.
 **Not a router.** Use Inertia, Vue Router, or Next.js Router for page transitions.
 
 **Not a state management library.** `useCommandState` provides reactive state atoms for
-command-driven values. Pinia remains the right tool for complex shared state — and works
-alongside Vapor Chamber without conflict.
+command-driven values. Pinia remains the right tool for complex shared state.
 
 **Not opinionated about your backend.** The `/api/vc` endpoint is a convention, not a
 requirement.
 
 ---
 
-## 12. Comparison
+## 17. Comparison
 
 | | Livewire | Alpine.js | HTMX | Vapor Chamber |
 |---|---|---|---|---|
@@ -729,45 +943,112 @@ requirement.
 
 ---
 
-## 13. Implementation Status
+## 18. Roadmap
 
-### Implemented (v0.4.x / Unreleased)
+### v0.6.0 — Core quality (current)
+- `onBefore` / `once` / `offAll` on both buses + TestBus
+- `BaseBus` structural interface
+- `BatchResult.successCount` / `failCount`
+- `commandKey` exported, `buildRunner` / `matchesPattern` exported
+- Fixed `once` mutation-during-iteration bug (`.slice()`)
+- Fixed `isAsyncFn` for minified builds (`Symbol.toStringTag`)
+- Fixed 419 ≠ 401 (CSRF expiry vs session expiry)
+- Fixed CSRF refresh (now fetches `csrfCookieUrl`, was no-op)
+- `HttpError.code` — machine-readable error codes
+- `noRetry: string[]` on HTTP bridge — prevents double-charge
+- WS `maxQueueSize` + configurable `timeout`
+- SSE bridge accepts `BaseBus` (sync or async)
+- Form async validators (`set()` = sync, `submit()` = awaits all)
+- `synthesize` custom `LlmAdapter` option
+
+### v0.7.0 — Utility layer
+- `createChamber`
+- `createWorkflow` (saga with compensation)
+- `createReaction` (cross-chamber rules)
+- `http.ts` Inertia CSRF option + `onRedirect`
+
+### v0.8.0 — Laravel stack
+- `createEchoBridge` — Laravel Echo / Reverb protocol
+- Sanctum SPA auth pattern documented
+- Laravel API Resource response unwrapping
+- `createFormBus` Precognition option
+- `vapor-chamber/inertia` sub-path
+
+### v0.9.0 — Vue Vapor alignment
+- Test against Vue 3.6 Vapor RC
+- `useCommand` shape alignment — `{ execute, isPending, error, data }`
+- Vite HMR plugin validation
+- `vapor-chamber/rx` optional RxJS bridge
+
+### v1.0.0 — Stability contract
+- Semantic versioning guarantee
+- Full documentation with Laravel + Vue Vapor happy path
+- No breaking changes without major version
+- Prime time: ready for Laravel 13 + Vue 3.6 Vapor stable
+
+---
+
+## 19. Core Guarantee
+
+The core (`command-bus.ts` + `testing.ts`) will remain:
+- **Zero runtime dependencies** — always
+- **Framework-agnostic** — always
+- **Under 3KB gzipped** — always
+- **100% branch and line coverage** — always
+
+Optional layers may add dependencies. The core never will.
+
+---
+
+## 20. Implementation Status
+
+### Implemented (v0.6.0-pre)
 
 - [x] Core command bus — sync and async, plugin pipeline, dead-letter, naming conventions
+- [x] `onBefore` hooks — cancelable pre-dispatch, sync and async
+- [x] `once` / `offAll` — one-shot and mass-unsubscribe
+- [x] `BaseBus` structural interface — utilities work with either bus variant
+- [x] `commandKey` exported — stable TanStack Query integration key
+- [x] `BatchResult.successCount` / `failCount` — always present
 - [x] `effectScope` / `onScopeDispose` cleanup
 - [x] Typed commands with TypeScript generics
-- [x] Middleware chain — `bus.use()` with priority, async, cached runner (no per-dispatch alloc)
+- [x] Middleware chain — `bus.use()` with priority, async, cached runner
 - [x] Command history — `useCommandHistory`, `history` plugin, inverse handlers
 - [x] `useCommandGroup` — namespace isolation, camelCase prefixing
 - [x] `useCommandError` — reactive error boundary, optional filter
-- [x] `createHttpBridge` — fetch, CSRF, headers, timeout, retry, action filter
-- [x] `createWsBridge` — WebSocket, reconnect
-- [x] `createSseBridge` — server-sent events, server push
+- [x] `createHttpBridge` — CSRF, headers, timeout, retry, `noRetry`, action filter
+- [x] 419 vs 401 distinction — CSRF expiry ≠ session expiry
+- [x] CSRF refresh fetches `csrfCookieUrl` (was no-op DOM re-read)
+- [x] `HttpError.code` — machine-readable error code from response body
+- [x] `createWsBridge` — WebSocket, reconnect, configurable timeout, `maxQueueSize`
+- [x] `createSseBridge` — server-sent events, accepts `BaseBus`
 - [x] `retry` plugin — exponential/linear/fixed, `isRetryable` predicate
 - [x] `persist` plugin — localStorage/sessionStorage/custom storage
 - [x] `sync` plugin — BroadcastChannel cross-tab coordination
 - [x] Vue DevTools — timeline layer, inspector panel, dynamic import (0KB prod)
-- [x] `createTestBus` — snapshot, time-travel, dispatch recording
-- [x] Directive plugin — `v-vc:command`, `v-vc-payload`, `v-vc-optimistic`
+- [x] `createTestBus` — snapshot, time-travel, `on`/`once`/`offAll` fire for real
+- [x] Directive plugin — `v-vc:command`, `v-vc-payload`
 - [x] Vite HMR plugin — state-preserving hot reload
 - [x] IIFE/CDN build — `vapor-chamber.iife.min.js`, global `VaporChamber`
-- [x] `http.ts` — TypeScript HTTP client (`postCommand`, `readCsrfToken`, `invalidateCsrfCache`)
+- [x] `createFormBus` — reactive form + sync/async validation
+- [x] Schema layer — `createSchemaCommandBus`, `toTools`, `synthesize` + `LlmAdapter`
 - [x] CDCC-compliant file splits — `plugins-core.ts`, `plugins-io.ts`, `chamber-vapor.ts`
 - [x] camelCase action names throughout (empirically justified — Pereira 2026)
-- [x] Async-on-sync guard — warns when async plugin installed on sync bus
-- [x] SSR concurrency verified (4 dedicated tests)
+- [x] SSR concurrency verified (per-request bus isolation)
 
-### Remaining (0.5.0 milestones)
+### Remaining (post v0.6.0)
 
-- [ ] `@vapor-chamber/laravel` — Artisan commands, command routing, state serialization
-- [ ] `@vapor-chamber/devtools` — standalone DevTools panel (decoupled from `@vue/devtools-api`)
-- [ ] Full documentation site with live examples for all five integration patterns
-- [ ] Performance benchmark vs Alpine.js, Livewire, HTMX — published and reproducible
-- [ ] API freeze declaration — semver guarantees from 0.5.0 onward
+- [ ] `createChamber` / `createWorkflow` / `createReaction` — utility layer (v0.7.0)
+- [ ] `createEchoBridge` — Laravel Echo / Reverb protocol (v0.8.0)
+- [ ] `createFormBus` Precognition option (v0.8.0)
+- [ ] `vapor-chamber/inertia` sub-path (v0.8.0)
+- [ ] `vapor-chamber/rx` RxJS bridge (v0.9.0)
+- [ ] Full documentation site with live examples
+- [ ] Performance benchmark vs Alpine.js, Livewire, HTMX
 
 ---
 
-## 14. File Map
+## 21. File Map
 
 ```
 src/
@@ -789,19 +1070,22 @@ src/
   index.ts          — public ESM barrel
 
 tests/
-  command-bus.test.ts        (18 tests)
-  chamber.test.ts            (19 tests)
-  plugins.test.ts            (31 tests)
-  new-features.test.ts       (44 tests — incl. SSR concurrency)
-  whitepaper-future.test.ts  (28 tests)
-  plugins-v042.test.ts       (18 tests)
-                             ─────────
-                             158 total
+  command-bus.test.ts            (core dispatch/register/plugins)
+  command-bus-features.test.ts   (once, offAll, onBefore, BaseBus)
+  chamber.test.ts                (composables)
+  plugins.test.ts                (logger, validator, history, debounce, throttle, authGuard, optimistic)
+  plugins-io.test.ts             (retry, persist, sync)
+  http.test.ts                   (CSRF, 419 vs 401, session expiry, retry)
+  transports.test.ts             (HTTP bridge, WS bridge, SSE bridge)
+  form.test.ts                   (createFormBus, async validators)
+  schema.test.ts                 (schema bus, toTools, synthesize, LlmAdapter)
+                                 ─────────────
+                                 318 total
 ```
 
 ---
 
-## 15. References
+## 22. References
 
 1. Pereira, L. F. (2026). *Empirical Validation of Cognitive-Derived Coding Constraints and
    Tokenization Asymmetries in LLM-Assisted Software Engineering*. Zenodo.
@@ -813,6 +1097,11 @@ tests/
 
 ---
 
-## 16. License
+## 23. License
 
 GNU Lesser General Public License v2.1 (LGPL-2.1)
+
+---
+
+*vapor-chamber is built for the Vue Vapor + Laravel stack.
+The core is open for anyone building similar coordination layers.*

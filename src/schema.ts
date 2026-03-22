@@ -218,11 +218,33 @@ export function schemaLogger(schema: BusSchema, options: SchemaLoggerOptions = {
 // synthesize
 // ---------------------------------------------------------------------------
 
+/**
+ * Custom LLM adapter for synthesize(). Receives the Anthropic-format tools, user text,
+ * and options, and must return a ToolCallInput (same shape as an LLM tool_use block).
+ * Use this to route LLM calls through your own proxy, OpenAI, or any other provider.
+ *
+ * @example
+ * const adapter: LlmAdapter = async (tools, text) => {
+ *   const res = await myLlmProxy.complete({ tools, prompt: text });
+ *   return { name: res.toolName, input: res.args };
+ * };
+ */
+export type LlmAdapter = (
+  tools: AnthropicTool[],
+  text: string,
+  options: SynthesizeOptions,
+) => Promise<ToolCallInput>;
+
 export type SynthesizeOptions = {
   apiKey?:  string;
   model?:   string;
   system?:  string;
   fetch?:   typeof globalThis.fetch;
+  /**
+   * Custom LLM adapter. When provided, bypasses the built-in Anthropic API call.
+   * Receives tool definitions, user text, and options — returns a ToolCallInput.
+   */
+  adapter?: LlmAdapter;
 };
 
 const DEFAULT_SYSTEM =
@@ -236,6 +258,14 @@ export async function synthesize(
   text:    string,
   options: SynthesizeOptions = {},
 ): Promise<CommandResult> {
+  if (options.adapter) {
+    let toolUse: ToolCallInput;
+    try { toolUse = await options.adapter(toAnthropicTools(schema), text, options); }
+    catch (e) { return { ok: false, error: e as Error }; }
+    const { target = {}, payload } = toolUse.input ?? {};
+    return Promise.resolve((bus as CommandBus).dispatch(toolUse.name, target, payload));
+  }
+
   const fetchFn = options.fetch ?? globalThis.fetch;
   const apiKey  = options.apiKey ?? (typeof process !== 'undefined' ? process.env?.ANTHROPIC_API_KEY : undefined);
 

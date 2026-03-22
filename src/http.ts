@@ -28,9 +28,15 @@ export type HttpConfig = {
   signal?: AbortSignal;
   /** Read CSRF token from DOM and attach as header. Default: false */
   csrf?: boolean;
+  /**
+   * URL to fetch when a 419 CSRF expiry occurs, to obtain a fresh token.
+   * Default: '/sanctum/csrf-cookie' (Laravel Sanctum SPA standard).
+   * Set to empty string '' to disable the refresh fetch (re-read DOM only).
+   */
+  csrfCookieUrl?: string;
   /** Additional headers merged into every request */
   headers?: Record<string, string>;
-  /** Called when 401 or 419 session-expired is detected */
+  /** Called when a 401 session-expired response is received */
   onSessionExpired?: (status: number) => void;
 };
 
@@ -45,6 +51,8 @@ export type HttpError = Error & {
   name: 'HttpError' | 'TimeoutError' | 'AbortError';
   response?: HttpResponse;
   status?: number;
+  /** Machine-readable error code from response body (e.g. `'CART_ITEM_LIMIT_EXCEEDED'`). */
+  code?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -53,9 +61,10 @@ export type HttpError = Error & {
 
 const RETRY_STATUS = [408, 429, 500, 502, 503, 504];
 const RETRY_AFTER_STATUS = [429, 503];
-const SESSION_EXPIRED_STATUS = [401, 419];
+const SESSION_EXPIRED_STATUS = [401]; // 419 is CSRF expiry, not session expiry
 const MAX_RETRY_AFTER_MS = 30_000;
 const CSRF_TTL_MS = 300_000; // 5 min
+const DEFAULT_CSRF_COOKIE_URL = '/sanctum/csrf-cookie';
 
 // ---------------------------------------------------------------------------
 // CSRF — multi-source with TTL cache
@@ -108,7 +117,7 @@ export function invalidateCsrfCache(): void {
   _csrfCache = null;
 }
 
-async function refreshCsrfOnce(): Promise<void> {
+async function refreshCsrfOnce(cookieUrl: string): Promise<void> {
   if (_csrfRefreshing) {
     // Coalesce: wait for the in-flight refresh instead of doing a duplicate
     let ticks = 0;
@@ -120,8 +129,14 @@ async function refreshCsrfOnce(): Promise<void> {
   }
   _csrfRefreshing = true;
   try {
+    // Fetch the CSRF cookie endpoint so Laravel issues a fresh XSRF-TOKEN cookie.
+    // Failures are silently swallowed — the retry below may still succeed if the
+    // cookie was already rotated by the server.
+    if (cookieUrl) {
+      try { await fetch(cookieUrl, { method: 'GET', credentials: 'same-origin' }); } catch { /* ignore */ }
+    }
     invalidateCsrfCache();
-    readCsrfToken(); // re-read from DOM
+    readCsrfToken(); // re-read DOM / cookie after fetch
   } finally {
     _csrfRefreshing = false;
   }
@@ -184,6 +199,8 @@ function httpError(message: string, response: HttpResponse): HttpError {
   err.name = 'HttpError';
   err.response = response;
   err.status = response.status;
+  const code = (response.data as any)?.code;
+  if (code != null) err.code = String(code);
   return err;
 }
 
@@ -215,7 +232,7 @@ async function doFetch<T>(url: string, serialized: string, headers: Record<strin
   const raw = await fetch(url, { method: 'POST', headers, body: serialized, credentials: 'same-origin', signal });
   const resHeaders = raw.headers ? Object.fromEntries(raw.headers.entries()) : {};
   let data: T = null as T;
-  if (raw.ok) { try { data = await raw.json() as T; } catch { /* non-JSON */ } }
+  try { data = await raw.json() as T; } catch { /* non-JSON */ }
   return { data, status: raw.status, headers: resHeaders, ok: raw.ok };
 }
 
@@ -224,7 +241,7 @@ export async function postCommand<T = unknown>(
   body: unknown,
   config: HttpConfig = {},
 ): Promise<HttpResponse<T>> {
-  const { timeout = 10_000, retry = 0, signal: userSignal, csrf = false, headers: extra = {}, onSessionExpired } = config;
+  const { timeout = 10_000, retry = 0, signal: userSignal, csrf = false, csrfCookieUrl = DEFAULT_CSRF_COOKIE_URL, headers: extra = {}, onSessionExpired } = config;
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -254,10 +271,10 @@ export async function postCommand<T = unknown>(
       if (!res.ok) {
         if (SESSION_EXPIRED_STATUS.includes(res.status)) handleSessionExpiry(res.status, url, onSessionExpired);
 
-        // 419: CSRF expired — refresh once, doesn't count against retry budget
+        // 419: CSRF expired — fetch fresh cookie, refresh once, doesn't count against retry budget
         if (res.status === 419 && !csrfRetried) {
           csrfRetried = true;
-          await refreshCsrfOnce();
+          await refreshCsrfOnce(csrfCookieUrl);
           const fresh = readCsrfToken();
           if (fresh) headers[fresh.headerName] = fresh.token;
           attempt--;

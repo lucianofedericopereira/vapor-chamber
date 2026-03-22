@@ -1,22 +1,51 @@
 /**
- * vapor-chamber - Lightweight command bus for Vue Vapor
+ * vapor-chamber — Lightweight command bus for Vue Vapor
  *
- * ~2KB gzipped (core + plugins + composables). DevTools loaded dynamically.
+ * Architecture:
+ *   CORE (zero dependencies, framework-agnostic):
+ *     command-bus  — dispatch, register, plugins, hooks, wildcard, request/respond
+ *     testing      — createTestBus, snapshot, time-travel
  *
- * v0.3.0 — Naming convention, wildcard listeners, request/response, authGuard, optimistic
- * v0.4.0 — Vue 3.6 Vapor alignment, defineVaporCommand, onScopeDispose
- * v0.4.1 — useCommandGroup, useCommandError
- * v0.4.2 — Transport layer (see 'vapor-chamber/transports'), retry/persist/sync plugins
- * v0.4.3 — createTestBus snapshot/time-travel
- * v0.5.0 — camelCase naming, TypeScript HTTP client, CDCC splits, createFormBus,
- *           Directive plugin (see 'vapor-chamber/directives'),
- *           Vite HMR plugin (see 'vapor-chamber/vite')
+ *   OPTIONAL (tree-shaken when unused):
+ *     plugins      — logger, validator, history, debounce, throttle, authGuard, optimistic
+ *     plugins-io   — retry, persist, sync
+ *     chamber      — Vue composables: useCommand, useCommandBus, useCommandGroup, …
+ *     chamber-vapor — Vue 3.6+ Vapor-specific API (requires Vue 3.6)
+ *     http         — postCommand, CSRF token reading
+ *     transports   — createHttpBridge, createWsBridge, createSseBridge
+ *     form         — createFormBus, reactive form state
+ *     schema       — LLM tool-use layer, synthesize, toTools
+ *     devtools     — @vue/devtools-api integration (requires @vue/devtools-api)
+ *     directives   — v-command Vue directive (requires Vue)
+ *     vite         — HMR plugin (requires Vite, see 'vapor-chamber/vite')
+ *     iife         — UMD/IIFE bundle (see 'vapor-chamber/iife')
+ *
+ * Sub-path exports that avoid pulling in optional code:
+ *   'vapor-chamber/transports' — HTTP + WS + SSE bridges
+ *   'vapor-chamber/directives' — v-command directive
+ *   'vapor-chamber/vite'       — Vite HMR plugin
+ *   'vapor-chamber/iife'       — IIFE bundle
+ *
+ * Changelog:
+ *   v0.3.0 — Naming convention, wildcard listeners, request/response, authGuard, optimistic
+ *   v0.4.0 — Vue 3.6 Vapor alignment, defineVaporCommand, onScopeDispose
+ *   v0.4.1 — useCommandGroup, useCommandError
+ *   v0.4.2 — Transport layer, retry/persist/sync plugins
+ *   v0.4.3 — createTestBus snapshot/time-travel
+ *   v0.5.0 — camelCase naming, HTTP client, CDCC splits, createFormBus, schema/LLM layer
+ *   v0.6.0 — onBefore, once, offAll, BaseBus, commandKey; BatchResult successCount/failCount;
+ *             form async validation; HttpError.code; noRetry; WS maxQueueSize; LlmAdapter;
+ *             419≠401 fix; CSRF refresh fix; WS timeout configurable; SSE BaseBus
  */
 
-// Core
+// ── CORE ─────────────────────────────────────────────────────────────────────
 export {
   createCommandBus,
   createAsyncCommandBus,
+  commandKey,
+  buildRunner,
+  matchesPattern,
+  type BaseBus,
   type Command,
   type CommandResult,
   type CommandBus,
@@ -27,6 +56,8 @@ export {
   type AsyncPlugin,
   type Hook,
   type AsyncHook,
+  type BeforeHook,
+  type AsyncBeforeHook,
   type PluginOptions,
   type BatchCommand,
   type BatchOptions,
@@ -39,8 +70,10 @@ export {
   type CommandMap,
 } from './command-bus';
 
-// Testing utilities
+// Testing utilities (CORE — zero runtime deps, for test environments only)
 export { createTestBus, type TestBus, type RecordedDispatch } from './testing';
+
+// ── OPTIONAL ──────────────────────────────────────────────────────────────────
 
 // Plugins
 export {
@@ -60,7 +93,7 @@ export {
   type SyncOptions,
 } from './plugins';
 
-// Vapor integration — core composables
+// Vue composables — optional, requires Vue ≥ 3.5
 export {
   signal,
   configureSignal,
@@ -80,14 +113,14 @@ export {
   isVaporAvailable,
 } from './chamber';
 
-// Vapor integration — Vue 3.6+ Vapor-specific API
+// Vue 3.6+ Vapor-specific API — optional, requires Vue 3.6
 export {
   createVaporChamberApp,
   getVaporInteropPlugin,
   defineVaporCommand,
 } from './chamber-vapor';
 
-// HTTP client utilities
+// HTTP client — optional, used by createHttpBridge; also available standalone
 export {
   readCsrfToken,
   invalidateCsrfCache,
@@ -97,7 +130,7 @@ export {
   type HttpError,
 } from './http';
 
-// Transport plugins (v0.4.2)
+// Transport plugins — optional; prefer 'vapor-chamber/transports' to avoid pulling http.ts
 export {
   createHttpBridge,
   createWsBridge,
@@ -109,10 +142,10 @@ export {
   type BackendResponse,
 } from './transports';
 
-// Directive plugin (v0.4.4) — opt-in, 0KB when not imported
+// Vue directive — optional, requires Vue; prefer 'vapor-chamber/directives'
 export { createDirectivePlugin } from './directives';
 
-// Form bus (v0.5.0)
+// Form management — optional, no extra runtime deps
 export {
   createFormBus,
   type FormBusOptions,
@@ -120,10 +153,10 @@ export {
   type FormRules,
 } from './form';
 
-// DevTools integration (optional — requires @vue/devtools-api)
+// DevTools integration — optional, requires @vue/devtools-api (loaded dynamically)
 export { setupDevtools } from './devtools';
 
-// Schema layer — LLM tool use, schema-aware logging, synthesize (v0.5.0)
+// Schema / LLM layer — optional, for AI-assisted command dispatch
 export {
   createSchemaCommandBus,
   createAsyncSchemaCommandBus,
@@ -140,6 +173,7 @@ export {
   type SchemaCommandBus,
   type AsyncSchemaCommandBus,
   type SynthesizeOptions,
+  type LlmAdapter,
   type AnthropicTool,
   type OpenAITool,
   type ToolCallInput,
