@@ -28,18 +28,18 @@ const cart: Cart = { items: [], total: 0 };
 // Create bus with plugins
 const bus = createCommandBus();
 
-bus.use(logger({ filter: (cmd) => cmd.action.startsWith('cart.') }));
+bus.use(logger({ filter: (cmd) => cmd.action.startsWith('cart') }));
 
 bus.use(validator({
-  'cart.add': (cmd) => cmd.target?.price > 0 ? null : 'Invalid product',
-  'cart.update': (cmd) => cmd.payload?.quantity >= 0 ? null : 'Invalid quantity'
+  'cartAdd': (cmd) => cmd.target?.price > 0 ? null : 'Invalid product',
+  'cartUpdate': (cmd) => cmd.payload?.quantity >= 0 ? null : 'Invalid quantity'
 }));
 
-const historyPlugin = history({ filter: (cmd) => cmd.action.startsWith('cart.') });
+const historyPlugin = history({ filter: (cmd) => cmd.action.startsWith('cart') });
 bus.use(historyPlugin);
 
 // Handlers
-bus.register('cart.add', (cmd) => {
+bus.register('cartAdd', (cmd) => {
   const product = cmd.target as Product;
   const quantity = cmd.payload?.quantity ?? 1;
 
@@ -54,14 +54,14 @@ bus.register('cart.add', (cmd) => {
   return { ...cart };
 });
 
-bus.register('cart.remove', (cmd) => {
+bus.register('cartRemove', (cmd) => {
   const product = cmd.target as Product;
   cart.items = cart.items.filter(i => i.id !== product.id);
   cart.total = cart.items.reduce((sum, i) => sum + i.price * i.quantity, 0);
   return { ...cart };
 });
 
-bus.register('cart.update', (cmd) => {
+bus.register('cartUpdate', (cmd) => {
   const product = cmd.target as Product;
   const quantity = cmd.payload?.quantity ?? 0;
 
@@ -78,7 +78,7 @@ bus.register('cart.update', (cmd) => {
   return { ...cart };
 });
 
-bus.register('cart.clear', () => {
+bus.register('cartClear', () => {
   cart.items = [];
   cart.total = 0;
   return { ...cart };
@@ -89,17 +89,17 @@ const widget = { id: 1, name: 'Widget', price: 9.99 };
 const gadget = { id: 2, name: 'Gadget', price: 19.99 };
 
 console.log('--- Adding items ---');
-bus.dispatch('cart.add', widget, { quantity: 2 });
-bus.dispatch('cart.add', gadget);
+bus.dispatch('cartAdd', widget, { quantity: 2 });
+bus.dispatch('cartAdd', gadget);
 
 console.log('\n--- Current cart ---');
 console.log(cart);
 
 console.log('\n--- Updating quantity ---');
-bus.dispatch('cart.update', widget, { quantity: 5 });
+bus.dispatch('cartUpdate', widget, { quantity: 5 });
 
 console.log('\n--- Removing item ---');
-bus.dispatch('cart.remove', gadget);
+bus.dispatch('cartRemove', gadget);
 
 console.log('\n--- Undo last action ---');
 historyPlugin.undo();

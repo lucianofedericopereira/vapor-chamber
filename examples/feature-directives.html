@@ -1,0 +1,118 @@
+<!--
+  Feature example: Directive plugin — v-vc:command, v-vc-payload, v-vc-optimistic
+  ================================================================================
+  Declarative dispatch directly in templates.
+  Combines dispatch + loading state + error handling without <script setup> wiring.
+
+  Install once in main.ts:
+    import { createDirectivePlugin } from 'vapor-chamber/directives'
+    app.use(createDirectivePlugin())
+-->
+
+<!--
+  Basic usage — dispatch on click, no script setup needed:
+
+  <button v-vc:command="'cartAdd'">
+    Add to cart
+  </button>
+
+  Adds .vc-loading while dispatch is in flight.
+  Adds .vc-error if the dispatch fails.
+  Disables the button while loading.
+-->
+
+<!--
+  With payload from data attribute (JSON):
+
+  <button
+    v-vc:command="'cartAdd'"
+    data-vc-payload='{"id": 1, "qty": 2}'>
+    Add to cart
+  </button>
+-->
+
+<!--
+  With reactive payload from v-vc-payload directive:
+
+  <button
+    v-vc:command="'productFavorite'"
+    v-vc-payload="{ id: product.id, userId: currentUser.id }">
+    ♥ Favorite
+  </button>
+-->
+
+<!--
+  With optimistic update — rollback on failure:
+
+  <script setup>
+  import { useCommandState } from 'vapor-chamber'
+
+  const { state: cart } = useCommandState({ count: 0 }, {
+    'cartAdd': (s) => ({ count: s.count + 1 })
+  })
+
+  // Optimistic: apply before server confirms, rollback if it fails
+  function onOptimisticAdd(cmd) {
+    const prev = cart.value.count
+    cart.value = { count: cart.value.count + 1 }  // apply immediately
+    return () => { cart.value = { count: prev } }  // rollback function
+  }
+  </script>
+
+  <button
+    v-vc:command="'cartAdd'"
+    v-vc-payload="{ id: product.id }"
+    v-vc-optimistic="onOptimisticAdd">
+    Add (optimistic)
+  </button>
+-->
+
+<!--
+  CSS classes applied automatically:
+
+  .vc-loading {
+    opacity: 0.6;
+    cursor: wait;
+    pointer-events: none;
+  }
+
+  .vc-error {
+    border: 1px solid red;
+    background: #fff5f5;
+  }
+
+  .vc-error::after {
+    content: ' ✗';
+    color: red;
+  }
+-->
+
+<!--
+  Full example component:
+
+  <template>
+    <form>
+      <input v-model="email" type="email" placeholder="Email" />
+      <input v-model="password" type="password" placeholder="Password" />
+
+      <button
+        v-vc:command="'authLogin'"
+        v-vc-payload="{ email, password }">
+        Sign in
+      </button>
+    </form>
+
+    <ul>
+      <li v-for="item in cart.items" :key="item.id">
+        {{ item.name }}
+        <button
+          v-vc:command="'cartRemove'"
+          v-vc-payload="{ id: item.id }">
+          Remove
+        </button>
+      </li>
+    </ul>
+  </template>
+-->
+
+<!-- Zero cost when createDirectivePlugin() is not imported. -->

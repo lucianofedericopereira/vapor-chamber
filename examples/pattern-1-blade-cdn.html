@@ -1,0 +1,91 @@
+<!--
+  Pattern 1: Blade + CDN (zero build)
+  ====================================
+  No npm. No Vite. No build step.
+  Drop VaporChamber into any Blade template via script tag.
+
+  Backend receives: { "command": "cartAdd", "target": {...}, "payload": {...} }
+  Backend returns:  { "state": { "cart": { "count": 3 } } }
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Vapor Chamber — Blade + CDN</title>
+</head>
+<body>
+
+<!-- Blade template: resources/views/cart.blade.php -->
+<div id="app">
+  <button id="add-btn">Add to cart</button>
+  <span id="cart-count">0 items</span>
+  <p id="error-msg" style="color:red;display:none"></p>
+</div>
+
+<!-- CDN: no npm, no build -->
+<script src="https://cdn.jsdelivr.net/npm/vapor-chamber/dist/vapor-chamber.iife.min.js"></script>
+<script>
+  const { bus, dispatch } = VaporChamber.createApp({
+    transport: VaporChamber.http({
+      endpoint: '/api/vc',
+      csrf: true,             // reads X-XSRF-TOKEN from cookie automatically
+    }),
+  })
+
+  // Persist cart count across page reloads
+  const cartPersist = VaporChamber.persist({
+    key: 'vc:cart',
+    getState: () => ({ count: parseInt(document.getElementById('cart-count').textContent) }),
+  })
+  bus.use(cartPersist)
+
+  // Restore on page load
+  const saved = cartPersist.load()
+  if (saved) {
+    document.getElementById('cart-count').textContent = saved.count + ' items'
+  }
+
+  // Register local side effects (UI updates after server responds)
+  bus.register('cartAdd', async (cmd) => {
+    // The HTTP bridge sends the command to the server and returns state
+    // This handler runs AFTER the transport middleware resolves
+    const countEl = document.getElementById('cart-count')
+    countEl.textContent = (parseInt(countEl.textContent) + (cmd.payload?.quantity ?? 1)) + ' items'
+  })
+
+  // Wire up button
+  const btn = document.getElementById('add-btn')
+  btn.addEventListener('click', async () => {
+    btn.disabled = true
+    const result = await dispatch('cartAdd', { id: 1 }, { quantity: 1 })
+    btn.disabled = false
+    if (!result.ok) {
+      const err = document.getElementById('error-msg')
+      err.textContent = result.error?.message ?? 'Unknown error'
+      err.style.display = ''
+    }
+  })
+</script>
+
+<!--
+  Laravel backend (no Livewire):
+
+  // routes/api.php
+  Route::post('/vc', VaporChamberController::class);
+
+  // app/Http/Controllers/VaporChamberController.php
+  public function __invoke(Request $request): JsonResponse
+  {
+      $command = $request->input('command');
+      $payload = $request->input('payload');
+
+      $state = match ($command) {
+          'cartAdd' => $this->cartService->add($payload),
+          default    => abort(404),
+      };
+
+      return response()->json(['state' => $state]);
+  }
+-->
+</body>
+</html>

@@ -5,6 +5,7 @@
  * without executing real handlers. Useful for unit-testing components that
  * use useCommand() without wiring up the full application logic.
  *
+ * v0.4.3: Added snapshot assertions and time-travel through dispatch history.
  * v0.3.0: Added on(), request(), respond(), getUndoHandler() stubs.
  *
  * @example
@@ -12,11 +13,17 @@
  * setCommandBus(bus);
  *
  * // Dispatch something under test
- * bus.dispatch('cart_add', cart, { id: 1 });
+ * bus.dispatch('cartAdd', cart, { id: 1 });
  *
  * // Assert
- * expect(bus.wasDispatched('cart_add')).toBe(true);
- * expect(bus.getDispatched('cart_add')[0].cmd.payload).toEqual({ id: 1 });
+ * expect(bus.wasDispatched('cartAdd')).toBe(true);
+ * expect(bus.getDispatched('cartAdd')[0].cmd.payload).toEqual({ id: 1 });
+ *
+ * // Snapshot: get a serializable copy of recorded dispatches
+ * const snap = bus.snapshot();
+ *
+ * // Time-travel: replay dispatches up to (and including) index N
+ * const state = bus.travelTo(2);
  */
 
 import type {
@@ -30,7 +37,7 @@ export interface RecordedDispatch {
   result: CommandResult;
 }
 
-export interface TestBus extends CommandBus {
+export interface TestBus extends CommandBus<any> {
   /** All dispatched commands in order */
   readonly recorded: RecordedDispatch[];
   /** True if any command with this action was dispatched */
@@ -39,6 +46,24 @@ export interface TestBus extends CommandBus {
   getDispatched(action: string): RecordedDispatch[];
   /** Clear the recorded list */
   clear(): void;
+  /**
+   * Snapshot — returns a deep-cloned, serializable copy of the recorded list.
+   * Safe to compare with `toEqual` in any test framework.
+   */
+  snapshot(): RecordedDispatch[];
+  /**
+   * travelTo — returns the ordered list of commands from dispatch index 0
+   * through `index` (inclusive). Useful for asserting the sequence of events
+   * that led to a particular state.
+   *
+   * @param index 0-based index into recorded[]. Clamped to valid range.
+   */
+  travelTo(index: number): Command[];
+  /**
+   * travelToAction — returns all commands dispatched up to and including
+   * the last occurrence of `action`. Useful for "what happened before this action".
+   */
+  travelToAction(action: string): Command[];
 }
 
 /**
@@ -160,6 +185,24 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
     return undoHandlers.get(action);
   }
 
+  function snapshot(): RecordedDispatch[] {
+    return JSON.parse(JSON.stringify(recorded)) as RecordedDispatch[];
+  }
+
+  function travelTo(index: number): Command[] {
+    const clamped = Math.max(0, Math.min(index, recorded.length - 1));
+    return recorded.slice(0, clamped + 1).map(r => r.cmd);
+  }
+
+  function travelToAction(action: string): Command[] {
+    let lastIdx = -1;
+    for (let i = 0; i < recorded.length; i++) {
+      if (recorded[i].cmd.action === action) lastIdx = i;
+    }
+    if (lastIdx === -1) return [];
+    return recorded.slice(0, lastIdx + 1).map(r => r.cmd);
+  }
+
   return {
     dispatch,
     dispatchBatch,
@@ -169,10 +212,14 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
     on,
     request,
     respond,
+    hasHandler: (action: string) => handlers.has(action),
     getUndoHandler,
     recorded,
-    wasDispatched: (action) => recorded.some(r => r.cmd.action === action),
-    getDispatched: (action) => recorded.filter(r => r.cmd.action === action),
+    wasDispatched: (action: string) => recorded.some(r => r.cmd.action === action),
+    getDispatched: (action: string) => recorded.filter(r => r.cmd.action === action),
     clear: () => recorded.splice(0),
-  };
+    snapshot,
+    travelTo,
+    travelToAction,
+  } as unknown as TestBus;
 }

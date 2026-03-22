@@ -1,6 +1,6 @@
 {
   "name": "vapor-chamber",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Lightweight command bus for Vue Vapor - plugins, hooks, undo/redo, Vue 3.6 Vapor aligned",
   "type": "module",
   "main": "./dist/index.js",
@@ -10,14 +10,33 @@
     ".": {
       "import": "./dist/index.js",
       "types": "./dist/index.d.ts"
+    },
+    "./transports": {
+      "import": "./dist/transports.js",
+      "types": "./dist/transports.d.ts"
+    },
+    "./directives": {
+      "import": "./dist/directives.js",
+      "types": "./dist/directives.d.ts"
+    },
+    "./vite": {
+      "import": "./dist/vite-hmr.js",
+      "types": "./dist/vite-hmr.d.ts"
+    },
+    "./iife": {
+      "import": "./dist/iife.js",
+      "types": "./dist/iife.d.ts"
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "scripts"
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/build-iife.mjs",
+    "build:esm": "tsc",
+    "build:iife": "node scripts/build-iife.mjs",
     "dev": "tsc --watch",
     "test": "vitest",
     "test:run": "vitest run",
@@ -51,8 +70,8 @@
   },
   "homepage": "https://github.com/lucianofedericopereira/vapor-chamber#readme",
   "peerDependencies": {
-    "vue": ">=3.5.0",
-    "@vue/devtools-api": ">=6.0.0"
+    "@vue/devtools-api": ">=6.0.0",
+    "vue": ">=3.5.0"
   },
   "peerDependenciesMeta": {
     "vue": {
@@ -63,8 +82,9 @@
     }
   },
   "devDependencies": {
+    "@types/node": "^25.5.0",
     "@vitest/coverage-v8": "^4.0.18",
-    "typescript": "^5.0.0",
+    "typescript": "^5.9.3",
     "vitest": "^4.0.18"
   },
   "engines": {

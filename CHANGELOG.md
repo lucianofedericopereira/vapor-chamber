@@ -4,6 +4,172 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- **`createAsyncSchemaCommandBus<S>(schema, options?)`** (`src/schema.ts`) — async variant of
+  `createSchemaCommandBus`. Use when handlers perform async work (API calls, LLM, DB).
+  Same interface: `toTools()`, `synthesize()`, `getSchema()`, `fromToolCall()`, `describe()`.
+
+- **`schemaValidator(schema)`** (`src/schema.ts`) — plugin that blocks dispatch when field types
+  don't match the schema. Returns `{ ok: false, error }` before the handler runs. Uses the same
+  `validateFields` helper as `schemaLogger`.
+
+- **`describeSchema(schema)`** (`src/schema.ts`) — returns a plain-text summary of all commands
+  for use in LLM system prompts: `"Available commands:\n- cartAdd: Add item to cart (target: id:number, ...)"`.
+  Also available as `bus.describe()` on schema buses.
+
+- **`bus.fromToolCall(toolUse)`** on `SchemaCommandBus` / `AsyncSchemaCommandBus` — dispatch
+  directly from a pre-existing LLM `tool_use` block without a full `synthesize()` round-trip.
+  Accepts `{ name, input: { target?, payload? } }` — the same shape the LLM returns.
+
+- **Schema layer** (`src/schema.ts`) — flat runtime schema as single source of truth:
+  - `BusSchema` / `ActionSchema` / `FieldMap` — flat type definitions (`{ id: 'number' }`)
+  - `InferMap<S>` — derives TypeScript `CommandMap` types from the runtime schema automatically;
+    no separate type definition needed
+  - `createSchemaCommandBus<S>(schema)` — sync bus typed from schema
+  - `createAsyncSchemaCommandBus<S>(schema)` — async bus typed from schema
+  - `toTools(schema, provider?)` / `toAnthropicTools` / `toOpenAITools` — LLM tool definitions;
+    `target` and `payload` kept as separate nested objects (no field merging/splitting)
+  - `schemaLogger(schema, options?)` — schema-aware plugin: logs description, validates field types
+    with `✓` / `⚠` indicators
+  - `synthesize(schema, bus, text, options?)` — natural language → LLM tool use → dispatch;
+    injectable `fetch` for testing; supports both sync and async buses
+  - Schema keys are normalized to camelCase on creation (`cart_add` → `cartAdd` with a warn)
+
+- **8 core bus fixes** (`src/command-bus.ts`):
+  - `request()` now routes through the plugin chain when a responder exists (was bypassing it)
+  - `request()` signature: `(action, target, payload?, options?)` — payload added as 3rd arg
+  - `onMissing` custom function wrapped in try/catch — throws return `{ ok: false, error }`
+  - `bus.hasHandler(action)` — introspection method on both `CommandBus` and `AsyncCommandBus`
+  - `register()` warns on silent handler overwrite
+  - `CommandBus<M extends CommandMap>` and `AsyncCommandBus<M>` are now generic — typed dispatch
+    and register via `createCommandBus<MyMap>()`
+  - `wrapThrottle` key: `JSON.stringify` wrapped in try/catch for circular ref safety
+  - `dispatchBatch(commands, options?)` — new `BatchOptions = { continueOnError?: boolean }`;
+    when true, collects all results and returns the first error instead of stopping
+
+- **`CommandMap`** and **`BatchOptions`** exported from main entry point.
+
+---
+
+## [0.5.0] - 2026-03-22
+
+### Breaking Changes
+
+- **camelCase action names enforced throughout** — all built-in examples, wildcard patterns, and
+  `useCommandGroup` now use camelCase (`cartAdd`, `ordersCancel`). The naming convention regex
+  changed from snake_case `/^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)+$/` to camelCase
+  `/^[a-z][a-zA-Z0-9]+$/`. Rationale: Pereira (2026) proved camelCase produces 1.12–1.20× fewer
+  BPE tokens than dot-notation (p<0.001, Spearman ρ=1.000 across all tested tokenizer pairs),
+  saving ~$54,499/year at enterprise-scale LLM usage.
+  See `docs/whitepaper.md` §2.5.
+
+- **Wildcard patterns now use `*` suffix** (was `.*` / `_*`) — `cart*` matches `cartAdd`,
+  `cartRemove`, etc. Affects `bus.on()`, `useCommandGroup`, `createHttpBridge`, `retry`.
+
+- **`wrapThrottle` now throws on throttled calls** (was returning an invalid `CommandResult`).
+  Throttled dispatches return `{ ok: false, error }` with `error.message === 'throttled'` and
+  `error.retryIn` (ms until retry is safe). Callers should check `result.ok` before using
+  `result.value`.
+
+### Added
+
+- **`useCommandGroup(namespace)`** (`src/chamber.ts`) — namespace isolation for large apps:
+  - All `dispatch`/`register`/`on` calls are automatically prefixed in camelCase
+  - `cart.dispatch('add', product)` → dispatches `'cartAdd'`
+  - `cart.register('add', handler)` → registers `'cartAdd'`
+  - `cart.on('*', listener)` → listens to `'cart*'`
+  - Auto-cleanup on Vue scope disposal
+  - `group.namespace` exposes the namespace string
+
+- **`useCommandError(options?)`** (`src/chamber.ts`) — reactive error boundary:
+  - `errors` — signal containing all failed dispatches
+  - `latestError` — signal with the most recent error
+  - `clearErrors()` — reset state
+  - Optional `filter` narrows which actions are tracked
+
+- **Transport layer** (`src/transports.ts`):
+  - `createHttpBridge(options)` — async plugin that forwards commands to a backend endpoint via POST
+  - `createWsBridge(options)` — WebSocket transport with auto-reconnect
+  - `createSseBridge(options)` — Server-sent events bridge (server-push commands)
+  - All transports accept an `actions` filter: `['cart*']` sends only matching commands over the wire
+  - `createHttpBridge` uses `postCommand` from `http.ts` for retry, CSRF, and timeout support
+
+- **`retry` plugin** (`src/plugins-io.ts`) — async plugin with configurable backoff:
+  - `maxAttempts`, `baseDelay`, `strategy` (`'fixed'` | `'linear'` | `'exponential'`)
+  - `actions` glob filter — only retry matching action patterns
+  - `isRetryable(error, attempt)` — stop retrying on non-recoverable errors early
+
+- **`persist` plugin** (`src/plugins-io.ts`) — auto-save state to localStorage after each command:
+  - Custom `storage` backend (sessionStorage, IndexedDB adapter, etc.)
+  - `plugin.load()`, `plugin.save()`, `plugin.clear()` methods
+  - SSR-safe: resolves localStorage at call time, no-ops when unavailable
+
+- **`sync` plugin** (`src/plugins-io.ts`) — broadcast commands across browser tabs via `BroadcastChannel`:
+  - `filter` option to select which actions to broadcast
+  - `onReceive` callback to intercept or suppress incoming commands
+  - `plugin.close()`, `plugin.isOpen()` methods
+  - Echo prevention: re-dispatched commands from other tabs are not re-broadcast
+
+- **`createTestBus` snapshot & time-travel** (`src/testing.ts`):
+  - `bus.snapshot()` — returns a deep copy of the recorded dispatch list (mutations don't affect `recorded`)
+  - `bus.travelTo(index)` — returns commands from 0 to index inclusive
+  - `bus.travelToAction(action)` — returns all commands up to the last occurrence of `action`
+  - All time-travel methods return the `Command` array (not `RecordedDispatch`) for easy assertion
+
+- **`src/http.ts`** — TypeScript HTTP client, adapted from `fetch/useFetch.js`:
+  - `postCommand<T>(url, body, config)` — POST with retry, CSRF, timeout, session detection
+  - `readCsrfToken()` — multi-source CSRF: meta tag → `XSRF-TOKEN` cookie → hidden `_token` input; 5-min TTL cache
+  - `invalidateCsrfCache()` — force cache clear (e.g. after logout)
+  - `AbortSignal.any` with manual fallback for older environments
+  - Jittered exponential backoff (avoids thundering herd)
+  - `X-RateLimit-Reset` as `Retry-After` fallback
+  - 419 CSRF refresh coalesces concurrent requests (no duplicate refreshes)
+  - `session-expired` CustomEvent + `onSessionExpired` callback
+  - `TimeoutError` distinct from `AbortError`
+
+- **`src/chamber-vapor.ts`** — Vapor-specific API extracted from `chamber.ts` for CDCC compliance:
+  - `createVaporChamberApp()`, `getVaporInteropPlugin()`, `defineVaporCommand()`
+
+- **`src/plugins-core.ts`** / **`src/plugins-io.ts`** — `plugins.ts` split for CDCC compliance:
+  - `plugins-core.ts`: logger, validator, history, debounce, throttle, authGuard, optimistic
+  - `plugins-io.ts`: retry, persist, sync
+  - `plugins.ts` now a barrel re-export
+
+- **SSR concurrency tests** — 4 new tests in `tests/new-features.test.ts` verifying that
+  independent buses don't share handlers, plugins, or state across simulated SSR requests.
+
+- **`useCommandGroup` camelCase tests** — 2 new tests verifying that
+  `cart.register('add')` registers `'cartAdd'` and `cart.dispatch('remove')` dispatches `'cartRemove'`.
+
+- **`createFormBus<T>(options)`** (`src/form.ts`) — reactive form state manager built on the command bus:
+  - `values`, `errors`, `touched`, `isDirty`, `isValid`, `isSubmitting` — reactive signals
+  - `set(field, value)` — update a field and re-run all validation rules
+  - `touch(field)` — mark a field as interacted with (triggers error display)
+  - `submit()` — validate all fields, call `onSubmit`, return `boolean`
+  - `reset()` — restore initial field values and clear all state
+  - `use(plugin)` — attach any command bus plugin (logger, throttle, authGuard, etc.)
+  - `bus` — exposes the underlying `CommandBus` for DevTools, testing, and advanced use
+  - 13 new tests in `tests/form.test.ts`
+
+- **`@types/node`** added as dev dependency (required by `vite-hmr.ts`).
+
+### Changed
+
+- **`command-bus.ts` refactored** to CDCC-compliant module-level functions with explicit state
+  threading (`SyncState` / `AsyncState`). Factory functions dropped from ~179 lines to ~20 lines
+  each. All inner functions promoted to module scope.
+
+- **Async-on-sync guard** — `syncUse()` now warns when an async plugin is installed on a sync bus:
+  ```
+  [vapor-chamber] Async plugin installed on sync bus — use createAsyncCommandBus() instead.
+  ```
+
+- **`chamber.ts`** exports `tryAutoCleanup` (previously private) and internal Vapor state getters
+  (`getVaporAppFn`, `getVaporInteropRef`) for use by `chamber-vapor.ts`.
+
+---
+
 ## [0.4.0] - 2026-03-20
 
 ### Vue 3.6 + Vite 7/8 Alignment
@@ -40,8 +206,8 @@ and the Vite 7/8 toolchain (Rolldown bundler).
   required in Vue 3.6+; the auto-detected `ref()` is already alien-signals powered.
 - The command bus core (`command-bus.ts`) remains framework-agnostic — zero Vue dependency.
 - All composables work identically in VDOM, Vapor, and mixed trees.
-- For Luxury's migration: start with `vaporInteropPlugin` in `createApp()`, convert hot-path
-  components to `<script setup vapor>` incrementally, eventually move to `createVaporApp()`.
+
+---
 
 ## [0.3.0] - 2026-03-20
 
@@ -57,82 +223,23 @@ and the Vite 7/8 toolchain (Rolldown bundler).
 
 ### Added
 
-- **Naming convention enforcement** (`src/command-bus.ts`): New `naming` option on `createCommandBus()` validates action names at both registration and dispatch time. Supports any regex pattern with configurable violation mode (`'warn'`, `'throw'`, or `'ignore'`). Designed for Luxury's LLM-first snake_case convention (`/^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)+$/`).
+- **Naming convention enforcement** (`src/command-bus.ts`): New `naming` option on `createCommandBus()` validates action names at both registration and dispatch time. Supports any regex pattern with configurable violation mode (`'warn'`, `'throw'`, or `'ignore'`).
 
-  ```typescript
-  const bus = createCommandBus({
-    naming: {
-      pattern: /^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)+$/,
-      onViolation: 'throw',
-    }
-  });
-  ```
+- **Wildcard / pattern listeners** (`src/command-bus.ts`): New `bus.on(pattern, listener)` method. Supports `'*'` (all events), `'prefix*'` (namespace glob), or exact match.
 
-- **Wildcard / pattern listeners** (`src/command-bus.ts`): New `bus.on(pattern, listener)` method. Supports `'*'` (all events), `'prefix_*'` (namespace glob), or exact match. Listeners receive both the command and its result. Returns unsubscribe function. Designed for analytics subscribers and debugging.
+- **Request/response pattern** (`src/command-bus.ts`): New `bus.request()` and `bus.respond()`. Supports timeout (default 5s). Falls back to normal `dispatch()` if no responder is registered.
 
-  ```typescript
-  bus.on('shop_*', (cmd, result) => trackShopEvent(cmd));
-  bus.on('*', (cmd, result) => console.log(cmd.action));
-  ```
+- **Per-command throttle/undo at register time** (`src/command-bus.ts`): `register()` now accepts `{ throttle, undo }` options.
 
-- **Request/response pattern** (`src/command-bus.ts`): New `bus.request(action, target, { timeout })` and `bus.respond(action, handler)` methods. `request()` returns a Promise that resolves with the responder's return value, or falls back to normal `dispatch()` if no responder is registered. Supports timeout (default 5s). Designed for cross-component queries: payment gateway tokens, address validation, modal confirmations.
+- **Auto-cleanup on Vue component unmount** (`src/chamber.ts`): All composables now detect Vue lifecycle context and register cleanup automatically.
 
-  ```typescript
-  bus.respond('payment_get_token', async (cmd) => {
-    return await stripe.createToken(cmd.target);
-  });
-  const result = await bus.request('payment_get_token', { amount: 100 });
-  ```
+- **`resetCommandBus()` export** (`src/chamber.ts`).
 
-- **Per-command debounce/throttle at register time** (`src/command-bus.ts`): `register()` now accepts an optional third argument with `{ debounce, throttle }` in milliseconds. Wraps the handler transparently — no need for a global debounce/throttle plugin for individual commands.
-
-  ```typescript
-  bus.register('shop_cart_item_updated', handler, { throttle: 500 });
-  bus.register('shop_selection_updated', trackHandler, { debounce: 3000 });
-  ```
-
-- **Undo handler registration** (`src/command-bus.ts`): `register()` now accepts `{ undo: handler }` to associate an inverse handler with a command. Retrieved via `bus.getUndoHandler(action)`. Used by the `history` plugin and `useCommandHistory` composable to execute real undo operations.
-
-  ```typescript
-  bus.register('cart_add', addHandler, {
-    undo: (cmd) => removeFromCart(cmd.target.productId)
-  });
-  ```
-
-- **Auto-cleanup on Vue component unmount** (`src/chamber.ts`): `useCommand()`, `useCommandState()`, and `useCommandHistory()` now detect if they're called inside a Vue component's `setup()` context. If so, they automatically register their `dispose()` function on `onUnmounted()`. Falls back to manual `dispose()` when called outside a component (Node, tests, non-Vue contexts).
-
-- **`resetCommandBus()` export** (`src/chamber.ts`): Resets the shared singleton bus to `null`. Call in `afterEach()` to prevent handler leaks between test files.
-
-- **`authGuard` plugin** (`src/plugins.ts`): Blocks commands matching protected action prefixes when the user is not authenticated. Calls an optional `onUnauthenticated` callback with the blocked command for intent storage / login redirect.
-
-  ```typescript
-  bus.use(authGuard({
-    isAuthenticated: () => window.isCustomer,
-    protected: ['shop_cart_', 'shop_wishlist_', 'shop_checkout_'],
-    onUnauthenticated: (cmd) => storeIntent(cmd),
-  }));
-  ```
-
-- **`optimistic` plugin** (`src/plugins.ts`): Applies optimistic state updates before the handler executes. If the handler fails, automatically calls the rollback function returned by `apply()`.
-
-  ```typescript
-  bus.use(optimistic({
-    'cart_update_qty': {
-      apply: (cmd) => {
-        const prev = cart.qty;
-        cart.qty = cmd.target.qty;
-        return () => { cart.qty = prev; }; // rollback
-      }
-    }
-  }));
-  ```
-
-- **Generic type parameters** (`src/command-bus.ts`): `Command`, `CommandResult`, and `Handler` types now accept generic type parameters for type-safe payloads and return values at the application level.
+- **`authGuard` plugin** and **`optimistic` plugin** (`src/plugins.ts`).
 
 ### Tests
 
-- Added tests for: naming convention enforcement, wildcard listeners, request/response, undo handler registration, per-command throttle, `resetCommandBus`, `authGuard` plugin, `optimistic` plugin, history with bus-backed undo/redo.
-- All test files now use `resetCommandBus()` in `afterEach` to prevent cross-test contamination.
+- Added tests for: naming convention, wildcard listeners, request/response, undo handler, per-command throttle, `resetCommandBus`, `authGuard`, `optimistic`, history with bus-backed undo/redo.
 
 ---
 
@@ -153,56 +260,40 @@ and the Vite 7/8 toolchain (Rolldown bundler).
 
 ### Fixed
 
-- **`newTodoText` reactivity bug** (`examples/vue-vapor-component.vue`): Form input was declared as a plain `let` variable. Mutations to it never triggered re-renders because the value was outside the signal system. Changed to `const newTodoText = signal('')` so input changes propagate correctly through Vapor's reactivity.
+- **`newTodoText` reactivity bug** (`examples/vue-vapor-component.vue`): Form input was declared as a plain `let` variable. Changed to `const newTodoText = signal('')`.
 
-- **Redundant stats recomputation** (`examples/vue-vapor-component.vue`): `getStats()` was called four times in the template, re-filtering the items array on each binding. Replaced with a `stats` signal updated once via `bus.onAfter()`, so the template reads stable signal values across all bindings.
+- **Redundant stats recomputation** (`examples/vue-vapor-component.vue`): `getStats()` was called four times in the template. Replaced with a `stats` signal updated once via `bus.onAfter()`.
 
-- **Debounce plugin memory leak** (`src/plugins.ts`): The `results` map was never cleared — every debounced key accumulated an entry for the lifetime of the plugin. Added a `setTimeout(..., 0)` after result storage to delete the entry after the current tick.
+- **Debounce plugin memory leak** (`src/plugins.ts`): The `results` map was never cleared.
 
-- **Throttle plugin memory leak** (`src/plugins.ts`): The `lastRun` map was never pruned — every unique `action:target` key stayed in the map indefinitely. Added a `setTimeout` equal to `wait` to delete the entry once the throttle window expires.
+- **Throttle plugin memory leak** (`src/plugins.ts`): The `lastRun` map was never pruned.
 
-- **`useCommand` lifecycle leak** (`src/chamber.ts`): `register` and `use` were forwarded directly from the raw bus with no shared cleanup path. Wrapped both in local tracker functions that collect unregister callbacks and exposed a `dispose()` method to tear them all down together.
+- **`useCommand` lifecycle leak** (`src/chamber.ts`): `register` and `use` were forwarded with no shared cleanup path.
 
-- **Proxy trap breakage via private global access** (`src/chamber.ts`): The signal factory was detected by probing `window.__VUE_VAPOR__`, a non-standard internal property. Accessing private properties on proxy-backed objects bypasses proxy traps and relies on unstable implementation details. Removed the runtime probe entirely and replaced it with an explicit `configureSignal(fn)` API that lets the host app inject the Vapor signal factory at setup time.
+- **Proxy trap breakage via private global access** (`src/chamber.ts`): Replaced `window.__VUE_VAPOR__` probe with explicit `configureSignal(fn)` API.
 
-- **Reactivity loss from destructuring** (`examples/vue-vapor-component.vue`): `getFilteredItems` destructured `{ items, filter }` from `todos.value`. Destructuring a signal's value into local bindings loses reactivity if the binding is ever captured in a longer-lived closure. Changed to direct property access (`todos.value.items`, `todos.value.filter`) so all reads go through the signal getter.
+- **Reactivity loss from destructuring** (`examples/vue-vapor-component.vue`).
 
-- **`v-model` on a signal object** (`examples/vue-vapor-component.vue`): After `newTodoText` became a signal, the template still used `v-model="newTodoText"`. Vue's `v-model` shorthand only works with plain reactive refs — on a custom signal object it binds to the object reference, not `.value`. Replaced with explicit `:value="newTodoText.value"` + `@input` handler.
+- **`v-model` on a signal object** (`examples/vue-vapor-component.vue`).
 
-- **`.trim()` called on signal object** (`examples/vue-vapor-component.vue`): The submit button's `:disabled` binding read `!newTodoText.trim()` after `newTodoText` became a signal. `Signal<string>` has no `.trim()` method — runtime error. Fixed to `!newTodoText.value.trim()`.
+- **`.trim()` called on signal object** (`examples/vue-vapor-component.vue`).
 
-- **`bus.onAfter()` return value discarded** (`examples/vue-vapor-component.vue`): The stats hook returned an unsubscribe function that was never captured. The hook would remain alive after unmount, updating a stale signal. Captured into `unsubscribeStats` and documented the `onUnmounted` call site.
+- **`bus.onAfter()` return value discarded** (`examples/vue-vapor-component.vue`).
 
-- **`AsyncHandler` type collapsed to `any`** (`src/command-bus.ts`): The type was `(cmd: Command) => any | Promise<any>`. The union `any | Promise<any>` simplifies to `any` in TypeScript's type algebra, erasing all return-type information. Changed to `(cmd: Command) => Promise<any>`.
+- **`AsyncHandler` type collapsed to `any`** (`src/command-bus.ts`).
 
-- **Dead `listeners` array in fallback signal** (`src/chamber.ts`): `fallbackSignal` allocated a `listeners` array and iterated it on every setter call, but nothing could ever push into it (no subscribe API). The array was always empty, making the `forEach` a permanent no-op. Removed; Vapor's compiler tracks signal reads/writes itself without a listener mechanism.
+- **Dead `listeners` array in fallback signal** (`src/chamber.ts`).
 
-- **Stale `~1KB` size claim** (`src/index.ts`, `src/command-bus.ts`): Header comments still referenced the original size estimate. Updated to reflect the current `~2KB gzipped` figure.
+- **Stale `~1KB` size claim** (`src/index.ts`, `src/command-bus.ts`).
 
-- **Wrong import path in JSDoc** (`src/devtools.ts`): The `@example` block showed `import { setupDevtools } from 'vapor-chamber/devtools'`, but no such subpath export exists. The correct import is from `'vapor-chamber'`. Fixed.
+- **Wrong import path in JSDoc** (`src/devtools.ts`).
 
 ### Performance
 
-- **Plugin chain no longer rebuilt on every dispatch** (`src/command-bus.ts`): Both `createCommandBus` and `createAsyncCommandBus` previously called `plugins.reduceRight(...)` on every `dispatch()`, allocating a new closure per plugin per call. Replaced with a cached `runner` function built once when plugins are added or removed. On each dispatch only the innermost `execute` function is created; the plugin traversal uses a local index counter with no additional allocations. The runner is rebuilt only when `use()` or its unregister function is called — both rare at runtime.
+- **Plugin chain no longer rebuilt on every dispatch** (`src/command-bus.ts`): Replaced per-dispatch `reduceRight` with a cached `runner` function rebuilt only on `use()`.
 
 ### Added
 
-- **`signal` and `configureSignal` exports** (`src/index.ts`, `src/chamber.ts`): The signal factory and its configuration function are now part of the public API. `configureSignal(fn)` is the supported way to inject Vue Vapor's native signal implementation; `signal` exposes the same factory the composables use internally.
-
-- **DevTools integration** (`src/devtools.ts`): New `setupDevtools(bus, app)` function connects any `CommandBus` or `AsyncCommandBus` to Vue DevTools. Adds a **Commands** timeline layer (green for success, red for error) and a **Vapor Chamber** inspector panel with filterable command history and full target/payload/result detail on selection. Requires `@vue/devtools-api` as an optional peer dependency — dynamically imported, silently no-ops if not installed, zero impact on production bundle size.
-
-- **Roadmap in README** (`README.md`): Added a Roadmap table tracking planned features (DevTools, persistence plugin, command batching, middleware ordering API) and their current status.
-
-### Documentation
-
-- **Whitepaper §5.1 updated** (`docs/whitepaper.md`): Replaced stale `window.__VUE_VAPOR__` code sample with the `configureSignal()` API and an explanation of why explicit injection is preferred.
-
-- **Whitepaper §8.2 updated** (`docs/whitepaper.md`): Updated from "consider caching the chain" to documenting the implemented cached-runner solution.
-
-- **Bundle size claim corrected** (`README.md`, `docs/whitepaper.md`): Updated from the outdated "~1KB" to the current estimate of ~4KB minified / ~2KB gzipped for the core (command bus + plugins + composables). DevTools are dynamically imported and do not count toward this figure.
-
-- **README API table updated** (`README.md`): Added `configureSignal`, `setupDevtools`, and per-composable `dispose()` notes.
-
-### Acknowledgements
-
-Thanks to **@Aniruddha Adak** for the discussion and remarks on Vue reactivity edge cases — specifically around proxy trap safety, `<script setup>` destructuring pitfalls, and the importance of using standard exposed endpoints over internal runtime properties. Those notes directly informed several fixes in this release.
+- **`signal` and `configureSignal` exports**.
+- **DevTools integration** (`src/devtools.ts`).
+- **Roadmap in README**.

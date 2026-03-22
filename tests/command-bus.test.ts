@@ -5,7 +5,7 @@ describe('createCommandBus', () => {
   describe('dispatch', () => {
     it('should return error when no handler registered', () => {
       const bus = createCommandBus();
-      const result = bus.dispatch('unknown.action', {});
+      const result = bus.dispatch('unknownAction', {});
 
       expect(result.ok).toBe(false);
       expect(result.error?.message).toContain('No handler');
@@ -13,9 +13,9 @@ describe('createCommandBus', () => {
 
     it('should execute registered handler', () => {
       const bus = createCommandBus();
-      bus.register('test.action', (cmd) => cmd.target.value * 2);
+      bus.register('testAction', (cmd) => cmd.target.value * 2);
 
-      const result = bus.dispatch('test.action', { value: 5 });
+      const result = bus.dispatch('testAction', { value: 5 });
 
       expect(result.ok).toBe(true);
       expect(result.value).toBe(10);
@@ -25,11 +25,11 @@ describe('createCommandBus', () => {
       const bus = createCommandBus();
       const handler = vi.fn((cmd) => cmd);
 
-      bus.register('test.action', handler);
-      bus.dispatch('test.action', { id: 1 }, { extra: 'data' });
+      bus.register('testAction', handler);
+      bus.dispatch('testAction', { id: 1 }, { extra: 'data' });
 
       expect(handler).toHaveBeenCalledWith({
-        action: 'test.action',
+        action: 'testAction',
         target: { id: 1 },
         payload: { extra: 'data' },
       });
@@ -37,11 +37,11 @@ describe('createCommandBus', () => {
 
     it('should catch handler errors and return error result', () => {
       const bus = createCommandBus();
-      bus.register('test.error', () => {
+      bus.register('testError', () => {
         throw new Error('Handler failed');
       });
 
-      const result = bus.dispatch('test.error', {});
+      const result = bus.dispatch('testError', {});
 
       expect(result.ok).toBe(false);
       expect(result.error?.message).toBe('Handler failed');
@@ -51,23 +51,25 @@ describe('createCommandBus', () => {
   describe('register', () => {
     it('should return unregister function', () => {
       const bus = createCommandBus();
-      const unregister = bus.register('test.action', () => 'result');
+      const unregister = bus.register('testAction', () => 'result');
 
-      expect(bus.dispatch('test.action', {}).ok).toBe(true);
+      expect(bus.dispatch('testAction', {}).ok).toBe(true);
 
       unregister();
 
-      expect(bus.dispatch('test.action', {}).ok).toBe(false);
+      expect(bus.dispatch('testAction', {}).ok).toBe(false);
     });
 
     it('should replace existing handler', () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
       const bus = createCommandBus();
-      bus.register('test.action', () => 'first');
-      bus.register('test.action', () => 'second');
+      bus.register('testAction', () => 'first');
+      bus.register('testAction', () => 'second');
 
-      const result = bus.dispatch('test.action', {});
+      const result = bus.dispatch('testAction', {});
 
       expect(result.value).toBe('second');
+      vi.restoreAllMocks();
     });
   });
 
@@ -83,12 +85,12 @@ describe('createCommandBus', () => {
         return result;
       });
 
-      bus.register('test.action', () => {
+      bus.register('testAction', () => {
         order.push('handler');
         return 'done';
       });
 
-      bus.dispatch('test.action', {});
+      bus.dispatch('testAction', {});
 
       expect(order).toEqual(['plugin-before', 'handler', 'plugin-after']);
     });
@@ -101,9 +103,9 @@ describe('createCommandBus', () => {
         return { ok: false, error: new Error('Blocked') };
       });
 
-      bus.register('test.action', handler);
+      bus.register('testAction', handler);
 
-      const result = bus.dispatch('test.action', {});
+      const result = bus.dispatch('testAction', {});
 
       expect(result.ok).toBe(false);
       expect(result.error?.message).toBe('Blocked');
@@ -128,12 +130,12 @@ describe('createCommandBus', () => {
         return result;
       });
 
-      bus.register('test.action', () => {
+      bus.register('testAction', () => {
         order.push('handler');
         return 'done';
       });
 
-      bus.dispatch('test.action', {});
+      bus.dispatch('testAction', {});
 
       expect(order).toEqual([
         'plugin1-before',
@@ -149,14 +151,14 @@ describe('createCommandBus', () => {
       const plugin = vi.fn((cmd, next) => next());
 
       const unsubscribe = bus.use(plugin);
-      bus.register('test.action', () => 'result');
+      bus.register('testAction', () => 'result');
 
-      bus.dispatch('test.action', {});
+      bus.dispatch('testAction', {});
       expect(plugin).toHaveBeenCalledTimes(1);
 
       unsubscribe();
 
-      bus.dispatch('test.action', {});
+      bus.dispatch('testAction', {});
       expect(plugin).toHaveBeenCalledTimes(1);
     });
   });
@@ -167,12 +169,12 @@ describe('createCommandBus', () => {
       const hook = vi.fn();
 
       bus.onAfter(hook);
-      bus.register('test.action', () => 'result');
+      bus.register('testAction', () => 'result');
 
-      bus.dispatch('test.action', { id: 1 });
+      bus.dispatch('testAction', { id: 1 });
 
       expect(hook).toHaveBeenCalledWith(
-        { action: 'test.action', target: { id: 1 }, payload: undefined },
+        { action: 'testAction', target: { id: 1 }, payload: undefined },
         { ok: true, value: 'result' }
       );
     });
@@ -182,11 +184,11 @@ describe('createCommandBus', () => {
       const hook = vi.fn();
 
       bus.onAfter(hook);
-      bus.register('test.error', () => {
+      bus.register('testError', () => {
         throw new Error('Oops');
       });
 
-      bus.dispatch('test.error', {});
+      bus.dispatch('testError', {});
 
       expect(hook).toHaveBeenCalled();
       expect(hook.mock.calls[0][1].ok).toBe(false);
@@ -199,9 +201,9 @@ describe('createCommandBus', () => {
       bus.onAfter(() => {
         throw new Error('Hook error');
       });
-      bus.register('test.action', () => 'result');
+      bus.register('testAction', () => 'result');
 
-      const result = bus.dispatch('test.action', {});
+      const result = bus.dispatch('testAction', {});
 
       expect(result.ok).toBe(true);
       expect(consoleError).toHaveBeenCalled();
@@ -214,14 +216,14 @@ describe('createCommandBus', () => {
       const hook = vi.fn();
 
       const unsubscribe = bus.onAfter(hook);
-      bus.register('test.action', () => 'result');
+      bus.register('testAction', () => 'result');
 
-      bus.dispatch('test.action', {});
+      bus.dispatch('testAction', {});
       expect(hook).toHaveBeenCalledTimes(1);
 
       unsubscribe();
 
-      bus.dispatch('test.action', {});
+      bus.dispatch('testAction', {});
       expect(hook).toHaveBeenCalledTimes(1);
     });
   });
@@ -231,12 +233,12 @@ describe('createAsyncCommandBus', () => {
   it('should handle async handlers', async () => {
     const bus = createAsyncCommandBus();
 
-    bus.register('async.action', async (cmd) => {
+    bus.register('asyncAction', async (cmd) => {
       await new Promise((r) => setTimeout(r, 10));
       return cmd.target.value * 2;
     });
 
-    const result = await bus.dispatch('async.action', { value: 5 });
+    const result = await bus.dispatch('asyncAction', { value: 5 });
 
     expect(result.ok).toBe(true);
     expect(result.value).toBe(10);
@@ -245,12 +247,12 @@ describe('createAsyncCommandBus', () => {
   it('should catch async errors', async () => {
     const bus = createAsyncCommandBus();
 
-    bus.register('async.error', async () => {
+    bus.register('asyncError', async () => {
       await new Promise((r) => setTimeout(r, 10));
       throw new Error('Async error');
     });
 
-    const result = await bus.dispatch('async.error', {});
+    const result = await bus.dispatch('asyncError', {});
 
     expect(result.ok).toBe(false);
     expect(result.error?.message).toBe('Async error');
@@ -268,12 +270,12 @@ describe('createAsyncCommandBus', () => {
       return result;
     });
 
-    bus.register('async.action', async () => {
+    bus.register('asyncAction', async () => {
       order.push('handler');
       return 'done';
     });
 
-    await bus.dispatch('async.action', {});
+    await bus.dispatch('asyncAction', {});
 
     expect(order).toEqual(['plugin-before', 'handler', 'plugin-after']);
   });
@@ -287,9 +289,9 @@ describe('createAsyncCommandBus', () => {
       hookCalled(result);
     });
 
-    bus.register('async.action', async () => 'result');
+    bus.register('asyncAction', async () => 'result');
 
-    await bus.dispatch('async.action', {});
+    await bus.dispatch('asyncAction', {});
 
     expect(hookCalled).toHaveBeenCalledWith({ ok: true, value: 'result' });
   });

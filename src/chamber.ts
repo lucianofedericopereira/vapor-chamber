@@ -1,12 +1,13 @@
 /**
  * vapor-chamber - Vue Vapor integration
  *
+ * v0.4.1 — Added: useCommandGroup (namespace isolation), useCommandError (error boundary).
  * v0.4.0 — Vue 3.6 Vapor alignment: onScopeDispose, Vapor detection,
  *           defineVaporCommand, createVaporChamberApp.
  * v0.3.0 — Fixed: signal shim, resetCommandBus, auto-cleanup on Vue unmount.
  */
 
-import { createCommandBus, type CommandBus, type Command, type CommandResult, type Handler, type Plugin, type RegisterOptions } from './command-bus';
+import { createCommandBus, type CommandBus, type Command, type CommandResult, type Handler, type Plugin, type RegisterOptions, type Listener } from './command-bus';
 
 // ---------------------------------------------------------------------------
 // Signal abstraction
@@ -123,44 +124,15 @@ export const signal: CreateSignal = <T>(initial: T) => _signalFn(initial);
 
 /**
  * Returns true if Vue 3.6+ with Vapor mode support is detected.
- * This means createVaporApp is available as an import from 'vue'.
  */
 export function isVaporAvailable(): boolean {
   return _hasVapor;
 }
 
-/**
- * Create a Vapor app instance with vapor-chamber ready.
- * Requires Vue 3.6+. Throws if Vapor is not available.
- *
- * @example
- * import { createVaporChamberApp } from 'vapor-chamber';
- * import App from './App.vue';
- * createVaporChamberApp(App).mount('#app');
- */
-export function createVaporChamberApp(rootComponent: any, rootProps?: any) {
-  if (!_createVaporAppFn) {
-    throw new Error(
-      '[vapor-chamber] Vue 3.6+ with Vapor mode required. ' +
-      'Install vue@^3.6.0-beta.1 or use createApp() for VDOM mode.'
-    );
-  }
-  return _createVaporAppFn(rootComponent, rootProps);
-}
-
-/**
- * Returns the vaporInteropPlugin if available (Vue 3.6+).
- * Use this to enable mixed Vapor/VDOM component trees:
- *
- * @example
- * import { createApp } from 'vue';
- * import { getVaporInteropPlugin } from 'vapor-chamber';
- * const plugin = getVaporInteropPlugin();
- * if (plugin) createApp(App).use(plugin).mount('#app');
- */
-export function getVaporInteropPlugin(): any | null {
-  return _vaporInteropPluginRef;
-}
+/** @internal — for chamber-vapor.ts use only */
+export function getVaporAppFn(): any { return _createVaporAppFn; }
+/** @internal — for chamber-vapor.ts use only */
+export function getVaporInteropRef(): any { return _vaporInteropPluginRef; }
 
 // ---------------------------------------------------------------------------
 // Shared command bus instance
@@ -201,7 +173,7 @@ export function resetCommandBus(): void {
  * Falls back to onUnmounted if onScopeDispose is not available.
  * No-ops entirely if not inside a Vue context.
  */
-function tryAutoCleanup(disposeFn: () => void): void {
+export function tryAutoCleanup(disposeFn: () => void): void {
   probeVue();
 
   // Prefer onScopeDispose — works in effectScope + both VDOM and Vapor
@@ -243,91 +215,13 @@ export function useCommand() {
   function dispatch(action: string, target: any, payload?: any): CommandResult {
     loading.value = true;
     lastError.value = null;
-
     const result = bus.dispatch(action, target, payload);
-
     loading.value = false;
-    if (!result.ok) {
-      lastError.value = result.error ?? null;
-    }
-
+    if (!result.ok) lastError.value = result.error ?? null;
     return result;
   }
 
-  const cleanups: Array<() => void> = [];
-
-  function register(action: string, handler: Handler): () => void {
-    const unregister = bus.register(action, handler);
-    cleanups.push(unregister);
-    return unregister;
-  }
-
-  function use(plugin: Plugin): () => void {
-    const remove = bus.use(plugin);
-    cleanups.push(remove);
-    return remove;
-  }
-
-  function dispose() {
-    cleanups.forEach(fn => fn());
-    cleanups.length = 0;
-  }
-
-  tryAutoCleanup(dispose);
-
-  return {
-    dispatch,
-    loading,
-    lastError,
-    register,
-    use,
-    dispose,
-  };
-}
-
-// ---------------------------------------------------------------------------
-// defineVaporCommand
-// ---------------------------------------------------------------------------
-
-/**
- * defineVaporCommand — zero-overhead command for hot paths in Vapor mode.
- *
- * Unlike useCommand(), this skips reactive loading/error signal creation.
- * Ideal for high-frequency dispatches: scroll tracking, mousemove, GA4 events,
- * debounced search, and any fire-and-forget pattern where you don't need
- * reactive loading/error state.
- *
- * Under Vue 3.6 Vapor + alien-signals, this avoids creating unnecessary
- * reactive subscriptions that would add overhead to the signal dependency graph.
- *
- * @example
- * // In <script setup vapor>
- * const { dispatch } = defineVaporCommand('analytics_track', (cmd) => {
- *   gtag('event', cmd.target.event, cmd.target.params);
- * });
- *
- * // Fire-and-forget — no reactive overhead
- * dispatch({ event: 'page_view', params: { page: '/shop' } });
- */
-export function defineVaporCommand(
-  action: string,
-  handler: Handler,
-  options?: RegisterOptions
-) {
-  const bus = getCommandBus();
-  const unregister = bus.register(action, handler, options);
-
-  function dispatch(target: any, payload?: any): CommandResult {
-    return bus.dispatch(action, target, payload);
-  }
-
-  function dispose() {
-    unregister();
-  }
-
-  tryAutoCleanup(dispose);
-
-  return { dispatch, dispose };
+  return { dispatch, loading, lastError };
 }
 
 // ---------------------------------------------------------------------------
@@ -469,4 +363,117 @@ export function useCommandHistory(options: {
     clear,
     dispose,
   };
+}
+
+// ---------------------------------------------------------------------------
+// useCommandGroup
+// ---------------------------------------------------------------------------
+
+/**
+ * useCommandGroup — namespace isolation for large apps and multi-team projects.
+ *
+ * All dispatch/register/on calls are automatically prefixed with the namespace
+ * in camelCase. This prevents action name collisions when composing multiple
+ * feature modules.
+ *
+ * @example
+ * // Cart feature
+ * const cart = useCommandGroup('cart')
+ * cart.register('add', handler)    // registers 'cartAdd'
+ * cart.dispatch('add', product)    // dispatches 'cartAdd'
+ * cart.on('*', listener)           // listens to 'cart*'
+ *
+ * // Orders feature — completely isolated
+ * const orders = useCommandGroup('orders')
+ * orders.dispatch('cancel', { id }) // dispatches 'ordersCancel'
+ */
+export function useCommandGroup(namespace: string) {
+  const bus = getCommandBus();
+  const cleanups: Array<() => void> = [];
+
+  function prefixed(action: string): string {
+    return namespace + action.charAt(0).toUpperCase() + action.slice(1);
+  }
+
+  function dispatch(action: string, target: any, payload?: any): CommandResult {
+    return bus.dispatch(prefixed(action), target, payload);
+  }
+
+  function register(action: string, handler: Handler, opts?: RegisterOptions): () => void {
+    const unregister = bus.register(prefixed(action), handler, opts);
+    cleanups.push(unregister);
+    return unregister;
+  }
+
+  function use(plugin: Plugin): () => void {
+    const remove = bus.use(plugin);
+    cleanups.push(remove);
+    return remove;
+  }
+
+  function on(pattern: string, listener: Listener): () => void {
+    // Translate wildcard to namespaced: '*' → 'cart*', 'add' → 'cartAdd'
+    const namespacedPattern = pattern === '*' ? `${namespace}*` : prefixed(pattern);
+    const unsub = bus.on(namespacedPattern, listener);
+    cleanups.push(unsub);
+    return unsub;
+  }
+
+  function dispose() {
+    cleanups.forEach(fn => fn());
+    cleanups.length = 0;
+  }
+
+  tryAutoCleanup(dispose);
+
+  return { dispatch, register, use, on, namespace, dispose };
+}
+
+// ---------------------------------------------------------------------------
+// useCommandError
+// ---------------------------------------------------------------------------
+
+/**
+ * useCommandError — component-scoped error boundary for command failures.
+ *
+ * Subscribes to the bus and captures all failed command results reactively.
+ * Optional filter narrows which actions are tracked.
+ *
+ * @example
+ * const { latestError, errors, clearErrors } = useCommandError()
+ *
+ * // Only watch cart commands
+ * const { latestError } = useCommandError({ filter: cmd => cmd.action.startsWith('cart') })
+ */
+export function useCommandError(options: {
+  filter?: (cmd: Command) => boolean;
+} = {}) {
+  const { filter } = options;
+  const bus = getCommandBus();
+
+  type ErrorEntry = { cmd: Command; error: Error; timestamp: number };
+  const errors = signal<ErrorEntry[]>([]);
+  const latestError = signal<Error | null>(null);
+
+  const unsubscribe = bus.onAfter((cmd, result) => {
+    if (!result.ok && result.error) {
+      if (!filter || filter(cmd)) {
+        latestError.value = result.error;
+        errors.value = [...errors.value, { cmd, error: result.error, timestamp: Date.now() }];
+      }
+    }
+  });
+
+  function clearErrors() {
+    errors.value = [];
+    latestError.value = null;
+  }
+
+  function dispose() {
+    unsubscribe();
+  }
+
+  tryAutoCleanup(dispose);
+
+  return { errors, latestError, clearErrors, dispose };
 }

@@ -6,6 +6,32 @@
   A lightweight command bus designed for <a href="https://github.com/vuejs/vue-vapor">Vue Vapor</a>. ~2KB gzipped. Vue 3.6 Vapor aligned. Optional DevTools integration.
 </p>
 
+## What is Vapor Chamber?
+
+Vapor Chamber is a **command bus for Vue 3.6+ Vapor mode**. It gives every user action a single handler, a composable plugin pipeline, and signal-native reactive state — replacing scattered event listeners and prop-drilling with one predictable, testable flow.
+
+```ts
+import { createCommandBus, useCommand } from 'vapor-chamber';
+
+const bus = createCommandBus();
+
+bus.register('cartAdd', (cmd) => addToCart(cmd.target));
+bus.use(logger());
+bus.use(validator({ cartAdd: (cmd) => cmd.target.id ? null : 'Missing ID' }));
+
+// In a component
+const { dispatch, loading, lastError } = useCommand('cartAdd');
+```
+
+- **~2 KB gzipped** — zero runtime dependencies
+- **Framework-agnostic core** — the bus itself has no Vue import
+- **Vue 3.6 Vapor aligned** — signals, `onScopeDispose`, alien-signals internals
+- **Full plugin pipeline** — logger, validator, debounce, throttle, retry, persist, sync, and more
+- **Transport layer** — HTTP bridge, WebSocket bridge, SSE bridge
+- **SSR-safe** — per-request bus isolation, no shared singletons
+
+---
+
 ## What is Vue Vapor?
 
 Vue Vapor is Vue's compilation strategy that eliminates the Virtual DOM. Instead of diffing virtual trees, Vapor compiles templates to direct DOM operations using **signals** — reactive primitives that update only what changed.
@@ -37,17 +63,17 @@ bus.on('cart:add', updateBadge);  // now two handlers, hard to trace
 ```
 // After — Vapor Chamber
 // Anywhere in the app
-bus.dispatch('cart_add', product, { quantity: 1 });
+bus.dispatch('cartAdd', product, { quantity: 1 });
 
 // One place, once:
-bus.register('cart_add', (cmd) => {
+bus.register('cartAdd', (cmd) => {
   cart.items.push(cmd.target);
   return cart.items;
 });
 
 // Cross-cutting concerns as plugins, not scattered listeners:
 bus.use(logger());
-bus.use(validator({ 'cart_add': (cmd) => cmd.target.id ? null : 'Missing ID' }));
+bus.use(validator({ 'cartAdd': (cmd) => cmd.target.id ? null : 'Missing ID' }));
 bus.use(analyticsPlugin);
 ```
 
@@ -60,7 +86,7 @@ Traditional event systems scatter logic across components. A command bus central
 ```
 Event-driven (scattered)          Command bus (centralized)
 ─────────────────────────         ─────────────────────────
-Component A emits 'add'    →      dispatch('cart_add', product)
+Component A emits 'add'    →      dispatch('cartAdd', product)
 Component B listens...            ↓
 Component C also listens...       Handler executes once
 Who handles what? When?           Plugins observe/modify
@@ -68,7 +94,7 @@ Who handles what? When?           Plugins observe/modify
 ```
 
 **Benefits:**
-- **Semantic actions** — `cart_add` is clearer than `emit('add')`
+- **Semantic actions** — `cartAdd` is clearer than `emit('add')`
 - **Single handler** — One place to look, debug, test
 - **Plugin pipeline** — Cross-cutting concerns (logging, validation, analytics) without cluttering handlers
 - **Undo/redo** — Command history is natural when actions are explicit
@@ -91,17 +117,17 @@ const bus = createCommandBus();
 // Add plugins
 bus.use(logger());
 bus.use(validator({
-  'cart_add': (cmd) => cmd.payload?.quantity > 0 ? null : 'Quantity required'
+  'cartAdd': (cmd) => cmd.payload?.quantity > 0 ? null : 'Quantity required'
 }));
 
 // Register handler
-bus.register('cart_add', (cmd) => {
+bus.register('cartAdd', (cmd) => {
   cart.items.push({ ...cmd.target, quantity: cmd.payload.quantity });
   return cart.items;
 });
 
 // Dispatch
-const result = bus.dispatch('cart_add', product, { quantity: 2 });
+const result = bus.dispatch('cartAdd', product, { quantity: 2 });
 if (result.ok) {
   console.log('Added:', result.value);
 } else {
@@ -167,7 +193,7 @@ A command has three parts:
 
 ```typescript
 bus.dispatch(
-  'cart_add',      // action - what to do
+  'cartAdd',      // action - what to do
   product,         // target - what to act on
   { quantity: 2 }  // payload - additional data (optional)
 );
@@ -180,13 +206,13 @@ Enforce consistent action names at register and dispatch time:
 ```typescript
 const bus = createCommandBus({
   naming: {
-    pattern: /^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)+$/,  // snake_case
+    pattern: /^[a-z][a-zA-Z0-9]+$/,  // camelCase
     onViolation: 'throw'  // or 'warn' or 'ignore'
   }
 });
 
-bus.register('cart_add', handler);       // ✓ passes
-bus.register('cartAdd', handler);        // ✗ throws
+bus.register('cartAdd', handler);       // ✓ passes
+bus.register('cart_add', handler);      // ✗ throws
 ```
 
 ### Handlers
@@ -194,7 +220,7 @@ bus.register('cartAdd', handler);        // ✗ throws
 One handler per action. Returns a value or throws:
 
 ```typescript
-bus.register('cart_add', (cmd) => {
+bus.register('cartAdd', (cmd) => {
   cart.items.push(cmd.target);
   return cart.items; // becomes result.value
 });
@@ -203,7 +229,7 @@ bus.register('cart_add', (cmd) => {
 Register with options for undo support and per-command throttling:
 
 ```typescript
-bus.register('cart_add', addHandler, {
+bus.register('cartAdd', addHandler, {
   undo: (cmd) => { cart.items.pop(); },
   throttle: 300,  // max once per 300ms per target
 });
@@ -253,10 +279,10 @@ Subscribe to command patterns without being a handler:
 bus.on('*', (cmd, result) => analytics.track(cmd.action));
 
 // Prefix matching
-bus.on('shop_*', (cmd, result) => console.log('Shop event:', cmd.action));
+bus.on('cart*', (cmd, result) => console.log('Cart event:', cmd.action));
 
 // Exact match
-bus.on('cart_add', (cmd, result) => updateBadge());
+bus.on('cartAdd', (cmd, result) => updateBadge());
 ```
 
 ### Request / Response
@@ -287,18 +313,21 @@ Falls back to normal `dispatch()` if no responder is registered.
 | `throttle(actions, wait)` | Limit execution frequency |
 | `authGuard(options)` | Block protected commands when unauthenticated |
 | `optimistic(handlers)` | Apply optimistic updates, rollback on failure |
+| `retry(options)` | Retry failed async dispatches with backoff |
+| `persist(options)` | Auto-save state to localStorage after commands |
+| `sync(options, bus?)` | Broadcast commands across browser tabs |
 
 ### logger
 
 ```typescript
-bus.use(logger({ collapsed: true, filter: (cmd) => cmd.action.startsWith('cart_') }));
+bus.use(logger({ collapsed: true, filter: (cmd) => cmd.action.startsWith('cart') }));
 ```
 
 ### validator
 
 ```typescript
 bus.use(validator({
-  'cart_add': (cmd) => {
+  'cartAdd': (cmd) => {
     if (!cmd.target?.id) return 'Product must have an ID';
     return null;  // null = valid
   }
@@ -322,20 +351,20 @@ With bus-backed undo (executes inverse handlers):
 const historyPlugin = history({ maxSize: 100, bus });
 bus.use(historyPlugin);
 
-// If cart_add was registered with { undo: fn }, calling undo() executes it
+// If cartAdd was registered with { undo: fn }, calling undo() executes it
 historyPlugin.undo();
 ```
 
 ### debounce
 
 ```typescript
-bus.use(debounce(['search_query'], 300)); // wait 300ms after last call
+bus.use(debounce(['searchQuery'], 300)); // wait 300ms after last call
 ```
 
 ### throttle
 
 ```typescript
-bus.use(throttle(['ui_scroll'], 100)); // max once per 100ms
+bus.use(throttle(['uiScroll'], 100)); // max once per 100ms
 ```
 
 ### authGuard
@@ -343,7 +372,7 @@ bus.use(throttle(['ui_scroll'], 100)); // max once per 100ms
 ```typescript
 bus.use(authGuard({
   isAuthenticated: () => !!user.value,
-  protected: ['shop_cart_', 'shop_wishlist_'],
+  protected: ['shopCart', 'shopWishlist'],
   onUnauthenticated: (cmd) => router.push('/login'),
 }));
 ```
@@ -352,7 +381,7 @@ bus.use(authGuard({
 
 ```typescript
 bus.use(optimistic({
-  'cart_add': {
+  'cartAdd': {
     apply: (cmd) => {
       cartCount.value++;
       return () => { cartCount.value--; };  // rollback function
@@ -361,15 +390,161 @@ bus.use(optimistic({
 }));
 ```
 
+### retry
+
+Async plugin that retries failed dispatches with configurable backoff. Install on an `AsyncCommandBus`:
+
+```typescript
+import { createAsyncCommandBus, retry } from 'vapor-chamber';
+
+const bus = createAsyncCommandBus();
+
+// All actions, exponential backoff (default)
+bus.use(retry({ maxAttempts: 3, baseDelay: 200 }));
+
+// Only retry network actions, fixed delay
+bus.use(retry({
+  actions: ['api*'],
+  maxAttempts: 5,
+  baseDelay: 500,
+  strategy: 'fixed',
+  isRetryable: (err) => err.message !== 'Unauthorized',
+}));
+```
+
+### persist
+
+Auto-save state to localStorage after each successful command. Rehydrate on startup:
+
+```typescript
+import { persist } from 'vapor-chamber';
+
+const cartPersist = persist({
+  key: 'vc:cart',
+  getState: () => cartState.value,
+});
+bus.use(cartPersist);
+
+// On app start — rehydrate before rendering
+const saved = cartPersist.load();
+if (saved) cartState.value = saved;
+
+// Manual operations
+cartPersist.save();   // force save now
+cartPersist.clear();  // remove from storage
+
+// Custom backend (sessionStorage, IndexedDB adapter, etc.)
+bus.use(persist({ key: 'vc:cart', getState, storage: sessionStorage }));
+```
+
+### sync
+
+Broadcast successful commands to all other open tabs via `BroadcastChannel`:
+
+```typescript
+import { sync } from 'vapor-chamber';
+
+const tabSync = sync(
+  {
+    channel: 'vapor-chamber:app',
+    filter: (cmd) => cmd.action.startsWith('cart') || cmd.action.startsWith('auth'),
+  },
+  bus // pass the bus so received messages are re-dispatched locally
+);
+
+bus.use(tabSync);
+
+// Teardown (component unmount, app destroy)
+tabSync.close();
+tabSync.isOpen(); // → false
+```
+
+## Transport Layer
+
+Send commands to a backend over HTTP, WebSocket, or SSE. Import from `vapor-chamber/transports`
+or directly from `vapor-chamber`:
+
+### createHttpBridge
+
+Async plugin that POSTs command envelopes to a backend endpoint. Unhandled commands (no local handler) fall through to the server:
+
+```typescript
+import { createAsyncCommandBus } from 'vapor-chamber';
+import { createHttpBridge } from 'vapor-chamber/transports';
+
+const bus = createAsyncCommandBus({ onMissing: 'ignore' });
+
+bus.use(createHttpBridge({
+  endpoint: '/api/commands',
+  csrf: true,           // reads XSRF-TOKEN cookie / meta tag automatically
+  retry: 2,             // retry up to 2 times on 5xx / 429 / 408
+  timeout: 8000,        // ms
+  actions: ['order*'],  // only forward order* actions; others stay local
+}));
+
+const result = await bus.dispatch('orderCreate', { items: cart });
+// → POST /api/commands  { command: 'orderCreate', target: { items: ... } }
+```
+
+The backend response shape:
+```json
+{ "state": { "orderId": 42, "status": "pending" } }
+```
+`result.value` will be the contents of `state`.
+
+### createWsBridge
+
+WebSocket transport with auto-reconnect:
+
+```typescript
+import { createWsBridge } from 'vapor-chamber/transports';
+
+bus.use(createWsBridge({
+  url: 'wss://api.example.com/commands',
+  actions: ['chat*', 'presence*'],
+}));
+```
+
+### createSseBridge
+
+Server-sent events — server pushes commands to the client:
+
+```typescript
+import { createSseBridge } from 'vapor-chamber/transports';
+
+bus.use(createSseBridge({
+  url: '/api/events',
+}));
+```
+
+## HTTP Client
+
+`postCommand` is exposed for use outside the transport plugin when you need direct HTTP control:
+
+```typescript
+import { postCommand } from 'vapor-chamber';
+
+const response = await postCommand('/api/commands', {
+  command: 'cartAdd',
+  target: product,
+  payload: { quantity: 2 },
+}, {
+  csrf: true,
+  timeout: 5000,
+  retry: 2,
+  onSessionExpired: (status) => router.push('/login'),
+});
+```
+
 ## Batch Dispatch
 
 Dispatch multiple commands as a unit. Stops on the first failure:
 
 ```typescript
 const result = bus.dispatchBatch([
-  { action: 'cart_add',        target: cart, payload: item },
-  { action: 'totals_update',   target: cart },
-  { action: 'analytics_track', target: session, payload: item },
+  { action: 'cartAdd',        target: cart, payload: item },
+  { action: 'totalsUpdate',   target: cart },
+  { action: 'analyticsTrack', target: session, payload: item },
 ]);
 
 if (result.ok) {
@@ -399,12 +574,12 @@ import { createAsyncCommandBus } from 'vapor-chamber';
 
 const bus = createAsyncCommandBus();
 
-bus.register('user_fetch', async (cmd) => {
+bus.register('userFetch', async (cmd) => {
   const response = await fetch(`/api/users/${cmd.target.id}`);
   return response.json();
 });
 
-const result = await bus.dispatch('user_fetch', { id: 123 });
+const result = await bus.dispatch('userFetch', { id: 123 });
 ```
 
 ## Vapor Composables
@@ -435,7 +610,7 @@ Ideal for GA4 tracking, scroll events, debounced search, fire-and-forget pattern
 <script setup vapor>
 import { defineVaporCommand } from 'vapor-chamber';
 
-const { dispatch } = defineVaporCommand('analytics_track', (cmd) => {
+const { dispatch } = defineVaporCommand('analyticsTrack', (cmd) => {
   gtag('event', cmd.target.event, cmd.target.params);
 });
 
@@ -455,7 +630,7 @@ import { useCommandState } from 'vapor-chamber';
 const { state: cart } = useCommandState(
   { items: [], total: 0 },
   {
-    'cart_add': (state, cmd) => ({
+    'cartAdd': (state, cmd) => ({
       items: [...state.items, cmd.target],
       total: state.total + cmd.target.price
     })
@@ -478,6 +653,97 @@ const { canUndo, canRedo, undo, redo } = useCommandHistory({
 </script>
 ```
 
+### useCommandGroup
+
+Namespace isolation for large apps and multi-team projects. All calls are automatically prefixed in camelCase — prevents action name collisions when composing multiple feature modules:
+
+```typescript
+import { useCommandGroup } from 'vapor-chamber';
+
+// Cart feature module
+const cart = useCommandGroup('cart');
+cart.register('add', handler);        // registers 'cartAdd'
+cart.dispatch('add', product);        // dispatches 'cartAdd'
+cart.on('*', listener);               // listens to 'cart*'
+
+// Orders feature — completely isolated
+const orders = useCommandGroup('orders');
+orders.dispatch('cancel', { id });    // dispatches 'ordersCancel'
+
+// Access the namespace
+cart.namespace;  // → 'cart'
+```
+
+Auto-cleanup on Vue scope disposal. `dispose()` is also available for manual teardown.
+
+### useCommandError
+
+Component-scoped error boundary. Reactively captures all failed command results:
+
+```typescript
+import { useCommandError } from 'vapor-chamber';
+
+// Watch all failed commands
+const { errors, latestError, clearErrors } = useCommandError();
+
+// Narrow to a subset
+const { latestError } = useCommandError({
+  filter: (cmd) => cmd.action.startsWith('cart'),
+});
+
+// In template
+// latestError.value?.message
+// errors.value.length
+```
+
+### createFormBus
+
+Reactive form state manager built on the command bus. Per-field validation, dirty tracking, and full plugin pipeline on every form command:
+
+```typescript
+import { createFormBus, logger } from 'vapor-chamber';
+
+const form = createFormBus({
+  fields: { email: '', password: '' },
+  rules: {
+    email:    (v) => v.includes('@') ? null : 'Invalid email',
+    password: (v) => v.length >= 8   ? null : 'Too short',
+  },
+  onSubmit: async (values) => await api.login(values),
+});
+
+// Attach plugins — logger, throttle, authGuard, etc.
+form.use(logger());
+
+// Reactive state
+form.values.value        // { email: '', password: '' }
+form.errors.value        // { email: 'Invalid email', ... }
+form.isDirty.value       // true when any field has changed
+form.isValid.value       // true when no errors
+form.isSubmitting.value  // true while onSubmit is in flight
+
+// Actions
+form.set('email', 'user@example.com');  // updates field + re-runs validation
+form.touch('email');                     // marks field as interacted with
+await form.submit();                     // validate → onSubmit → returns bool
+form.reset();                            // restore initial values
+```
+
+Template usage (Vue 3):
+
+```vue
+<input :value="form.values.value.email"
+       @input="form.set('email', $event.target.value)"
+       @blur="form.touch('email')" />
+<span v-if="form.touched.value.email && form.errors.value.email">
+  {{ form.errors.value.email }}
+</span>
+<button :disabled="!form.isValid.value || form.isSubmitting.value"
+        @click="form.submit()">
+  Submit
+</button>
+```
+
 ### useCommandBus
 
 Lightweight access to the shared bus — tree-shakeable:
@@ -486,7 +752,7 @@ Lightweight access to the shared bus — tree-shakeable:
 import { useCommandBus } from 'vapor-chamber';
 
 const bus = useCommandBus();
-bus.dispatch('cart_add', product, { quantity: 1 });
+bus.dispatch('cartAdd', product, { quantity: 1 });
 ```
 
 Use `useCommand()` when you need reactive `loading`/`lastError` signals. Use `defineVaporCommand()` for zero-overhead hot paths. Use `useCommandBus()` when you just need to dispatch.
@@ -507,9 +773,8 @@ configureSignal(ref); // explicit — usually auto-detected
 `createTestBus()` records all dispatched commands without executing real handlers:
 
 ```typescript
-import { createTestBus, setCommandBus } from 'vapor-chamber';
+import { createTestBus, setCommandBus, resetCommandBus } from 'vapor-chamber';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { resetCommandBus } from 'vapor-chamber';
 
 describe('CartButton', () => {
   let bus: TestBus;
@@ -523,12 +788,35 @@ describe('CartButton', () => {
     resetCommandBus();
   });
 
-  it('dispatches cart_add on click', () => {
+  it('dispatches cartAdd on click', () => {
     // ... render component, click button ...
-    expect(bus.wasDispatched('cart_add')).toBe(true);
-    expect(bus.getDispatched('cart_add')[0].cmd.payload).toEqual({ quantity: 1 });
+    expect(bus.wasDispatched('cartAdd')).toBe(true);
+    expect(bus.getDispatched('cartAdd')[0].cmd.payload).toEqual({ quantity: 1 });
   });
 });
+```
+
+**Snapshot & time-travel** — replay command sequences for debugging or testing:
+
+```typescript
+const bus = createTestBus();
+
+bus.dispatch('login', user);
+bus.dispatch('cartAdd', product, { quantity: 1 });
+bus.dispatch('cartAdd', product2, { quantity: 2 });
+bus.dispatch('checkout', cart);
+
+// Immutable snapshot — mutations don't affect bus.recorded
+const snap = bus.snapshot(); // → RecordedDispatch[]
+
+// Commands 0..N inclusive (returns Command[])
+bus.travelTo(1);                        // → [login, cartAdd]
+
+// All commands up to last occurrence of 'cartAdd'
+bus.travelToAction('cartAdd');          // → [login, cartAdd, cartAdd]
+
+// Out-of-range indices are clamped
+bus.travelTo(999);                      // → full history
 ```
 
 ### setupDevtools
@@ -580,10 +868,10 @@ See the [`examples/`](./examples) folder for complete, runnable examples:
 |--------|-------------|
 | `dispatch(action, target, payload?)` | Execute a command |
 | `dispatchBatch(commands[])` | Execute multiple commands; stops on first failure |
-| `register(action, handler, options?)` | Register a handler. Options: `{ undo?, throttle?, debounce? }` |
+| `register(action, handler, options?)` | Register a handler. Options: `{ undo?, throttle? }` |
 | `use(plugin, options?)` | Add a plugin. `options.priority` controls order |
 | `onAfter(hook)` | Run callback after every command |
-| `on(pattern, listener)` | Subscribe to commands matching a pattern (`*`, `prefix_*`, exact) |
+| `on(pattern, listener)` | Subscribe to commands matching a pattern (`*`, `prefix*`, exact) |
 | `request(action, target, options?)` | Async request/response with timeout |
 | `respond(action, handler)` | Register a responder for `request()` calls |
 | `getUndoHandler(action)` | Get the undo handler for an action |
@@ -596,6 +884,8 @@ See the [`examples/`](./examples) folder for complete, runnable examples:
 | `defineVaporCommand(action, handler, options?)` | Zero-overhead dispatch for hot paths |
 | `useCommandState(initial, handlers)` | State managed by commands |
 | `useCommandHistory(options?)` | Reactive undo/redo |
+| `useCommandGroup(namespace)` | Namespace isolation — prefixes all calls in camelCase |
+| `useCommandError(options?)` | Reactive error boundary for failed dispatches |
 | `useCommandBus()` | Get shared bus instance |
 | `getCommandBus()` | Get shared bus instance (non-composable) |
 | `setCommandBus(bus)` | Set shared bus instance |
@@ -625,16 +915,24 @@ See the [`examples/`](./examples) folder for complete, runnable examples:
 | Vue 3.6 Vapor alignment | ✅ Done (v0.4.0) |
 | `defineVaporCommand` zero-overhead composable | ✅ Done (v0.4.0) |
 | `onScopeDispose` lifecycle alignment | ✅ Done (v0.4.0) |
-| Persistence plugin (localStorage / IndexedDB) | Planned |
-| SSR support | Planned (pending Vue Vapor stabilization) |
+| Namespace isolation (`useCommandGroup`) | ✅ Done (v0.4.1) |
+| Error boundary (`useCommandError`) | ✅ Done (v0.4.1) |
+| Transport layer (HTTP / WebSocket / SSE) | ✅ Done (v0.4.2) |
+| Retry plugin with configurable backoff | ✅ Done (v0.4.2) |
+| Persistence plugin (localStorage / IndexedDB) | ✅ Done (v0.4.2) |
+| Cross-tab sync plugin (`BroadcastChannel`) | ✅ Done (v0.4.2) |
+| `createTestBus` snapshot & time-travel | ✅ Done (v0.4.3) |
+| camelCase action names (LLM-tokenization optimal) | ✅ Done (v0.5.0) |
+| TypeScript HTTP client (`postCommand`) | ✅ Done (v0.5.0) |
+| CDCC-compliant file splits | ✅ Done (v0.5.0) |
+| SSR concurrency tests | ✅ Done (v0.5.0) |
+| Directive plugin (`v-command`) | ✅ Done (v0.5.0) |
+| Vite HMR plugin | ✅ Done (v0.5.0) |
+| Form bus (`createFormBus`) | ✅ Done (v0.5.0) |
 
 ## Documentation
 
-See the [`docs/`](./docs) folder for detailed documentation:
-
-- [Whitepaper](./docs/whitepaper.md) — Design philosophy and architecture
-- [Vue 3.6 Vapor Alignment](./docs/whitepaper-vue36.md) — Alien-signals, Vapor mode, and migration strategy
-- [SSR Guide](./docs/ssr.md) — Server-side rendering and hydration
+See [`docs/whitepaper.md`](./docs/whitepaper.md) for design philosophy, architecture, camelCase naming rationale, Vue 3.6 Vapor alignment, SSR guide, and migration strategy.
 
 ## Design Goals
 

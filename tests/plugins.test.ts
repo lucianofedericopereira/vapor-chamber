@@ -14,9 +14,9 @@ describe('logger plugin', () => {
     const groupEnd = vi.spyOn(console, 'groupEnd').mockImplementation(() => {});
 
     bus.use(logger());
-    bus.register('test.action', () => 'result');
+    bus.register('testAction', () => 'result');
 
-    bus.dispatch('test.action', { id: 1 }, { extra: 'data' });
+    bus.dispatch('testAction', { id: 1 }, { extra: 'data' });
 
     expect(group).toHaveBeenCalled();
     expect(log).toHaveBeenCalledWith('target:', { id: 1 });
@@ -32,9 +32,9 @@ describe('logger plugin', () => {
     vi.spyOn(console, 'groupEnd').mockImplementation(() => {});
 
     bus.use(logger({ collapsed: false }));
-    bus.register('test.action', () => 'result');
+    bus.register('testAction', () => 'result');
 
-    bus.dispatch('test.action', {});
+    bus.dispatch('testAction', {});
 
     expect(group).toHaveBeenCalled();
   });
@@ -45,16 +45,16 @@ describe('logger plugin', () => {
     vi.spyOn(console, 'groupCollapsed').mockImplementation(() => {});
     vi.spyOn(console, 'groupEnd').mockImplementation(() => {});
 
-    bus.use(logger({ filter: (cmd) => cmd.action.startsWith('cart.') }));
-    bus.register('cart.add', () => 'cart');
-    bus.register('user.login', () => 'user');
+    bus.use(logger({ filter: (cmd) => cmd.action.startsWith('cart') }));
+    bus.register('cartAdd', () => 'cart');
+    bus.register('userLogin', () => 'user');
 
-    bus.dispatch('cart.add', {});
+    bus.dispatch('cartAdd', {});
     expect(log).toHaveBeenCalled();
 
     log.mockClear();
 
-    bus.dispatch('user.login', {});
+    bus.dispatch('userLogin', {});
     expect(log).not.toHaveBeenCalled();
   });
 });
@@ -64,11 +64,11 @@ describe('validator plugin', () => {
     const bus = createCommandBus();
 
     bus.use(validator({
-      'test.action': () => null,
+      'testAction': () => null,
     }));
-    bus.register('test.action', () => 'success');
+    bus.register('testAction', () => 'success');
 
-    const result = bus.dispatch('test.action', {});
+    const result = bus.dispatch('testAction', {});
 
     expect(result.ok).toBe(true);
     expect(result.value).toBe('success');
@@ -78,11 +78,11 @@ describe('validator plugin', () => {
     const bus = createCommandBus();
 
     bus.use(validator({
-      'test.action': () => 'Validation failed',
+      'testAction': () => 'Validation failed',
     }));
-    bus.register('test.action', () => 'success');
+    bus.register('testAction', () => 'success');
 
-    const result = bus.dispatch('test.action', {});
+    const result = bus.dispatch('testAction', {});
 
     expect(result.ok).toBe(false);
     expect(result.error?.message).toBe('Validation failed');
@@ -92,23 +92,23 @@ describe('validator plugin', () => {
     const bus = createCommandBus();
 
     bus.use(validator({
-      'test.action': (cmd) => cmd.target?.value > 0 ? null : 'Value must be positive',
+      'testAction': (cmd) => cmd.target?.value > 0 ? null : 'Value must be positive',
     }));
-    bus.register('test.action', () => 'success');
+    bus.register('testAction', () => 'success');
 
-    expect(bus.dispatch('test.action', { value: 5 }).ok).toBe(true);
-    expect(bus.dispatch('test.action', { value: -1 }).ok).toBe(false);
+    expect(bus.dispatch('testAction', { value: 5 }).ok).toBe(true);
+    expect(bus.dispatch('testAction', { value: -1 }).ok).toBe(false);
   });
 
   it('should skip unregistered actions', () => {
     const bus = createCommandBus();
 
     bus.use(validator({
-      'validated.action': () => 'Blocked',
+      'validatedAction': () => 'Blocked',
     }));
-    bus.register('other.action', () => 'success');
+    bus.register('otherAction', () => 'success');
 
-    const result = bus.dispatch('other.action', {});
+    const result = bus.dispatch('otherAction', {});
 
     expect(result.ok).toBe(true);
   });
@@ -120,10 +120,10 @@ describe('history plugin', () => {
     const historyPlugin = history();
 
     bus.use(historyPlugin);
-    bus.register('test.action', () => 'success');
+    bus.register('testAction', () => 'success');
 
-    bus.dispatch('test.action', { id: 1 });
-    bus.dispatch('test.action', { id: 2 });
+    bus.dispatch('testAction', { id: 1 });
+    bus.dispatch('testAction', { id: 2 });
 
     const state = historyPlugin.getState();
     expect(state.past.length).toBe(2);
@@ -136,11 +136,11 @@ describe('history plugin', () => {
     const historyPlugin = history();
 
     bus.use(historyPlugin);
-    bus.register('test.error', () => {
+    bus.register('testError', () => {
       throw new Error('Failed');
     });
 
-    bus.dispatch('test.error', {});
+    bus.dispatch('testError', {});
 
     const state = historyPlugin.getState();
     expect(state.past.length).toBe(0);
@@ -151,10 +151,10 @@ describe('history plugin', () => {
     const historyPlugin = history();
 
     bus.use(historyPlugin);
-    bus.register('test.action', () => 'success');
+    bus.register('testAction', () => 'success');
 
-    bus.dispatch('test.action', { id: 1 });
-    bus.dispatch('test.action', { id: 2 });
+    bus.dispatch('testAction', { id: 1 });
+    bus.dispatch('testAction', { id: 2 });
 
     const undone = historyPlugin.undo();
 
@@ -169,9 +169,9 @@ describe('history plugin', () => {
     const historyPlugin = history();
 
     bus.use(historyPlugin);
-    bus.register('test.action', () => 'success');
+    bus.register('testAction', () => 'success');
 
-    bus.dispatch('test.action', { id: 1 });
+    bus.dispatch('testAction', { id: 1 });
     historyPlugin.undo();
 
     const redone = historyPlugin.redo();
@@ -186,15 +186,15 @@ describe('history plugin', () => {
     const historyPlugin = history();
 
     bus.use(historyPlugin);
-    bus.register('test.action', () => 'success');
+    bus.register('testAction', () => 'success');
 
-    bus.dispatch('test.action', { id: 1 });
-    bus.dispatch('test.action', { id: 2 });
+    bus.dispatch('testAction', { id: 1 });
+    bus.dispatch('testAction', { id: 2 });
     historyPlugin.undo();
 
     expect(historyPlugin.getState().future.length).toBe(1);
 
-    bus.dispatch('test.action', { id: 3 });
+    bus.dispatch('testAction', { id: 3 });
 
     expect(historyPlugin.getState().future.length).toBe(0);
   });
@@ -204,11 +204,11 @@ describe('history plugin', () => {
     const historyPlugin = history({ maxSize: 2 });
 
     bus.use(historyPlugin);
-    bus.register('test.action', () => 'success');
+    bus.register('testAction', () => 'success');
 
-    bus.dispatch('test.action', { id: 1 });
-    bus.dispatch('test.action', { id: 2 });
-    bus.dispatch('test.action', { id: 3 });
+    bus.dispatch('testAction', { id: 1 });
+    bus.dispatch('testAction', { id: 2 });
+    bus.dispatch('testAction', { id: 3 });
 
     const state = historyPlugin.getState();
     expect(state.past.length).toBe(2);
@@ -219,16 +219,16 @@ describe('history plugin', () => {
   it('should respect filter', () => {
     const bus = createCommandBus();
     const historyPlugin = history({
-      filter: (cmd) => cmd.action.startsWith('track.'),
+      filter: (cmd) => cmd.action.startsWith('track'),
     });
 
     bus.use(historyPlugin);
-    bus.register('track.action', () => 'tracked');
-    bus.register('other.action', () => 'not tracked');
+    bus.register('trackAction', () => 'tracked');
+    bus.register('otherAction', () => 'not tracked');
 
-    bus.dispatch('track.action', { id: 1 });
-    bus.dispatch('other.action', { id: 2 });
-    bus.dispatch('track.action', { id: 3 });
+    bus.dispatch('trackAction', { id: 1 });
+    bus.dispatch('otherAction', { id: 2 });
+    bus.dispatch('trackAction', { id: 3 });
 
     const state = historyPlugin.getState();
     expect(state.past.length).toBe(2);
@@ -239,9 +239,9 @@ describe('history plugin', () => {
     const historyPlugin = history();
 
     bus.use(historyPlugin);
-    bus.register('test.action', () => 'success');
+    bus.register('testAction', () => 'success');
 
-    bus.dispatch('test.action', { id: 1 });
+    bus.dispatch('testAction', { id: 1 });
     historyPlugin.undo();
 
     historyPlugin.clear();
@@ -261,13 +261,13 @@ describe('debounce plugin', () => {
     const bus = createCommandBus();
     const handler = vi.fn(() => 'result');
 
-    bus.use(debounce(['test.action'], 100));
-    bus.register('test.action', handler);
+    bus.use(debounce(['testAction'], 100));
+    bus.register('testAction', handler);
 
     // Same target = same debounce key
-    bus.dispatch('test.action', { id: 1 });
-    bus.dispatch('test.action', { id: 1 });
-    bus.dispatch('test.action', { id: 1 });
+    bus.dispatch('testAction', { id: 1 });
+    bus.dispatch('testAction', { id: 1 });
+    bus.dispatch('testAction', { id: 1 });
 
     expect(handler).not.toHaveBeenCalled();
 
@@ -280,10 +280,10 @@ describe('debounce plugin', () => {
     const bus = createCommandBus();
     const handler = vi.fn(() => 'result');
 
-    bus.use(debounce(['debounced.action'], 100));
-    bus.register('other.action', handler);
+    bus.use(debounce(['debouncedAction'], 100));
+    bus.register('otherAction', handler);
 
-    bus.dispatch('other.action', {});
+    bus.dispatch('otherAction', {});
 
     expect(handler).toHaveBeenCalledTimes(1);
   });
@@ -291,10 +291,10 @@ describe('debounce plugin', () => {
   it('should return pending status for debounced calls', () => {
     const bus = createCommandBus();
 
-    bus.use(debounce(['test.action'], 100));
-    bus.register('test.action', () => 'result');
+    bus.use(debounce(['testAction'], 100));
+    bus.register('testAction', () => 'result');
 
-    const result = bus.dispatch('test.action', {});
+    const result = bus.dispatch('testAction', {});
 
     expect(result.ok).toBe(true);
     expect(result.value?.pending).toBe(true);
@@ -304,11 +304,11 @@ describe('debounce plugin', () => {
     const bus = createCommandBus();
     const handler = vi.fn(() => 'result');
 
-    bus.use(debounce(['test.action'], 100));
-    bus.register('test.action', handler);
+    bus.use(debounce(['testAction'], 100));
+    bus.register('testAction', handler);
 
-    bus.dispatch('test.action', { id: 1 });
-    bus.dispatch('test.action', { id: 2 });
+    bus.dispatch('testAction', { id: 1 });
+    bus.dispatch('testAction', { id: 2 });
 
     vi.advanceTimersByTime(100);
 
@@ -329,10 +329,10 @@ describe('throttle plugin', () => {
     const bus = createCommandBus();
     const handler = vi.fn(() => 'result');
 
-    bus.use(throttle(['test.action'], 100));
-    bus.register('test.action', handler);
+    bus.use(throttle(['testAction'], 100));
+    bus.register('testAction', handler);
 
-    const result = bus.dispatch('test.action', {});
+    const result = bus.dispatch('testAction', {});
 
     expect(handler).toHaveBeenCalledTimes(1);
     expect(result.value).toBe('result');
@@ -342,28 +342,29 @@ describe('throttle plugin', () => {
     const bus = createCommandBus();
     const handler = vi.fn(() => 'result');
 
-    bus.use(throttle(['test.action'], 100));
-    bus.register('test.action', handler);
+    bus.use(throttle(['testAction'], 100));
+    bus.register('testAction', handler);
 
-    bus.dispatch('test.action', {});
-    const throttled = bus.dispatch('test.action', {});
+    bus.dispatch('testAction', {});
+    const throttled = bus.dispatch('testAction', {});
 
     expect(handler).toHaveBeenCalledTimes(1);
-    expect(throttled.value?.throttled).toBe(true);
+    expect(throttled.ok).toBe(false);
+    expect(throttled.error?.message).toBe('throttled');
   });
 
   it('should allow calls after wait period', () => {
     const bus = createCommandBus();
     const handler = vi.fn(() => 'result');
 
-    bus.use(throttle(['test.action'], 100));
-    bus.register('test.action', handler);
+    bus.use(throttle(['testAction'], 100));
+    bus.register('testAction', handler);
 
-    bus.dispatch('test.action', {});
+    bus.dispatch('testAction', {});
 
     vi.advanceTimersByTime(100);
 
-    bus.dispatch('test.action', {});
+    bus.dispatch('testAction', {});
 
     expect(handler).toHaveBeenCalledTimes(2);
   });
@@ -372,11 +373,11 @@ describe('throttle plugin', () => {
     const bus = createCommandBus();
     const handler = vi.fn(() => 'result');
 
-    bus.use(throttle(['throttled.action'], 100));
-    bus.register('other.action', handler);
+    bus.use(throttle(['throttledAction'], 100));
+    bus.register('otherAction', handler);
 
-    bus.dispatch('other.action', {});
-    bus.dispatch('other.action', {});
+    bus.dispatch('otherAction', {});
+    bus.dispatch('otherAction', {});
 
     expect(handler).toHaveBeenCalledTimes(2);
   });
@@ -385,11 +386,11 @@ describe('throttle plugin', () => {
     const bus = createCommandBus();
     const handler = vi.fn(() => 'result');
 
-    bus.use(throttle(['test.action'], 100));
-    bus.register('test.action', handler);
+    bus.use(throttle(['testAction'], 100));
+    bus.register('testAction', handler);
 
-    bus.dispatch('test.action', { id: 1 });
-    bus.dispatch('test.action', { id: 2 });
+    bus.dispatch('testAction', { id: 1 });
+    bus.dispatch('testAction', { id: 2 });
 
     expect(handler).toHaveBeenCalledTimes(2);
   });
@@ -406,16 +407,16 @@ describe('history plugin with bus (undo/redo execution)', () => {
     const bus = createCommandBus();
     const undoFn = vi.fn();
 
-    bus.register('cart_add', () => 'added', { undo: undoFn });
+    bus.register('cartAdd', () => 'added', { undo: undoFn });
 
     const historyPlugin = history({ bus });
     bus.use(historyPlugin);
 
-    bus.dispatch('cart_add', { id: 1 });
+    bus.dispatch('cartAdd', { id: 1 });
     historyPlugin.undo();
 
     expect(undoFn).toHaveBeenCalledWith(
-      expect.objectContaining({ action: 'cart_add', target: { id: 1 } })
+      expect.objectContaining({ action: 'cartAdd', target: { id: 1 } })
     );
   });
 
@@ -423,12 +424,12 @@ describe('history plugin with bus (undo/redo execution)', () => {
     const bus = createCommandBus();
     const handler = vi.fn(() => 'result');
 
-    bus.register('cart_add', handler);
+    bus.register('cartAdd', handler);
 
     const historyPlugin = history({ bus });
     bus.use(historyPlugin);
 
-    bus.dispatch('cart_add', { id: 1 });
+    bus.dispatch('cartAdd', { id: 1 });
     expect(handler).toHaveBeenCalledTimes(1);
 
     historyPlugin.undo();
@@ -446,17 +447,17 @@ describe('authGuard plugin', () => {
 
     bus.use(authGuard({
       isAuthenticated: () => false,
-      protected: ['shop_cart_', 'shop_wishlist_'],
+      protected: ['shopCart', 'shopWishlist'],
     }));
 
-    bus.register('shop_cart_add', () => 'added');
-    bus.register('ui_toast', () => 'toasted');
+    bus.register('shopCartAdd', () => 'added');
+    bus.register('uiToast', () => 'toasted');
 
-    const blocked = bus.dispatch('shop_cart_add', {});
+    const blocked = bus.dispatch('shopCartAdd', {});
     expect(blocked.ok).toBe(false);
     expect(blocked.error?.message).toContain('Unauthorized');
 
-    const allowed = bus.dispatch('ui_toast', {});
+    const allowed = bus.dispatch('uiToast', {});
     expect(allowed.ok).toBe(true);
   });
 
@@ -465,11 +466,11 @@ describe('authGuard plugin', () => {
 
     bus.use(authGuard({
       isAuthenticated: () => true,
-      protected: ['shop_cart_'],
+      protected: ['shopCart'],
     }));
 
-    bus.register('shop_cart_add', () => 'added');
-    expect(bus.dispatch('shop_cart_add', {}).ok).toBe(true);
+    bus.register('shopCartAdd', () => 'added');
+    expect(bus.dispatch('shopCartAdd', {}).ok).toBe(true);
   });
 
   it('should call onUnauthenticated callback', () => {
@@ -478,15 +479,15 @@ describe('authGuard plugin', () => {
 
     bus.use(authGuard({
       isAuthenticated: () => false,
-      protected: ['shop_cart_'],
+      protected: ['shopCart'],
       onUnauthenticated: callback,
     }));
 
-    bus.register('shop_cart_add', () => 'added');
-    bus.dispatch('shop_cart_add', { productId: 123 });
+    bus.register('shopCartAdd', () => 'added');
+    bus.dispatch('shopCartAdd', { productId: 123 });
 
     expect(callback).toHaveBeenCalledWith(
-      expect.objectContaining({ action: 'shop_cart_add' })
+      expect.objectContaining({ action: 'shopCartAdd' })
     );
   });
 });
@@ -499,13 +500,13 @@ describe('optimistic plugin', () => {
     const state = { count: 0 };
 
     bus.use(optimistic({
-      'counter_increment': {
+      'counterIncrement': {
         apply: () => { state.count++; return () => { state.count--; }; }
       }
     }));
 
-    bus.register('counter_increment', () => 'ok');
-    bus.dispatch('counter_increment', {});
+    bus.register('counterIncrement', () => 'ok');
+    bus.dispatch('counterIncrement', {});
 
     expect(state.count).toBe(1);
   });
@@ -515,13 +516,13 @@ describe('optimistic plugin', () => {
     const state = { count: 0 };
 
     bus.use(optimistic({
-      'counter_increment': {
+      'counterIncrement': {
         apply: () => { state.count++; return () => { state.count--; }; }
       }
     }));
 
-    bus.register('counter_increment', () => { throw new Error('fail'); });
-    bus.dispatch('counter_increment', {});
+    bus.register('counterIncrement', () => { throw new Error('fail'); });
+    bus.dispatch('counterIncrement', {});
 
     expect(state.count).toBe(0);
   });

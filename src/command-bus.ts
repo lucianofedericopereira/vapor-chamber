@@ -1,9 +1,6 @@
 /**
  * vapor-chamber - Command Bus for Vue Vapor
  * ~2KB gzipped (core + plugins + composables) — DevTools loaded dynamically
- *
- * v0.3.0 — Added: typed generics, naming validation, request/response,
- *           wildcard listeners, per-command debounce/throttle at register time.
  */
 
 // ---------------------------------------------------------------------------
@@ -35,6 +32,9 @@ export type PluginOptions = { priority?: number };
 /** Batch dispatch input */
 export type BatchCommand = { action: string; target: any; payload?: any };
 
+/** Options for batch dispatch */
+export type BatchOptions = { continueOnError?: boolean };
+
 /** Result of a batch dispatch */
 export type BatchResult = { ok: boolean; results: CommandResult[]; error?: Error };
 
@@ -60,8 +60,6 @@ export type NamingConvention = {
 
 /** Per-command registration options */
 export type RegisterOptions = {
-  /** Debounce this handler by N ms. Handler runs after activity stops. */
-  debounce?: number;
   /** Throttle this handler: execute immediately, then block for N ms. */
   throttle?: number;
   /** Inverse handler for undo support. Called with the original command. */
@@ -74,106 +72,134 @@ export type CommandBusOptions = {
   naming?: NamingConvention;
 };
 
-// ---------------------------------------------------------------------------
-// Wildcard/pattern matching
-// ---------------------------------------------------------------------------
-
 /** Listener callback for on() subscriptions (wildcard-capable) */
 export type Listener = (cmd: Command, result: CommandResult) => void;
+
+/**
+ * Typed command map — define action names, target, payload, and result shapes.
+ * Use with createCommandBus<MyMap>() for type-safe dispatch and register.
+ *
+ * @example
+ * type AppCommands = {
+ *   cartAdd: { target: { id: number }; payload: { qty: number }; result: void };
+ *   cartClear: { target: {}; result: number };
+ * };
+ * const bus = createCommandBus<AppCommands>();
+ * bus.dispatch('cartAdd', { id: 1 }, { qty: 2 }); // fully typed
+ */
+export type CommandMap = Record<string, { target?: any; payload?: any; result?: any }>;
+
+// Internal helper types for extracting typed shapes
+type _T<M extends CommandMap, A extends keyof M> = M[A] extends { target: infer T } ? T : any;
+type _P<M extends CommandMap, A extends keyof M> = M[A] extends { payload: infer P } ? P : any;
+type _R<M extends CommandMap, A extends keyof M> = M[A] extends { result: infer R } ? R : any;
 
 // ---------------------------------------------------------------------------
 // Interfaces
 // ---------------------------------------------------------------------------
 
-export interface CommandBus {
-  dispatch: (action: string, target: any, payload?: any) => CommandResult;
-  dispatchBatch: (commands: BatchCommand[]) => BatchResult;
-  register: (action: string, handler: Handler, options?: RegisterOptions) => () => void;
-  use: (plugin: Plugin, options?: PluginOptions) => () => void;
-  onAfter: (hook: Hook) => () => void;
-  /** Subscribe to commands matching a pattern. Supports '*' (all), 'prefix_*' (glob), or exact. */
-  on: (pattern: string, listener: Listener) => () => void;
-  /** Request/response: dispatch and wait for a response from a responder. */
-  request: (action: string, target: any, options?: { timeout?: number }) => Promise<CommandResult>;
-  /** Register a responder for request() calls. */
-  respond: (action: string, handler: (cmd: Command) => any | Promise<any>) => () => void;
-  /** Get the undo handler for an action (if registered with { undo }) */
-  getUndoHandler: (action: string) => Handler | undefined;
+export interface CommandBus<M extends CommandMap = CommandMap> {
+  dispatch<A extends keyof M & string>(action: A, target: _T<M, A>, payload?: _P<M, A>): CommandResult<_R<M, A>>;
+  dispatchBatch(commands: BatchCommand[], options?: BatchOptions): BatchResult;
+  register<A extends keyof M & string>(action: A, handler: (cmd: Command<A, _T<M, A>, _P<M, A>>) => _R<M, A>, options?: RegisterOptions): () => void;
+  use(plugin: Plugin, options?: PluginOptions): () => void;
+  onAfter(hook: Hook): () => void;
+  on(pattern: string, listener: Listener): () => void;
+  request<A extends keyof M & string>(action: A, target: _T<M, A>, payload?: _P<M, A>, options?: { timeout?: number }): Promise<CommandResult<_R<M, A>>>;
+  respond(action: string, handler: (cmd: Command) => any | Promise<any>): () => void;
+  /** Returns true if a handler is registered for the given action. */
+  hasHandler(action: string): boolean;
+  getUndoHandler(action: string): Handler | undefined;
+  /** Remove all handlers, plugins, hooks, and listeners. Useful for testing and HMR. */
+  clear(): void;
 }
 
-export interface AsyncCommandBus {
-  dispatch: (action: string, target: any, payload?: any) => Promise<CommandResult>;
-  dispatchBatch: (commands: BatchCommand[]) => Promise<BatchResult>;
-  register: (action: string, handler: AsyncHandler, options?: RegisterOptions) => () => void;
-  use: (plugin: AsyncPlugin, options?: PluginOptions) => () => void;
-  onAfter: (hook: AsyncHook) => () => void;
+export interface AsyncCommandBus<M extends CommandMap = CommandMap> {
+  dispatch<A extends keyof M & string>(action: A, target: _T<M, A>, payload?: _P<M, A>): Promise<CommandResult<_R<M, A>>>;
+  dispatchBatch(commands: BatchCommand[], options?: BatchOptions): Promise<BatchResult>;
+  register<A extends keyof M & string>(action: A, handler: (cmd: Command<A, _T<M, A>, _P<M, A>>) => Promise<_R<M, A>>, options?: RegisterOptions): () => void;
+  use(plugin: AsyncPlugin, options?: PluginOptions): () => void;
+  onAfter(hook: AsyncHook): () => void;
+  on(pattern: string, listener: Listener): () => void;
+  request<A extends keyof M & string>(action: A, target: _T<M, A>, payload?: _P<M, A>, options?: { timeout?: number }): Promise<CommandResult<_R<M, A>>>;
+  respond(action: string, handler: (cmd: Command) => any | Promise<any>): () => void;
+  /** Returns true if a handler is registered for the given action. */
+  hasHandler(action: string): boolean;
+  getUndoHandler(action: string): Handler | undefined;
+  /** Remove all handlers, plugins, hooks, and listeners. Useful for testing and HMR. */
+  clear(): void;
 }
 
 // ---------------------------------------------------------------------------
-// Naming validation helper
+// Internal state types
+// ---------------------------------------------------------------------------
+
+type SyncState = {
+  readonly opts: CommandBusOptions;
+  handlers: Map<string, Handler>;
+  undoHandlers: Map<string, Handler>;
+  pluginEntries: Array<{ plugin: Plugin; priority: number }>;
+  afterHooks: Hook[];
+  patternListeners: Array<{ pattern: string; listener: Listener }>;
+  responders: Map<string, (cmd: Command) => any | Promise<any>>;
+  runner: (cmd: Command, execute: () => CommandResult) => CommandResult;
+};
+
+type AsyncState = {
+  readonly opts: CommandBusOptions;
+  handlers: Map<string, AsyncHandler>;
+  undoHandlers: Map<string, Handler>;
+  pluginEntries: Array<{ plugin: AsyncPlugin; priority: number }>;
+  afterHooks: AsyncHook[];
+  patternListeners: Array<{ pattern: string; listener: Listener }>;
+  responders: Map<string, (cmd: Command) => any | Promise<any>>;
+  runner: (cmd: Command, execute: () => Promise<CommandResult>) => Promise<CommandResult>;
+};
+
+// ---------------------------------------------------------------------------
+// Helpers
 // ---------------------------------------------------------------------------
 
 function validateNaming(action: string, naming?: NamingConvention): void {
   if (!naming) return;
   if (naming.pattern.test(action)) return;
-
+  const msg = `[vapor-chamber] Action "${action}" does not match pattern ${naming.pattern}`;
   const mode = naming.onViolation ?? 'warn';
-  const msg = `[vapor-chamber] Action name "${action}" does not match pattern ${naming.pattern}`;
-
   if (mode === 'throw') throw new Error(msg);
   if (mode === 'warn') console.warn(msg);
-  // 'ignore' — do nothing
 }
-
-// ---------------------------------------------------------------------------
-// Pattern matching for on() subscriptions
-// ---------------------------------------------------------------------------
 
 function matchesPattern(pattern: string, action: string): boolean {
   if (pattern === '*') return true;
-  if (pattern.endsWith('_*')) {
-    return action.startsWith(pattern.slice(0, -1)); // 'shop_*' → starts with 'shop_'
-  }
+  if (pattern.endsWith('*')) return action.startsWith(pattern.slice(0, -1));
   return pattern === action;
 }
 
-// ---------------------------------------------------------------------------
-// Debounce/throttle wrappers for per-command options
-// ---------------------------------------------------------------------------
-
-function wrapDebounce(handler: Handler, wait: number, dispatchFn: (action: string, target: any, payload?: any) => CommandResult): Handler {
-  const timers = new Map<string, ReturnType<typeof setTimeout>>();
-
-  return (cmd: Command) => {
-    const key = `${cmd.action}:${JSON.stringify(cmd.target)}`;
-    const existing = timers.get(key);
-    if (existing) clearTimeout(existing);
-
-    return new Promise<any>((resolve) => {
-      timers.set(key, setTimeout(() => {
-        timers.delete(key);
-        const result = handler(cmd);
-        resolve(result);
-      }, wait));
-    });
-  };
+function isAsyncFn(fn: Function): boolean {
+  return fn.constructor?.name === 'AsyncFunction';
 }
 
-function wrapThrottle(handler: Handler, wait: number): Handler {
-  const lastRun = new Map<string, number>();
+/** Serialize a throttle target to a stable string key. Handles circular refs safely. */
+function throttleKey(action: string, target: any): string {
+  let tkey: string;
+  try { tkey = JSON.stringify(target); } catch { tkey = String(target); }
+  return `${action}:${tkey}`;
+}
 
-  return (cmd: Command) => {
-    const key = `${cmd.action}:${JSON.stringify(cmd.target)}`;
+function wrapThrottle(handler: Handler, wait: number): Handler;
+function wrapThrottle(handler: AsyncHandler, wait: number): AsyncHandler;
+function wrapThrottle(handler: Handler | AsyncHandler, wait: number): Handler | AsyncHandler {
+  const lastRun = new Map<string, number>();
+  return (cmd: Command): any => {
+    const key = throttleKey(cmd.action, cmd.target);
     const now = Date.now();
     const last = lastRun.get(key) ?? 0;
-
     if (now - last >= wait) {
       lastRun.set(key, now);
       setTimeout(() => lastRun.delete(key), wait);
-      return handler(cmd);
+      return (handler as Handler)(cmd);
     }
-
-    return { throttled: true, key, retryIn: wait - (now - last) };
+    throw Object.assign(new Error('throttled'), { retryIn: wait - (now - last) });
   };
 }
 
@@ -193,187 +219,171 @@ function buildRunner(plugins: Plugin[]) {
 }
 
 // ---------------------------------------------------------------------------
+// Module-level sync bus operations (state threaded explicitly)
+// ---------------------------------------------------------------------------
+
+function syncRebuildRunner(s: SyncState): void {
+  const sorted = s.pluginEntries.slice().sort((a, b) => b.priority - a.priority).map(e => e.plugin);
+  s.runner = buildRunner(sorted);
+}
+
+function syncHandleMissing(s: SyncState, cmd: Command): CommandResult {
+  const mode = s.opts.onMissing ?? 'error';
+  if (mode === 'ignore') return { ok: true, value: undefined };
+  if (mode === 'throw') throw new Error(`No handler: ${cmd.action}`);
+  if (typeof mode === 'function') {
+    try { return mode(cmd); }
+    catch (e) { return { ok: false, error: e as Error }; }
+  }
+  return { ok: false, error: new Error(`No handler: ${cmd.action}`) };
+}
+
+function syncRunHooks(s: SyncState, cmd: Command, result: CommandResult): void {
+  for (const hook of s.afterHooks) { try { hook(cmd, result); } catch (e) { console.error('[vapor-chamber] Hook error:', e); } }
+  for (const { pattern, listener } of s.patternListeners) { if (matchesPattern(pattern, cmd.action)) { try { listener(cmd, result); } catch (e) { console.error('[vapor-chamber] Listener error:', e); } } }
+}
+
+function syncDispatch(s: SyncState, action: string, target: any, payload?: any, executeOverride?: () => CommandResult): CommandResult {
+  validateNaming(action, s.opts.naming);
+  const cmd: Command = { action, target, payload };
+  const execute = executeOverride ?? ((): CommandResult => {
+    const handler = s.handlers.get(action);
+    if (!handler) return syncHandleMissing(s, cmd);
+    try { return { ok: true, value: handler(cmd) }; }
+    catch (e) { return { ok: false, error: e as Error }; }
+  });
+  const result = s.runner(cmd, execute);
+  syncRunHooks(s, cmd, result);
+  return result;
+}
+
+function syncDispatchBatch(s: SyncState, commands: BatchCommand[], opts: BatchOptions = {}): BatchResult {
+  const results: CommandResult[] = [];
+  let firstError: Error | undefined;
+  for (const { action, target, payload } of commands) {
+    const result = syncDispatch(s, action, target, payload);
+    results.push(result);
+    if (!result.ok) {
+      if (!opts.continueOnError) return { ok: false, results, error: result.error };
+      if (!firstError) firstError = result.error;
+    }
+  }
+  return firstError ? { ok: false, results, error: firstError } : { ok: true, results };
+}
+
+function syncRegister(s: SyncState, action: string, handler: Handler, opts: RegisterOptions = {}): () => void {
+  validateNaming(action, s.opts.naming);
+  if (s.handlers.has(action)) {
+    console.warn(`[vapor-chamber] Handler for "${action}" is being overwritten. Call unregister first to suppress this warning.`);
+  }
+  let h = handler;
+  if (opts.throttle && opts.throttle > 0) h = wrapThrottle(h, opts.throttle);
+  if (opts.undo) s.undoHandlers.set(action, opts.undo);
+  s.handlers.set(action, h);
+  return () => { s.handlers.delete(action); s.undoHandlers.delete(action); };
+}
+
+function syncUse(s: SyncState, plugin: Plugin, opts: PluginOptions = {}): () => void {
+  if (isAsyncFn(plugin)) {
+    console.warn('[vapor-chamber] Async plugin installed on sync bus — use createAsyncCommandBus() instead.');
+  }
+  const entry = { plugin, priority: opts.priority ?? 0 };
+  s.pluginEntries.push(entry);
+  syncRebuildRunner(s);
+  return () => { const i = s.pluginEntries.indexOf(entry); if (i !== -1) { s.pluginEntries.splice(i, 1); syncRebuildRunner(s); } };
+}
+
+function syncOnAfter(s: SyncState, hook: Hook): () => void {
+  s.afterHooks.push(hook);
+  return () => { const i = s.afterHooks.indexOf(hook); if (i !== -1) s.afterHooks.splice(i, 1); };
+}
+
+function syncOn(s: SyncState, pattern: string, listener: Listener): () => void {
+  const entry = { pattern, listener };
+  s.patternListeners.push(entry);
+  return () => { const i = s.patternListeners.indexOf(entry); if (i !== -1) s.patternListeners.splice(i, 1); };
+}
+
+function syncRequest(s: SyncState, action: string, target: any, payload?: any, reqOpts: { timeout?: number } = {}): Promise<CommandResult> {
+  const timeout = reqOpts.timeout ?? 5000;
+  const responder = s.responders.get(action);
+  if (!responder) return Promise.resolve(syncDispatch(s, action, target, payload));
+
+  return new Promise((resolve) => {
+    const timeoutId = setTimeout(
+      () => resolve({ ok: false, error: new Error(`Request "${action}" timed out after ${timeout}ms`) }),
+      timeout
+    );
+
+    // Route through the plugin chain with responder as the execute function
+    const cmd: Command = { action, target, payload };
+    const execute = (): CommandResult => {
+      try { return { ok: true, value: responder(cmd) }; }
+      catch (e) { return { ok: false, error: e as Error }; }
+    };
+
+    let pluginResult: CommandResult;
+    try { pluginResult = s.runner(cmd, execute); }
+    catch (e) { clearTimeout(timeoutId); resolve({ ok: false, error: e as Error }); return; }
+
+    syncRunHooks(s, cmd, pluginResult);
+
+    if (!pluginResult.ok) { clearTimeout(timeoutId); resolve(pluginResult); return; }
+
+    // Unwrap async responder value if needed
+    const maybeAsync = pluginResult.value;
+    if (maybeAsync && typeof maybeAsync.then === 'function') {
+      maybeAsync
+        .then((v: any) => { clearTimeout(timeoutId); resolve({ ok: true, value: v }); })
+        .catch((e: Error) => { clearTimeout(timeoutId); resolve({ ok: false, error: e }); });
+    } else {
+      clearTimeout(timeoutId);
+      resolve(pluginResult);
+    }
+  });
+}
+
+function syncRespond(s: SyncState, action: string, handler: (cmd: Command) => any | Promise<any>): () => void {
+  validateNaming(action, s.opts.naming);
+  s.responders.set(action, handler);
+  return () => s.responders.delete(action);
+}
+
+function syncClear(s: SyncState): void {
+  s.handlers.clear();
+  s.undoHandlers.clear();
+  s.pluginEntries.length = 0;
+  s.afterHooks.length = 0;
+  s.patternListeners.length = 0;
+  s.responders.clear();
+  s.runner = buildRunner([]);
+}
+
+// ---------------------------------------------------------------------------
 // createCommandBus
 // ---------------------------------------------------------------------------
 
-export function createCommandBus(options: CommandBusOptions = {}): CommandBus {
-  const handlers = new Map<string, Handler>();
-  const undoHandlers = new Map<string, Handler>();
-  const pluginEntries: Array<{ plugin: Plugin; priority: number }> = [];
-  const afterHooks: Hook[] = [];
-  const patternListeners: Array<{ pattern: string; listener: Listener }> = [];
-  const responders = new Map<string, (cmd: Command) => any | Promise<any>>();
-
-  let runner = buildRunner([]);
-
-  function handleMissing(cmd: Command): CommandResult {
-    const mode = options.onMissing ?? 'error';
-    if (mode === 'ignore') return { ok: true, value: undefined };
-    if (mode === 'throw') throw new Error(`No handler: ${cmd.action}`);
-    if (typeof mode === 'function') return mode(cmd);
-    return { ok: false, error: new Error(`No handler: ${cmd.action}`) };
-  }
-
-  function rebuildRunner() {
-    const sorted = pluginEntries
-      .slice()
-      .sort((a, b) => b.priority - a.priority)
-      .map(e => e.plugin);
-    runner = buildRunner(sorted);
-  }
-
-  function dispatch(action: string, target: any, payload?: any): CommandResult {
-    validateNaming(action, options.naming);
-
-    const cmd: Command = { action, target, payload };
-    const handler = handlers.get(action);
-
-    const execute = (): CommandResult => {
-      if (!handler) return handleMissing(cmd);
-      try {
-        return { ok: true, value: handler(cmd) };
-      } catch (e) {
-        return { ok: false, error: e as Error };
-      }
-    };
-
-    const result = runner(cmd, execute);
-
-    // Run after hooks
-    for (const hook of afterHooks) {
-      try {
-        hook(cmd, result);
-      } catch (e) {
-        console.error('[vapor-chamber] Hook error:', e);
-      }
-    }
-
-    // Notify pattern listeners
-    for (const { pattern, listener } of patternListeners) {
-      if (matchesPattern(pattern, action)) {
-        try {
-          listener(cmd, result);
-        } catch (e) {
-          console.error('[vapor-chamber] Listener error:', e);
-        }
-      }
-    }
-
-    return result;
-  }
-
-  function dispatchBatch(commands: BatchCommand[]): BatchResult {
-    const results: CommandResult[] = [];
-    for (const { action, target, payload } of commands) {
-      const result = dispatch(action, target, payload);
-      results.push(result);
-      if (!result.ok) return { ok: false, results, error: result.error };
-    }
-    return { ok: true, results };
-  }
-
-  function register(action: string, handler: Handler, opts: RegisterOptions = {}): () => void {
-    validateNaming(action, options.naming);
-
-    let finalHandler = handler;
-
-    // Wrap with throttle if specified
-    if (opts.throttle && opts.throttle > 0) {
-      finalHandler = wrapThrottle(finalHandler, opts.throttle);
-    }
-
-    // Store undo handler if provided
-    if (opts.undo) {
-      undoHandlers.set(action, opts.undo);
-    }
-
-    handlers.set(action, finalHandler);
-    return () => {
-      handlers.delete(action);
-      undoHandlers.delete(action);
-    };
-  }
-
-  function use(plugin: Plugin, opts: PluginOptions = {}): () => void {
-    const entry = { plugin, priority: opts.priority ?? 0 };
-    pluginEntries.push(entry);
-    rebuildRunner();
-    return () => {
-      const i = pluginEntries.indexOf(entry);
-      if (i !== -1) {
-        pluginEntries.splice(i, 1);
-        rebuildRunner();
-      }
-    };
-  }
-
-  function onAfter(hook: Hook): () => void {
-    afterHooks.push(hook);
-    return () => {
-      const i = afterHooks.indexOf(hook);
-      if (i !== -1) afterHooks.splice(i, 1);
-    };
-  }
-
-  function on(pattern: string, listener: Listener): () => void {
-    const entry = { pattern, listener };
-    patternListeners.push(entry);
-    return () => {
-      const i = patternListeners.indexOf(entry);
-      if (i !== -1) patternListeners.splice(i, 1);
-    };
-  }
-
-  function request(action: string, target: any, reqOpts: { timeout?: number } = {}): Promise<CommandResult> {
-    const timeout = reqOpts.timeout ?? 5000;
-
-    return new Promise((resolve, reject) => {
-      const responder = responders.get(action);
-      if (!responder) {
-        // Fall back to normal dispatch
-        resolve(dispatch(action, target));
-        return;
-      }
-
-      const timeoutId = setTimeout(() => {
-        reject(new Error(`Request "${action}" timed out after ${timeout}ms`));
-      }, timeout);
-
-      const cmd: Command = { action, target };
-      try {
-        const result = responder(cmd);
-        if (result && typeof result.then === 'function') {
-          result
-            .then((value: any) => {
-              clearTimeout(timeoutId);
-              resolve({ ok: true, value });
-            })
-            .catch((error: Error) => {
-              clearTimeout(timeoutId);
-              resolve({ ok: false, error });
-            });
-        } else {
-          clearTimeout(timeoutId);
-          resolve({ ok: true, value: result });
-        }
-      } catch (e) {
-        clearTimeout(timeoutId);
-        resolve({ ok: false, error: e as Error });
-      }
-    });
-  }
-
-  function respond(action: string, handler: (cmd: Command) => any | Promise<any>): () => void {
-    validateNaming(action, options.naming);
-    responders.set(action, handler);
-    return () => { responders.delete(action); };
-  }
-
-  function getUndoHandler(action: string): Handler | undefined {
-    return undoHandlers.get(action);
-  }
-
-  return { dispatch, dispatchBatch, register, use, onAfter, on, request, respond, getUndoHandler };
+export function createCommandBus<M extends CommandMap = CommandMap>(options: CommandBusOptions = {}): CommandBus<M> {
+  const s: SyncState = {
+    opts: options,
+    handlers: new Map(), undoHandlers: new Map(),
+    pluginEntries: [], afterHooks: [], patternListeners: [],
+    responders: new Map(),
+    runner: buildRunner([]),
+  };
+  return {
+    dispatch:        (a, t, p)       => syncDispatch(s, a as string, t, p),
+    dispatchBatch:   (cmds, o)       => syncDispatchBatch(s, cmds, o),
+    register:        (a, h, o)       => syncRegister(s, a as string, h as Handler, o),
+    use:             (p, o)          => syncUse(s, p, o),
+    onAfter:         (h)             => syncOnAfter(s, h),
+    on:              (pat, l)        => syncOn(s, pat, l),
+    request:         (a, t, p, o)   => syncRequest(s, a as string, t, p, o),
+    respond:         (a, h)          => syncRespond(s, a, h),
+    hasHandler:      (a)             => s.handlers.has(a),
+    getUndoHandler:  (a)             => s.undoHandlers.get(a),
+    clear:           ()              => syncClear(s),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -381,10 +391,7 @@ export function createCommandBus(options: CommandBusOptions = {}): CommandBus {
 // ---------------------------------------------------------------------------
 
 function buildAsyncRunner(plugins: AsyncPlugin[]) {
-  return function run(
-    cmd: Command,
-    execute: () => Promise<CommandResult>
-  ): Promise<CommandResult> {
+  return function run(cmd: Command, execute: () => Promise<CommandResult>): Promise<CommandResult> {
     let i = 0;
     function next(): CommandResult | Promise<CommandResult> {
       const plugin = plugins[i++];
@@ -395,96 +402,153 @@ function buildAsyncRunner(plugins: AsyncPlugin[]) {
 }
 
 // ---------------------------------------------------------------------------
+// Module-level async bus operations
+// ---------------------------------------------------------------------------
+
+function asyncRebuildRunner(s: AsyncState): void {
+  const sorted = s.pluginEntries.slice().sort((a, b) => b.priority - a.priority).map(e => e.plugin);
+  s.runner = buildAsyncRunner(sorted);
+}
+
+function asyncHandleMissing(s: AsyncState, cmd: Command): CommandResult {
+  const mode = s.opts.onMissing ?? 'error';
+  if (mode === 'ignore') return { ok: true, value: undefined };
+  if (mode === 'throw') throw new Error(`No handler: ${cmd.action}`);
+  if (typeof mode === 'function') {
+    try { return mode(cmd); }
+    catch (e) { return { ok: false, error: e as Error }; }
+  }
+  return { ok: false, error: new Error(`No handler: ${cmd.action}`) };
+}
+
+async function asyncRunHooks(s: AsyncState, cmd: Command, result: CommandResult): Promise<void> {
+  for (const hook of s.afterHooks) { try { await hook(cmd, result); } catch (e) { console.error('[vapor-chamber] Hook error:', e); } }
+  for (const { pattern, listener } of s.patternListeners) { if (matchesPattern(pattern, cmd.action)) { try { listener(cmd, result); } catch (e) { console.error('[vapor-chamber] Listener error:', e); } } }
+}
+
+async function asyncDispatch(s: AsyncState, action: string, target: any, payload?: any, executeOverride?: () => Promise<CommandResult>): Promise<CommandResult> {
+  validateNaming(action, s.opts.naming);
+  const cmd: Command = { action, target, payload };
+  const execute = executeOverride ?? (async (): Promise<CommandResult> => {
+    const handler = s.handlers.get(action);
+    if (!handler) return asyncHandleMissing(s, cmd);
+    try { return { ok: true, value: await handler(cmd) }; }
+    catch (e) { return { ok: false, error: e as Error }; }
+  });
+  const result = await s.runner(cmd, execute);
+  await asyncRunHooks(s, cmd, result);
+  return result;
+}
+
+async function asyncDispatchBatch(s: AsyncState, commands: BatchCommand[], opts: BatchOptions = {}): Promise<BatchResult> {
+  const results: CommandResult[] = [];
+  let firstError: Error | undefined;
+  for (const { action, target, payload } of commands) {
+    const result = await asyncDispatch(s, action, target, payload);
+    results.push(result);
+    if (!result.ok) {
+      if (!opts.continueOnError) return { ok: false, results, error: result.error };
+      if (!firstError) firstError = result.error;
+    }
+  }
+  return firstError ? { ok: false, results, error: firstError } : { ok: true, results };
+}
+
+function asyncRegister(s: AsyncState, action: string, handler: AsyncHandler, opts: RegisterOptions = {}): () => void {
+  validateNaming(action, s.opts.naming);
+  if (s.handlers.has(action)) {
+    console.warn(`[vapor-chamber] Handler for "${action}" is being overwritten. Call unregister first to suppress this warning.`);
+  }
+  let h = handler;
+  if (opts.throttle && opts.throttle > 0) h = wrapThrottle(h, opts.throttle);
+  if (opts.undo) s.undoHandlers.set(action, opts.undo);
+  s.handlers.set(action, h);
+  return () => { s.handlers.delete(action); s.undoHandlers.delete(action); };
+}
+
+function asyncUse(s: AsyncState, plugin: AsyncPlugin, opts: PluginOptions = {}): () => void {
+  const entry = { plugin, priority: opts.priority ?? 0 };
+  s.pluginEntries.push(entry);
+  asyncRebuildRunner(s);
+  return () => { const i = s.pluginEntries.indexOf(entry); if (i !== -1) { s.pluginEntries.splice(i, 1); asyncRebuildRunner(s); } };
+}
+
+function asyncOnAfter(s: AsyncState, hook: AsyncHook): () => void {
+  s.afterHooks.push(hook);
+  return () => { const i = s.afterHooks.indexOf(hook); if (i !== -1) s.afterHooks.splice(i, 1); };
+}
+
+function asyncOn(s: AsyncState, pattern: string, listener: Listener): () => void {
+  const entry = { pattern, listener };
+  s.patternListeners.push(entry);
+  return () => { const i = s.patternListeners.indexOf(entry); if (i !== -1) s.patternListeners.splice(i, 1); };
+}
+
+async function asyncRequest(s: AsyncState, action: string, target: any, payload?: any, reqOpts: { timeout?: number } = {}): Promise<CommandResult> {
+  const timeout = reqOpts.timeout ?? 5000;
+  const responder = s.responders.get(action);
+
+  // Route through the plugin chain with responder as the execute function
+  const executeOverride = responder ? async (): Promise<CommandResult> => {
+    try { return { ok: true, value: await responder({ action, target, payload } as Command) }; }
+    catch (e) { return { ok: false, error: e as Error }; }
+  } : undefined;
+
+  const dispatchPromise = asyncDispatch(s, action, target, payload, executeOverride);
+
+  let timeoutId: ReturnType<typeof setTimeout>;
+  const timeoutPromise = new Promise<CommandResult>((resolve) => {
+    timeoutId = setTimeout(
+      () => resolve({ ok: false, error: new Error(`Request "${action}" timed out after ${timeout}ms`) }),
+      timeout
+    );
+  });
+
+  return Promise.race([
+    dispatchPromise.then((r) => { clearTimeout(timeoutId!); return r; }),
+    timeoutPromise,
+  ]);
+}
+
+function asyncRespond(s: AsyncState, action: string, handler: (cmd: Command) => any | Promise<any>): () => void {
+  validateNaming(action, s.opts.naming);
+  s.responders.set(action, handler);
+  return () => s.responders.delete(action);
+}
+
+function asyncClear(s: AsyncState): void {
+  s.handlers.clear();
+  s.undoHandlers.clear();
+  s.pluginEntries.length = 0;
+  s.afterHooks.length = 0;
+  s.patternListeners.length = 0;
+  s.responders.clear();
+  s.runner = buildAsyncRunner([]);
+}
+
+// ---------------------------------------------------------------------------
 // createAsyncCommandBus
 // ---------------------------------------------------------------------------
 
-export function createAsyncCommandBus(options: CommandBusOptions = {}): AsyncCommandBus {
-  const handlers = new Map<string, AsyncHandler>();
-  const pluginEntries: Array<{ plugin: AsyncPlugin; priority: number }> = [];
-  const afterHooks: AsyncHook[] = [];
-
-  let runner = buildAsyncRunner([]);
-
-  function handleMissing(cmd: Command): CommandResult {
-    const mode = options.onMissing ?? 'error';
-    if (mode === 'ignore') return { ok: true, value: undefined };
-    if (mode === 'throw') throw new Error(`No handler: ${cmd.action}`);
-    if (typeof mode === 'function') return mode(cmd);
-    return { ok: false, error: new Error(`No handler: ${cmd.action}`) };
-  }
-
-  function rebuildRunner() {
-    const sorted = pluginEntries
-      .slice()
-      .sort((a, b) => b.priority - a.priority)
-      .map(e => e.plugin);
-    runner = buildAsyncRunner(sorted);
-  }
-
-  async function dispatch(action: string, target: any, payload?: any): Promise<CommandResult> {
-    validateNaming(action, options.naming);
-
-    const cmd: Command = { action, target, payload };
-    const handler = handlers.get(action);
-
-    const execute = async (): Promise<CommandResult> => {
-      if (!handler) return handleMissing(cmd);
-      try {
-        return { ok: true, value: await handler(cmd) };
-      } catch (e) {
-        return { ok: false, error: e as Error };
-      }
-    };
-
-    const result = await runner(cmd, execute);
-
-    for (const hook of afterHooks) {
-      try {
-        await hook(cmd, result);
-      } catch (e) {
-        console.error('[vapor-chamber] Hook error:', e);
-      }
-    }
-
-    return result;
-  }
-
-  async function dispatchBatch(commands: BatchCommand[]): Promise<BatchResult> {
-    const results: CommandResult[] = [];
-    for (const { action, target, payload } of commands) {
-      const result = await dispatch(action, target, payload);
-      results.push(result);
-      if (!result.ok) return { ok: false, results, error: result.error };
-    }
-    return { ok: true, results };
-  }
-
-  function register(action: string, handler: AsyncHandler, opts: RegisterOptions = {}): () => void {
-    validateNaming(action, options.naming);
-    handlers.set(action, handler);
-    return () => handlers.delete(action);
-  }
-
-  function use(plugin: AsyncPlugin, opts: PluginOptions = {}): () => void {
-    const entry = { plugin, priority: opts.priority ?? 0 };
-    pluginEntries.push(entry);
-    rebuildRunner();
-    return () => {
-      const i = pluginEntries.indexOf(entry);
-      if (i !== -1) {
-        pluginEntries.splice(i, 1);
-        rebuildRunner();
-      }
-    };
-  }
-
-  function onAfter(hook: AsyncHook): () => void {
-    afterHooks.push(hook);
-    return () => {
-      const i = afterHooks.indexOf(hook);
-      if (i !== -1) afterHooks.splice(i, 1);
-    };
-  }
-
-  return { dispatch, dispatchBatch, register, use, onAfter };
+export function createAsyncCommandBus<M extends CommandMap = CommandMap>(options: CommandBusOptions = {}): AsyncCommandBus<M> {
+  const s: AsyncState = {
+    opts: options,
+    handlers: new Map(), undoHandlers: new Map(),
+    pluginEntries: [], afterHooks: [], patternListeners: [],
+    responders: new Map(),
+    runner: buildAsyncRunner([]),
+  };
+  return {
+    dispatch:       (a, t, p)     => asyncDispatch(s, a as string, t, p),
+    dispatchBatch:  (cmds, o)     => asyncDispatchBatch(s, cmds, o),
+    register:       (a, h, o)     => asyncRegister(s, a as string, h as AsyncHandler, o),
+    use:            (p, o)        => asyncUse(s, p, o),
+    onAfter:        (h)           => asyncOnAfter(s, h),
+    on:             (pat, l)      => asyncOn(s, pat, l),
+    request:        (a, t, p, o)  => asyncRequest(s, a as string, t, p, o),
+    respond:        (a, h)        => asyncRespond(s, a, h),
+    hasHandler:     (a)           => s.handlers.has(a),
+    getUndoHandler: (a)           => s.undoHandlers.get(a),
+    clear:          ()            => asyncClear(s),
+  };
 }
