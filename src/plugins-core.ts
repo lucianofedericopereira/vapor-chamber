@@ -1,10 +1,11 @@
 /**
  * vapor-chamber — Core plugins (sync)
  *
- * logger, validator, history, debounce, throttle, authGuard, optimistic
+ * logger, validator, history, debounce, throttle, authGuard, optimistic, optimisticUndo
  */
 
 import type { Command, CommandResult, Plugin, CommandBus } from './command-bus';
+import { BusError } from './command-bus';
 
 /**
  * Logger plugin - logs all commands and results
@@ -84,11 +85,12 @@ export function history(options: {
   const { maxSize = 50, filter, bus } = options;
   const past: Command[] = [];
   const future: Command[] = [];
+  let _replaying = false; // true during redo dispatch — prevents double-recording
 
   const plugin: Plugin = (cmd, next) => {
     const result = next();
 
-    if (result.ok && (!filter || filter(cmd))) {
+    if (!_replaying && result.ok && (!filter || filter(cmd))) {
       past.push(cmd);
       if (past.length > maxSize) past.shift();
       future.length = 0;
@@ -112,8 +114,10 @@ export function history(options: {
         if (bus) {
           const undoHandler = bus.getUndoHandler(cmd.action);
           if (undoHandler) {
+            _replaying = true;
             try { undoHandler(cmd); }
             catch (e) { console.error(`[vapor-chamber] Undo handler error for "${cmd.action}":`, e); }
+            finally { _replaying = false; }
           }
         }
       }
@@ -125,8 +129,10 @@ export function history(options: {
       if (cmd) {
         past.push(cmd);
         if (bus) {
+          _replaying = true;
           try { bus.dispatch(cmd.action, cmd.target, cmd.payload); }
           catch (e) { console.error(`[vapor-chamber] Redo dispatch error for "${cmd.action}":`, e); }
+          finally { _replaying = false; }
         }
       }
       return cmd;
@@ -148,12 +154,12 @@ export function history(options: {
 export function debounce(
   actions: string[],
   wait: number
-): Plugin {
+): Plugin & { /** Cancel all pending debounce timers. */ dispose(): void } {
   const actionSet = new Set(actions);
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   const latestNext = new Map<string, () => CommandResult>();
 
-  return (cmd, next) => {
+  const plugin: Plugin = (cmd, next) => {
     if (!actionSet.has(cmd.action)) return next();
 
     const key = `${cmd.action}:${JSON.stringify(cmd.target)}`;
@@ -175,6 +181,10 @@ export function debounce(
 
     return { ok: true, value: { pending: true, key } };
   };
+
+  return Object.assign(plugin, {
+    dispose(): void { for (const [, t] of timers) clearTimeout(t); timers.clear(); latestNext.clear(); },
+  });
 }
 
 /**
@@ -183,11 +193,12 @@ export function debounce(
 export function throttle(
   actions: string[],
   wait: number
-): Plugin {
+): Plugin & { /** Cancel all pending throttle timers. */ dispose(): void } {
   const actionSet = new Set(actions);
   const lastRun = new Map<string, number>();
+  const timers = new Set<ReturnType<typeof setTimeout>>();
 
-  return (cmd, next) => {
+  const plugin: Plugin = (cmd, next) => {
     if (!actionSet.has(cmd.action)) return next();
 
     const key = `${cmd.action}:${JSON.stringify(cmd.target)}`;
@@ -196,12 +207,18 @@ export function throttle(
 
     if (now - last >= wait) {
       lastRun.set(key, now);
-      setTimeout(() => lastRun.delete(key), wait);
+      const timer = setTimeout(() => { lastRun.delete(key); timers.delete(timer); }, wait);
+      timers.add(timer);
       return next();
     }
 
-    return { ok: false, error: Object.assign(new Error('throttled'), { retryIn: wait - (now - last) }) };
+    const retryIn = wait - (now - last);
+    return { ok: false, value: undefined, error: new BusError('VC_CORE_THROTTLED', `Action "${cmd.action}" throttled. Retry in ${retryIn}ms.`, { emitter: 'core', action: cmd.action, context: { retryIn, wait } }) };
   };
+
+  return Object.assign(plugin, {
+    dispose(): void { for (const t of timers) clearTimeout(t); timers.clear(); lastRun.clear(); },
+  });
 }
 
 /**
@@ -230,6 +247,15 @@ export function authGuard(options: {
 
 /**
  * Optimistic update plugin - apply optimistic state, rollback on failure.
+ *
+ * Accepts per-action `apply` functions that optimistically mutate state
+ * and return a rollback closure. If the handler (or async resolution) fails,
+ * the rollback is called automatically.
+ *
+ * @example
+ * bus.use(optimistic({
+ *   cartAdd: { apply: (cmd) => { addItem(cmd.target); return () => removeItem(cmd.target); } },
+ * }));
  */
 export function optimistic(
   handlers: Record<string, {
@@ -261,5 +287,105 @@ export function optimistic(
 
     return result;
   };
+  return plugin as Plugin;
+}
+
+// ---------------------------------------------------------------------------
+// optimisticUndo — auto-rollback using registered undo handlers
+// ---------------------------------------------------------------------------
+
+export type OptimisticUndoOptions = {
+  /**
+   * Predict the optimistic result returned immediately to the caller.
+   * If omitted, returns `{ ok: true, value: undefined }` as the optimistic result.
+   */
+  predict?: (cmd: Command) => any;
+  /**
+   * Called when the real handler fails and the undo handler runs.
+   * Use this to notify the UI of the rollback (e.g. show a toast).
+   */
+  onRollback?: (cmd: Command, error: Error) => void;
+  /**
+   * Called when the undo handler itself throws during rollback.
+   * If omitted, errors are logged to console.error.
+   */
+  onRollbackError?: (cmd: Command, undoError: Error, originalError: Error) => void;
+};
+
+/**
+ * Optimistic dispatch plugin that auto-rollbacks using the bus's registered undo handlers.
+ *
+ * Unlike `optimistic()`, this plugin does **not** require separate `apply`/rollback
+ * closures — it uses the undo handler already registered via `register(action, handler, { undo })`.
+ *
+ * **How it works on an async bus:**
+ * 1. Immediately returns `{ ok: true, value: predict(cmd) }` to the caller.
+ * 2. The real handler runs in the background.
+ * 3. If the real handler fails, the registered undo handler is called automatically.
+ *
+ * **On a sync bus:** behaves like the regular `optimistic()` — runs handler synchronously,
+ * rolls back via undo handler if it fails.
+ *
+ * **Requires** undo handlers to be registered for the targeted actions.
+ * Actions without undo handlers are passed through unchanged.
+ *
+ * @example
+ * bus.register('cartAdd', addToCart, { undo: removeFromCart });
+ * bus.use(optimisticUndo(bus, ['cartAdd'], {
+ *   predict: (cmd) => ({ id: cmd.target.id, qty: cmd.payload.qty }),
+ *   onRollback: (cmd, err) => toast.error(`Failed to add item: ${err.message}`),
+ * }));
+ * // dispatch returns immediately with predicted result
+ * const result = await bus.dispatch('cartAdd', { id: 5 }, { qty: 2 });
+ * // result.ok === true, result.value === { id: 5, qty: 2 }
+ */
+export function optimisticUndo(
+  bus: CommandBus,
+  actions: string[],
+  options: OptimisticUndoOptions = {},
+): Plugin {
+  const actionSet = new Set(actions);
+  const { predict, onRollback, onRollbackError } = options;
+
+  const plugin: any = (cmd: Command, next: () => any) => {
+    if (!actionSet.has(cmd.action)) return next();
+
+    const undoHandler = bus.getUndoHandler(cmd.action);
+    if (!undoHandler) return next(); // no undo registered — passthrough
+
+    const result = next();
+
+    // Async path: return predicted result immediately, rollback on failure in background
+    if (result && typeof result.then === 'function') {
+      const optimisticValue = predict ? predict(cmd) : undefined;
+
+      // Fire-and-forget: monitor the real result and rollback if needed
+      (result as Promise<CommandResult>).then((r: CommandResult) => {
+        if (!r.ok) {
+          try { undoHandler(cmd); }
+          catch (undoErr) {
+            if (onRollbackError) onRollbackError(cmd, undoErr as Error, r.error!);
+            else console.error(`[vapor-chamber] Undo rollback error for "${cmd.action}":`, undoErr);
+          }
+          if (onRollback) onRollback(cmd, r.error!);
+        }
+      });
+
+      return { ok: true, value: optimisticValue };
+    }
+
+    // Sync path: rollback immediately if handler failed
+    if (!result.ok) {
+      try { undoHandler(cmd); }
+      catch (undoErr) {
+        if (onRollbackError) onRollbackError(cmd, undoErr as Error, result.error!);
+        else console.error(`[vapor-chamber] Undo rollback error for "${cmd.action}":`, undoErr);
+      }
+      if (onRollback) onRollback(cmd, result.error!);
+    }
+
+    return result;
+  };
+
   return plugin as Plugin;
 }

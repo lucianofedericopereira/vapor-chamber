@@ -34,8 +34,19 @@
  *   v0.4.3 — createTestBus snapshot/time-travel
  *   v0.5.0 — camelCase naming, HTTP client, CDCC splits, createFormBus, schema/LLM layer
  *   v0.6.0 — onBefore, once, offAll, BaseBus, commandKey; BatchResult successCount/failCount;
- *             form async validation; HttpError.code; noRetry; WS maxQueueSize; LlmAdapter;
- *             419≠401 fix; CSRF refresh fix; WS timeout configurable; SSE BaseBus
+ *             form async validation (isValidating, isBusy); HttpError.code; noRetry;
+ *             WS maxQueueSize; LlmAdapter; 419≠401 fix; CSRF refresh error propagation;
+ *             WS queue expiry on reconnect; async request dedup; directive dispatch timeout;
+ *             signal detection sync probe (globalThis.__VUE__); waitForVueDetection();
+ *             passthroughHandlers fix in TestBus; Vue >=3.6.0-beta.1 peer dep;
+ *             useVaporCommand() composable; Vapor directive compat warning;
+ *             tryAutoCleanup dev warning; Vite HMR .vapor.vue support;
+ *             FormBus reactive:false headless mode; HttpBridge scopeController;
+ *             WsBridge reactive connected signal
+ *   v1.0.0 — bus.query() CQRS read-only dispatch; bus.emit() domain events;
+ *             Command.meta auto-stamped metadata (ts, id, correlationId, causationId);
+ *             bus.registeredActions() introspection; TestBus.onBefore fires for real;
+ *             TestBus.query/emit/registeredActions parity
  */
 
 // ── CORE ─────────────────────────────────────────────────────────────────────
@@ -43,11 +54,21 @@ export {
   createCommandBus,
   createAsyncCommandBus,
   commandKey,
+  createCommandPool,
+  unsealBus,
+  inspectBus,
   buildRunner,
   matchesPattern,
+  BusError,
+  type CommandPool,
+  type BusInspection,
+  type BusErrorCode,
+  type BusSeverity,
+  type BusEmitter,
   type BaseBus,
   type Command,
   type CommandResult,
+  type CommandMeta,
   type CommandBus,
   type AsyncCommandBus,
   type Handler,
@@ -73,6 +94,36 @@ export {
 // Testing utilities (CORE — zero runtime deps, for test environments only)
 export { createTestBus, type TestBus, type RecordedDispatch } from './testing';
 
+// ── UTILITIES ────────────────────────────────────────────────────────────────
+// Declarative patterns for common bus usage. Tree-shaken when unused.
+export {
+  createChamber,
+  createWorkflow,
+  createReaction,
+  type Chamber,
+  type ChamberHandlers,
+  type ChamberOptions,
+  type WorkflowStep,
+  type WorkflowResult,
+  type Workflow,
+  type ReactionOptions,
+  type Reaction,
+} from './utilities';
+
+// ── EXTRA PLUGINS ────────────────────────────────────────────────────────────
+// Production-ready plugins: caching, resilience, observability. Tree-shaken.
+export {
+  cache,
+  circuitBreaker,
+  rateLimit,
+  metrics,
+  type CacheOptions,
+  type CircuitBreakerOptions,
+  type RateLimitOptions,
+  type MetricsEntry,
+  type MetricsOptions,
+} from './plugins-extra';
+
 // ── OPTIONAL ──────────────────────────────────────────────────────────────────
 
 // Plugins
@@ -84,10 +135,12 @@ export {
   throttle,
   authGuard,
   optimistic,
+  optimisticUndo,
   retry,
   persist,
   sync,
   type HistoryState,
+  type OptimisticUndoOptions,
   type RetryOptions,
   type PersistOptions,
   type SyncOptions,
@@ -111,6 +164,8 @@ export {
   useCommandError,
   // v0.4.0: Vue 3.6 Vapor detection
   isVaporAvailable,
+  // v0.6.0: Await Vue detection for guaranteed signal availability
+  waitForVueDetection,
 } from './chamber';
 
 // Vue 3.6+ Vapor-specific API — optional, requires Vue 3.6
@@ -118,6 +173,8 @@ export {
   createVaporChamberApp,
   getVaporInteropPlugin,
   defineVaporCommand,
+  // v0.6.0: Vapor-safe reactive composable (no getCurrentInstance dependency)
+  useVaporCommand,
 } from './chamber-vapor';
 
 // HTTP client — optional, used by createHttpBridge; also available standalone
@@ -172,6 +229,7 @@ export {
   type InferMap,
   type SchemaCommandBus,
   type AsyncSchemaCommandBus,
+  type SchemaCommandBusOptions,
   type SynthesizeOptions,
   type LlmAdapter,
   type AnthropicTool,
@@ -179,4 +237,10 @@ export {
   type ToolCallInput,
   schemaValidator,
   describeSchema,
+  // v1.0: Error code registry and API schema for LLMs
+  ERROR_CODE_REGISTRY,
+  getErrorEntry,
+  describeErrorCodes,
+  busApiSchema,
+  type ErrorCodeEntry,
 } from './schema';

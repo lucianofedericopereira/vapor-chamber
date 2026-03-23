@@ -227,6 +227,22 @@ describe('postCommand — session expiry', () => {
 // ---------------------------------------------------------------------------
 
 describe('postCommand — CSRF 419 refresh', () => {
+  // After the A3 fix, refreshCsrfOnce throws if readCsrfToken() returns null
+  // post-refresh. In Node there's no real DOM, so we mock document + querySelector
+  // to provide a CSRF meta tag after the csrf-cookie fetch completes.
+  beforeEach(() => {
+    const fakeDocument = {
+      querySelector: (sel: string) => {
+        if (sel === 'meta[name="csrf-token"]') {
+          return { content: 'test-csrf-token-refreshed' };
+        }
+        return null;
+      },
+      cookie: '',
+    };
+    vi.stubGlobal('document', fakeDocument);
+  });
+
   it('retries once after 419 and does not count against retry budget', async () => {
     (globalThis.fetch as any)
       .mockResolvedValueOnce(mockResponse(419))          // original request → 419

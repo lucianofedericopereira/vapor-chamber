@@ -350,7 +350,7 @@ describe('throttle plugin', () => {
 
     expect(handler).toHaveBeenCalledTimes(1);
     expect(throttled.ok).toBe(false);
-    expect(throttled.error?.message).toBe('throttled');
+    expect(throttled.error?.message).toContain('throttled');
   });
 
   it('should allow calls after wait period', () => {
@@ -525,5 +525,33 @@ describe('optimistic plugin', () => {
     bus.dispatch('counterIncrement', {});
 
     expect(state.count).toBe(0);
+  });
+});
+
+// ─── Plugin dispose ────────────────────────────────────────────────────────
+
+describe('throttle plugin dispose()', () => {
+  it('cancels all pending throttle timers', () => {
+    const bus = createCommandBus();
+    const t = throttle(['a'], 10000);
+    bus.use(t);
+    bus.register('a', () => 1);
+
+    bus.dispatch('a', {}); // first call goes through, starts timer
+    t.dispose(); // cancel the timer
+    // No timer leak — test just verifies dispose exists and doesn't throw
+  });
+});
+
+describe('debounce plugin dispose()', () => {
+  it('cancels all pending debounce timers', () => {
+    const bus = createCommandBus();
+    const d = debounce(['a'], 10000);
+    bus.use(d);
+    bus.register('a', () => 1);
+
+    bus.dispatch('a', {}); // starts debounce timer
+    d.dispose(); // cancel the timer
+    // No timer leak — test just verifies dispose exists and doesn't throw
   });
 });

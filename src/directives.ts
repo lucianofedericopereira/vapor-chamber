@@ -26,12 +26,15 @@
  * </button>
  */
 
-import { getCommandBus } from './chamber';
+import { getCommandBus, isVaporAvailable } from './chamber';
 import type { Command } from './command-bus';
 
 // ---------------------------------------------------------------------------
 // Internal state per element (stored via WeakMap)
 // ---------------------------------------------------------------------------
+
+/** Default timeout for async dispatch in ms. Prevents infinite loading states. */
+const DEFAULT_DISPATCH_TIMEOUT = 30_000;
 
 type DirectiveState = {
   action: string;
@@ -42,6 +45,8 @@ type DirectiveState = {
   error: Error | null;
   handler: (event: Event) => void;
   rollback?: (() => void) | null;
+  /** Timeout in ms for async dispatch. Default: 30_000 */
+  timeout: number;
 };
 
 const stateMap = new WeakMap<Element, DirectiveState>();
@@ -91,21 +96,36 @@ function buildHandler(el: Element, state: DirectiveState): (event: Event) => voi
       rollback = state.optimisticFn(cmd) ?? null;
     }
 
-    let result;
+    let resolved: { ok: boolean; error?: Error; value?: any };
     try {
-      result = bus.dispatch(state.action, target, payload);
+      let result;
+      try {
+        result = bus.dispatch(state.action, target, payload);
+      } catch (e) {
+        result = { ok: false, error: e as Error };
+      }
+
+      // Handle result (may be a Promise if using async bus shim)
+      if (result && typeof (result as any).then === 'function') {
+        // Race against timeout to prevent infinite loading states
+        const timeoutPromise = new Promise<{ ok: false; error: Error }>((resolve) => {
+          setTimeout(
+            () => resolve({ ok: false, error: new Error(`Directive dispatch "${state.action}" timed out after ${state.timeout}ms`) }),
+            state.timeout
+          );
+        });
+        resolved = await Promise.race([(result as unknown as Promise<any>), timeoutPromise]);
+      } else {
+        resolved = result;
+      }
     } catch (e) {
-      result = { ok: false, error: e as Error };
+      resolved = { ok: false, error: e as Error };
+    } finally {
+      // Always reset loading state — prevents stuck buttons
+      state.loading = false;
+      el.classList.remove(LOADING_CLASS);
+      if (el instanceof HTMLButtonElement) el.disabled = false;
     }
-
-    // Handle result (may be a Promise if using async bus shim)
-    const resolved = result && typeof (result as any).then === 'function'
-      ? await (result as any)
-      : result;
-
-    state.loading = false;
-    el.classList.remove(LOADING_CLASS);
-    if (el instanceof HTMLButtonElement) el.disabled = false;
 
     if (!resolved.ok) {
       state.error = resolved.error ?? null;
@@ -130,6 +150,17 @@ function buildHandler(el: Element, state: DirectiveState): (event: Event) => voi
 export function createDirectivePlugin(): { install(app: any): void } {
   return {
     install(app: any) {
+      // Vue 3.6+ Vapor components don't support custom directives (no VDOM
+      // lifecycle hooks). Warn developers to use useVaporCommand() instead.
+      if (isVaporAvailable()) {
+        console.warn(
+          '[vapor-chamber] Directives (v-vc:command) are VDOM-only and will not ' +
+          'work inside <script setup vapor> components. Use useVaporCommand() or ' +
+          'defineVaporCommand() for Vapor components. Directives still work in ' +
+          'VDOM components within the same app.'
+        );
+      }
+
       /**
        * v-vc:command="'actionName'"
        *
@@ -140,11 +171,16 @@ export function createDirectivePlugin(): { install(app: any): void } {
         mounted(el: Element, binding: { arg?: string; value: any; modifiers: Record<string, boolean> }) {
           if (binding.arg !== 'command') return;
 
+          const timeout = typeof binding.modifiers === 'object' && binding.modifiers
+            ? parseInt(Object.keys(binding.modifiers).find(k => /^\d+$/.test(k)) ?? '', 10) || DEFAULT_DISPATCH_TIMEOUT
+            : DEFAULT_DISPATCH_TIMEOUT;
+
           const state: DirectiveState = {
             action: binding.value as string,
             loading: false,
             error: null,
             handler: () => {},
+            timeout,
           };
 
           state.handler = buildHandler(el, state);

@@ -148,4 +148,55 @@ describe('createFormBus — plugin integration', () => {
     expect(form.bus).toBeDefined();
     expect(typeof form.bus.dispatch).toBe('function');
   });
+
+  // -- reactive: false (headless/SSR mode) ----------------------------------
+
+  describe('reactive: false (headless mode)', () => {
+    it('works with plain get/set wrappers instead of Vue signals', () => {
+      const form = createFormBus({ fields: { email: '', name: '' }, reactive: false });
+      expect(form.values.value).toEqual({ email: '', name: '' });
+
+      form.set('email', 'test@example.com');
+      expect(form.values.value.email).toBe('test@example.com');
+      expect(form.isDirty.value).toBe(true);
+    });
+
+    it('validation still works in headless mode', () => {
+      const form = createFormBus({
+        fields: { age: 0 },
+        rules: { age: (v) => v >= 18 ? null : 'Too young' },
+        reactive: false,
+      });
+
+      form.set('age', 10);
+      expect(form.isValid.value).toBe(false);
+      expect(form.errors.value.age).toBe('Too young');
+
+      form.set('age', 21);
+      expect(form.isValid.value).toBe(true);
+    });
+
+    it('submit works in headless mode', async () => {
+      const onSubmit = vi.fn();
+      const form = createFormBus({
+        fields: { x: 'ok' },
+        onSubmit,
+        reactive: false,
+      });
+
+      const result = await form.submit();
+      expect(result).toBe(true);
+      expect(onSubmit).toHaveBeenCalledWith({ x: 'ok' });
+    });
+
+    it('reset restores initial values in headless mode', () => {
+      const form = createFormBus({ fields: { a: 1 }, reactive: false });
+      form.set('a', 99);
+      expect(form.values.value.a).toBe(99);
+
+      form.reset();
+      expect(form.values.value.a).toBe(1);
+      expect(form.isDirty.value).toBe(false);
+    });
+  });
 });

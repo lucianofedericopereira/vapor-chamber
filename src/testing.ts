@@ -27,11 +27,11 @@
  */
 
 import type {
-  Command, CommandResult, Handler, Plugin, Hook,
+  Command, CommandResult, Handler, Plugin, Hook, BeforeHook,
   PluginOptions, BatchCommand, BatchResult, CommandBus,
-  Listener, RegisterOptions,
+  Listener, RegisterOptions, CommandMeta, BusInspection,
 } from './command-bus';
-import { buildRunner, matchesPattern } from './command-bus';
+import { buildRunner, matchesPattern, BusError } from './command-bus';
 
 export interface RecordedDispatch {
   cmd: Command;
@@ -45,8 +45,14 @@ export interface TestBus extends CommandBus<any> {
   wasDispatched(action: string): boolean;
   /** All recorded dispatches for a given action */
   getDispatched(action: string): RecordedDispatch[];
-  /** Clear the recorded list */
+  /** Clear the recorded list and listeners */
   clear(): void;
+  /** Read-only dispatch — skips beforeHooks, runs handler + plugins, fires afterHooks. */
+  query(action: string, target: any, payload?: any): CommandResult;
+  /** Fire a domain event — notifies on() listeners, no handler required, no result. */
+  emit(event: string, data?: any): void;
+  /** Returns all registered action names. */
+  registeredActions(): string[];
   /**
    * Snapshot — returns a deep-cloned, serializable copy of the recorded list.
    * Safe to compare with `toEqual` in any test framework.
@@ -65,6 +71,8 @@ export interface TestBus extends CommandBus<any> {
    * the last occurrence of `action`. Useful for "what happened before this action".
    */
   travelToAction(action: string): Command[];
+  /** Full topology snapshot — actions, plugins, hooks, listeners, seal state. */
+  inspect(): BusInspection;
 }
 
 /**
@@ -75,9 +83,13 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
   const handlers = new Map<string, Handler>();
   const undoHandlers = new Map<string, Handler>();
   const plugins: Array<{ plugin: Plugin; priority: number }> = [];
+  const beforeHooks: BeforeHook[] = [];
   const afterHooks: Hook[] = [];
   const patternListeners: Array<{ pattern: string; listener: Listener }> = [];
   const recorded: RecordedDispatch[] = [];
+  let sealed = false;
+  let dispatchDepth = 0;
+  const MAX_DISPATCH_DEPTH = 16;
 
   let runner = buildRunner([]);
 
@@ -86,19 +98,56 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
     runner = buildRunner(sorted);
   }
 
+  function runAfterHooksAndListeners(cmd: Command, result: CommandResult): void {
+    // V8-aligned: index-based loop with length snapshot for hooks (no self-removal)
+    const ah = afterHooks;
+    for (let i = 0, len = ah.length; i < len; i++) {
+      try { ah[i](cmd, result); } catch (e) {
+        console.error('[vapor-chamber/test] Hook error:', e);
+      }
+    }
+    // once() splices itself out mid-iteration — adjust index when array shrinks
+    const pl = patternListeners;
+    for (let i = 0; i < pl.length; i++) {
+      const entry = pl[i];
+      if (matchesPattern(entry.pattern, cmd.action)) {
+        const lenBefore = pl.length;
+        try { entry.listener(cmd, result); } catch (e) {
+          console.error('[vapor-chamber/test] Listener error:', e);
+        }
+        if (pl.length < lenBefore) i--;
+      }
+    }
+  }
+
   function dispatch(action: string, target: any, payload?: any): CommandResult {
+    if (dispatchDepth >= MAX_DISPATCH_DEPTH) {
+      return { ok: false, error: new BusError('VC_CORE_MAX_DEPTH', `Maximum dispatch depth (${MAX_DISPATCH_DEPTH}) exceeded for "${action}".`, { emitter: 'test', action }) };
+    }
+    dispatchDepth++;
+    try { return _dispatchInner(action, target, payload); }
+    finally { dispatchDepth--; }
+  }
+
+  function _dispatchInner(action: string, target: any, payload?: any): CommandResult {
     const cmd: Command = { action, target, payload };
+
+    // Run beforeHooks — throw cancels dispatch
+    const bh = beforeHooks;
+    for (let i = 0, len = bh.length; i < len; i++) {
+      try { bh[i](cmd); }
+      catch (e) {
+        const result: CommandResult = { ok: false, error: e as Error };
+        recorded.push({ cmd, result });
+        runAfterHooksAndListeners(cmd, result);
+        return result;
+      }
+    }
+
     const handler = handlers.get(action);
 
     const execute = (): CommandResult => {
-      if (opts.passthroughHandlers && handler) {
-        try {
-          return { ok: true, value: handler(cmd) };
-        } catch (e) {
-          return { ok: false, error: e as Error };
-        }
-      }
-      if (handler) {
+      if (handler && opts.passthroughHandlers) {
         try {
           return { ok: true, value: handler(cmd) };
         } catch (e) {
@@ -110,21 +159,41 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
 
     const result = runner(cmd, execute);
     recorded.push({ cmd, result });
+    runAfterHooksAndListeners(cmd, result);
+    return result;
+  }
 
-    for (const hook of afterHooks.slice()) {
-      try { hook(cmd, result); } catch (e) {
-        console.error('[vapor-chamber/test] Hook error:', e);
+  function query(action: string, target: any, payload?: any): CommandResult {
+    const cmd: Command = { action, target, payload };
+    // Skip beforeHooks — reads don't trigger mutation gates
+    const handler = handlers.get(action);
+    const execute = (): CommandResult => {
+      if (handler && opts.passthroughHandlers) {
+        try { return { ok: true, value: handler(cmd) }; }
+        catch (e) { return { ok: false, error: e as Error }; }
       }
-    }
-    for (const { pattern, listener } of patternListeners.slice()) {
-      if (matchesPattern(pattern, cmd.action)) {
-        try { listener(cmd, result); } catch (e) {
+      return { ok: true, value: undefined };
+    };
+    const result = runner(cmd, execute);
+    recorded.push({ cmd, result });
+    runAfterHooksAndListeners(cmd, result);
+    return result;
+  }
+
+  function emit(event: string, data?: any): void {
+    const cmd: Command = { action: event, target: data };
+    const result: CommandResult = { ok: true, value: undefined };
+    const pl = patternListeners;
+    for (let i = 0; i < pl.length; i++) {
+      const entry = pl[i];
+      if (matchesPattern(entry.pattern, event)) {
+        const lenBefore = pl.length;
+        try { entry.listener(cmd, result); } catch (e) {
           console.error('[vapor-chamber/test] Listener error:', e);
         }
+        if (pl.length < lenBefore) i--;
       }
     }
-
-    return result;
   }
 
   function dispatchBatch(commands: BatchCommand[]): BatchResult {
@@ -142,6 +211,7 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
   }
 
   function register(action: string, handler: Handler, regOpts: RegisterOptions = {}): () => void {
+    if (sealed) throw new BusError('VC_CORE_SEALED', `Cannot call register() on a sealed bus.`, { emitter: 'test' });
     handlers.set(action, handler);
     if (regOpts.undo) {
       undoHandlers.set(action, regOpts.undo);
@@ -153,6 +223,7 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
   }
 
   function use(plugin: Plugin, options: PluginOptions = {}): () => void {
+    if (sealed) throw new BusError('VC_CORE_SEALED', `Cannot call use() on a sealed bus.`, { emitter: 'test' });
     const entry = { plugin, priority: options.priority ?? 0 };
     plugins.push(entry);
     rebuildRunner();
@@ -162,11 +233,14 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
     };
   }
 
-  function onBefore(_hook: any): () => void {
-    return () => {};
+  function onBefore(hook: BeforeHook): () => void {
+    if (sealed) throw new BusError('VC_CORE_SEALED', `Cannot call onBefore() on a sealed bus.`, { emitter: 'test' });
+    beforeHooks.push(hook);
+    return () => { const i = beforeHooks.indexOf(hook); if (i !== -1) beforeHooks.splice(i, 1); };
   }
 
   function onAfter(hook: Hook): () => void {
+    if (sealed) throw new BusError('VC_CORE_SEALED', `Cannot call onAfter() on a sealed bus.`, { emitter: 'test' });
     afterHooks.push(hook);
     return () => {
       const i = afterHooks.indexOf(hook);
@@ -224,6 +298,8 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
 
   return {
     dispatch,
+    query,
+    emit,
     dispatchBatch,
     register,
     use,
@@ -235,11 +311,28 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
     request,
     respond,
     hasHandler: (action: string) => handlers.has(action),
+    registeredActions: () => Array.from(handlers.keys()),
     getUndoHandler,
     recorded,
     wasDispatched: (action: string) => recorded.some(r => r.cmd.action === action),
     getDispatched: (action: string) => recorded.filter(r => r.cmd.action === action),
-    clear: () => { recorded.splice(0); patternListeners.length = 0; },
+    clear: () => { recorded.splice(0); patternListeners.length = 0; beforeHooks.length = 0; sealed = false; },
+    dispose: () => { recorded.splice(0); patternListeners.length = 0; beforeHooks.length = 0; afterHooks.length = 0; handlers.clear(); undoHandlers.clear(); plugins.length = 0; sealed = false; },
+    seal: () => { sealed = true; },
+    isSealed: () => sealed,
+    inspect: (): BusInspection => ({
+      actions: Array.from(handlers.keys()),
+      undoActions: Array.from(undoHandlers.keys()),
+      responderActions: [],
+      pluginCount: plugins.length,
+      pluginPriorities: plugins.slice().sort((a, b) => b.priority - a.priority).map(e => e.priority),
+      beforeHookCount: beforeHooks.length,
+      afterHookCount: afterHooks.length,
+      listenerPatterns: patternListeners.map(e => e.pattern),
+      sealed,
+      dispatchDepth,
+      activeTimers: 0,
+    }),
     snapshot,
     travelTo,
     travelToAction,

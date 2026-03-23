@@ -295,6 +295,20 @@ describe('createWsBridge', () => {
     expect(ws.isConnected()).toBe(false);
   });
 
+  it('connected signal reflects WebSocket state reactively', async () => {
+    vi.useFakeTimers();
+    const ws = createWsBridge({ url: 'ws://localhost' });
+
+    expect(ws.connected.value).toBe(false);
+
+    ws.connect();
+    await vi.runAllTimersAsync();
+    expect(ws.connected.value).toBe(true);
+
+    ws.disconnect();
+    expect(ws.connected.value).toBe(false);
+  });
+
   it('ignores malformed JSON frames without crashing', async () => {
     vi.useFakeTimers();
     const bus = createAsyncCommandBus();

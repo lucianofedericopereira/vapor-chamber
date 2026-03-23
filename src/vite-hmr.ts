@@ -109,7 +109,9 @@ export { getCommandBus, setCommandBus, resetCommandBus };
       if (!code.includes('vapor-chamber')) return;
       if (id.includes('node_modules')) return;
       if (id.includes(resolvedVirtualModuleId)) return;
-      if (!id.match(/\.(ts|js|vue|tsx|jsx)$/)) return;
+      // Match standard Vue files + Vapor SFCs (.vapor.vue compiled by
+      // @vitejs/plugin-vue-vapor) and virtual modules from vue-vapor plugin
+      if (!id.match(/\.(ts|js|vue|tsx|jsx)$/) && !id.includes('.vapor.vue')) return;
 
       // Avoid double-injection
       if (code.includes(virtualModuleId)) return;

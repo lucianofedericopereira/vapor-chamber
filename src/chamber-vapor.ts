@@ -1,18 +1,20 @@
 /**
  * vapor-chamber — Vue 3.6+ Vapor-specific API
  *
- * createVaporChamberApp, getVaporInteropPlugin, defineVaporCommand
+ * createVaporChamberApp, getVaporInteropPlugin, defineVaporCommand,
+ * useVaporCommand
  *
  * Separated from chamber.ts to keep the core composable module CDCC-compliant.
  */
 
 import {
   getCommandBus,
+  signal,
   tryAutoCleanup,
   getVaporAppFn,
   getVaporInteropRef,
 } from './chamber';
-import type { Handler, RegisterOptions, CommandResult } from './command-bus';
+import type { Handler, RegisterOptions, CommandResult, Command } from './command-bus';
 
 /**
  * Create a Vapor app instance with vapor-chamber ready.
@@ -79,4 +81,60 @@ export function defineVaporCommand(
   tryAutoCleanup(dispose);
 
   return { dispatch, dispose };
+}
+
+// ---------------------------------------------------------------------------
+// useVaporCommand
+// ---------------------------------------------------------------------------
+
+/**
+ * useVaporCommand — reactive command dispatch designed for Vapor components.
+ *
+ * Like useCommand() but safe for `<script setup vapor>` where
+ * getCurrentInstance() returns null. Provides reactive loading/error signals
+ * and relies exclusively on onScopeDispose for cleanup (no onUnmounted path).
+ *
+ * For fire-and-forget (no loading/error state), prefer defineVaporCommand().
+ *
+ * @example
+ * // In a <script setup vapor> component:
+ * import { useVaporCommand } from 'vapor-chamber';
+ * const { dispatch, loading, lastError } = useVaporCommand();
+ * dispatch('cartAdd', { id: product.id });
+ */
+export function useVaporCommand() {
+  const bus = getCommandBus();
+  const loading = signal(false);
+  const lastError = signal<Error | null>(null);
+  const listeners: Array<() => void> = [];
+
+  function dispatch(action: string, target: any, payload?: any): CommandResult {
+    loading.value = true;
+    lastError.value = null;
+    const result = bus.dispatch(action, target, payload);
+    loading.value = false;
+    if (!result.ok) lastError.value = result.error ?? null;
+    return result;
+  }
+
+  function register(action: string, handler: Handler, opts?: RegisterOptions): () => void {
+    const unregister = bus.register(action, handler, opts);
+    listeners.push(unregister);
+    return unregister;
+  }
+
+  function on(pattern: string, listener: (cmd: Command, result: CommandResult) => void): () => void {
+    const unsub = bus.on(pattern, listener);
+    listeners.push(unsub);
+    return unsub;
+  }
+
+  function dispose() {
+    listeners.forEach(fn => fn());
+    listeners.length = 0;
+  }
+
+  tryAutoCleanup(dispose);
+
+  return { dispatch, register, on, loading, lastError, dispose };
 }

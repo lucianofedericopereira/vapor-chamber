@@ -25,7 +25,7 @@
  */
 
 import { signal } from './chamber';
-import type { Signal } from './chamber';
+import type { Signal, CreateSignal } from './chamber';
 import { createCommandBus } from './command-bus';
 import type { CommandBus, Plugin, PluginOptions } from './command-bus';
 
@@ -44,6 +44,13 @@ export type FormBusOptions<T extends Record<string, any>> = {
   rules?: FormRules<T>;
   /** Called after successful validation on submit(). May be async. */
   onSubmit?: (values: T) => void | Promise<void>;
+  /**
+   * Create reactive signals for all form state (values, errors, isDirty, etc.).
+   * Default: true. Set to false for headless / server-side / batch use cases
+   * where reactivity is not needed — avoids 7 signal allocations per form.
+   * When false, all Signal fields still work as plain get/set wrappers.
+   */
+  reactive?: boolean;
 };
 
 export type FormBus<T extends Record<string, any>> = {
@@ -59,6 +66,10 @@ export type FormBus<T extends Record<string, any>> = {
   isValid: Signal<boolean>;
   /** True while onSubmit is in flight. */
   isSubmitting: Signal<boolean>;
+  /** True while async validation is running. */
+  isValidating: Signal<boolean>;
+  /** True when either validating or submitting — use for disabling submit buttons. */
+  isBusy: Signal<boolean>;
   /** Set a single field value and re-run validation. */
   set<K extends keyof T>(field: K, value: T[K]): void;
   /** Mark a field as touched (shows errors for that field). */
@@ -126,18 +137,32 @@ function hasDiff<T extends Record<string, any>>(a: T, b: T): boolean {
 export function createFormBus<T extends Record<string, any>>(
   options: FormBusOptions<T>,
 ): FormBus<T> {
-  const { onSubmit } = options;
+  const { onSubmit, reactive: useReactive = true } = options;
   const rules = (options.rules ?? {}) as FormRules<T>;
   const initial: T = { ...options.fields };
 
   const bus = createCommandBus();
 
-  const values    = signal<T>({ ...initial });
-  const errors    = signal<Partial<Record<keyof T, string>>>({});
-  const touched   = signal<Partial<Record<keyof T, boolean>>>({});
-  const isDirty   = signal(false);
-  const isValid   = signal(true);
-  const isSubmitting = signal(false);
+  // When reactive: false, use plain get/set wrappers instead of Vue signals.
+  // Saves 7 signal allocations per form in headless/batch/SSR contexts.
+  const sig: CreateSignal = useReactive ? signal : <V>(v: V): Signal<V> => {
+    let _val = v;
+    return { get value() { return _val; }, set value(v: V) { _val = v; } };
+  };
+
+  const values    = sig<T>({ ...initial });
+  const errors    = sig<Partial<Record<keyof T, string>>>({});
+  const touched   = sig<Partial<Record<keyof T, boolean>>>({});
+  const isDirty   = sig(false);
+  const isValid   = sig(true);
+  const isSubmitting = sig(false);
+  const isValidating = sig(false);
+  const isBusy   = sig(false);
+
+  /** Update isBusy whenever isSubmitting or isValidating changes */
+  function updateBusy(): void {
+    isBusy.value = isSubmitting.value || isValidating.value;
+  }
 
   // ---- formSet -----------------------------------------------------------
   bus.register('formSet', (cmd) => {
@@ -166,6 +191,8 @@ export function createFormBus<T extends Record<string, any>>(
     isDirty.value  = false;
     isValid.value  = true;
     isSubmitting.value = false;
+    isValidating.value = false;
+    isBusy.value   = false;
     return values.value;
   });
 
@@ -203,17 +230,27 @@ export function createFormBus<T extends Record<string, any>>(
     touched.value = allTouched;
 
     // Run all rules — awaits async validators too
-    const errs = await runRulesAsync(rules, values.value);
-    errors.value = errs;
-    isValid.value = Object.keys(errs).length === 0;
+    // Set isValidating so the UI can show loading state during async validation
+    isValidating.value = true;
+    updateBusy();
+    try {
+      const errs = await runRulesAsync(rules, values.value);
+      errors.value = errs;
+      isValid.value = Object.keys(errs).length === 0;
+    } finally {
+      isValidating.value = false;
+      updateBusy();
+    }
     if (!isValid.value) return false;
 
     isSubmitting.value = true;
+    updateBusy();
     try {
       if (onSubmit) await onSubmit(values.value);
       return true;
     } finally {
       isSubmitting.value = false;
+      updateBusy();
     }
   }
 
@@ -221,5 +258,5 @@ export function createFormBus<T extends Record<string, any>>(
     bus.use(plugin, pluginOptions);
   }
 
-  return { values, errors, touched, isDirty, isValid, isSubmitting, set, touch, submit, reset, use, bus };
+  return { values, errors, touched, isDirty, isValid, isSubmitting, isValidating, isBusy, set, touch, submit, reset, use, bus };
 }

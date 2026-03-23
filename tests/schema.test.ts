@@ -156,13 +156,9 @@ describe('schemaLogger', () => {
 // ---------------------------------------------------------------------------
 
 describe('synthesize', () => {
-  function makeFetchMock(toolName: string, input: Record<string, any>) {
-    return vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        content: [{ type: 'tool_use', id: 'tu_1', name: toolName, input }],
-      }),
-    });
+  /** Helper: create an adapter that returns a specific tool call */
+  function makeAdapter(toolName: string, input: Record<string, any>) {
+    return vi.fn(async () => ({ name: toolName, input }));
   }
 
   it('dispatches the tool selected by the LLM', async () => {
@@ -170,12 +166,8 @@ describe('synthesize', () => {
     const handler = vi.fn(() => 'added');
     bus.register('cartAdd', handler);
 
-    // LLM returns nested { target, payload } — no splitting needed
-    const fetchMock = makeFetchMock('cartAdd', { target: { id: 5 }, payload: { qty: 2 } });
-    const result = await synthesize(cartSchema, bus, 'add 2 of item 5', {
-      apiKey: 'test-key',
-      fetch: fetchMock,
-    });
+    const adapter = makeAdapter('cartAdd', { target: { id: 5 }, payload: { qty: 2 } });
+    const result = await synthesize(cartSchema, bus, 'add 2 of item 5', { adapter });
 
     expect(result.ok).toBe(true);
     expect(result.value).toBe('added');
@@ -184,50 +176,43 @@ describe('synthesize', () => {
     );
   });
 
-  it('sends Anthropic tool definitions in the request body', async () => {
+  it('passes Anthropic tool definitions to the adapter', async () => {
     const bus = createCommandBus();
     bus.register('cartClear', () => null);
-    const fetchMock = makeFetchMock('cartClear', { target: { force: true } });
 
-    await synthesize(cartSchema, bus, 'clear my cart', { apiKey: 'k', fetch: fetchMock });
+    const adapter = makeAdapter('cartClear', { target: { force: true } });
+    await synthesize(cartSchema, bus, 'clear my cart', { adapter });
 
-    const body = JSON.parse(fetchMock.mock.calls[0][1].body);
-    expect(body.tools).toHaveLength(2);
-    expect(body.tools[0].name).toBe('cartAdd');
-    expect(body.tools[0].input_schema.properties.target).toBeDefined();
-    expect(body.tool_choice).toEqual({ type: 'any' });
+    expect(adapter).toHaveBeenCalledTimes(1);
+    const tools = adapter.mock.calls[0][0];
+    expect(tools).toHaveLength(2);
+    expect(tools[0].name).toBe('cartAdd');
+    expect(tools[0].input_schema.properties.target).toBeDefined();
   });
 
-  it('returns error when apiKey is missing', async () => {
+  it('returns error when adapter is missing', async () => {
     const bus = createCommandBus();
     const result = await synthesize(cartSchema, bus, 'anything');
     expect(result.ok).toBe(false);
-    expect(result.error?.message).toContain('apiKey');
+    expect(result.error?.message).toContain('adapter');
   });
 
-  it('returns error when LLM response is not ok', async () => {
+  it('returns error when adapter throws', async () => {
     const bus = createCommandBus();
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 401,
-      text: async () => 'Unauthorized',
-    });
+    const adapter = vi.fn(async () => { throw new Error('LLM returned 401: Unauthorized'); });
 
-    const result = await synthesize(cartSchema, bus, 'test', { apiKey: 'k', fetch: fetchMock });
+    const result = await synthesize(cartSchema, bus, 'test', { adapter });
     expect(result.ok).toBe(false);
     expect(result.error?.message).toContain('401');
   });
 
-  it('returns error when LLM does not select a tool', async () => {
+  it('returns error when adapter returns invalid result', async () => {
     const bus = createCommandBus();
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ content: [{ type: 'text', text: 'I cannot help with that.' }] }),
-    });
+    // Adapter returns a tool name that doesn't exist — dispatch will fail
+    const adapter = vi.fn(async () => ({ name: 'nonExistent', input: {} }));
 
-    const result = await synthesize(cartSchema, bus, 'tell me a joke', { apiKey: 'k', fetch: fetchMock });
+    const result = await synthesize(cartSchema, bus, 'tell me a joke', { adapter });
     expect(result.ok).toBe(false);
-    expect(result.error?.message).toContain('tool');
   });
 });
 
@@ -272,14 +257,9 @@ describe('createSchemaCommandBus', () => {
     const handler = vi.fn(() => 'cleared');
     bus.register('cartClear', handler);
 
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        content: [{ type: 'tool_use', id: 'tu_1', name: 'cartClear', input: { target: { force: true } } }],
-      }),
-    });
+    const adapter = vi.fn(async () => ({ name: 'cartClear', input: { target: { force: true } } }));
 
-    const result = await bus.synthesize('clear the cart', { apiKey: 'k', fetch: fetchMock });
+    const result = await bus.synthesize('clear the cart', { adapter });
     expect(result.ok).toBe(true);
     expect(handler).toHaveBeenCalled();
   });
@@ -310,14 +290,9 @@ describe('createAsyncSchemaCommandBus', () => {
     const handler = vi.fn(async () => 'async-added');
     bus.register('cartAdd', handler);
 
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        content: [{ type: 'tool_use', id: 'tu_1', name: 'cartAdd', input: { target: { id: 3 }, payload: { qty: 1 } } }],
-      }),
-    });
+    const adapter = vi.fn(async () => ({ name: 'cartAdd', input: { target: { id: 3 }, payload: { qty: 1 } } }));
 
-    const result = await bus.synthesize('add item 3', { apiKey: 'k', fetch: fetchMock });
+    const result = await bus.synthesize('add item 3', { adapter });
     expect(result.ok).toBe(true);
     expect(handler).toHaveBeenCalled();
   });
@@ -437,9 +412,15 @@ describe('fromToolCall (sync bus)', () => {
     const bus = createSchemaCommandBus(cartSchema);
     bus.register('cartClear', () => 'cleared');
 
-    const result = bus.fromToolCall({ name: 'cartClear' });
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe('cleared');
+    // With auto-validation enabled, missing required 'force' field is rejected
+    const invalid = bus.fromToolCall({ name: 'cartClear' });
+    expect(invalid.ok).toBe(false);
+    expect(invalid.error?.message).toContain('force');
+
+    // Valid call with required field
+    const valid = bus.fromToolCall({ name: 'cartClear', input: { target: { force: true } } });
+    expect(valid.ok).toBe(true);
+    expect(valid.value).toBe('cleared');
   });
 });
 
@@ -455,5 +436,86 @@ describe('fromToolCall (async bus)', () => {
 
     expect(result.ok).toBe(true);
     expect(result.value).toBe(15);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Auto-validation (#8)
+// ---------------------------------------------------------------------------
+
+describe('createSchemaCommandBus auto-validation', () => {
+  const schema: BusSchema = {
+    cartAdd: {
+      description: 'Add item',
+      target: { id: 'number' },
+      payload: { qty: 'number' },
+    },
+  };
+
+  it('rejects invalid target fields by default (validate: true)', () => {
+    const bus = createSchemaCommandBus(schema);
+    bus.register('cartAdd', (cmd) => cmd.target.id);
+
+    // Pass string instead of number for id
+    const result = bus.dispatch('cartAdd', { id: 'not-a-number' as any }, { qty: 1 });
+    expect(result.ok).toBe(false);
+    expect(result.error?.message).toContain('Validation failed');
+    expect(result.error?.message).toContain('id');
+  });
+
+  it('rejects invalid payload fields by default', () => {
+    const bus = createSchemaCommandBus(schema);
+    bus.register('cartAdd', (cmd) => cmd.target.id);
+
+    const result = bus.dispatch('cartAdd', { id: 1 }, { qty: 'two' as any });
+    expect(result.ok).toBe(false);
+    expect(result.error?.message).toContain('Validation failed');
+    expect(result.error?.message).toContain('qty');
+  });
+
+  it('allows valid data through', () => {
+    const bus = createSchemaCommandBus(schema);
+    bus.register('cartAdd', (cmd) => cmd.target.id * cmd.payload.qty);
+
+    const result = bus.dispatch('cartAdd', { id: 3 }, { qty: 4 });
+    expect(result.ok).toBe(true);
+    expect(result.value).toBe(12);
+  });
+
+  it('skips validation when validate: false', () => {
+    const bus = createSchemaCommandBus(schema, { validate: false });
+    bus.register('cartAdd', (cmd) => cmd.target.id);
+
+    // Invalid type but should pass through (no validator installed)
+    const result = bus.dispatch('cartAdd', { id: 'not-a-number' as any }, { qty: 1 });
+    expect(result.ok).toBe(true);
+    expect(result.value).toBe('not-a-number');
+  });
+});
+
+describe('createAsyncSchemaCommandBus auto-validation', () => {
+  const schema: BusSchema = {
+    cartAdd: {
+      description: 'Add item',
+      target: { id: 'number' },
+    },
+  };
+
+  it('rejects invalid data by default', async () => {
+    const bus = createAsyncSchemaCommandBus(schema);
+    bus.register('cartAdd', async (cmd) => cmd.target.id);
+
+    const result = await bus.dispatch('cartAdd', { id: 'bad' as any });
+    expect(result.ok).toBe(false);
+    expect(result.error?.message).toContain('Validation failed');
+  });
+
+  it('skips validation with validate: false', async () => {
+    const bus = createAsyncSchemaCommandBus(schema, { validate: false });
+    bus.register('cartAdd', async (cmd) => cmd.target.id);
+
+    const result = await bus.dispatch('cartAdd', { id: 'string-ok' as any });
+    expect(result.ok).toBe(true);
+    expect(result.value).toBe('string-ok');
   });
 });

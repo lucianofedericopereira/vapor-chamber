@@ -8,8 +8,8 @@
  *   - synthesize(): natural language → dispatch via LLM tool use
  */
 
-import { createCommandBus, createAsyncCommandBus } from './command-bus';
-import type { CommandBus, AsyncCommandBus, Plugin, CommandResult, CommandBusOptions, CommandMap } from './command-bus';
+import { createCommandBus, createAsyncCommandBus, BusError } from './command-bus';
+import type { CommandBus, AsyncCommandBus, Plugin, CommandResult, CommandBusOptions, CommandMap, BusErrorCode, BusSeverity, BusEmitter } from './command-bus';
 
 // ---------------------------------------------------------------------------
 // Schema types — flat and explicit
@@ -236,73 +236,40 @@ export type LlmAdapter = (
 ) => Promise<ToolCallInput>;
 
 export type SynthesizeOptions = {
-  apiKey?:  string;
-  model?:   string;
-  system?:  string;
-  fetch?:   typeof globalThis.fetch;
-  /**
-   * Custom LLM adapter. When provided, bypasses the built-in Anthropic API call.
-   * Receives tool definitions, user text, and options — returns a ToolCallInput.
-   */
+  /** LLM adapter — required. Receives tool definitions + text, returns a ToolCallInput. */
   adapter?: LlmAdapter;
+  /** Passed through to the adapter for provider-specific config. */
+  [key: string]: unknown;
 };
 
-const DEFAULT_SYSTEM =
-  'You are a command dispatcher. Use the provided tools to dispatch the ' +
-  'appropriate command based on the user intent. Use exactly one tool. ' +
-  'Pass arguments as { target: {...}, payload: {...} } matching the schema.';
-
+/**
+ * synthesize — natural language → bus dispatch via LLM tool use.
+ *
+ * Requires an `adapter` — a function that takes tool definitions + user text
+ * and returns a ToolCallInput. This keeps vapor-chamber vendor-agnostic:
+ * bring your own Anthropic SDK, OpenAI SDK, or custom proxy.
+ *
+ * @example
+ * const result = await synthesize(schema, bus, 'add 2 of item 5', {
+ *   adapter: async (tools, text) => {
+ *     const res = await anthropic.messages.create({ tools, messages: [{ role: 'user', content: text }] });
+ *     const toolUse = res.content.find(b => b.type === 'tool_use');
+ *     return { name: toolUse.name, input: toolUse.input };
+ *   },
+ * });
+ */
 export async function synthesize(
   schema:  BusSchema,
   bus:     CommandBus | AsyncCommandBus,
   text:    string,
   options: SynthesizeOptions = {},
 ): Promise<CommandResult> {
-  if (options.adapter) {
-    let toolUse: ToolCallInput;
-    try { toolUse = await options.adapter(toAnthropicTools(schema), text, options); }
-    catch (e) { return { ok: false, error: e as Error }; }
-    const { target = {}, payload } = toolUse.input ?? {};
-    return Promise.resolve((bus as CommandBus).dispatch(toolUse.name, target, payload));
+  if (!options.adapter) {
+    return { ok: false, error: new Error('synthesize: adapter is required. Pass an LlmAdapter function that calls your LLM provider.') };
   }
-
-  const fetchFn = options.fetch ?? globalThis.fetch;
-  const apiKey  = options.apiKey ?? (typeof process !== 'undefined' ? process.env?.ANTHROPIC_API_KEY : undefined);
-
-  if (!apiKey) return { ok: false, error: new Error('synthesize: apiKey is required') };
-
-  let response: Response;
-  try {
-    response = await fetchFn('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model:       options.model ?? 'claude-haiku-4-5-20251001',
-        max_tokens:  256,
-        tools:       toAnthropicTools(schema),
-        tool_choice: { type: 'any' },
-        system:      options.system ?? DEFAULT_SYSTEM,
-        messages:    [{ role: 'user', content: text }],
-      }),
-    });
-  } catch (e) {
-    return { ok: false, error: e as Error };
-  }
-
-  if (!response.ok) {
-    return { ok: false, error: new Error(`LLM API ${response.status}: ${await response.text()}`) };
-  }
-
-  const data    = await response.json();
-  const toolUse = data.content?.find((b: any) => b.type === 'tool_use');
-
-  if (!toolUse) return { ok: false, error: new Error('LLM did not select a tool') };
-
-  // LLM returns { target: {...}, payload: {...} } — pass directly, no splitting
+  let toolUse: ToolCallInput;
+  try { toolUse = await options.adapter(toAnthropicTools(schema), text, options); }
+  catch (e) { return { ok: false, error: e as Error }; }
   const { target = {}, payload } = toolUse.input ?? {};
   return Promise.resolve((bus as CommandBus).dispatch(toolUse.name, target, payload));
 }
@@ -349,6 +316,14 @@ function dispatchToolCall(bus: CommandBus | AsyncCommandBus, toolUse: ToolCallIn
 // createSchemaCommandBus
 // ---------------------------------------------------------------------------
 
+export type SchemaCommandBusOptions = CommandBusOptions & {
+  /**
+   * Auto-install schemaValidator plugin on creation. Default: `true`.
+   * Set to `false` to skip validation (e.g. in production with pre-validated inputs).
+   */
+  validate?: boolean;
+};
+
 export type SchemaCommandBus<M extends CommandMap = CommandMap> = CommandBus<M> & {
   toTools(provider?: 'anthropic' | 'openai'): AnthropicTool[] | OpenAITool[];
   synthesize(text: string, options?: SynthesizeOptions): Promise<CommandResult>;
@@ -381,7 +356,7 @@ export type AsyncSchemaCommandBus<M extends CommandMap = CommandMap> = AsyncComm
  *
  * bus.dispatch('cartAdd', { id: 1 }, { qty: 2 }); // fully typed
  * const tools = bus.toTools();                     // Anthropic tool definitions
- * const result = await bus.synthesize('add 2 of item 5', { apiKey });
+ * const result = await bus.synthesize('add 2 of item 5', { adapter: myAdapter });
  */
 /**
  * Creates an AsyncCommandBus typed from a flat runtime schema.
@@ -392,14 +367,15 @@ export type AsyncSchemaCommandBus<M extends CommandMap = CommandMap> = AsyncComm
  *   cartAdd: { description: 'Add item', target: { id: 'number' }, payload: { qty: 'number' } },
  * });
  * bus.register('cartAdd', async (cmd) => fetchCart(cmd.target.id, cmd.payload.qty));
- * const result = await bus.synthesize('add 2 of item 5', { apiKey });
+ * const result = await bus.synthesize('add 2 of item 5', { adapter: myAdapter });
  */
 export function createAsyncSchemaCommandBus<S extends BusSchema>(
   schema:   S,
-  options?: CommandBusOptions,
+  options?: SchemaCommandBusOptions,
 ): AsyncSchemaCommandBus<InferMap<S>> {
   const normalized = normalizeSchema(schema);
   const bus = createAsyncCommandBus<InferMap<S>>(options);
+  if (options?.validate !== false) bus.use(schemaValidator(normalized) as any);
   return Object.assign(bus, {
     toTools:      (provider: 'anthropic' | 'openai' = 'anthropic') => toTools(normalized, provider),
     synthesize:   (text: string, opts?: SynthesizeOptions) => synthesize(normalized, bus as unknown as AsyncCommandBus, text, opts),
@@ -411,10 +387,11 @@ export function createAsyncSchemaCommandBus<S extends BusSchema>(
 
 export function createSchemaCommandBus<S extends BusSchema>(
   schema:   S,
-  options?: CommandBusOptions,
+  options?: SchemaCommandBusOptions,
 ): SchemaCommandBus<InferMap<S>> {
   const normalized = normalizeSchema(schema);
   const bus = createCommandBus<InferMap<S>>(options);
+  if (options?.validate !== false) bus.use(schemaValidator(normalized));
   return Object.assign(bus, {
     toTools:      (provider: 'anthropic' | 'openai' = 'anthropic') => toTools(normalized, provider),
     synthesize:   (text: string, opts?: SynthesizeOptions) => synthesize(normalized, bus as CommandBus, text, opts),
@@ -422,4 +399,181 @@ export function createSchemaCommandBus<S extends BusSchema>(
     describe:     () => describeSchema(normalized),
     fromToolCall: (toolUse: ToolCallInput) => dispatchToolCall(bus as CommandBus, toolUse),
   }) as SchemaCommandBus<InferMap<S>>;
+}
+
+// ---------------------------------------------------------------------------
+// Error code registry — machine-readable table for LLMs, docs, i18n
+// ---------------------------------------------------------------------------
+
+/**
+ * Error code definition — every BusError code has a structured entry.
+ * Useful for generating documentation, i18n lookups, and LLM error handling.
+ */
+export type ErrorCodeEntry = {
+  code: BusErrorCode;
+  severity: BusSeverity;
+  emitter: BusEmitter;
+  message: string;
+  /** Human-readable fix suggestion for LLMs and developers. */
+  fix: string;
+};
+
+/**
+ * Complete registry of all BusError codes with their metadata.
+ * This is the single source of truth for error documentation.
+ *
+ * @example
+ * import { ERROR_CODE_REGISTRY } from 'vapor-chamber';
+ * // Lookup an error code
+ * const entry = ERROR_CODE_REGISTRY.find(e => e.code === 'VC_CORE_NO_HANDLER');
+ * console.log(entry?.fix); // "Register a handler with bus.register(action, handler)"
+ *
+ * @example
+ * // Generate an LLM system prompt with all error codes
+ * const prompt = ERROR_CODE_REGISTRY
+ *   .map(e => `${e.code} (${e.severity}): ${e.message} → Fix: ${e.fix}`)
+ *   .join('\n');
+ */
+export const ERROR_CODE_REGISTRY: readonly ErrorCodeEntry[] = Object.freeze([
+  // Core
+  { code: 'VC_CORE_NO_HANDLER',       severity: 'error', emitter: 'core',     message: 'No handler registered for action',                  fix: 'Register a handler with bus.register(action, handler) before dispatching.' },
+  { code: 'VC_CORE_HANDLER_THREW',     severity: 'error', emitter: 'core',     message: 'Handler threw an exception during execution',       fix: 'Add try/catch in your handler or check the error in result.error.' },
+  { code: 'VC_CORE_BEFORE_CANCEL',     severity: 'warn',  emitter: 'hook',     message: 'A beforeHook threw to cancel the dispatch',         fix: 'This is intentional cancellation. Check the beforeHook logic or remove the hook.' },
+  { code: 'VC_CORE_NAMING_VIOLATION',  severity: 'warn',  emitter: 'core',     message: 'Action name does not match the naming pattern',     fix: 'Rename the action to match the pattern or adjust naming config in createCommandBus().' },
+  { code: 'VC_CORE_HANDLER_OVERWRITE', severity: 'info',  emitter: 'core',     message: 'A handler was overwritten without unregistering',   fix: 'Call the unregister function returned by register() before re-registering.' },
+  { code: 'VC_CORE_REQUEST_TIMEOUT',   severity: 'error', emitter: 'core',     message: 'request() timed out waiting for a response',        fix: 'Increase the timeout option or check that respond() is registered for this action.' },
+  { code: 'VC_CORE_THROTTLED',         severity: 'warn',  emitter: 'core',     message: 'Handler throttled, too many calls in window',       fix: 'Wait for the throttle window to pass. Check context.retryIn for the remaining wait time.' },
+  // Plugins
+  { code: 'VC_PLUGIN_CIRCUIT_OPEN',    severity: 'error', emitter: 'plugin',   message: 'Circuit breaker is open due to consecutive failures', fix: 'Wait for resetTimeout to elapse. The circuit will transition to half-open and retry.' },
+  { code: 'VC_PLUGIN_RATE_LIMITED',    severity: 'error', emitter: 'plugin',   message: 'Rate limit exceeded for this action',               fix: 'Reduce call frequency or increase the max/window in rateLimit() options.' },
+  { code: 'VC_PLUGIN_CACHE_MISS',      severity: 'info',  emitter: 'plugin',   message: 'Cache miss — handler will be called',               fix: 'This is informational. Increase TTL or warm the cache if needed.' },
+  // Workflow
+  { code: 'VC_WORKFLOW_STEP_FAILED',       severity: 'error', emitter: 'workflow', message: 'A workflow step failed, running compensations',  fix: 'Check the step handler. Compensations run automatically for previous steps.' },
+  { code: 'VC_WORKFLOW_COMPENSATE_FAILED', severity: 'error', emitter: 'workflow', message: 'A compensation step also failed',               fix: 'Manual intervention needed. Check the compensation handler for errors.' },
+  // Hooks/Listeners
+  { code: 'VC_CORE_MAX_DEPTH',         severity: 'error', emitter: 'core',     message: 'Recursive dispatch depth exceeded',                 fix: 'A listener or reaction is re-dispatching in a loop. Break the cycle or add a guard condition.' },
+  { code: 'VC_CORE_SEALED',           severity: 'error', emitter: 'core',     message: 'Mutation attempted on a sealed bus',                fix: 'The bus was sealed with bus.seal(). Register all handlers/plugins before calling seal().' },
+  { code: 'VC_HOOK_ERROR',             severity: 'warn',  emitter: 'hook',     message: 'An afterHook threw (logged, not fatal)',            fix: 'Fix the error in your onAfter hook. Hook errors do not affect dispatch results.' },
+  { code: 'VC_LISTENER_ERROR',         severity: 'warn',  emitter: 'listener', message: 'An on() listener threw (logged, not fatal)',        fix: 'Fix the error in your on() listener. Listener errors do not affect dispatch results.' },
+  // Generic
+  { code: 'VC_UNKNOWN',                severity: 'error', emitter: 'core',     message: 'Unclassified error',                                fix: 'Check the error message and stack trace for details.' },
+]);
+
+/**
+ * Get the error registry entry for a BusError code.
+ *
+ * @example
+ * if (result.error instanceof BusError) {
+ *   const entry = getErrorEntry(result.error.code);
+ *   console.log(entry?.fix); // actionable fix suggestion
+ * }
+ */
+export function getErrorEntry(code: BusErrorCode): ErrorCodeEntry | undefined {
+  return ERROR_CODE_REGISTRY.find(e => e.code === code);
+}
+
+/**
+ * Describe all error codes as plain text — useful for LLM system prompts.
+ *
+ * @example
+ * const systemPrompt = `When the bus returns an error, use this table:\n${describeErrorCodes()}`;
+ */
+export function describeErrorCodes(): string {
+  const lines = ['Error codes (code | severity | emitter | fix):'];
+  for (const e of ERROR_CODE_REGISTRY) {
+    lines.push(`  ${e.code} | ${e.severity} | ${e.emitter} | ${e.fix}`);
+  }
+  return lines.join('\n');
+}
+
+// ---------------------------------------------------------------------------
+// busApiSchema — JSON Schema of the bus API for LLM code generation
+// ---------------------------------------------------------------------------
+
+/**
+ * Generates a JSON Schema-style description of the bus API.
+ * Include this in LLM system prompts so the model knows exactly what methods
+ * are available and their signatures — reduces hallucinated method calls.
+ *
+ * @example
+ * const schema = busApiSchema();
+ * const systemPrompt = `Use the vapor-chamber bus API:\n${JSON.stringify(schema, null, 2)}`;
+ */
+export function busApiSchema(): Record<string, {
+  description: string;
+  params: Record<string, string>;
+  returns: string;
+}> {
+  return {
+    dispatch: {
+      description: 'Execute a command through the handler + plugin pipeline. Runs beforeHooks, handler, plugins, afterHooks, listeners.',
+      params: { action: 'string — registered action name', target: 'any — primary data (entity, id, etc.)', payload: '(optional) any — secondary data (quantities, flags, etc.)' },
+      returns: 'CommandResult { ok: boolean, value?: any, error?: Error }',
+    },
+    query: {
+      description: 'Read-only dispatch — skips beforeHooks (no mutation gating), otherwise same as dispatch. Use for reads/queries.',
+      params: { action: 'string', target: 'any', payload: '(optional) any' },
+      returns: 'CommandResult { ok: boolean, value?: any, error?: Error }',
+    },
+    emit: {
+      description: 'Fire a domain event — notifies on() listeners only, no handler required, no return value.',
+      params: { event: 'string — event name', data: '(optional) any — event payload' },
+      returns: 'void',
+    },
+    register: {
+      description: 'Register a handler for an action. Returns an unregister function.',
+      params: { action: 'string', handler: '(cmd: Command) => any', options: '(optional) { throttle?: number, undo?: Handler }' },
+      returns: '() => void — call to unregister',
+    },
+    use: {
+      description: 'Install a plugin that wraps every dispatch in a middleware chain.',
+      params: { plugin: '(cmd, next) => CommandResult', options: '(optional) { priority?: number }' },
+      returns: '() => void — call to remove plugin',
+    },
+    onBefore: {
+      description: 'Subscribe a hook that fires before every dispatch. Throw to cancel the dispatch.',
+      params: { hook: '(cmd: Command) => void' },
+      returns: '() => void — call to unsubscribe',
+    },
+    onAfter: {
+      description: 'Subscribe a hook that fires after every dispatch (including failed ones).',
+      params: { hook: '(cmd: Command, result: CommandResult) => void' },
+      returns: '() => void — call to unsubscribe',
+    },
+    on: {
+      description: 'Subscribe a listener for commands matching a glob pattern (e.g. "cart*", "*").',
+      params: { pattern: 'string — glob pattern (* supported at end)', listener: '(cmd: Command, result: CommandResult) => void' },
+      returns: '() => void — call to unsubscribe',
+    },
+    once: {
+      description: 'Like on(), but auto-unsubscribes after the first match.',
+      params: { pattern: 'string', listener: '(cmd, result) => void' },
+      returns: '() => void',
+    },
+    request: {
+      description: 'Async request/response pattern — dispatches and waits for a respond() handler.',
+      params: { action: 'string', target: 'any', payload: '(optional) any', options: '(optional) { timeout?: number }' },
+      returns: 'Promise<CommandResult>',
+    },
+    respond: {
+      description: 'Register a respond handler for request() calls.',
+      params: { action: 'string', handler: '(cmd: Command) => any | Promise<any>' },
+      returns: '() => void',
+    },
+    hasHandler: {
+      description: 'Check if a handler is registered for the given action.',
+      params: { action: 'string' },
+      returns: 'boolean',
+    },
+    registeredActions: {
+      description: 'Returns all registered action names. Useful for introspection and DevTools.',
+      params: {},
+      returns: 'string[]',
+    },
+    clear: {
+      description: 'Remove all handlers, plugins, hooks, and listeners. Useful for testing and HMR.',
+      params: {},
+      returns: 'void',
+    },
+  };
 }

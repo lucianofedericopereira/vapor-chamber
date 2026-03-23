@@ -2,7 +2,155 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+### Added — v1.0 e-commerce hardening
+
+- **Transactional batch dispatch** (`command-bus.ts`) — `dispatchBatch(commands, { transactional: true })`
+  rolls back all successful commands on first failure using registered undo handlers. Returns
+  `BatchResult.rollbacks?: CommandResult[]` with compensation results in reverse order. Essential
+  for e-commerce checkout flows where partial execution is worse than total failure:
+  ```ts
+  const result = bus.dispatchBatch([
+    { action: 'inventoryReserve', target: item },
+    { action: 'paymentCharge',    target: payment },
+    { action: 'orderCreate',      target: order },
+  ], { transactional: true });
+  // If paymentCharge fails → inventoryReserve's undo handler runs automatically
+  // result.rollbacks contains the compensation results
+  ```
+
+- **`optimisticUndo(bus, actions, options?)` plugin** (`plugins-core.ts`) — automatic rollback
+  using registered undo handlers. On async failure, executes `bus.getUndoHandler(action)` to
+  revert. On sync failure, rolls back immediately. Options: `predict` (return optimistic value),
+  `onRollback` (notification callback), `onRollbackError` (undo itself failed). Pairs with
+  `register(action, handler, { undo })` for zero-config rollback:
+  ```ts
+  bus.register('cartAdd', addHandler, { undo: (cmd) => removeFromCart(cmd.target) });
+  bus.use(optimisticUndo(bus, ['cartAdd'], {
+    predict: (cmd) => ({ ...cart, items: [...cart.items, cmd.target] }),
+    onRollback: (cmd, err) => toast.error(`Failed: ${err.message}`),
+  }));
+  ```
+
+- **Auto-validation in `createSchemaCommandBus`** (`schema.ts`) — `schemaValidator` plugin is
+  now installed automatically when creating a schema bus. Validates field types against the schema
+  before the handler runs. Opt out with `{ validate: false }`:
+  ```ts
+  const bus = createSchemaCommandBus(schema);           // validates by default
+  const bus = createSchemaCommandBus(schema, { validate: false }); // skip
+  ```
+  `SchemaCommandBusOptions` type exported: `CommandBusOptions & { validate?: boolean }`.
+
+- **`inspectBus(bus)` introspection** (`command-bus.ts`) — tree-shakeable standalone function
+  that returns a full `BusInspection` snapshot of bus topology: registered actions, undo actions,
+  responder actions, plugin count/priorities, hook counts, listener patterns, sealed state,
+  dispatch depth, and active timers. Uses Symbol key pattern (same as `unsealBus`):
+  ```ts
+  import { inspectBus } from 'vapor-chamber';
+  const info = inspectBus(bus);
+  // { actions: ['cartAdd', ...], pluginCount: 3, sealed: false, ... }
+  ```
+  `TestBus.inspect()` also available for test assertions.
+
+- **`createCommandPool(size)`** (`command-bus.ts`) — pre-allocated object pool for `Command`
+  instances in hot paths. Eliminates GC pressure in high-frequency dispatch scenarios (10k+/sec).
+
+- **`bus.seal()` / `unsealBus(bus)`** (`command-bus.ts`) — freeze bus configuration after setup.
+  Sealed buses reject `register()`, `use()`, and `clear()` calls with `BusError`. `unsealBus()`
+  is a tree-shakeable escape hatch using Symbol key.
+
+- **`bus.dispose()`** (`command-bus.ts`) — clean teardown: clears all state, cancels active
+  timers, and marks the bus as disposed. Subsequent dispatch/register calls throw. Safe for
+  component-scoped buses and SSR per-request teardown.
+
+- **Recursion depth guard** (`command-bus.ts`) — dispatch depth is tracked and capped at 10.
+  Prevents infinite dispatch loops (e.g. handler A dispatches B which dispatches A). Throws
+  `BusError` with code `VC_CORE_MAX_DEPTH` and the current depth in context.
+
+### Added — v1.0 performance, LLM-friendliness, structured errors
+
+- **V8 engine optimizations** (`command-bus.ts`) — monomorphic `okResult()`/`errResult()` factories
+  ensure stable hidden classes; extracted `tryCatchHandler()` so V8 TurboFan can optimize callers;
+  replaced all `.slice()` + `for...of` in hot paths with index-based `for` loops and length snapshots.
+  10k dispatches: ~15ms.
+
+- **`BusError` class** (`command-bus.ts`) — structured errors with machine-readable `code`,
+  `severity` (error/warn/info), `emitter` (core/plugin/hook/listener/transport/workflow), `action`,
+  and optional `context` bag. All core error paths now produce `BusError` instances. Extends `Error`.
+  ```ts
+  if (result.error instanceof BusError) {
+    switch (result.error.code) {
+      case 'VC_CORE_NO_HANDLER': /* register handler */ break;
+      case 'VC_PLUGIN_CIRCUIT_OPEN': /* wait for reset */ break;
+    }
+  }
+  ```
+
+- **`BusErrorCode` type** — union of all error codes: `VC_CORE_NO_HANDLER`, `VC_CORE_THROTTLED`,
+  `VC_CORE_REQUEST_TIMEOUT`, `VC_PLUGIN_CIRCUIT_OPEN`, `VC_PLUGIN_RATE_LIMITED`, etc.
+
+- **`ERROR_CODE_REGISTRY`** (`schema.ts`) — frozen lookup table of all error codes with severity,
+  emitter, message, and fix suggestion. Single source of truth for docs, i18n, and LLM prompts.
+
+- **`getErrorEntry(code)`** — lookup function for error code metadata.
+
+- **`describeErrorCodes()`** — plain-text table of all error codes for LLM system prompts.
+
+- **`busApiSchema()`** (`schema.ts`) — JSON schema of every bus method (dispatch, query, emit,
+  register, use, on, etc.) with param types and return types. Prevents LLM hallucination of
+  non-existent methods.
+
+- **LLM-friendly naming** (`command-bus.ts`) — renamed internal type helpers `_T`/`_P`/`_R` to
+  `TargetOf`/`PayloadOf`/`ResultOf` with JSDoc. Added `@example` blocks to `createCommandBus`
+  and `createAsyncCommandBus`.
+
+- **Self-correcting error messages** — all errors now include actionable fix text (e.g.
+  `"No handler registered for 'X'. Call bus.register('X', handler) first."`).
+
+- **`createChamber(namespace, handlers)`** (`utilities.ts`) — declarative namespace grouping with
+  camelCase prefixing. Returns `{ install, actionName, namespace }`.
+
+- **`createWorkflow(steps)`** (`utilities.ts`) — sequential command execution with automatic saga
+  compensation on failure. Returns `{ run, steps }`.
+
+- **`createReaction(pattern, action, opts)`** (`utilities.ts`) — declarative cross-domain dispatch
+  rules via `bus.on()`. Returns `{ install }`.
+
+- **`cache(opts)`** (`plugins-extra.ts`) — LRU query result caching with TTL, maxSize, glob action
+  filter. Methods: `invalidate()`, `clear()`, `size()`.
+
+- **`circuitBreaker(opts)`** (`plugins-extra.ts`) — per-action circuit with closed/open/half-open
+  states. Threshold, resetTimeout, onOpen/onClose callbacks.
+
+- **`rateLimit(opts)`** (`plugins-extra.ts`) — per-action sliding window rate limiter.
+
+- **`metrics(opts)`** (`plugins-extra.ts`) — lightweight telemetry: dispatch count, duration,
+  success rate per action. Methods: `entries()`, `summary()`, `clear()`.
+
+### Added — core 1.0 readiness
+
+- **`Command.meta?: CommandMeta`** (`command-bus.ts`) — auto-stamped metadata on every dispatched
+  command: `{ ts, id, correlationId?, causationId? }`. `ts` is `Date.now()`, `id` is
+  `crypto.randomUUID()` with Math.random fallback. Propagate tracing IDs via
+  `payload.__correlationId` and `payload.__causationId`. Optional on the type level — userland
+  code that constructs `Command` objects manually does not need to provide it.
+
+- **`bus.query(action, target, payload?)`** (`command-bus.ts`) — read-only dispatch that skips
+  `onBefore` hooks (no mutation gating). Runs handler through the plugin pipeline and fires
+  `onAfter` hooks and `on()` listeners. CQRS separation: use `dispatch()` for writes,
+  `query()` for reads.
+
+- **`bus.emit(event, data?)`** (`command-bus.ts`) — fire a domain event that notifies `on()`
+  listeners without requiring a registered handler and without returning a result. Clean path
+  for domain events (e.g., `orderCreated`, `cartCleared`) that are observations, not commands.
+
+- **`bus.registeredActions(): string[]`** (`command-bus.ts`) — returns all registered action
+  names. Essential for introspection, DevTools panels, and debugging.
+
+- **`TestBus.onBefore` now fires for real** (`testing.ts`) — was previously a no-op stub.
+  Hooks can now cancel dispatch on TestBus, matching real bus behavior.
+
+- **`TestBus.query()`, `TestBus.emit()`, `TestBus.registeredActions()`** (`testing.ts`) — full
+  parity with the real buses.
 
 ### Added — core quality & gap fixes (v0.6.0 candidate)
 
@@ -86,6 +234,34 @@ All notable changes to this project will be documented in this file.
   integration guide for Pinia / TanStack Query / Inertia 3 / XState / Laravel Reverb,
   utility layer design (`createChamber`, `createWorkflow`, `createReaction`), and v1.0 roadmap.
 
+### Fixed — v1.0 review rounds (3 full audits)
+
+- **Per-instance throttle timers** (`command-bus.ts`) — throttle `setTimeout` handles were stored
+  per action but not per bus instance. Two buses with the same throttled action shared timers.
+  Fixed: timers are now stored in per-instance `SyncState.activeTimers` / `AsyncState.activeTimers`.
+
+- **`BusError` native `cause` propagation** (`command-bus.ts`) — `BusError` constructor now passes
+  `{ cause: originalError }` to `Error` super constructor when wrapping an existing error. Enables
+  `error.cause` chaining for debugging.
+
+- **`commandKey` fast-path for primitives** (`command-bus.ts`) — `commandKey()` now returns
+  `action:target` directly when target is a string/number/boolean, skipping `JSON.stringify`.
+  ~3× faster for the common case of ID-based targets.
+
+- **History plugin `_replaying` flag** (`plugins-core.ts`) — `history.undo()` and `history.redo()`
+  now set a `_replaying` flag that prevents re-recording the replayed command into history. Previously,
+  undo/redo could create infinite history loops.
+
+- **Cache plugin async compatibility** (`plugins-extra.ts`) — `cache()` now correctly awaits
+  async handler results before caching. Previously, cache stored the Promise object instead of
+  the resolved value on async buses.
+
+- **Metrics plugin O(1) entry access** (`plugins-extra.ts`) — `metrics.entries()` now returns
+  a frozen snapshot instead of rebuilding from internal maps on every call.
+
+- **`TestBus.on()` fires listeners on `query()` and `emit()`** (`testing.ts`) — previously only
+  fired on `dispatch()`. Now consistent with real bus behavior.
+
 ### Fixed
 
 - **419 CSRF expiry incorrectly triggered session-expired callbacks** (`http.ts`) — 419 was
@@ -130,6 +306,37 @@ All notable changes to this project will be documented in this file.
 
 - **`TestBus.on()` was a no-op stub** (`testing.ts`) — stored listeners but never called them.
   Now fires matching listeners after every dispatch, consistent with the real buses.
+
+### Added — Vue 3.6 Vapor alignment (v0.6.0 candidate)
+
+- **`useVaporCommand()` composable** (`chamber-vapor.ts`) — full-featured Vapor-safe composable
+  with `dispatch()`, `register()`, `on()`, reactive `loading`/`lastError` signals, and `dispose()`.
+  Does not use `getCurrentInstance()` — safe in Vapor's scope-based lifecycle. Auto-cleans up
+  via `onScopeDispose` when available.
+
+- **`tryAutoCleanup` dev warning** (`chamber.ts`) — in development mode, logs a console warning
+  when no Vue scope or component instance is found. Helps catch accidental usage outside
+  `setup()` or `effectScope()` in Vapor components where `getCurrentInstance()` returns null.
+
+- **Vapor directive compatibility warning** (`directives.ts`) — `createDirectivePlugin.install()`
+  now emits a console warning when Vapor mode is detected, explaining that `v-vc:command`
+  directives are VDOM-only and suggesting `useVaporCommand()` or `defineVaporCommand()` instead.
+
+- **Vite HMR `.vapor.vue` file support** (`vite-hmr.ts`) — the `transform()` hook now matches
+  `.vapor.vue` files (Vue 3.6+ Vapor SFCs) in addition to `.ts`, `.js`, `.vue`, `.tsx`, `.jsx`.
+
+- **`FormBusOptions.reactive?: boolean`** (`form.ts`) — set to `false` to skip Vue signal
+  allocations (saves 7 signal allocations per form). All APIs work identically via plain
+  get/set wrappers. Useful for headless, server-side, or batch form processing.
+
+- **`HttpBridgeOptions.scopeController?: AbortController`** (`transports.ts`) — pass an
+  AbortController tied to a Vapor component's lifecycle. When the component is disposed and
+  the controller is aborted, all in-flight HTTP requests are cancelled automatically. Merges
+  with the existing `signal` option via `AbortSignal.any()` when available.
+
+- **`WsBridge.connected: Signal<boolean>`** (`transports.ts`) — reactive signal for WebSocket
+  connection state. Bindable directly in Vapor/VDOM templates without polling. Updates on
+  `ws.onopen`, `ws.onclose`, and `disconnect()`.
 
 ### Changed
 

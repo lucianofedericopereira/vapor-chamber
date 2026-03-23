@@ -38,40 +38,60 @@ let _hasVapor = false;
 let _createVaporAppFn: any = null;
 let _vaporInteropPluginRef: any = null;
 
+/** Promise that resolves once Vue detection is complete. Await this in composables
+ *  that need Vue APIs to be available before first use. */
+let _probePromise: Promise<void> | null = null;
+
+function applyVueModule(vue: any): void {
+  if (vue && typeof vue.ref === 'function') {
+    _vueRef = vue.ref;
+  }
+
+  // Prefer onScopeDispose (Vue 3.5+) — works in effectScope, VDOM, and Vapor
+  if (vue && typeof vue.onScopeDispose === 'function') {
+    _vueOnScopeDispose = vue.onScopeDispose;
+  }
+
+  if (vue && typeof vue.onUnmounted === 'function') {
+    _vueOnUnmounted = vue.onUnmounted;
+  }
+  if (vue && typeof vue.getCurrentInstance === 'function') {
+    _vueGetCurrentInstance = vue.getCurrentInstance;
+  }
+
+  // Vue 3.6+ Vapor detection
+  if (vue && typeof vue.createVaporApp === 'function') {
+    _hasVapor = true;
+    _createVaporAppFn = vue.createVaporApp;
+  }
+  if (vue && typeof vue.vaporInteropPlugin !== 'undefined') {
+    _vaporInteropPluginRef = vue.vaporInteropPlugin;
+  }
+}
+
 function probeVue(): void {
   if (_vueProbed) return;
   _vueProbed = true;
 
-  // Eager async probe — Vue detection available after first await/tick.
-  // For immediate availability, call configureSignal(vueRef) at app setup.
-  // Variable indirection prevents TS from statically resolving the optional peer dep.
+  // 1. Synchronous probe: check globalThis.__VUE__ (set by Vue devtools or bundler)
+  //    This gives immediate availability for signal() calls at module init time.
+  if (typeof globalThis !== 'undefined' && (globalThis as any).__VUE__) {
+    try {
+      // If Vue is already loaded (common in Blade/MPA setups), try synchronous require
+      const vue = (globalThis as any).__VUE__;
+      if (typeof vue.ref === 'function') {
+        applyVueModule(vue);
+      }
+    } catch { /* not available synchronously */ }
+  }
+
+  // 2. Async probe: dynamic import for ESM / Vite / bundler environments.
+  //    Resolved by the time user code's first await/tick completes.
+  //    Variable indirection prevents TS from statically resolving the optional peer dep.
   const vuePkg = 'vue';
-  import(/* @vite-ignore */ vuePkg)
+  _probePromise = import(/* @vite-ignore */ vuePkg)
     .then((vue: any) => {
-      if (vue && typeof vue.ref === 'function') {
-        _vueRef = vue.ref;
-      }
-
-      // Prefer onScopeDispose (Vue 3.5+) — works in effectScope, VDOM, and Vapor
-      if (vue && typeof vue.onScopeDispose === 'function') {
-        _vueOnScopeDispose = vue.onScopeDispose;
-      }
-
-      if (vue && typeof vue.onUnmounted === 'function') {
-        _vueOnUnmounted = vue.onUnmounted;
-      }
-      if (vue && typeof vue.getCurrentInstance === 'function') {
-        _vueGetCurrentInstance = vue.getCurrentInstance;
-      }
-
-      // Vue 3.6+ Vapor detection
-      if (vue && typeof vue.createVaporApp === 'function') {
-        _hasVapor = true;
-        _createVaporAppFn = vue.createVaporApp;
-      }
-      if (vue && typeof vue.vaporInteropPlugin !== 'undefined') {
-        _vaporInteropPluginRef = vue.vaporInteropPlugin;
-      }
+      applyVueModule(vue);
     })
     .catch(() => {
       // Vue not available — use plain signals, no auto-cleanup
@@ -81,6 +101,20 @@ function probeVue(): void {
 // Kick off Vue detection at module load time so it's resolved
 // by the time user code calls signal() (typically after a tick).
 probeVue();
+
+/**
+ * Wait for Vue detection to complete. Call this in app setup if you need
+ * to guarantee Vue APIs are available before the first signal() call.
+ *
+ * @example
+ * import { waitForVueDetection, signal } from 'vapor-chamber';
+ * await waitForVueDetection();
+ * const count = signal(0); // guaranteed to use Vue ref() if available
+ */
+export async function waitForVueDetection(): Promise<void> {
+  probeVue();
+  if (_probePromise) await _probePromise;
+}
 
 const fallbackSignal: CreateSignal = <T>(initial: T): Signal<T> => {
   probeVue();
@@ -186,15 +220,28 @@ export function tryAutoCleanup(disposeFn: () => void): void {
     }
   }
 
-  // Fallback: onUnmounted (requires component setup context)
+  // Fallback: onUnmounted (requires component setup context).
+  // NOTE: In Vue 3.6+ Vapor components, getCurrentInstance() returns null
+  // even inside <script setup>. This fallback only works for VDOM components.
+  // Vapor components are already covered by onScopeDispose above.
   if (_vueOnUnmounted && _vueGetCurrentInstance) {
     try {
       if (_vueGetCurrentInstance()) {
         _vueOnUnmounted(disposeFn);
+        return;
       }
     } catch {
       // Not in a setup context — caller must call dispose() manually
     }
+  }
+
+  // If Vue is detected but neither scope nor instance is available,
+  // the caller is likely outside setup() — warn in dev mode.
+  if (_vueRef && typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production') {
+    console.warn(
+      '[vapor-chamber] tryAutoCleanup: no Vue scope or component instance found. ' +
+      'Call dispose() manually or use this composable inside setup() / effectScope().'
+    );
   }
 }
 

@@ -10,6 +10,8 @@
 import type { Command, CommandResult, AsyncPlugin, BaseBus } from './command-bus';
 import { matchesPattern } from './command-bus';
 import { postCommand } from './http';
+import { signal } from './chamber';
+import type { Signal } from './chamber';
 
 // ---------------------------------------------------------------------------
 // Shared protocol types
@@ -70,6 +72,19 @@ export type HttpBridgeOptions = {
    * Default: all actions.
    */
   actions?: string[];
+  /**
+   * Abort controller whose signal cancels all in-flight requests when the
+   * owning scope/component is disposed. In Vapor components, create an
+   * AbortController in setup and pass it here — call `.abort()` in
+   * onScopeDispose to cancel orphaned requests automatically.
+   *
+   * @example
+   * // In <script setup vapor>:
+   * const ctrl = new AbortController();
+   * onScopeDispose(() => ctrl.abort());
+   * bus.use(createHttpBridge({ endpoint: '/api/vc', scopeController: ctrl }));
+   */
+  scopeController?: AbortController;
 };
 
 function matchesActions(action: string, patterns?: string[]): boolean {
@@ -93,7 +108,13 @@ function matchesActions(action: string, patterns?: string[]): boolean {
  * await bus.dispatch('cartAdd', product, { quantity: 2 })
  */
 export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
-  const { endpoint, actions, csrf = false, csrfCookieUrl, headers = {}, timeout = 10_000, retry = 0, noRetry = [], signal, onSessionExpired } = options;
+  const { endpoint, actions, csrf = false, csrfCookieUrl, headers = {}, timeout = 10_000, retry = 0, noRetry = [], signal, onSessionExpired, scopeController } = options;
+  // Merge external signal + scope controller signal for automatic cancellation
+  const effectiveSignal = scopeController && signal
+    ? (typeof AbortSignal.any === 'function'
+        ? AbortSignal.any([signal, scopeController.signal])
+        : signal) // fallback: prefer user signal if AbortSignal.any unavailable
+    : scopeController?.signal ?? signal;
 
   return async (cmd: Command, next: () => CommandResult | Promise<CommandResult>) => {
     if (!matchesActions(cmd.action, actions)) return next();
@@ -103,7 +124,7 @@ export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
 
     try {
       const res = await postCommand<BackendResponse>(endpoint, envelope, {
-        csrf, csrfCookieUrl, headers, timeout, retry: effectiveRetry, signal, onSessionExpired,
+        csrf, csrfCookieUrl, headers, timeout, retry: effectiveRetry, signal: effectiveSignal, onSessionExpired,
       });
 
       if (!res.ok) {
@@ -178,6 +199,8 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
   connect(): void;
   disconnect(): void;
   isConnected(): boolean;
+  /** Reactive connection state — bindable in Vapor/VDOM templates without polling. */
+  connected: Signal<boolean>;
 } {
   const {
     url,
@@ -197,8 +220,11 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let intentionalClose = false;
 
+  // Reactive signal for connection state — usable in Vapor/VDOM templates
+  const connected = signal(false);
+
   const pending = new Map<string, PendingRequest>();
-  const queue: Array<{ id: string; envelope: CommandEnvelope; timeout: number }> = [];
+  const queue: Array<{ id: string; envelope: CommandEnvelope; timeout: number; queuedAt: number }> = [];
 
   function genId(): string {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -217,13 +243,25 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
           req.resolve({ ok: false, error: new Error(`WS queue overflow: "${dropped.envelope.command}" dropped`) });
         }
       }
-      queue.push({ id, envelope, timeout });
+      queue.push({ id, envelope, timeout, queuedAt: Date.now() });
     }
   }
 
   function flushQueue(): void {
     const items = queue.splice(0);
-    for (const { id, envelope } of items) {
+    const now = Date.now();
+    for (const { id, envelope, timeout, queuedAt } of items) {
+      const elapsed = now - queuedAt;
+      if (elapsed >= timeout) {
+        // Message expired while queued — reject it instead of sending stale commands
+        const req = pending.get(id);
+        if (req) {
+          clearTimeout(req.timeoutId);
+          pending.delete(id);
+          req.resolve({ ok: false, error: new Error(`WS queued message "${envelope.command}" expired after ${elapsed}ms (timeout: ${timeout}ms)`) });
+        }
+        continue;
+      }
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ id, ...envelope }));
       }
@@ -247,6 +285,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
 
     ws.onopen = () => {
       reconnectCount = 0;
+      connected.value = true;
       flushQueue();
       onConnect?.();
     };
@@ -270,6 +309,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
     };
 
     ws.onclose = (event) => {
+      connected.value = false;
       onDisconnect?.(event);
       if (!intentionalClose) scheduleReconnect();
     };
@@ -281,6 +321,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
 
   function disconnect(): void {
     intentionalClose = true;
+    connected.value = false;
     if (reconnectTimer) {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
@@ -312,7 +353,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
     });
   };
 
-  return Object.assign(plugin, { connect, disconnect, isConnected });
+  return Object.assign(plugin, { connect, disconnect, isConnected, connected });
 }
 
 // ---------------------------------------------------------------------------

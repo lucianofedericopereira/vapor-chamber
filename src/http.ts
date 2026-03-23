@@ -117,6 +117,8 @@ export function invalidateCsrfCache(): void {
   _csrfCache = null;
 }
 
+let _csrfRefreshResult: boolean = false;
+
 async function refreshCsrfOnce(cookieUrl: string): Promise<void> {
   if (_csrfRefreshing) {
     // Coalesce: wait for the in-flight refresh instead of doing a duplicate
@@ -125,18 +127,26 @@ async function refreshCsrfOnce(cookieUrl: string): Promise<void> {
       await new Promise<void>(r => setTimeout(r, 100));
       ticks++;
     }
+    // Check if the refresh that we waited for actually succeeded
+    if (!_csrfRefreshResult) {
+      throw new Error('[vapor-chamber] CSRF refresh failed: token unavailable after refresh');
+    }
     return;
   }
   _csrfRefreshing = true;
+  _csrfRefreshResult = false;
   try {
     // Fetch the CSRF cookie endpoint so Laravel issues a fresh XSRF-TOKEN cookie.
-    // Failures are silently swallowed — the retry below may still succeed if the
-    // cookie was already rotated by the server.
-    if (cookieUrl) {
-      try { await fetch(cookieUrl, { method: 'GET', credentials: 'same-origin' }); } catch { /* ignore */ }
+    // Only fetch if cookieUrl is a non-empty string
+    if (typeof cookieUrl === 'string' && cookieUrl.length > 0) {
+      try { await fetch(cookieUrl, { method: 'GET', credentials: 'same-origin' }); } catch { /* ignore network errors */ }
     }
     invalidateCsrfCache();
-    readCsrfToken(); // re-read DOM / cookie after fetch
+    const freshToken = readCsrfToken(); // re-read DOM / cookie after fetch
+    if (!freshToken) {
+      throw new Error('[vapor-chamber] CSRF refresh failed: no token found in DOM after refresh');
+    }
+    _csrfRefreshResult = true;
   } finally {
     _csrfRefreshing = false;
   }

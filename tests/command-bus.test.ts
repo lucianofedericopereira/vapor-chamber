@@ -28,11 +28,11 @@ describe('createCommandBus', () => {
       bus.register('testAction', handler);
       bus.dispatch('testAction', { id: 1 }, { extra: 'data' });
 
-      expect(handler).toHaveBeenCalledWith({
+      expect(handler).toHaveBeenCalledWith(expect.objectContaining({
         action: 'testAction',
         target: { id: 1 },
         payload: { extra: 'data' },
-      });
+      }));
     });
 
     it('should catch handler errors and return error result', () => {
@@ -174,7 +174,7 @@ describe('createCommandBus', () => {
       bus.dispatch('testAction', { id: 1 });
 
       expect(hook).toHaveBeenCalledWith(
-        { action: 'testAction', target: { id: 1 }, payload: undefined },
+        expect.objectContaining({ action: 'testAction', target: { id: 1 }, payload: undefined }),
         { ok: true, value: 'result' }
       );
     });
