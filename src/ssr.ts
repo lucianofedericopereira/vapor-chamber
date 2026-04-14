@@ -1,0 +1,171 @@
+/**
+ * vapor-chamber — SSR hydration plugin
+ *
+ * v1.1.0 — Dehydrate bus state on the server, rehydrate on the client.
+ *
+ * Per the whitepaper (§14): commands that ran on the server to populate initial
+ * state need to replay on the client so reactive signals reflect the same values.
+ * This plugin automates the dehydrate/rehydrate pattern as a first-class plugin.
+ *
+ * @example Server entry
+ * import { createCommandBus, setCommandBus, resetCommandBus } from 'vapor-chamber';
+ * import { createSSRPlugin } from 'vapor-chamber/ssr';
+ *
+ * const bus = createCommandBus();
+ * setCommandBus(bus);
+ * const ssr = createSSRPlugin();
+ * bus.use(ssr.plugin);
+ *
+ * // ... render app, dispatch commands ...
+ *
+ * const html = renderToString(app);
+ * const serialized = ssr.dehydrate();
+ * // Embed: <script>window.__VAPOR_COMMANDS__ = ${JSON.stringify(serialized)}</script>
+ * resetCommandBus();
+ *
+ * @example Client entry
+ * import { getCommandBus } from 'vapor-chamber';
+ * import { rehydrate } from 'vapor-chamber/ssr';
+ *
+ * const bus = getCommandBus();
+ * rehydrate(bus, window.__VAPOR_COMMANDS__);
+ * createVaporChamberApp(App).mount('#app');
+ */
+
+import type { Command, CommandResult, Plugin, BaseBus } from './command-bus';
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+/** Serializable command entry for transport between server and client. */
+export type DehydratedCommand = {
+  action: string;
+  target: any;
+  payload?: any;
+};
+
+export type SSRPluginOptions = {
+  /**
+   * Filter which commands to record for dehydration. Return false to skip.
+   * Default: record all successful commands.
+   *
+   * @example Skip side-effectful commands
+   * filter: (cmd) => !cmd.action.startsWith('analytics')
+   */
+  filter?: (cmd: Command) => boolean;
+  /**
+   * Maximum number of commands to record. Prevents unbounded growth in
+   * long SSR renders. Default: 500.
+   */
+  maxCommands?: number;
+};
+
+export type SSRPlugin = {
+  /** Sync plugin — install on the server bus via bus.use(ssr.plugin). */
+  plugin: Plugin;
+  /**
+   * Extract the recorded commands as a serializable array.
+   * Call after SSR render is complete, embed in HTML for the client.
+   */
+  dehydrate(): DehydratedCommand[];
+  /** Clear recorded commands. Call in `finally` block after each SSR request. */
+  clear(): void;
+  /** Number of recorded commands. */
+  size(): number;
+};
+
+export type RehydrateOptions = {
+  /**
+   * When true, commands that don't have a registered handler are silently
+   * skipped instead of producing errors. Default: true.
+   */
+  ignoreUnhandled?: boolean;
+  /**
+   * Plugin to suppress side effects during rehydration. When provided,
+   * this function is called for each command before dispatch. Return false
+   * to skip the dispatch (e.g. for analytics, API calls).
+   */
+  filter?: (cmd: DehydratedCommand) => boolean;
+};
+
+// ---------------------------------------------------------------------------
+// createSSRPlugin — server-side recording
+// ---------------------------------------------------------------------------
+
+/**
+ * createSSRPlugin — records dispatched commands on the server for dehydration.
+ *
+ * Install the `.plugin` on the server bus. After rendering, call `.dehydrate()`
+ * to get a serializable command list for embedding in the HTML payload.
+ */
+export function createSSRPlugin(options: SSRPluginOptions = {}): SSRPlugin {
+  const { filter, maxCommands = 500 } = options;
+  const recorded: DehydratedCommand[] = [];
+
+  const plugin: Plugin = (cmd: Command, next: () => CommandResult): CommandResult => {
+    const result = next();
+    if (result.ok && (!filter || filter(cmd))) {
+      if (recorded.length < maxCommands) {
+        recorded.push({
+          action: cmd.action,
+          target: cmd.target,
+          ...(cmd.payload !== undefined ? { payload: cmd.payload } : {}),
+        });
+      }
+    }
+    return result;
+  };
+
+  function dehydrate(): DehydratedCommand[] {
+    return [...recorded];
+  }
+
+  function clear(): void {
+    recorded.length = 0;
+  }
+
+  function size(): number {
+    return recorded.length;
+  }
+
+  return { plugin, dehydrate, clear, size };
+}
+
+// ---------------------------------------------------------------------------
+// rehydrate — client-side replay
+// ---------------------------------------------------------------------------
+
+/**
+ * rehydrate — replay server-recorded commands on the client bus.
+ *
+ * Dispatches each dehydrated command in order so reactive signals reach the
+ * same state as the server render. Commands without registered handlers are
+ * silently skipped by default (the handler may not be registered yet during
+ * early client bootstrap).
+ *
+ * @returns Array of results from each replayed command.
+ */
+export function rehydrate(
+  bus: BaseBus,
+  commands: DehydratedCommand[],
+  options: RehydrateOptions = {},
+): CommandResult[] {
+  const { ignoreUnhandled = true, filter } = options;
+  const results: CommandResult[] = [];
+
+  for (const cmd of commands) {
+    if (filter && !filter(cmd)) continue;
+
+    if (ignoreUnhandled && !bus.hasHandler(cmd.action)) continue;
+
+    try {
+      const result = bus.dispatch(cmd.action, cmd.target, cmd.payload);
+      results.push(result);
+    } catch (e) {
+      results.push({ ok: false, error: e as Error });
+    }
+  }
+
+  return results;
+}

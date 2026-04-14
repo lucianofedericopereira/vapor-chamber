@@ -406,7 +406,7 @@ the bus, normalized entity storage. The wall held every time.
 | `metrics` | Observability | Lightweight telemetry: count, duration, errorRate per action |
 | `schemaValidator` | Guards | Auto-validates field types against schema (auto-installed in schema bus) |
 | `retry` | Resilience | Exponential/linear/fixed backoff on failure |
-| `persist` | Storage | Auto-save state to localStorage/sessionStorage/custom |
+| `persist` | Storage | Auto-save state to localStorage/sessionStorage/custom; validate on load |
 | `sync` | Multi-tab | Broadcast commands to all open tabs via BroadcastChannel |
 | `createHttpBridge` | Transport | Fetch-based HTTP transport |
 | `createWsBridge` | Transport | WebSocket transport with reconnect + bounded queue |
@@ -420,10 +420,14 @@ bus.use(retry({
   isRetryable: (err) => err.message !== 'Unauthorized',
 }))
 
-// persist
-const cartPersist = persist({ key: 'vc:cart', getState: () => cartState.value })
+// persist — with shape validation to reject stale state after deploys
+const cartPersist = persist({
+  key: 'vc:cart',
+  getState: () => cartState.value,
+  validate: (state) => Array.isArray(state.items) && typeof state.total === 'number',
+})
 bus.use(cartPersist)
-const saved = cartPersist.load()   // → T | null
+const saved = cartPersist.load()   // → T | null (null if validate returns false)
 cartPersist.save()                 // force save (e.g. beforeunload)
 cartPersist.clear()                // remove (e.g. logout)
 
@@ -598,6 +602,8 @@ const bus = useCommandBus()
 | `useCommandError()` | `errors`, `latestError` | Component-scoped error display |
 | `useCommandState()` | `state` | Reducer-based reactive state |
 | `useCommandHistory()` | `past`, `future`, `canUndo`, `canRedo` | Undo/redo UI |
+| `useCommandQuery()` | `data`, `loading`, `lastError` | CQRS read-side (skips onBefore) |
+| `useTransitionCommand()` | `phase` | `<Transition>` hook → bus dispatch |
 
 ### 10.3 Directive plugin (opt-in, 0KB when not imported)
 
@@ -780,6 +786,23 @@ const checkout = createWorkflow([
 
 const result = await checkout.run(bus, { cartId, paymentInfo });
 // If orderCreate fails → paymentRelease runs automatically
+```
+
+### `createTransitionBridge`
+
+Wires Vue `<Transition>` hooks to bus commands. Framework-agnostic — accepts any `BaseBus`.
+
+```ts
+const modal = createTransitionBridge({ bus, namespace: 'modal' });
+// modal.onEnter dispatches 'modalEnter', etc.
+// modal.phase.value → 'idle' | 'entering' | 'leaving'
+```
+
+The composable counterpart `useTransitionCommand()` uses the shared bus and auto-cleanup:
+
+```ts
+const hooks = useTransitionCommand({ namespace: 'drawer' });
+// <Transition v-bind="hooks"> — all 8 hooks wired automatically
 ```
 
 ### `createReaction`

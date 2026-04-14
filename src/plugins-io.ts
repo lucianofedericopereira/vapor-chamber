@@ -103,6 +103,20 @@ export type PersistOptions<T = any> = {
    * Default: JSON.parse
    */
   deserialize?: (raw: string) => T | null;
+  /**
+   * Validate deserialized state before returning from load().
+   * Return true to accept, false to reject (load() returns null).
+   * Use this to reject stale or structurally invalid persisted state
+   * after deploys that change the shape of persisted data.
+   *
+   * @example
+   * persist({
+   *   key: 'vc:cart',
+   *   getState: () => cart.value,
+   *   validate: (state) => Array.isArray(state.items) && typeof state.total === 'number',
+   * })
+   */
+  validate?: (state: T) => boolean;
   /** Which actions trigger a save. Default: all successful dispatches. */
   filter?: (cmd: Command) => boolean;
   /**
@@ -130,6 +144,7 @@ export function persist<T>(options: PersistOptions<T>): Plugin & {
     getState,
     serialize = (v) => JSON.stringify(v),
     deserialize = (s) => { try { return JSON.parse(s) as T; } catch { return null; } },
+    validate,
     filter,
   } = options;
 
@@ -154,7 +169,13 @@ export function persist<T>(options: PersistOptions<T>): Plugin & {
     try {
       const raw = store.getItem(key);
       if (raw === null) return null;
-      return deserialize(raw);
+      const state = deserialize(raw);
+      if (state == null) return null;
+      if (validate && !validate(state)) {
+        console.warn(`[vapor-chamber] persist: validation failed for key "${key}" — returning null. Persisted state may be stale after a deploy.`);
+        return null;
+      }
+      return state;
     } catch (e) {
       console.warn(`[vapor-chamber] persist: failed to load key "${key}":`, e);
       return null;

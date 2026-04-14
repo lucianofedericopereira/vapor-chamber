@@ -8,8 +8,9 @@ import {
   useCommandHistory,
   useCommandGroup,
   useCommandError,
+  useCommandQuery,
 } from '../src/chamber';
-import { createCommandBus } from '../src/command-bus';
+import { createCommandBus, createAsyncCommandBus } from '../src/command-bus';
 
 describe('getCommandBus / setCommandBus', () => {
   beforeEach(() => {
@@ -289,6 +290,25 @@ describe('useCommandHistory', () => {
     expect(past.value.length).toBe(2);
   });
 
+  it('redo should re-dispatch through the bus', () => {
+    const bus = getCommandBus();
+    let count = 0;
+    bus.register('inc', () => { count++; });
+
+    const { undo, redo } = useCommandHistory();
+
+    bus.dispatch('inc', {});
+    expect(count).toBe(1);
+
+    undo();
+    // undo runs inverse handler if registered, but inc has no undo — count stays 1
+    expect(count).toBe(1);
+
+    redo();
+    // redo should re-dispatch 'inc' through the bus
+    expect(count).toBe(2);
+  });
+
   it('should respect maxSize option', () => {
     const bus = getCommandBus();
     bus.register('testAction', () => 'done');
@@ -415,6 +435,36 @@ describe('useCommandGroup', () => {
 
     expect(seen).toContain('cartRemove');
   });
+
+  it('query() dispatches namespaced read-only query', () => {
+    const bus = createCommandBus();
+    setCommandBus(bus);
+
+    const beforeCalls: string[] = [];
+    bus.onBefore((cmd) => beforeCalls.push(cmd.action));
+    bus.register('cartGetTotal', () => 99);
+
+    const cart = useCommandGroup('cart');
+    const result = cart.query('getTotal', {});
+
+    expect(result.ok).toBe(true);
+    expect(result.value).toBe(99);
+    // query skips onBefore — CQRS
+    expect(beforeCalls).toHaveLength(0);
+  });
+
+  it('emit() fires namespaced domain events', () => {
+    const bus = createCommandBus();
+    setCommandBus(bus);
+
+    const received: string[] = [];
+    bus.on('cart*', (cmd) => received.push(cmd.action));
+
+    const cart = useCommandGroup('cart');
+    cart.emit('updated', { total: 50 });
+
+    expect(received).toEqual(['cartUpdated']);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -474,5 +524,126 @@ describe('useCommandError', () => {
     clearErrors();
     expect(errors.value).toHaveLength(0);
     expect(latestError.value).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// useCommand async loading fix
+// ---------------------------------------------------------------------------
+
+describe('useCommand async loading', () => {
+  beforeEach(() => resetCommandBus());
+
+  it('loading stays true until async result resolves', async () => {
+    const asyncBus = createAsyncCommandBus();
+    setCommandBus(asyncBus as any);
+
+    asyncBus.register('fetchData', async () => {
+      await new Promise(r => setTimeout(r, 20));
+      return 'data';
+    });
+
+    const { dispatch, loading, lastError } = useCommand();
+
+    const resultPromise = dispatch('fetchData', {});
+
+    // loading should be true while the handler is running
+    expect(loading.value).toBe(true);
+
+    const result = await resultPromise;
+
+    expect(loading.value).toBe(false);
+    expect(result.ok).toBe(true);
+    expect(result.value).toBe('data');
+    expect(lastError.value).toBeNull();
+  });
+
+  it('loading resets and error set on async failure', async () => {
+    const asyncBus = createAsyncCommandBus();
+    setCommandBus(asyncBus as any);
+
+    asyncBus.register('failAsync', async () => {
+      throw new Error('async boom');
+    });
+
+    const { dispatch, loading, lastError } = useCommand();
+
+    const result = await dispatch('failAsync', {});
+
+    expect(loading.value).toBe(false);
+    expect(result.ok).toBe(false);
+    expect(lastError.value?.message).toBe('async boom');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// useCommandQuery
+// ---------------------------------------------------------------------------
+
+describe('useCommandQuery', () => {
+  beforeEach(() => resetCommandBus());
+
+  it('queries and populates data signal', () => {
+    const bus = createCommandBus();
+    setCommandBus(bus);
+    bus.register('getUser', (cmd) => ({ id: cmd.target.id, name: 'Alice' }));
+
+    const { query, data, loading, lastError } = useCommandQuery();
+
+    const result = query('getUser', { id: 42 });
+
+    expect(result.ok).toBe(true);
+    expect(data.value).toEqual({ id: 42, name: 'Alice' });
+    expect(loading.value).toBe(false);
+    expect(lastError.value).toBeNull();
+  });
+
+  it('sets lastError on query failure', () => {
+    const bus = createCommandBus();
+    setCommandBus(bus);
+    bus.register('getUser', () => { throw new Error('not found'); });
+
+    const { query, data, lastError } = useCommandQuery();
+
+    const result = query('getUser', { id: 99 });
+
+    expect(result.ok).toBe(false);
+    expect(data.value).toBeNull();
+    expect(lastError.value?.message).toBe('not found');
+  });
+
+  it('handles async queries', async () => {
+    const asyncBus = createAsyncCommandBus();
+    setCommandBus(asyncBus as any);
+
+    asyncBus.register('getProducts', async () => {
+      await new Promise(r => setTimeout(r, 10));
+      return [{ id: 1, name: 'Widget' }];
+    });
+
+    const { query, data, loading } = useCommandQuery();
+
+    const resultPromise = query('getProducts', {});
+    expect(loading.value).toBe(true);
+
+    await resultPromise;
+
+    expect(loading.value).toBe(false);
+    expect(data.value).toEqual([{ id: 1, name: 'Widget' }]);
+  });
+
+  it('query skips onBefore hooks', () => {
+    const bus = createCommandBus();
+    setCommandBus(bus);
+
+    const beforeCalls: string[] = [];
+    bus.onBefore((cmd) => beforeCalls.push(cmd.action));
+    bus.register('getUser', () => ({ name: 'Bob' }));
+
+    const { query } = useCommandQuery();
+    query('getUser', { id: 1 });
+
+    // query() skips onBefore — this is the CQRS distinction
+    expect(beforeCalls).toHaveLength(0);
   });
 });

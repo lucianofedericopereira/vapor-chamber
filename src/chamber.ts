@@ -1,6 +1,8 @@
 /**
  * vapor-chamber - Vue Vapor integration
  *
+ * v1.1.0 — Vue 3.6.0-beta.10 alignment: defineVaporCustomElement, defineVaporComponent,
+ *           defineVaporAsyncComponent detection; improved hydration interop.
  * v0.4.1 — Added: useCommandGroup (namespace isolation), useCommandError (error boundary).
  * v0.4.0 — Vue 3.6 Vapor alignment: onScopeDispose, Vapor detection,
  *           defineVaporCommand, createVaporChamberApp.
@@ -31,12 +33,18 @@ let _vueRef: ((initial: any) => any) | null = null;
 let _vueOnUnmounted: ((fn: () => void) => void) | null = null;
 let _vueOnScopeDispose: ((fn: () => void) => void) | null = null;
 let _vueGetCurrentInstance: (() => any) | null = null;
+let _vueOnActivated: ((fn: () => void) => void) | null = null;
+let _vueOnDeactivated: ((fn: () => void) => void) | null = null;
 let _vueProbed = false;
 
 // Vue 3.6+ Vapor detection
 let _hasVapor = false;
 let _createVaporAppFn: any = null;
 let _vaporInteropPluginRef: any = null;
+// Vue 3.6.0-beta.10+ Vapor APIs
+let _defineVaporCustomElementFn: any = null;
+let _defineVaporComponentFn: any = null;
+let _defineVaporAsyncComponentFn: any = null;
 
 /** Promise that resolves once Vue detection is complete. Await this in composables
  *  that need Vue APIs to be available before first use. */
@@ -59,6 +67,14 @@ function applyVueModule(vue: any): void {
     _vueGetCurrentInstance = vue.getCurrentInstance;
   }
 
+  // KeepAlive lifecycle hooks (Vue 3.x)
+  if (vue && typeof vue.onActivated === 'function') {
+    _vueOnActivated = vue.onActivated;
+  }
+  if (vue && typeof vue.onDeactivated === 'function') {
+    _vueOnDeactivated = vue.onDeactivated;
+  }
+
   // Vue 3.6+ Vapor detection
   if (vue && typeof vue.createVaporApp === 'function') {
     _hasVapor = true;
@@ -66,6 +82,17 @@ function applyVueModule(vue: any): void {
   }
   if (vue && typeof vue.vaporInteropPlugin !== 'undefined') {
     _vaporInteropPluginRef = vue.vaporInteropPlugin;
+  }
+
+  // Vue 3.6.0-beta.10+: Vapor custom elements and component definitions
+  if (vue && typeof vue.defineVaporCustomElement === 'function') {
+    _defineVaporCustomElementFn = vue.defineVaporCustomElement;
+  }
+  if (vue && typeof vue.defineVaporComponent === 'function') {
+    _defineVaporComponentFn = vue.defineVaporComponent;
+  }
+  if (vue && typeof vue.defineVaporAsyncComponent === 'function') {
+    _defineVaporAsyncComponentFn = vue.defineVaporAsyncComponent;
   }
 }
 
@@ -167,6 +194,12 @@ export function isVaporAvailable(): boolean {
 export function getVaporAppFn(): any { return _createVaporAppFn; }
 /** @internal — for chamber-vapor.ts use only */
 export function getVaporInteropRef(): any { return _vaporInteropPluginRef; }
+/** @internal — for chamber-vapor.ts use only */
+export function getDefineVaporCustomElementFn(): any { return _defineVaporCustomElementFn; }
+/** @internal — for chamber-vapor.ts use only */
+export function getDefineVaporComponentFn(): any { return _defineVaporComponentFn; }
+/** @internal — for chamber-vapor.ts use only */
+export function getDefineVaporAsyncComponentFn(): any { return _defineVaporAsyncComponentFn; }
 
 // ---------------------------------------------------------------------------
 // Shared command bus instance
@@ -246,6 +279,29 @@ export function tryAutoCleanup(disposeFn: () => void): void {
 }
 
 // ---------------------------------------------------------------------------
+// KeepAlive pause/resume support
+// ---------------------------------------------------------------------------
+
+/**
+ * Register KeepAlive lifecycle hooks to pause/resume bus subscriptions.
+ *
+ * When a component is deactivated by KeepAlive, `onPause` is called.
+ * When reactivated, `onResume` is called. No-ops if not inside a
+ * KeepAlive-wrapped component or if Vue is not available.
+ *
+ * @internal — used by composables that manage bus subscriptions.
+ */
+export function tryKeepAliveHooks(onPause: () => void, onResume: () => void): void {
+  probeVue();
+  if (_vueOnDeactivated) {
+    try { _vueOnDeactivated(onPause); } catch { /* not in component context */ }
+  }
+  if (_vueOnActivated) {
+    try { _vueOnActivated(onResume); } catch { /* not in component context */ }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // useCommand
 // ---------------------------------------------------------------------------
 
@@ -259,10 +315,27 @@ export function useCommand() {
   const loading = signal(false);
   const lastError = signal<Error | null>(null);
 
-  function dispatch(action: string, target: any, payload?: any): CommandResult {
+  function dispatch(action: string, target: any, payload?: any): CommandResult | Promise<CommandResult> {
     loading.value = true;
     lastError.value = null;
-    const result = bus.dispatch(action, target, payload);
+    let result: any;
+    try {
+      result = bus.dispatch(action, target, payload);
+    } catch (e) {
+      loading.value = false;
+      const error = e as Error;
+      lastError.value = error;
+      return { ok: false, error };
+    }
+
+    // Handle async results (when using async bus or async transport plugins)
+    if (result && typeof result.then === 'function') {
+      return (result as Promise<CommandResult>).then(
+        (r) => { loading.value = false; if (!r.ok) lastError.value = r.error ?? null; return r; },
+        (e: Error) => { loading.value = false; lastError.value = e; return { ok: false, error: e }; },
+      );
+    }
+
     loading.value = false;
     if (!result.ok) lastError.value = result.error ?? null;
     return result;
@@ -342,7 +415,10 @@ export function useCommandHistory(options: {
   const canUndo = signal(false);
   const canRedo = signal(false);
 
+  let paused = false;
+
   const unsubscribe = bus.onAfter((cmd, result) => {
+    if (paused) return;
     if (result.ok && (!filter || filter(cmd))) {
       const newPast = [...past.value, cmd];
       if (newPast.length > maxSize) newPast.shift();
@@ -352,6 +428,12 @@ export function useCommandHistory(options: {
       canRedo.value = false;
     }
   });
+
+  // KeepAlive: pause tracking when deactivated, resume when activated
+  tryKeepAliveHooks(
+    () => { paused = true; },
+    () => { paused = false; },
+  );
 
   function undo(): Command | undefined {
     const p = [...past.value];
@@ -380,6 +462,15 @@ export function useCommandHistory(options: {
     const cmd = f.pop();
     if (cmd) {
       future.value = f;
+      // Pause tracking so the re-dispatch doesn't double-record
+      paused = true;
+      try {
+        bus.dispatch(cmd.action, cmd.target, cmd.payload);
+      } catch (e) {
+        console.error(`[vapor-chamber] Redo dispatch error for "${cmd.action}":`, e);
+      } finally {
+        paused = false;
+      }
       past.value = [...past.value, cmd];
       canUndo.value = true;
       canRedo.value = f.length > 0;
@@ -410,6 +501,66 @@ export function useCommandHistory(options: {
     clear,
     dispose,
   };
+}
+
+// ---------------------------------------------------------------------------
+// useCommandQuery
+// ---------------------------------------------------------------------------
+
+/**
+ * useCommandQuery — CQRS read-side composable with reactive state.
+ *
+ * Wraps bus.query() with reactive `data`, `loading`, and `lastError` signals.
+ * query() skips onBefore hooks (no auth gates, no loading spinners for reads)
+ * but runs plugins, handlers, and afterHooks.
+ *
+ * Supports both sync and async buses — if the result is a Promise, loading
+ * stays true until it resolves.
+ *
+ * @example
+ * const { query, data, loading, lastError } = useCommandQuery();
+ * const result = query('getUser', { id: 42 });
+ * // data.value = result.value after query completes
+ */
+export function useCommandQuery() {
+  const bus = getCommandBus();
+  const data = signal<any>(null);
+  const loading = signal(false);
+  const lastError = signal<Error | null>(null);
+
+  function query(action: string, target: any, payload?: any): CommandResult | Promise<CommandResult> {
+    loading.value = true;
+    lastError.value = null;
+    let result: any;
+    try {
+      result = bus.query(action, target, payload);
+    } catch (e) {
+      loading.value = false;
+      const error = e as Error;
+      lastError.value = error;
+      return { ok: false, error };
+    }
+
+    // Handle async results
+    if (result && typeof result.then === 'function') {
+      return (result as Promise<CommandResult>).then(
+        (r) => {
+          loading.value = false;
+          if (r.ok) data.value = r.value;
+          else lastError.value = r.error ?? null;
+          return r;
+        },
+        (e: Error) => { loading.value = false; lastError.value = e; return { ok: false, error: e }; },
+      );
+    }
+
+    loading.value = false;
+    if (result.ok) data.value = result.value;
+    else lastError.value = result.error ?? null;
+    return result;
+  }
+
+  return { query, data, loading, lastError };
 }
 
 // ---------------------------------------------------------------------------
@@ -446,6 +597,16 @@ export function useCommandGroup(namespace: string) {
     return bus.dispatch(prefixed(action), target, payload);
   }
 
+  /** Read-only dispatch — skips onBefore hooks, runs handler + plugins, fires afterHooks. */
+  function query(action: string, target: any, payload?: any): CommandResult {
+    return bus.query(prefixed(action), target, payload);
+  }
+
+  /** Fire a namespaced domain event — notifies on() listeners, no handler required. */
+  function emit(event: string, data?: any): void {
+    bus.emit(prefixed(event), data);
+  }
+
   function register(action: string, handler: Handler, opts?: RegisterOptions): () => void {
     const unregister = bus.register(prefixed(action), handler, opts);
     cleanups.push(unregister);
@@ -473,7 +634,7 @@ export function useCommandGroup(namespace: string) {
 
   tryAutoCleanup(dispose);
 
-  return { dispatch, register, use, on, namespace, dispose };
+  return { dispatch, query, emit, register, use, on, namespace, dispose };
 }
 
 // ---------------------------------------------------------------------------
@@ -501,8 +662,10 @@ export function useCommandError(options: {
   type ErrorEntry = { cmd: Command; error: Error; timestamp: number };
   const errors = signal<ErrorEntry[]>([]);
   const latestError = signal<Error | null>(null);
+  let paused = false;
 
   const unsubscribe = bus.onAfter((cmd, result) => {
+    if (paused) return;
     if (!result.ok && result.error) {
       if (!filter || filter(cmd)) {
         latestError.value = result.error;
@@ -510,6 +673,12 @@ export function useCommandError(options: {
       }
     }
   });
+
+  // KeepAlive: pause error capture when deactivated, resume when activated
+  tryKeepAliveHooks(
+    () => { paused = true; },
+    () => { paused = false; },
+  );
 
   function clearErrors() {
     errors.value = [];

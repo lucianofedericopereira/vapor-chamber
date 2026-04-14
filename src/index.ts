@@ -11,20 +11,24 @@
  *     plugins-io   — retry, persist, sync
  *     chamber      — Vue composables: useCommand, useCommandBus, useCommandGroup, …
  *     chamber-vapor — Vue 3.6+ Vapor-specific API (requires Vue 3.6)
- *     http         — postCommand, CSRF token reading
+ *     http         — postCommand, createHttpClient, CSRF token reading
  *     transports   — createHttpBridge, createWsBridge, createSseBridge
  *     form         — createFormBus, reactive form state
  *     schema       — LLM tool-use layer, synthesize, toTools
  *     devtools     — @vue/devtools-api integration (requires @vue/devtools-api)
+ *     transitions   — <Transition> hook → bus dispatch bridge
+ *     ssr          — SSR dehydrate/rehydrate plugin
  *     directives   — v-command Vue directive (requires Vue)
  *     vite         — HMR plugin (requires Vite, see 'vapor-chamber/vite')
  *     iife         — UMD/IIFE bundle (see 'vapor-chamber/iife')
  *
  * Sub-path exports that avoid pulling in optional code:
- *   'vapor-chamber/transports' — HTTP + WS + SSE bridges
- *   'vapor-chamber/directives' — v-command directive
- *   'vapor-chamber/vite'       — Vite HMR plugin
- *   'vapor-chamber/iife'       — IIFE bundle
+ *   'vapor-chamber/transports'  — HTTP + WS + SSE bridges
+ *   'vapor-chamber/transitions' — <Transition> hook → bus dispatch
+ *   'vapor-chamber/ssr'         — SSR dehydrate/rehydrate
+ *   'vapor-chamber/directives'  — v-command directive
+ *   'vapor-chamber/vite'        — Vite HMR plugin
+ *   'vapor-chamber/iife'        — IIFE bundle
  *
  * Changelog:
  *   v0.3.0 — Naming convention, wildcard listeners, request/response, authGuard, optimistic
@@ -43,6 +47,10 @@
  *             tryAutoCleanup dev warning; Vite HMR .vapor.vue support;
  *             FormBus reactive:false headless mode; HttpBridge scopeController;
  *             WsBridge reactive connected signal
+ *   v1.1.0 — Vue 3.6.0-beta.10 alignment: defineVaporCustomElement, defineVaporComponent,
+ *             defineVaporAsyncComponent wrappers; useVaporAsyncCommand for Suspense-aware
+ *             async dispatch; createTransitionBridge + useTransitionCommand; persist validate
+ *             option; improved Vapor/VDOM interop awareness; HMR vapor↔vdom switch
  *   v1.0.0 — bus.query() CQRS read-only dispatch; bus.emit() domain events;
  *             Command.meta auto-stamped metadata (ts, id, correlationId, causationId);
  *             bus.registeredActions() introspection; TestBus.onBefore fires for real;
@@ -162,6 +170,8 @@ export {
   // v0.4.1
   useCommandGroup,
   useCommandError,
+  // v1.1.0: CQRS read-side composable
+  useCommandQuery,
   // v0.4.0: Vue 3.6 Vapor detection
   isVaporAvailable,
   // v0.6.0: Await Vue detection for guaranteed signal availability
@@ -175,6 +185,11 @@ export {
   defineVaporCommand,
   // v0.6.0: Vapor-safe reactive composable (no getCurrentInstance dependency)
   useVaporCommand,
+  // v1.1.0: Vue 3.6.0-beta.10+ Vapor APIs
+  defineVaporCustomElement,
+  defineVaporComponent,
+  defineVaporAsyncComponent,
+  useVaporAsyncCommand,
 } from './chamber-vapor';
 
 // HTTP client — optional, used by createHttpBridge; also available standalone
@@ -182,9 +197,18 @@ export {
   readCsrfToken,
   invalidateCsrfCache,
   postCommand,
+  // v1.1.0: Multi-method HTTP client
+  createHttpClient,
   type HttpConfig,
   type HttpResponse,
   type HttpError,
+  type HttpRequestConfig,
+  type HttpClient,
+  type HttpMethod,
+  type ResponseType,
+  type SafeResult,
+  type DownloadResult,
+  type InterceptorManager,
 } from './http';
 
 // Transport plugins — optional; prefer 'vapor-chamber/transports' to avoid pulling http.ts
@@ -198,6 +222,26 @@ export {
   type CommandEnvelope,
   type BackendResponse,
 } from './transports';
+
+// Transition integration — optional; prefer 'vapor-chamber/transitions'
+export {
+  createTransitionBridge,
+  useTransitionCommand,
+  type TransitionPhase,
+  type TransitionBridgeOptions,
+  type TransitionHooks,
+  type TransitionBridge,
+} from './transitions';
+
+// SSR hydration — optional; prefer 'vapor-chamber/ssr'
+export {
+  createSSRPlugin,
+  rehydrate,
+  type DehydratedCommand,
+  type SSRPluginOptions,
+  type SSRPlugin,
+  type RehydrateOptions,
+} from './ssr';
 
 // Vue directive — optional, requires Vue; prefer 'vapor-chamber/directives'
 export { createDirectivePlugin } from './directives';

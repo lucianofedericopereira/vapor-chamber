@@ -2,8 +2,9 @@
  * Tests for src/chamber-vapor.ts — Vue 3.6+ Vapor API
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createVaporChamberApp, getVaporInteropPlugin, defineVaporCommand, useVaporCommand } from '../src/chamber-vapor';
-import { getCommandBus, resetCommandBus } from '../src/chamber';
+import { createVaporChamberApp, getVaporInteropPlugin, defineVaporCommand, useVaporCommand, defineVaporCustomElement, defineVaporComponent, defineVaporAsyncComponent, useVaporAsyncCommand } from '../src/chamber-vapor';
+import { getCommandBus, resetCommandBus, setCommandBus } from '../src/chamber';
+import { createAsyncCommandBus } from '../src/command-bus';
 
 beforeEach(() => {
   resetCommandBus();
@@ -185,5 +186,110 @@ describe('useVaporCommand', () => {
     bus.register('vaporClean', () => 'post-dispose');
     bus.dispatch('vaporClean', {});
     expect(listener).not.toHaveBeenCalled();
+  });
+
+  it('emit() fires domain events through the bus', () => {
+    const listener = vi.fn();
+    const bus = getCommandBus();
+    bus.on('cartUpdated', listener);
+
+    const { emit, dispose } = useVaporCommand();
+    emit('cartUpdated', { itemCount: 5 });
+
+    expect(listener).toHaveBeenCalledOnce();
+    expect(listener).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'cartUpdated', target: { itemCount: 5 } }),
+      expect.objectContaining({ ok: true }),
+    );
+
+    dispose();
+  });
+
+  it('loading stays true until async handler resolves', async () => {
+    const asyncBus = createAsyncCommandBus();
+    setCommandBus(asyncBus as any);
+
+    asyncBus.register('asyncFetch', async () => {
+      await new Promise(r => setTimeout(r, 20));
+      return 'fetched';
+    });
+
+    const { dispatch, loading, lastError, dispose } = useVaporCommand();
+
+    const resultPromise = dispatch('asyncFetch', {});
+    expect(loading.value).toBe(true);
+
+    const result = await resultPromise;
+
+    expect(loading.value).toBe(false);
+    expect(result.ok).toBe(true);
+    expect(lastError.value).toBeNull();
+
+    dispose();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Vue 3.6.0-beta.10+ APIs
+// ---------------------------------------------------------------------------
+
+describe('defineVaporCustomElement', () => {
+  it('returns null when Vue 3.6.0-beta.10 is not available', () => {
+    expect(defineVaporCustomElement({})).toBeNull();
+  });
+});
+
+describe('defineVaporComponent', () => {
+  it('returns null when Vue 3.6.0-beta.10 is not available', () => {
+    expect(defineVaporComponent({})).toBeNull();
+  });
+});
+
+describe('defineVaporAsyncComponent', () => {
+  it('returns null when Vue 3.6.0-beta.10 is not available', () => {
+    expect(defineVaporAsyncComponent(() => Promise.resolve({}))).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// useVaporAsyncCommand
+// ---------------------------------------------------------------------------
+
+describe('useVaporAsyncCommand', () => {
+  beforeEach(() => resetCommandBus());
+
+  it('dispatches async commands with reactive loading', async () => {
+    const asyncBus = createAsyncCommandBus();
+    asyncBus.register('orderCreate', async () => {
+      await new Promise(r => setTimeout(r, 10));
+      return { orderId: 123 };
+    });
+
+    const { dispatch, loading, lastError, dispose } = useVaporAsyncCommand(asyncBus);
+
+    const resultPromise = dispatch('orderCreate', { items: [1, 2] });
+    expect(loading.value).toBe(true);
+
+    const result = await resultPromise;
+    expect(loading.value).toBe(false);
+    expect(result.ok).toBe(true);
+    expect(result.value).toEqual({ orderId: 123 });
+    expect(lastError.value).toBeNull();
+
+    dispose();
+  });
+
+  it('captures async errors in lastError', async () => {
+    const asyncBus = createAsyncCommandBus();
+    asyncBus.register('fail', async () => { throw new Error('async fail'); });
+
+    const { dispatch, loading, lastError, dispose } = useVaporAsyncCommand(asyncBus);
+
+    const result = await dispatch('fail', {});
+    expect(loading.value).toBe(false);
+    expect(result.ok).toBe(false);
+    expect(lastError.value?.message).toBe('async fail');
+
+    dispose();
   });
 });

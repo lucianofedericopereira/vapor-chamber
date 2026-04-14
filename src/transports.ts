@@ -10,6 +10,7 @@
 import type { Command, CommandResult, AsyncPlugin, BaseBus } from './command-bus';
 import { matchesPattern } from './command-bus';
 import { postCommand } from './http';
+import type { HttpClient } from './http';
 import { signal } from './chamber';
 import type { Signal } from './chamber';
 
@@ -85,6 +86,17 @@ export type HttpBridgeOptions = {
    * bus.use(createHttpBridge({ endpoint: '/api/vc', scopeController: ctrl }));
    */
   scopeController?: AbortController;
+  /**
+   * Custom HTTP client instance for advanced use cases (interceptors,
+   * custom baseURL, etc). When provided, the bridge uses `client.post()`
+   * instead of the built-in `postCommand()`.
+   *
+   * @example
+   * const http = createHttpClient({ baseURL: '/api' });
+   * http.interceptors.request.use((c) => { c.headers = { ...c.headers, 'X-Tenant': '42' }; return c; });
+   * bus.use(createHttpBridge({ endpoint: '/vc', httpClient: http }));
+   */
+  httpClient?: HttpClient;
 };
 
 function matchesActions(action: string, patterns?: string[]): boolean {
@@ -108,7 +120,7 @@ function matchesActions(action: string, patterns?: string[]): boolean {
  * await bus.dispatch('cartAdd', product, { quantity: 2 })
  */
 export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
-  const { endpoint, actions, csrf = false, csrfCookieUrl, headers = {}, timeout = 10_000, retry = 0, noRetry = [], signal, onSessionExpired, scopeController } = options;
+  const { endpoint, actions, csrf = false, csrfCookieUrl, headers = {}, timeout = 10_000, retry = 0, noRetry = [], signal, onSessionExpired, scopeController, httpClient } = options;
   // Merge external signal + scope controller signal for automatic cancellation
   const effectiveSignal = scopeController && signal
     ? (typeof AbortSignal.any === 'function'
@@ -123,9 +135,13 @@ export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
     const effectiveRetry = noRetry.includes(cmd.action) ? 0 : retry;
 
     try {
-      const res = await postCommand<BackendResponse>(endpoint, envelope, {
-        csrf, csrfCookieUrl, headers, timeout, retry: effectiveRetry, signal: effectiveSignal, onSessionExpired,
-      });
+      const res = httpClient
+        ? await httpClient.post<BackendResponse>(endpoint, envelope, {
+            csrf, csrfCookieUrl, headers, timeout, retry: effectiveRetry, signal: effectiveSignal, onSessionExpired,
+          })
+        : await postCommand<BackendResponse>(endpoint, envelope, {
+            csrf, csrfCookieUrl, headers, timeout, retry: effectiveRetry, signal: effectiveSignal, onSessionExpired,
+          });
 
       if (!res.ok) {
         const msg = (res.data as any)?.message ?? (res.data as any)?.error ?? `HTTP ${res.status}`;

@@ -133,6 +133,82 @@ describe('persist plugin', () => {
     expect(() => p.load()).not.toThrow();
     expect(() => p.clear()).not.toThrow();
   });
+
+  it('validate option accepts valid state', () => {
+    mockStorage.data['cart'] = JSON.stringify({ items: [1, 2], total: 50 });
+
+    const p = persist({
+      key: 'cart',
+      getState: () => ({}),
+      storage: mockStorage,
+      validate: (state: any) => Array.isArray(state.items) && typeof state.total === 'number',
+    });
+
+    expect(p.load()).toEqual({ items: [1, 2], total: 50 });
+  });
+
+  it('validate option rejects invalid state and returns null', () => {
+    // Stale shape: missing 'total' field after a deploy
+    mockStorage.data['cart'] = JSON.stringify({ items: [1, 2] });
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const p = persist({
+      key: 'cart',
+      getState: () => ({}),
+      storage: mockStorage,
+      validate: (state: any) => Array.isArray(state.items) && typeof state.total === 'number',
+    });
+
+    expect(p.load()).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('validation failed for key "cart"'),
+    );
+
+    warnSpy.mockRestore();
+  });
+
+  it('validate option rejects completely wrong shape', () => {
+    mockStorage.data['prefs'] = JSON.stringify('just a string');
+
+    const p = persist({
+      key: 'prefs',
+      getState: () => ({}),
+      storage: mockStorage,
+      validate: (state: any) => typeof state === 'object' && state !== null && 'theme' in state,
+    });
+
+    expect(p.load()).toBeNull();
+  });
+
+  it('validate is not called when storage is empty', () => {
+    const validateFn = vi.fn(() => true);
+
+    const p = persist({
+      key: 'empty',
+      getState: () => ({}),
+      storage: mockStorage,
+      validate: validateFn,
+    });
+
+    expect(p.load()).toBeNull();
+    expect(validateFn).not.toHaveBeenCalled();
+  });
+
+  it('validate is not called when deserialize returns null', () => {
+    mockStorage.data['bad'] = 'not valid json';
+    const validateFn = vi.fn(() => true);
+
+    const p = persist({
+      key: 'bad',
+      getState: () => ({}),
+      storage: mockStorage,
+      validate: validateFn,
+    });
+
+    expect(p.load()).toBeNull();
+    expect(validateFn).not.toHaveBeenCalled();
+  });
 });
 
 // ---------------------------------------------------------------------------

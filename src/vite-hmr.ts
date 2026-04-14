@@ -1,6 +1,8 @@
 /**
  * vapor-chamber - Vite HMR plugin
  *
+ * v1.1.0 — Vapor↔VDOM mode switching: tracks __vapor state during HMR reloads
+ *           so components switching between Vapor and VDOM modes preserve bus state.
  * v0.5.0 — State-preserving hot module replacement.
  *
  * Preserves the shared command bus (handlers, plugins, hooks) across Vite HMR
@@ -42,6 +44,8 @@ export type VaporChamberHMROptions = {
 
 // The global symbol used to persist the bus across HMR updates in the browser.
 const HMR_GLOBAL_KEY = '__VAPOR_CHAMBER_BUS__';
+// Track whether the last active component was Vapor or VDOM — used for mode switch detection.
+const HMR_MODE_KEY = '__VAPOR_CHAMBER_MODE__';
 
 /**
  * vaporChamberHMR — Vite plugin for state-preserving hot reload.
@@ -71,17 +75,27 @@ export function vaporChamberHMR(options: VaporChamberHMROptions = {}): any {
       // It patches setCommandBus/getCommandBus to persist across HMR.
       return `
 // vapor-chamber HMR shim — injected by vaporChamberHMR() Vite plugin
-import { getCommandBus, setCommandBus, resetCommandBus } from 'vapor-chamber';
+import { getCommandBus, setCommandBus, resetCommandBus, isVaporAvailable } from 'vapor-chamber';
 
 const KEY = '${HMR_GLOBAL_KEY}';
+const MODE_KEY = '${HMR_MODE_KEY}';
 
-// On first load: store current bus in globalThis
+// On first load: store current bus and mode in globalThis
 if (typeof globalThis[KEY] === 'undefined') {
   globalThis[KEY] = getCommandBus();
+  globalThis[MODE_KEY] = isVaporAvailable() ? 'vapor' : 'vdom';
 } else {
   // On HMR reload: restore the preserved bus
   setCommandBus(globalThis[KEY]);
-  ${verbose ? "console.log('[vapor-chamber] HMR: restored bus from previous module');" : ''}
+  // Detect vapor↔vdom mode switch (Vue 3.6.0-beta.10 tracks __vapor state)
+  const prevMode = globalThis[MODE_KEY];
+  const currMode = isVaporAvailable() ? 'vapor' : 'vdom';
+  if (prevMode !== currMode) {
+    globalThis[MODE_KEY] = currMode;
+    ${verbose ? "console.log('[vapor-chamber] HMR: mode switched from ' + prevMode + ' to ' + currMode + ', bus preserved');" : ''}
+  } else {
+    ${verbose ? "console.log('[vapor-chamber] HMR: restored bus from previous module');" : ''}
+  }
 }
 
 // Accept HMR updates for the entire app module tree without full reload
@@ -90,9 +104,10 @@ if (import.meta.hot) {
     ${verbose ? "console.log('[vapor-chamber] HMR: module updated, bus preserved');" : ''}
   });
 
-  // On dispose, persist the current bus for the next module version
+  // On dispose, persist the current bus and mode for the next module version
   import.meta.hot.dispose(() => {
     globalThis[KEY] = getCommandBus();
+    globalThis[MODE_KEY] = isVaporAvailable() ? 'vapor' : 'vdom';
     ${verbose ? "console.log('[vapor-chamber] HMR: bus persisted for next reload');" : ''}
   });
 }

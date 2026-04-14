@@ -51,6 +51,18 @@ export type FormBusOptions<T extends Record<string, any>> = {
    * When false, all Signal fields still work as plain get/set wrappers.
    */
   reactive?: boolean;
+  /**
+   * Inject an external command bus instead of creating an isolated one.
+   * When provided, form commands (formSet, formTouch, formReset, formValidate)
+   * flow through this bus — making them visible to DevTools, metrics, logger,
+   * and global listeners.
+   *
+   * @example
+   * const bus = getCommandBus();
+   * const form = createFormBus({ fields: { email: '' }, bus });
+   * // formSet, formTouch, etc. now visible in setupDevtools()
+   */
+  bus?: CommandBus;
 };
 
 export type FormBus<T extends Record<string, any>> = {
@@ -141,7 +153,7 @@ export function createFormBus<T extends Record<string, any>>(
   const rules = (options.rules ?? {}) as FormRules<T>;
   const initial: T = { ...options.fields };
 
-  const bus = createCommandBus();
+  const bus = options.bus ?? createCommandBus();
 
   // When reactive: false, use plain get/set wrappers instead of Vue signals.
   // Saves 7 signal allocations per form in headless/batch/SSR contexts.

@@ -151,13 +151,16 @@ export function createDirectivePlugin(): { install(app: any): void } {
   return {
     install(app: any) {
       // Vue 3.6+ Vapor components don't support custom directives (no VDOM
-      // lifecycle hooks). Warn developers to use useVaporCommand() instead.
+      // lifecycle hooks). Since beta.10, VDOM/Vapor interop is much improved —
+      // VDOM components can invoke Vapor slots and vice versa — but directives
+      // remain a VDOM-only feature tied to the VDOM patch lifecycle.
       if (isVaporAvailable()) {
         console.warn(
           '[vapor-chamber] Directives (v-vc:command) are VDOM-only and will not ' +
           'work inside <script setup vapor> components. Use useVaporCommand() or ' +
-          'defineVaporCommand() for Vapor components. Directives still work in ' +
-          'VDOM components within the same app.'
+          'defineVaporCommand() for Vapor components. For async operations under ' +
+          'Suspense, use useVaporAsyncCommand(). Directives still work in VDOM ' +
+          'components within mixed Vapor/VDOM trees (interop plugin required).'
         );
       }
 

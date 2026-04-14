@@ -1,6 +1,6 @@
 {
   "name": "vapor-chamber",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Lightweight command bus for Vue Vapor - plugins, hooks, undo/redo, Vue 3.6 Vapor aligned",
   "type": "module",
   "main": "./dist/index.js",
@@ -22,6 +22,14 @@
     "./vite": {
       "import": "./dist/vite-hmr.js",
       "types": "./dist/vite-hmr.d.ts"
+    },
+    "./transitions": {
+      "import": "./dist/transitions.js",
+      "types": "./dist/transitions.d.ts"
+    },
+    "./ssr": {
+      "import": "./dist/ssr.js",
+      "types": "./dist/ssr.d.ts"
     },
     "./iife": {
       "import": "./dist/iife.js",
@@ -71,7 +79,7 @@
   "homepage": "https://github.com/lucianofedericopereira/vapor-chamber#readme",
   "peerDependencies": {
     "@vue/devtools-api": ">=6.0.0",
-    "vue": ">=3.5.0 || >=3.6.0-beta.1"
+    "vue": ">=3.5.0 || >=3.6.0-beta.10"
   },
   "peerDependenciesMeta": {
     "vue": {

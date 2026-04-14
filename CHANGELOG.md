@@ -2,6 +2,117 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.1.0 — Vue 3.6.0-beta.10 alignment
+
+### Added
+
+- **`defineVaporCustomElement(options)`** (`chamber-vapor.ts`) — wrapper for Vue 3.6.0-beta.10's
+  `defineVaporCustomElement()`. Creates custom elements backed by Vapor rendering with zero-overhead
+  DOM updates inside shadow DOM. SSR runtime is automatically tree-shaken (beta.10 fix). Returns
+  `null` when Vue 3.6.0-beta.10+ is not detected.
+
+- **`defineVaporComponent(options)`** (`chamber-vapor.ts`) — wrapper for Vue 3.6.0-beta.10's
+  `defineVaporComponent()`. Provides full TypeScript inference for props, emits, and slots in
+  Vapor components. Returns `null` when not available.
+
+- **`defineVaporAsyncComponent(loader)`** (`chamber-vapor.ts`) — wrapper for Vue 3.6.0-beta.10's
+  `defineVaporAsyncComponent()`. Async Vapor components are properly cached by VaporKeepAlive and
+  hydrate under VDOM Suspense boundaries. Returns `null` when not available.
+
+- **`useVaporAsyncCommand(asyncBus?)`** (`chamber-vapor.ts`) — async-aware command dispatch
+  composable for Vapor components under Suspense. Returns `Promise<CommandResult>` from dispatch,
+  with reactive `loading` and `lastError` signals. Safe for `<script setup vapor>`.
+
+### Changed
+
+- **Vue detection** (`chamber.ts`) — now probes for `defineVaporCustomElement`,
+  `defineVaporComponent`, and `defineVaporAsyncComponent` from Vue 3.6.0-beta.10+.
+
+- **Directive warning** (`directives.ts`) — updated Vapor compatibility warning to mention
+  `useVaporAsyncCommand()` and clarify that directives work in VDOM components within mixed
+  Vapor/VDOM trees when the interop plugin is installed.
+
+- **Vite HMR** (`vite-hmr.ts`) — tracks Vapor↔VDOM mode switching during HMR reloads. When a
+  component switches rendering mode (e.g. template-only HMR between Vapor and VDOM), the bus state
+  is preserved and the mode change is logged in verbose mode.
+
+- **`createTransitionBridge(options)`** (`transitions.ts`) — framework-agnostic factory that
+  wires Vue `<Transition>` / `<TransitionGroup>` lifecycle hooks to bus commands. All 8 hooks
+  (`onBeforeEnter`, `onEnter`, `onAfterEnter`, `onEnterCancelled`, `onBeforeLeave`, `onLeave`,
+  `onAfterLeave`, `onLeaveCancelled`) dispatch namespaced actions with the DOM element as target.
+  The `done()` callback is called automatically after sync or async handler completion.
+
+- **`useTransitionCommand(options?)`** (`transitions.ts`) — Vue composable version of the
+  transition bridge. Uses the shared bus, reactive `phase` signal (`'idle' | 'entering' | 'leaving'`),
+  and auto-cleanup via `tryAutoCleanup`. Bind directly to `<Transition v-bind="hooks">`.
+
+- **Sub-path export** `vapor-chamber/transitions` — tree-shakeable, zero cost when not imported.
+
+- **`useCommandQuery()`** (`chamber.ts`) — CQRS read-side composable with reactive `data`,
+  `loading`, and `lastError` signals. Wraps `bus.query()` which skips `onBefore` hooks (no auth
+  gates or loading spinners for reads). Supports both sync and async buses.
+
+- **`createSSRPlugin(options?)`** (`ssr.ts`) — server-side plugin that records dispatched
+  commands for dehydration. Options: `filter`, `maxCommands`. Methods: `dehydrate()`, `clear()`.
+
+- **`rehydrate(bus, commands, options?)`** (`ssr.ts`) — client-side replay of dehydrated commands.
+  Skips unhandled commands by default (`ignoreUnhandled: true`). Options: `filter` to suppress
+  side-effectful commands during replay.
+
+- **Sub-path export** `vapor-chamber/ssr` — tree-shakeable SSR hydration utilities.
+
+- **`createHttpClient(defaults?)`** (`http.ts`) — multi-method HTTP client factory aligned with
+  useFetch patterns. All HTTP methods (GET/POST/PUT/PATCH/DELETE), request deduplication for GETs,
+  LRU response caching with TTL, request/response interceptors (Axios-style), safe mode
+  (`client.safe.post()` returns `{ data, error, status }` instead of throwing), file download
+  with Content-Disposition parsing, instance creation with `client.create({ baseURL })`, query
+  params builder (arrays, nested objects). `postCommand` retained for backward compatibility.
+
+- **Configurable XSRF cookie name** (`http.ts`) — reads `<meta name="xsrf-cookie">` to
+  configure the cookie name for CSRF token detection. Defaults to `XSRF-TOKEN` (backward compat).
+
+- **`createHttpBridge` httpClient option** (`transports.ts`) — inject a custom `HttpClient`
+  instance for advanced use cases (interceptors, custom baseURL). Falls back to `postCommand`.
+
+- **`persist` validate option** (`plugins-io.ts`) — `persist({ validate: (state) => bool })`
+  rejects stale or structurally invalid persisted state on `load()`. Returns `null` with a
+  console warning when validation fails. Prevents silent shape drift after deploys.
+
+### Fixed
+
+- **`useCommand()` / `useVaporCommand()` async loading** — `loading` signal now stays `true`
+  until async handler results resolve. Previously it flashed `true→false` in the same tick,
+  making it invisible in templates when using async transports (HTTP bridge, WS bridge).
+
+### Changed
+
+- **`useVaporCommand()` now exposes `emit()`** — fire domain events directly from the composable
+  without dropping to `useCommandBus()`.
+
+- **KeepAlive-aware composables** — `useCommandHistory` and `useCommandError` now pause their
+  bus subscriptions when the host component is deactivated by `<KeepAlive>`, and resume when
+  reactivated. Prevents silent subscription loss in cached components.
+
+- **Transition bridge `onMove` hook** — `TransitionBridge` now includes `onMove(el)` for
+  `<TransitionGroup>` reorder animations. Dispatches `{namespace}Move` action.
+
+- **`useCommandGroup()` now exposes `query()` and `emit()`** — namespaced CQRS reads and domain
+  events. `cart.query('getTotal', {})` dispatches `cartGetTotal` via `bus.query()` (skips onBefore).
+  `cart.emit('updated', data)` dispatches `cartUpdated` via `bus.emit()`.
+
+- **`useCommandHistory` redo re-dispatches** — `redo()` now re-dispatches the command through
+  the bus (matching the plugin version's behavior). Previously it only moved the command between
+  stacks without executing the handler.
+
+- **`createFormBus` bus injection** — `createFormBus({ bus: sharedBus })` injects an external
+  command bus instead of creating an isolated one. Form commands (`formSet`, `formTouch`, etc.)
+  become visible to DevTools, metrics, logger, and global listeners.
+
+- **Peer dependency** — `vue` peer dep updated to `>=3.5.0 || >=3.6.0-beta.10` to align with
+  the APIs used by the new wrappers.
+
+---
+
 ### Added — v1.0 e-commerce hardening
 
 - **Transactional batch dispatch** (`command-bus.ts`) — `dispatchBatch(commands, { transactional: true })`

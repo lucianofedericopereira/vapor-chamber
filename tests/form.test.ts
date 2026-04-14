@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createFormBus } from '../src/form';
+import { createCommandBus } from '../src/command-bus';
 import { logger } from '../src/plugins';
 
 // ---------------------------------------------------------------------------
@@ -198,5 +199,49 @@ describe('createFormBus — plugin integration', () => {
       expect(form.values.value.a).toBe(1);
       expect(form.isDirty.value).toBe(false);
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createFormBus — bus injection
+// ---------------------------------------------------------------------------
+
+describe('createFormBus — bus injection', () => {
+  it('uses injected bus instead of creating an isolated one', () => {
+    const sharedBus = createCommandBus();
+    const seen: string[] = [];
+    sharedBus.onAfter((cmd) => seen.push(cmd.action));
+
+    const form = createFormBus({ fields: { name: '' }, bus: sharedBus });
+    form.set('name', 'Alice');
+
+    expect(seen).toContain('formSet');
+  });
+
+  it('form commands visible to plugins on injected bus', () => {
+    const sharedBus = createCommandBus();
+    const entries: Array<{ action: string }> = [];
+    sharedBus.use((cmd, next) => {
+      entries.push({ action: cmd.action });
+      return next();
+    });
+
+    const form = createFormBus({ fields: { x: 0 }, bus: sharedBus });
+    form.set('x', 42);
+    form.reset();
+
+    expect(entries.map(e => e.action)).toEqual(['formSet', 'formReset']);
+  });
+
+  it('creates isolated bus by default (backward compat)', () => {
+    const sharedBus = createCommandBus();
+    const seen: string[] = [];
+    sharedBus.onAfter((cmd) => seen.push(cmd.action));
+
+    const form = createFormBus({ fields: { y: '' } });
+    form.set('y', 'test');
+
+    // sharedBus should NOT see form commands — isolated by default
+    expect(seen).toHaveLength(0);
   });
 });
