@@ -24,8 +24,8 @@
  * form.reset();          // restores initial field values
  */
 
-import { signal } from './chamber';
-import type { Signal, CreateSignal } from './chamber';
+import { signal } from './signal';
+import type { Signal, CreateSignal } from './signal';
 import { createCommandBus } from './command-bus';
 import type { CommandBus, Plugin, PluginOptions } from './command-bus';
 

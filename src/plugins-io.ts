@@ -124,6 +124,19 @@ export type PersistOptions<T = any> = {
    * Pass `sessionStorage` for session-scoped persistence.
    */
   storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+  /**
+   * When true, collapse back-to-back saves within the same microtask into one.
+   * Trades 1 microtask of latency for one `getState()` + `JSON.stringify()` +
+   * `setItem()` cycle per burst, regardless of how many dispatches triggered it.
+   *
+   * Use when the same state is touched by many rapid commands (form input,
+   * scroll tracking, batched cart updates). Default: false (every successful
+   * dispatch saves immediately, matching pre-v1.2 behavior).
+   *
+   * @example
+   * persist({ key: 'vc:cart', getState: () => cart.value, coalesce: true })
+   */
+  coalesce?: boolean;
 };
 
 /**
@@ -146,6 +159,7 @@ export function persist<T>(options: PersistOptions<T>): Plugin & {
     deserialize = (s) => { try { return JSON.parse(s) as T; } catch { return null; } },
     validate,
     filter,
+    coalesce = false,
   } = options;
 
   function getStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null {
@@ -189,11 +203,25 @@ export function persist<T>(options: PersistOptions<T>): Plugin & {
     catch (e) { console.warn(`[vapor-chamber] persist: failed to clear key "${key}":`, e); }
   }
 
-  const plugin: Plugin = (cmd, next) => {
-    const result = next();
-    if (result.ok && (!filter || filter(cmd))) save();
-    return result;
-  };
+  // Coalesced save scheduling — flushes one save per microtask burst.
+  let _saveScheduled = false;
+  function scheduleSave(): void {
+    if (_saveScheduled) return;
+    _saveScheduled = true;
+    queueMicrotask(() => { _saveScheduled = false; save(); });
+  }
+
+  const plugin: Plugin = coalesce
+    ? (cmd, next) => {
+        const result = next();
+        if (result.ok && (!filter || filter(cmd))) scheduleSave();
+        return result;
+      }
+    : (cmd, next) => {
+        const result = next();
+        if (result.ok && (!filter || filter(cmd))) save();
+        return result;
+      };
 
   return Object.assign(plugin, { load, save, clear });
 }
@@ -241,7 +269,7 @@ export function sync(
   }
 
   let bc: BroadcastChannel | null = null;
-  let localDispatch: ((action: string, target: any, payload?: any) => any) | null =
+  const localDispatch: ((action: string, target: any, payload?: any) => any) | null =
     busRef?.dispatch ?? null;
 
   let receiving = false;

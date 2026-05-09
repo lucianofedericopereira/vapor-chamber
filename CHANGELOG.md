@@ -2,6 +2,819 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.2.0 — Vue 3.6.0-beta.11 alignment
+
+### Changed
+
+- **Build pipeline migrated to Vite** (`scripts/build.mjs`). Replaces the custom
+  esbuild IIFE script and tsc JS emit with a single orchestrator using Vite's
+  programmatic API. Rollup tree-shaking + multi-entry library mode in one pass.
+  `tsc` now emits types only (`emitDeclarationOnly: true`).
+- **IIFE bundle split into three audience-based variants.** Variants reflect
+  *deployment shapes*, not Vue feature axes — split by who is consuming the
+  bundle, not by which Vue API happens to be inside.
+  - `core` — sprinkled JS on server-rendered pages (Blade / Rails / Django /
+    .NET MVC / WordPress). Bus + HTTP transport + lightweight plugins
+    (logger, validator, debounce, throttle, retry, authGuard) + `connect()`
+    one-liner with auto-CSRF.
+  - `elements` — embeddable widgets via custom elements. Everything in `core`
+    plus `defineVaporCustomElement` and a `defineWidget(tag, options)` helper.
+  - `full` — kitchen sink for SPAs. Everything in `elements` plus realtime
+    transports (WebSocket / SSE), heavy plugins (persist, sync, history,
+    optimistic), `mount()`, and the full Vapor composables surface.
+
+  New audience-specific helpers `connect()` (CORE/ELEMENTS/FULL) and
+  `defineWidget()` (ELEMENTS/FULL) are also exposed in larger variants so the
+  same call site works regardless of which bundle is loaded.
+
+  Sub-path exports: `vapor-chamber/iife`, `/iife-core`, `/iife-elements`.
+
+  Measured sizes (v1.2.0, min / brotli q=11 / gzip -9):
+  - core: 23 KB / 6.1 KB / 6.8 KB
+  - elements: 24 KB / 6.4 KB / 7.2 KB
+  - full: 32 KB / 8.7 KB / 9.8 KB
+
+  **Variant contents are not under semver before v2.0** — see ROADMAP.md.
+  ESM consumers (the main entry) get the full surface and obey strict semver.
+- **peerDependencies** bumped to `vue: ">=3.5.0 || >=3.6.0-beta.11"`.
+
+### Documented
+
+- `defineVaporComponent` JSDoc now describes Vue 3.6.0-beta.11 alignment:
+  generics + runtime props inference (Vue PR #14770), and the emits-vs-attrs
+  split (declared `emits` listeners are excluded from `$attrs`). The wrapper
+  forwards `options` unchanged so both behaviors flow through to Vue.
+
+### Tests
+
+- New regression test asserting `defineVaporComponent` passes options through
+  unmodified — locks in the emits/attrs and generics flow-through.
+- New IIFE bundle smoke test asserting the three variants ship the expected
+  exports (and don't accidentally bloat with unwanted ones).
+- New SSR rehydrate benchmarks (`tests/perf.bench.ts`) at 10 / 100 / 1000
+  command scales, plus the ignoreUnhandled skip path. Locks the lib's replay
+  cost so any regression is visible regardless of Vue version. (Vue's
+  beta.11 hydration fast path is orthogonal — it speeds Vue's part of SSR,
+  not command replay.)
+
+### Performance
+
+- **`signal` extracted into a side-effect-free `src/signal.ts` module.** The
+  minimal signal API (lazy sync `globalThis.__VUE__` probe + plain fallback
+  + `configureSignal()`) lives standalone with no module-load side effects.
+  `chamber.ts` re-exports it for backward compat and pushes Vue's `ref()`
+  into it via `configureSignal()` once its async probe completes.
+  - `transports.ts` and `form.ts` now import `signal` from `./signal`,
+    breaking their transitive dependency on `chamber.ts`'s Vapor-detection
+    registry (the module-load `probeVue()` side effect, ~9 Vue API probes,
+    `defineVaporCustomElement` / `defineVaporAsyncComponent` references,
+    `waitForVueDetection` machinery).
+  - **Result:** every ESM consumer using transports/form/plugins without
+    Vue composables ships a smaller bundle. Measured against a typical
+    Blade scenario (`createCommandBus` + `createHttpBridge` + `logger`):
+    bundle dropped from ~6.2 KB brotli to **5.7 KB brotli (~9% reduction,
+    535 bytes saved)**, with zero remaining references to `probeVue`,
+    `_vueOnScopeDispose`, `defineVaporCustomElement`, `applyVueModule`, or
+    `waitForVueDetection` in the consumer output. Public API unchanged.
+- **Listener bucketing in core.** `on()` / `once()` listeners are now split
+  between `exactListeners: Map<action, Listener[]>` (O(1) lookup on the
+  dispatch hot path) and `wildcardListeners: Array<{pattern, listener}>`
+  (walked with `matchesPattern` only when wildcards exist). The split is
+  internal — no API change. Measured against the 5k-dispatch × 55-listener
+  bench:
+  - dispatch: 415 → 466 ops/sec (**+12%**)
+  - emit: 403 → 507 ops/sec (**+26%**)
+  Real-world wins scale with listener count: silent at 3 listeners, larger
+  beyond ~50.
+- **`persist` plugin gains opt-in `coalesce: true`.** Collapses back-to-back
+  `getState()` + `JSON.stringify()` + `setItem()` cycles within one microtask
+  burst into a single save. Use when many rapid commands touch the same
+  state (form input, scroll tracking, batched cart updates). Trade-off: 1
+  microtask of save latency. Measured against the 100-dispatch × 50-item
+  array bench: 3,300 → 28,887 ops/sec (**8.75×**). Default behavior unchanged
+  (per-dispatch save).
+- **Default `meta.id` generator swapped from `crypto.randomUUID()` to a
+  counter + per-process random prefix.** Command IDs are correlation tokens,
+  not security tokens — uniqueness across one process is sufficient for tracing
+  and observability. Measured 2.26× speedup on the 10k-dispatch hot path
+  (default 1460 ops/sec vs randomUUID 645 ops/sec on the dev machine).
+- **`configureUid(fn)` exported** — opt-in to `crypto.randomUUID` (or any
+  custom generator) for distributed tracing or cross-process auditing use cases.
+- Verified `okResult` / `errResult` / `stampMeta` / `AsyncState` already
+  produce monomorphic hidden classes — the existing code is V8-aligned. No
+  changes needed beyond the uid swap.
+
+### Infrastructure
+
+- **CI/CD pipeline** added at [.github/workflows/ci.yml](./.github/workflows/ci.yml).
+  Test matrix runs typecheck, lint, full test suite (559 tests), build, and
+  size budget guard on Node 20.19 + Node 22, on Linux + macOS. A separate
+  `bench smoke` job runs `vitest bench` and uploads the result as an artifact
+  for trend tracking.
+- **Biome config** ([biome.json](./biome.json)) replaces the absence of a
+  linter. Tuned to match the project's existing style (no auto-format
+  pass — formatter disabled to avoid touching every file). Three new
+  scripts: `npm run lint` (auto-fix), `npm run lint:check` (CI), and
+  `npm run typecheck` (tsc --noEmit).
+- **`scripts/check-size.mjs`** — bundle-size budget guard. Fails if any IIFE
+  variant exceeds its raw or brotli budget. Locks v1.2.0 sizes so future
+  changes can't silently regress the headline numbers. Bumping budgets
+  requires an explicit edit + CHANGELOG note. Wired as `npm run size:check`
+  and into `prepublishOnly`.
+- **`tests/esm-treeshake.test.ts`** — bundles a synthetic Blade-style consumer
+  (`createCommandBus` + `createHttpBridge` + `logger`) and asserts the bundle
+  stays under 6.5 KB brotli with zero leaked references to `probeVue`,
+  `applyVueModule`, `defineVaporCustomElement`, `defineVaporAsyncComponent`,
+  `defineVaporComponent`, `waitForVueDetection`, or `_vueOnScopeDispose`.
+  Locks the v1.2.0 signal-extraction win — if a future side-effect import
+  drags chamber.ts back into transports/plugins consumers, this test fires.
+- **[CONTRIBUTING.md](./CONTRIBUTING.md)** — dev setup, project layout,
+  workflow, performance-work expectations ("only ship perf changes that
+  benches confirm"), release process.
+- **[SECURITY.md](./SECURITY.md)** — supported version policy, vulnerability
+  reporting via GitHub Security Advisories, response timeline (≤72h ack,
+  ≤30d patch for high/critical), in-scope and out-of-scope items.
+- **Issue + PR templates** — bug report, feature request, and PR templates
+  under `.github/`. PR template includes the perf-bench requirement and a
+  CHANGELOG-entry slot.
+- **`prepublishOnly`** now runs the full quality pipeline: typecheck → lint
+  → tests → build → size guard. No accidental publishes with broken builds
+  or oversized bundles.
+
+### AbortController integration (async bus + HTTP bridge)
+
+Cancelable async dispatches landed in v1.2.x with a tight scope:
+
+- **`asyncBus.dispatch(action, target, payload, { signal })`** — 4th arg is
+  an optional `DispatchOptions`. Backward compatible (existing 3-arg call
+  sites work unchanged).
+- **`Command.signal: AbortSignal | undefined`** — handlers can read
+  `cmd.signal.aborted` or attach `cmd.signal.addEventListener('abort', …)`
+  to short-circuit work mid-flight.
+- **Pre-flight abort:** if `signal.aborted` at dispatch time, the bus skips
+  the handler entirely and resolves with `{ ok: false, error }`. The error
+  is the explicit reason if the user passed one (`ac.abort(new MyError())`),
+  otherwise a `BusError('VC_CORE_ABORTED', …)` so consumers can switch on
+  `error.code`. Added `VC_CORE_ABORTED` to the `BusErrorCode` union.
+- **HTTP bridge auto-propagation:** `createHttpBridge()` now merges
+  `cmd.signal` with any bridge-level `signal` / `scopeController` via
+  `AbortSignal.any()` (with a fallback for older runtimes). Consumers no
+  longer need to thread the signal through the bridge config — pass it at
+  the call site and the fetch picks it up.
+- **After-hooks fire** for aborted dispatches so loggers / metrics see the
+  aborted command. Observability stays intact regardless of cancellation.
+
+### Sync bus accepts but ignores `{ signal }`
+
+The sync `CommandBus.dispatch` signature accepts the 4th `DispatchOptions`
+arg for type compatibility with `AsyncCommandBus`, but the signal is ignored
+at runtime — sync dispatches are atomic and not cancelable. Pass a signal
+here only if you also use the async bus and want a uniform call site.
+
+### Test coverage gate
+
+CI now enforces a coverage floor via [vitest.config.ts](./vitest.config.ts)
++ a `test:coverage` step in [.github/workflows/ci.yml](./.github/workflows/ci.yml).
+Current floor:
+
+| Metric     | Threshold |
+|------------|-----------|
+| lines      | 75%       |
+| functions  | 80%       |
+| branches   | 65%       |
+| statements | 73%       |
+
+Set ~1–2 points below current measured coverage — acts as a real floor
+without tightening on trivial test additions. Tightens over time as
+coverage improves; only loosened with an explicit CHANGELOG note.
+
+**Excluded** (covered indirectly or not unit-testable):
+- `index.ts`, `plugins.ts` — pure re-export aggregators
+- `iife*.ts` — namespace builders; underlying surface tested elsewhere
+- `vite-hmr.ts` — Vite plugin (real Vite server required)
+- `testing.ts` — test-only utility (would test the test helper)
+- `devtools.ts`, `directives.ts` — require real Vue runtime
+
+**Known gaps for follow-up** (reflected in the floor, not hidden):
+- `plugins-extra.ts` — 0% (cache, circuitBreaker, rateLimit, metrics)
+- `utilities.ts` — 0% (createChamber, createWorkflow, createReaction)
+
+### `emitDOMEvent` — bridge widget events to host pages
+
+Vue's component `emit(...)` goes through Vue's event system; it does NOT
+bubble out as a real DOM event. For embeddable widgets that need to
+communicate with the surrounding page (e.g. a `<cart-bubble>` notifying
+its container that a product was added), the new `emitDOMEvent(el, name,
+detail, options?)` helper dispatches a real `CustomEvent` so host pages
+can `addEventListener` on the widget tag.
+
+```ts
+// In a widget
+VaporChamber.defineWidget('cart-bubble', {
+  setup() {
+    return () => h('button', {
+      onClick: (e) =>
+        VaporChamber.emitDOMEvent(e.target.getRootNode().host, 'cart-added', { sku: 'X' })
+    }, 'Add');
+  }
+});
+
+// On the host page
+document.querySelector('cart-bubble').addEventListener('cart-added', (e) => {
+  console.log(e.detail.sku);   // 'X'
+});
+```
+
+Defaults: `bubbles: true`, `composed: true` (the latter escapes shadow DOM
+so events reach light-DOM listeners on the host). Options override per
+call.
+
+Exposed in `elements` and `full` IIFE namespaces. 8 tests in
+[tests/emit-dom-event.test.ts](./tests/emit-dom-event.test.ts) cover
+every-type detail, preventDefault behavior, missing-CustomEvent fallback,
+null-element defensive return, options overrides.
+
+**Pattern adapted from
+[vue-custom-element](https://github.com/karol-f/vue-custom-element)'s
+`customEmit` helper** (Karol-F, MIT). vue-custom-element predates Vue 3.6
+Vapor by years, but the underlying gap (Vue emit ≠ DOM event) still
+exists today and the helper shape is timeless. The rest of
+vue-custom-element's surface (string→typed-prop coercion, slot handling,
+shadow-DOM strategy, async loading, disconnect cleanup) is now native to
+Vue 3.6's `defineVaporCustomElement` — no other harvest needed.
+
+**Particularly relevant for Laravel integration.** Laravel projects
+typically have multiple coexisting reactive layers (Blade + Alpine +
+Livewire + Filament). vapor-chamber widgets are none of those — they're
+Vue Vapor — so they need an interop primitive that doesn't couple to any
+specific layer. `emitDOMEvent` is that primitive: a widget dispatches a
+`CustomEvent`, and any of Alpine's `@event.window`, Livewire 3's
+`#[On('event')]`, or vanilla `addEventListener` can pick it up. New
+section in [docs/integrations/laravel.md](./docs/integrations/laravel.md)
+("Widget ↔ Livewire / Alpine / Blade event bridging") shows the four
+patterns: Blade+Alpine, Livewire 3, Filament panel widget, vanilla DOM.
+
+### `vapor-chamber/alien-signals` — connector for non-Vue contexts
+
+[src/alien-signals.ts](./src/alien-signals.ts) — a tiny adapter that bridges
+[alien-signals](https://github.com/stackblitz/alien-signals)' function-call
+API (`s()` / `s(value)`) to vapor-chamber's `.value`-style `Signal`
+interface.
+
+```ts
+import { signal as alienSignal } from 'alien-signals';
+import { configureAlienSignals } from 'vapor-chamber/alien-signals';
+
+configureAlienSignals(alienSignal);
+
+// Every vapor-chamber signal() — including useCommand, useSharedCommandState,
+// FormBus signals — is now backed by alien-signals' push-pull propagation.
+```
+
+**Why ship this:** Vue 3.6's `ref()` is itself a port of alien-signals
+([vuejs/core#12349](https://github.com/vuejs/core/pull/12349)), so Vue
+consumers already get alien-signals reactivity via the lib's
+auto-detection. The connector serves **non-Vue contexts** — SSR / Node
+services, Web Workers, embedded widgets, anywhere you want push-pull
+reactivity without Vue's full runtime.
+
+**No runtime dep added.** The connector takes alien-signals' `signal`
+function as an argument rather than importing it; consumers install
+alien-signals themselves (~7.5 KB raw / ~2.5 KB brotli). vapor-chamber
+stays Vue-agnostic on the runtime side.
+
+7 tests in [tests/alien-signals.test.ts](./tests/alien-signals.test.ts)
+verify the adapter against the real published alien-signals package,
+including: value reads/writes, multi-type coverage,
+`configureAlienSignals` flipping the global signal factory, propagation
+through alien-signals `computed`/`effect`, and a full integration test
+running `useSharedCommandState` on top of the alien-signals-backed
+factory.
+
+### Migration guides
+
+- [docs/migrating/from-mitt.md](./docs/migrating/from-mitt.md) — API mapping,
+  listener-signature change, when not to migrate (and pointer to fast-lane
+  if you only need pub/sub).
+- [docs/migrating/from-event-emitter.md](./docs/migrating/from-event-emitter.md) —
+  Node EventEmitter / eventemitter3 mapping, multi-arg-emit→single-payload,
+  class-based vs functional, listener leak detection.
+
+### Inertia 2 integration flags (Inertia + vapor-chamber coexistence)
+
+[transports.ts](src/transports.ts) — `HttpBridgeOptions` gains two flags
+that the whitepaper §11.3 documented but the code never shipped:
+
+- **`csrf: 'inertia'`** — defer CSRF token management to Inertia's Axios
+  instance. The bridge skips its own DOM-based CSRF reading and relies on
+  the consumer's `@inertiajs/inertia` axios setup to inject the token.
+- **`onRedirect: (url) => router.visit(url)`** — handle 3xx / `{ redirect }`
+  body responses. When set, vapor-chamber resolves the dispatch as failed
+  with a "Redirected to ..." message and calls the callback with the URL.
+  Use this to hand 302s to Inertia's router for navigation.
+
+### `vapor-chamber/observable` — Symbol.observable / RxJS interop
+
+[src/observable.ts](src/observable.ts) — bridges `bus.on(pattern)` and
+`bus.dispatch()` into the TC39 Observable protocol via `Symbol.observable`.
+Zero RxJS dependency — RxJS reads the interop natively via `from()`.
+
+```ts
+import { from } from 'rxjs';
+import { filter, debounceTime } from 'rxjs/operators';
+import { observe } from 'vapor-chamber/observable';
+
+from(observe(bus, 'cart*'))
+  .pipe(filter(({ result }) => result.ok), debounceTime(200))
+  .subscribe(({ cmd }) => console.log(cmd.action));
+```
+
+Inverse: `dispatchFrom(bus, action, observable)` pipes Observable values
+into the bus as dispatches. 9 tests in
+[tests/observable.test.ts](./tests/observable.test.ts).
+
+### `vapor-chamber/standard-schema` — schema-lib-agnostic validation plugin
+
+[src/plugins-schema.ts](src/plugins-schema.ts) — `validateSchemas` and
+`validateSchemasAsync` plugins that work with any schema library
+implementing [Standard Schema v1](https://standardschema.dev/): Zod,
+Valibot, ArkType, Effect Schema. The plugin only depends on the
+`'~standard'` interop shape — no schema lib is bundled or required.
+
+```ts
+import { z } from 'zod';
+import { validateSchemas } from 'vapor-chamber/standard-schema';
+
+bus.use(validateSchemas({
+  cartAdd:     z.object({ id: z.number(), qty: z.number().min(1) }),
+  orderCreate: z.object({ items: z.array(z.any()).min(1) }),
+}));
+
+// Failures resolve with { ok: false, error: BusError(VC_VALIDATION_FAILED) }.
+```
+
+Options: `field` (`'target' | 'payload' | 'both' | (cmd) => unknown`),
+`onInvalid` (`'reject' | 'warn'`). New `VC_VALIDATION_FAILED` BusErrorCode.
+7 tests in [tests/plugins-schema.test.ts](./tests/plugins-schema.test.ts).
+
+Distinct from the existing `schemaValidator` in [schema.ts](src/schema.ts)
+which serves the LLM tool-use layer with field-type strings — the two
+have intentionally different shapes for different use cases.
+
+### Comparative bench expansion (3 → 7 peer libraries)
+
+[tests/perf.bench.ts](./tests/perf.bench.ts) now benches against:
+mitt, nanoevents, eventemitter3, tiny-emitter, RxJS Subject, raw Map, plus
+vapor-chamber's general bus and fast lane. Multi-listener emit (3 listeners,
+10k events):
+
+| Lib                                 | ops/sec |
+|-------------------------------------|---------|
+| eventemitter3                       | ~5,990  |
+| nanoevents                          | ~5,830  |
+| raw `Map<string, Set<fn>>`          | ~5,310  |
+| **vapor-chamber `bus.emit`**        | **~4,660** |
+| mitt                                | ~2,620  |
+| tiny-emitter                        | ~2,240  |
+| rxjs Subject                        | ~2,030  |
+
+vapor-chamber's general `bus.emit` is now competitive with the fastest
+event emitters (#4 of 7), beats mitt/tiny-emitter/RxJS by 1.8–2.3×, ~80%
+of eventemitter3/nanoevents. The fast lane (separately) remains 1.9×
+faster than nanoevents on single-handler dispatch.
+
+### TypeDoc → GitHub Pages auto-deploy
+
+[.github/workflows/docs.yml](./.github/workflows/docs.yml) — when `main`
+gets pushes to `src/**.ts`, `typedoc.json`, or `README.md`, regenerates
+the API site and deploys to GitHub Pages. The site is `.gitignore`d
+locally; CI is the source of truth for the published version.
+
+### `examples/sprinkled-blade/` — runnable demo
+
+[examples/sprinkled-blade/](./examples/sprinkled-blade/) — minimal
+end-to-end example of the sprinkled-JS pattern with a Node mock backend
+that emulates what `VaporChamberController.php` does. Two-terminal
+`node mock-server.mjs` + `npx serve .` and the demo is interactive.
+Pairs with the runnable PHP companions in
+[`examples/laravel-backend/`](./examples/laravel-backend/).
+
+### Deferred to v1.3
+
+- **`command-bus.ts` file split** (1388 → 5–7 focused modules). Pure
+  maintainability, no API change. Best done alongside v1.3's wrapper
+  elimination so the elimination diff stays clean.
+
+### `createFastLane()` — new dispatch path for real-real-hot loops
+
+Sub-path export `vapor-chamber/fast-lane` adds a deliberately-narrow
+dispatcher for workloads where the general bus's per-call overhead
+(Command envelope, CommandResult, plugin chain) is measurably the
+bottleneck. **Not a faster bus** — a different tool for a different
+audience. Game ticks, trading data feeds, audio buffer processing,
+scroll/mousemove sampling, physics steps.
+
+```ts
+import { createFastLane } from 'vapor-chamber/fast-lane';
+
+const lane = createFastLane();
+const onTick = lane.compile<TickData, void>('tick', (data) => {
+  updateChart(data.symbol, data.price);
+});
+
+// Hot loop — pure function call, no envelope or result allocation
+for (const tick of feed) onTick(tick);
+
+// Multi-subscriber fan-out
+lane.on('frame', dt => animate(dt));
+lane.on('frame', dt => render(dt));
+lane.emit('frame', deltaSeconds);
+```
+
+**Surface (intentionally minimal):**
+- `compile(action, handler)` → returns a pre-bound dispatcher callable
+- `on(action, listener)` / `emit(action, data)` → multi-subscriber fan-out
+- `remove(action)` / unsubscribe closures
+- `registeredActions()` / `clear()`
+
+**Intentionally NOT in fast-lane:**
+- Command/Result envelopes — handler receives `data` directly, returns whatever
+- Plugins, hooks, listeners on `compile`'s dispatch path
+- Wildcards
+- Schema validation, batch, request/response, AbortController
+- meta / id / correlation / causation tracing
+- Auto-cleanup hooks (no Vue scope integration)
+- Any of the bus's transports / persistence / retry
+
+**Measured against the same 10k-dispatch bench used elsewhere:**
+
+| Lib / Path                              | ops/sec     | vs fast-lane |
+|-----------------------------------------|-------------|--------------|
+| direct function call (theoretical floor)| ~348,000    | 13.7× faster |
+| **vapor-chamber `fast-lane.compile`**   | **~25,400** | 1.0×         |
+| nanoevents emit                         | ~13,300     | 1.9× slower  |
+| mitt emit                               | ~4,750      | 5.3× slower  |
+| vapor-chamber `bus.dispatch` (general)  | ~700        | 36× slower   |
+
+Multi-listener emit (3 listeners): fast-lane ~5,980 ops/sec ties nanoevents
+(~5,700) within 5%, beats mitt (~2,580) by 2.3×, beats `bus.emit` (~3,100)
+by 1.9×.
+
+**Implementation:** ~50 lines in `src/fast-lane.ts`. Two parallel `Map`s
+(handlers + listeners). `compile` returns a closure that captures the
+action key and reads from the handler map (one Map.get + one call per
+dispatch). The Map.get indirection is the only thing keeping it from
+matching direct-function-call throughput; that indirection enables
+`remove()` and `clear()` without breaking previously-returned dispatchers.
+
+**Tests:** 12 in [tests/fast-lane.test.ts](./tests/fast-lane.test.ts) —
+correctness for compile/dispatch/on/emit/remove/clear, isolation between
+instances, error propagation (no try/catch wrapping), late re-compile
+re-routing the dispatcher.
+
+**Doc positioning:** [docs/performance.md](./docs/performance.md) opens
+with a "two doorways" section explaining when to pick each path. The
+[ROADMAP.md](./ROADMAP.md) reflects this is a permanent two-path design,
+not a v2 migration target.
+
+Inspired by [splice](https://github.com/lucianofedericopereira/splice) but
+keeps **string-keyed actions** (debuggable in stack traces, devtools, logs)
+rather than splice's numeric IDs. The trade-off: ~13.7× behind theoretical
+floor instead of ~3-5× — paying ~2-3× for debuggability vs splice. For a
+tradeoff curve where the next bigger workload is "I'm building HFT", the
+right tool is splice; for "I have a hot loop in my Vue app", the fast lane
+is the right tool.
+
+### Performance — splice-inspired optimization sweep (kept 2 of 5)
+
+Inspired by the [splice](https://github.com/lucianofedericopereira/splice)
+architecture (which trades ergonomics for raw speed at every junction). I
+tested five candidate optimizations against vapor-chamber's hot path —
+**only kept what bench-confirmed a clear win**, the rest reverted with the
+finding documented so future contributors don't re-investigate.
+
+| # | Candidate                                              | Outcome  | Δ on bare-bus dispatch (10k ops/sec) |
+|---|--------------------------------------------------------|----------|--------------------------------------|
+| 1 | Bare-bus fast path (sync) — bypass runner when no plugins/hooks/listeners | ✅ **KEPT**   | 595 → ~700 (**+18%**)                |
+| 2 | Skip `validateNaming` when no naming option configured | ✅ **KEPT**   | ~700 → ~728 (**+4%**)                |
+| 3 | Bare-bus fast path (async)                             | ✗ reverted | 3,586 → 3,360 (within noise, possible regression) |
+| 4 | Cache `isBare` boolean (vs five inline property reads) | ✗ reverted | ~700 → ~536 (**-25%** — V8 already optimizes the inline reads; adding the field changed `SyncState`'s hidden class and slowed the dispatch site) |
+| 5 | Inline `tryCatchHandler` in bare path                  | ✗ reverted | ~700 → ~651 (no measurable win — V8 was already inlining) |
+| 6 | `stampMeta(payload)` instead of `stampMeta({action, target, payload})` (drop temporary wrapper) | ✗ reverted | ~728 → ~682 (slight regression — possibly V8 IC polymorphism on the `any` arg) |
+
+**Net result for v1.2.x dispatch:** +22% on the bare-bus path (sync, no
+plugins/hooks/listeners). Specifically:
+
+```ts
+// In _syncDispatchInner, before the normal path:
+if (s.opts.naming !== undefined) validateNaming(action, s.opts.naming);  // skip if no naming option
+const cmd: Command = { ... };
+
+if (
+  executeOverride === undefined &&
+  s.pluginEntries.length === 0 &&
+  s.beforeHooks.length === 0 &&
+  s.afterHooks.length === 0 &&
+  s.exactListeners.size === 0 &&
+  s.wildcardListeners.length === 0
+) {
+  const handler = s.handlers.get(action);
+  if (handler === undefined) return handleMissing(s.opts, cmd);
+  return tryCatchHandler(handler, cmd);
+}
+```
+
+**Lessons documented for future investigators:**
+- **Don't add fields to hot-path state objects to "cache" simple inline
+  checks.** V8's tight ICs on `Map.size` / `Array.length` already optimize
+  those reads; introducing a new field shifts the hidden class and can
+  regress the receiver-site IC. Inline reads won by 25%.
+- **V8 inlines small functions like `tryCatchHandler` automatically.**
+  Manual inlining didn't measure.
+- **Async dispatch's `await` + Promise microtask machinery dominates** —
+  skipping the runner indirection doesn't help because the runner cost is
+  a small fraction of total async dispatch cost.
+- **Removing temporary object allocation can regress IC behavior** when the
+  argument type becomes more polymorphic (`any` payloads). The bench
+  showed regression even though escape analysis "should" elide the wrapper.
+  Keep the wrapper for stable IC.
+- **Skipping a function call (validateNaming) when its body would early-
+  return anyway IS a real win** because the call itself is the cost on the
+  hot path, not the body.
+
+### Performance — sync dispatch bare-bus fast path (+18%)
+
+For sync `bus.dispatch` calls where the bus has no plugins, no
+before/after hooks, and no listeners (a common configuration: register +
+dispatch with nothing else), the implementation now bypasses the runner
+indirection and fans out directly to the handler. Same correctness, fewer
+function calls.
+
+```ts
+// In _syncDispatchInner, before the normal path:
+if (
+  executeOverride === undefined &&
+  s.pluginEntries.length === 0 &&
+  s.beforeHooks.length === 0 &&
+  s.afterHooks.length === 0 &&
+  s.exactListeners.size === 0 &&
+  s.wildcardListeners.length === 0
+) {
+  const handler = s.handlers.get(action);
+  if (handler === undefined) return handleMissing(s.opts, cmd);
+  return tryCatchHandler(handler, cmd);
+}
+```
+
+Measured 10k-dispatch bench, average across 3 runs:
+
+| Path                                    | Before    | After     | Δ       |
+|-----------------------------------------|-----------|-----------|---------|
+| sync dispatch — bare bus (no plugins)   | ~595 ops/sec | **~705 ops/sec** | **+18%** |
+| sync dispatch — with plugins/hooks/listeners | unchanged | unchanged | 0%      |
+
+The fast path's five length/size checks (`pluginEntries.length`,
+`beforeHooks.length`, `afterHooks.length`, `exactListeners.size`,
+`wildcardListeners.length`) are all O(1) property reads — cheaper than
+allocating the per-dispatch arrow + invoking the runner closure.
+
+### Performance — async dispatch fast path: tested, NOT shipped
+
+The same bare-bus fast path was tested for async dispatch and showed no
+measurable win (3,586 → 3,360 ops/sec across 3 runs — within noise, possible
+slight regression). The async path's `await` + Promise microtask machinery
+dominates the per-call cost, so skipping the runner doesn't help. Reverted.
+
+A comment in `_asyncDispatchInner` records this finding so future
+contributors don't repeat the same investigation.
+
+### Performance — pre-bound dispatcher Map: tested, NOT shipped
+
+A second optimization was tested: pre-bind a `(cmd) => tryCatchHandler(h, cmd)`
+closure per action at register time, store in a parallel `dispatchers: Map`,
+and reference it in dispatch instead of building the arrow per call. **Failed
+to win** because the runner's `execute` parameter is parameterless — the
+pre-bound dispatcher takes `cmd`, so dispatch still has to allocate
+`() => dispatcher(cmd)` to bridge into the runner. Same alloc cost as before.
+Reverted; insight noted for any future runner-signature change.
+
+### Performance — `emit` fast path (9.9× speedup)
+
+The v1.2.x `bus.emit()` path now skips three per-call allocations that were
+present before:
+
+1. **No-listener short-circuit** — `if (!exactListeners.has(event) && wildcardListeners.length === 0) return;` before allocating anything. Real apps emit many events that nobody listens for; this turns them into a hash lookup + length check.
+2. **Singleton `EMIT_RESULT`** — frozen `{ ok: true, value: undefined, error: undefined }` shared by every emit, replacing per-call `okResult(undefined)`.
+3. **Skip `stampMeta` on emit** — emit is fire-and-forget; the typical listener doesn't read `cmd.meta.id` / `correlationId` / `causationId` / `ts`. `Command.meta` is left `undefined` for emit-fired commands. Listeners that need meta on a fire-and-forget event should use `dispatch`.
+
+Measured on the same 10k-event × 3-listener bench used for v1.2.0:
+
+| Path                              | Before    | After     | Speedup |
+|-----------------------------------|-----------|-----------|---------|
+| `bus.emit` — 3 listeners          | ~470 ops/sec | **~4,640 ops/sec** | **9.9×** |
+| `bus.emit` — NO listeners         | (also ~470, allocated unconditionally) | **~24,500 ops/sec** | **52×** |
+
+Comparative repositioning:
+
+| Bench                             | vapor-chamber | mitt   | nanoevents |
+|-----------------------------------|---------------|--------|------------|
+| emit, 3 listeners                 | **4,640**     | 2,550  | 5,620      |
+| emit, no listeners (fast path)    | **24,500**    | 9,820  | 81,800     |
+
+vapor-chamber `emit` is now **1.8× faster than mitt** with subscribers and
+**2.5× faster without**. Within 20% of nanoevents on the loaded path; about
+3× behind on the empty path (nanoevents' single-property check vs the lib's
+two-step Map+array check).
+
+`bus.dispatch` is unchanged in this pass — it does meaningfully more per
+call than `emit` (CommandResult, plugin chain, meta stamping for
+correlation/causation tracing) and a fair comparison is to other bus /
+middleware libraries, not to event emitters.
+
+Comparative bench harness lives in
+[tests/perf.bench.ts](./tests/perf.bench.ts) under `describe('emit fast
+path — no listeners')`, `describe('comparative emit fan-out')`, and
+`describe('comparative dispatch')`. `mitt` and `nanoevents` are devDeps
+(bench-only).
+
+Inspiration: [splice](https://github.com/lucianofedericopereira/splice)
+ships similar tricks (frame pooling, no-listener fast path, minimal
+envelopes). vapor-chamber didn't adopt splice's full architecture
+(numeric action IDs, binary headers, frozen action tables) because it
+would mean a v2 rewrite; the targeted fast paths capture most of the win
+without breaking existing API.
+
+### TypeDoc → API reference site (`npm run docs`)
+
+Added [typedoc.json](./typedoc.json) and `npm run docs` / `npm run docs:watch`
+scripts. Generates a navigable HTML API reference from existing JSDoc into
+`docs/api/`, covering the main entry plus all sub-path entries
+(`transports`, `directives`, `transitions`, `ssr`, `vite-hmr`).
+
+The output is `.gitignore`d so it stays fresh per release. Public hosting
+(GitHub Pages or Netlify) is queued for v1.3.
+
+`typedoc` and `typedoc-plugin-markdown` added as devDeps.
+
+### Vapor SFC end-to-end example
+
+Added [examples/vapor-sfc/](./examples/vapor-sfc/) — a runnable Vapor SFC
+demo (`npm install && npm run dev`) showing three composable patterns side
+by side:
+
+- `CartPanel.vue` uses `useVaporCommand()` for per-button reactive
+  loading state
+- `SearchPanel.vue` uses `defineVaporCommand()` for fire-and-forget
+  search-as-you-type without reactive overhead
+- `StatusBar.vue` uses `useSharedCommandState()` for cross-component
+  aggregate state (loading + recent errors)
+
+Pinned to `vue@^3.6.0-beta.11` and `@vitejs/plugin-vue@^5.2.0`. Uses the
+local checkout (`"file:../.."`); swap to a published version when
+testing v1.2.0 from npm.
+
+### `useSharedCommandState()` composable
+
+Aggregate loading / error signals **shared** across every subscriber on the
+same bus, instead of allocating a private `loading` + `lastError` pair per
+caller. Designed for component-heavy pages where many components only need
+to react to "is *anything* in flight?" or "what was the last error?".
+
+```ts
+import { useSharedCommandState } from 'vapor-chamber';
+
+const { dispatch, isAnyLoading, lastError, errors, errorCount, clear } =
+  useSharedCommandState({ errorCap: 10 });
+
+// Bind across components:
+//   <Button :disabled="isAnyLoading.value">Save</Button>
+//   <Toast v-if="lastError.value">{{ lastError.value.message }}</Toast>
+```
+
+Behavior:
+- **Same signal instances** for every caller on the same bus (verified by
+  identity).
+- **Per-bus isolation** — separate buses get separate shared states (kept in
+  a `WeakMap<CommandBus, SharedState>`).
+- **Ref-counted disposal** — state is dropped when the last subscriber
+  disposes, allowing the WeakMap entry to be GC'd.
+- **`inFlight` counter** aggregates concurrent dispatches across all
+  subscribers; never goes negative.
+- **`errors` ring buffer** newest-last, capped at `errorCap` (default 10).
+  Custom caps respected; if multiple subscribers request different caps the
+  smallest wins (avoids surprise memory growth).
+- **`{ signal }` option** forwards to the underlying bus dispatch — the
+  AbortController integration shipped earlier in v1.2 works through this
+  composable too.
+- **Auto-cleanup** via `tryAutoCleanup` so Vue scope / component unmount
+  drops the subscription without manual disposal.
+
+12 tests in [tests/shared-state.test.ts](./tests/shared-state.test.ts)
+covering identity, isolation, inFlight aggregation, error ring buffer,
+clear semantics, async/sync paths, abort propagation, ref-counted disposal.
+
+### AbortController extensions (v1.2.x continuation)
+
+The AbortController story shipped in v1.2.0 was deliberately minimal (async
+dispatch + HTTP bridge). These extensions complete the cancellation surface:
+
+- **`bus.request(action, target, payload, { signal, timeout })`** — async
+  request/response now accepts `signal`. Pre-aborted signal short-circuits
+  with `VC_CORE_ABORTED` before the responder runs; mid-flight abort races
+  against the responder + timeout so callers can cancel without waiting.
+  After settlement, the listener is removed and the dedup key cleared.
+- **`bus.dispatchBatch(commands, { signal })`** — batch-level cancellation.
+  Pre-aborted signal returns immediately with empty results;
+  mid-batch abort stops further dispatches (already-completed results are
+  preserved). Per-command `cmd.signal` flows to handlers via the underlying
+  `dispatch` so individual handlers can observe abort. With `transactional:
+  true`, mid-batch abort triggers rollback of already-succeeded commands.
+- **WebSocket bridge auto-propagation** — `createWsBridge` now honors
+  `cmd.signal` per dispatch. Pre-aborted skips the send; mid-flight abort
+  removes the request from the pending map and resolves the dispatch
+  immediately (server may still process the command — WS protocol has no
+  per-message cancellation, this only cancels the client-side wait).
+- **Child signal pattern documented**, not auto-derived. True auto-derivation
+  would require AsyncLocalStorage (Node-only) or a module-level dispatch
+  stack (race-condition prone in browsers under concurrent dispatches). The
+  reliable pattern is explicit threading:
+  ```ts
+  bus.register('parent', async (cmd) => {
+    return await bus.dispatch('child', target, payload, { signal: cmd.signal });
+  });
+  ```
+  Already works since v1.2.0 — no new code needed.
+
+### SSE bridge — intentionally not wired
+
+`createSseBridge` is receive-only (server-pushes to client; no per-command
+request/response cycle), so `cmd.signal` doesn't apply at the bridge level.
+Consumers wanting to cancel an SSE subscription call `sse.teardown()`.
+
+### Bundle-size budget bumped
+
+The new signal-handling code (WS/request/batch) plus `useSharedCommandState`
+in chamber.ts added bytes. Budgets in `scripts/check-size.mjs` raised
+accordingly:
+- `vapor-chamber.iife.min.js`: 9.5 KB → **10.0 KB brotli max** (full variant
+  picked up both AbortController extensions and useSharedCommandState)
+- `vapor-chamber-core.iife.min.js`: 6.7 KB → 6.9 KB brotli max
+  (AbortController extensions only — chamber.ts not bundled here)
+- `vapor-chamber-elements.iife.min.js`: 7.0 KB → 7.2 KB brotli max (same)
+
+Measured sizes after both changes:
+- full: 35.2 KB raw / **9.8 KB brotli** / 11.0 KB gzip
+- core: 24.6 KB raw / **6.6 KB brotli** / 7.4 KB gzip
+- elements: 25.8 KB raw / **6.9 KB brotli** / 7.8 KB gzip
+
+### Laravel integration documentation
+
+- **[docs/integrations/laravel.md](./docs/integrations/laravel.md)** — single
+  consolidated reference covering the backend deliverables: minimum-viable
+  shape (one route + one controller + action classes), CSRF flows (Blade
+  meta tag vs Sanctum SPA cookie), Inertia coexistence, Filament panel
+  islands, Reverb / Echo realtime, queued / long-running commands,
+  per-command authorization and validation patterns. Smoke-test snippet
+  included.
+- **[examples/laravel-backend/](./examples/laravel-backend/)** — drop-in PHP
+  companion files: `VaporChamberController.php`, `config-vapor-chamber.php`,
+  `routes-web.php`, plus three example action classes
+  (`AddToCart.php`, `CancelOrder.php`, `ProcessCheckout.php`) covering
+  inline validation, Gate authorization, and queued commands.
+- **Comment cleanup pass** in `src/http.ts`, `src/transports.ts`,
+  `src/chamber.ts`, `src/signal.ts` — JSDoc and inline comments now frame
+  Laravel as one of several supported server-rendered frameworks (Rails,
+  Django, .NET MVC, custom stacks) rather than the singular target.
+  Behavior unchanged.
+- **Whitepaper §11.5 trimmed.** The previous reference to
+  `createEchoBridge` "v0.8.0" overstated shipped surface — the protocol-aware
+  Echo bridge isn't shipped yet. §11.5 now describes the generic
+  `createWsBridge` + Echo-event-to-`bus.emit()` pattern that works today,
+  with the protocol-aware adapter on the v1.3 ROADMAP.
+
+### Roadmap
+
+- New [ROADMAP.md](./ROADMAP.md) makes the beta-tracking posture explicit:
+  what is stable today regardless of Vue's beta cycle, what is transitional
+  (Vapor wrappers, `useVaporCommand` / `useCommand` split, runtime feature
+  registry), and the v1.3 / v2 cutover plan tied to Vue 3.6 RC and stable.
+  Includes the build-flag wrapper-elimination strategy (Vite `define` +
+  `package.json` conditional `vue36` export) so the wrappers can compile to
+  identity calls and be DCE'd for consumers on Vue 3.6 stable.
+
+### Audited, no change needed
+
+- Defensive try/catch blocks around scope cleanup in `chamber.ts` were audited
+  against beta.11's `runtime-core: cleanup stopped async setup scopes` fix.
+  The lib's guards target a different condition (called outside any scope at
+  all, not a stopped async scope), so nothing is now obsolete. All guards
+  remain load-bearing.
+
+### Removed
+
+- `scripts/build-iife.mjs` (replaced by `scripts/build.mjs`).
+- Stale hardcoded `version: '0.4.2'` in `src/iife.ts`.
+
 ## v1.1.0 — Vue 3.6.0-beta.10 alignment
 
 ### Added
@@ -638,7 +1451,8 @@ and the Vite 7/8 toolchain (Rolldown bundler).
 - **`getVaporInteropPlugin()`** — returns `vaporInteropPlugin` for mixed VDOM/Vapor trees
 - **`defineVaporCommand()`** — zero-overhead composable for hot-path dispatches in Vapor mode.
   Skips reactive `loading`/`lastError` signal creation that `useCommand()` provides.
-  Ideal for GA4 tracking, scroll events, debounced search, and fire-and-forget patterns.
+  Ideal for telemetry events, scroll-position sampling, debounced search, autosave,
+  and any fire-and-forget pattern where reactive loading state would be wasted overhead.
 
 ### Changed
 

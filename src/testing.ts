@@ -29,7 +29,7 @@
 import type {
   Command, CommandResult, Handler, Plugin, Hook, BeforeHook,
   PluginOptions, BatchCommand, BatchResult, CommandBus,
-  Listener, RegisterOptions, CommandMeta, BusInspection,
+  Listener, RegisterOptions, BusInspection,
 } from './command-bus';
 import { buildRunner, matchesPattern, BusError } from './command-bus';
 

@@ -145,8 +145,73 @@ Sub-path exports avoid pulling in optional modules:
 'vapor-chamber/transports'  → HTTP + WebSocket + SSE bridges only
 'vapor-chamber/directives'  → v-command Vue directive only
 'vapor-chamber/vite'        → Vite HMR plugin only
-'vapor-chamber/iife'        → IIFE bundle
+'vapor-chamber/fast-lane'     → minimal-allocation dispatcher for real-real-hot loops (game ticks, trading data, audio, scroll). Not a bus — see docs/performance.md.
+'vapor-chamber/observable'    → Symbol.observable interop — RxJS / xstream / callbag adapter
+'vapor-chamber/standard-schema'→ Standard Schema v1 validator plugin (Zod / Valibot / ArkType compatible)
+'vapor-chamber/alien-signals' → connector to use alien-signals as the underlying reactive primitive (non-Vue contexts)
+'vapor-chamber/iife'          → IIFE bundle (full)
+'vapor-chamber/iife-core'     → IIFE bundle (no Vapor custom-element, no Suspense paths)
+'vapor-chamber/iife-elements' → IIFE bundle (core + Vapor custom-element)
 ```
+
+### IIFE / CDN variants
+
+Three `<script>`-tag drop-ins, sized for distinct deployment shapes. Pick by
+audience, not by feature checklist.
+
+| Variant   | Audience                                     | File                                  | Min   | Brotli | Gzip   |
+|-----------|----------------------------------------------|---------------------------------------|-------|--------|--------|
+| core      | Sprinkled JS on server-rendered pages (Blade, Rails, Django, .NET MVC, WordPress). You dispatch user actions to a backend over HTTP. | `vapor-chamber-core.iife.js`     | 23 KB | 6.1 KB | 6.8 KB |
+| elements  | Embeddable widgets (chat bubbles, checkout buttons, third-party drop-ins). You ship a `<vc-widget>` custom element. | `vapor-chamber-elements.iife.js` | 24 KB | 6.4 KB | 7.2 KB |
+| full      | SPAs that grew big enough to want everything (realtime, undo/redo, persistence, full Vapor surface). | `vapor-chamber.iife.js`              | 32 KB | 8.7 KB | 9.8 KB |
+
+**What's in each variant**
+
+| Surface                                                  | core | elements | full |
+|----------------------------------------------------------|:----:|:--------:|:----:|
+| Bus (`createCommandBus`, `createAsyncCommandBus`)        | ✅   | ✅       | ✅   |
+| `createApp()`, `connect()` one-liner                     | ✅   | ✅       | ✅   |
+| HTTP transport (`http`)                                  | ✅   | ✅       | ✅   |
+| Light plugins (logger, validator, debounce, throttle, retry, authGuard) | ✅   | ✅       | ✅   |
+| `defineVaporCustomElement`, `defineWidget()`             | ❌   | ✅       | ✅   |
+| WebSocket / SSE (`ws`, `sse`)                            | ❌   | ❌       | ✅   |
+| Heavy plugins (persist, sync, history, optimistic)       | ❌   | ❌       | ✅   |
+| `mount()`                                                | ❌   | ❌       | ✅   |
+| Full Vapor (`defineVaporComponent`, async/Suspense)      | ❌   | ❌       | ✅   |
+
+**Examples**
+
+```html
+<!-- core: dispatch over HTTP, with CSRF auto-wired -->
+<script src=".../vapor-chamber-core.iife.min.js"></script>
+<script>
+  const { dispatch } = VaporChamber.connect({ endpoint: '/api/vc' });
+  document.getElementById('add').addEventListener('click',
+    () => dispatch('cartAdd', { id: 42 }));
+</script>
+```
+
+```html
+<!-- elements: register a custom-element widget in one call -->
+<script src=".../vapor-chamber-elements.iife.min.js"></script>
+<script>
+  VaporChamber.defineWidget('vc-cart', {
+    props: { sku: String },
+    setup(props) { return () => h('span', `SKU ${props.sku}`); }
+  });
+</script>
+<vc-cart sku="ABC-123"></vc-cart>
+```
+
+(Sizes measured against v1.2.0; min = `*.iife.min.js`. Brotli @ q=11, gzip @ -9.
+Modern CDNs serve brotli to every supported browser, so brotli is the number
+that hits the wire.) The build is driven by `scripts/build.mjs` (Vite programmatic
+API) — single source, multiple outputs.
+
+> **Variant contents are not under semver before v2.0.** While Vue 3.6 is in
+> beta, the lib reserves the right to move APIs between IIFE variants. ESM
+> consumers (the `vapor-chamber` main entry) get the full surface and are
+> unaffected. See [ROADMAP.md](./ROADMAP.md).
 
 ---
 
@@ -156,7 +221,27 @@ Sub-path exports avoid pulling in optional modules:
 npm install vapor-chamber
 ```
 
-**Requirements:** Node.js ≥20.19.0 | Vue ≥3.5.0 (optional peer dep) | Vite 7/8 compatible
+**Requirements:** Node.js ≥20.19.0 | Vue ≥3.5.0 (composables) or ≥3.6.0-beta.11 (full Vapor) — optional peer dep | Vite ≥7.0.0 + `@vitejs/plugin-vue` ≥5.0.0 (only required for the `vapor-chamber/vite` HMR plugin and Vapor SFC support)
+
+> **Beta tracking:** this lib follows Vue 3.6 while it is in beta. The Vapor
+> wrappers and the `useVaporCommand` / `useCommand` split are transitional
+> surfaces that will realign once Vue 3.6 ships stable. See [ROADMAP.md](./ROADMAP.md)
+> for what is stable today, what is transitional, and the v1.3 / v2 plan.
+>
+> **Performance & tuning:** see [docs/performance.md](./docs/performance.md)
+> for what's optimized by default, the consumer-facing tuning knobs
+> (`persist({ coalesce: true })`, `configureUid`, `configureSignal`), variant
+> selection guide, and a benchmark snapshot.
+>
+> **Laravel integration:** see [docs/integrations/laravel.md](./docs/integrations/laravel.md)
+> for the full backend deliverables list (route, controller, action classes,
+> CSRF flows, Sanctum, Inertia coexistence, Filament panels, Reverb
+> realtime, queued commands). Runnable PHP companions live in
+> [examples/laravel-backend/](./examples/laravel-backend/).
+>
+> **API reference:** generate locally with `npm run docs` (TypeDoc → `docs/api/`).
+> The generated site is `.gitignore`d so it stays fresh per release. Hosting it
+> publicly (e.g. via GitHub Pages or Netlify) is on the v1.3 ROADMAP.
 
 ## Quick Start
 
@@ -821,9 +906,9 @@ Dispatch multiple commands as a unit. Stops on the first failure by default:
 
 ```typescript
 const result = bus.dispatchBatch([
-  { action: 'cartAdd',        target: cart, payload: item },
-  { action: 'totalsUpdate',   target: cart },
-  { action: 'analyticsTrack', target: session, payload: item },
+  { action: 'cartAdd',       target: cart, payload: item },
+  { action: 'totalsUpdate',  target: cart },
+  { action: 'telemetryLog',  target: session, payload: item },
 ]);
 
 if (result.ok) {
@@ -913,14 +998,16 @@ const { dispatch, loading, lastError } = useCommand();
 ### defineVaporCommand
 
 Zero-overhead dispatch for hot paths — no reactive `loading`/`lastError` signals created.
-Ideal for GA4 tracking, scroll events, debounced search, fire-and-forget patterns:
+Ideal for fire-and-forget patterns: telemetry events, scroll-position sampling,
+debounced search, autosave — anywhere reactive loading state would be wasted overhead:
 
 ```vue
 <script setup vapor>
 import { defineVaporCommand } from 'vapor-chamber';
 
-const { dispatch } = defineVaporCommand('analyticsTrack', (cmd) => {
-  gtag('event', cmd.target.event, cmd.target.params);
+const { dispatch } = defineVaporCommand('telemetryEvent', (cmd) => {
+  // forward to whatever metrics / analytics SDK you use
+  sendMetric(cmd.target.name, cmd.target.params);
 });
 
 // Fire-and-forget — no reactive overhead in the alien-signals graph
@@ -1245,7 +1332,8 @@ See the [`examples/`](./examples) folder for complete, runnable examples:
 
 | Composable | Description |
 |------------|-------------|
-| `useCommand()` | Dispatch with reactive loading/error state |
+| `useCommand()` | Dispatch with reactive loading/error state (per-call signals) |
+| `useSharedCommandState(options?)` | Aggregate `isAnyLoading` + `errors` ring buffer, **shared** across every subscriber on the same bus. Use for toolbars, status bars, global spinners. Saves ~2 signal nodes per subscribing component. |
 | `useVaporCommand()` | Vapor-safe composable with dispatch, register, on, loading/error, auto-cleanup |
 | `defineVaporCommand(action, handler, options?)` | Zero-overhead dispatch for hot paths |
 | `useCommandState(initial, handlers)` | State managed by commands |

@@ -1,0 +1,106 @@
+<!--
+  vapor-chamber — sprinkled-JS demo for server-rendered pages.
+
+  Drop-in pattern: Blade / Rails / Django / WordPress emits HTML with a
+  CSRF meta tag, then loads the IIFE bundle and wires interactive bits
+  via `VaporChamber.connect()`.
+
+  This single HTML file is runnable as-is via:
+    cd examples/sprinkled-blade
+    npx serve .         # serves on http://localhost:3000
+
+  …with the small Node mock backend in mock-server.mjs running on :3001
+  to handle the POST /api/vc round-trip:
+    node mock-server.mjs
+
+  In a real Laravel deploy, replace the meta tag with `{{ csrf_token() }}`
+  and route `/api/vc` to your VaporChamberController. See
+  ../laravel-backend/ for runnable PHP companions.
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="csrf-token" content="demo-csrf-token-replace-with-blade-csrf_token" />
+  <title>vapor-chamber — sprinkled-JS / Blade demo</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
+    button { padding: 0.5rem 1rem; cursor: pointer; }
+    button:disabled { opacity: 0.5; cursor: wait; }
+    .panel { border: 1px solid #ddd; padding: 1rem; margin: 1rem 0; border-radius: 6px; }
+    .row { display: flex; gap: 1rem; align-items: center; }
+    .ok { color: #060; }
+    .err { color: #c00; }
+    pre { background: #f5f5f5; padding: 0.5rem; border-radius: 4px; overflow: auto; font-size: 12px; }
+  </style>
+</head>
+<body>
+
+  <h1>Sprinkled-JS demo</h1>
+  <p>
+    Server-rendered HTML page (think Blade / Rails / Django).
+    Vue is <em>not</em> involved; just vapor-chamber's IIFE bundle dispatching
+    commands to a backend over HTTP.
+  </p>
+
+  <div class="panel">
+    <h2>Cart</h2>
+    <div class="row">
+      <button id="add">Add to cart</button>
+      <span id="count">0 items</span>
+    </div>
+    <p id="status"></p>
+  </div>
+
+  <div class="panel">
+    <h2>Telemetry log</h2>
+    <p>Every dispatch is logged here client-side via <code>bus.on('*', …)</code>.</p>
+    <pre id="log">(waiting…)</pre>
+  </div>
+
+  <!-- In production: load from CDN
+       <script src="https://cdn.jsdelivr.net/npm/vapor-chamber/dist/vapor-chamber-core.iife.min.js"></script> -->
+  <!-- For local dev, point at the locally-built bundle: -->
+  <script src="../../dist/vapor-chamber-core.iife.min.js"></script>
+
+  <script>
+    // One-line bus + HTTP transport setup. csrf:true reads the meta tag
+    // automatically and attaches X-CSRF-TOKEN to every request.
+    const { bus, dispatch } = VaporChamber.connect({
+      endpoint: 'http://localhost:3001/api/vc',
+    });
+
+    // Telemetry: log every successful dispatch + failure to the page.
+    const logEl = document.getElementById('log');
+    const lines = [];
+    bus.on('*', (cmd, result) => {
+      const ts = new Date().toTimeString().slice(0, 8);
+      lines.unshift(`[${ts}] ${cmd.action} → ${result.ok ? 'ok' : 'fail: ' + result.error?.message}`);
+      logEl.textContent = lines.slice(0, 8).join('\n');
+    });
+
+    // UI: cart counter
+    const countEl = document.getElementById('count');
+    const statusEl = document.getElementById('status');
+    const btn = document.getElementById('add');
+
+    btn.addEventListener('click', async () => {
+      btn.disabled = true;
+      statusEl.textContent = '';
+
+      const result = await dispatch('cartAdd', { id: 1 }, { qty: 1 });
+
+      btn.disabled = false;
+      if (result.ok) {
+        const state = result.value;
+        countEl.textContent = `${state.count} items (total: $${state.total.toFixed(2)})`;
+        statusEl.innerHTML = '<span class="ok">Added.</span>';
+      } else {
+        statusEl.innerHTML = `<span class="err">Error: ${result.error.message}</span>`;
+      }
+    });
+  </script>
+
+</body>
+</html>

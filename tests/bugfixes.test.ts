@@ -1,7 +1,7 @@
 /**
  * Tests for all Track A bug fixes (A1–A7)
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, } from 'vitest';
 import { createTestBus } from '../src/testing';
 import { createAsyncCommandBus } from '../src/command-bus';
 import { createFormBus } from '../src/form';

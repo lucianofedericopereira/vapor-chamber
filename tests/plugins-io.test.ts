@@ -2,8 +2,8 @@
  * Tests for I/O plugins: retry, persist, sync
  */
 
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { createCommandBus, createAsyncCommandBus, resetCommandBus, setCommandBus, retry } from '../src/index';
+import { describe, it, expect, beforeEach, vi, } from 'vitest';
+import { createCommandBus, createAsyncCommandBus, resetCommandBus, retry } from '../src/index';
 import { persist, sync } from '../src/plugins';
 
 // ---------------------------------------------------------------------------
@@ -37,10 +37,10 @@ describe('persist plugin', () => {
     bus.use(p);
 
     bus.dispatch('inc', {});
-    expect(mockStorage.data['test']).toBe(JSON.stringify({ count: 1 }));
+    expect(mockStorage.data.test).toBe(JSON.stringify({ count: 1 }));
 
     bus.dispatch('inc', {});
-    expect(mockStorage.data['test']).toBe(JSON.stringify({ count: 2 }));
+    expect(mockStorage.data.test).toBe(JSON.stringify({ count: 2 }));
   });
 
   it('does not save after failed commands', () => {
@@ -51,7 +51,7 @@ describe('persist plugin', () => {
     bus.use(p);
 
     bus.dispatch('fail', {});
-    expect(mockStorage.data['test']).toBeUndefined();
+    expect(mockStorage.data.test).toBeUndefined();
   });
 
   it('load() returns null when nothing stored', () => {
@@ -60,30 +60,30 @@ describe('persist plugin', () => {
   });
 
   it('load() returns deserialized state', () => {
-    mockStorage.data['cart'] = JSON.stringify({ items: [1, 2], total: 50 });
+    mockStorage.data.cart = JSON.stringify({ items: [1, 2], total: 50 });
 
     const p = persist({ key: 'cart', getState: () => ({}), storage: mockStorage });
     expect(p.load()).toEqual({ items: [1, 2], total: 50 });
   });
 
   it('load() returns null on invalid JSON', () => {
-    mockStorage.data['bad'] = 'not valid json {{';
+    mockStorage.data.bad = 'not valid json {{';
     const p = persist({ key: 'bad', getState: () => ({}), storage: mockStorage });
     expect(p.load()).toBeNull();
   });
 
   it('clear() removes the stored entry', () => {
-    mockStorage.data['key'] = '{"x":1}';
+    mockStorage.data.key = '{"x":1}';
     const p = persist({ key: 'key', getState: () => ({}), storage: mockStorage });
     p.clear();
-    expect(mockStorage.data['key']).toBeUndefined();
+    expect(mockStorage.data.key).toBeUndefined();
   });
 
   it('save() manually persists current state', () => {
-    let val = 99;
+    const val = 99;
     const p = persist({ key: 'manual', getState: () => ({ val }), storage: mockStorage });
     p.save();
-    expect(JSON.parse(mockStorage.data['manual'])).toEqual({ val: 99 });
+    expect(JSON.parse(mockStorage.data.manual)).toEqual({ val: 99 });
   });
 
   it('filter prevents save for non-matching commands', () => {
@@ -100,10 +100,10 @@ describe('persist plugin', () => {
     bus.use(p);
 
     bus.dispatch('analyticsTrack', {});
-    expect(mockStorage.data['filtered']).toBeUndefined();
+    expect(mockStorage.data.filtered).toBeUndefined();
 
     bus.dispatch('cartAdd', {});
-    expect(mockStorage.data['filtered']).toBeDefined();
+    expect(mockStorage.data.filtered).toBeDefined();
   });
 
   it('custom serialize/deserialize', () => {
@@ -120,7 +120,7 @@ describe('persist plugin', () => {
     bus.use(p);
 
     bus.dispatch('cmd', {});
-    expect(mockStorage.data['custom']).toBe('CUSTOM:{"n":42}');
+    expect(mockStorage.data.custom).toBe('CUSTOM:{"n":42}');
 
     const loaded = p.load();
     expect(loaded).toEqual({ n: 42 });
@@ -135,7 +135,7 @@ describe('persist plugin', () => {
   });
 
   it('validate option accepts valid state', () => {
-    mockStorage.data['cart'] = JSON.stringify({ items: [1, 2], total: 50 });
+    mockStorage.data.cart = JSON.stringify({ items: [1, 2], total: 50 });
 
     const p = persist({
       key: 'cart',
@@ -149,7 +149,7 @@ describe('persist plugin', () => {
 
   it('validate option rejects invalid state and returns null', () => {
     // Stale shape: missing 'total' field after a deploy
-    mockStorage.data['cart'] = JSON.stringify({ items: [1, 2] });
+    mockStorage.data.cart = JSON.stringify({ items: [1, 2] });
 
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
@@ -169,7 +169,7 @@ describe('persist plugin', () => {
   });
 
   it('validate option rejects completely wrong shape', () => {
-    mockStorage.data['prefs'] = JSON.stringify('just a string');
+    mockStorage.data.prefs = JSON.stringify('just a string');
 
     const p = persist({
       key: 'prefs',
@@ -196,7 +196,7 @@ describe('persist plugin', () => {
   });
 
   it('validate is not called when deserialize returns null', () => {
-    mockStorage.data['bad'] = 'not valid json';
+    mockStorage.data.bad = 'not valid json';
     const validateFn = vi.fn(() => true);
 
     const p = persist({

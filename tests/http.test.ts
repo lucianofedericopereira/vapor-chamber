@@ -6,7 +6,6 @@ import {
   postCommand,
   readCsrfToken,
   invalidateCsrfCache,
-  type HttpConfig,
 } from '../src/http';
 
 // ---------------------------------------------------------------------------
@@ -74,7 +73,7 @@ describe('postCommand — basic', () => {
     await postCommand('/api/cmd', {}, { headers: { Authorization: 'Bearer tok' } });
 
     const [, init] = (globalThis.fetch as any).mock.calls[0];
-    expect(init.headers['Authorization']).toBe('Bearer tok');
+    expect(init.headers.Authorization).toBe('Bearer tok');
   });
 });
 

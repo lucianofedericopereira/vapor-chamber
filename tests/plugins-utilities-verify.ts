@@ -7,7 +7,6 @@
  */
 import {
   createCommandBus,
-  createAsyncCommandBus,
   BusError,
   matchesPattern,
   commandKey,
@@ -350,13 +349,11 @@ function cachePlugin(opts: { ttl?: number; maxSize?: number } = {}) {
 // matchesPattern (already tested in core, just verify here)
 // ═══════════════════════════════════════════════════════════════════
 
-{
-  assert(matchesPattern('*', 'anything') === true, 'wildcard *');
-  assert(matchesPattern('cart*', 'cartAdd') === true, 'prefix match');
-  assert(matchesPattern('cart*', 'userAdd') === false, 'prefix no match');
-  assert(matchesPattern('cartAdd', 'cartAdd') === true, 'exact match');
-  assert(matchesPattern('cartAdd', 'cartRemove') === false, 'exact no match');
-}
+assert(matchesPattern('*', 'anything') === true, 'wildcard *');
+assert(matchesPattern('cart*', 'cartAdd') === true, 'prefix match');
+assert(matchesPattern('cart*', 'userAdd') === false, 'prefix no match');
+assert(matchesPattern('cartAdd', 'cartAdd') === true, 'exact match');
+assert(matchesPattern('cartAdd', 'cartRemove') === false, 'exact no match');
 
 // ═══════════════════════════════════════════════════════════════════
 // Summary

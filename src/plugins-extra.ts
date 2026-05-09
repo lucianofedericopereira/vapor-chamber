@@ -6,7 +6,7 @@
  * These are optional, tree-shaken, and use only the public Plugin/AsyncPlugin types.
  */
 
-import type { Command, CommandResult, Plugin, AsyncPlugin } from './command-bus';
+import type { Command, CommandResult, Plugin, } from './command-bus';
 import { matchesPattern, commandKey, BusError } from './command-bus';
 
 // ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 /**
  * Tests for src/directives.ts — v-vc:command, v-vc:payload, v-vc:optimistic
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createDirectivePlugin } from '../src/directives';
 import { createCommandBus } from '../src/command-bus';
 import { setCommandBus, resetCommandBus } from '../src/chamber';

@@ -43,12 +43,13 @@ orders.register('refund', (cmd) => {
   console.log('order refunded', cmd.target.id, 'amount:', cmd.payload?.amount)
 })
 
-// ─── Analytics feature ────────────────────────────────────────────────────────
+// ─── Telemetry feature ────────────────────────────────────────────────────────
 
-const analytics = useCommandGroup('analytics')
+const telemetry = useCommandGroup('telemetry')
 
-analytics.register('track', (cmd) => {
-  console.log('[GA4]', cmd.target.event, cmd.target.params)
+telemetry.register('event', (cmd) => {
+  // forward to whatever metrics / telemetry sink you use
+  console.log('[telemetry]', cmd.target.name, cmd.target.params)
 })
 
 // ─── Dispatch — no prefix needed inside the group ─────────────────────────────
@@ -59,8 +60,8 @@ cart.dispatch('add', { id: 1, name: 'T-Shirt' }, { qty: 2 })
 orders.dispatch('cancel', { id: 42 })
 // → dispatches 'ordersCancel'
 
-analytics.dispatch('track', { event: 'page_view', params: { page: '/shop' } })
-// → dispatches 'analyticsTrack'
+telemetry.dispatch('event', { name: 'page_view', params: { page: '/shop' } })
+// → dispatches 'telemetryEvent'
 
 // Cross-namespace dispatch does NOT trigger handlers (isolated):
 orders.dispatch('add', { id: 99 })

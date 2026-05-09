@@ -10,26 +10,27 @@
  */
 
 import { createCommandBus, type CommandBus, type Command, type CommandResult, type Handler, type Plugin, type RegisterOptions, type Listener } from './command-bus';
+import { configureSignal, signal } from './signal';
+import type { Signal } from './signal';
 
 // ---------------------------------------------------------------------------
 // Signal abstraction
 // ---------------------------------------------------------------------------
+// The minimal signal API lives in `./signal` (no module-load side effects, so
+// transports / plugins / form can import it without dragging Vue feature
+// detection into ESM consumer bundles). This module adds the heavier behavior:
+// async dynamic import of Vue, lifecycle hook detection, Vapor APIs.
+//
+// When the async probe resolves, applyVueModule() pushes Vue's ref() into the
+// signal module via configureSignal() so SPA consumers eventually use the
+// alien-signals-backed ref for real reactivity.
 
-export type Signal<T> = { value: T };
-export type CreateSignal = <T>(initial: T) => Signal<T>;
+// Re-export the signal API so existing import paths (`from 'vapor-chamber'`)
+// keep working without source change.
+export type { Signal, CreateSignal } from './signal';
+export { configureSignal };
+export { signal };
 
-/**
- * Signal implementation with Vue auto-detection.
- *
- * Priority:
- * 1. User-configured signal via configureSignal() — highest priority
- * 2. Vue ref() from import('vue') — works in VDOM, Vapor, and mixed trees
- * 3. Plain getter/setter fallback — Node/test environments
- *
- * Under Vue 3.6+ (alien-signals), ref() is backed by fine-grained signals
- * internally. No separate signal API is needed — ref() IS the signal.
- */
-let _vueRef: ((initial: any) => any) | null = null;
 let _vueOnUnmounted: ((fn: () => void) => void) | null = null;
 let _vueOnScopeDispose: ((fn: () => void) => void) | null = null;
 let _vueGetCurrentInstance: (() => any) | null = null;
@@ -52,7 +53,9 @@ let _probePromise: Promise<void> | null = null;
 
 function applyVueModule(vue: any): void {
   if (vue && typeof vue.ref === 'function') {
-    _vueRef = vue.ref;
+    // Push Vue's ref() into the signal module so signal() returns real
+    // alien-signals-backed reactives going forward.
+    configureSignal(vue.ref);
   }
 
   // Prefer onScopeDispose (Vue 3.5+) — works in effectScope, VDOM, and Vapor
@@ -104,7 +107,8 @@ function probeVue(): void {
   //    This gives immediate availability for signal() calls at module init time.
   if (typeof globalThis !== 'undefined' && (globalThis as any).__VUE__) {
     try {
-      // If Vue is already loaded (common in Blade/MPA setups), try synchronous require
+      // If Vue is already loaded as a global (common in MPA / server-rendered
+      // page setups where Vue ships via a `<script>` tag), use it synchronously.
       const vue = (globalThis as any).__VUE__;
       if (typeof vue.ref === 'function') {
         applyVueModule(vue);
@@ -143,41 +147,9 @@ export async function waitForVueDetection(): Promise<void> {
   if (_probePromise) await _probePromise;
 }
 
-const fallbackSignal: CreateSignal = <T>(initial: T): Signal<T> => {
-  probeVue();
-
-  if (_vueRef) {
-    // Use Vue ref() for real reactivity — in 3.6+ this is alien-signals backed
-    return _vueRef(initial) as Signal<T>;
-  }
-
-  // Plain getter/setter — works in Node/test environments
-  let _value = initial;
-  return {
-    get value() { return _value; },
-    set value(v: T) { _value = v; }
-  };
-};
-
-let _signalFn: CreateSignal = fallbackSignal;
-
-/**
- * Configure the signal factory used by vapor-chamber composables.
- * Call this once at app setup when Vue Vapor's signal API is available.
- *
- * In Vue 3.6+, ref() is already backed by alien-signals, so this is only
- * needed if you want to use a completely custom signal implementation.
- *
- * @example
- * import { ref } from 'vue';
- * import { configureSignal } from 'vapor-chamber';
- * configureSignal(ref); // explicit — usually auto-detected
- */
-export function configureSignal(fn: CreateSignal): void {
-  _signalFn = fn;
-}
-
-export const signal: CreateSignal = <T>(initial: T) => _signalFn(initial);
+// Kick off the async probe on first signal() call from this module's
+// consumers, so SPA tree code paths get full Vue auto-detection. Composables
+// below use signal() and call probeVue() explicitly via tryAutoCleanup.
 
 // ---------------------------------------------------------------------------
 // Vue 3.6+ Vapor detection
@@ -270,7 +242,9 @@ export function tryAutoCleanup(disposeFn: () => void): void {
 
   // If Vue is detected but neither scope nor instance is available,
   // the caller is likely outside setup() — warn in dev mode.
-  if (_vueRef && typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production') {
+  // (Use `_vueOnScopeDispose` as the "Vue detected" probe — it's set in the
+  //  same applyVueModule() pass that used to set the now-relocated _vueRef.)
+  if (_vueOnScopeDispose && typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production') {
     console.warn(
       '[vapor-chamber] tryAutoCleanup: no Vue scope or component instance found. ' +
       'Call dispose() manually or use this composable inside setup() / effectScope().'
@@ -342,6 +316,174 @@ export function useCommand() {
   }
 
   return { dispatch, loading, lastError };
+}
+
+// ---------------------------------------------------------------------------
+// useSharedCommandState
+// ---------------------------------------------------------------------------
+
+/**
+ * Shared state attached to one bus. The ref-count tracks how many
+ * `useSharedCommandState()` callers are still subscribed; when it hits zero
+ * we drop the entry so the WeakMap can collect it (the bus itself is also
+ * weakly held).
+ */
+type SharedCommandStateEntry = {
+  inFlight: Signal<number>;
+  isAnyLoading: Signal<boolean>;
+  lastError: Signal<Error | null>;
+  errors: Signal<Error[]>;
+  errorCount: Signal<number>;
+  refCount: number;
+  errorCap: number;
+};
+
+const _sharedStates = new WeakMap<CommandBus, SharedCommandStateEntry>();
+
+export type UseSharedCommandStateOptions = {
+  /**
+   * How many recent errors to retain in `errors`. The list is kept
+   * newest-last; older entries drop off. Default: 10.
+   */
+  errorCap?: number;
+  /**
+   * Bus to attach to. Defaults to the shared instance from `getCommandBus()`,
+   * which matches the single-bus pattern most apps use. Pass an explicit bus
+   * to scope shared state to a feature group / island.
+   */
+  bus?: CommandBus;
+};
+
+/**
+ * useSharedCommandState — one set of reactive signals shared across every
+ * caller, instead of two signals (`loading`, `lastError`) per call.
+ *
+ * Designed for component-heavy pages where many components need to react to
+ * "is *anything* in flight?" or "what was the last error?". Replaces
+ * `N × useCommand()` allocations with a single shared state per bus.
+ *
+ * Memory math: 50 components × 2 signals each = 100 signal nodes today.
+ * With shared state: ~5 signal nodes total + a counter, regardless of
+ * subscriber count.
+ *
+ * @example
+ * // Components using this share isAnyLoading, errors, etc.
+ * const { dispatch, isAnyLoading, lastError } = useSharedCommandState();
+ * await dispatch('cartAdd', product);
+ *
+ * @example
+ * // Disable an entire toolbar while any command is in flight.
+ * const { isAnyLoading } = useSharedCommandState();
+ * <Button :disabled="isAnyLoading.value">Save</Button>
+ *
+ * Auto-cleanup on Vue scope/component disposal via tryAutoCleanup.
+ */
+export function useSharedCommandState(options: UseSharedCommandStateOptions = {}) {
+  const bus = options.bus ?? getCommandBus();
+  const errorCap = options.errorCap ?? 10;
+
+  let state = _sharedStates.get(bus);
+  if (!state) {
+    state = {
+      inFlight: signal(0),
+      isAnyLoading: signal(false),
+      lastError: signal<Error | null>(null),
+      errors: signal<Error[]>([]),
+      errorCount: signal(0),
+      refCount: 0,
+      errorCap,
+    };
+    _sharedStates.set(bus, state);
+  } else if (errorCap < state.errorCap) {
+    // Tighten the cap if the new caller wants a smaller buffer; never grow
+    // it above another caller's request (avoid surprise memory growth).
+    state.errorCap = errorCap;
+  }
+  state.refCount++;
+
+  function recordError(err: Error): void {
+    state!.lastError.value = err;
+    const next = state!.errors.value.slice();
+    next.push(err);
+    while (next.length > state!.errorCap) next.shift();
+    state!.errors.value = next;
+    state!.errorCount.value = next.length;
+  }
+
+  function decrement(): void {
+    const n = Math.max(0, state!.inFlight.value - 1);
+    state!.inFlight.value = n;
+    state!.isAnyLoading.value = n > 0;
+  }
+
+  function increment(): void {
+    state!.inFlight.value++;
+    state!.isAnyLoading.value = true;
+  }
+
+  function dispatch(
+    action: string,
+    target: any,
+    payload?: any,
+    opts?: { signal?: AbortSignal },
+  ): CommandResult | Promise<CommandResult> {
+    increment();
+    let result: any;
+    try {
+      result = bus.dispatch(action, target, payload, opts);
+    } catch (e) {
+      const error = e as Error;
+      recordError(error);
+      decrement();
+      return { ok: false, error, value: undefined };
+    }
+
+    if (result && typeof result.then === 'function') {
+      return (result as Promise<CommandResult>).then(
+        (r) => { if (!r.ok && r.error) recordError(r.error); decrement(); return r; },
+        (e: Error) => { recordError(e); decrement(); return { ok: false, error: e, value: undefined }; },
+      );
+    }
+
+    if (!result.ok && result.error) recordError(result.error);
+    decrement();
+    return result;
+  }
+
+  /** Wipe accumulated errors. Does not affect in-flight counter. */
+  function clear(): void {
+    state!.errors.value = [];
+    state!.errorCount.value = 0;
+    state!.lastError.value = null;
+  }
+
+  function dispose(): void {
+    state!.refCount--;
+    if (state!.refCount <= 0) {
+      _sharedStates.delete(bus);
+    }
+  }
+
+  tryAutoCleanup(dispose);
+
+  return {
+    dispatch,
+    /** Number of dispatches currently in flight across all subscribers. */
+    inFlight: state.inFlight,
+    /** True when `inFlight > 0`. Bind to button `disabled` etc. */
+    isAnyLoading: state.isAnyLoading,
+    /** Most recent error (across all subscribers). */
+    lastError: state.lastError,
+    /** Ring buffer of recent errors, newest last, capped at `errorCap`. */
+    errors: state.errors,
+    /** Current size of the `errors` buffer. */
+    errorCount: state.errorCount,
+    /** Wipe accumulated errors. */
+    clear,
+    /** Manually unhook. Most callers don't need this — `tryAutoCleanup`
+     *  hooks Vue's scope/unmount lifecycle. */
+    dispose,
+  };
 }
 
 // ---------------------------------------------------------------------------

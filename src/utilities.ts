@@ -6,8 +6,7 @@
  * These use only the public BaseBus interface. They are optional and tree-shaken.
  */
 
-import type { BaseBus, Command, CommandResult, Handler, RegisterOptions, Listener } from './command-bus';
-import { matchesPattern } from './command-bus';
+import type { BaseBus, Command, CommandResult, Handler, RegisterOptions, } from './command-bus';
 
 // ---------------------------------------------------------------------------
 // createChamber — declarative namespace grouping

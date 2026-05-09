@@ -1,8 +1,12 @@
 /**
- * vapor-chamber - CDN / IIFE entry point
+ * vapor-chamber — IIFE variant: FULL
  *
- * Exposes the full vapor-chamber API as `window.VaporChamber`.
- * Designed for zero-build environments: drop a script tag into any HTML page.
+ * Exposes the full vapor-chamber API as `window.VaporChamber`. For sites that
+ * want every feature in a single `<script>` tag drop-in. For smaller bundles,
+ * see `vapor-chamber-core.iife.js` and `vapor-chamber-elements.iife.js`.
+ *
+ * Includes: command bus, transports, all plugins, Vapor custom elements,
+ * Vapor sync + async (Suspense-aware) composables.
  *
  * Usage:
  * <script src="https://cdn.jsdelivr.net/npm/vapor-chamber/dist/vapor-chamber.iife.js"></script>
@@ -35,7 +39,19 @@ import {
   createHttpBridge,
   createWsBridge,
   createSseBridge,
+  type HttpBridgeOptions,
 } from './transports';
+import {
+  defineVaporCustomElement,
+  defineVaporComponent,
+  defineVaporAsyncComponent,
+  defineVaporCommand,
+  useVaporCommand,
+  useVaporAsyncCommand,
+  createVaporChamberApp,
+  getVaporInteropPlugin,
+} from './chamber-vapor';
+import { useSharedCommandState } from './chamber';
 import type { AsyncPlugin, Plugin } from './command-bus';
 
 // ---------------------------------------------------------------------------
@@ -117,6 +133,57 @@ function mount(selector: string, options: MountOptions = {}): {
   return { ...app, state, el };
 }
 
+/**
+ * connect — one-line setup mirroring the CORE variant's API. Equivalent to
+ * `createApp({ transport: createHttpBridge({ csrf: true, ...opts }) })`.
+ * Available in every variant so the same call site works regardless of which
+ * IIFE bundle is loaded.
+ */
+function connect(options: HttpBridgeOptions & { plugins?: Plugin[]; onMissing?: CommandBusOptions['onMissing'] }) {
+  const { plugins, onMissing, ...httpOptions } = options;
+  return createApp({
+    transport: createHttpBridge({ csrf: true, ...httpOptions }),
+    plugins,
+    onMissing,
+  });
+}
+
+/**
+ * defineWidget — one-line custom-element registration mirroring the ELEMENTS
+ * variant's API. Returns `false` if Vue 3.6+ Vapor is not detected.
+ */
+function defineWidget(tagName: string, options: any, extraOptions?: any): boolean {
+  const El = extraOptions !== undefined
+    ? defineVaporCustomElement(options, extraOptions)
+    : defineVaporCustomElement(options);
+  if (!El) return false;
+  if (typeof customElements === 'undefined') return false;
+  if (customElements.get(tagName)) return true;
+  customElements.define(tagName, El);
+  return true;
+}
+
+/**
+ * emitDOMEvent — bridge Vue's component emit() to a real DOM CustomEvent so
+ * host pages can `addEventListener` on the widget tag. See ELEMENTS variant
+ * for the full doc + attribution.
+ */
+function emitDOMEvent(
+  el: Element,
+  eventName: string,
+  detail?: any,
+  options: { bubbles?: boolean; composed?: boolean; cancelable?: boolean } = {},
+): boolean {
+  if (typeof CustomEvent !== 'function' || !el) return true;
+  const event = new CustomEvent(eventName, {
+    detail,
+    bubbles: options.bubbles ?? true,
+    composed: options.composed ?? true,
+    cancelable: options.cancelable ?? false,
+  });
+  return el.dispatchEvent(event);
+}
+
 // ---------------------------------------------------------------------------
 // Global VaporChamber namespace
 // ---------------------------------------------------------------------------
@@ -128,7 +195,10 @@ const VaporChamber = {
 
   // --- Convenience ---
   createApp,
+  connect,
   mount,
+  defineWidget,
+  emitDOMEvent,
 
   // --- Transport shortcuts ---
   /** HTTP fetch transport. Alias for createHttpBridge(). */
@@ -150,8 +220,16 @@ const VaporChamber = {
   persist,
   sync,
 
-  // --- Version ---
-  version: '0.4.2',
+  // --- Vapor (Vue 3.6+) ---
+  defineVaporCustomElement,
+  defineVaporComponent,
+  defineVaporAsyncComponent,
+  defineVaporCommand,
+  useVaporCommand,
+  useVaporAsyncCommand,
+  useSharedCommandState,
+  createVaporChamberApp,
+  getVaporInteropPlugin,
 } as const;
 
 // Assign to globalThis so it's accessible as window.VaporChamber in browsers

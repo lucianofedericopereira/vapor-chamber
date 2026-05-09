@@ -11,6 +11,16 @@
  * Without this plugin, each HMR update re-creates the bus from scratch,
  * clearing all registered handlers and registered state.
  *
+ * Tested against:
+ *   • Vite ≥ 7.0.0 (programmatic build API + library mode)
+ *   • @vitejs/plugin-vue ≥ 5.0.0 (Vue 3.6 Vapor SFC support — earlier
+ *     plugin-vue versions only handle 3.5 VDOM and silently skip vapor blocks)
+ *   • Vue ≥ 3.5.0 (composables) or ≥ 3.6.0-beta.11 (full Vapor surface)
+ *
+ * If you're on plugin-vue v4 the HMR plugin still works for VDOM SFCs but
+ * you'll miss Vapor support entirely — Vapor `<script setup vapor>` blocks
+ * fall back to the VDOM compiler. Upgrade plugin-vue alongside Vue 3.6.
+ *
  * @example
  * // vite.config.ts
  * import { defineConfig } from 'vite'

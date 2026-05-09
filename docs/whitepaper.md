@@ -469,6 +469,15 @@ As of beta.8, Vapor mode is **feature-complete for all stable APIs**: `<script s
 `createVaporApp()`, `vaporInteropPlugin`, `<Teleport>`, `<Suspense>`, `<KeepAlive>`, and
 `defineAsyncComponent` all work. The `vapor` attribute is the opt-in switch per SFC.
 
+**3.6.0-beta.11 perf addendum (May 2026):** Vue introduced tree-shake axes that
+remove the slot-fallback / teleport / transition / keep-alive / suspense paths
+from bundles that don't reference them, plus a static-template hydration fast
+path and dynamic-props stability optimizations. Vapor Chamber's wrappers are
+pass-through, so all of these gains flow into consumer bundles unmodified. The
+library mirrors these axes in its own IIFE distribution: three sized variants
+(`core` / `elements` / `full`) so script-tag consumers can pick the smallest
+bundle that covers their use case. See §11.6.
+
 Vapor Chamber auto-detects `ref()` at module load. No configuration needed — `signal()` IS a
 Vue alien-signal in 3.6+.
 
@@ -562,8 +571,9 @@ register('cartAdd', (cmd) => addToCart(cmd.target))
 on('cart*', (cmd, result) => console.log('Cart event:', cmd.action))
 
 // Zero-overhead hot path — no signals, no alien-signals graph nodes
-const { dispatch: track } = defineVaporCommand('analyticsScroll', (cmd) => {
-  gtag('event', 'scroll', { depth: cmd.target.depth })
+const { dispatch: track } = defineVaporCommand('scrollSample', (cmd) => {
+  // forward to whatever metrics / telemetry sink you use
+  sendMetric('scroll', { depth: cmd.target.depth })
 })
 
 // Reducer-based reactive state
@@ -696,24 +706,54 @@ invoke: {
 }
 ```
 
-### 11.5 With Laravel Reverb / Echo
+### 11.5 With WebSocket-based realtime (Laravel Reverb / Echo, Centrifugo, custom servers)
 
-The generic WS bridge works with any WebSocket server. A `createEchoBridge` adapter (v0.8.0)
-speaks the Laravel Echo protocol (channels, private channels, presence) natively. This is the
-correct transport for Laravel 13+ real-time features.
+The generic `createWsBridge` works with any WebSocket server — it forwards
+commands as JSON envelopes and pairs request/response by id. For
+framework-specific protocols (Laravel Echo channels / private / presence,
+Centrifugo subscriptions, etc.) the user-side handler can wrap the generic
+bridge or implement protocol-specific message parsing inside an `onReceive`
+callback.
+
+A protocol-aware `createEchoBridge` adapter for Laravel Reverb / Echo (native
+channels, private channels, presence) is on the roadmap — not yet shipped.
+Track [ROADMAP.md](../ROADMAP.md) for the version it lands in.
 
 ### 11.6 Blade + CDN (zero build)
 
+Three IIFE variants ship under `dist/`, split by **audience / deployment shape**:
+
+| Variant   | Audience                                                  | Brotli |
+|-----------|-----------------------------------------------------------|--------|
+| core      | Sprinkled JS on server-rendered pages — Blade / Rails / Django | 6.1 KB |
+| elements  | Embeddable widgets via custom elements                    | 6.4 KB |
+| full      | SPAs that grew big (realtime + undo/redo + persistence)   | 8.7 KB |
+
+The Blade example below uses **core** with the `connect()` one-liner — the
+audience-specific helper that wires HTTP + CSRF in a single call:
+
 ```html
-<script src="https://cdn.jsdelivr.net/npm/vapor-chamber/dist/vapor-chamber.iife.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vapor-chamber/dist/vapor-chamber-core.iife.min.js"></script>
 <script>
-const { bus, dispatch } = VaporChamber.createApp({
-  transport: VaporChamber.http({ endpoint: '/api/vc', csrf: true }),
-  plugins: [VaporChamber.logger()],
-})
-bus.use(VaporChamber.persist({ key: 'vc:cart', getState: () => state }))
+const { dispatch } = VaporChamber.connect({ endpoint: '/api/vc' });
+
+document.querySelector('#add-to-cart').addEventListener('click',
+  () => dispatch('cartAdd', { id: 42 }));
 </script>
 ```
+
+`connect()` is equivalent to
+`createApp({ transport: createHttpBridge({ csrf: true, ...opts }) })` but
+shorter for the common case.
+
+Sites that ship `<vc-widget>` custom elements should use
+`vapor-chamber-elements.iife.min.js` and the `defineWidget(tag, options)`
+helper. Sites needing realtime (WebSocket / SSE), persistence, or the full
+Vapor composables surface use the `full` bundle.
+
+Variant contents are not stable across major versions before v2.0 — see
+ROADMAP.md. ESM consumers (the `vapor-chamber` main entry) always get the
+full surface.
 
 **Backend (Laravel — no Livewire dependency):**
 ```php
@@ -853,8 +893,9 @@ For fire-and-forget patterns, switch to `defineVaporCommand` to avoid unnecessar
 ```vue
 <script setup vapor>
 import { defineVaporCommand } from 'vapor-chamber'
-const { dispatch: trackScroll } = defineVaporCommand('analyticsScroll', (cmd) => {
-  gtag('event', 'scroll', { depth: cmd.target.depth })
+const { dispatch: trackScroll } = defineVaporCommand('scrollSample', (cmd) => {
+  // forward to whatever metrics / telemetry sink you use
+  sendMetric('scroll', { depth: cmd.target.depth })
 })
 </script>
 ```

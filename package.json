@@ -1,6 +1,6 @@
 {
   "name": "vapor-chamber",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Lightweight command bus for Vue Vapor - plugins, hooks, undo/redo, Vue 3.6 Vapor aligned",
   "type": "module",
   "main": "./dist/index.js",
@@ -31,25 +31,56 @@
       "import": "./dist/ssr.js",
       "types": "./dist/ssr.d.ts"
     },
+    "./fast-lane": {
+      "import": "./dist/fast-lane.js",
+      "types": "./dist/fast-lane.d.ts"
+    },
+    "./observable": {
+      "import": "./dist/observable.js",
+      "types": "./dist/observable.d.ts"
+    },
+    "./standard-schema": {
+      "import": "./dist/plugins-schema.js",
+      "types": "./dist/plugins-schema.d.ts"
+    },
+    "./alien-signals": {
+      "import": "./dist/alien-signals.js",
+      "types": "./dist/alien-signals.d.ts"
+    },
     "./iife": {
       "import": "./dist/iife.js",
       "types": "./dist/iife.d.ts"
+    },
+    "./iife-core": {
+      "import": "./dist/iife-core.js",
+      "types": "./dist/iife-core.d.ts"
+    },
+    "./iife-elements": {
+      "import": "./dist/iife-elements.js",
+      "types": "./dist/iife-elements.d.ts"
     }
   },
   "files": [
     "dist",
-    "scripts"
+    "scripts",
+    "ROADMAP.md"
   ],
   "sideEffects": false,
   "scripts": {
-    "build": "tsc && node scripts/build-iife.mjs",
-    "build:esm": "tsc",
-    "build:iife": "node scripts/build-iife.mjs",
+    "build": "tsc && node scripts/build.mjs",
+    "build:types": "tsc",
+    "build:js": "node scripts/build.mjs",
     "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "lint": "biome check --write src tests scripts",
+    "lint:check": "biome check src tests scripts",
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "prepublishOnly": "npm run build && npm run test:run"
+    "size:check": "node scripts/check-size.mjs",
+    "docs": "typedoc",
+    "docs:watch": "typedoc --watch",
+    "prepublishOnly": "npm run typecheck && npm run lint:check && npm run test:run && npm run build && npm run size:check"
   },
   "keywords": [
     "vue",
@@ -78,8 +109,10 @@
   },
   "homepage": "https://github.com/lucianofedericopereira/vapor-chamber#readme",
   "peerDependencies": {
+    "@vitejs/plugin-vue": ">=5.0.0",
     "@vue/devtools-api": ">=6.0.0",
-    "vue": ">=3.5.0 || >=3.6.0-beta.10"
+    "vite": ">=7.0.0",
+    "vue": ">=3.5.0 || >=3.6.0-beta.11"
   },
   "peerDependenciesMeta": {
     "vue": {
@@ -87,12 +120,28 @@
     },
     "@vue/devtools-api": {
       "optional": true
+    },
+    "@vitejs/plugin-vue": {
+      "optional": true
+    },
+    "vite": {
+      "optional": true
     }
   },
   "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
     "@types/node": "^25.5.0",
     "@vitest/coverage-v8": "^4.0.18",
+    "alien-signals": "^3.1.2",
+    "eventemitter3": "^5.0.4",
+    "mitt": "^3.0.1",
+    "nanoevents": "^9.1.0",
+    "rxjs": "^7.8.2",
+    "tiny-emitter": "^2.1.0",
+    "typedoc": "^0.28.19",
+    "typedoc-plugin-markdown": "^4.11.0",
     "typescript": "^5.9.3",
+    "vite": "^7.0.0",
     "vitest": "^4.0.18"
   },
   "engines": {

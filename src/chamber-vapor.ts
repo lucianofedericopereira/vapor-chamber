@@ -20,7 +20,7 @@ import {
   getDefineVaporComponentFn,
   getDefineVaporAsyncComponentFn,
 } from './chamber';
-import type { Handler, AsyncHandler, RegisterOptions, CommandResult, Command } from './command-bus';
+import type { Handler, RegisterOptions, CommandResult, Command } from './command-bus';
 
 /**
  * Create a Vapor app instance with vapor-chamber ready.
@@ -78,7 +78,7 @@ export function getVaporInteropPlugin(): any | null {
  *   props: { label: String },
  *   setup(props) { return () => h('span', props.label); }
  * });
- * if (MyEl) customElements.define('my-el', MyEl);
+ * if (MyEl) customElements.define('vc-greeting', MyEl);
  */
 export function defineVaporCustomElement(options: any, extraOptions?: any): any | null {
   const fn = getDefineVaporCustomElementFn();
@@ -94,10 +94,20 @@ export function defineVaporCustomElement(options: any, extraOptions?: any): any 
  *
  * Returns null if Vue 3.6.0-beta.10+ is not detected.
  *
+ * Vue 3.6.0-beta.11 alignment:
+ *   • Generics + runtime props now infer correctly (Vue PR #14770) — pass-through
+ *     wrappers like this one preserve the generic flow:
+ *       defineVaporComponent<{ label: string }>({ props: { label: String }, ... })
+ *   • Declared `emits` listeners are excluded from `$attrs` — if a component
+ *     declares `emits: ['select']`, an `onSelect` handler bound by the parent
+ *     is routed to the emit channel and will NOT leak into `attrs`. This wrapper
+ *     forwards `options` unchanged, so the behavior flows through unmodified.
+ *
  * @example
  * import { defineVaporComponent } from 'vapor-chamber';
  * const Comp = defineVaporComponent({
  *   props: { count: Number },
+ *   emits: ['change'],
  *   setup(props) { return () => h('div', `Count: ${props.count}`); }
  * });
  */
@@ -134,15 +144,16 @@ export function defineVaporAsyncComponent(loader: any): any | null {
  * defineVaporCommand — zero-overhead command for hot paths in Vapor mode.
  *
  * Unlike useCommand(), this skips reactive loading/error signal creation.
- * Ideal for high-frequency dispatches: scroll tracking, mousemove, GA4 events,
- * debounced search, and any fire-and-forget pattern where you don't need
- * reactive loading/error state.
+ * Ideal for high-frequency, fire-and-forget patterns where reactive
+ * loading/error state isn't needed: scroll-position tracking, mousemove
+ * sampling, telemetry / metrics events, debounced search, autosave.
  *
  * @example
- * const { dispatch } = defineVaporCommand('analyticsTrack', (cmd) => {
- *   gtag('event', cmd.target.event, cmd.target.params);
+ * const { dispatch } = defineVaporCommand('telemetryEvent', (cmd) => {
+ *   // forward to whatever metrics / analytics SDK you use
+ *   sendMetric(cmd.target.name, cmd.target.params);
  * });
- * dispatch({ event: 'page_view', params: { page: '/shop' } });
+ * dispatch({ name: 'page_view', params: { page: '/landing' } });
  */
 export function defineVaporCommand(
   action: string,

@@ -8,7 +8,7 @@
  *   - synthesize(): natural language → dispatch via LLM tool use
  */
 
-import { createCommandBus, createAsyncCommandBus, BusError } from './command-bus';
+import { createCommandBus, createAsyncCommandBus, } from './command-bus';
 import type { CommandBus, AsyncCommandBus, Plugin, CommandResult, CommandBusOptions, CommandMap, BusErrorCode, BusSeverity, BusEmitter } from './command-bus';
 
 // ---------------------------------------------------------------------------
@@ -126,6 +126,7 @@ function validateFields(fields: FieldMap, value: Record<string, any>): string[] 
     const v = value[key];
     if (v === undefined) { errors.push(`${key}: missing`); continue; }
     if (expected === 'array' && !Array.isArray(v)) errors.push(`${key}: expected array`);
+    // biome-ignore lint/suspicious/useValidTypeof: `expected` is a runtime-validated typeof string ('string'|'number'|'boolean')
     else if (expected !== 'array' && expected !== 'object' && typeof v !== expected) {
       errors.push(`${key}: expected ${expected}, got ${typeof v}`);
     }

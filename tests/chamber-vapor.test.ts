@@ -243,6 +243,32 @@ describe('defineVaporComponent', () => {
   it('returns null when Vue 3.6.0-beta.10 is not available', () => {
     expect(defineVaporComponent({})).toBeNull();
   });
+
+  // Vue 3.6.0-beta.11 alignment (#14770 + emit/$attrs split):
+  // wrapper must forward options unchanged so generic inference and the
+  // emits-vs-attrs separation flow through to Vue without modification.
+  it('passes options through unchanged so beta.11 attrs/emits + generics flow through', async () => {
+    const chamber = await import('../src/chamber');
+    const fakeDefine = vi.fn((options: any) => ({ __defined: true, options }));
+    const spy = vi.spyOn(chamber, 'getDefineVaporComponentFn').mockReturnValue(fakeDefine);
+    try {
+      const options = {
+        props: { label: String },
+        emits: ['select'],
+        setup: () => () => null,
+      };
+      const result = defineVaporComponent(options);
+      expect(spy).toHaveBeenCalled();
+      expect(fakeDefine).toHaveBeenCalledTimes(1);
+      // Critical: the wrapper must NOT mutate or strip emits — beta.11 relies on
+      // the declared emits list to keep onXxx listeners out of $attrs.
+      expect(fakeDefine.mock.calls[0]![0]).toBe(options);
+      expect(fakeDefine.mock.calls[0]![0].emits).toEqual(['select']);
+      expect((result as any).__defined).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
 });
 
 describe('defineVaporAsyncComponent', () => {

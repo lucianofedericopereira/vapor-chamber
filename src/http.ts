@@ -29,9 +29,12 @@ export type HttpConfig = {
   /** Read CSRF token from DOM and attach as header. Default: false */
   csrf?: boolean;
   /**
-   * URL to fetch when a 419 CSRF expiry occurs, to obtain a fresh token.
-   * Default: '/sanctum/csrf-cookie' (Laravel Sanctum SPA standard).
-   * Set to empty string '' to disable the refresh fetch (re-read DOM only).
+   * URL to fetch when a CSRF-expiry response (HTTP 419) occurs, to obtain a
+   * fresh token. The default targets the Laravel Sanctum SPA convention
+   * because it's the most common backend issuing 419 — override for other
+   * frameworks, or set to '' to disable the auto-refresh entirely (the lib
+   * will then only re-read the token from the DOM on retry).
+   * Default: '/sanctum/csrf-cookie'.
    */
   csrfCookieUrl?: string;
   /** Additional headers merged into every request */
@@ -93,20 +96,23 @@ function readCsrfFromDom(): CsrfResult | null {
     ? (sel: string) => document.querySelector(sel)
     : null;
 
-  // 1. Meta tag — Laravel Blade: <meta name="csrf-token" content="...">
+  // 1. Meta tag — `<meta name="csrf-token" content="...">`. Common in
+  //    server-rendered frameworks (Laravel Blade, Rails, others).
   if (q) {
     const meta = q('meta[name="csrf-token"]') as HTMLMetaElement | null;
     if (meta?.content) return { token: meta.content, headerName: 'X-CSRF-TOKEN' };
   }
 
-  // 2. Cookie — read cookie name from <meta name="xsrf-cookie"> or default to XSRF-TOKEN
+  // 2. Cookie — read cookie name from `<meta name="xsrf-cookie">` or default
+  //    to `XSRF-TOKEN` (the de-facto SPA convention shared across frameworks).
   const cookieNameMeta = q?.('meta[name="xsrf-cookie"]') as HTMLMetaElement | null;
   const cookieName = cookieNameMeta?.content || 'XSRF-TOKEN';
   const escaped = cookieName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const cookieMatch = document.cookie?.match(new RegExp(`(?:^|;\\s*)${escaped}=([^;]+)`));
   if (cookieMatch) return { token: decodeURIComponent(cookieMatch[1]), headerName: 'X-XSRF-TOKEN' };
 
-  // 3. Hidden input — @csrf Blade directive: <input name="_token">
+  // 3. Hidden input — `<input name="_token">`. Emitted by Laravel's `@csrf`
+  //    Blade directive, also appears in Rails forms and other stacks.
   if (q) {
     const input = q('input[name="_token"]') as HTMLInputElement | null;
     if (input?.value) return { token: input.value, headerName: 'X-CSRF-TOKEN' };
@@ -139,8 +145,10 @@ async function refreshCsrfOnce(cookieUrl: string): Promise<void> {
   _csrfRefreshing = true;
   _csrfRefreshResult = false;
   try {
-    // Fetch the CSRF cookie endpoint so Laravel issues a fresh XSRF-TOKEN cookie.
-    // Only fetch if cookieUrl is a non-empty string
+    // Fetch the CSRF cookie endpoint so the backend issues a fresh
+    // XSRF-TOKEN cookie (Laravel Sanctum's `/sanctum/csrf-cookie` is the
+    // most common shape; other frameworks expose equivalent endpoints).
+    // Only fetch if cookieUrl is a non-empty string.
     if (typeof cookieUrl === 'string' && cookieUrl.length > 0) {
       try { await fetch(cookieUrl, { method: 'GET', credentials: 'same-origin' }); } catch { /* ignore network errors */ }
     }

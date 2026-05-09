@@ -1,0 +1,49 @@
+{
+  "$schema": "https://typedoc.org/schema.json",
+  "entryPoints": [
+    "src/index.ts",
+    "src/transports.ts",
+    "src/directives.ts",
+    "src/transitions.ts",
+    "src/ssr.ts",
+    "src/vite-hmr.ts"
+  ],
+  "out": "docs/api",
+  "name": "vapor-chamber API reference",
+  "readme": "README.md",
+  "tsconfig": "tsconfig.json",
+  "excludePrivate": true,
+  "excludeInternal": true,
+  "excludeExternals": true,
+  "includeVersion": true,
+  "githubPages": false,
+  "navigationLinks": {
+    "Repo": "https://github.com/lucianofedericopereira/vapor-chamber",
+    "Performance": "../performance.md",
+    "Roadmap": "../../ROADMAP.md",
+    "Laravel integration": "../integrations/laravel.md"
+  },
+  "sort": ["source-order"],
+  "categorizeByGroup": true,
+  "groupOrder": [
+    "Functions",
+    "Classes",
+    "Interfaces",
+    "Type Aliases",
+    "Variables",
+    "*"
+  ],
+  "highlightLanguages": [
+    "typescript",
+    "javascript",
+    "json",
+    "html",
+    "bash",
+    "shell",
+    "css",
+    "vue",
+    "diff",
+    "yaml",
+    "php"
+  ]
+}

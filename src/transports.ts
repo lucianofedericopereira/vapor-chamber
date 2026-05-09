@@ -8,11 +8,11 @@
  */
 
 import type { Command, CommandResult, AsyncPlugin, BaseBus } from './command-bus';
-import { matchesPattern } from './command-bus';
+import { matchesPattern, BusError } from './command-bus';
 import { postCommand } from './http';
 import type { HttpClient } from './http';
-import { signal } from './chamber';
-import type { Signal } from './chamber';
+import { signal } from './signal';
+import type { Signal } from './signal';
 
 // ---------------------------------------------------------------------------
 // Shared protocol types
@@ -40,13 +40,24 @@ export type HttpBridgeOptions = {
   /** Backend endpoint URL (e.g. '/api/vc') */
   endpoint: string;
   /**
-   * Read CSRF token from DOM (meta tag, cookie, hidden input) and attach.
-   * Supports Laravel Blade and SPA setups. Handles 419 auto-refresh. Default: false
+   * CSRF token strategy:
+   *   • `false` (default) — don't attach any CSRF token
+   *   • `true` — read from DOM (meta tag, cookie, hidden input) and attach
+   *     as the appropriate header. Works with any server-rendered framework
+   *     that exposes a token via one of those three sources — Laravel Blade,
+   *     Rails, Django, .NET MVC, custom stacks. Auto-refreshes on HTTP 419.
+   *   • `'inertia'` — defer token management to Inertia's Axios instance.
+   *     The bridge will skip its own CSRF reading and rely on the consumer's
+   *     `@inertiajs/inertia` axios setup to inject the token. Use this when
+   *     vapor-chamber dispatches share an HTTP layer with Inertia routes.
    */
-  csrf?: boolean;
+  csrf?: boolean | 'inertia';
   /**
-   * URL to fetch on 419 CSRF expiry to obtain a fresh token.
-   * Default: '/sanctum/csrf-cookie'. Set to '' to disable.
+   * URL to fetch on a CSRF-expiry response (HTTP 419) to obtain a fresh
+   * token. The default targets the Laravel Sanctum SPA convention because
+   * it's the most common 419-issuing backend; override for other frameworks
+   * or set to '' to disable the refresh fetch.
+   * Default: '/sanctum/csrf-cookie'.
    */
   csrfCookieUrl?: string;
   /** Additional headers merged into every request */
@@ -68,6 +79,17 @@ export type HttpBridgeOptions = {
    * A `session-expired` CustomEvent is also dispatched on `window`.
    */
   onSessionExpired?: (status: number) => void;
+  /**
+   * Called when a backend response indicates a redirect (3xx response with
+   * `Location` header, OR a `{ redirect: '/path' }` field in the JSON body).
+   * Useful for handing 302s to Inertia's router so vapor-chamber dispatches
+   * can trigger page navigations:
+   *
+   *   onRedirect: (url) => router.visit(url)
+   *
+   * If not set, redirects are surfaced as `{ ok: false, error: 'Redirect to /path' }`.
+   */
+  onRedirect?: (url: string) => void;
   /**
    * Which actions to forward. Glob patterns supported: '*', 'cart*'.
    * Default: all actions.
@@ -105,13 +127,35 @@ function matchesActions(action: string, patterns?: string[]): boolean {
 }
 
 /**
+ * Build a CommandResult for an aborted dispatch. Mirrors the helper in
+ * command-bus.ts: prefer a user-supplied explicit reason
+ * (`ac.abort(new MyError())`); fall back to a BusError so consumers can
+ * switch on `error.code === 'VC_CORE_ABORTED'`.
+ */
+function abortResultForBridge(action: string, signal: AbortSignal): CommandResult {
+  const reason = (signal as any).reason;
+  const isDefaultAbort = reason && reason.name === 'AbortError' && reason.constructor !== BusError;
+  if (reason instanceof Error && !isDefaultAbort) {
+    return { ok: false, error: reason, value: undefined };
+  }
+  return {
+    ok: false,
+    error: new BusError('VC_CORE_ABORTED', `Dispatch "${action}" was aborted via cmd.signal.`, { emitter: 'core', action }),
+    value: undefined,
+  };
+}
+
+/**
  * createHttpBridge — fetch-based transport plugin.
  *
  * Intercepts matching commands and forwards them to the backend as JSON.
  * The backend receives `{ command, target, payload }` and returns `{ ok, state, error }`.
  *
- * Features: multi-source CSRF (meta/cookie/input), 419 auto-refresh, session expiry
- * detection, Retry-After header, timeout, per-signal abort, jittered backoff.
+ * Features: multi-source CSRF token reading (meta tag / cookie / hidden input),
+ * automatic CSRF-expiry refresh on HTTP 419 (Laravel Sanctum convention by
+ * default, configurable for other frameworks), session-expiry detection on
+ * 401, Retry-After header support, request timeout, per-call AbortSignal,
+ * jittered exponential backoff.
  *
  * @example
  * const bus = createAsyncCommandBus()
@@ -120,7 +164,12 @@ function matchesActions(action: string, patterns?: string[]): boolean {
  * await bus.dispatch('cartAdd', product, { quantity: 2 })
  */
 export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
-  const { endpoint, actions, csrf = false, csrfCookieUrl, headers = {}, timeout = 10_000, retry = 0, noRetry = [], signal, onSessionExpired, scopeController, httpClient } = options;
+  const { endpoint, actions, csrf = false, csrfCookieUrl, headers = {}, timeout = 10_000, retry = 0, noRetry = [], signal, onSessionExpired, onRedirect, scopeController, httpClient } = options;
+  // `csrf: 'inertia'` means: don't read CSRF from the DOM ourselves —
+  // Inertia's Axios already injects the token. The HTTP layer shape just
+  // needs to know "skip CSRF", same as `csrf: false`. Inertia handles it
+  // upstream via its own request interceptor.
+  const csrfFlag = csrf === 'inertia' ? false : csrf;
   // Merge external signal + scope controller signal for automatic cancellation
   const effectiveSignal = scopeController && signal
     ? (typeof AbortSignal.any === 'function'
@@ -134,14 +183,36 @@ export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
     const envelope: CommandEnvelope = { command: cmd.action, target: cmd.target, payload: cmd.payload };
     const effectiveRetry = noRetry.includes(cmd.action) ? 0 : retry;
 
+    // Merge bridge-level effectiveSignal with per-dispatch cmd.signal. The
+    // dispatch-time signal (from `bus.dispatch(..., { signal })`) is
+    // auto-propagated to the HTTP request — consumers don't need to wire it
+    // through the bridge options.
+    const perCallSignal = cmd.signal && effectiveSignal
+      ? (typeof AbortSignal.any === 'function'
+          ? AbortSignal.any([effectiveSignal, cmd.signal])
+          : cmd.signal) // fallback: prefer the per-dispatch signal
+      : (cmd.signal ?? effectiveSignal);
+
     try {
       const res = httpClient
         ? await httpClient.post<BackendResponse>(endpoint, envelope, {
-            csrf, csrfCookieUrl, headers, timeout, retry: effectiveRetry, signal: effectiveSignal, onSessionExpired,
+            csrf: csrfFlag, csrfCookieUrl, headers, timeout, retry: effectiveRetry, signal: perCallSignal, onSessionExpired,
           })
         : await postCommand<BackendResponse>(endpoint, envelope, {
-            csrf, csrfCookieUrl, headers, timeout, retry: effectiveRetry, signal: effectiveSignal, onSessionExpired,
+            csrf: csrfFlag, csrfCookieUrl, headers, timeout, retry: effectiveRetry, signal: perCallSignal, onSessionExpired,
           });
+
+      // Backend redirect — either a body field or a 3xx status. Pass the URL
+      // to onRedirect (typically Inertia's `router.visit`) and resolve as a
+      // failed dispatch. If onRedirect isn't set, surface as a string error.
+      const redirectUrl = (res.data as any)?.redirect;
+      if (redirectUrl && typeof redirectUrl === 'string') {
+        if (onRedirect) {
+          onRedirect(redirectUrl);
+          return { ok: false, error: new Error(`Redirected to ${redirectUrl}`) };
+        }
+        return { ok: false, error: new Error(`Backend redirect to ${redirectUrl} (no onRedirect handler configured)`) };
+      }
 
       if (!res.ok) {
         const msg = (res.data as any)?.message ?? (res.data as any)?.error ?? `HTTP ${res.status}`;
@@ -355,15 +426,42 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
       return next();
     }
 
+    // Pre-flight abort — don't enqueue if signal is already tripped.
+    if (cmd.signal?.aborted) return abortResultForBridge(cmd.action, cmd.signal);
+
     return new Promise<CommandResult>((resolve) => {
       const id = genId();
+      let abortHandler: (() => void) | null = null;
+      let settled = false;
+
+      const settle = (result: CommandResult): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeoutId);
+        pending.delete(id);
+        if (abortHandler && cmd.signal) {
+          cmd.signal.removeEventListener('abort', abortHandler);
+        }
+        resolve(result);
+      };
 
       const timeoutId = setTimeout(() => {
-        pending.delete(id);
-        resolve({ ok: false, error: new Error(`WS request "${cmd.action}" timed out after ${wsTimeout}ms`) });
+        settle({ ok: false, error: new Error(`WS request "${cmd.action}" timed out after ${wsTimeout}ms`), value: undefined });
       }, wsTimeout);
 
-      pending.set(id, { resolve, reject: (e) => resolve({ ok: false, error: e }), timeoutId });
+      pending.set(id, {
+        resolve: settle,
+        reject: (e) => settle({ ok: false, error: e, value: undefined }),
+        timeoutId,
+      });
+
+      // Mid-flight abort — drop the pending request and resolve with abort error.
+      // The server may still process the command; this only cancels the client-side
+      // wait. WS transports don't have per-message cancellation in the protocol.
+      if (cmd.signal) {
+        abortHandler = () => settle(abortResultForBridge(cmd.action, cmd.signal!));
+        cmd.signal.addEventListener('abort', abortHandler);
+      }
 
       send(id, { command: cmd.action, target: cmd.target, payload: cmd.payload }, wsTimeout);
     });

@@ -7,6 +7,12 @@ dist/
 # Test coverage
 coverage/
 
+# Generated API reference (npm run docs) — re-generated, not committed
+docs/api/
+
+# Bench-run outputs
+bench.txt
+
 # Logs
 *.log
 npm-debug.log*

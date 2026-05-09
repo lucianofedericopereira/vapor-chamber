@@ -111,9 +111,9 @@ drawer.onEnter(el, () => console.log('Drawer enter done() — Vue can proceed'))
  * import { useTransitionCommand } from 'vapor-chamber/transitions'
  * import { defineVaporCommand } from 'vapor-chamber'
  *
- * // Track animation events for analytics
+ * // Forward animation events to whatever telemetry sink you use
  * defineVaporCommand('panelEnter', (cmd) => {
- *   gtag('event', 'panel_open', { element: cmd.target.tagName })
+ *   sendMetric('panel_open', { element: cmd.target.tagName })
  * })
  *
  * const panel = useTransitionCommand({ namespace: 'panel' })

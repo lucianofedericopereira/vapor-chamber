@@ -23,12 +23,14 @@
  *     iife         — UMD/IIFE bundle (see 'vapor-chamber/iife')
  *
  * Sub-path exports that avoid pulling in optional code:
- *   'vapor-chamber/transports'  — HTTP + WS + SSE bridges
- *   'vapor-chamber/transitions' — <Transition> hook → bus dispatch
- *   'vapor-chamber/ssr'         — SSR dehydrate/rehydrate
- *   'vapor-chamber/directives'  — v-command directive
- *   'vapor-chamber/vite'        — Vite HMR plugin
- *   'vapor-chamber/iife'        — IIFE bundle
+ *   'vapor-chamber/transports'    — HTTP + WS + SSE bridges
+ *   'vapor-chamber/transitions'   — <Transition> hook → bus dispatch
+ *   'vapor-chamber/ssr'           — SSR dehydrate/rehydrate
+ *   'vapor-chamber/directives'    — v-command directive
+ *   'vapor-chamber/vite'          — Vite HMR plugin
+ *   'vapor-chamber/iife'          — IIFE bundle (full)
+ *   'vapor-chamber/iife-core'     — IIFE bundle (no Vapor custom-element, no Suspense paths)
+ *   'vapor-chamber/iife-elements' — IIFE bundle (core + Vapor custom-element)
  *
  * Changelog:
  *   v0.3.0 — Naming convention, wildcard listeners, request/response, authGuard, optimistic
@@ -51,6 +53,12 @@
  *             defineVaporAsyncComponent wrappers; useVaporAsyncCommand for Suspense-aware
  *             async dispatch; createTransitionBridge + useTransitionCommand; persist validate
  *             option; improved Vapor/VDOM interop awareness; HMR vapor↔vdom switch
+ *   v1.2.0 — Vue 3.6.0-beta.11 alignment: peerDep bumped; defineVaporComponent
+ *             JSDoc documents generics (#14770) + emits-vs-attrs split; build
+ *             pipeline migrated from custom esbuild script to Vite programmatic
+ *             API (scripts/build.mjs); IIFE split into three sized variants
+ *             (full / core / elements) mirroring Vue's tree-shake axes; tsc
+ *             now emits types only (`emitDeclarationOnly`)
  *   v1.0.0 — bus.query() CQRS read-only dispatch; bus.emit() domain events;
  *             Command.meta auto-stamped metadata (ts, id, correlationId, causationId);
  *             bus.registeredActions() introspection; TestBus.onBefore fires for real;
@@ -62,6 +70,7 @@ export {
   createCommandBus,
   createAsyncCommandBus,
   commandKey,
+  configureUid,
   createCommandPool,
   unsealBus,
   inspectBus,
@@ -165,6 +174,8 @@ export {
   resetCommandBus,
   useCommandBus,
   useCommand,
+  useSharedCommandState,
+  type UseSharedCommandStateOptions,
   useCommandState,
   useCommandHistory,
   // v0.4.1
