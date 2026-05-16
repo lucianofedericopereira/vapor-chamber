@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  A lightweight command bus designed for <a href="https://github.com/vuejs/vue-vapor">Vue Vapor</a>. ~6.2KB. Vue 3.6 Vapor aligned. Optional DevTools integration.
+  A lightweight command bus designed for <a href="https://github.com/vuejs/vue-vapor">Vue Vapor</a>. ~6.7KB. Vue 3.6 Vapor aligned. Optional DevTools integration.
 </p>
 
 ## What is Vapor Chamber?
