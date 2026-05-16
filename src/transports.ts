@@ -8,7 +8,7 @@
  */
 
 import type { Command, CommandResult, AsyncPlugin, BaseBus } from './command-bus';
-import { matchesPattern, abortedResult, BusError } from './command-bus';
+import { matchesPattern, abortedResult, } from './command-bus';
 import { postCommand } from './http';
 import type { HttpClient } from './http';
 import { signal } from './signal';

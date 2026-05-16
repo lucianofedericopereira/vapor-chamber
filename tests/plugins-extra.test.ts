@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
 import { cache, circuitBreaker, rateLimit, metrics } from '../src/plugins-extra';
 
@@ -319,8 +319,8 @@ describe('metrics', () => {
     bus.dispatch('op', {});
 
     const s = m.summary();
-    expect(s['op'].count).toBe(3);
-    expect(s['op'].errorRate).toBeCloseTo(0.333, 2);
+    expect(s.op.count).toBe(3);
+    expect(s.op.errorRate).toBeCloseTo(0.333, 2);
   });
 
   it('clear() resets all entries', () => {
