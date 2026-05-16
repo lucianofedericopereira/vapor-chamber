@@ -1,6 +1,10 @@
 /**
  * vapor-chamber — Vue 3.6+ Vapor-specific API
  *
+ * v1.3.0 — Vue 3.6.0-beta.12 alignment: error recovery in Vapor setup (component
+ *           context, fallthrough props, render effects restored after setup errors);
+ *           VDOM slots interop normalization; SSR unresolved tag fallback as element.
+ *           All changes are in Vue's runtime — wrappers here are pass-through.
  * v1.1.0 — Added: defineVaporCustomElement, defineVaporComponent,
  *           defineVaporAsyncComponent wrappers (Vue 3.6.0-beta.10+);
  *           useVaporAsyncCommand for Suspense-aware async dispatch.
@@ -14,6 +18,7 @@ import {
   getCommandBus,
   signal,
   tryAutoCleanup,
+  runDispatch,
   getVaporAppFn,
   getVaporInteropRef,
   getDefineVaporCustomElementFn,
@@ -25,6 +30,10 @@ import type { Handler, RegisterOptions, CommandResult, Command } from './command
 /**
  * Create a Vapor app instance with vapor-chamber ready.
  * Requires Vue 3.6+. Throws if Vapor is not available.
+ *
+ * Vue 3.6.0-beta.12: component context, fallthrough prop state, and render
+ * effect state are now properly restored when setup() throws — broken Vapor
+ * runtime state after setup errors is no longer possible.
  *
  * @example
  * import { createVaporChamberApp } from 'vapor-chamber';
@@ -45,6 +54,10 @@ export function createVaporChamberApp(rootComponent: any, rootProps?: any) {
 /**
  * Returns the vaporInteropPlugin if available (Vue 3.6+).
  * Use this to enable mixed Vapor/VDOM component trees.
+ *
+ * Vue 3.6.0-beta.12: VDOM slots are now normalized and exposed during Vapor
+ * interop, and VDOM interop state is no longer retained from emits — mixed
+ * trees are more correct without any code change here.
  *
  * @example
  * import { createApp } from 'vue';
@@ -102,6 +115,11 @@ export function defineVaporCustomElement(options: any, extraOptions?: any): any 
  *     declares `emits: ['select']`, an `onSelect` handler bound by the parent
  *     is routed to the emit channel and will NOT leak into `attrs`. This wrapper
  *     forwards `options` unchanged, so the behavior flows through unmodified.
+ *
+ * Vue 3.6.0-beta.12 alignment:
+ *   • VDOM interop state is no longer retained from emits — components that emit
+ *     events inside VDOM interop trees no longer carry stale interop refs after
+ *     the emit call. Wrapper is pass-through; behavior flows through unmodified.
  *
  * @example
  * import { defineVaporComponent } from 'vapor-chamber';
@@ -200,29 +218,7 @@ export function useVaporCommand() {
   const listeners: Array<() => void> = [];
 
   function dispatch(action: string, target: any, payload?: any): CommandResult | Promise<CommandResult> {
-    loading.value = true;
-    lastError.value = null;
-    let result: any;
-    try {
-      result = bus.dispatch(action, target, payload);
-    } catch (e) {
-      loading.value = false;
-      const error = e as Error;
-      lastError.value = error;
-      return { ok: false, error };
-    }
-
-    // Handle async results (when using async bus or async transport plugins)
-    if (result && typeof result.then === 'function') {
-      return (result as Promise<CommandResult>).then(
-        (r) => { loading.value = false; if (!r.ok) lastError.value = r.error ?? null; return r; },
-        (e: Error) => { loading.value = false; lastError.value = e; return { ok: false, error: e }; },
-      );
-    }
-
-    loading.value = false;
-    if (!result.ok) lastError.value = result.error ?? null;
-    return result;
+    return runDispatch(() => bus.dispatch(action, target, payload), loading, lastError);
   }
 
   function register(action: string, handler: Handler, opts?: RegisterOptions): () => void {
@@ -264,6 +260,11 @@ export function useVaporCommand() {
  * Suspense. This composable wraps an AsyncCommandBus dispatch with reactive
  * loading/error state, making it safe for `<script setup vapor>` components
  * that await async operations.
+ *
+ * Vue 3.6.0-beta.12: component context, fallthrough prop state, and render
+ * effect state are restored after setup errors. The try/catch in `dispatch`
+ * below captures command-bus errors; Vue now independently ensures its
+ * internal runtime state is clean after any setup throw.
  *
  * The dispatch function returns a Promise<CommandResult>, matching the
  * AsyncCommandBus interface. Use this when your commands hit async transports

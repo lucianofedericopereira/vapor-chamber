@@ -4,7 +4,7 @@
  * retry, persist, sync
  */
 
-import type { Command, CommandResult, AsyncPlugin, Plugin } from './command-bus';
+import { matchesPattern, type Command, type CommandResult, type AsyncPlugin, type Plugin } from './command-bus';
 
 // ---------------------------------------------------------------------------
 // Retry plugin
@@ -32,15 +32,6 @@ export type RetryOptions = {
   isRetryable?: (error: Error, attempt: number) => boolean;
 };
 
-function matchesRetryActions(action: string, patterns?: string[]): boolean {
-  if (!patterns || patterns.length === 0) return true;
-  return patterns.some(p => {
-    if (p === '*') return true;
-    if (p.endsWith('*')) return action.startsWith(p.slice(0, -1));
-    return p === action;
-  });
-}
-
 function retryDelay(strategy: 'fixed' | 'linear' | 'exponential', base: number, attempt: number): number {
   if (strategy === 'fixed') return base;
   if (strategy === 'linear') return base * attempt;
@@ -64,7 +55,7 @@ export function retry(options: RetryOptions = {}): AsyncPlugin {
   } = options;
 
   return async (cmd: Command, next: () => CommandResult | Promise<CommandResult>): Promise<CommandResult> => {
-    if (!matchesRetryActions(cmd.action, actions)) return next();
+    if (actions?.length && !actions.some(p => matchesPattern(p, cmd.action))) return next();
 
     let lastResult: CommandResult = { ok: false, error: new Error('No attempts made') };
 

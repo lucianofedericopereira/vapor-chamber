@@ -5,7 +5,7 @@
  */
 
 import type { Command, CommandResult, Plugin, CommandBus } from './command-bus';
-import { BusError } from './command-bus';
+import { BusError, commandKey } from './command-bus';
 
 /**
  * Logger plugin - logs all commands and results
@@ -162,7 +162,7 @@ export function debounce(
   const plugin: Plugin = (cmd, next) => {
     if (!actionSet.has(cmd.action)) return next();
 
-    const key = `${cmd.action}:${JSON.stringify(cmd.target)}`;
+    const key = commandKey(cmd.action, cmd.target);
 
     const existing = timers.get(key);
     if (existing) clearTimeout(existing);
@@ -201,7 +201,7 @@ export function throttle(
   const plugin: Plugin = (cmd, next) => {
     if (!actionSet.has(cmd.action)) return next();
 
-    const key = `${cmd.action}:${JSON.stringify(cmd.target)}`;
+    const key = commandKey(cmd.action, cmd.target);
     const now = Date.now();
     const last = lastRun.get(key) ?? 0;
 

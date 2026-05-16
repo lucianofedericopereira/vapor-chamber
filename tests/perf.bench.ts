@@ -42,6 +42,16 @@ describe('core dispatch throughput', () => {
     }
   });
 
+  bench('syncQuery — 1 plugin + 1 after-hook (full runner path)', () => {
+    const bus = createCommandBus();
+    bus.register('getUser', (cmd) => ({ id: cmd.target }));
+    bus.use((cmd, next) => next());
+    bus.onAfter(() => {});
+    for (let i = 0; i < 10_000; i++) {
+      bus.query('getUser', i);
+    }
+  });
+
   bench('emit — 3 listeners, no handler', () => {
     const bus = createCommandBus();
     bus.on('test', () => {});
@@ -95,6 +105,12 @@ describe('meta overhead — uid generator comparison', () => {
     for (let i = 0; i < 10_000; i++) {
       bus.dispatch('test', i);
     }
+    // Restore counter-based uid so later benches are not contaminated.
+    configureUid(((): () => string => {
+      const prefix = ((Math.random() * 0xffffffff) >>> 0).toString(36);
+      let n = 0;
+      return () => prefix + '-' + (++n).toString(36);
+    })());
   });
 });
 

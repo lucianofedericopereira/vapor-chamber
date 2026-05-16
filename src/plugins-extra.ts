@@ -9,6 +9,11 @@
 import type { Command, CommandResult, Plugin, } from './command-bus';
 import { matchesPattern, commandKey, BusError } from './command-bus';
 
+function makeActionFilter(patterns: string[] | undefined): (action: string) => boolean {
+  if (!patterns?.length) return () => true;
+  return (action: string) => patterns.some(p => matchesPattern(p, action));
+}
+
 // ---------------------------------------------------------------------------
 // cache — memoize query results with TTL
 // ---------------------------------------------------------------------------
@@ -43,17 +48,13 @@ export function cache(options: CacheOptions = {}): Plugin & {
   size(): number;
 } {
   const { ttl = 30_000, maxSize = 100, actions, key: keyFn } = options;
+  const matchesActions = makeActionFilter(actions);
 
   // LRU-style cache: Map preserves insertion order, we move accessed entries to end
   const store = new Map<string, { result: CommandResult; expiresAt: number }>();
 
   function getKey(cmd: Command): string {
     return keyFn ? keyFn(cmd) : commandKey(cmd.action, cmd.target);
-  }
-
-  function matchesActions(action: string): boolean {
-    if (!actions || actions.length === 0) return true;
-    return actions.some(p => matchesPattern(p, action));
   }
 
   function evictIfNeeded(): void {
@@ -148,6 +149,7 @@ export function circuitBreaker(options: CircuitBreakerOptions = {}): Plugin & {
   reset(action: string): void;
 } {
   const { threshold = 5, resetTimeout = 30_000, actions, onOpen, onClose } = options;
+  const matchesActions = makeActionFilter(actions);
 
   // Per-action circuit state
   const circuits = new Map<string, {
@@ -155,11 +157,6 @@ export function circuitBreaker(options: CircuitBreakerOptions = {}): Plugin & {
     failCount: number;
     openedAt: number;
   }>();
-
-  function matchesActions(action: string): boolean {
-    if (!actions || actions.length === 0) return true;
-    return actions.some(p => matchesPattern(p, action));
-  }
 
   function getCircuit(action: string) {
     let c = circuits.get(action);
@@ -236,14 +233,10 @@ export type RateLimitOptions = {
  */
 export function rateLimit(options: RateLimitOptions = {}): Plugin {
   const { max = 10, window: windowMs = 1_000, actions } = options;
+  const matchesActions = makeActionFilter(actions);
 
   // Per-action sliding window: { timestamps[], head } — head index avoids O(n) shift()
   const windows = new Map<string, { ts: number[]; head: number }>();
-
-  function matchesActions(action: string): boolean {
-    if (!actions || actions.length === 0) return true;
-    return actions.some(p => matchesPattern(p, action));
-  }
 
   return (cmd, next) => {
     if (!matchesActions(cmd.action)) return next();
@@ -311,13 +304,9 @@ export function metrics(options: MetricsOptions = {}): Plugin & {
   clear(): void;
 } {
   const { maxEntries = 1000, actions, onEntry } = options;
+  const matchesActions = makeActionFilter(actions);
   let data: MetricsEntry[] = [];
   let head = 0; // O(1) eviction — head index tracks first live entry
-
-  function matchesActions(action: string): boolean {
-    if (!actions || actions.length === 0) return true;
-    return actions.some(p => matchesPattern(p, action));
-  }
 
   /** Compact when more than half the array is dead entries. */
   function compactIfNeeded(): void {

@@ -2,6 +2,135 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.3.0 — Vue 3.6.0-beta.12 alignment
+
+### Changed
+
+- **peerDependencies** bumped to `vue: ">=3.5.0 || >=3.6.0-beta.12"`.
+
+### Vue 3.6.0-beta.12 alignment
+
+- **Error recovery in Vapor setup**: Vue now restores component context,
+  fallthrough prop state, and render effect state after `setup()` throws.
+  Wrappers (`createVaporChamberApp`, `defineVaporComponent`,
+  `useVaporAsyncCommand`) are pass-through — consumers receive the fix
+  automatically on upgrade.
+
+- **VDOM slots interop**: `runtime-vapor` normalizes and exposes VDOM slots
+  during interop, and no longer retains interop state from emits.
+  `getVaporInteropPlugin()` passes through unchanged — mixed Vapor/VDOM trees
+  pick up these fixes with no code changes.
+
+- **SSR unresolved tag fallback**: `server-renderer` now renders unresolved tags
+  as elements rather than failing. The `rehydrate()` function's `ignoreUnhandled`
+  option already handles the command-bus side — this Vue fix covers the
+  server-render side symmetrically.
+
+- **Deferred fragment hydration anchors**: anchor preservation for deferred
+  fragment hydration is now correct. Applications using `rehydrate()` inside
+  Vapor fragments benefit without any vapor-chamber changes.
+
+- **v-for item scope detach** (perf): Vapor's runtime detaches v-for item scopes
+  on removal, preventing scope retention. `useCommandState` arrays used in v-for
+  benefit from reduced scope overhead on item removal.
+
+- **Static class fast path** (perf): Vapor's compiler emits a fast path for
+  static class strings, lowering DOM update cost per render cycle.
+
+### New
+
+- **`useCommandState` coalesce option** (`chamber.ts`): New `{ coalesce: true }`
+  third argument accumulates state mutations from synchronous dispatches and
+  flushes the signal once per microtask via `queueMicrotask`. Pairs with
+  beta.12's v-for source coalescing — the signal write is deferred, Vue's runtime
+  coalesces the resulting DOM update into one pass. 10 rapid `dispatchBatch` items
+  → 1 signal write instead of 10. Default: `false` (immediate write, unchanged).
+
+  ```ts
+  const { state } = useCommandState(
+    [] as Item[],
+    { append: (s, cmd) => [...s, cmd.target] },
+    { coalesce: true }, // flush once per microtask burst
+  );
+  ```
+
+### Performance
+
+- **`syncQuery` bare-bus fast path** (`command-bus.ts`): `bus.query()` now skips
+  the plugin runner and hook walk when the bus has no plugins, after-hooks, or
+  listeners — matching the existing optimization in `bus.dispatch()`. CQRS read
+  calls on a bare bus hit the handler directly with no indirection. Bench
+  confirms `syncQuery` bare (2,393 hz) now matches `syncDispatch` bare (2,259 hz).
+
+### Internal
+
+- **`stampMeta` signature simplified** (`command-bus.ts`): Changed from
+  `stampMeta({ action, target, payload })` to `stampMeta(payload)` — `action`
+  and `target` were never read inside the function. Eliminates a temporary
+  object at all 9 call sites.
+
+- **`_prefixCache` FIFO eviction** (`command-bus.ts`): On overflow, the wildcard
+  prefix cache previously called `Map.clear()`, wiping all 256 entries. Now
+  evicts only the oldest entry (`Map` insertion order), keeping the cache warm.
+
+- **`getCurrentScope()` in `tryAutoCleanup`** (`chamber.ts`): Replaced the
+  `try { onScopeDispose(fn) } catch {}` pattern with `if (getCurrentScope())`.
+  The unreachable `onUnmounted` fallback (dead code under Vue ≥ 3.5) is removed.
+  `tryKeepAliveHooks` simplified the same way using `getCurrentInstance()`.
+
+- **`command-bus.ts` — 10 duplicate sync/async functions collapsed to shared
+  implementations.** Both buses now call the same underlying functions:
+  `register`, `on`, `once`, `offAll`, `addHook`, `clearState`, `inspect`.
+  `syncRegister` and `asyncRegister` were byte-for-byte identical at runtime
+  (type annotations only differed) — merged into a single `register`.
+  `asyncClear` shared 8 of 10 lines with `syncClear` — common body extracted
+  to `clearState`. Both bus factories shared the same 12-line inspection object
+  — extracted to `inspect()`.
+
+- **`plugins-extra.ts`** — Four identical `matchesActions` closures (one per
+  plugin) replaced by a single module-level `makeActionFilter(patterns)` factory.
+
+- **`plugins-io.ts`** — Local `matchesRetryActions` deleted; `matchesPattern`
+  imported from `command-bus` instead (which additionally has prefix caching).
+
+- **`plugins-core.ts`** — `debounce` and `throttle` were building throttle keys
+  with `JSON.stringify(cmd.target)` (no key-sort, no circular-ref safety).
+  Replaced with `commandKey(cmd.action, cmd.target)` which sorts keys for stable
+  output and handles circular references.
+
+- **`transports.ts`** — Local `matchesActions` wrapper and `abortResultForBridge`
+  deleted. Both replaced by imports: `matchesPattern` (inline) and
+  `abortedResult` (now exported `@internal` from `command-bus.ts`).
+
+- **`chamber.ts` / `chamber-vapor.ts`** — `useCommand.dispatch`,
+  `useVaporCommand.dispatch`, and `useCommandQuery.query` shared the same
+  20-line loading/error wrapper. Extracted to `runDispatch(busCall, loading,
+  lastError, onSuccess?)` in `chamber.ts`, imported by `chamber-vapor.ts`.
+
+### Bundle sizes (min / brotli / gzip)
+
+| variant | v1.2.0 | v1.3.0 |
+|---|---|---|
+| full    | 32 KB / 8.7 KB / 9.8 KB | 33.7 KB / 9.9 KB / 11.1 KB |
+| core    | 23 KB / 6.1 KB / 6.8 KB  | 23.0 KB / 6.7 KB / 7.5 KB  |
+| elements| 24 KB / 6.4 KB / 7.2 KB  | 24.4 KB / 7.1 KB / 7.9 KB  |
+
+Net size increase over v1.2.0 is from new features (`useCommandState` coalesce,
+`runDispatch`, `getCurrentScope` detection). The internal refactoring offset
+~1.1 KB raw across all variants.
+
+### Tests
+
+- New `tests/plugins-extra.test.ts` — 30 cases covering `cache`,
+  `circuitBreaker`, `rateLimit`, and `metrics` (previously 0% coverage).
+- New `tests/utilities.test.ts` — 17 cases covering `createChamber`,
+  `createWorkflow`, and `createReaction` (previously 0% coverage).
+- Targeted additions to `tests/chamber.test.ts` — `useCommandState` coalesce
+  mode, `useCommandHistory` undo handler invocation and error recovery.
+- Targeted additions to `tests/command-bus.test.ts` — `configureUid`,
+  `syncQuery` bare-bus fast path, `offAll` with wildcard pattern, async batch
+  mid-flight abort.
+
 ## v1.2.0 — Vue 3.6.0-beta.11 alignment
 
 ### Changed

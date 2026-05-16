@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   getCommandBus,
   setCommandBus,
@@ -645,5 +645,99 @@ describe('useCommandQuery', () => {
 
     // query() skips onBefore — this is the CQRS distinction
     expect(beforeCalls).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// useCommandState — coalesce mode
+// ---------------------------------------------------------------------------
+
+describe('useCommandState — coalesce', () => {
+  beforeEach(() => { setCommandBus(createCommandBus()); });
+  afterEach(() => { resetCommandBus(); });
+
+  it('defers signal write to next microtask when coalesce:true', async () => {
+    const bus = getCommandBus();
+    const { state } = useCommandState(
+      [] as number[],
+      { append: (s, cmd) => [...s, cmd.target.v] },
+      { coalesce: true },
+    );
+
+    bus.dispatch('append', { v: 1 });
+    bus.dispatch('append', { v: 2 });
+    bus.dispatch('append', { v: 3 });
+
+    // synchronously: signal not yet updated (pending microtask)
+    expect(state.value).toEqual([]);
+
+    await Promise.resolve(); // flush microtask queue
+
+    expect(state.value).toEqual([1, 2, 3]);
+  });
+
+  it('returns the pending value as CommandResult even before flush', () => {
+    const bus = getCommandBus();
+    useCommandState(
+      0,
+      { inc: (s) => s + 1 },
+      { coalesce: true },
+    );
+
+    const r1 = bus.dispatch('inc', {});
+    const r2 = bus.dispatch('inc', {});
+
+    expect(r1.value).toBe(1);
+    expect(r2.value).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// useCommandHistory — undo/redo with registered undo handler
+// ---------------------------------------------------------------------------
+
+describe('useCommandHistory — undo handler execution', () => {
+  beforeEach(() => { setCommandBus(createCommandBus()); });
+  afterEach(() => { resetCommandBus(); });
+
+  it('calls the registered undo handler on undo()', () => {
+    const bus = getCommandBus();
+    const undoFn = vi.fn();
+    bus.register('cartAdd', (cmd) => cmd.target, { undo: undoFn });
+
+    const { undo, canUndo } = useCommandHistory();
+    bus.dispatch('cartAdd', { id: 1 });
+
+    expect(canUndo.value).toBe(true);
+    undo();
+
+    expect(undoFn).toHaveBeenCalledWith(expect.objectContaining({ action: 'cartAdd' }));
+  });
+
+  it('re-dispatches the command on redo()', () => {
+    const bus = getCommandBus();
+    const handler = vi.fn((cmd: any) => cmd.target);
+    bus.register('cartAdd', handler, { undo: vi.fn() });
+
+    const { undo, redo } = useCommandHistory();
+    bus.dispatch('cartAdd', { id: 1 });
+    undo();
+    redo();
+
+    // handler called: initial dispatch + redo re-dispatch = 2 times
+    expect(handler).toHaveBeenCalledTimes(2);
+  });
+
+  it('undo catches and logs handler errors', () => {
+    const bus = getCommandBus();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    bus.register('op', () => 1, { undo: () => { throw new Error('undo failed'); } });
+
+    const { undo } = useCommandHistory();
+    bus.dispatch('op', {});
+    undo(); // should not throw
+
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
   });
 });

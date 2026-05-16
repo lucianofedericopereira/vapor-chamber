@@ -538,11 +538,9 @@ async function tryCatchAsyncHandler(handler: AsyncHandler, cmd: Command): Promis
 }
 
 /** Stamp a command with auto-generated metadata. */
-/** Stamp a command with auto-generated metadata. */
-function stampMeta(cmd: { action: string; target: any; payload?: any }): CommandMeta {
-  const p = cmd.payload;
-  const correlationId = p?.__correlationId ?? p?.__causationId ?? undefined;
-  const causationId = p?.__causationId ?? undefined;
+function stampMeta(payload: any): CommandMeta {
+  const correlationId = payload?.__correlationId ?? payload?.__causationId;
+  const causationId = payload?.__causationId;
   return { ts: Date.now(), id: uid(), correlationId, causationId };
 }
 
@@ -601,7 +599,7 @@ export function matchesPattern(pattern: string, action: string): boolean {
     let prefix = _prefixCache.get(pattern);
     if (prefix === undefined) {
       prefix = pattern.slice(0, -1);
-      if (_prefixCache.size >= _PREFIX_CACHE_MAX) _prefixCache.clear();
+      if (_prefixCache.size >= _PREFIX_CACHE_MAX) _prefixCache.delete(_prefixCache.keys().next().value!);
       _prefixCache.set(pattern, prefix);
     }
     return action.startsWith(prefix);
@@ -745,9 +743,61 @@ export function buildRunner(plugins: Plugin[]) {
 // Module-level sync bus operations (state threaded explicitly)
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Shared helpers for both sync and async buses
+// ---------------------------------------------------------------------------
+
+/** Reusable priority comparator — avoids 4 inline arrow-function copies. */
+const byPriority = (a: { priority: number }, b: { priority: number }) => b.priority - a.priority;
+
+/**
+ * Register a handler on either bus variant. Both SyncState and AsyncState
+ * carry the same fields here, so one implementation covers both.
+ */
+function register(s: SyncState | AsyncState, action: string, handler: any, opts: RegisterOptions = {}): () => void {
+  assertNotSealed(s.sealed, 'register');
+  validateNaming(action, s.opts.naming);
+  if (s.handlers.has(action)) {
+    console.warn(`[vapor-chamber] Handler for "${action}" already exists and is being overwritten. Call the unregister function returned by register() first, or use bus.clear() to reset.`);
+  }
+  let h = handler;
+  if (opts.throttle && opts.throttle > 0) h = wrapThrottle(h, opts.throttle, s.throttleTimers);
+  if (opts.undo) s.undoHandlers.set(action, opts.undo);
+  s.handlers.set(action, h);
+  return () => { s.handlers.delete(action); s.undoHandlers.delete(action); };
+}
+
+/** Clear the fields both bus variants share. Each bus then resets its own runner. */
+function clearState(s: SyncState | AsyncState): void {
+  s.handlers.clear();
+  s.undoHandlers.clear();
+  s.pluginEntries.length = 0;
+  s.beforeHooks.length = 0;
+  s.afterHooks.length = 0;
+  s.exactListeners.clear();
+  s.wildcardListeners.length = 0;
+  s.responders.clear();
+}
+
+/** Build the BusInspection snapshot — identical shape for sync and async buses. */
+function inspect(s: SyncState | AsyncState): BusInspection {
+  return {
+    actions:          Array.from(s.handlers.keys()),
+    undoActions:      Array.from(s.undoHandlers.keys()),
+    responderActions: Array.from(s.responders.keys()),
+    pluginCount:      s.pluginEntries.length,
+    pluginPriorities: s.pluginEntries.slice().sort(byPriority).map(e => e.priority),
+    beforeHookCount:  s.beforeHooks.length,
+    afterHookCount:   s.afterHooks.length,
+    listenerPatterns: [...Array.from(s.exactListeners.keys()), ...s.wildcardListeners.map(e => e.pattern)],
+    sealed:           s.sealed,
+    dispatchDepth:    s.dispatchDepth,
+    activeTimers:     s.throttleTimers.size,
+  };
+}
+
 function syncRebuildRunner(s: SyncState): void {
-  const sorted = s.pluginEntries.slice().sort((a, b) => b.priority - a.priority).map(e => e.plugin);
-  s.runner = buildRunner(sorted);
+  s.runner = buildRunner(s.pluginEntries.slice().sort(byPriority).map(e => e.plugin));
 }
 
 function handleMissing(opts: CommandBusOptions, cmd: Command): CommandResult {
@@ -786,7 +836,7 @@ function syncDispatch(s: SyncState, action: string, target: any, payload?: any, 
 
 function _syncDispatchInner(s: SyncState, action: string, target: any, payload?: any, executeOverride?: () => CommandResult): CommandResult {
   if (s.opts.naming !== undefined) validateNaming(action, s.opts.naming);
-  const cmd: Command = { action, target, payload, meta: stampMeta({ action, target, payload }) };
+  const cmd: Command = { action, target, payload, meta: stampMeta(payload) };
 
   // Bare-bus fast path. When the bus has no plugins / hooks / listeners
   // and there's no executeOverride (request/respond path), skip the runner
@@ -832,7 +882,19 @@ function _syncDispatchInner(s: SyncState, action: string, target: any, payload?:
 /** Read-only query — skips beforeHooks, runs handler + plugins, fires afterHooks. */
 function syncQuery(s: SyncState, action: string, target: any, payload?: any): CommandResult {
   validateNaming(action, s.opts.naming);
-  const cmd: Command = { action, target, payload, meta: stampMeta({ action, target, payload }) };
+  const cmd: Command = { action, target, payload, meta: stampMeta(payload) };
+  // Bare-bus fast path — mirrors the one in _syncDispatchInner. Queries skip
+  // beforeHooks by design so the condition omits that check.
+  if (
+    s.pluginEntries.length === 0 &&
+    s.afterHooks.length === 0 &&
+    s.exactListeners.size === 0 &&
+    s.wildcardListeners.length === 0
+  ) {
+    const handler = s.handlers.get(action);
+    if (handler === undefined) return handleMissing(s.opts, cmd);
+    return tryCatchHandler(handler, cmd);
+  }
   // Skip beforeHooks — queries don't trigger mutation gates (auth, loading spinners, etc.)
   const execute = (): CommandResult => {
     const handler = s.handlers.get(action);
@@ -889,25 +951,13 @@ function syncRollback(s: SyncState, commands: BatchCommand[], results: CommandRe
     if (!results[j].ok) continue; // skip already-failed commands
     const undo = s.undoHandlers.get(commands[j].action);
     if (!undo) continue; // no undo registered — skip
-    const cmd: Command = { action: commands[j].action, target: commands[j].target, payload: commands[j].payload, meta: stampMeta(commands[j]) };
+    const cmd: Command = { action: commands[j].action, target: commands[j].target, payload: commands[j].payload, meta: stampMeta(commands[j].payload) };
     try { rollbacks.push(okResult(undo(cmd))); }
     catch (e) { rollbacks.push(errResult(e as Error)); }
   }
   return rollbacks;
 }
 
-function syncRegister(s: SyncState, action: string, handler: Handler, opts: RegisterOptions = {}): () => void {
-  assertNotSealed(s.sealed, 'register');
-  validateNaming(action, s.opts.naming);
-  if (s.handlers.has(action)) {
-    console.warn(`[vapor-chamber] Handler for "${action}" already exists and is being overwritten. Call the unregister function returned by register() first, or use bus.clear() to reset.`);
-  }
-  let h = handler;
-  if (opts.throttle && opts.throttle > 0) h = wrapThrottle(h, opts.throttle, s.throttleTimers);
-  if (opts.undo) s.undoHandlers.set(action, opts.undo);
-  s.handlers.set(action, h);
-  return () => { s.handlers.delete(action); s.undoHandlers.delete(action); };
-}
 
 function syncUse(s: SyncState, plugin: Plugin, opts: PluginOptions = {}): () => void {
   assertNotSealed(s.sealed, 'use');
@@ -920,13 +970,18 @@ function syncUse(s: SyncState, plugin: Plugin, opts: PluginOptions = {}): () => 
   return () => { const i = s.pluginEntries.indexOf(entry); if (i !== -1) { s.pluginEntries.splice(i, 1); syncRebuildRunner(s); } };
 }
 
-function syncOnAfter(s: SyncState, hook: Hook): () => void {
-  assertNotSealed(s.sealed, 'onAfter');
-  s.afterHooks.push(hook);
-  return () => { const i = s.afterHooks.indexOf(hook); if (i !== -1) s.afterHooks.splice(i, 1); };
-}
+// ---------------------------------------------------------------------------
+// Shared listener and hook helpers — used by both sync and async buses.
+// Both SyncState and AsyncState carry exactListeners/wildcardListeners with
+// identical types, so a single implementation covers both.
+// ---------------------------------------------------------------------------
 
-function syncOn(s: SyncState, pattern: string, listener: Listener): () => void {
+type ListenerBucket = {
+  exactListeners: Map<string, Listener[]>;
+  wildcardListeners: Array<{ pattern: string; listener: Listener }>;
+};
+
+function on(s: ListenerBucket, pattern: string, listener: Listener): () => void {
   if (isWildcardPattern(pattern)) {
     const entry = { pattern, listener };
     s.wildcardListeners.push(entry);
@@ -945,23 +1000,15 @@ function syncOn(s: SyncState, pattern: string, listener: Listener): () => void {
 }
 
 /**
- * once() unsubscribes itself *before* calling the listener. This means:
- * - If the listener throws, the subscription is still removed (no re-fire on retry).
- * - The listener cannot observe itself in the listener buckets.
- * This is intentional — it matches DOM addEventListener({ once: true }) semantics.
+ * once() unsubscribes itself *before* calling the listener — matches
+ * DOM addEventListener({ once: true }) semantics.
  */
-function syncOnce(s: SyncState, pattern: string, listener: Listener): () => void {
-  const unsub = syncOn(s, pattern, (cmd, result) => { unsub(); listener(cmd, result); });
+function once(s: ListenerBucket, pattern: string, listener: Listener): () => void {
+  const unsub = on(s, pattern, (cmd, result) => { unsub(); listener(cmd, result); });
   return unsub;
 }
 
-function syncOnBefore(s: SyncState, hook: BeforeHook): () => void {
-  assertNotSealed(s.sealed, 'onBefore');
-  s.beforeHooks.push(hook);
-  return () => { const i = s.beforeHooks.indexOf(hook); if (i !== -1) s.beforeHooks.splice(i, 1); };
-}
-
-function syncOffAll(s: SyncState, pattern?: string): void {
+function offAll(s: ListenerBucket, pattern?: string): void {
   if (pattern === undefined) {
     s.exactListeners.clear();
     s.wildcardListeners.length = 0;
@@ -976,6 +1023,12 @@ function syncOffAll(s: SyncState, pattern?: string): void {
   }
 }
 
+function addHook<H>(sealed: boolean, hooks: H[], hook: H, method: string): () => void {
+  assertNotSealed(sealed, method);
+  hooks.push(hook);
+  return () => { const i = hooks.indexOf(hook); if (i !== -1) hooks.splice(i, 1); };
+}
+
 function syncRequest(s: SyncState, action: string, target: any, payload?: any, reqOpts: { timeout?: number } = {}): Promise<CommandResult> {
   const timeout = reqOpts.timeout ?? 5000;
   const responder = s.responders.get(action);
@@ -988,7 +1041,7 @@ function syncRequest(s: SyncState, action: string, target: any, payload?: any, r
     );
 
     // Route through the plugin chain with responder as the execute function
-    const cmd: Command = { action, target, payload, meta: stampMeta({ action, target, payload }) };
+    const cmd: Command = { action, target, payload, meta: stampMeta(payload) };
     const execute = (): CommandResult => {
       try { return okResult(responder(cmd)); }
       catch (e) { return errResult(e as Error); }
@@ -1023,14 +1076,7 @@ function syncRespond(s: SyncState, action: string, handler: (cmd: Command) => an
 }
 
 function syncClear(s: SyncState): void {
-  s.handlers.clear();
-  s.undoHandlers.clear();
-  s.pluginEntries.length = 0;
-  s.beforeHooks.length = 0;
-  s.afterHooks.length = 0;
-  s.exactListeners.clear();
-  s.wildcardListeners.length = 0;
-  s.responders.clear();
+  clearState(s);
   s.runner = buildRunner([]);
 }
 
@@ -1089,13 +1135,13 @@ export function createCommandBus<M extends CommandMap = CommandMap>(options: Com
     query:             (a, t, p)       => syncQuery(s, a as string, t, p),
     emit:              (e, d)          => syncEmit(s, e, d),
     dispatchBatch:     (cmds, o)       => syncDispatchBatch(s, cmds, o),
-    register:          (a, h, o)       => syncRegister(s, a as string, h as Handler, o),
+    register:          (a, h, o)       => register(s, a as string, h as Handler, o),
     use:               (p, o)          => syncUse(s, p, o),
-    onBefore:          (h)             => syncOnBefore(s, h),
-    onAfter:           (h)             => syncOnAfter(s, h),
-    on:                (pat, l)        => syncOn(s, pat, l),
-    once:              (pat, l)        => syncOnce(s, pat, l),
-    offAll:            (pat)           => syncOffAll(s, pat),
+    onBefore:          (h)             => addHook(s.sealed, s.beforeHooks, h, 'onBefore'),
+    onAfter:           (h)             => addHook(s.sealed, s.afterHooks, h, 'onAfter'),
+    on:                (pat, l)        => on(s, pat, l),
+    once:              (pat, l)        => once(s, pat, l),
+    offAll:            (pat)           => offAll(s, pat),
     request:           (a, t, p, o)   => syncRequest(s, a as string, t, p, o),
     respond:           (a, h)          => syncRespond(s, a, h),
     hasHandler:        (a)             => s.handlers.has(a),
@@ -1108,19 +1154,7 @@ export function createCommandBus<M extends CommandMap = CommandMap>(options: Com
   };
   // Symbol keys for tree-shakeable introspection — not on the public interface
   (bus as any)[_UNSEAL] = () => { s.sealed = false; };
-  (bus as any)[_INSPECT] = (): BusInspection => ({
-      actions: Array.from(s.handlers.keys()),
-      undoActions: Array.from(s.undoHandlers.keys()),
-      responderActions: Array.from(s.responders.keys()),
-      pluginCount: s.pluginEntries.length,
-      pluginPriorities: s.pluginEntries.slice().sort((a, b) => b.priority - a.priority).map(e => e.priority),
-      beforeHookCount: s.beforeHooks.length,
-      afterHookCount: s.afterHooks.length,
-      listenerPatterns: [...Array.from(s.exactListeners.keys()), ...s.wildcardListeners.map(e => e.pattern)],
-      sealed: s.sealed,
-      dispatchDepth: s.dispatchDepth,
-      activeTimers: s.throttleTimers.size,
-  });
+  (bus as any)[_INSPECT] = () => inspect(s);
   return bus;
 }
 
@@ -1144,8 +1178,7 @@ function buildAsyncRunner(plugins: AsyncPlugin[]) {
 // ---------------------------------------------------------------------------
 
 function asyncRebuildRunner(s: AsyncState): void {
-  const sorted = s.pluginEntries.slice().sort((a, b) => b.priority - a.priority).map(e => e.plugin);
-  s.runner = buildAsyncRunner(sorted);
+  s.runner = buildAsyncRunner(s.pluginEntries.slice().sort(byPriority).map(e => e.plugin));
 }
 
 async function asyncRunHooks(s: AsyncState, cmd: Command, result: CommandResult): Promise<void> {
@@ -1173,8 +1206,10 @@ async function asyncDispatch(s: AsyncState, action: string, target: any, payload
  * switch on `error.code === 'VC_CORE_ABORTED'`.
  *
  * After-hooks still fire from the caller, so observability is intact.
+ *
+ * @internal — also used by transports.ts for mid-flight signal handling.
  */
-function abortedResult(action: string, signal: AbortSignal): CommandResult {
+export function abortedResult(action: string, signal: AbortSignal): CommandResult {
   const reason = (signal as any).reason;
   // Default DOMException (name: 'AbortError') is what `ac.abort()` produces
   // with no arg; substitute our BusError so the code field is queryable.
@@ -1185,7 +1220,7 @@ function abortedResult(action: string, signal: AbortSignal): CommandResult {
 
 async function _asyncDispatchInner(s: AsyncState, action: string, target: any, payload?: any, executeOverride?: () => Promise<CommandResult>, signal?: AbortSignal): Promise<CommandResult> {
   validateNaming(action, s.opts.naming);
-  const cmd: Command = { action, target, payload, meta: stampMeta({ action, target, payload }), signal };
+  const cmd: Command = { action, target, payload, meta: stampMeta(payload), signal };
 
   // Pre-flight abort: if the signal is already tripped, skip the handler entirely.
   // After-hooks still run so loggers / metrics see the aborted command.
@@ -1225,7 +1260,7 @@ async function _asyncDispatchInner(s: AsyncState, action: string, target: any, p
 /** Async read-only query — skips beforeHooks, runs handler + plugins, fires afterHooks. */
 async function asyncQuery(s: AsyncState, action: string, target: any, payload?: any): Promise<CommandResult> {
   validateNaming(action, s.opts.naming);
-  const cmd: Command = { action, target, payload, meta: stampMeta({ action, target, payload }) };
+  const cmd: Command = { action, target, payload, meta: stampMeta(payload) };
   const execute = async (): Promise<CommandResult> => {
     const handler = s.handlers.get(action);
     if (!handler) return handleMissing(s.opts, cmd);
@@ -1295,26 +1330,13 @@ async function asyncRollback(s: AsyncState, commands: BatchCommand[], results: C
     if (!results[j].ok) continue;
     const undo = s.undoHandlers.get(commands[j].action);
     if (!undo) continue;
-    const cmd: Command = { action: commands[j].action, target: commands[j].target, payload: commands[j].payload, meta: stampMeta(commands[j]) };
+    const cmd: Command = { action: commands[j].action, target: commands[j].target, payload: commands[j].payload, meta: stampMeta(commands[j].payload) };
     try {
       const r = undo(cmd);
       rollbacks.push(okResult(r && typeof r.then === 'function' ? await r : r));
     } catch (e) { rollbacks.push(errResult(e as Error)); }
   }
   return rollbacks;
-}
-
-function asyncRegister(s: AsyncState, action: string, handler: AsyncHandler, opts: RegisterOptions = {}): () => void {
-  assertNotSealed(s.sealed, 'register');
-  validateNaming(action, s.opts.naming);
-  if (s.handlers.has(action)) {
-    console.warn(`[vapor-chamber] Handler for "${action}" already exists and is being overwritten. Call the unregister function returned by register() first, or use bus.clear() to reset.`);
-  }
-  let h = handler;
-  if (opts.throttle && opts.throttle > 0) h = wrapThrottle(h, opts.throttle, s.throttleTimers);
-  if (opts.undo) s.undoHandlers.set(action, opts.undo);
-  s.handlers.set(action, h);
-  return () => { s.handlers.delete(action); s.undoHandlers.delete(action); };
 }
 
 function asyncUse(s: AsyncState, plugin: AsyncPlugin, opts: PluginOptions = {}): () => void {
@@ -1325,55 +1347,6 @@ function asyncUse(s: AsyncState, plugin: AsyncPlugin, opts: PluginOptions = {}):
   return () => { const i = s.pluginEntries.indexOf(entry); if (i !== -1) { s.pluginEntries.splice(i, 1); asyncRebuildRunner(s); } };
 }
 
-function asyncOnAfter(s: AsyncState, hook: AsyncHook): () => void {
-  assertNotSealed(s.sealed, 'onAfter');
-  s.afterHooks.push(hook);
-  return () => { const i = s.afterHooks.indexOf(hook); if (i !== -1) s.afterHooks.splice(i, 1); };
-}
-
-function asyncOn(s: AsyncState, pattern: string, listener: Listener): () => void {
-  if (isWildcardPattern(pattern)) {
-    const entry = { pattern, listener };
-    s.wildcardListeners.push(entry);
-    return () => { const i = s.wildcardListeners.indexOf(entry); if (i !== -1) s.wildcardListeners.splice(i, 1); };
-  }
-  let bucket = s.exactListeners.get(pattern);
-  if (bucket === undefined) { bucket = []; s.exactListeners.set(pattern, bucket); }
-  bucket.push(listener);
-  return () => {
-    const b = s.exactListeners.get(pattern);
-    if (b === undefined) return;
-    const i = b.indexOf(listener);
-    if (i !== -1) b.splice(i, 1);
-    if (b.length === 0) s.exactListeners.delete(pattern);
-  };
-}
-
-function asyncOnce(s: AsyncState, pattern: string, listener: Listener): () => void {
-  const unsub = asyncOn(s, pattern, (cmd, result) => { unsub(); listener(cmd, result); });
-  return unsub;
-}
-
-function asyncOnBefore(s: AsyncState, hook: AsyncBeforeHook): () => void {
-  assertNotSealed(s.sealed, 'onBefore');
-  s.beforeHooks.push(hook);
-  return () => { const i = s.beforeHooks.indexOf(hook); if (i !== -1) s.beforeHooks.splice(i, 1); };
-}
-
-function asyncOffAll(s: AsyncState, pattern?: string): void {
-  if (pattern === undefined) {
-    s.exactListeners.clear();
-    s.wildcardListeners.length = 0;
-    return;
-  }
-  if (isWildcardPattern(pattern)) {
-    for (let i = s.wildcardListeners.length - 1; i >= 0; i--) {
-      if (s.wildcardListeners[i].pattern === pattern) s.wildcardListeners.splice(i, 1);
-    }
-  } else {
-    s.exactListeners.delete(pattern);
-  }
-}
 
 async function asyncRequest(s: AsyncState, action: string, target: any, payload?: any, reqOpts: { timeout?: number; signal?: AbortSignal } = {}): Promise<CommandResult> {
   const timeout = reqOpts.timeout ?? 5000;
@@ -1394,7 +1367,7 @@ async function asyncRequest(s: AsyncState, action: string, target: any, payload?
   // Route through the plugin chain with responder as the execute function.
   // The signal also flows to cmd.signal so the responder can observe abort.
   const executeOverride = responder ? async (): Promise<CommandResult> => {
-    try { return okResult(await responder({ action, target, payload, meta: stampMeta({ action, target, payload }), signal } as Command)); }
+    try { return okResult(await responder({ action, target, payload, meta: stampMeta(payload), signal } as Command)); }
     catch (e) { return errResult(e as Error); }
   } : undefined;
 
@@ -1442,14 +1415,7 @@ function asyncRespond(s: AsyncState, action: string, handler: (cmd: Command) => 
 }
 
 function asyncClear(s: AsyncState): void {
-  s.handlers.clear();
-  s.undoHandlers.clear();
-  s.pluginEntries.length = 0;
-  s.beforeHooks.length = 0;
-  s.afterHooks.length = 0;
-  s.exactListeners.clear();
-  s.wildcardListeners.length = 0;
-  s.responders.clear();
+  clearState(s);
   s.pendingRequests.clear();
   s.runner = buildAsyncRunner([]);
 }
@@ -1494,13 +1460,13 @@ export function createAsyncCommandBus<M extends CommandMap = CommandMap>(options
     query:             (a, t, p)     => asyncQuery(s, a as string, t, p),
     emit:              (e, d)        => asyncEmit(s, e, d),
     dispatchBatch:     (cmds, o)     => asyncDispatchBatch(s, cmds, o),
-    register:          (a, h, o)     => asyncRegister(s, a as string, h as AsyncHandler, o),
+    register:          (a, h, o)     => register(s, a as string, h as AsyncHandler, o),
     use:               (p, o)        => asyncUse(s, p, o),
-    onBefore:          (h)           => asyncOnBefore(s, h),
-    onAfter:           (h)           => asyncOnAfter(s, h),
-    on:                (pat, l)      => asyncOn(s, pat, l),
-    once:              (pat, l)      => asyncOnce(s, pat, l),
-    offAll:            (pat)         => asyncOffAll(s, pat),
+    onBefore:          (h)           => addHook(s.sealed, s.beforeHooks, h, 'onBefore'),
+    onAfter:           (h)           => addHook(s.sealed, s.afterHooks, h, 'onAfter'),
+    on:                (pat, l)      => on(s, pat, l),
+    once:              (pat, l)      => once(s, pat, l),
+    offAll:            (pat)         => offAll(s, pat),
     request:           (a, t, p, o)  => asyncRequest(s, a as string, t, p, o),
     respond:           (a, h)        => asyncRespond(s, a, h),
     hasHandler:        (a)           => s.handlers.has(a),
@@ -1513,19 +1479,7 @@ export function createAsyncCommandBus<M extends CommandMap = CommandMap>(options
   };
   // Symbol keys for tree-shakeable introspection — not on the public interface
   (bus as any)[_UNSEAL] = () => { s.sealed = false; };
-  (bus as any)[_INSPECT] = (): BusInspection => ({
-    actions: Array.from(s.handlers.keys()),
-    undoActions: Array.from(s.undoHandlers.keys()),
-    responderActions: Array.from(s.responders.keys()),
-    pluginCount: s.pluginEntries.length,
-    pluginPriorities: s.pluginEntries.slice().sort((a, b) => b.priority - a.priority).map(e => e.priority),
-    beforeHookCount: s.beforeHooks.length,
-    afterHookCount: s.afterHooks.length,
-    listenerPatterns: [...Array.from(s.exactListeners.keys()), ...s.wildcardListeners.map(e => e.pattern)],
-    sealed: s.sealed,
-    dispatchDepth: s.dispatchDepth,
-    activeTimers: s.throttleTimers.size,
-  });
+  (bus as any)[_INSPECT] = () => inspect(s);
   return bus;
 }
 

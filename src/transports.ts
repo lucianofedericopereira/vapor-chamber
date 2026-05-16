@@ -8,7 +8,7 @@
  */
 
 import type { Command, CommandResult, AsyncPlugin, BaseBus } from './command-bus';
-import { matchesPattern, BusError } from './command-bus';
+import { matchesPattern, abortedResult, BusError } from './command-bus';
 import { postCommand } from './http';
 import type { HttpClient } from './http';
 import { signal } from './signal';
@@ -121,29 +121,6 @@ export type HttpBridgeOptions = {
   httpClient?: HttpClient;
 };
 
-function matchesActions(action: string, patterns?: string[]): boolean {
-  if (!patterns || patterns.length === 0) return true;
-  return patterns.some(p => matchesPattern(p, action));
-}
-
-/**
- * Build a CommandResult for an aborted dispatch. Mirrors the helper in
- * command-bus.ts: prefer a user-supplied explicit reason
- * (`ac.abort(new MyError())`); fall back to a BusError so consumers can
- * switch on `error.code === 'VC_CORE_ABORTED'`.
- */
-function abortResultForBridge(action: string, signal: AbortSignal): CommandResult {
-  const reason = (signal as any).reason;
-  const isDefaultAbort = reason && reason.name === 'AbortError' && reason.constructor !== BusError;
-  if (reason instanceof Error && !isDefaultAbort) {
-    return { ok: false, error: reason, value: undefined };
-  }
-  return {
-    ok: false,
-    error: new BusError('VC_CORE_ABORTED', `Dispatch "${action}" was aborted via cmd.signal.`, { emitter: 'core', action }),
-    value: undefined,
-  };
-}
 
 /**
  * createHttpBridge — fetch-based transport plugin.
@@ -178,7 +155,7 @@ export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
     : scopeController?.signal ?? signal;
 
   return async (cmd: Command, next: () => CommandResult | Promise<CommandResult>) => {
-    if (!matchesActions(cmd.action, actions)) return next();
+    if (actions?.length && !actions.some(p => matchesPattern(p, cmd.action))) return next();
 
     const envelope: CommandEnvelope = { command: cmd.action, target: cmd.target, payload: cmd.payload };
     const effectiveRetry = noRetry.includes(cmd.action) ? 0 : retry;
@@ -422,12 +399,12 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
   }
 
   const plugin: AsyncPlugin = async (cmd: Command, next: () => CommandResult | Promise<CommandResult>): Promise<CommandResult> => {
-    if (!matchesActions(cmd.action, actions)) {
+    if (actions?.length && !actions.some(p => matchesPattern(p, cmd.action))) {
       return next();
     }
 
     // Pre-flight abort — don't enqueue if signal is already tripped.
-    if (cmd.signal?.aborted) return abortResultForBridge(cmd.action, cmd.signal);
+    if (cmd.signal?.aborted) return abortedResult(cmd.action, cmd.signal);
 
     return new Promise<CommandResult>((resolve) => {
       const id = genId();
@@ -459,7 +436,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
       // The server may still process the command; this only cancels the client-side
       // wait. WS transports don't have per-message cancellation in the protocol.
       if (cmd.signal) {
-        abortHandler = () => settle(abortResultForBridge(cmd.action, cmd.signal!));
+        abortHandler = () => settle(abortedResult(cmd.action, cmd.signal!));
         cmd.signal.addEventListener('abort', abortHandler);
       }
 

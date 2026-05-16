@@ -177,6 +177,7 @@ export {
   useSharedCommandState,
   type UseSharedCommandStateOptions,
   useCommandState,
+  type UseCommandStateOptions,
   useCommandHistory,
   // v0.4.1
   useCommandGroup,

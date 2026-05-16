@@ -17,9 +17,9 @@ import { brotliCompressSync, constants } from 'node:zlib';
 // Brotli q=11 budgets, in bytes. Values are intentionally a bit above current
 // measurements to absorb minifier output drift between Vite versions.
 const BUDGETS = {
-  'vapor-chamber.iife.min.js':          { rawMax: 37_500, brotliMax: 10_400 },
-  'vapor-chamber-core.iife.min.js':     { rawMax: 26_000, brotliMax: 7_100 },
-  'vapor-chamber-elements.iife.min.js': { rawMax: 27_500, brotliMax: 7_400 },
+  'vapor-chamber.iife.min.js':          { rawMax: 35_000, brotliMax: 10_100 },
+  'vapor-chamber-core.iife.min.js':     { rawMax: 24_200, brotliMax: 6_900 },
+  'vapor-chamber-elements.iife.min.js': { rawMax: 25_600, brotliMax: 7_300 },
 };
 
 const BR_OPTS = { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } };

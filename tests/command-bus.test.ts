@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { createCommandBus, createAsyncCommandBus } from '../src/command-bus';
+import { createCommandBus, createAsyncCommandBus, configureUid } from '../src/command-bus';
 
 describe('createCommandBus', () => {
   describe('dispatch', () => {
@@ -294,5 +294,124 @@ describe('createAsyncCommandBus', () => {
     await bus.dispatch('asyncAction', {});
 
     expect(hookCalled).toHaveBeenCalledWith({ ok: true, value: 'result' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// configureUid
+// ---------------------------------------------------------------------------
+
+describe('configureUid', () => {
+  it('replaces the id generator used by stampMeta', () => {
+    let counter = 0;
+    configureUid(() => `test-${++counter}`);
+
+    const bus = createCommandBus();
+    bus.register('op', (cmd) => cmd.meta?.id);
+    const r1 = bus.dispatch('op', {});
+    const r2 = bus.dispatch('op', {});
+
+    // restore default before asserting so other tests are not affected
+    configureUid(() => `restored-${Math.random()}`);
+
+    expect(r1.value).toBe('test-1');
+    expect(r2.value).toBe('test-2');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// syncQuery bare-bus fast path (no plugins/hooks/listeners)
+// ---------------------------------------------------------------------------
+
+describe('syncQuery bare-bus fast path', () => {
+  it('returns handler result with no plugins installed', () => {
+    const bus = createCommandBus();
+    bus.register('getCount', () => 42);
+    // No plugins, hooks, or listeners — exercises the bare-bus branch
+    const r = bus.query('getCount', {});
+    expect(r.ok).toBe(true);
+    expect(r.value).toBe(42);
+  });
+
+  it('returns handleMissing when no handler on bare bus', () => {
+    const bus = createCommandBus();
+    const r = bus.query('missing', {});
+    expect(r.ok).toBe(false);
+    expect(r.error?.message).toContain('No handler');
+  });
+
+  it('uses full runner path when a plugin is installed', () => {
+    const bus = createCommandBus();
+    bus.register('get', () => 1);
+    const pluginSpy = vi.fn((_cmd: any, next: any) => next());
+    bus.use(pluginSpy);
+    bus.query('get', {});
+    expect(pluginSpy).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// listenerOffAll with wildcard pattern
+// ---------------------------------------------------------------------------
+
+describe('listenerOffAll with wildcard pattern', () => {
+  it('removes only the matching wildcard listener', () => {
+    const bus = createCommandBus();
+    bus.register('cartAdd', () => 1);
+    const cartListener = vi.fn();
+    const allListener  = vi.fn();
+    bus.on('cart*', cartListener);
+    bus.on('*',     allListener);
+
+    bus.offAll('cart*');
+    bus.dispatch('cartAdd', {});
+
+    expect(cartListener).not.toHaveBeenCalled();
+    expect(allListener).toHaveBeenCalled(); // untouched
+  });
+
+  it('removes exact-match listener via offAll', () => {
+    const bus = createCommandBus();
+    bus.register('op', () => 1);
+    const listener = vi.fn();
+    bus.on('op', listener);
+
+    bus.offAll('op');
+    bus.dispatch('op', {});
+
+    expect(listener).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// asyncDispatchBatch mid-flight abort with transactional rollback
+// ---------------------------------------------------------------------------
+
+describe('asyncDispatchBatch mid-flight abort', () => {
+  it('triggers transactional rollback when signal aborts mid-batch', async () => {
+    const bus = createAsyncCommandBus();
+    const log: string[] = [];
+    bus.register('a', async () => { log.push('a'); return 1; });
+    bus.register('b', async () => {
+      log.push('b');
+      ac.abort(); // abort mid-flight
+      return 2;
+    });
+    bus.register('undoA', async () => { log.push('undoA'); });
+
+    const ac = new AbortController();
+    const result = await bus.dispatchBatch(
+      [
+        { action: 'a', target: {} },
+        { action: 'b', target: {} },
+        { action: 'c', target: {} },
+      ],
+      { signal: ac.signal, transactional: false },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(log).toContain('a');
+    expect(log).toContain('b');
+    expect(log).not.toContain('c'); // aborted before reaching c
   });
 });

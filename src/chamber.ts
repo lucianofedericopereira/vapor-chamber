@@ -1,6 +1,9 @@
 /**
  * vapor-chamber - Vue Vapor integration
  *
+ * v1.3.0 — Vue 3.6.0-beta.12 alignment: error recovery (component context,
+ *           fallthrough props, render effects restored after setup errors);
+ *           VDOM slots interop normalization; no code changes needed here.
  * v1.1.0 — Vue 3.6.0-beta.10 alignment: defineVaporCustomElement, defineVaporComponent,
  *           defineVaporAsyncComponent detection; improved hydration interop.
  * v0.4.1 — Added: useCommandGroup (namespace isolation), useCommandError (error boundary).
@@ -31,8 +34,8 @@ export type { Signal, CreateSignal } from './signal';
 export { configureSignal };
 export { signal };
 
-let _vueOnUnmounted: ((fn: () => void) => void) | null = null;
 let _vueOnScopeDispose: ((fn: () => void) => void) | null = null;
+let _vueGetCurrentScope: (() => any) | null = null;
 let _vueGetCurrentInstance: (() => any) | null = null;
 let _vueOnActivated: ((fn: () => void) => void) | null = null;
 let _vueOnDeactivated: ((fn: () => void) => void) | null = null;
@@ -58,13 +61,13 @@ function applyVueModule(vue: any): void {
     configureSignal(vue.ref);
   }
 
-  // Prefer onScopeDispose (Vue 3.5+) — works in effectScope, VDOM, and Vapor
   if (vue && typeof vue.onScopeDispose === 'function') {
     _vueOnScopeDispose = vue.onScopeDispose;
   }
-
-  if (vue && typeof vue.onUnmounted === 'function') {
-    _vueOnUnmounted = vue.onUnmounted;
+  // getCurrentScope() (Vue 3.2+) — returns the active effect scope or undefined.
+  // Used as the guard before calling onScopeDispose, replacing the try/catch pattern.
+  if (vue && typeof vue.getCurrentScope === 'function') {
+    _vueGetCurrentScope = vue.getCurrentScope;
   }
   if (vue && typeof vue.getCurrentInstance === 'function') {
     _vueGetCurrentInstance = vue.getCurrentInstance;
@@ -205,48 +208,30 @@ export function resetCommandBus(): void {
 /**
  * Try to register a cleanup function on the nearest Vue scope/component.
  *
- * v0.4.0: Prefers onScopeDispose (Vue 3.5+) over onUnmounted.
- * onScopeDispose works in component setup, effectScope(), Vapor components,
- * and SSR — making it the correct choice for library composables.
+ * Uses `getCurrentScope()` (Vue 3.2+) to check whether a reactive scope is
+ * active before calling `onScopeDispose`. This replaces the earlier try/catch
+ * pattern — no exception-as-control-flow, no `onUnmounted` fallback needed.
  *
- * Falls back to onUnmounted if onScopeDispose is not available.
- * No-ops entirely if not inside a Vue context.
+ * In Vue 3.5+ (the minimum peer dep), every component `setup()` — including
+ * Vapor components — is wrapped in an effect scope, so `getCurrentScope()`
+ * inside setup always returns something. The `onUnmounted` fallback is
+ * unreachable under Vue 3.5+ and has been removed.
+ *
+ * No-ops entirely when called outside any Vue scope (e.g. module init time,
+ * plain async callbacks). Caller is responsible for calling `dispose()` in
+ * those cases.
  */
 export function tryAutoCleanup(disposeFn: () => void): void {
   probeVue();
 
-  // Prefer onScopeDispose — works in effectScope + both VDOM and Vapor
-  if (_vueOnScopeDispose) {
-    try {
-      _vueOnScopeDispose(disposeFn);
-      return;
-    } catch {
-      // Not in a reactive scope — try onUnmounted fallback
-    }
+  if (_vueOnScopeDispose && _vueGetCurrentScope?.()) {
+    _vueOnScopeDispose(disposeFn);
+    return;
   }
 
-  // Fallback: onUnmounted (requires component setup context).
-  // NOTE: In Vue 3.6+ Vapor components, getCurrentInstance() returns null
-  // even inside <script setup>. This fallback only works for VDOM components.
-  // Vapor components are already covered by onScopeDispose above.
-  if (_vueOnUnmounted && _vueGetCurrentInstance) {
-    try {
-      if (_vueGetCurrentInstance()) {
-        _vueOnUnmounted(disposeFn);
-        return;
-      }
-    } catch {
-      // Not in a setup context — caller must call dispose() manually
-    }
-  }
-
-  // If Vue is detected but neither scope nor instance is available,
-  // the caller is likely outside setup() — warn in dev mode.
-  // (Use `_vueOnScopeDispose` as the "Vue detected" probe — it's set in the
-  //  same applyVueModule() pass that used to set the now-relocated _vueRef.)
   if (_vueOnScopeDispose && typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production') {
     console.warn(
-      '[vapor-chamber] tryAutoCleanup: no Vue scope or component instance found. ' +
+      '[vapor-chamber] tryAutoCleanup: no active Vue scope found. ' +
       'Call dispose() manually or use this composable inside setup() / effectScope().'
     );
   }
@@ -263,16 +248,58 @@ export function tryAutoCleanup(disposeFn: () => void): void {
  * When reactivated, `onResume` is called. No-ops if not inside a
  * KeepAlive-wrapped component or if Vue is not available.
  *
+ * `getCurrentInstance()` is the correct guard: `onActivated`/`onDeactivated`
+ * throw when called outside a component setup context, so the upfront check
+ * replaces the earlier two try/catch blocks.
+ *
  * @internal — used by composables that manage bus subscriptions.
  */
 export function tryKeepAliveHooks(onPause: () => void, onResume: () => void): void {
   probeVue();
-  if (_vueOnDeactivated) {
-    try { _vueOnDeactivated(onPause); } catch { /* not in component context */ }
+  if (!_vueGetCurrentInstance?.()) return;
+  _vueOnDeactivated?.(onPause);
+  _vueOnActivated?.(onResume);
+}
+
+// ---------------------------------------------------------------------------
+// runDispatch — shared loading/error wrapper used by useCommand, useCommandQuery,
+// and useVaporCommand (chamber-vapor.ts). Accepts a thunk so the bus call is
+// made inside the try block.
+// ---------------------------------------------------------------------------
+
+/** @internal */
+export function runDispatch(
+  busCall: () => any,
+  loading: Signal<boolean>,
+  lastError: Signal<Error | null>,
+  onSuccess?: (value: any) => void,
+): CommandResult | Promise<CommandResult> {
+  loading.value = true;
+  lastError.value = null;
+  let result: any;
+  try {
+    result = busCall();
+  } catch (e) {
+    loading.value = false;
+    const error = e as Error;
+    lastError.value = error;
+    return { ok: false, error };
   }
-  if (_vueOnActivated) {
-    try { _vueOnActivated(onResume); } catch { /* not in component context */ }
+  if (result && typeof result.then === 'function') {
+    return (result as Promise<CommandResult>).then(
+      (r) => {
+        loading.value = false;
+        if (r.ok) onSuccess?.(r.value);
+        else lastError.value = r.error ?? null;
+        return r;
+      },
+      (e: Error) => { loading.value = false; lastError.value = e; return { ok: false, error: e }; },
+    );
   }
+  loading.value = false;
+  if (result.ok) onSuccess?.(result.value);
+  else lastError.value = result.error ?? null;
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -290,29 +317,7 @@ export function useCommand() {
   const lastError = signal<Error | null>(null);
 
   function dispatch(action: string, target: any, payload?: any): CommandResult | Promise<CommandResult> {
-    loading.value = true;
-    lastError.value = null;
-    let result: any;
-    try {
-      result = bus.dispatch(action, target, payload);
-    } catch (e) {
-      loading.value = false;
-      const error = e as Error;
-      lastError.value = error;
-      return { ok: false, error };
-    }
-
-    // Handle async results (when using async bus or async transport plugins)
-    if (result && typeof result.then === 'function') {
-      return (result as Promise<CommandResult>).then(
-        (r) => { loading.value = false; if (!r.ok) lastError.value = r.error ?? null; return r; },
-        (e: Error) => { loading.value = false; lastError.value = e; return { ok: false, error: e }; },
-      );
-    }
-
-    loading.value = false;
-    if (!result.ok) lastError.value = result.error ?? null;
-    return result;
+    return runDispatch(() => bus.dispatch(action, target, payload), loading, lastError);
   }
 
   return { dispatch, loading, lastError };
@@ -490,24 +495,65 @@ export function useSharedCommandState(options: UseSharedCommandStateOptions = {}
 // useCommandState
 // ---------------------------------------------------------------------------
 
+export type UseCommandStateOptions = {
+  /**
+   * When true, multiple synchronous dispatches within the same microtask are
+   * accumulated and the signal is written once via `queueMicrotask`. Pairs with
+   * Vue 3.6.0-beta.12's v-for source coalescing: our side defers the signal
+   * write, Vue's runtime coalesces the resulting DOM update into one pass.
+   *
+   * Trade-off: 1 microtask of signal latency. Use for arrays consumed by v-for
+   * that receive rapid bulk updates (batch dispatch, form field arrays, scroll
+   * position lists). Default: false (immediate write per dispatch).
+   */
+  coalesce?: boolean;
+};
+
 /**
- * useCommandState - create reactive state that updates via commands
+ * useCommandState - create reactive state that updates via commands.
  *
  * Auto-cleanup on Vue component unmount or scope disposal.
+ *
+ * @example
+ * // Immediate mode (default):
+ * const { state } = useCommandState([], { cartAdd: (s, cmd) => [...s, cmd.target] });
+ *
+ * @example
+ * // Coalesced mode — batch writes for v-for lists:
+ * const { state } = useCommandState([], { cartAdd: (s, cmd) => [...s, cmd.target] }, { coalesce: true });
  */
 export function useCommandState<T>(
   initial: T,
   handlers: {
     [action: string]: (state: T, cmd: Command) => T;
-  }
+  },
+  options: UseCommandStateOptions = {}
 ) {
+  const { coalesce = false } = options;
   const bus = getCommandBus();
   const state = signal(initial);
-
   const unregisters: Array<() => void> = [];
+
+  // coalesce bookkeeping — only allocated when coalesce: true
+  let _pending: T = initial;
+  let _hasPending = false;
+  let _scheduled = false;
 
   for (const [action, handler] of Object.entries(handlers)) {
     const unregister = bus.register(action, (cmd) => {
+      if (coalesce) {
+        _pending = handler(_hasPending ? _pending : state.value, cmd);
+        _hasPending = true;
+        if (!_scheduled) {
+          _scheduled = true;
+          queueMicrotask(() => {
+            state.value = _pending;
+            _hasPending = false;
+            _scheduled = false;
+          });
+        }
+        return _pending;
+      }
       state.value = handler(state.value, cmd);
       return state.value;
     });
@@ -671,35 +717,12 @@ export function useCommandQuery() {
   const lastError = signal<Error | null>(null);
 
   function query(action: string, target: any, payload?: any): CommandResult | Promise<CommandResult> {
-    loading.value = true;
-    lastError.value = null;
-    let result: any;
-    try {
-      result = bus.query(action, target, payload);
-    } catch (e) {
-      loading.value = false;
-      const error = e as Error;
-      lastError.value = error;
-      return { ok: false, error };
-    }
-
-    // Handle async results
-    if (result && typeof result.then === 'function') {
-      return (result as Promise<CommandResult>).then(
-        (r) => {
-          loading.value = false;
-          if (r.ok) data.value = r.value;
-          else lastError.value = r.error ?? null;
-          return r;
-        },
-        (e: Error) => { loading.value = false; lastError.value = e; return { ok: false, error: e }; },
-      );
-    }
-
-    loading.value = false;
-    if (result.ok) data.value = result.value;
-    else lastError.value = result.error ?? null;
-    return result;
+    return runDispatch(
+      () => bus.query(action, target, payload),
+      loading,
+      lastError,
+      (value) => { data.value = value; },
+    );
   }
 
   return { query, data, loading, lastError };

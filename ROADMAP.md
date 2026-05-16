@@ -4,18 +4,18 @@ This project tracks Vue 3.6 while it is in beta. That has direct consequences
 for what's stable, what's transitional, and what will change once Vue 3.6
 ships stable. This file is the source of truth for that distinction.
 
-Last reviewed against **Vue 3.6.0-beta.11** (released 2026-05-07).
+Last reviewed against **Vue 3.6.0-beta.12** (released 2026-05-15).
 
 ---
 
 ## Current posture: beta territory
 
-- **Peer dependency:** `vue: ">=3.5.0 || >=3.6.0-beta.11"`. The lib supports
+- **Peer dependency:** `vue: ">=3.5.0 || >=3.6.0-beta.12"`. The lib supports
   Vue 3.5 (composables only) and Vue 3.6 betas (full Vapor surface).
 - **Vapor APIs are still moving.** `defineVaporCustomElement`, `defineVaporComponent`,
   `defineVaporAsyncComponent` are stable in shape but their underlying behavior
-  has shifted between beta.10 and beta.11 (generics inference, emits/attrs split,
-  custom-element fallback in shadowRoot:false trees). The lib's wrappers are
+  has shifted between beta.10 and beta.12 (generics inference, emits/attrs split,
+  VDOM slots interop normalization, error recovery). The lib's wrappers are
   pass-through, so consumers inherit each beta's improvements without code
   changes — but the wrappers themselves exist precisely because the API is
   not yet final.
