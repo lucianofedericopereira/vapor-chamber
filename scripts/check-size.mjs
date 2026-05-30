@@ -16,10 +16,13 @@ import { brotliCompressSync, constants } from 'node:zlib';
 
 // Brotli q=11 budgets, in bytes. Values are intentionally a bit above current
 // measurements to absorb minifier output drift between Vite versions.
+// Budgets updated for v1.4.0: AlienSignalWrapper class in alien-signals.ts
+// (class refactor for V8 hidden class stability). alien-signals is a regular dep
+// but NOT auto-bundled — opt in via configureAlienSignals from vapor-chamber/alien-signals.
 const BUDGETS = {
-  'vapor-chamber.iife.min.js':          { rawMax: 35_000, brotliMax: 10_100 },
-  'vapor-chamber-core.iife.min.js':     { rawMax: 24_200, brotliMax: 6_900 },
-  'vapor-chamber-elements.iife.min.js': { rawMax: 25_600, brotliMax: 7_300 },
+  'vapor-chamber.iife.min.js':          { rawMax: 34_600, brotliMax: 10_100 },
+  'vapor-chamber-core.iife.min.js':     { rawMax: 23_700, brotliMax: 6_900 },
+  'vapor-chamber-elements.iife.min.js': { rawMax: 25_100, brotliMax: 7_300 },
 };
 
 const BR_OPTS = { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } };

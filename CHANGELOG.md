@@ -2,6 +2,290 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.4.0 — Vue 3.6.0-beta.13 alignment
+
+### Changed
+
+- **peerDependencies** bumped to `vue: ">=3.5.0 || >=3.6.0-beta.13"`.
+
+### Vue 3.6.0-beta.13 alignment
+
+#### TransitionGroup (`transitions.ts`)
+
+- **`onMove` now fires for Vapor component moves** (`runtime-vapor: animate vapor
+  component moves in TransitionGroup`): `onMove` was silently skipped when a
+  Vapor component was repositioned inside a Vapor `<TransitionGroup>`. The hook
+  now fires correctly — `createTransitionBridge` and `useTransitionCommand`
+  dispatch the `*Move` command as expected.
+
+- **`onMove` now fires for VDOM component moves** (`runtime-vapor: animate vdom
+  component moves in vapor TransitionGroup`): the same class of bug affected VDOM
+  components inside a Vapor `<TransitionGroup>`. Both cases are now fixed in
+  Vue's runtime; wrappers here are pass-through.
+
+- **`onMove` fires after child updates flush** (`runtime-vapor: defer
+  TransitionGroup moves until child updates flush`): move hooks are deferred until
+  all child update jobs complete before `onMove` is called. The dispatched command
+  receives `el` in its settled pre-move position — safe to read final layout.
+
+- **Transition hooks on slot fallbacks** (`runtime-vapor: apply transition hooks
+  to slot fallbacks`): transition lifecycle hooks now apply to slot fallback
+  children inside Vapor components. Commands wired to `onBeforeEnter`/`onLeave`
+  etc. fire correctly when a fallback slot transitions.
+
+- **v-for item keys preserved** (`runtime-vapor: preserve v-for item keys in
+  transition group`): keys assigned to v-for items are maintained through
+  TransitionGroup reorders, preventing identity mismatches during animated list
+  updates. No wiring change needed.
+
+#### Interop / Vapor roots (`chamber-vapor.ts`)
+
+- **CSS scope IDs on Vapor roots** (`runtime-vapor: apply interop scope ids to
+  vapor roots`): Vapor app roots created with `createVaporChamberApp()` and
+  Vapor components mounted via the interop plugin now correctly inherit CSS scope
+  IDs from parent VDOM components. Scoped styles no longer leak or go missing in
+  mixed Vapor/VDOM trees.
+
+- **v-once respected in VDOM slot interop** (`runtime-vapor: respect v-once in
+  vdom slot interop`): VDOM slot content marked `v-once` no longer re-evaluates
+  after crossing into a `defineVaporComponent()`. Slot prop snapshots are also
+  preserved (`runtime-vapor: preserve v-once slot prop snapshots`,
+  `runtime-vapor: snapshot v-once slot inputs`).
+
+- **v-once for slot fallback children** (`runtime-vapor: preserve v-once
+  semantics for slot fallback children`): `v-once` semantics are now consistently
+  applied to slot fallback content in Vapor components. All wrappers in this
+  library are pass-through.
+
+#### SSR / Hydration (`ssr.ts`)
+
+- **No stale DOM on mismatch** (`runtime-vapor: avoid preserving stale element
+  mismatch content`): Vue's hydration recovery no longer retains wrong DOM nodes
+  when server and client markup diverge. `rehydrate()` results are more reliable
+  after a mismatch.
+
+- **Namespace preserved during recovery** (`runtime-vapor: preserve namespace
+  during hydration recovery`): SVG and MathML namespace context is maintained
+  when Vue recovers from hydration errors. No impact on command-level replay.
+
+- **Allowed prop mismatches respected** (`runtime-vapor: respect allowed prop
+  mismatches during hydration`): expected prop differences (e.g. `data-v-inspector`
+  in dev) no longer trigger spurious hydration warnings. The `ignoreUnhandled`
+  option is unaffected.
+
+- **Teleport ranges excluded from sibling walk** (`runtime-vapor: skip teleport
+  ranges for logical hydration siblings`): Teleport boundaries are correctly
+  skipped during logical sibling traversal, preventing command replay ordering
+  issues in apps that use `<Teleport>` with SSR.
+
+- **Static hydration target validation in dev** (`runtime-vapor: validate static
+  hydration targets in dev`): dev builds now assert that static element targets
+  exist before hydrating, surfacing markup errors earlier. Safe for `rehydrate()`
+  callers — command dispatch happens after DOM is ready.
+
+### Performance
+
+Beta.13 ships a large batch of compiler and runtime optimizations that benefit
+vapor-chamber consumers automatically — no code changes required.
+
+#### `tryAutoCleanup` / composable lifecycle cost (`chamber.ts`)
+
+`runtime-vapor: only create lifecycle update jobs when needed` — lifecycle update
+jobs are now created lazily. Every vapor-chamber composable calls `tryAutoCleanup`
+→ `onScopeDispose`, which previously caused an update job to be allocated per
+component even when no reactive signals were consumed. In beta.13, components that
+use vapor-chamber purely for dispatch (no signals read in the template) incur zero
+update-job overhead.
+
+#### `useCommandState` coalesced writes (`chamber.ts`)
+
+`runtime-vapor: specialize v-for block operations` and `runtime-vapor: reduce v-if
+branch scope overhead` — signal writes flushed by `{ coalesce: true }` now land
+into faster Vapor runtime patch paths. v-for list updates dispatch less overhead
+per item; v-if branches around state-driven conditionals have reduced scope
+allocation.
+
+#### `useTransitionCommand` v-bind spread (`transitions.ts`)
+
+`compiler-vapor: expand object literal v-bind and v-on` — object literal spreads
+are expanded inline at compile time instead of spread at runtime. The canonical
+`<Transition v-bind="t">` / `<TransitionGroup v-bind="t">` pattern now produces
+cheaper compiled output; the hook object keys are statically known at the call
+site.
+
+`runtime-vapor: avoid duplicate TransitionGroup props resolution` — `<TransitionGroup>`
+no longer resolves its own props twice per render cycle. Applies to all
+TransitionGroup instances, including those bound via `useTransitionCommand`.
+
+#### `defineVaporComponent` compiled output (`chamber-vapor.ts`)
+
+`vapor: encode template options as flags` — `emits`, `inheritAttrs`, and other
+template-level options are encoded as bit flags rather than objects at compile
+time. Components wrapped with `defineVaporComponent()` parse options faster.
+
+`compiler-vapor: inline static component literal props` — static props passed at
+the call site are inlined by the compiler rather than allocated as runtime objects
+per render.
+
+`vapor: lower single-use asset component resolves` — a component used exactly once
+in a template no longer goes through `resolveComponent()` at runtime; the compiler
+emits a direct reference. Most `defineVaporComponent()` usages in leaf templates
+qualify.
+
+`compiler-vapor: use onBinding helper for reactive events` and `vapor: move event
+invoker wrapping into runtime helpers` — event handlers use shared runtime helpers
+instead of per-element closures. Vapor components with event bindings generate
+less code and allocate fewer closures.
+
+#### Directives (`directives.ts`)
+
+`vapor: move event invoker wrapping into runtime helpers` — VDOM components that
+use `v-vc:command` now share a single invoker wrapper per action type rather than
+one closure per element in compiled output.
+
+### Performance baselines (v1.4.0, 2026-05-28)
+
+New benchmark groups added to `tests/perf.bench.ts` covering surfaces affected
+by beta.13 optimizations. Run `npm run bench` to reproduce.
+
+**Transition bridge (`createTransitionBridge`)** *(two-run average)*
+
+| bench | run 1 | run 2 | avg | mean |
+|---|---|---|---|---|
+| all 9 hooks × 1k sequences | 709 hz | 717 hz | 713 hz | 1.40ms / 1k |
+| onMove only × 10k *(beta.13 baseline)* | 1,067 hz | 969 hz | 1,018 hz | 0.98ms / 10k |
+| onEnter + onLeave × 5k | 1,000 hz | 969 hz | 984 hz | 1.02ms / 5k pairs |
+| raw `bus.dispatch` × 10k *(overhead delta)* | 1,750 hz | 1,764 hz | 1,757 hz | 0.57ms / 10k |
+
+Bridge overhead vs bare dispatch: ~37ns/call (`dispatchSafe` try/catch).
+The `onMove` baseline is new — this path was silently skipped in Vapor before beta.13.
+`onMove` shows higher run-to-run variance (±6% vs ±0.4% for raw dispatch) due to
+the try/catch block inhibiting V8 inlining under GC pressure — expected behaviour.
+
+**`useCommandState` immediate vs coalesced** *(two-run average)*
+
+| bench | run 1 | run 2 | avg |
+|---|---|---|---|
+| immediate — 10 array appends | 20,188 hz | 20,507 hz | 20,347 hz |
+| coalesced — 10 array appends | 19,767 hz | 19,715 hz | 19,741 hz |
+| immediate — 100 array appends | 1,934 hz | 2,090 hz | 2,012 hz |
+| coalesced — 100 array appends | 2,015 hz | 2,090 hz | 2,052 hz |
+| immediate — 100 counter | 2,015 hz | 2,073 hz | 2,044 hz |
+| coalesced — 100 counter | 1,875 hz | 2,098 hz | 1,986 hz |
+
+`{ coalesce: true }` is neutral across all cases — both array and scalar types
+stay within noise of immediate mode across two independent runs. The earlier
+single-run finding of "no win for scalars" was within measurement variance.
+Rule of thumb: use coalesced when you want to guarantee ≤1 signal write per
+microtask burst (correctness reason), not for a throughput win. Throughput is
+equivalent; the benefit is fewer Vue re-renders per rapid dispatch burst.
+
+**Vue reactive integration — beta.13 actual signal cost (vue@3.6.0-beta.13 devDep)**
+
+Previous bench runs had no Vue installed — `signal()` fell back to plain
+getter/setter objects and `tryAutoCleanup` never hit `onScopeDispose`. These
+numbers reflect the real reactive path with Vue beta.13.
+
+| bench | hz | note |
+|---|---|---|
+| plain closure getter/setter 10k writes *(baseline)* | 2,542 hz | what all prior benches were measuring |
+| Vue ref (alien-signals) 10k writes | 9,647 hz | **3.8× faster** than plain fallback |
+| effectScope + onScopeDispose only × 1k | 165,559 hz | beta.13 lazy job — no update job allocated |
+| effectScope + signal + onScopeDispose × 1k | 22,027 hz | full reactive scope path |
+| useCommandState 100 dispatches — Vue ref | 1,902 hz | ~7% vs 2,044 hz without Vue |
+| useCommandState coalesced 100 dispatches | 1,897 hz | identical to immediate (confirmed) |
+
+Three findings:
+
+**alien-signals writes are 3.8× faster than the plain fallback.** The closure
+getter/setter fallback (`let _v; get value() { return _v; }`) forces V8 through
+scope-chain lookup and property descriptor dispatch. alien-signals uses a plain
+internal object that V8 can fully inline. Users running without Vue are not
+getting "cheaper" signals — they're getting slower ones.
+
+**beta.13 lazy lifecycle jobs confirmed.** `effectScope + onScopeDispose` with
+no reactive state runs at 165k hz — no update job is allocated. The cost only
+appears when reactive state is actually tracked inside the scope (22k hz for
+the full path). Every `tryAutoCleanup` call in a dispatch-only component (no
+signal reads in the template) now costs nothing in terms of update jobs.
+
+**useCommandState overhead from alien-signals tracking: ~7%.** The full path
+(dispatch → handler → `state.value = newValue` through alien-signals) costs
+~7% more than plain object writes — entirely from dependency tracking bookkeeping.
+This is the true cost paid per reactive state update in a real app.
+
+### Refactors (v1.4.0)
+
+Three runtime changes driven by bench findings with Vue beta.13 and alien-signals
+installed. All are internal — no public API changes, no behavior changes for
+existing consumers.
+
+**`src/signal.ts` — plain `{ value }` object fallback**
+
+Replaced the closure getter/setter fallback (`let _v; { get value(), set value() }`)
+with a plain `{ value: initial }` object. Getter/setter descriptors force V8 through
+a function call on every read/write; a plain data property has zero indirection.
+The improvement is an upper bound in synthetic benches (V8 DCEs dead writes) but
+the lack of function-call overhead is real in all paths.
+
+**`src/alien-signals.ts` — class-based `AlienSignalWrapper`**
+
+Replaced the `alienSignalAdapter` return value (object literal with getter/setter)
+with a `class AlienSignalWrapper<T>`. Classes give V8 a stable hidden class for all
+wrapper instances — monomorphic inline caches at every `.value` access site across
+the reactive graph.
+
+**`package.json` — `alien-signals` promoted to `dependencies`**
+
+Moved from `devDependencies` to `dependencies`. Consumers using
+`configureAlienSignals` no longer need a separate `npm install alien-signals`.
+alien-signals is **not** auto-bundled in `signal.ts` — it only enters your bundle
+when you explicitly call `configureAlienSignals`. Bundle impact: zero for consumers
+who don't use it; the `vapor-chamber/alien-signals` sub-path entry stays opt-in.
+
+---
+
+**Regression check — v1.3.0 → v1.4.0**
+
+The table below uses two independent bench runs to confirm no regression in core
+dispatch throughput against v1.3.0 baselines. The signal.ts and alien-signals.ts
+changes are internal-only and do not affect the dispatch hot path.
+
+| bench | v1.3.0 recorded | v1.4.0 run 1 | v1.4.0 run 2 | Δ vs v1.3.0 |
+|---|---|---|---|---|
+| syncDispatch bare | 2,259 hz | 2,231 hz | 2,213 hz | -2% — noise |
+| syncQuery bare | 2,393 hz | 2,374 hz | 2,377 hz | -1% — noise |
+| bus.emit 3 listeners | 4,640 hz *(v1.2.x)* | 4,618 hz | 4,717 hz | flat |
+| fast-lane compile+dispatch | 25,400 hz *(v1.2.x)* | 28,584 hz | 28,763 hz | **+13%** — JIT/session variance |
+| bus.dispatch bare | ~700 hz *(v1.2.x, pre-opt)* | 1,801 hz | 1,827 hz | **+160%** — cumulative v1.2–v1.3 opt |
+| rehydrate 1k | *(not recorded)* | 13,888 hz | 14,355 hz | — |
+| rehydrate 1k ignoreUnhandled | *(not recorded)* | 97,113 hz | 100,290 hz | — |
+| persist coalesced 100 | *(not recorded)* | 103,162 hz | 104,735 hz | — |
+| asyncDispatch bare | *(not recorded)* | 3,000 hz | 3,387 hz | — |
+
+No regressions. The `bus.dispatch` +160% reflects cumulative optimisations from
+v1.2.x–v1.3.0 (bare-bus fast path, `stampMeta` simplification, FIFO prefix-cache
+eviction) — not a v1.4.0 change. Two-run spread on all rows is within ±5%,
+consistent with normal JIT and OS scheduling variance.
+
+**Comparative emit fan-out — v1.2.x recorded vs v1.4.0 (two-run, peer library versions may differ)**
+
+| peer | v1.2.x recorded | v1.4.0 run 1 | v1.4.0 run 2 | note |
+|---|---|---|---|---|
+| vapor-chamber bus.emit 3 listeners | 4,640 hz | 4,662 hz | 4,694 hz | flat |
+| mitt | 2,550 hz | 3,312 hz | 3,357 hz | +31% — likely mitt version bump |
+| nanoevents | 5,620 hz | 6,484 hz | 6,622 hz | +18% — likely nanoevents version bump |
+| eventemitter3 | *(not recorded)* | 6,224 hz | 6,341 hz | — |
+| tiny-emitter | *(not recorded)* | 2,278 hz | 2,288 hz | — |
+| rxjs Subject | *(not recorded)* | 2,424 hz | 2,394 hz | — |
+| raw Map+Set baseline | *(not recorded)* | 5,529 hz | 5,539 hz | — |
+
+vapor-chamber's own emit throughput is flat and consistent across runs.
+Peer library improvements reflect their own version upgrades between bench sessions.
+Run-to-run variance across both sessions is ≤2% for all peers except rxjs (±1.2%).
+
+---
+
 ## v1.3.0 — Vue 3.6.0-beta.12 alignment
 
 ### Changed

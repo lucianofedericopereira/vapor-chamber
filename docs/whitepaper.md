@@ -478,6 +478,18 @@ library mirrors these axes in its own IIFE distribution: three sized variants
 (`core` / `elements` / `full`) so script-tag consumers can pick the smallest
 bundle that covers their use case. See §11.6.
 
+**3.6.0-beta.13 addendum (May 2026):** Five bug fixes relevant to Vapor Chamber
+consumers — `onMove` now fires correctly for both Vapor and VDOM component moves
+inside a Vapor `<TransitionGroup>` (was silently skipped), move hooks defer until
+child updates flush, transition hooks apply to slot fallback children, and v-for
+item keys are preserved through reorders. SSR: five hydration fixes including
+stale mismatch content, namespace recovery, and Teleport sibling walk. Interop:
+CSS scope IDs now correctly apply to Vapor roots in mixed trees. Lifecycle: update
+jobs are created lazily — `onScopeDispose` registration (via `tryAutoCleanup`) no
+longer allocates an update job when no reactive state is tracked in the scope.
+Compiler: object-literal `v-bind` spreads expanded inline, single-use component
+resolves lowered, static props inlined. All Vapor Chamber wrappers are pass-through.
+
 Vapor Chamber auto-detects `ref()` at module load. No configuration needed — `signal()` IS a
 Vue alien-signal in 3.6+.
 

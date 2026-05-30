@@ -1,6 +1,13 @@
 /**
  * vapor-chamber - Directive plugin (opt-in, 0KB when not imported)
  *
+ * v1.4.0 — Vue 3.6.0-beta.13 alignment:
+ *           • Event invoker wrapping moved to shared runtime helpers (vapor: move
+ *             event invoker wrapping into runtime helpers) — click handlers
+ *             attached by this plugin land in VDOM components whose compiled
+ *             event bindings now share a single invoker wrapper per action type
+ *             rather than one closure per element. No code change; VDOM consumers
+ *             of this directive benefit automatically on upgrade.
  * v0.4.4 — Added: v-vc:command, v-vc:optimistic directives.
  *
  * Provides a Vue plugin that installs two directives for declarative command

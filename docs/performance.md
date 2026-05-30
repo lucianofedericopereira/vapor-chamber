@@ -266,12 +266,34 @@ configureAlienSignals(alienSignal);
 // observe the same underlying instances.
 ```
 
+**Performance note (v1.4.0 bench, beta.13):**
+
+| Signal path | ops/sec | Notes |
+|---|---|---|
+| Plain `{ value }` object (default fallback) | ~368,000 | Zero overhead, not reactive |
+| alien-signals via `configureAlienSignals` | ~21,000 | Opt-in reactive, 8× faster than old closure |
+| Vue `ref()` via `signal()` auto-detected | ~9,500 | Slower than raw adapter — Vue wrapper adds overhead |
+| Old closure getter/setter (v1.3, removed) | ~2,500 | 145× slower than plain object |
+
+The plain `{ value }` fallback is the fastest because it has zero getter/setter overhead — V8 optimizes a direct property write far better than a closure-captured variable. For push-pull reactivity without Vue, `configureAlienSignals` (21k ops/sec) beats even the Vue ref path (9.5k ops/sec) because it skips Vue's additional wrapper layer. Vue consumers are unaffected — `signal()` auto-detects `vue.ref()` and the 9.5k ops/sec path is the real reactive cost including Vue's scheduler integration.
+
 **Implementation note:** the connector takes alien-signals' `signal`
 function as an argument rather than importing it. vapor-chamber stays free
 of an `alien-signals` runtime dep; consumers install it themselves
 (~7.5 KB raw / ~2.5 KB brotli). 7 tests in
 [tests/alien-signals.test.ts](../tests/alien-signals.test.ts) verify the
 adapter against the real published package, not a stub.
+
+### `useCommandState({ coalesce: true })` — correctness, not speed
+
+`useCommandState` accepts a `{ coalesce: true }` option that collapses a burst
+of dispatches into a single reactive signal write (≤1 write per microtask burst).
+Bench result (v1.4.0, beta.13): throughput is **indistinguishable** from the
+default — 1,902 ops/sec vs 1,897 ops/sec across two runs.
+
+Use `coalesce: true` when correctness matters — e.g. a `v-for` that should
+never see a partially-updated list mid-burst. Do not reach for it as a
+performance knob; the measurements show no gain.
 
 ### `configureSignal(fn)` — provide your own signal implementation
 
@@ -467,6 +489,30 @@ The v1.2.x `emit` fast path makes three changes:
 
 Inspiration: similar tricks ship in [splice](https://github.com/lucianofedericopereira/splice) — frame pooling, no-listener fast path, minimal envelopes. vapor-chamber didn't adopt the full splice architecture (numeric action IDs, binary headers, frozen action tables) because it would mean a v2 rewrite; the targeted fast paths capture most of the win without breaking existing API.
 
+## Vue 3.6.0-beta.13 reactive runtime notes
+
+Three findings from the v1.4.0 bench run with beta.13 installed:
+
+**1. The plain `{ value }` fallback is the fastest write path at ~368,000 ops/sec.**
+It has zero getter/setter overhead — V8 optimizes a direct property write far better
+than a closure-captured variable (the old v1.3 closure ran at ~2,500 ops/sec, 145×
+slower). The fallback is not reactive; for push-pull reactivity without Vue, call
+`configureAlienSignals(alienSignal)` once at boot (~21,000 ops/sec). This is also
+faster than Vue's `ref()` path (~9,500 ops/sec) because it skips Vue's wrapper layer.
+
+**2. beta.13 lazy lifecycle jobs confirm near-zero `onScopeDispose` overhead.**
+`effectScope.run(() => onScopeDispose(fn))` with no tracked reactive state costs
+~165,000 hz — the lifecycle update job is never allocated (runtime-vapor: only
+create lifecycle update jobs when needed). Every vapor-chamber composable that
+calls `tryAutoCleanup` benefits automatically on beta.13.
+
+**3. `useCommandState { coalesce: true }` is throughput-neutral.** Coalescing
+collapses many reactive writes to one per microtask burst. It does not change
+dispatch throughput (measured at ~1,900 ops/sec both ways). Use it for
+correctness, not speed.
+
+---
+
 ## Benchmark snapshot
 
 Run on a current Apple Silicon dev machine, May 2026. Your numbers will
@@ -491,6 +537,15 @@ npx vitest bench --run tests/perf.bench.ts
 | `persist` — `coalesce: true` (100 dispatches × 50-item state)      | ~28,887     |
 | `rehydrate` — 1000 commands, single handler                        | ~1,300      |
 | `rehydrate` — 1000 commands, ignoreUnhandled skip path             | ~96,000     |
+| **Vue reactive integration (beta.13, requires vue devDep)**        |             |
+| `signal()` fallback — plain `{ value }` object (no Vue, no alien-signals) | ~368,000 |
+| `signal()` fallback — old closure getter/setter (v1.3, removed)   | ~2,500      |
+| alien-signals via `configureAlienSignals` (opt-in reactive)        | ~21,000     |
+| `signal()` write — Vue ref auto-detected (beta.13)                 | ~9,500      |
+| `effectScope` + `onScopeDispose` × 1k — no reactive state (beta.13 lazy job) | ~144,000 |
+| `effectScope` + reactive signal + `onScopeDispose` × 1k (full path)| ~16,600    |
+| `useCommandState` 100 dispatches — Vue ref signal writes (beta.13) | ~1,660      |
+| `useCommandState coalesced` 100 dispatches — 1 reactive write      | ~1,780      |
 
 ---
 

@@ -64,14 +64,16 @@ export type AlienSignalFn = <T>(initial?: T) => {
  *
  * configureSignal(alienSignalAdapter(alienSignal));
  */
+/** Class wrapper gives V8 a stable hidden class across all adapter instances. */
+class AlienSignalWrapper<T> {
+  private readonly _s: { (): T; (next: T): T };
+  constructor(s: { (): T; (next: T): T }) { this._s = s; }
+  get value(): T { return this._s(); }
+  set value(next: T) { this._s(next); }
+}
+
 export function alienSignalAdapter(alienSignal: AlienSignalFn): CreateSignal {
-  return <T>(initial: T): Signal<T> => {
-    const s = alienSignal<T>(initial);
-    return {
-      get value(): T { return s() as T; },
-      set value(next: T) { s(next); },
-    };
-  };
+  return <T>(initial: T): Signal<T> => new AlienSignalWrapper<T>(alienSignal<T>(initial));
 }
 
 /**

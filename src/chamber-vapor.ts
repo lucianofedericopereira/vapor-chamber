@@ -1,6 +1,16 @@
 /**
  * vapor-chamber — Vue 3.6+ Vapor-specific API
  *
+ * v1.4.0 — Vue 3.6.0-beta.13 alignment:
+ *           • apply interop scope ids to vapor roots — Vapor app roots created with
+ *             createVaporChamberApp() now correctly inherit CSS scope IDs from the
+ *             parent VDOM tree, fixing scoped-style leakage in mixed Vapor/VDOM apps.
+ *           • respect v-once in vdom slot interop — VDOM slot content marked v-once
+ *             is no longer re-evaluated after crossing the Vapor interop boundary;
+ *             defineVaporComponent() wrappers receive the fix automatically.
+ *           • v-once slot snapshots and prop snapshots are preserved correctly;
+ *             preserve v-once semantics for slot fallback children.
+ *           All changes are in Vue's runtime — wrappers here are pass-through.
  * v1.3.0 — Vue 3.6.0-beta.12 alignment: error recovery in Vapor setup (component
  *           context, fallthrough props, render effects restored after setup errors);
  *           VDOM slots interop normalization; SSR unresolved tag fallback as element.
@@ -31,6 +41,11 @@ import type { Handler, RegisterOptions, CommandResult, Command } from './command
  * Create a Vapor app instance with vapor-chamber ready.
  * Requires Vue 3.6+. Throws if Vapor is not available.
  *
+ * Vue 3.6.0-beta.13: Vapor app roots now correctly receive CSS scope IDs from
+ * their parent VDOM context when mounted inside a mixed Vapor/VDOM tree
+ * (runtime-vapor: apply interop scope ids to vapor roots). Scoped styles defined
+ * on parent VDOM components are no longer missing from Vapor root descendants.
+ *
  * Vue 3.6.0-beta.12: component context, fallthrough prop state, and render
  * effect state are now properly restored when setup() throws — broken Vapor
  * runtime state after setup errors is no longer possible.
@@ -54,6 +69,11 @@ export function createVaporChamberApp(rootComponent: any, rootProps?: any) {
 /**
  * Returns the vaporInteropPlugin if available (Vue 3.6+).
  * Use this to enable mixed Vapor/VDOM component trees.
+ *
+ * Vue 3.6.0-beta.13: the interop plugin now correctly applies CSS scope IDs to
+ * Vapor roots (runtime-vapor: apply interop scope ids to vapor roots), and
+ * respects v-once on VDOM slot content crossing the interop boundary
+ * (runtime-vapor: respect v-once in vdom slot interop).
  *
  * Vue 3.6.0-beta.12: VDOM slots are now normalized and exposed during Vapor
  * interop, and VDOM interop state is no longer retained from emits — mixed
@@ -115,6 +135,28 @@ export function defineVaporCustomElement(options: any, extraOptions?: any): any 
  *     declares `emits: ['select']`, an `onSelect` handler bound by the parent
  *     is routed to the emit channel and will NOT leak into `attrs`. This wrapper
  *     forwards `options` unchanged, so the behavior flows through unmodified.
+ *
+ * Vue 3.6.0-beta.13 alignment:
+ *   • v-once in VDOM slot interop is now respected — slot content marked v-once
+ *     that flows into a defineVaporComponent via VDOM interop is no longer
+ *     re-evaluated on subsequent renders. Wrapper is pass-through.
+ *   • v-once slot prop snapshots are preserved — slot inputs captured at mount
+ *     time are not overwritten by later parent re-renders. Pass-through.
+ *   • CSS scope IDs are correctly applied when this component is used as a Vapor
+ *     root inside a VDOM parent. Pass-through.
+ *   Compiler performance (all pass-through):
+ *   • Template options (inheritAttrs, emits) are encoded as bit flags instead of
+ *     objects — faster option parsing at runtime (vapor: encode template options
+ *     as flags).
+ *   • Static literal props passed to this component are inlined at compile time
+ *     instead of allocated as runtime objects (compiler-vapor: inline static
+ *     component literal props).
+ *   • Components used exactly once in a template skip resolveComponent() and
+ *     are lowered to a direct reference (vapor: lower single-use asset component
+ *     resolves).
+ *   • Event handlers use a shared onBinding runtime helper instead of per-element
+ *     closures (compiler-vapor: use onBinding helper for reactive events;
+ *     vapor: move event invoker wrapping into runtime helpers).
  *
  * Vue 3.6.0-beta.12 alignment:
  *   • VDOM interop state is no longer retained from emits — components that emit

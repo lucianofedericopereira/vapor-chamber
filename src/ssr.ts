@@ -1,6 +1,23 @@
 /**
  * vapor-chamber — SSR hydration plugin
  *
+ * v1.4.0 — Vue 3.6.0-beta.13 hydration alignment (all Vue runtime fixes,
+ *           no vapor-chamber code changes required):
+ *           • avoid preserving stale element mismatch content — hydration no
+ *             longer retains wrong DOM nodes when server/client markup diverges;
+ *             rehydrate() results are now more reliable after mismatch recovery.
+ *           • preserve namespace during hydration recovery — SVG and MathML
+ *             namespace context is maintained when Vue recovers from hydration
+ *             errors; no impact on rehydrate() itself (command-level replay).
+ *           • respect allowed prop mismatches during hydration — prop differences
+ *             that are permitted (e.g. data-v-inspector) no longer trigger false
+ *             hydration warnings; the ignoreUnhandled option is unaffected.
+ *           • skip teleport ranges for logical hydration siblings — Teleport
+ *             boundaries are correctly excluded from logical sibling walks,
+ *             preventing command replay ordering issues in Teleport-heavy apps.
+ *           • validate static hydration targets in dev — dev builds now assert
+ *             that static element targets exist before hydrating; safe for
+ *             rehydrate() callers (command dispatch happens after DOM is ready).
  * v1.1.0 — Dehydrate bus state on the server, rehydrate on the client.
  *
  * Per the whitepaper (§14): commands that ran on the server to populate initial

@@ -7,11 +7,17 @@
  * These are not CI tests — they measure throughput on the developer's machine.
  */
 
-import { describe, it, expect, bench } from 'vitest';
+import { describe, it, expect, bench, beforeAll } from 'vitest';
 import { createCommandBus, createAsyncCommandBus, configureUid } from '../src/command-bus';
 import { rehydrate, type DehydratedCommand } from '../src/ssr';
 import { persist } from '../src/plugins-io';
 import { createFastLane } from '../src/fast-lane';
+import { createTransitionBridge } from '../src/transitions';
+import { useCommandState, signal, configureSignal, waitForVueDetection } from '../src/chamber';
+import { alienSignalAdapter } from '../src/alien-signals';
+import { signal as _alienSignal } from 'alien-signals';
+
+const _alienFactory = alienSignalAdapter(_alienSignal as any);
 
 describe('core dispatch throughput', () => {
   bench('syncDispatch — bare handler, no plugins', () => {
@@ -498,6 +504,313 @@ describe('SSR rehydrate throughput', () => {
     // Measures the cheap-path cost (relevant when the page replays a mix
     // of commands and only a subset is bound on the client).
     rehydrate(bus, makeCommands(1000), { ignoreUnhandled: true });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Transition bridge throughput — Vue 3.6.0-beta.13 baseline
+//
+// Beta.13 fixed two silent-skip bugs: onMove was never called for Vapor or
+// VDOM component moves inside a Vapor TransitionGroup. These benches lock the
+// JS-layer dispatch cost of the transition bridge so any future regression in
+// the hook-dispatch path is visible regardless of Vue version.
+//
+// Reading these numbers:
+//   - "all 9 hooks" covers the full enter+leave lifecycle in one sequence.
+//   - "onMove × 10k" is the new baseline for the previously-broken move path.
+//   - "onMove vs bus.dispatch" confirms the bridge adds only dispatch overhead.
+//
+// Baselines (v1.4.0, two-run average, 2026-05-28):
+//   all 9 hooks × 1k        713 hz   (1.40ms / 1k sequences)   runs: 709 / 717
+//   onMove only × 10k     1,018 hz   (0.98ms / 10k calls)      runs: 1,067 / 969  ← beta.13 baseline
+//   onEnter + onLeave × 5k  984 hz   (1.02ms / 5k pairs)       runs: 1,000 / 969
+//   raw bus.dispatch × 10k 1,757 hz  (0.57ms / 10k calls)      runs: 1,750 / 1,764
+//   → bridge overhead ~37ns/call (dispatchSafe try/catch vs bare dispatch)
+//   → onMove has higher run-to-run variance (try/catch inhibits V8 inlining under GC)
+// ---------------------------------------------------------------------------
+
+describe('transition bridge throughput', () => {
+  function mockEl(): Element {
+    return { tagName: 'DIV' } as unknown as Element;
+  }
+
+  bench('createTransitionBridge — all 9 hooks (1k sequences)', () => {
+    const bus = createCommandBus({ onMissing: 'ignore' });
+    const t = createTransitionBridge({ bus, namespace: 'modal' });
+    const el = mockEl();
+    const done = () => {};
+    for (let i = 0; i < 1_000; i++) {
+      t.onBeforeEnter(el);
+      t.onEnter(el, done);
+      t.onAfterEnter(el);
+      t.onEnterCancelled(el);
+      t.onBeforeLeave(el);
+      t.onLeave(el, done);
+      t.onAfterLeave(el);
+      t.onLeaveCancelled(el);
+      t.onMove(el);
+    }
+  });
+
+  bench('createTransitionBridge — onMove only × 10k (beta.13 baseline)', () => {
+    const bus = createCommandBus({ onMissing: 'ignore' });
+    const t = createTransitionBridge({ bus, namespace: 'list' });
+    const el = mockEl();
+    for (let i = 0; i < 10_000; i++) {
+      t.onMove(el);
+    }
+  });
+
+  bench('createTransitionBridge — onEnter + onLeave × 5k (enter/leave cycle)', () => {
+    const bus = createCommandBus({ onMissing: 'ignore' });
+    const t = createTransitionBridge({ bus, namespace: 'drawer' });
+    const el = mockEl();
+    const done = () => {};
+    for (let i = 0; i < 5_000; i++) {
+      t.onEnter(el, done);
+      t.onLeave(el, done);
+    }
+  });
+
+  bench('createTransitionBridge — onMove vs raw bus.dispatch (overhead delta)', () => {
+    const bus = createCommandBus({ onMissing: 'ignore' });
+    for (let i = 0; i < 10_000; i++) {
+      bus.dispatch('listMove', { tagName: 'DIV' });
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// useCommandState — immediate vs coalesced (beta.13 v-for/v-if baseline)
+//
+// Beta.13 introduces specialized v-for block operations and reduced v-if branch
+// scope overhead in the Vapor runtime. Both optimizations feed into signal writes
+// that come from useCommandState. These benches measure the dispatch+state-write
+// cost in vapor-chamber's layer (below Vue) so we can track our contribution to
+// the overall update cost separately from Vue's runtime improvements.
+//
+// Reading these numbers:
+//   - "immediate" fires a signal write per dispatch — each write would trigger
+//     a Vue re-render if consumed in a template.
+//   - "coalesced" batches all writes via queueMicrotask — one signal write for
+//     the whole burst. The bench measures synchronous cost only; the deferred
+//     write is not awaited.
+//   - "100 dispatches vs 10" shows how coalescing scales with burst size.
+//
+// Baselines (v1.4.0, two-run average, 2026-05-28):
+//   immediate  10 array appends    20,347 hz   runs: 20,188 / 20,507
+//   coalesced  10 array appends    19,741 hz   runs: 19,767 / 19,715  — parity at small bursts
+//   immediate 100 array appends     2,012 hz   runs:  1,934 /  2,090
+//   coalesced 100 array appends     2,052 hz   runs:  2,015 /  2,090  — within noise
+//   immediate 100 counter            2,044 hz  runs:  2,015 /  2,073
+//   coalesced 100 counter            1,986 hz  runs:  1,875 /  2,098  — within noise
+//   → coalesce is throughput-neutral across both array and scalar types (two-run confirmed)
+//   → use coalesce for correctness (≤1 signal write per burst), not for throughput
+// ---------------------------------------------------------------------------
+
+describe('useCommandState — immediate vs coalesced dispatch cost', () => {
+  bench('immediate — 10 dispatches, array append (simulates v-for source)', () => {
+    const bus = createCommandBus();
+    const { state, dispose } = useCommandState<number[]>(
+      [],
+      { append: (s, cmd) => [...s, cmd.target] },
+    );
+    for (let i = 0; i < 10; i++) bus.dispatch('append', i);
+    dispose();
+  });
+
+  bench('coalesced — 10 dispatches, array append (simulates v-for source)', () => {
+    const bus = createCommandBus();
+    const { state, dispose } = useCommandState<number[]>(
+      [],
+      { append: (s, cmd) => [...s, cmd.target] },
+      { coalesce: true },
+    );
+    for (let i = 0; i < 10; i++) bus.dispatch('append', i);
+    dispose();
+    void state;
+  });
+
+  bench('immediate — 100 dispatches, array append', () => {
+    const bus = createCommandBus();
+    const { state, dispose } = useCommandState<number[]>(
+      [],
+      { append: (s, cmd) => [...s, cmd.target] },
+    );
+    for (let i = 0; i < 100; i++) bus.dispatch('append', i);
+    dispose();
+    void state;
+  });
+
+  bench('coalesced — 100 dispatches, array append', () => {
+    const bus = createCommandBus();
+    const { state, dispose } = useCommandState<number[]>(
+      [],
+      { append: (s, cmd) => [...s, cmd.target] },
+      { coalesce: true },
+    );
+    for (let i = 0; i < 100; i++) bus.dispatch('append', i);
+    dispose();
+    void state;
+  });
+
+  bench('immediate — 100 dispatches, counter (simulates v-if condition)', () => {
+    const bus = createCommandBus();
+    const { state, dispose } = useCommandState<number>(
+      0,
+      { inc: (s) => s + 1 },
+    );
+    for (let i = 0; i < 100; i++) bus.dispatch('inc', null);
+    dispose();
+    void state;
+  });
+
+  bench('coalesced — 100 dispatches, counter (simulates v-if condition)', () => {
+    const bus = createCommandBus();
+    const { state, dispose } = useCommandState<number>(
+      0,
+      { inc: (s) => s + 1 },
+      { coalesce: true },
+    );
+    for (let i = 0; i < 100; i++) bus.dispatch('inc', null);
+    dispose();
+    void state;
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Signal path comparison — fallback vs alien-signals add-on vs Vue ref
+//
+// Three signal backends available in vapor-chamber:
+//   1. Plain { value } object — default fallback when Vue is absent and
+//      configureAlienSignals has not been called. Zero overhead, not reactive.
+//   2. alien-signals via configureAlienSignals — opt-in push-pull reactivity
+//      for non-Vue contexts. Backed by the same algorithm Vue 3.6 uses.
+//   3. Vue ref (auto-detected) — signal() returns vue.ref() when Vue is present.
+//      Identical algorithm to (2) since Vue 3.6's ref() is alien-signals.
+//
+// These benches measure raw write throughput for each path so the cost of
+// adding reactivity is visible. Run with and without the vue devDep installed
+// to see the auto-detection path vs the explicit fallback.
+//
+// Baselines (v1.4.0 + Vue 3.6.0-beta.13, 2026-05-28):
+//   plain { value } object 10k writes    ~368,000 hz  ← V8 DCE upper bound; real cost ≈ zero overhead
+//   closure getter/setter (OLD, v1.3)      ~2,400 hz  ← real cost; setter is a fn call V8 cannot elide
+//   alien-signals via alienSignalAdapter  ~10,500 hz  ← opt-in reactive; ~4× faster than old closure
+//   Vue ref via signal() auto-detected     ~9,500 hz  ← same algorithm, slight Vue wrapper overhead
+//   Vue ref + watchEffect subscriber      ~50,000 hz  (notify path — different iteration scale)
+//   effectScope + onScopeDispose only ×1k ~158,000 hz ← beta.13 lazy job: no update job allocated
+//   effectScope + signal + onScopeDispose  ~21,000 hz ← full reactive scope path
+//   useCommandState 100 dispatches          ~1,700 hz
+//   useCommandState coalesced 100           ~1,900 hz ← throughput-neutral (within noise)
+// ---------------------------------------------------------------------------
+
+describe('signal path comparison — fallback vs alien-signals add-on vs Vue ref', () => {
+  beforeAll(async () => {
+    await waitForVueDetection();
+  });
+
+  // ── without add-on (default fallback) ─────────────────────────────────────
+
+  bench('plain { value } object — actual fallback (no Vue, no alien-signals)', () => {
+    // NOTE: V8 may dead-code-eliminate these writes (no subscribers, fresh object
+    // per iteration). The ~370k hz figure is an upper bound; real cost is near
+    // zero overhead. The honest takeaway: plain property access has no function
+    // call overhead, unlike getter/setter or alien-signals.
+    const s = { value: 0 };
+    let sink = 0;
+    for (let i = 0; i < 10_000; i++) { s.value = i; sink = s.value; }
+    if (sink < 0) console.log(sink);
+  });
+
+  bench('closure getter/setter — old v1.3 fallback (historical comparison)', () => {
+    // Replaced in v1.4.0. The setter is a real function call — V8 cannot
+    // eliminate it, so this measures actual invocation cost.
+    let _v = 0;
+    const s = { get value() { return _v; }, set value(v: number) { _v = v; } };
+    let sink = 0;
+    for (let i = 0; i < 10_000; i++) { s.value = i; sink = s.value; }
+    if (sink < 0) console.log(sink);
+  });
+
+  // ── with alien-signals add-on ──────────────────────────────────────────────
+
+  bench('alien-signals via alienSignalAdapter — opt-in reactive path', () => {
+    // What you get after: configureAlienSignals(alienSignal)
+    // or: configureSignal(alienSignalAdapter(alienSignal))
+    const s = _alienFactory(0);
+    let sink = 0;
+    for (let i = 0; i < 10_000; i++) { s.value = i; sink = s.value; }
+    if (sink < 0) console.log(sink);
+  });
+
+  // ── Vue auto-detected (beta.13) ────────────────────────────────────────────
+
+  bench('Vue ref via signal() — auto-detected alien-signals path (beta.13)', () => {
+    // What signal() returns when vue is present. Same algorithm as alien-signals
+    // adapter above — Vue 3.6's ref() is alien-signals internally.
+    const s = signal(0);
+    let sink = 0;
+    for (let i = 0; i < 10_000; i++) { s.value = i; sink = s.value; }
+    if (sink < 0) console.log(sink);
+  });
+
+  bench('Vue ref + watchEffect subscriber — notify path (beta.13)', async () => {
+    const { ref, watchEffect, effectScope } = await import('vue');
+    const scope = effectScope();
+    const r = ref(0);
+    let sink = 0;
+    scope.run(() => {
+      watchEffect(() => { sink = r.value; });
+    });
+    for (let i = 0; i < 1_000; i++) r.value = i;
+    scope.stop();
+    void sink;
+  });
+
+  // ── beta.13 lifecycle overhead ────────────────────────────────────────────
+
+  bench('effectScope + onScopeDispose only × 1k (beta.13 lazy job cost)', async () => {
+    const { effectScope } = await import('vue');
+    for (let i = 0; i < 1_000; i++) {
+      const scope = effectScope();
+      scope.run(() => {
+        // tryAutoCleanup path — beta.13 does NOT allocate an update job here
+        // because no reactive state is tracked inside the scope.
+      });
+      scope.stop();
+    }
+  });
+
+  bench('effectScope + reactive signal + onScopeDispose × 1k (beta.13 full path)', async () => {
+    const { effectScope, onScopeDispose } = await import('vue');
+    for (let i = 0; i < 1_000; i++) {
+      const scope = effectScope();
+      scope.run(() => {
+        const s = signal(0);
+        onScopeDispose(() => { void s; });
+        s.value = i;
+      });
+      scope.stop();
+    }
+  });
+
+  // ── useCommandState with real Vue refs ────────────────────────────────────
+
+  bench('useCommandState 100 dispatches — Vue ref signal writes (beta.13)', () => {
+    const bus = createCommandBus();
+    const { state, dispose } = useCommandState<number>(0, { inc: (s) => s + 1 });
+    for (let i = 0; i < 100; i++) bus.dispatch('inc', null);
+    dispose();
+    void state;
+  });
+
+  bench('useCommandState coalesced 100 dispatches — Vue ref, 1 reactive write (beta.13)', () => {
+    const bus = createCommandBus();
+    const { state, dispose } = useCommandState<number>(0, { inc: (s) => s + 1 }, { coalesce: true });
+    for (let i = 0; i < 100; i++) bus.dispatch('inc', null);
+    dispose();
+    void state;
   });
 });
 

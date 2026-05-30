@@ -23,9 +23,9 @@ bus.use(validator({ cartAdd: (cmd) => cmd.target.id ? null : 'Missing ID' }));
 const { dispatch, loading, lastError } = useCommand('cartAdd');
 ```
 
-- **~6.7 KB brotli (full IIFE) / ~5.7 KB brotli (ESM tree-shaken)** — zero runtime dependencies
+- **~9.8 KB brotli (full IIFE) / ~6.7 KB brotli (core IIFE) / ~5.7 KB brotli (ESM tree-shaken)** — one runtime dependency (`alien-signals`)
 - **Framework-agnostic core** — the bus itself has no Vue import
-- **Vue 3.6.0-beta.12 aligned** — signals, `onScopeDispose`, `getCurrentScope`, alien-signals internals
+- **Vue 3.6.0-beta.13 aligned** — signals, `onScopeDispose`, `getCurrentScope`, alien-signals internals
 - **Full plugin pipeline** — logger, validator, debounce, throttle, retry, persist, sync, and more
 - **Transport layer** — HTTP bridge, WebSocket bridge, SSE bridge
 - **SSR-safe** — per-request bus isolation, no shared singletons

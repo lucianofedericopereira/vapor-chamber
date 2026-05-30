@@ -1,9 +1,33 @@
 /**
  * vapor-chamber — Transition integration
  *
+ * v1.4.0 — Vue 3.6.0-beta.13 alignment:
+ *           • onMove now correctly fires for Vapor component moves in a Vapor
+ *             TransitionGroup (runtime-vapor: animate vapor component moves in
+ *             TransitionGroup — was silently skipped before beta.13).
+ *           • onMove now correctly fires for VDOM component moves inside a Vapor
+ *             TransitionGroup (runtime-vapor: animate vdom component moves in
+ *             vapor TransitionGroup — same class of bug, separate fix).
+ *           • Moves are deferred until all child updates flush before onMove is
+ *             called — el is in its final pre-move position when the command
+ *             dispatches (runtime-vapor: defer TransitionGroup moves until child
+ *             updates flush).
+ *           • Transition hooks now apply to slot fallback children inside Vapor
+ *             components (runtime-vapor: apply transition hooks to slot fallbacks).
+ *           • v-for item keys are preserved through TransitionGroup reorders
+ *             (runtime-vapor: preserve v-for item keys in transition group).
+ *           Performance (pass-through):
+ *           • TransitionGroup no longer resolves its own props twice per render
+ *             (runtime-vapor: avoid duplicate TransitionGroup props resolution).
+ *           • <Transition v-bind="t"> / <TransitionGroup v-bind="t"> — object
+ *             literal v-bind spreads are now expanded inline by the compiler
+ *             instead of being spread at runtime (compiler-vapor: expand object
+ *             literal v-bind and v-on). The useTransitionCommand() return value
+ *             bound via v-bind generates cheaper compiled output in beta.13.
+ *           All other changes are in Vue's runtime — wrappers here are pass-through.
  * v1.1.0 — Dispatches bus commands from Vue <Transition> / <TransitionGroup>
- * lifecycle hooks. Enables animation coordination through the command bus
- * without direct DOM coupling.
+ *           lifecycle hooks. Enables animation coordination through the command bus
+ *           without direct DOM coupling.
  *
  * Two entry points:
  *   createTransitionBridge — framework-agnostic factory (accepts BaseBus)
@@ -46,7 +70,14 @@ export type TransitionHooks = {
   onLeave: (el: Element, done: () => void) => void;
   onAfterLeave: (el: Element) => void;
   onLeaveCancelled: (el: Element) => void;
-  /** TransitionGroup-only: called when an element moves due to reorder. */
+  /**
+   * TransitionGroup-only: called when an element moves due to reorder.
+   *
+   * Vue 3.6.0-beta.13: fires correctly for both Vapor and VDOM component moves
+   * inside a Vapor TransitionGroup. Guaranteed to be called after all child
+   * updates have flushed — `el` is in its pre-move position, ready for the CSS
+   * move class to be applied. No `done()` callback; moves are CSS-only.
+   */
   onMove: (el: Element) => void;
 };
 

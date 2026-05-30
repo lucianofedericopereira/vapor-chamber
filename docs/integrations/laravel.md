@@ -488,7 +488,7 @@ echo.private(`user.${userId}`)
 ```
 
 A protocol-aware `createEchoBridge` (channels / private / presence native to
-the Echo protocol) is on the [v1.3 ROADMAP](../../ROADMAP.md). Until it
+the Echo protocol) is on the [v1.5 ROADMAP](../../ROADMAP.md). Until it
 ships, the wrap-Echo-into-emit() pattern above works.
 
 ---

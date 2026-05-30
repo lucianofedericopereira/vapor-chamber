@@ -4,21 +4,21 @@ This project tracks Vue 3.6 while it is in beta. That has direct consequences
 for what's stable, what's transitional, and what will change once Vue 3.6
 ships stable. This file is the source of truth for that distinction.
 
-Last reviewed against **Vue 3.6.0-beta.12** (released 2026-05-15).
+Last reviewed against **Vue 3.6.0-beta.13** (released 2026-05-28).
 
 ---
 
 ## Current posture: beta territory
 
-- **Peer dependency:** `vue: ">=3.5.0 || >=3.6.0-beta.12"`. The lib supports
+- **Peer dependency:** `vue: ">=3.5.0 || >=3.6.0-beta.13"`. The lib supports
   Vue 3.5 (composables only) and Vue 3.6 betas (full Vapor surface).
 - **Vapor APIs are still moving.** `defineVaporCustomElement`, `defineVaporComponent`,
   `defineVaporAsyncComponent` are stable in shape but their underlying behavior
-  has shifted between beta.10 and beta.12 (generics inference, emits/attrs split,
-  VDOM slots interop normalization, error recovery). The lib's wrappers are
-  pass-through, so consumers inherit each beta's improvements without code
-  changes — but the wrappers themselves exist precisely because the API is
-  not yet final.
+  has shifted between beta.10 and beta.13 (generics inference, emits/attrs split,
+  VDOM slots interop normalization, error recovery, TransitionGroup move hooks,
+  lazy lifecycle update jobs). The lib's wrappers are pass-through, so consumers
+  inherit each beta's improvements without code changes — but the wrappers
+  themselves exist precisely because the API is not yet final.
 - **The lib's value during beta** is graceful degradation (`null` returns when
   Vue's API is absent or not yet present), version probing (`isVaporAvailable`),
   and a stable surface for consumers to code against while Vue itself iterates.
@@ -187,7 +187,9 @@ benchmark numbers, and decision tree.
 | Version | Trigger                          | Headline                                                                 |
 |---------|----------------------------------|--------------------------------------------------------------------------|
 | v1.2.x  | Vue 3.6.0-beta.11+               | Beta-aligned: docs, build pipeline, IIFE split, regression tests, V8-aligned hot path, listener bucketing, persist coalescing |
-| v1.3.0  | First Vue 3.6 RC or stable       | Build-flag wrapper elimination; `vue36` conditional export; soft-deprecations begin; Rolldown migration if stable in Vite 8; `AbortController` extensions (request/respond, dispatchBatch, child signals, WS/SSE bridge propagation); protocol-aware `createEchoBridge` for Laravel Reverb / Echo (channels / private / presence) |
+| v1.3.0  | Vue 3.6.0-beta.12                | SSR/Hydration alignment, AbortController extensions (request/respond, dispatchBatch, child signals, WS/SSE bridge), useSharedCommandState, TestBus snapshot/time-travel |
+| v1.4.0  | Vue 3.6.0-beta.13                | TransitionGroup fixes, interop scope IDs, SSR hydration fixes, lazy lifecycle jobs, signal.ts plain-object fallback, alien-signals class adapter, alien-signals promoted to dep |
+| v1.5.0  | Next Vue 3.6 beta or RC          | Build-flag wrapper elimination; `vue36` conditional export; soft-deprecations begin; protocol-aware `createEchoBridge` for Laravel Reverb / Echo (channels / private / presence) |
 | v2.0.0  | One minor cycle after 3.6 stable | Drop `useVaporCommand` (folded into `useCommand`); registry collapse; remove wrappers' null path |
 
 ## Vite + plugin-vue alignment

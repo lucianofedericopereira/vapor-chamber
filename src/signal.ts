@@ -6,14 +6,14 @@
  * full Vue feature-detection registry from `chamber.ts` into ESM consumer
  * bundles.
  *
- * Detection strategy:
- *   1. Lazy sync probe of `globalThis.__VUE__` on first `signal()` call —
- *      catches the MPA / server-rendered-page case where Vue is loaded as a
- *      global via `<script>` tag before vapor-chamber initializes.
- *   2. Plain getter/setter fallback otherwise.
- *   3. `configureSignal(fn)` lets `chamber.ts` push Vue's `ref()` here once
- *      its async dynamic import resolves, so SPA consumers eventually use
- *      the alien-signals-backed `ref` for real reactivity.
+ * Detection / fallback chain (first match wins on each `signal()` call):
+ *   1. `configureSignal(fn)` — explicit override; `chamber.ts` pushes Vue's
+ *      `ref()` here once its async dynamic import resolves.
+ *   2. Lazy sync probe of `globalThis.__VUE__` — catches the MPA /
+ *      server-rendered-page case where Vue is a `<script>` global.
+ *   3. Plain `{ value }` object — zero-overhead fallback for non-Vue, non-reactive
+ *      contexts. For push-pull reactivity without Vue, call
+ *      `configureAlienSignals` from `vapor-chamber/alien-signals` once at boot.
  *
  * Consumers needing full Vue auto-detection (async probe, Vapor detection,
  * lifecycle hooks) import from `chamber.ts`, which calls into this module.
@@ -40,12 +40,7 @@ function syncProbe(): void {
 const fallbackSignal: CreateSignal = <T>(initial: T): Signal<T> => {
   syncProbe();
   if (_vueRef) return _vueRef(initial) as Signal<T>;
-
-  let _value = initial;
-  return {
-    get value() { return _value; },
-    set value(v: T) { _value = v; },
-  };
+  return { value: initial };
 };
 
 let _signalFn: CreateSignal = fallbackSignal;

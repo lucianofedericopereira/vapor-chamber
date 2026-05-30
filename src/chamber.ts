@@ -217,6 +217,14 @@ export function resetCommandBus(): void {
  * inside setup always returns something. The `onUnmounted` fallback is
  * unreachable under Vue 3.5+ and has been removed.
  *
+ * Vue 3.6.0-beta.13 (runtime-vapor: only create lifecycle update jobs when
+ * needed): lifecycle update jobs are now created lazily — only when a component
+ * actually has reactive state that can trigger updates. Registering
+ * `onScopeDispose` via this function no longer causes a lifecycle update job
+ * to be allocated for every vapor-chamber composable call. Components that use
+ * vapor-chamber composables solely for dispatch (no reactive signals consumed
+ * in the template) incur zero update-job overhead.
+ *
  * No-ops entirely when called outside any Vue scope (e.g. module init time,
  * plain async callbacks). Caller is responsible for calling `dispose()` in
  * those cases.
@@ -501,6 +509,12 @@ export type UseCommandStateOptions = {
    * accumulated and the signal is written once via `queueMicrotask`. Pairs with
    * Vue 3.6.0-beta.12's v-for source coalescing: our side defers the signal
    * write, Vue's runtime coalesces the resulting DOM update into one pass.
+   *
+   * Vue 3.6.0-beta.13: v-for consumers of coalesced state benefit from two
+   * additional runtime optimizations — specialized v-for block operations
+   * (runtime-vapor: specialize v-for block operations) and reduced v-if branch
+   * scope overhead (runtime-vapor: reduce v-if branch scope overhead). Signal
+   * writes flushed here land into a faster Vapor runtime patch path.
    *
    * Trade-off: 1 microtask of signal latency. Use for arrays consumed by v-for
    * that receive rapid bulk updates (batch dispatch, form field arrays, scroll
