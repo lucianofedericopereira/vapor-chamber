@@ -6,7 +6,7 @@
  * These are optional, tree-shaken, and use only the public Plugin/AsyncPlugin types.
  */
 
-import type { Command, CommandResult, Plugin, } from './command-bus';
+import type { Command, CommandResult, Plugin, AsyncPlugin } from './command-bus';
 import { matchesPattern, commandKey, BusError } from './command-bus';
 
 function makeActionFilter(patterns: string[] | undefined): (action: string) => boolean {
@@ -363,4 +363,195 @@ export function metrics(options: MetricsOptions = {}): Plugin & {
     },
     clear(): void { data = []; head = 0; },
   });
+}
+
+// ---------------------------------------------------------------------------
+// serialize — per-key sequential processing for async commands
+// ---------------------------------------------------------------------------
+
+export type SerializeOptions = {
+  /**
+   * Derive the serialization key from a command. Commands resolving to the SAME
+   * key run strictly one-at-a-time (FIFO); different keys run concurrently.
+   * Return `null`/`undefined` to skip serialization for that command.
+   * Default: `cmd.action` (each action serialized against itself).
+   */
+  key?: (cmd: Command) => string | number | null | undefined;
+  /** Restrict to specific actions (glob patterns). Default: all. */
+  actions?: string[];
+  /**
+   * Where the serialization lane lives.
+   * - `'instance'` (default): a per-bus in-memory FIFO queue. Same-key commands
+   *   serialize within THIS bus instance only.
+   * - `'cross-tab'`: use the Web Locks API (`navigator.locks`) so same-key
+   *   commands serialize across every tab / window of the same origin — true
+   *   browser-arbitrated mutual exclusion, no custom transport. Automatically
+   *   falls back to the `'instance'` queue when `navigator.locks` is unavailable
+   *   (SSR, older browsers, or workers without the API).
+   */
+  scope?: 'instance' | 'cross-tab';
+  /** Web Locks name prefix used in `'cross-tab'` mode. Default: `'vapor-chamber:serialize'`. */
+  lockPrefix?: string;
+};
+
+/**
+ * serialize — guarantee that async commands sharing a key never overlap.
+ *
+ * **Async bus only.** Sync handlers run to completion synchronously and cannot
+ * interleave, so serialization is meaningless there (and would turn a sync
+ * dispatch into a Promise). Register on `createAsyncCommandBus`.
+ *
+ * Prevents read-modify-write races on a shared resource: two `accountWithdraw`
+ * for the same account, rapid `cartCheckout` clicks, or any handler where a
+ * second dispatch must observe the first one's committed effect. This is
+ * distinct from in-flight request dedup (which collapses *identical* requests) —
+ * serialize queues *distinct* same-key commands so they apply in order.
+ *
+ * Failure-safe: a rejected/failed command does NOT stall its lane — the next
+ * same-key command proceeds regardless of the previous outcome. Per-key entries
+ * are reclaimed once a lane drains, so the map never grows unbounded.
+ *
+ * `scope: 'cross-tab'` extends serialization across tabs via the Web Locks API:
+ * `navigator.locks.request` queues same-name requests FIFO across all same-origin
+ * contexts and releases the lock when the handler settles (even on throw), so the
+ * failure-safety guarantee holds across tabs too. Degrades to per-instance when
+ * the API is absent.
+ *
+ * @example
+ * const bus = createAsyncCommandBus();
+ * bus.use(serialize({ key: (cmd) => cmd.target.accountId, actions: ['account*'] }));
+ * // withdrawals for the same account now run strictly in order;
+ * // different accounts still run concurrently
+ *
+ * @example
+ * // serialize across every tab of the same origin:
+ * bus.use(serialize({ scope: 'cross-tab', key: (cmd) => cmd.target.accountId }));
+ */
+export function serialize(options: SerializeOptions = {}): AsyncPlugin {
+  const { key, actions, scope = 'instance', lockPrefix = 'vapor-chamber:serialize' } = options;
+  const matchesActions = makeActionFilter(actions);
+  const crossTab = scope === 'cross-tab';
+  // Per-key tail of the in-flight chain (default mode AND cross-tab fallback).
+  // Stored promises never reject (errors swallowed), so chaining the next
+  // same-key command onto them is safe.
+  const tails = new Map<string, Promise<unknown>>();
+
+  function inMemory(k: string, next: () => CommandResult | Promise<CommandResult>) {
+    const prev = tails.get(k) ?? Promise.resolve();
+    // Run after the previous same-key command settles — success OR failure both
+    // release the lane, so one rejection can't deadlock the queue.
+    const run = prev.then(() => next(), () => next());
+    // The stored tail must never reject; the next command chains onto it.
+    const tail = run.then(() => {}, () => {});
+    tails.set(k, tail);
+    // Reclaim the entry once this lane drains with nothing queued behind it.
+    tail.then(() => { if (tails.get(k) === tail) tails.delete(k); });
+    return run;
+  }
+
+  return (cmd, next) => {
+    if (!matchesActions(cmd.action)) return next();
+    const raw = key ? key(cmd) : cmd.action;
+    if (raw == null) return next();
+    const k = String(raw);
+
+    if (crossTab) {
+      // Web Locks queues same-name requests FIFO across all tabs and releases on
+      // settle (incl. throw). Read lazily so detection isn't bound to plugin
+      // construction order. Falls back to the in-memory lane when unavailable.
+      const locks = (globalThis as any).navigator?.locks;
+      if (locks && typeof locks.request === 'function') {
+        return locks.request(`${lockPrefix}:${k}`, () => next());
+      }
+    }
+    return inMemory(k, next);
+  };
+}
+
+// ---------------------------------------------------------------------------
+// idempotent — collapse duplicate commands + stamp an idempotency key
+// ---------------------------------------------------------------------------
+
+export type IdempotentOptions = {
+  /**
+   * Derive a stable idempotency key from a command. Commands with the same key
+   * are the same logical operation. Return `null`/`undefined` to skip a command.
+   * Default: `commandKey(action, target)` (action + stable JSON of target).
+   */
+  key?: (cmd: Command) => string | null | undefined;
+  /**
+   * How long (ms) a *completed* key is remembered for dedup — the window in
+   * which a repeat (double-click, retry, reconnect replay) is collapsed to the
+   * first result instead of hitting the handler/backend again. Default: 60_000.
+   */
+  ttl?: number;
+  /** Restrict to specific actions (glob patterns). Default: all. */
+  actions?: string[];
+  /**
+   * Also stamp the key onto `cmd.meta.idempotencyKey` so transports forward it
+   * (the HTTP bridge sends it as an `Idempotency-Key` header). Default: true.
+   */
+  stampMeta?: boolean;
+};
+
+/**
+ * idempotent — make duplicate dispatches a no-op against the handler/backend.
+ *
+ * The client-side half of exactly-once delivery: it collapses repeats of the
+ * same logical command — double-clicked Checkout, an auto-retry, a reconnect
+ * that replays a queued action — so the handler (and the backend it calls) runs
+ * **once**. Concurrent duplicates share the first in-flight promise; sequential
+ * duplicates within `ttl` get the cached result. Failures are NOT cached, so a
+ * genuine retry after an error still runs.
+ *
+ * Pairs with `serialize` (orders same-key commands locally) and with the HTTP
+ * bridge, which forwards the stamped `cmd.meta.idempotencyKey` as an
+ * `Idempotency-Key` header so the backend can reject the duplicate write too —
+ * the wire half of exactly-once. Register `idempotent` at a HIGHER priority than
+ * the transport so the key is stamped before the request is built.
+ *
+ * @example
+ * const bus = createAsyncCommandBus();
+ * bus.use(idempotent({ actions: ['order*'] }), { priority: 100 }); // outermost
+ * bus.use(createHttpBridge({ endpoint: '/commands', csrf: true }));
+ * // two rapid orderCreate dispatches → one handler run, one backend write
+ */
+export function idempotent(options: IdempotentOptions = {}): AsyncPlugin {
+  const { key, ttl = 60_000, actions, stampMeta = true } = options;
+  const matchesActions = makeActionFilter(actions);
+  // key → completed result (with timestamp) OR the in-flight promise.
+  const done = new Map<string, { at: number; result: CommandResult }>();
+  const inflight = new Map<string, Promise<CommandResult>>();
+
+  return (cmd, next) => {
+    if (!matchesActions(cmd.action)) return next();
+    const raw = key ? key(cmd) : commandKey(cmd.action, cmd.target);
+    if (raw == null) return next();
+    const k = String(raw);
+
+    if (stampMeta && cmd.meta) cmd.meta.idempotencyKey = k;
+
+    const pending = inflight.get(k);
+    if (pending) return pending; // collapse concurrent duplicates
+
+    const cached = done.get(k);
+    const now = Date.now();
+    if (cached && now - cached.at < ttl) return cached.result; // collapse repeats within TTL
+
+    const run = Promise.resolve(next()).then(
+      (result) => {
+        inflight.delete(k);
+        // Cache only successes. A failed result (resolved errResult, ok:false)
+        // is NOT cached so a genuine retry runs again.
+        if (result?.ok) done.set(k, { at: Date.now(), result });
+        return result;
+      },
+      (err) => {
+        inflight.delete(k); // thrown/rejected — also not cached
+        throw err;
+      },
+    );
+    inflight.set(k, run);
+    return run;
+  };
 }

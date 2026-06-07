@@ -8,7 +8,9 @@
  *
  * Detection / fallback chain (first match wins on each `signal()` call):
  *   1. `configureSignal(fn)` — explicit override; `chamber.ts` pushes Vue's
- *      `ref()` here once its async dynamic import resolves.
+ *      `shallowRef()` here once its async dynamic import resolves (shallow because
+ *      the library replaces signal values wholesale and never mutates nested
+ *      fields — skipping ref()'s deep-Proxy wrap on object/array values).
  *   2. Lazy sync probe of `globalThis.__VUE__` — catches the MPA /
  *      server-rendered-page case where Vue is a `<script>` global.
  *   3. Plain `{ value }` object — zero-overhead fallback for non-Vue, non-reactive
@@ -31,7 +33,11 @@ function syncProbe(): void {
   _syncProbed = true;
   if (typeof globalThis !== 'undefined') {
     const vue = (globalThis as any).__VUE__;
-    if (vue && typeof vue.ref === 'function') {
+    // Prefer shallowRef — the library replaces signal values wholesale, so the
+    // deep-Proxy wrap ref() applies to objects/arrays is pure overhead here.
+    if (vue && typeof vue.shallowRef === 'function') {
+      _vueRef = vue.shallowRef;
+    } else if (vue && typeof vue.ref === 'function') {
       _vueRef = vue.ref;
     }
   }

@@ -471,9 +471,15 @@ composer require laravel/reverb
 php artisan reverb:install
 ```
 
+Use the protocol-aware `createEchoBridge` — it subscribes public / private /
+presence channels and routes each broadcast to the bus, with presence membership
+(`here` / `joining` / `leaving`) emitted too. You pass your own Echo instance, so
+vapor-chamber never imports `laravel-echo`:
+
 ```js
 import Echo from 'laravel-echo';
 import { createCommandBus } from 'vapor-chamber';
+import { createEchoBridge } from 'vapor-chamber/transports';
 
 const bus = createCommandBus();
 const echo = new Echo({
@@ -483,13 +489,22 @@ const echo = new Echo({
   wsPort: import.meta.env.VITE_REVERB_PORT,
 });
 
-echo.private(`user.${userId}`)
-  .listen('OrderShipped', e => bus.emit('orderShipped', e));
+const realtime = createEchoBridge({
+  echo,
+  channels: [
+    { name: `user.${userId}`, type: 'private',  events: ['OrderShipped', 'OrderCancelled'] },
+    { name: 'lobby',          type: 'presence', events: ['MessagePosted'] },
+  ],
+});
+realtime.install(bus); // OrderShipped → bus.emit('OrderShipped', payload); lobby:joining on presence
+
+// on teardown (component unmount / SPA route change):
+realtime.teardown();
 ```
 
-A protocol-aware `createEchoBridge` (channels / private / presence native to
-the Echo protocol) is on the [v1.5 ROADMAP](../../ROADMAP.md). Until it
-ships, the wrap-Echo-into-emit() pattern above works.
+Need to react with a *command* instead of an event? Pass `onBroadcast: ({ payload }, b)
+=> b.dispatch('applyShipment', payload)`. Realtime is receive-only — outbound writes
+still go through the HTTP bridge (with CSRF + the `Idempotency-Key` header above).
 
 ---
 
@@ -580,6 +595,46 @@ class UpdateProfile
 
 The controller's `ValidationException` catch maps it to `422 + { ok: false,
 error: ... }`.
+
+---
+
+## Idempotency & double-submit protection
+
+The classic "user clicks Checkout twice" race has two halves, and vapor-chamber
+covers the client side of both:
+
+- **Locally** — the `idempotent` plugin collapses duplicate dispatches of the same
+  logical command, so the handler (and the request it makes) runs once. Concurrent
+  duplicates share the first in-flight promise; repeats within the TTL return the
+  cached result. Failures aren't cached, so a genuine retry still runs.
+- **On the wire** — `idempotent` stamps `cmd.meta.idempotencyKey`, and the HTTP
+  bridge forwards it as a standard `Idempotency-Key` request header. The backend
+  reads that header and rejects a second write with the same key — so even a retry
+  that slips past the client lands once.
+
+```ts
+import { createAsyncCommandBus, idempotent } from 'vapor-chamber';
+import { createHttpBridge } from 'vapor-chamber/transports';
+
+const bus = createAsyncCommandBus();
+// idempotent OUTERMOST (higher priority) so the key is stamped before the bridge builds the request
+bus.use(idempotent({ actions: ['order*', 'checkout*'] }), { priority: 100 });
+bus.use(createHttpBridge({ endpoint: '/commands', csrf: true }));
+
+// two rapid clicks → one handler run, one backend write
+bus.dispatch('checkoutSubmit', { cartId });
+bus.dispatch('checkoutSubmit', { cartId });
+```
+
+For commands that must also never *interleave* (two writes to the same account),
+add `serialize({ key })` — it orders same-key commands locally while `idempotent`
+collapses identical ones. Together they give exactly-once semantics on the client.
+The only backend contract is the standard one: honor the `Idempotency-Key` header
+(persist the key with its result; return the stored result on a repeat).
+
+> Deeply-reactive command state two-way bound with `v-model`? The opt-in
+> `vapor-chamber/reactive` companion (`useDeepCommandState` / `deepSignal`) adds
+> nested-mutation reactivity; the core stays shallow + fast by default.
 
 ---
 

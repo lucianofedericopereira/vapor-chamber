@@ -16,12 +16,24 @@
   "excludeInternal": true,
   "excludeExternals": true,
   "includeVersion": true,
-  "githubPages": false,
+  "githubPages": true,
+  "intentionallyNotExported": [
+    "PayloadOf",
+    "TargetOf",
+    "ResultOf",
+    "DispatchOptions",
+    "CircuitState",
+    "CsrfResult",
+    "ErrorEntry",
+    "InferFields",
+    "Observable",
+    "SchemaLoggerOptions"
+  ],
   "navigationLinks": {
     "Repo": "https://github.com/lucianofedericopereira/vapor-chamber",
-    "Performance": "../performance.md",
-    "Roadmap": "../../ROADMAP.md",
-    "Laravel integration": "../integrations/laravel.md"
+    "Performance": "https://github.com/lucianofedericopereira/vapor-chamber/blob/main/docs/performance.md",
+    "Roadmap": "https://github.com/lucianofedericopereira/vapor-chamber/blob/main/ROADMAP.md",
+    "Laravel integration": "https://github.com/lucianofedericopereira/vapor-chamber/blob/main/docs/integrations/laravel.md"
   },
   "sort": ["source-order"],
   "categorizeByGroup": true,

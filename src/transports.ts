@@ -160,6 +160,12 @@ export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
     const envelope: CommandEnvelope = { command: cmd.action, target: cmd.target, payload: cmd.payload };
     const effectiveRetry = noRetry.includes(cmd.action) ? 0 : retry;
 
+    // Forward the idempotency key stamped by the `idempotent` plugin as an
+    // `Idempotency-Key` header so the backend can reject duplicate writes — the
+    // wire half of exactly-once. No-op (same `headers` ref) when unset.
+    const idemKey = cmd.meta?.idempotencyKey;
+    const reqHeaders = idemKey ? { ...headers, 'Idempotency-Key': idemKey } : headers;
+
     // Merge bridge-level effectiveSignal with per-dispatch cmd.signal. The
     // dispatch-time signal (from `bus.dispatch(..., { signal })`) is
     // auto-propagated to the HTTP request — consumers don't need to wire it
@@ -173,10 +179,10 @@ export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
     try {
       const res = httpClient
         ? await httpClient.post<BackendResponse>(endpoint, envelope, {
-            csrf: csrfFlag, csrfCookieUrl, headers, timeout, retry: effectiveRetry, signal: perCallSignal, onSessionExpired,
+            csrf: csrfFlag, csrfCookieUrl, headers: reqHeaders, timeout, retry: effectiveRetry, signal: perCallSignal, onSessionExpired,
           })
         : await postCommand<BackendResponse>(endpoint, envelope, {
-            csrf: csrfFlag, csrfCookieUrl, headers, timeout, retry: effectiveRetry, signal: perCallSignal, onSessionExpired,
+            csrf: csrfFlag, csrfCookieUrl, headers: reqHeaders, timeout, retry: effectiveRetry, signal: perCallSignal, onSessionExpired,
           });
 
       // Backend redirect — either a body field or a 3xx status. Pass the URL
@@ -529,4 +535,110 @@ export function createSseBridge(options: SseBridgeOptions): {
   }
 
   return { install, teardown, isConnected };
+}
+
+// ---------------------------------------------------------------------------
+// createEchoBridge — Laravel Echo / Reverb realtime → bus
+// ---------------------------------------------------------------------------
+
+export type EchoChannelType = 'public' | 'private' | 'presence';
+
+export type EchoSubscription = {
+  /** Channel name. Echo adds the `private-` / `presence-` prefix itself. */
+  name: string;
+  /** Channel kind. Default: 'public'. */
+  type?: EchoChannelType;
+  /** Server-broadcast event names to listen for on this channel. */
+  events: string[];
+};
+
+export type EchoBridgeOptions = {
+  /**
+   * A configured laravel-echo instance (or any object exposing
+   * `channel(name)` / `private(name)` / `join(name)` and `leave(name)`). The
+   * bridge takes your app's Echo so it never imports laravel-echo itself —
+   * keeping vapor-chamber backend-agnostic and the dependency out of the bundle.
+   */
+  echo: any;
+  /** Channels + events to subscribe on install. */
+  channels: EchoSubscription[];
+  /**
+   * Map an incoming broadcast to the bus. Default: `bus.emit(event, payload)` so
+   * `on(event)` listeners fire. Provide this to dispatch a command instead, or
+   * to rename/drop events.
+   */
+  onBroadcast?: (info: { channel: string; event: string; payload: any }, bus: BaseBus) => void;
+  /**
+   * For presence channels, also emit membership changes as bus events
+   * `"<name>:here"`, `"<name>:joining"`, `"<name>:leaving"`. Default: true.
+   */
+  presenceEvents?: boolean;
+};
+
+/**
+ * createEchoBridge — wire Laravel Echo / Reverb realtime channels to the bus.
+ *
+ * Protocol-aware over the generic WS bridge: subscribes public / private /
+ * presence channels and routes each broadcast to `bus.emit()` (or a command via
+ * `onBroadcast`). Presence membership (`here` / `joining` / `leaving`) is emitted
+ * too. Receive-only by design — outbound commands still go through the HTTP
+ * bridge. Pass your own Echo instance; the bridge never imports laravel-echo, so
+ * non-Laravel consumers don't pay for it.
+ *
+ * @example
+ * import Echo from 'laravel-echo';
+ * const echo = new Echo({ broadcaster: 'reverb', ... });
+ * const realtime = createEchoBridge({
+ *   echo,
+ *   channels: [
+ *     { name: 'orders', type: 'private', events: ['OrderShipped', 'OrderCancelled'] },
+ *     { name: 'lobby',  type: 'presence', events: ['MessagePosted'] },
+ *   ],
+ * });
+ * realtime.install(bus);   // OrderShipped → bus.emit('OrderShipped', payload)
+ * // on teardown:
+ * realtime.teardown();
+ */
+export function createEchoBridge(options: EchoBridgeOptions): {
+  install(bus: BaseBus): void;
+  teardown(): void;
+} {
+  const { echo, channels, onBroadcast, presenceEvents = true } = options;
+  const joined: string[] = [];
+
+  function install(bus: BaseBus): void {
+    for (const sub of channels) {
+      const type = sub.type ?? 'public';
+      const ch = type === 'private' ? echo.private(sub.name)
+               : type === 'presence' ? echo.join(sub.name)
+               : echo.channel(sub.name);
+      joined.push(sub.name);
+
+      for (const event of sub.events) {
+        ch.listen(event, (payload: any) => {
+          try {
+            if (onBroadcast) onBroadcast({ channel: sub.name, event, payload }, bus);
+            else bus.emit(event, payload);
+          } catch (e) {
+            console.error('[vapor-chamber] Echo broadcast error:', e);
+          }
+        });
+      }
+
+      if (type === 'presence' && presenceEvents) {
+        ch.here?.((members: any) => bus.emit(`${sub.name}:here`, members));
+        ch.joining?.((member: any) => bus.emit(`${sub.name}:joining`, member));
+        ch.leaving?.((member: any) => bus.emit(`${sub.name}:leaving`, member));
+      }
+    }
+  }
+
+  function teardown(): void {
+    for (const name of joined) {
+      try { echo.leave(name); } catch { /* echo may already be torn down */ }
+    }
+    joined.length = 0;
+  }
+
+  return { install, teardown };
 }

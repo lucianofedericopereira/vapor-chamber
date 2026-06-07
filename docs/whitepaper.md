@@ -404,6 +404,8 @@ the bus, normalized entity storage. The wall held every time.
 | `circuitBreaker` | Resilience | Per-action closed/open/half-open circuit states |
 | `rateLimit` | Rate limiting | Per-action sliding window rate limiter |
 | `metrics` | Observability | Lightweight telemetry: count, duration, errorRate per action |
+| `serialize` | Concurrency | Per-key sequential processing of async commands — prevents same-key read-modify-write races |
+| `idempotent` | Exactly-once | Collapses duplicate commands (double-submit/retry/reconnect); stamps an `Idempotency-Key` the HTTP bridge forwards to the backend |
 | `schemaValidator` | Guards | Auto-validates field types against schema (auto-installed in schema bus) |
 | `retry` | Resilience | Exponential/linear/fixed backoff on failure |
 | `persist` | Storage | Auto-save state to localStorage/sessionStorage/custom; validate on load |
@@ -447,8 +449,11 @@ tabSync.close()
 ### 9.1 The reactivity rewrite
 
 Vue 3.6 replaces Proxy-based reactivity with [alien-signals](https://github.com/stackblitz/alien-signals).
-The public API is unchanged — `ref()`, `computed()`, `watch()` work identically — but `ref()`
-IS a signal now, not a Proxy wrapper around one.
+The public API is unchanged — `ref()`, `computed()`, `watch()` work identically — and a `ref()`
+holding a **primitive** IS a signal now, not a Proxy wrapper around one. A `ref()` holding an
+**object or array** is still a signal *wrapping a deep reactive Proxy* (`toReactive()`); the rewrite
+changed dependency tracking, not object wrapping. See the `shallowRef` note below for why the
+library wires shallow signals.
 
 | Aspect | Proxy-based (Vue 3.0–3.5) | Alien-signals (Vue 3.6+) |
 |--------|--------------------------|--------------------------|
@@ -457,41 +462,50 @@ IS a signal now, not a Proxy wrapper around one.
 | Memory overhead | Proxy + handler per reactive object | Lightweight signal node |
 | Update propagation | Full component re-evaluation | Only affected signal consumers |
 
-**Performance benchmarks from Vue 3.6.0-beta.8 (feature-complete, March 2026):**
-- 14% less memory for reactive state
-- 40% less CPU on complex data visualizations
-- Mounting 100,000 components in ~100ms (parity with SolidJS)
-- Base bundle under 10KB for Vapor-only apps (vs ~50KB+ with VDOM)
-- 66% reduction in JavaScript payload for Vapor-only builds
-- alien-signals reactivity is stable — all core Vue APIs pass the existing test suite
+**Vapor has been feature-complete since beta.8** (March 2026): `<script setup vapor>`,
+`createVaporApp()`, `vaporInteropPlugin`, `<Teleport>` / `<Suspense>` / `<KeepAlive>`, and
+`defineAsyncComponent` all work, with the `vapor` attribute as the per-SFC opt-in. The
+alien-signals reactivity that shipped with it brought Vue's headline gains: ~14% less memory for
+reactive state, ~40% less CPU on complex visualizations, ~100k components mounted in ~100 ms
+(SolidJS parity), sub-10 KB Vapor-only bundles, ~66% smaller JS payload.
 
-As of beta.8, Vapor mode is **feature-complete for all stable APIs**: `<script setup vapor>`,
-`createVaporApp()`, `vaporInteropPlugin`, `<Teleport>`, `<Suspense>`, `<KeepAlive>`, and
-`defineAsyncComponent` all work. The `vapor` attribute is the opt-in switch per SFC.
+Every beta since has been **bug fixes and runtime optimizations** that Vapor Chamber inherits
+through its pass-through wrappers — no consumer code changes. The table below is the running
+**Vue 3.6 alignment log**: this is the single source of per-beta detail, so prose elsewhere stays
+version-agnostic, and each new beta is one added row.
 
-**3.6.0-beta.11 perf addendum (May 2026):** Vue introduced tree-shake axes that
-remove the slot-fallback / teleport / transition / keep-alive / suspense paths
-from bundles that don't reference them, plus a static-template hydration fast
-path and dynamic-props stability optimizations. Vapor Chamber's wrappers are
-pass-through, so all of these gains flow into consumer bundles unmodified. The
-library mirrors these axes in its own IIFE distribution: three sized variants
-(`core` / `elements` / `full`) so script-tag consumers can pick the smallest
-bundle that covers their use case. See §11.6.
+| Vue 3.6 beta | What changed in Vue's runtime | vapor-chamber response |
+|---|---|---|
+| **beta.8** (Mar) | Vapor feature-complete; alien-signals reactivity ships (headline gains above). | Baseline Vapor surface wrapped. Pass-through. |
+| **beta.11** (May) | Tree-shake axes (slot-fallback / teleport / transition / keep-alive / suspense); static-template hydration fast path; dynamic-props stability. | Mirrored as three sized IIFE variants (`core` / `elements` / `full`, §11.6). Pass-through. |
+| **beta.12** | Vapor `setup()` error recovery (component context, fallthrough props, render effects restored after a throw); VDOM-slot interop normalization; SSR unresolved-tag fallback. | Pass-through. Lib-side this cycle: AbortController extensions, `useSharedCommandState`, TestBus snapshot / time-travel. |
+| **beta.13** (May) | `onMove` fires for Vapor **and** VDOM component moves in a Vapor `<TransitionGroup>` (was silently skipped); moves defer until child updates flush; slot-fallback transition hooks; v-for key preservation; 5 SSR hydration fixes; interop CSS scope IDs on Vapor roots; **lazy lifecycle update jobs**; compiler opts (inline `v-bind` spreads, single-use component-resolve lowering, static-prop inlining). | Pass-through. Lazy lifecycle jobs make `tryAutoCleanup` / `onScopeDispose` allocation-free when no reactive state is tracked in the scope. |
+| **beta.14** (Jun) | HMR: child/parent reload alignment, parent-reload dedup, setup-effect preservation, context-restore-on-error, app-instance refresh on root reload. Transitions: `onMove` suppressed for v-show-hidden children. Custom elements: no hook retention on shared definitions; children update from reactive props. Async: `loadingComponent` receives props/slots; `defineVaporAsyncComponent` now a main `vue` export. Interop: bridge no longer mutated on setup; slot wrappers memoised. Vapor root: scope ID preserved on dynamic updates. Scheduler: job-queue length reset after flush. v-for: skip updated hooks on mount, no fast-remove for component v-for, lazy destructure defaults. | HMR shim gains a per-cycle dedup guard + try/catch — the **only** new beta.14 code; the rest is pass-through. **Measured gains:** `useCommandState` ~+24%, `effectScope` lifecycle ~+9%, transition bridge ~+8% (all from the scheduler flush fix). |
 
-**3.6.0-beta.13 addendum (May 2026):** Five bug fixes relevant to Vapor Chamber
-consumers — `onMove` now fires correctly for both Vapor and VDOM component moves
-inside a Vapor `<TransitionGroup>` (was silently skipped), move hooks defer until
-child updates flush, transition hooks apply to slot fallback children, and v-for
-item keys are preserved through reorders. SSR: five hydration fixes including
-stale mismatch content, namespace recovery, and Teleport sibling walk. Interop:
-CSS scope IDs now correctly apply to Vapor roots in mixed trees. Lifecycle: update
-jobs are created lazily — `onScopeDispose` registration (via `tryAutoCleanup`) no
-longer allocates an update job when no reactive state is tracked in the scope.
-Compiler: object-literal `v-bind` spreads expanded inline, single-use component
-resolves lowered, static props inlined. All Vapor Chamber wrappers are pass-through.
+Vapor Chamber auto-detects Vue at module load and wires `signal()` to **`shallowRef()`**, not
+`ref()`. The distinction matters and is easy to get wrong: the alien-signals rewrite changed the
+**dependency-tracking layer**, but `ref(anObjectOrArray)` in 3.6 still calls `toReactive()` and
+wraps the value in a **deep reactive Proxy** — exactly as in 3.5. So `ref(0)` is a pure signal,
+but `ref([])` is a signal *plus* a deep Proxy, and every read/spread of that value pays Proxy-trap
+cost. The "value-level granularity" in the table above holds **for primitives only**.
 
-Vapor Chamber auto-detects `ref()` at module load. No configuration needed — `signal()` IS a
-Vue alien-signal in 3.6+.
+The library never mutates a signal's value in place — it replaces it wholesale
+(`state.value = handler(...)`, `errors.value = [...]`, `past.value = [...]`). Whole-value
+replacement is precisely the pattern where shallow tracking is semantically identical to deep
+tracking, so `shallowRef` is correct here and skips the deep-Proxy tax. Measured on the real
+`useCommandState` dispatch path (interleaved same-process A/B): array-state dispatch is ~3.4×
+faster with `shallowRef`, scalar signals ~1.2× faster, with lower per-write allocation. Direct
+nested mutation of a returned state (`state.value.x = y`) would bypass the command bus regardless,
+which this library treats as an anti-pattern — so nothing of value is lost by tracking shallowly.
+
+For the cases where deep reactivity *is* wanted deliberately — a state object two-way bound with
+`v-model` whose nested fields you mutate in place — the `vapor-chamber/reactive` companion module
+exports `useDeepCommandState()` and `deepSignal()`. They share the exact dispatch/coalesce/cleanup
+core with `useCommandState`, differing only in the signal factory (deep `ref()` vs shallow
+`shallowRef()`), and ship in a separate tree-shakable chunk so the default install stays lean. The
+result is best-of-both-worlds: shallow-fast by default, deep-reactive per state when you opt in. The
+ref-vs-shallowRef ratios quoted here are proven by a committed CI benchmark
+(`tests/signal-shallow-ab.test.ts`), not assumed.
 
 ### 9.2 Vapor mode — the VDOM-less path
 
@@ -541,8 +555,8 @@ Each `useCommand()` and `useVaporCommand()` call creates 2 signals (`loading`, `
 
 | Vue version | Per signal | 50 components using useCommand/useVaporCommand |
 |-------------|-----------|-------------------------------|
-| Vue 3.5 (Proxy) | ~200 bytes | ~20KB |
-| Vue 3.6 (alien-signals) | ~64 bytes | ~6.4KB |
+| Vue 3.5 (Proxy) | ~200 bytes | ~20 KB |
+| Vue 3.6 (alien-signals) | ~64 bytes | ~6.4 KB |
 
 The difference between `useCommand()` and `useVaporCommand()` is not signal count but lifecycle
 safety: `useVaporCommand()` never calls `getCurrentInstance()`, making it safe in Vapor components.
@@ -1248,7 +1262,7 @@ Optional layers may add dependencies. The core never will.
 - [ ] `vapor-chamber/rx` RxJS bridge (v1.2)
 - [ ] Full documentation site with live examples
 - [ ] Performance benchmark vs Alpine.js, Livewire, HTMX
-- [ ] `chamber.ts` branch coverage 76% → 90%
+- [x] `chamber.ts` branch coverage 76% → 85% (achieved ~87% branch / ~95% statements)
 
 ---
 

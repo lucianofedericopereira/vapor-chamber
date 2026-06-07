@@ -1,6 +1,17 @@
 /**
  * vapor-chamber — Transition integration
  *
+ * v1.5.0 — Vue 3.6.0-beta.14 alignment:
+ *           • onMove is no longer called for v-show-hidden TransitionGroup
+ *             children (transition: avoid move transition for hidden v-show group
+ *             children). Before beta.14, Vue called onMove for elements with
+ *             display:none set by v-show, causing invisible move animations to
+ *             be triggered. After beta.14, Vue's runtime skips the onMove call
+ *             for those elements — the `*Move` command is never dispatched for
+ *             hidden children. No code change needed here; the fix is in Vue's
+ *             runtime. Workarounds that guarded against spurious move dispatches
+ *             by checking element visibility can be removed.
+ *           All changes are in Vue's runtime — wrappers here are pass-through.
  * v1.4.0 — Vue 3.6.0-beta.13 alignment:
  *           • onMove now correctly fires for Vapor component moves in a Vapor
  *             TransitionGroup (runtime-vapor: animate vapor component moves in
@@ -72,6 +83,12 @@ export type TransitionHooks = {
   onLeaveCancelled: (el: Element) => void;
   /**
    * TransitionGroup-only: called when an element moves due to reorder.
+   *
+   * Vue 3.6.0-beta.14: NOT called for elements hidden by v-show (display:none).
+   * Vue's runtime skips the hook for v-show-hidden children, so the `*Move`
+   * command is never dispatched for invisible list items. Handlers that were
+   * guarding against spurious move events on hidden elements can remove that
+   * check.
    *
    * Vue 3.6.0-beta.13: fires correctly for both Vapor and VDOM component moves
    * inside a Vapor TransitionGroup. Guaranteed to be called after all child

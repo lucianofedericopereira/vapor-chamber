@@ -1,6 +1,28 @@
 /**
  * vapor-chamber - Vite HMR plugin
  *
+ * v1.5.0 — Vue 3.6.0-beta.14 HMR alignment:
+ *           • dedupe HMR parent reloads (hmr: dedupe HMR parent reloads) — Vue now
+ *             deduplicates parent reload events at the runtime level; the dispose
+ *             shim mirrors this with a per-cycle guard so the bus is persisted at
+ *             most once per HMR update regardless of how many parent reload events
+ *             fire.
+ *           • align child/parent reload timing (hmr: align child component HMR
+ *             reload with parent rerender) — child component HMR reload is now
+ *             synchronised with the parent rerender; bus restoration happens after
+ *             the full parent subtree has settled.
+ *           • preserve setup effects (runtime-vapor: preserve setup effects during
+ *             hmr rerender) — watchers and computed effects created in setup() are
+ *             maintained across HMR rerenders; bus handlers registered via
+ *             watchEffect inside setup() survive a hot reload without re-registration.
+ *           • restore HMR context on errors (runtime-vapor: restore hmr context on
+ *             errors) — HMR context is recovered when an error occurs mid-reload;
+ *             the shim wraps bus persistence in try/catch so a failed getCommandBus()
+ *             call doesn't leave the module in an unrecoverable state.
+ *           • update app instance on root reload (runtime-vapor: update app instance
+ *             on root hmr reload) — the app instance on the root component is
+ *             refreshed after a root HMR cycle; callers of createVaporChamberApp()
+ *             no longer need to re-acquire the app reference after a root reload.
  * v1.1.0 — Vapor↔VDOM mode switching: tracks __vapor state during HMR reloads
  *           so components switching between Vapor and VDOM modes preserve bus state.
  * v0.5.0 — State-preserving hot module replacement.
@@ -15,7 +37,7 @@
  *   • Vite ≥ 7.0.0 (programmatic build API + library mode)
  *   • @vitejs/plugin-vue ≥ 5.0.0 (Vue 3.6 Vapor SFC support — earlier
  *     plugin-vue versions only handle 3.5 VDOM and silently skip vapor blocks)
- *   • Vue ≥ 3.5.0 (composables) or ≥ 3.6.0-beta.11 (full Vapor surface)
+ *   • Vue ≥ 3.5.0 (composables) or ≥ 3.6.0-beta.14 (full Vapor surface)
  *
  * If you're on plugin-vue v4 the HMR plugin still works for VDOM SFCs but
  * you'll miss Vapor support entirely — Vapor `<script setup vapor>` blocks
@@ -111,13 +133,24 @@ if (typeof globalThis[KEY] === 'undefined') {
 // Accept HMR updates for the entire app module tree without full reload
 if (import.meta.hot) {
   import.meta.hot.accept(() => {
+    // Beta.14: clear the per-cycle dedup flag so dispose can run on the next update.
+    import.meta.hot.data.__vc_disposed = false;
     ${verbose ? "console.log('[vapor-chamber] HMR: module updated, bus preserved');" : ''}
   });
 
-  // On dispose, persist the current bus and mode for the next module version
-  import.meta.hot.dispose(() => {
-    globalThis[KEY] = getCommandBus();
-    globalThis[MODE_KEY] = isVaporAvailable() ? 'vapor' : 'vdom';
+  // On dispose, persist the current bus and mode for the next module version.
+  // Beta.14: guarded to run at most once per HMR cycle (dedupe HMR parent reloads).
+  // Wrapped in try/catch so a mid-reload error doesn't leave the module unrecoverable
+  // (runtime-vapor: restore hmr context on errors).
+  import.meta.hot.dispose((data) => {
+    if (data.__vc_disposed) return;
+    data.__vc_disposed = true;
+    try {
+      globalThis[KEY] = getCommandBus();
+      globalThis[MODE_KEY] = isVaporAvailable() ? 'vapor' : 'vdom';
+    } catch (_) {
+      // Preserve whatever was last stored — do not overwrite with a failed read.
+    }
     ${verbose ? "console.log('[vapor-chamber] HMR: bus persisted for next reload');" : ''}
   });
 }

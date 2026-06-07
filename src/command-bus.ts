@@ -133,6 +133,12 @@ export type CommandMeta = {
   causationId?: string;
   /** Correlation ID for tracing a chain of commands (propagates from parent). */
   correlationId?: string;
+  /**
+   * Idempotency key stamped by the `idempotent` plugin. Transports (e.g. the
+   * HTTP bridge) forward it as an `Idempotency-Key` header so the backend can
+   * reject duplicate writes. Not set by default — only when `idempotent` runs.
+   */
+  idempotencyKey?: string;
 };
 
 export type Command<A extends string = string, T = any, P = any> = {
@@ -223,9 +229,17 @@ export type BatchResult = {
  * - `'error'` (default): returns `{ ok: false, error }`
  * - `'throw'`: throws the error
  * - `'ignore'`: returns `{ ok: true, value: undefined }`
+ * - `'buffer'`: queue the command (per action, FIFO) and replay it — in order —
+ *   the moment a handler for that action is `register()`-ed. Built for
+ *   lazy/async wiring where a command can be dispatched before its handler
+ *   exists (e.g. Astro/island hydration, code-split panels): the click isn't
+ *   lost, it fires when the handler arrives. The synchronous dispatch returns
+ *   `{ ok: true, value: undefined }` (the real handler runs later). `query`
+ *   never buffers (it must return a value) — it falls back to `'error'`.
+ *   Bounded by `bufferLimit` (drop-oldest + dev warning on overflow).
  * - function: called with the command, return value used as result
  */
-export type DeadLetterMode = 'error' | 'throw' | 'ignore' | ((cmd: Command) => CommandResult);
+export type DeadLetterMode = 'error' | 'throw' | 'ignore' | 'buffer' | ((cmd: Command) => CommandResult);
 
 /**
  * Naming convention configuration.
@@ -250,6 +264,12 @@ export type CommandBusOptions = {
   onMissing?: DeadLetterMode;
   /** Enforce naming convention on action names */
   naming?: NamingConvention;
+  /**
+   * Max commands buffered per action when `onMissing: 'buffer'`. When exceeded,
+   * the oldest queued command for that action is dropped (with a dev warning).
+   * Default: 256.
+   */
+  bufferLimit?: number;
 };
 
 /** Listener callback for on() subscriptions (wildcard-capable) */
@@ -454,6 +474,10 @@ type SyncState = {
   sealed: boolean;
   /** Per-instance throttle timers — dispose() cancels only this bus's timers. */
   throttleTimers: Set<ReturnType<typeof setTimeout>>;
+  /** onMissing:'buffer' queue — per-action FIFO of {target,payload}, replayed on
+   *  register(). Lazily null unless onMissing:'buffer' is configured, so non-buffer
+   *  buses don't allocate it. */
+  deferred: Map<string, Array<{ target: any; payload: any }>> | null;
 };
 
 type AsyncState = {
@@ -477,6 +501,10 @@ type AsyncState = {
   sealed: boolean;
   /** Per-instance throttle timers — dispose() cancels only this bus's timers. */
   throttleTimers: Set<ReturnType<typeof setTimeout>>;
+  /** onMissing:'buffer' queue — per-action FIFO of {target,payload}, replayed on
+   *  register(). Lazily null unless onMissing:'buffer' is configured, so non-buffer
+   *  buses don't allocate it. */
+  deferred: Map<string, Array<{ target: any; payload: any }>> | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -764,6 +792,8 @@ function register(s: SyncState | AsyncState, action: string, handler: any, opts:
   if (opts.throttle && opts.throttle > 0) h = wrapThrottle(h, opts.throttle, s.throttleTimers);
   if (opts.undo) s.undoHandlers.set(action, opts.undo);
   s.handlers.set(action, h);
+  // onMissing:'buffer' — replay any commands that arrived before this handler.
+  if (s.deferred !== null && s.deferred.size !== 0) flushDeferred(s, action);
   return () => { s.handlers.delete(action); s.undoHandlers.delete(action); };
 }
 
@@ -777,6 +807,7 @@ function clearState(s: SyncState | AsyncState): void {
   s.exactListeners.clear();
   s.wildcardListeners.length = 0;
   s.responders.clear();
+  s.deferred?.clear();
 }
 
 /** Build the BusInspection snapshot — identical shape for sync and async buses. */
@@ -800,9 +831,29 @@ function syncRebuildRunner(s: SyncState): void {
   s.runner = buildRunner(s.pluginEntries.slice().sort(byPriority).map(e => e.plugin));
 }
 
-function handleMissing(opts: CommandBusOptions, cmd: Command): CommandResult {
-  const mode = opts.onMissing ?? 'error';
+/**
+ * No-handler path. `canDefer` is true for dispatch (which may buffer) and false
+ * for query (which must return a value, so 'buffer' degrades to 'error').
+ */
+function handleMissing(s: SyncState | AsyncState, cmd: Command, canDefer: boolean): CommandResult {
+  const mode = s.opts.onMissing ?? 'error';
   if (mode === 'ignore') return okResult(undefined);
+  if (mode === 'buffer' && canDefer) {
+    // s.deferred is non-null here — it was allocated at construction when
+    // onMissing:'buffer' was set (opts is readonly, so the mode can't change).
+    const d = s.deferred ?? (s.deferred = new Map());
+    let q = d.get(cmd.action);
+    if (q === undefined) { q = []; d.set(cmd.action, q); }
+    const limit = s.opts.bufferLimit ?? 256;
+    if (q.length >= limit) {
+      q.shift(); // drop oldest
+      if (typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production') {
+        console.warn(`[vapor-chamber] onMissing:'buffer' queue for "${cmd.action}" hit bufferLimit (${limit}); dropped the oldest pending command. Register a handler, or raise bufferLimit.`);
+      }
+    }
+    q.push({ target: cmd.target, payload: cmd.payload });
+    return okResult(undefined); // accepted; the real handler runs on register()
+  }
   const err = new BusError(
     'VC_CORE_NO_HANDLER',
     `No handler registered for "${cmd.action}". Call bus.register("${cmd.action}", handler) first.`,
@@ -814,6 +865,25 @@ function handleMissing(opts: CommandBusOptions, cmd: Command): CommandResult {
     catch (e) { return errResult(e as Error); }
   }
   return errResult(err);
+}
+
+/**
+ * Replay commands buffered under `onMissing:'buffer'` for `action`, in FIFO
+ * order, now that a handler exists. Re-dispatches through the full pipeline
+ * (plugins, hooks, listeners). Sync buses run synchronously; async buses
+ * fire-and-forget. Called from register() right after the handler is set.
+ */
+function flushDeferred(s: SyncState | AsyncState, action: string): void {
+  if (s.deferred === null) return;
+  const q = s.deferred.get(action);
+  if (q === undefined || q.length === 0) return;
+  s.deferred.delete(action);
+  const isAsync = 'pendingRequests' in s;
+  for (let i = 0; i < q.length; i++) {
+    const { target, payload } = q[i];
+    if (isAsync) void asyncDispatch(s as AsyncState, action, target, payload);
+    else syncDispatch(s as SyncState, action, target, payload);
+  }
 }
 
 function syncRunHooks(s: SyncState, cmd: Command, result: CommandResult): void {
@@ -855,8 +925,16 @@ function _syncDispatchInner(s: SyncState, action: string, target: any, payload?:
     s.wildcardListeners.length === 0
   ) {
     const handler = s.handlers.get(action);
-    if (handler === undefined) return handleMissing(s.opts, cmd);
+    if (handler === undefined) return handleMissing(s, cmd, true);
     return tryCatchHandler(handler, cmd);
+  }
+
+  // onMissing:'buffer' — when there's no handler yet, queue WITHOUT running the
+  // pipeline (plugins/hooks/listeners must fire on replay, not now). The
+  // bare-path above already buffers correctly (nothing fires there). Skipped
+  // for the request/respond path (executeOverride) and non-buffer buses.
+  if (executeOverride === undefined && s.opts.onMissing === 'buffer' && !s.handlers.has(action)) {
+    return handleMissing(s, cmd, true);
   }
 
   // V8 opt: index-based loop, no .slice()
@@ -871,7 +949,7 @@ function _syncDispatchInner(s: SyncState, action: string, target: any, payload?:
   }
   const execute = executeOverride ?? ((): CommandResult => {
     const handler = s.handlers.get(action);
-    if (!handler) return handleMissing(s.opts, cmd);
+    if (!handler) return handleMissing(s, cmd, true);
     return tryCatchHandler(handler, cmd);
   });
   const result = s.runner(cmd, execute);
@@ -892,13 +970,13 @@ function syncQuery(s: SyncState, action: string, target: any, payload?: any): Co
     s.wildcardListeners.length === 0
   ) {
     const handler = s.handlers.get(action);
-    if (handler === undefined) return handleMissing(s.opts, cmd);
+    if (handler === undefined) return handleMissing(s, cmd, false);
     return tryCatchHandler(handler, cmd);
   }
   // Skip beforeHooks — queries don't trigger mutation gates (auth, loading spinners, etc.)
   const execute = (): CommandResult => {
     const handler = s.handlers.get(action);
-    if (!handler) return handleMissing(s.opts, cmd);
+    if (!handler) return handleMissing(s, cmd, false);
     return tryCatchHandler(handler, cmd);
   };
   const result = s.runner(cmd, execute);
@@ -1127,6 +1205,8 @@ export function createCommandBus<M extends CommandMap = CommandMap>(options: Com
     dispatchDepth: 0,
     sealed: false,
     throttleTimers: new Set(),
+    // Only allocate the buffer queue when buffering is actually requested.
+    deferred: options.onMissing === 'buffer' ? new Map() : null,
   };
   const bus: CommandBus<M> = {
     // Sync bus accepts the options arg for type compatibility with BaseBus,
@@ -1237,6 +1317,12 @@ async function _asyncDispatchInner(s: AsyncState, action: string, target: any, p
   // skipping the runner doesn't move the needle. Sync dispatch DID win
   // (+18%) so the same fast path is kept in `_syncDispatchInner`.
 
+  // onMissing:'buffer' — queue WITHOUT running the pipeline when no handler yet
+  // (plugins/hooks/listeners fire on replay, not now). Skipped for request/respond.
+  if (executeOverride === undefined && s.opts.onMissing === 'buffer' && !s.handlers.has(action)) {
+    return handleMissing(s, cmd, true);
+  }
+
   // V8 opt: index-based loop, no .slice()
   const bh = s.beforeHooks;
   for (let i = 0, len = bh.length; i < len; i++) {
@@ -1249,7 +1335,7 @@ async function _asyncDispatchInner(s: AsyncState, action: string, target: any, p
   }
   const execute = executeOverride ?? (async (): Promise<CommandResult> => {
     const handler = s.handlers.get(action);
-    if (!handler) return handleMissing(s.opts, cmd);
+    if (!handler) return handleMissing(s, cmd, true);
     return tryCatchAsyncHandler(handler, cmd);
   });
   const result = await s.runner(cmd, execute);
@@ -1263,7 +1349,7 @@ async function asyncQuery(s: AsyncState, action: string, target: any, payload?: 
   const cmd: Command = { action, target, payload, meta: stampMeta(payload) };
   const execute = async (): Promise<CommandResult> => {
     const handler = s.handlers.get(action);
-    if (!handler) return handleMissing(s.opts, cmd);
+    if (!handler) return handleMissing(s, cmd, false);
     return tryCatchAsyncHandler(handler, cmd);
   };
   const result = await s.runner(cmd, execute);
@@ -1454,6 +1540,8 @@ export function createAsyncCommandBus<M extends CommandMap = CommandMap>(options
     dispatchDepth: 0,
     sealed: false,
     throttleTimers: new Set(),
+    // Only allocate the buffer queue when buffering is actually requested.
+    deferred: options.onMissing === 'buffer' ? new Map() : null,
   };
   const bus: AsyncCommandBus<M> = {
     dispatch:          (a, t, p, o)  => asyncDispatch(s, a as string, t, p, undefined, o?.signal),

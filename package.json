@@ -1,6 +1,6 @@
 {
   "name": "vapor-chamber",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Lightweight command bus for Vue Vapor - plugins, hooks, undo/redo, Vue 3.6 Vapor aligned",
   "type": "module",
   "main": "./dist/index.js",
@@ -47,6 +47,10 @@
       "import": "./dist/alien-signals.js",
       "types": "./dist/alien-signals.d.ts"
     },
+    "./reactive": {
+      "import": "./dist/reactive.js",
+      "types": "./dist/reactive.d.ts"
+    },
     "./iife": {
       "import": "./dist/iife.js",
       "types": "./dist/iife.d.ts"
@@ -74,8 +78,9 @@
     "typecheck": "tsc --noEmit",
     "lint": "biome check --write src tests scripts",
     "lint:check": "biome check src tests scripts",
-    "test": "vitest",
+    "test": "vitest run",
     "test:run": "vitest run",
+    "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "bench": "vitest bench --run tests/perf.bench.ts",
     "size:check": "node scripts/check-size.mjs",
@@ -113,7 +118,7 @@
     "@vitejs/plugin-vue": ">=5.0.0",
     "@vue/devtools-api": ">=6.0.0",
     "vite": ">=7.0.0",
-    "vue": ">=3.5.0 || >=3.6.0-beta.13"
+    "vue": ">=3.5.0 || >=3.6.0-beta.14"
   },
   "peerDependenciesMeta": {
     "vue": {
@@ -146,7 +151,7 @@
     "typescript": "^5.9.3",
     "vite": "^7.0.0",
     "vitest": "^4.0.18",
-    "vue": "^3.6.0-beta.13"
+    "vue": "^3.6.0-beta.14"
   },
   "engines": {
     "node": ">=20.19.0"

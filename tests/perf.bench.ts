@@ -8,12 +8,13 @@
  */
 
 import { describe, it, expect, bench, beforeAll } from 'vitest';
+import { effectScope } from 'vue';
 import { createCommandBus, createAsyncCommandBus, configureUid } from '../src/command-bus';
 import { rehydrate, type DehydratedCommand } from '../src/ssr';
 import { persist } from '../src/plugins-io';
 import { createFastLane } from '../src/fast-lane';
 import { createTransitionBridge } from '../src/transitions';
-import { useCommandState, signal, configureSignal, waitForVueDetection } from '../src/chamber';
+import { useCommandState, signal, waitForVueDetection } from '../src/chamber';
 import { alienSignalAdapter } from '../src/alien-signals';
 import { signal as _alienSignal } from 'alien-signals';
 
@@ -508,7 +509,7 @@ describe('SSR rehydrate throughput', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Transition bridge throughput — Vue 3.6.0-beta.13 baseline
+// Transition bridge throughput — Vue 3.6.0-beta.14 baseline
 //
 // Beta.13 fixed two silent-skip bugs: onMove was never called for Vapor or
 // VDOM component moves inside a Vapor TransitionGroup. These benches lock the
@@ -520,11 +521,18 @@ describe('SSR rehydrate throughput', () => {
 //   - "onMove × 10k" is the new baseline for the previously-broken move path.
 //   - "onMove vs bus.dispatch" confirms the bridge adds only dispatch overhead.
 //
-// Baselines (v1.4.0, two-run average, 2026-05-28):
+// Baselines (v1.4.0, beta.13, 2026-05-28):
 //   all 9 hooks × 1k        713 hz   (1.40ms / 1k sequences)   runs: 709 / 717
-//   onMove only × 10k     1,018 hz   (0.98ms / 10k calls)      runs: 1,067 / 969  ← beta.13 baseline
+//   onMove only × 10k     1,018 hz   (0.98ms / 10k calls)      runs: 1,067 / 969
 //   onEnter + onLeave × 5k  984 hz   (1.02ms / 5k pairs)       runs: 1,000 / 969
 //   raw bus.dispatch × 10k 1,757 hz  (0.57ms / 10k calls)      runs: 1,750 / 1,764
+//
+// Baselines (v1.5.0, beta.14, 2026-06-05):
+//   all 9 hooks × 1k        776 hz   (+9% vs beta.13)
+//   onMove only × 10k     1,096 hz   (+8% vs beta.13)
+//   onEnter + onLeave × 5k 1,022 hz  (+4% vs beta.13)
+//   raw bus.dispatch × 10k 1,904 hz  (+8% vs beta.13)
+//   → scheduler flush improvements in beta.14 account for the uplift
 //   → bridge overhead ~37ns/call (dispatchSafe try/catch vs bare dispatch)
 //   → onMove has higher run-to-run variance (try/catch inhibits V8 inlining under GC)
 // ---------------------------------------------------------------------------
@@ -552,7 +560,7 @@ describe('transition bridge throughput', () => {
     }
   });
 
-  bench('createTransitionBridge — onMove only × 10k (beta.13 baseline)', () => {
+  bench('createTransitionBridge — onMove only × 10k (beta.14 baseline)', () => {
     const bus = createCommandBus({ onMissing: 'ignore' });
     const t = createTransitionBridge({ bus, namespace: 'list' });
     const el = mockEl();
@@ -581,7 +589,7 @@ describe('transition bridge throughput', () => {
 });
 
 // ---------------------------------------------------------------------------
-// useCommandState — immediate vs coalesced (beta.13 v-for/v-if baseline)
+// useCommandState — immediate vs coalesced (beta.14 v-for/v-if baseline)
 //
 // Beta.13 introduces specialized v-for block operations and reduced v-if branch
 // scope overhead in the Vapor runtime. Both optimizations feed into signal writes
@@ -597,84 +605,110 @@ describe('transition bridge throughput', () => {
 //     write is not awaited.
 //   - "100 dispatches vs 10" shows how coalescing scales with burst size.
 //
-// Baselines (v1.4.0, two-run average, 2026-05-28):
+// Baselines (v1.4.0, beta.13, 2026-05-28):
 //   immediate  10 array appends    20,347 hz   runs: 20,188 / 20,507
 //   coalesced  10 array appends    19,741 hz   runs: 19,767 / 19,715  — parity at small bursts
 //   immediate 100 array appends     2,012 hz   runs:  1,934 /  2,090
 //   coalesced 100 array appends     2,052 hz   runs:  2,015 /  2,090  — within noise
 //   immediate 100 counter            2,044 hz  runs:  2,015 /  2,073
 //   coalesced 100 counter            1,986 hz  runs:  1,875 /  2,098  — within noise
-//   → coalesce is throughput-neutral across both array and scalar types (two-run confirmed)
+//
+// Baselines (v1.5.0, beta.14, 2026-06-05):
+//   immediate  10 array appends    20,679 hz   (+2% vs beta.13)
+//   coalesced  10 array appends    20,493 hz   (+4% vs beta.13) — parity holds
+//   immediate 100 array appends     2,093 hz   (+4% vs beta.13)
+//   coalesced 100 array appends     2,086 hz   (+2% vs beta.13) — within noise
+//   immediate 100 counter            2,067 hz  (+1% vs beta.13)
+//   coalesced 100 counter            2,105 hz  (+6% vs beta.13) — within noise
+//   → coalesce is throughput-neutral across both array and scalar types (confirmed beta.14)
 //   → use coalesce for correctness (≤1 signal write per burst), not for throughput
 // ---------------------------------------------------------------------------
 
 describe('useCommandState — immediate vs coalesced dispatch cost', () => {
+  // Each iteration creates a fresh effectScope so tryAutoCleanup finds a live
+  // Vue scope. We call dispose() inside run() and do NOT call scope.stop() —
+  // stopping would fire onScopeDispose and double-call dispose() on
+  // already-cleaned-up state, producing 0ns measurements and NaN hz.
+
   bench('immediate — 10 dispatches, array append (simulates v-for source)', () => {
-    const bus = createCommandBus();
-    const { state, dispose } = useCommandState<number[]>(
-      [],
-      { append: (s, cmd) => [...s, cmd.target] },
-    );
-    for (let i = 0; i < 10; i++) bus.dispatch('append', i);
-    dispose();
+    effectScope().run(() => {
+      const bus = createCommandBus();
+      const { state, dispose } = useCommandState<number[]>(
+        [],
+        { append: (s, cmd) => [...s, cmd.target] },
+      );
+      for (let i = 0; i < 10; i++) bus.dispatch('append', i);
+      dispose();
+      void state;
+    });
   });
 
   bench('coalesced — 10 dispatches, array append (simulates v-for source)', () => {
-    const bus = createCommandBus();
-    const { state, dispose } = useCommandState<number[]>(
-      [],
-      { append: (s, cmd) => [...s, cmd.target] },
-      { coalesce: true },
-    );
-    for (let i = 0; i < 10; i++) bus.dispatch('append', i);
-    dispose();
-    void state;
+    effectScope().run(() => {
+      const bus = createCommandBus();
+      const { state, dispose } = useCommandState<number[]>(
+        [],
+        { append: (s, cmd) => [...s, cmd.target] },
+        { coalesce: true },
+      );
+      for (let i = 0; i < 10; i++) bus.dispatch('append', i);
+      dispose();
+      void state;
+    });
   });
 
   bench('immediate — 100 dispatches, array append', () => {
-    const bus = createCommandBus();
-    const { state, dispose } = useCommandState<number[]>(
-      [],
-      { append: (s, cmd) => [...s, cmd.target] },
-    );
-    for (let i = 0; i < 100; i++) bus.dispatch('append', i);
-    dispose();
-    void state;
+    effectScope().run(() => {
+      const bus = createCommandBus();
+      const { state, dispose } = useCommandState<number[]>(
+        [],
+        { append: (s, cmd) => [...s, cmd.target] },
+      );
+      for (let i = 0; i < 100; i++) bus.dispatch('append', i);
+      dispose();
+      void state;
+    });
   });
 
   bench('coalesced — 100 dispatches, array append', () => {
-    const bus = createCommandBus();
-    const { state, dispose } = useCommandState<number[]>(
-      [],
-      { append: (s, cmd) => [...s, cmd.target] },
-      { coalesce: true },
-    );
-    for (let i = 0; i < 100; i++) bus.dispatch('append', i);
-    dispose();
-    void state;
+    effectScope().run(() => {
+      const bus = createCommandBus();
+      const { state, dispose } = useCommandState<number[]>(
+        [],
+        { append: (s, cmd) => [...s, cmd.target] },
+        { coalesce: true },
+      );
+      for (let i = 0; i < 100; i++) bus.dispatch('append', i);
+      dispose();
+      void state;
+    });
   });
 
   bench('immediate — 100 dispatches, counter (simulates v-if condition)', () => {
-    const bus = createCommandBus();
-    const { state, dispose } = useCommandState<number>(
-      0,
-      { inc: (s) => s + 1 },
-    );
-    for (let i = 0; i < 100; i++) bus.dispatch('inc', null);
-    dispose();
-    void state;
+    effectScope().run(() => {
+      const bus = createCommandBus();
+      const { state, dispose } = useCommandState<number>(
+        0,
+        { inc: (s) => s + 1 },
+      );
+      for (let i = 0; i < 100; i++) bus.dispatch('inc', null);
+      dispose();
+      void state;
+    });
   });
 
   bench('coalesced — 100 dispatches, counter (simulates v-if condition)', () => {
-    const bus = createCommandBus();
-    const { state, dispose } = useCommandState<number>(
-      0,
-      { inc: (s) => s + 1 },
-      { coalesce: true },
-    );
-    for (let i = 0; i < 100; i++) bus.dispatch('inc', null);
-    dispose();
-    void state;
+    effectScope().run(() => {
+      const bus = createCommandBus();
+      const { state, dispose } = useCommandState<number>(
+        0,
+        { inc: (s) => s + 1 },
+        { coalesce: true },
+      );
+      for (let i = 0; i < 100; i++) bus.dispatch('inc', null);
+      dispose();
+      void state;
+    });
   });
 });
 
@@ -693,7 +727,7 @@ describe('useCommandState — immediate vs coalesced dispatch cost', () => {
 // adding reactivity is visible. Run with and without the vue devDep installed
 // to see the auto-detection path vs the explicit fallback.
 //
-// Baselines (v1.4.0 + Vue 3.6.0-beta.13, 2026-05-28):
+// Baselines (v1.4.0, beta.13, 2026-05-28):
 //   plain { value } object 10k writes    ~368,000 hz  ← V8 DCE upper bound; real cost ≈ zero overhead
 //   closure getter/setter (OLD, v1.3)      ~2,400 hz  ← real cost; setter is a fn call V8 cannot elide
 //   alien-signals via alienSignalAdapter  ~10,500 hz  ← opt-in reactive; ~4× faster than old closure
@@ -703,6 +737,17 @@ describe('useCommandState — immediate vs coalesced dispatch cost', () => {
 //   effectScope + signal + onScopeDispose  ~21,000 hz ← full reactive scope path
 //   useCommandState 100 dispatches          ~1,700 hz
 //   useCommandState coalesced 100           ~1,900 hz ← throughput-neutral (within noise)
+//
+// Baselines (v1.5.0, beta.14, 2026-06-05):
+//   plain { value } object 10k writes    ~372,000 hz  ← stable (V8 DCE)
+//   closure getter/setter (OLD, v1.3)      ~2,208 hz
+//   alien-signals via alienSignalAdapter  ~10,400 hz
+//   Vue shallowRef via signal() (v1.5.0)  ~40-62k hz  ← ~4-7× the old deep-ref() ~9k path (run-dependent)
+//   Vue ref + watchEffect subscriber      ~53,866 hz  (+8% vs beta.13)
+//   effectScope + onScopeDispose only ×1k ~173,462 hz ← beta.14: +9% vs beta.13
+//   effectScope + signal + onScopeDispose  ~21,287 hz ← stable
+//   useCommandState 100 dispatches          ~2,100 hz  (+24% vs beta.13)
+//   useCommandState coalesced 100           ~2,115 hz  ← throughput-neutral (within noise)
 // ---------------------------------------------------------------------------
 
 describe('signal path comparison — fallback vs alien-signals add-on vs Vue ref', () => {
@@ -721,7 +766,7 @@ describe('signal path comparison — fallback vs alien-signals add-on vs Vue ref
     let sink = 0;
     for (let i = 0; i < 10_000; i++) { s.value = i; sink = s.value; }
     if (sink < 0) console.log(sink);
-  });
+  }, { baseline: true });
 
   bench('closure getter/setter — old v1.3 fallback (historical comparison)', () => {
     // Replaced in v1.4.0. The setter is a real function call — V8 cannot
@@ -744,18 +789,19 @@ describe('signal path comparison — fallback vs alien-signals add-on vs Vue ref
     if (sink < 0) console.log(sink);
   });
 
-  // ── Vue auto-detected (beta.13) ────────────────────────────────────────────
+  // ── Vue auto-detected (v1.5.0: signal() wires shallowRef) ──────────────────
 
-  bench('Vue ref via signal() — auto-detected alien-signals path (beta.13)', () => {
-    // What signal() returns when vue is present. Same algorithm as alien-signals
-    // adapter above — Vue 3.6's ref() is alien-signals internally.
+  bench('Vue shallowRef via signal() — auto-detected (v1.5.0 default)', () => {
+    // What signal() returns when Vue is present: shallowRef (v1.5.0+). Goes
+    // through the signal() indirection, so V8 can't constant-fold it — this is
+    // a reliable scalar-write measurement (~40-62k hz run-dependent, ~4-7× the old deep-ref ~9k).
     const s = signal(0);
     let sink = 0;
     for (let i = 0; i < 10_000; i++) { s.value = i; sink = s.value; }
     if (sink < 0) console.log(sink);
   });
 
-  bench('Vue ref + watchEffect subscriber — notify path (beta.13)', async () => {
+  bench('Vue ref + watchEffect subscriber — notify path (beta.14)', async () => {
     const { ref, watchEffect, effectScope } = await import('vue');
     const scope = effectScope();
     const r = ref(0);
@@ -768,9 +814,9 @@ describe('signal path comparison — fallback vs alien-signals add-on vs Vue ref
     void sink;
   });
 
-  // ── beta.13 lifecycle overhead ────────────────────────────────────────────
+  // ── beta.14 lifecycle overhead ────────────────────────────────────────────
 
-  bench('effectScope + onScopeDispose only × 1k (beta.13 lazy job cost)', async () => {
+  bench('effectScope + onScopeDispose only × 1k (beta.14 lazy job cost)', async () => {
     const { effectScope } = await import('vue');
     for (let i = 0; i < 1_000; i++) {
       const scope = effectScope();
@@ -782,7 +828,7 @@ describe('signal path comparison — fallback vs alien-signals add-on vs Vue ref
     }
   });
 
-  bench('effectScope + reactive signal + onScopeDispose × 1k (beta.13 full path)', async () => {
+  bench('effectScope + reactive signal + onScopeDispose × 1k (beta.14 full path)', async () => {
     const { effectScope, onScopeDispose } = await import('vue');
     for (let i = 0; i < 1_000; i++) {
       const scope = effectScope();
@@ -797,22 +843,35 @@ describe('signal path comparison — fallback vs alien-signals add-on vs Vue ref
 
   // ── useCommandState with real Vue refs ────────────────────────────────────
 
-  bench('useCommandState 100 dispatches — Vue ref signal writes (beta.13)', () => {
-    const bus = createCommandBus();
-    const { state, dispose } = useCommandState<number>(0, { inc: (s) => s + 1 });
-    for (let i = 0; i < 100; i++) bus.dispatch('inc', null);
-    dispose();
-    void state;
+  bench('useCommandState 100 dispatches — Vue ref signal writes (beta.14)', () => {
+    effectScope().run(() => {
+      const bus = createCommandBus();
+      const { state, dispose } = useCommandState<number>(0, { inc: (s) => s + 1 });
+      for (let i = 0; i < 100; i++) bus.dispatch('inc', null);
+      dispose();
+      void state;
+    });
   });
 
-  bench('useCommandState coalesced 100 dispatches — Vue ref, 1 reactive write (beta.13)', () => {
-    const bus = createCommandBus();
-    const { state, dispose } = useCommandState<number>(0, { inc: (s) => s + 1 }, { coalesce: true });
-    for (let i = 0; i < 100; i++) bus.dispatch('inc', null);
-    dispose();
-    void state;
+  bench('useCommandState coalesced 100 dispatches — Vue ref, 1 reactive write (beta.14)', () => {
+    effectScope().run(() => {
+      const bus = createCommandBus();
+      const { state, dispose } = useCommandState<number>(0, { inc: (s) => s + 1 }, { coalesce: true });
+      for (let i = 0; i < 100; i++) bus.dispatch('inc', null);
+      dispose();
+      void state;
+    });
   });
 });
+
+// NOTE: isolated ref-vs-shallowRef micro-benches were intentionally NOT added
+// here. Pure deterministic signal loops are constant-foldable, so V8 dead-code-
+// eliminates the shallowRef path (whose writes have no observable effect) while
+// keeping ref's Proxy-trap side effects — producing inflated, unstable ratios
+// (observed 800×+ with ±100% rme). The honest, DCE-safe measurement lives in
+// tests/signal-shallow-ab.test.ts, which runs the REAL dispatch path (the bus
+// indirection defeats constant-folding) interleaved in-process and asserts the
+// ratio (~3.4× / +245% on the array path). Use that as the source of truth.
 
 describe('command.meta', () => {
   it('command.meta.id is populated', () => {

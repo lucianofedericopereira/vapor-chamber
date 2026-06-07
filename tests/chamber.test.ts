@@ -9,8 +9,11 @@ import {
   useCommandGroup,
   useCommandError,
   useCommandQuery,
+  signal,
+  waitForVueDetection,
 } from '../src/chamber';
 import { createCommandBus, createAsyncCommandBus } from '../src/command-bus';
+import { isShallow, isReactive, effectScope, watchEffect } from 'vue';
 
 describe('getCommandBus / setCommandBus', () => {
   beforeEach(() => {
@@ -193,6 +196,52 @@ describe('useCommandState', () => {
     // After dispose, handler is unregistered
     const result = bus.dispatch('counterIncrement', {});
     expect(result.ok).toBe(false);
+  });
+});
+
+describe('signal() factory — shallow reactivity', () => {
+  beforeEach(() => {
+    setCommandBus(createCommandBus());
+  });
+  afterEach(() => {
+    resetCommandBus();
+  });
+
+  // Regression guard: the library auto-wires Vue's shallowRef (not ref) because
+  // it only ever replaces signal values wholesale. Reverting to ref() would
+  // reintroduce the per-write deep-Proxy (toReactive) cost on object/array state
+  // (~3.4x slower on the useCommandState array path). These assertions fail if
+  // signal() goes back to a deep ref.
+  it('returns a SHALLOW Vue ref once Vue is detected', async () => {
+    await waitForVueDetection();
+    const s = signal({ nested: { n: 1 } });
+    expect(isShallow(s)).toBe(true);
+    // shallow ⇒ nested value is the raw object, not a reactive proxy
+    expect(isReactive(s.value.nested)).toBe(false);
+  });
+
+  it('still drives reactivity on whole-value replacement (the library contract)', async () => {
+    await waitForVueDetection();
+    const { state } = useCommandState(
+      { items: [] as number[] },
+      { itemAdd: (s, cmd) => ({ items: [...s.items, cmd.target as number] }) },
+    );
+
+    const seen: number[] = [];
+    const scope = effectScope();
+    scope.run(() => {
+      watchEffect(() => { seen.push(state.value.items.length); });
+    });
+
+    const bus = getCommandBus();
+    bus.dispatch('itemAdd', 1);
+    bus.dispatch('itemAdd', 2);
+    await Promise.resolve(); // let the effect flush
+
+    // Effect saw the initial mount (0) and reacted to whole-value reassignments.
+    expect(seen[0]).toBe(0);
+    expect(seen[seen.length - 1]).toBe(2);
+    scope.stop();
   });
 });
 

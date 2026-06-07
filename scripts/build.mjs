@@ -39,6 +39,7 @@ await build({
         'observable': 'src/observable.ts',
         'plugins-schema': 'src/plugins-schema.ts',
         'alien-signals': 'src/alien-signals.ts',
+        'reactive':   'src/reactive.ts',
         'iife':       'src/iife.ts',
       },
       formats: ['es'],

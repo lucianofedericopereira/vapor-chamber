@@ -25,7 +25,7 @@ const { dispatch, loading, lastError } = useCommand('cartAdd');
 
 - **~9.8 KB brotli (full IIFE) / ~6.7 KB brotli (core IIFE) / ~5.7 KB brotli (ESM tree-shaken)** — one runtime dependency (`alien-signals`)
 - **Framework-agnostic core** — the bus itself has no Vue import
-- **Vue 3.6.0-beta.13 aligned** — signals, `onScopeDispose`, `getCurrentScope`, alien-signals internals
+- **Vue 3.6.0-beta.14 aligned** — signals, `onScopeDispose`, `getCurrentScope`, alien-signals internals
 - **Full plugin pipeline** — logger, validator, debounce, throttle, retry, persist, sync, and more
 - **Transport layer** — HTTP bridge, WebSocket bridge, SSE bridge
 - **SSR-safe** — per-request bus isolation, no shared singletons
@@ -130,7 +130,7 @@ vapor-chamber is built in layers. The **core** is framework-agnostic, has zero d
 | Plugins | `plugins-io.ts` | 88% | ✅ Stable |
 | Transport | `http.ts` | 80% | ✅ Stable |
 | Transport | `transports.ts` | 91% | ✅ Stable |
-| Vue | `chamber.ts` | 76% | ✅ Stable |
+| Vue | `chamber.ts` | ~95% stmts / ~87% branch | ✅ Stable |
 | Extras | `form.ts` | 99% | ✅ Stable |
 | Extras | `schema.ts` | 92% | ✅ Stable |
 | Vue 3.6 | `chamber-vapor.ts` | ✅ | ✅ Stable (unit-tested without Vue 3.6 runtime) |
@@ -149,6 +149,7 @@ Sub-path exports avoid pulling in optional modules:
 'vapor-chamber/observable'    → Symbol.observable interop — RxJS / xstream / callbag adapter
 'vapor-chamber/standard-schema'→ Standard Schema v1 validator plugin (Zod / Valibot / ArkType compatible)
 'vapor-chamber/alien-signals' → connector to use alien-signals as the underlying reactive primitive (non-Vue contexts)
+'vapor-chamber/reactive'      → opt-in DEEP reactivity: deepSignal + useDeepCommandState (nested-mutation tracking; the core signal() is shallow+fast by default)
 'vapor-chamber/iife'          → IIFE bundle (full)
 'vapor-chamber/iife-core'     → IIFE bundle (no Vapor custom-element, no Suspense paths)
 'vapor-chamber/iife-elements' → IIFE bundle (core + Vapor custom-element)
@@ -211,7 +212,7 @@ API) — single source, multiple outputs.
 > **Variant contents are not under semver before v2.0.** While Vue 3.6 is in
 > beta, the lib reserves the right to move APIs between IIFE variants. ESM
 > consumers (the `vapor-chamber` main entry) get the full surface and are
-> unaffected. See [ROADMAP.md](./ROADMAP.md).
+> unaffected. See [ROADMAP.md](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/ROADMAP.md).
 
 ---
 
@@ -221,23 +222,23 @@ API) — single source, multiple outputs.
 npm install vapor-chamber
 ```
 
-**Requirements:** Node.js ≥20.19.0 | Vue ≥3.5.0 (composables) or ≥3.6.0-beta.11 (full Vapor) — optional peer dep | Vite ≥7.0.0 + `@vitejs/plugin-vue` ≥5.0.0 (only required for the `vapor-chamber/vite` HMR plugin and Vapor SFC support)
+**Requirements:** Node.js ≥20.19.0 | Vue ≥3.5.0 (composables) or ≥3.6.0-beta.14 (full Vapor) — optional peer dep | Vite ≥7.0.0 + `@vitejs/plugin-vue` ≥5.0.0 (only required for the `vapor-chamber/vite` HMR plugin and Vapor SFC support)
 
 > **Beta tracking:** this lib follows Vue 3.6 while it is in beta. The Vapor
 > wrappers and the `useVaporCommand` / `useCommand` split are transitional
-> surfaces that will realign once Vue 3.6 ships stable. See [ROADMAP.md](./ROADMAP.md)
+> surfaces that will realign once Vue 3.6 ships stable. See [ROADMAP.md](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/ROADMAP.md)
 > for what is stable today, what is transitional, and the v1.3 / v2 plan.
 >
-> **Performance & tuning:** see [docs/performance.md](./docs/performance.md)
+> **Performance & tuning:** see [docs/performance.md](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/docs/performance.md)
 > for what's optimized by default, the consumer-facing tuning knobs
 > (`persist({ coalesce: true })`, `configureUid`, `configureSignal`), variant
 > selection guide, and a benchmark snapshot.
 >
-> **Laravel integration:** see [docs/integrations/laravel.md](./docs/integrations/laravel.md)
+> **Laravel integration:** see [docs/integrations/laravel.md](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/docs/integrations/laravel.md)
 > for the full backend deliverables list (route, controller, action classes,
 > CSRF flows, Sanctum, Inertia coexistence, Filament panels, Reverb
 > realtime, queued commands). Runnable PHP companions live in
-> [examples/laravel-backend/](./examples/laravel-backend/).
+> [examples/laravel-backend/](https://github.com/lucianofedericopereira/vapor-chamber/tree/main/examples/laravel-backend).
 >
 > **API reference:** generate locally with `npm run docs` (TypeDoc → `docs/api/`).
 > The generated site is `.gitignore`d so it stays fresh per release. Hosting it
@@ -881,6 +882,26 @@ bus.use(createSseBridge({
 }));
 ```
 
+### createEchoBridge
+
+Laravel Echo / Reverb realtime — subscribe public/private/presence channels and
+route each broadcast to `bus.emit()`. You pass your own Echo instance, so the
+library never imports `laravel-echo`:
+
+```typescript
+import { createEchoBridge } from 'vapor-chamber/transports';
+
+const realtime = createEchoBridge({
+  echo, // your configured laravel-echo / Reverb instance
+  channels: [
+    { name: `user.${userId}`, type: 'private',  events: ['OrderShipped'] },
+    { name: 'lobby',          type: 'presence', events: ['MessagePosted'] },
+  ],
+});
+realtime.install(bus);   // OrderShipped → bus.emit('OrderShipped', payload)
+// realtime.teardown();  // on unmount / route change
+```
+
 ## HTTP Client
 
 `postCommand` is exposed for use outside the transport plugin when you need direct HTTP control:
@@ -1271,16 +1292,16 @@ app.mount('#app');
 
 ## Examples
 
-See the [`examples/`](./examples) folder for complete, runnable examples:
+See the [`examples/`](https://github.com/lucianofedericopereira/vapor-chamber/tree/main/examples) folder for complete, runnable examples:
 
 | Example | Description |
 |---------|-------------|
-| [`shopping-cart.ts`](./examples/shopping-cart.ts) | Cart with validation, history, and undo/redo |
-| [`form-validation.ts`](./examples/form-validation.ts) | Form validation with error handling |
-| [`async-api.ts`](./examples/async-api.ts) | Async handlers with retry plugin |
-| [`realtime-search.ts`](./examples/realtime-search.ts) | Debounced search queries |
-| [`custom-plugins.ts`](./examples/custom-plugins.ts) | Analytics, auth guard, rate limiter plugins |
-| [`vue-vapor-component.vue`](./examples/vue-vapor-component.vue) | Full Vue Vapor todo app |
+| [`shopping-cart.ts`](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/examples/shopping-cart.ts) | Cart with validation, history, and undo/redo |
+| [`form-validation.ts`](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/examples/form-validation.ts) | Form validation with error handling |
+| [`async-api.ts`](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/examples/async-api.ts) | Async handlers with retry plugin |
+| [`realtime-search.ts`](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/examples/realtime-search.ts) | Debounced search queries |
+| [`custom-plugins.ts`](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/examples/custom-plugins.ts) | Analytics, auth guard, rate limiter plugins |
+| [`vue-vapor-component.vue`](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/examples/vue-vapor-component.vue) | Full Vue Vapor todo app |
 
 ## API Reference
 
@@ -1409,6 +1430,8 @@ See the [`examples/`](./examples) folder for complete, runnable examples:
 | `circuitBreaker` — per-action closed/open/half-open resilience | `plugins-extra` | ✅ v1.0 | ✅ covered |
 | `rateLimit` — per-action sliding window limiter | `plugins-extra` | ✅ v1.0 | ✅ covered |
 | `metrics` — lightweight telemetry (count, duration, errorRate) | `plugins-extra` | ✅ v1.0 | ✅ covered |
+| `serialize` — per-key sequential processing (async; prevents same-key races; `scope:'cross-tab'` via Web Locks) | `plugins-extra` | ✅ v1.5 | ✅ covered |
+| `idempotent` — collapse duplicate commands (double-submit/retry); stamps `Idempotency-Key` for the HTTP bridge | `plugins-extra` | ✅ v1.5 | ✅ covered |
 
 ### Utilities — optional, tree-shaken
 
@@ -1432,12 +1455,13 @@ See the [`examples/`](./examples) folder for complete, runnable examples:
 | `createWsBridge` — WebSocket plugin + reconnect + bounded queue | `transports` | ✅ v0.6.0 | ✅ covered |
 | `WsBridge.connected` — reactive signal for connection state | `transports` | ✅ v0.6.0 | ✅ covered |
 | `createSseBridge` — server-push EventSource, accepts `BaseBus` | `transports` | ✅ v0.6.0 | ✅ covered |
+| `createEchoBridge` — Laravel Echo/Reverb realtime (public/private/presence → bus) | `transports` | ✅ v1.5.0 | ✅ covered |
 
 ### Vue composables — optional, requires Vue ≥3.5
 
 | Feature | Module | Status | Tests |
 |---------|--------|--------|-------|
-| `useCommand` — reactive loading/error | `chamber` | ✅ v0.1.0 | ✅ 76% coverage |
+| `useCommand` — reactive loading/error | `chamber` | ✅ v0.1.0 | ✅ ~95% coverage |
 | `useCommandState` | `chamber` | ✅ v0.2.0 | ✅ covered |
 | `useCommandHistory` — reactive undo/redo | `chamber` | ✅ v0.2.0 | ✅ covered |
 | `useCommandGroup` — namespace isolation | `chamber` | ✅ v0.4.1 | ✅ covered |
@@ -1506,12 +1530,12 @@ See the [`examples/`](./examples) folder for complete, runnable examples:
 | `createCommandPool` — object pool for hot paths | ✅ Done (v1.0) |
 | Recursion depth guard (max 10) | ✅ Done (v1.0) |
 | Architectural whitepaper | ✅ Done (v0.6.0) |
-| `chamber.ts` branch coverage | 🔄 76% → target 85% |
+| `chamber.ts` branch coverage | ✅ ~87% branch / ~95% stmts (target met) |
 | Publish to npm as `vapor-chamber@1.0.0` | ⬜ Pending |
 
 ## Documentation
 
-See [`docs/whitepaper.md`](./docs/whitepaper.md) for design philosophy, architecture, camelCase naming rationale, Vue 3.6 Vapor alignment, SSR guide, and migration strategy.
+See [`docs/whitepaper.md`](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/docs/whitepaper.md) for design philosophy, architecture, camelCase naming rationale, Vue 3.6 Vapor alignment, SSR guide, and migration strategy.
 
 ## Design Goals
 

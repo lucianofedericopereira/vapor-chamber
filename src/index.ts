@@ -134,11 +134,15 @@ export {
   circuitBreaker,
   rateLimit,
   metrics,
+  serialize,
+  idempotent,
   type CacheOptions,
   type CircuitBreakerOptions,
   type RateLimitOptions,
   type MetricsEntry,
   type MetricsOptions,
+  type SerializeOptions,
+  type IdempotentOptions,
 } from './plugins-extra';
 
 // ── OPTIONAL ──────────────────────────────────────────────────────────────────
@@ -228,9 +232,13 @@ export {
   createHttpBridge,
   createWsBridge,
   createSseBridge,
+  createEchoBridge,
   type HttpBridgeOptions,
   type WsBridgeOptions,
   type SseBridgeOptions,
+  type EchoBridgeOptions,
+  type EchoSubscription,
+  type EchoChannelType,
   type CommandEnvelope,
   type BackendResponse,
 } from './transports';

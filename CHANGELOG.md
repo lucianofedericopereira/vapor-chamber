@@ -2,6 +2,278 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.5.0 — Vue 3.6.0-beta.14 alignment
+
+### Changed
+
+- **peerDependencies** bumped to `vue: ">=3.5.0 || >=3.6.0-beta.14"`.
+- **`signal()` now wires Vue's `shallowRef()` instead of `ref()`** when Vue is detected
+  (`chamber.ts`, `signal.ts`). The library only ever replaces a signal's value wholesale
+  (`state.value = handler(...)`, `errors.value = [...]`) and never mutates nested fields in
+  place, so shallow tracking is semantically identical for every internal signal while skipping
+  the deep reactive Proxy (`toReactive()`) that `ref()` wraps around object/array values. This is
+  *not* a beta.14 feature — it is a standing optimization surfaced while profiling the beta.14
+  reactive path. Measured on the real `useCommandState` dispatch path (interleaved same-process
+  A/B, not the coarse vitest-bench harness whose ~480µs/iteration floor masks the effect):
+  array-state dispatch **~3.4× faster** (+245% at 100 dispatches), scalar signals **~1.1–1.2×**,
+  lower per-write allocation. Proven by a committed, reproducible benchmark —
+  `tests/signal-shallow-ab.test.ts` measures the real dispatch path with `process.hrtime` and
+  **prints the table on every run** (the live evidence); it doesn't assert a timing threshold
+  (ratios are unstable under load/coverage and it compares Vue primitives directly, so it can't catch
+  a library regression). The regression guard is `tests/chamber.test.ts` → "signal() factory — shallow
+  reactivity", which asserts the factory stays a `shallowRef` and that whole-value replacement still
+  drives reactivity. (Isolated `ref`-vs-`shallowRef`
+  micro-benches were deliberately *not* added to `perf.bench.ts`: pure signal loops are
+  constant-foldable and V8 dead-code-elimination inflates the ratio to 800×+ with ±100% variance —
+  the real-path interleaved test is the only trustworthy measure.) Consumer note: directly mutating a returned
+  `state.value.x = y` (instead of dispatching a command) no longer triggers reactivity under the
+  shallow default — that always bypassed the command bus and was an anti-pattern, but if you need
+  it deliberately, use `useDeepCommandState` / `deepSignal` from `vapor-chamber/reactive` (see Added).
+- **`tryAutoCleanup` dev warning — deduped and reworded.** The "composable used outside a Vue scope"
+  warning now fires **at most once per module** (it used to repeat on every such call, flooding test
+  and bench output) and is reworded as a clearly-labeled, self-explaining hint — it opens with
+  "Heads-up (not an error)" and states it's "expected and harmless when intentional — e.g. in tests,
+  one-off scripts, or anywhere you dispose manually", so it can't be mistaken for a failure. Guarded
+  by `tests/auto-cleanup-warning.test.ts`.
+- **`onMissing:'buffer'` allocates lazily.** The per-action buffer Map is created only when
+  `onMissing:'buffer'` is configured (read once at construction) — non-buffer buses, the overwhelming
+  majority, skip the allocation entirely.
+
+### Tooling & tests
+
+- **`npm test` now runs once and exits** (`vitest run`) instead of launching the watch-mode dev
+  runner; the interactive watcher moved to **`npm run test:watch`**. `test:run` is unchanged; CI and
+  `prepublishOnly` already used it.
+- **`chamber.ts` coverage 76% → ~87% branch / ~95% statements** — new behavior tests for the
+  `globalThis.__VUE__` script-tag/MPA detection path, `runDispatch`/`useSharedCommandState` error
+  arms, undo/redo handler errors, and the `useCommandGroup` `use`/`on`/`query`/`emit`/`dispose`
+  methods. Self-flagged roadmap target met.
+- **Adversarial hardening tests** for the saga/compensation path — a compensation step that *itself*
+  fails, first-step failure (nothing to compensate), reverse-order compensation, async-bus sagas.
+- **De-flaked the `signal-shallow-ab` proof test.** It blew the 5s default timeout under heavy
+  parallel load / `--coverage` instrumentation (the real cause of a rare CI flake, not its
+  assertions). It now skips under `--coverage` (instrumented timing is meaningless there), runs with
+  a 30s timeout otherwise, and only smoke-checks finite/positive ratios — it *prints* the evidence
+  rather than asserting a timing threshold (the `isShallow` test is the real regression guard).
+
+### Docs
+
+- **Feature set declared locked; docs restructured for Vue-version tracking.** `ROADMAP.md`
+  refreshed to beta.14 (currency, peer dep, the moving-API range) and given a **feature-lock
+  posture** (the surface is complete; the only forward motion until 3.6 stable is tracking betas),
+  a **Vue version-support matrix**, and a **"what flips at Vue 3.6 stable" checklist** so the
+  stable landing is mechanical. The whitepaper's layered beta.8 → .14 addenda were consolidated
+  into a single **Vue 3.6 alignment log table** (one row per beta — the only place per-beta detail
+  lives now), and `performance.md`'s parallel beta.13/beta.14 reactive-notes sections merged into
+  one version-agnostic section with prior-beta baselines cited inline. No content lost; future beta
+  bumps are now a one-row table edit instead of another stacked addendum.
+
+### Added
+
+- **`createEchoBridge` — Laravel Echo / Reverb realtime → bus.** Protocol-aware over the generic WS
+  bridge: subscribes public / private / presence channels and routes each broadcast to `bus.emit()`
+  (or a command via `onBroadcast`); presence membership (`here`/`joining`/`leaving`) is emitted as
+  `"<channel>:here"` etc. Receive-only by design (outbound still goes through the HTTP bridge). Takes
+  your own Echo instance, so the library never imports `laravel-echo` and non-Laravel consumers don't
+  pay for it. `install(bus)` / `teardown()`. 6 tests against a mock Echo. (Was previously roadmap-only.)
+- **`onMissing: 'buffer'` — deferred dispatch (buffer-until-registered).** A command dispatched
+  before its handler exists is now queued **per action, FIFO**, and replayed — in order, through the
+  full pipeline (plugins/hooks/listeners fire on replay, not before) — the moment a handler
+  `register()`s. Built for lazy/async wiring where dispatch can precede the handler (Astro/island
+  hydration, code-split panels): the click isn't lost, it fires when the handler arrives. Sync and
+  async buses; bounded by `bufferLimit` (default 256, drop-oldest + dev warning). Buffered dispatch
+  returns `{ ok: true, value: undefined }`; `query` never buffers (falls back to `'error'`). 8 tests.
+- **`idempotent` plugin — collapse duplicate commands (client-side exactly-once).** Repeats of the
+  same logical command — double-clicked Checkout, an auto-retry, a reconnect replay — run the
+  handler/backend **once**: concurrent dupes share the first in-flight promise, sequential dupes
+  within `ttl` (default 60 s) return the cached result. Failures are **not** cached (a real retry
+  runs). Default key is `commandKey(action, target)`; configurable `key`/`ttl`/`actions`. Stamps
+  `cmd.meta.idempotencyKey`, and **the HTTP bridge now forwards it as an `Idempotency-Key` header**
+  so the backend can reject the duplicate write too — the wire half of exactly-once. Composes with
+  `serialize` (orders same-key locally). Lives in `plugins-extra` (tree-shaken; not in the IIFE
+  bundles). 7 tests.
+- **Bundle-size budgets** (`scripts/check-size.mjs`): all three IIFE variants +~120–230 B (brotli)
+  for the `onMissing:'buffer'` deferred-dispatch logic in `command-bus.ts`. The `idempotent` plugin
+  is in `plugins-extra` and not in these bundles.
+- **`serialize` plugin — per-key sequential processing for async commands.** Closes the one
+  genuine core-feature gap: ordered serialization of *distinct* same-key commands (the bus already
+  had in-flight *dedup*, which collapses identical requests — this queues different same-key commands
+  so they apply in order). Async bus only (sync handlers are atomic and can't interleave). Prevents
+  read-modify-write races on a shared resource — two `accountWithdraw` for the same account, rapid
+  `cartCheckout` clicks, etc. `serialize({ key: (cmd) => cmd.target.accountId, actions: ['account*'] })`.
+  Failure-safe (a rejected command doesn't stall its lane) and bounded (per-key entries reclaimed when
+  a lane drains). **`scope: 'cross-tab'`** extends serialization across every tab/window of the same
+  origin via the **Web Locks API** (`navigator.locks`) — browser-arbitrated mutual exclusion with no
+  custom transport, auto-falling back to the per-instance queue when the API is absent (SSR/older
+  browsers). Lives in `plugins-extra` (tree-shaken; not in the IIFE bundles). 10 tests including a
+  control case proving the race exists without it and deterministic barrier-based concurrency checks.
+- **`vapor-chamber/reactive` — opt-in deep-reactivity companion.** New subpath module exporting
+  `deepSignal()` and `useDeepCommandState()`. The core stays shallow and fast by default; import
+  this module only when you genuinely need nested reactivity — e.g. a state object two-way bound
+  with `v-model` whose fields you mutate in place (`state.value.profile.name = 'x'`) rather than
+  through dispatched commands. `useDeepCommandState` shares the exact dispatch/coalesce/cleanup
+  core with `useCommandState` (via the internal `_createCommandState`), differing only in the
+  signal factory (deep `ref()` vs shallow `shallowRef()`), so the two can never drift. The companion
+  ships in its own tree-shakable chunk and is **not** bundled into the IIFE variants or pulled into
+  the core `.` entry. Best of both worlds: shallow-fast default, deep-reactive when asked.
+- **Bundle-size budgets** (`scripts/check-size.mjs`): `full` brotli 10,100 → 10,250 B and `elements`
+  raw 25,100 → 25,250 B, accommodating the ~60–120 B `_createCommandState` shared-core refactor that
+  backs the reactive companion. The companion module itself is not in these IIFE bundles.
+
+### Vue 3.6.0-beta.14 alignment
+
+#### HMR (`vite-hmr.ts`)
+
+- **Deduplication of parent reload cycles** (`hmr: dedupe HMR parent reloads`):
+  Vue's runtime now deduplicates parent HMR reload events. The injected shim
+  mirrors this with a per-cycle guard (`data.__vc_disposed`) so the command bus
+  is persisted at most once per HMR update, even if parent reload events fire
+  multiple times in a single cycle.
+
+- **Child/parent reload timing aligned** (`hmr: align child component HMR reload
+  with parent rerender`): child component HMR reloads are now synchronised with
+  the parent rerender. Bus restoration in the shim happens after the full parent
+  subtree settles — no stale handler snapshots during the reload window.
+
+- **Setup effects preserved across HMR rerenders** (`runtime-vapor: preserve setup
+  effects during hmr rerender`): watchers and computed effects created in `setup()`
+  survive a hot-reload without requiring re-registration. Bus handlers registered
+  via `watchEffect` inside a Vapor component's `setup()` no longer need to be
+  re-registered after a hot reload.
+
+- **HMR context restored on errors** (`runtime-vapor: restore hmr context on
+  errors`): the shim's `dispose` handler now wraps bus persistence in `try/catch`.
+  A failed `getCommandBus()` call mid-reload no longer leaves the module in an
+  unrecoverable state — whatever was last stored in `globalThis` is kept intact.
+
+- **App instance updated on root HMR reload** (`runtime-vapor: update app instance
+  on root hmr reload`): when the root Vapor component hot-reloads, the `app`
+  instance reference on that component is refreshed. Callers of
+  `createVaporChamberApp()` no longer need to re-acquire the app reference after a
+  root HMR cycle.
+
+#### TransitionGroup (`transitions.ts`)
+
+- **`onMove` not called for v-show-hidden children** (`transition: avoid move
+  transition for hidden v-show group children`): before beta.14, Vue called `onMove`
+  for TransitionGroup children hidden with `v-show` (i.e. `display:none`), causing
+  invisible move animations. After beta.14, Vue's runtime skips the hook entirely
+  for such elements — the `*Move` command is never dispatched. Handlers that guarded
+  against spurious move events by checking element visibility can remove that check.
+
+#### Custom elements (`chamber-vapor.ts` — `defineVaporCustomElement`)
+
+- **No hook retention on shared definitions** (`custom-element: avoid retaining
+  custom element hooks on shared definitions`): lifecycle hooks are no longer
+  accumulated on the shared `options` object when the same reference is passed to
+  multiple `defineVaporCustomElement()` calls. Hooks stay correctly scoped to each
+  element instance.
+
+- **Children update from reactive props** (`custom-element: update custom element
+  children from reactive props`): Vapor custom elements now correctly re-render
+  their children tree when reactive props change, fixing missing updates in shadow
+  DOM subtrees.
+
+#### Async components (`chamber-vapor.ts` — `defineVaporAsyncComponent`)
+
+- **Props and slots forwarded to `loadingComponent`** (`runtime-vapor: pass props
+  and slots to loadingComponent`): the loading placeholder now receives the same
+  props and slots as the deferred component. Use this to render a skeleton that
+  matches the final component's shape and slot structure.
+
+- **SSR runtime alias exposed** (`vapor: expose async component alias for SSR
+  runtime`): the async component output now declares an SSR alias, enabling correct
+  tree-shaking of the async component chunk in SSR code-split builds.
+
+#### Interop bridge (`chamber-vapor.ts` — `getVaporInteropPlugin`)
+
+- **Bridge not mutated on app setup** (`runtime-vapor: avoid mutating shared interop
+  bridge`): the plugin reference returned by `getVaporInteropPlugin()` is no longer
+  modified by Vue's runtime during `createApp().use(plugin)`. The reference is safe
+  to hold and reuse across multiple app instances and HMR cycles.
+
+- **Interop slot wrappers cached** (`runtime-vapor: cache normalized interop slot
+  wrappers`): slot wrapper normalization across the Vapor↔VDOM boundary is now
+  memoised. Repeated boundary crossings in the same render cycle no longer allocate
+  new wrapper functions per slot per render.
+
+#### Vapor app root (`chamber-vapor.ts` — `createVaporChamberApp`)
+
+- **Scope ID preserved on dynamic root updates** (`runtime-vapor: preserve scope id
+  on dynamic root updates`): CSS scope IDs are now maintained when the root
+  component updates dynamically, not only on initial mount. Scoped styles in
+  mixed Vapor/VDOM trees remain correct across all root re-renders.
+
+#### Async wrapper / scheduler
+
+- **Error component creation aligned** (`runtime-vapor: align error component
+  creation in async wrapper`): error components inside async wrappers (Suspense
+  boundaries) now render consistently with VDOM behaviour; `useVaporAsyncCommand()`
+  error state handling is unaffected at the command-bus level.
+
+- **Scheduler job queue reset after flush** (`scheduler: reset job queue length
+  after flush`): the Vapor scheduler correctly resets its internal job counter
+  after each flush cycle. Async commands queued in burst patterns no longer
+  accumulate stale queue-length state across flushes.
+
+#### v-for fixes
+
+- **Skip `updated` hooks on initial mount** (`runtime-vapor: skip v-for updated
+  hooks on initial mount`): `onUpdated` no longer fires for v-for items during
+  the initial mount pass. `defineVaporCommand` and `useVaporCommand` handlers
+  wired to `onUpdated` inside v-for blocks will not fire prematurely on mount.
+
+- **Component v-for avoids fast remove** (`runtime-vapor: avoid fast remove for
+  component v-for`): component-level v-for no longer uses the fast-remove path,
+  fixing cleanup ordering for `defineVaporCommand` / `useVaporCommand` registered
+  inside v-for items. Dispose callbacks now run in the correct sequence relative
+  to parent teardown.
+
+- **Lazy destructure defaults** (`vFor: avoid eager evaluation of destructure
+  defaults`): destructure defaults in v-for item patterns are evaluated lazily.
+  No impact on command handlers; aligns compiled template output with expected
+  JavaScript semantics.
+
+### Performance baselines (v1.5.0, 2026-06-05)
+
+Run on Apple Silicon dev machine, Vue beta.14 devDep installed.
+
+**Reactive signal paths** *(beta.14 — confirmed bench run)*
+
+| path (isolated scalar write loop) | ops/sec | note |
+|---|---|---|
+| plain `{ value }` fallback | ~372,000 | not reactive; fastest |
+| **Vue `shallowRef` via `signal()`** (v1.5.0 default) | **~40k–62k** | ~4–7× the deep `ref()` it replaced; ~4–6× the alien adapter (run-dependent) |
+| alien-signals `configureAlienSignals` | ~10,400 | opt-in, non-Vue contexts |
+| Vue deep `ref()` (old v1.4 `signal()` default) | ~9,000 | replaced by shallowRef |
+| `effectScope` + `onScopeDispose` only | ~173,000 | **+9%** vs beta.13 (scheduler flush fix) |
+| `effectScope` + reactive signal + scope | ~21–26k | +2% (within noise) |
+| `useCommandState` 100 dispatches (real path) | ~2,050 | bus dispatch dominates; signal cost masked here |
+
+Key finding: two separate effects. (a) beta.14's scheduler flush fix ("reset job queue length
+after flush") gives ~+9% on `effectScope` lifecycle. (b) v1.5.0's `signal()` → `shallowRef`
+switch makes the auto-detected Vue path ~4–7× faster on isolated scalar writes (~40–62k across
+runs vs the old deep-`ref()` ~9k; absolute is machine-state sensitive, ratio is the robust claim)
+— so the earlier "alien-signals and Vue `ref()` have converged to ~9–10k" claim is **obsolete**:
+`signal()` (shallowRef) is now several× the `configureAlienSignals` adapter.
+`configureAlienSignals` is for non-Vue contexts, not a throughput upgrade. NOTE: the isolated
+scalar figure (~62k) is signal-write cost only; end-to-end through the bus the scalar gain is
+~+12% and the array gain ~+245% (dispatch dominates) — see `tests/signal-shallow-ab.test.ts`.
+
+**Transition bridge** *(beta.14 improvements confirmed)*
+
+| bench | hz | delta vs beta.13 |
+|---|---|---|
+| all 9 hooks × 1k sequences | 776 | **+9%** |
+| onMove only × 10k | 1,096 | **+8%** |
+| onEnter + onLeave × 5k | 1,022 | **+4%** |
+| raw `bus.dispatch` overhead delta | 1,904 | **+8%** |
+
+All transition bridge paths improved ~4–9% in beta.14, attributable to the scheduler
+flush fix. Note: `onMove` baseline reflects the beta.14 v-show fix — the hook is no
+longer called for hidden TransitionGroup children, so production hot paths with mixed
+visible/hidden lists will see fewer calls than this bench measures (bench uses all-visible elements).
+
 ## v1.4.0 — Vue 3.6.0-beta.13 alignment
 
 ### Changed

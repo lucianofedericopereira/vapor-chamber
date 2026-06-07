@@ -266,16 +266,23 @@ configureAlienSignals(alienSignal);
 // observe the same underlying instances.
 ```
 
-**Performance note (v1.4.0 bench, beta.13):**
+**Performance note (v1.5.0 bench, beta.14):**
 
-| Signal path | ops/sec | Notes |
+| Signal path (isolated scalar write loop) | ops/sec | Notes |
 |---|---|---|
-| Plain `{ value }` object (default fallback) | ~368,000 | Zero overhead, not reactive |
-| alien-signals via `configureAlienSignals` | ~21,000 | Opt-in reactive, 8× faster than old closure |
-| Vue `ref()` via `signal()` auto-detected | ~9,500 | Slower than raw adapter — Vue wrapper adds overhead |
-| Old closure getter/setter (v1.3, removed) | ~2,500 | 145× slower than plain object |
+| Plain `{ value }` object (default fallback) | ~371,000 | Zero overhead, not reactive |
+| **Vue `shallowRef()` via `signal()` auto-detected** | **~40,000–62,000** | The default since v1.5.0 — ~4–7× the old deep-`ref()` path |
+| alien-signals via `configureAlienSignals` | ~10,400 | Opt-in reactive (non-Vue contexts) |
+| Vue deep `ref()` (the old v1.4 `signal()` default) | ~9,000 | Replaced by shallowRef — see §"reactive runtime notes" finding #5 |
+| Old closure getter/setter (v1.3, removed) | ~2,200 | 166× slower than plain object |
 
-The plain `{ value }` fallback is the fastest because it has zero getter/setter overhead — V8 optimizes a direct property write far better than a closure-captured variable. For push-pull reactivity without Vue, `configureAlienSignals` (21k ops/sec) beats even the Vue ref path (9.5k ops/sec) because it skips Vue's additional wrapper layer. Vue consumers are unaffected — `signal()` auto-detects `vue.ref()` and the 9.5k ops/sec path is the real reactive cost including Vue's scheduler integration.
+The plain `{ value }` fallback is fastest — zero getter/setter overhead. Since v1.5.0 `signal()`
+auto-detects Vue and wires **`shallowRef()`**, which on this isolated scalar write loop runs
+~40–62k ops/sec across runs (the absolute is machine-state sensitive; the **ratio is the robust
+claim**: ~4–7× the deep `ref()` it replaced), and well ahead of the `configureAlienSignals`
+adapter (~10k). (This isolated figure is the signal-write cost only; end-to-end through the command
+bus the scalar gain is ~+12% because dispatch dominates — see the reactive-runtime-notes section.)
+For push-pull reactivity *without* Vue, `configureAlienSignals` remains the correct choice.
 
 **Implementation note:** the connector takes alien-signals' `signal`
 function as an argument rather than importing it. vapor-chamber stays free
@@ -489,34 +496,85 @@ The v1.2.x `emit` fast path makes three changes:
 
 Inspiration: similar tricks ship in [splice](https://github.com/lucianofedericopereira/splice) — frame pooling, no-listener fast path, minimal envelopes. vapor-chamber didn't adopt the full splice architecture (numeric action IDs, binary headers, frozen action tables) because it would mean a v2 rewrite; the targeted fast paths capture most of the win without breaking existing API.
 
-## Vue 3.6.0-beta.13 reactive runtime notes
+## Reactive runtime notes (Vue 3.6)
 
-Three findings from the v1.4.0 bench run with beta.13 installed:
+Findings from the v1.5.0 bench run (June 2026, Vue beta.14, confirmed numbers — see the
+bench comment block in `tests/perf.bench.ts`). This is the single, current reactive-perf
+section; where a number shifted across betas the prior-beta baseline is cited inline (so the
+superseded per-beta notes don't need their own section).
 
-**1. The plain `{ value }` fallback is the fastest write path at ~368,000 ops/sec.**
-It has zero getter/setter overhead — V8 optimizes a direct property write far better
-than a closure-captured variable (the old v1.3 closure ran at ~2,500 ops/sec, 145×
-slower). The fallback is not reactive; for push-pull reactivity without Vue, call
-`configureAlienSignals(alienSignal)` once at boot (~21,000 ops/sec). This is also
-faster than Vue's `ref()` path (~9,500 ops/sec) because it skips Vue's wrapper layer.
+**1. The plain `{ value }` fallback remains the fastest write path at ~372,000 ops/sec.**
+Essentially unchanged from beta.13 (~368k) — within normal run-to-run variance.
+The fallback is not reactive; for push-pull reactivity without Vue, use
+`configureAlienSignals(alienSignal)` (~10,400 ops/sec).
 
-**2. beta.13 lazy lifecycle jobs confirm near-zero `onScopeDispose` overhead.**
-`effectScope.run(() => onScopeDispose(fn))` with no tracked reactive state costs
-~165,000 hz — the lifecycle update job is never allocated (runtime-vapor: only
-create lifecycle update jobs when needed). Every vapor-chamber composable that
-calls `tryAutoCleanup` benefits automatically on beta.13.
+**2. With `signal()` now wired to `shallowRef`, the Vue path is several× the alien-signals adapter — not equivalent to it.**
+The beta.13 docs reported `signal()` (then deep `ref()`) at ~9k, *converging* with the
+`alienSignalAdapter` (~10k). That comparison is obsolete: since v1.5.0 `signal()` wires
+**`shallowRef`**, and on an isolated scalar write loop it measures **~40,000–62,000 ops/sec**
+across runs — roughly **4–7× the deep `ref()` it replaced** and ~4–6× the alien adapter (~10,400).
+The absolute is machine-state sensitive (observed 37k on a busy machine, 62k on an idle one); the
+ratio is the robust claim. So for Vue apps the auto-detected `signal()` is now clearly the fastest
+reactive path; `configureAlienSignals` is for non-Vue contexts, not a throughput upgrade. (Isolated
+figure — end-to-end through the bus the scalar gain is ~+12%; see finding #5 for the real-path numbers.)
 
-**3. `useCommandState { coalesce: true }` is throughput-neutral.** Coalescing
-collapses many reactive writes to one per microtask burst. It does not change
-dispatch throughput (measured at ~1,900 ops/sec both ways). Use it for
-correctness, not speed.
+**3. beta.14 scheduler improvements lift `effectScope` lifecycle cost ~9% above beta.13.**
+`effectScope.run(() => onScopeDispose(fn))` with no tracked reactive state now costs
+~173,000 hz (vs ~165k in beta.13) — the "reset job queue length after flush" fix reduces
+teardown overhead. Every vapor-chamber composable that calls `tryAutoCleanup` benefits
+automatically.
+
+**4. `useCommandState` throughput improves ~24% in beta.14 and `{ coalesce: true }` remains neutral.**
+Measured at ~2,093 ops/sec (immediate) and ~2,105 ops/sec (coalesced) with 100 dispatches —
+both are +24% above the beta.13 ~1,700 hz baseline. The scheduler flush improvement accounts
+for the lift. Rule unchanged: use `coalesce: true` for correctness (≤1 reactive write per
+burst), not throughput — the two paths are within noise of each other.
+
+**5. `signal()` wires `shallowRef`, not `ref` — and the difference is large for object/array state.**
+The alien-signals rewrite changed dependency *tracking*, but `ref(anObjectOrArray)` still wraps the
+value in a deep reactive Proxy via `toReactive()`. The library replaces signal values wholesale and
+never mutates nested fields, so `shallowRef` is semantically equivalent for every internal signal
+and skips that proxy cost. Measured **interleaved same-process A/B** on the real `useCommandState`
+dispatch path (the coarse vitest-bench harness, with its ~480µs/iteration setup floor, cannot
+resolve this — it compresses array and scalar cases to the same ~2,100 ops/sec):
+
+| `useCommandState` dispatch path | `ref` | `shallowRef` | delta |
+|---|---|---|---|
+| 100 array appends (v-for source) | ~3,300 | ~11,300 | **+245%** |
+| 10 array appends | ~122,000 | ~285,000 | **+134%** |
+| 100 scalar increments | ~123,000 | ~146,000 | **+12%** |
+
+These are not hand-measured one-offs: `tests/signal-shallow-ab.test.ts` runs this exact A/B in CI
+(median of 7 interleaved reps, `process.hrtime`) and **prints the table on every run** — that printed
+output is the live evidence. It deliberately does not assert a timing *threshold* (ratios are unstable
+under parallel load / coverage instrumentation, and the test compares Vue's `ref`/`shallowRef`
+directly, so it couldn't catch a library regression anyway). The actual regression guard is
+`chamber.test.ts` › "signal() factory — shallow reactivity", which asserts `signal()` stays a
+`shallowRef`. The array/10 and scalar deltas are the noisier cases (run-to-run ±10–20%); the
+array/100 case is consistently ~3.4×.
+
+Why not an isolated `ref`-vs-`shallowRef` micro-bench in `perf.bench.ts`? Because pure deterministic
+signal loops are constant-foldable: V8 dead-code-eliminates the shallowRef path (no observable effect)
+while keeping `ref`'s Proxy-trap side effects, yielding inflated 800×+ ratios with ±100% rme — garbage.
+The real dispatch path defeats constant-folding (the command bus is opaque indirection), which is why
+the interleaved real-path test above is the only trustworthy source for these ratios.
+
+Methodology note: these absolute numbers are far higher than the `perf.bench.ts` `useCommandState`
+table because the manual harness strips vitest-bench's ~480µs/iteration setup floor. Use them for the
+**ref-vs-shallowRef ratio only**, not as standalone throughput figures. The takeaway: deep-proxy
+creation on every object/array signal write was real, avoidable overhead — now avoided by default.
+
+If you genuinely need deep reactivity (nested-mutation tracking for a `v-model`-bound state object),
+opt back in per-state with `useDeepCommandState` / `deepSignal` from `vapor-chamber/reactive` — it
+pays the `ref` cost only where you ask for it, leaving every other signal on the fast shallow path.
 
 ---
 
 ## Benchmark snapshot
 
-Run on a current Apple Silicon dev machine, May 2026. Your numbers will
-differ; what matters is the **ratios** and how they shift after your changes.
+Run on a current Apple Silicon dev machine, June 2026 (v1.5.0, Vue beta.14).
+Your numbers will differ; what matters is the **ratios** and how they shift after
+your changes.
 
 Reproduce with:
 
@@ -526,26 +584,27 @@ npx vitest bench --run tests/perf.bench.ts
 
 | Bench                                                              | ops/sec     |
 |--------------------------------------------------------------------|-------------|
-| `syncDispatch` — bare handler, no plugins (10k dispatches)         | ~1,900      |
-| `syncDispatch` — 3 plugins + 1 listener (10k dispatches)           | ~1,250      |
-| `asyncDispatch` — bare handler (1k dispatches)                     | ~3,500      |
-| `dispatch` — default uid                                           | ~1,460      |
-| `dispatch` — `crypto.randomUUID` via `configureUid`                | ~645        |
-| `dispatch` — 50 exact + 5 wildcard listeners (5k dispatches)       | ~466        |
-| `emit` — 50 exact + 5 wildcard listeners (5k dispatches)           | ~507        |
-| `persist` — default mode (100 dispatches × 50-item state)          | ~3,300      |
-| `persist` — `coalesce: true` (100 dispatches × 50-item state)      | ~28,887     |
-| `rehydrate` — 1000 commands, single handler                        | ~1,300      |
-| `rehydrate` — 1000 commands, ignoreUnhandled skip path             | ~96,000     |
-| **Vue reactive integration (beta.13, requires vue devDep)**        |             |
-| `signal()` fallback — plain `{ value }` object (no Vue, no alien-signals) | ~368,000 |
-| `signal()` fallback — old closure getter/setter (v1.3, removed)   | ~2,500      |
-| alien-signals via `configureAlienSignals` (opt-in reactive)        | ~21,000     |
-| `signal()` write — Vue ref auto-detected (beta.13)                 | ~9,500      |
-| `effectScope` + `onScopeDispose` × 1k — no reactive state (beta.13 lazy job) | ~144,000 |
-| `effectScope` + reactive signal + `onScopeDispose` × 1k (full path)| ~16,600    |
-| `useCommandState` 100 dispatches — Vue ref signal writes (beta.13) | ~1,660      |
-| `useCommandState coalesced` 100 dispatches — 1 reactive write      | ~1,780      |
+| `syncDispatch` — bare handler, no plugins                          | ~2,316      |
+| `syncDispatch` — 3 plugins + 1 listener                            | ~1,267      |
+| `asyncDispatch` — bare handler                                     | ~3,391      |
+| `dispatch` — default uid                                           | ~1,874      |
+| `dispatch` — `crypto.randomUUID` via `configureUid`                | ~747        |
+| `dispatch` — 50 exact + 5 wildcard listeners                       | ~602        |
+| `emit` — 50 exact + 5 wildcard listeners                           | ~756        |
+| `persist` — default mode (100 dispatches × 50-item state)          | ~3,894      |
+| `persist` — `coalesce: true` (100 dispatches × 50-item state)      | ~98,292     |
+| `rehydrate` — 1000 commands, single handler                        | ~16,192     |
+| `rehydrate` — 1000 commands, ignoreUnhandled skip path             | ~107,016    |
+| **Vue reactive integration (beta.14, requires vue devDep)**        |             |
+| `signal()` fallback — plain `{ value }` object (no Vue, no alien-signals) | ~372,198 |
+| `signal()` fallback — old closure getter/setter (v1.3, removed)   | ~2,208      |
+| alien-signals via `configureAlienSignals` (opt-in reactive)        | ~10,400     |
+| `signal()` write — Vue **shallowRef** auto-detected (v1.5.0 default)| ~40,000–62,000 |
+| `signal()` write — Vue deep `ref()` (old v1.4 default, for reference)| ~9,000     |
+| `effectScope` + `onScopeDispose` × 1k — no reactive state (lazy job) | ~173,462 |
+| `effectScope` + reactive signal + `onScopeDispose` × 1k (full path)| ~21,287    |
+| `useCommandState` 100 dispatches — Vue ref signal writes (beta.14) | ~2,100      |
+| `useCommandState coalesced` 100 dispatches — 1 reactive write      | ~2,115      |
 
 ---
 

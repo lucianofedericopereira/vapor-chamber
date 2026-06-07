@@ -272,8 +272,32 @@ describe('defineVaporComponent', () => {
 });
 
 describe('defineVaporAsyncComponent', () => {
-  it('returns null when Vue 3.6.0-beta.10 is not available', () => {
-    expect(defineVaporAsyncComponent(() => Promise.resolve({}))).toBeNull();
+  // Vue 3.6.0-beta.14: defineVaporAsyncComponent is now exported from the main
+  // Vue package (vapor: expose async component alias for SSR runtime). The
+  // wrapper calls through to it when available, and returns null otherwise.
+  it('returns null when the fn is not available (mocked)', async () => {
+    const chamber = await import('../src/chamber');
+    const spy = vi.spyOn(chamber, 'getDefineVaporAsyncComponentFn').mockReturnValue(null);
+    try {
+      expect(defineVaporAsyncComponent(() => Promise.resolve({}))).toBeNull();
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('calls through to Vue defineVaporAsyncComponent when available (beta.14+)', async () => {
+    const loader = () => Promise.resolve({ setup: () => null });
+    const fakeResult = { __asyncLoader: loader, name: 'AsyncComponentWrapper' };
+    const fakeDefine = vi.fn(() => fakeResult);
+    const chamber = await import('../src/chamber');
+    const spy = vi.spyOn(chamber, 'getDefineVaporAsyncComponentFn').mockReturnValue(fakeDefine);
+    try {
+      const result = defineVaporAsyncComponent(loader);
+      expect(fakeDefine).toHaveBeenCalledWith(loader);
+      expect(result).toBe(fakeResult);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

@@ -7,6 +7,7 @@ on:
       - 'src/**/*.ts'
       - 'typedoc.json'
       - 'README.md'
+      - 'package.json'
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
