@@ -65,9 +65,13 @@ describe('signal() shallowRef vs ref — empirical proof (real useCommandState p
 
   // Skip under `npm run test:coverage`: V8 coverage instrumentation makes the
   // heavy timing loops both meaningless (instrumented ratios aren't real) and
-  // slow (they blow the test timeout). Generous 30s timeout otherwise, since the
-  // interleaved reps can cross the 5s default under heavy parallel load — that
-  // timeout, not the assertions, was the source of the rare flake.
+  // slow (they blow the test timeout). Generous 45s timeout otherwise: this body
+  // is synchronous, CPU-bound work that runs concurrently with the rest of the
+  // suite, so under heavy parallel load wall-clock time stretches well past the
+  // raw compute time. Iteration/rep counts are sized to leave comfortable
+  // headroom under that timeout — the assertions only smoke-check that the
+  // ratios are finite/positive, so precision beyond this buys nothing. That
+  // timeout, not the assertions, was the source of the flake.
   const underCoverage = process.env.npm_lifecycle_event === 'test:coverage';
   it.skipIf(underCoverage)('measures the ref-vs-shallowRef diff and proves shallowRef is faster', async () => {
     await waitForVueDetection();
@@ -75,19 +79,19 @@ describe('signal() shallowRef vs ref — empirical proof (real useCommandState p
     expect(typeof (ref(0) as any).value).toBe('number');
 
     const cases: Array<{ key: string; kind: Kind; n: number; iters: number }> = [
-      { key: 'array append /100 (v-for source)', kind: 'array', n: 100, iters: 1200 },
-      { key: 'array append /10', kind: 'array', n: 10, iters: 5000 },
-      { key: 'scalar increment /100', kind: 'counter', n: 100, iters: 1200 },
+      { key: 'array append /100 (v-for source)', kind: 'array', n: 100, iters: 400 },
+      { key: 'array append /10', kind: 'array', n: 10, iters: 1500 },
+      { key: 'scalar increment /100', kind: 'counter', n: 100, iters: 400 },
     ];
 
     // warmup both factories on every case
-    for (const c of cases) { opsPerSec(ref, c.kind, c.n, 60); opsPerSec(shallowRef, c.kind, c.n, 60); }
+    for (const c of cases) { opsPerSec(ref, c.kind, c.n, 30); opsPerSec(shallowRef, c.kind, c.n, 30); }
 
     for (const c of cases) {
       const refS: number[] = [];
       const shS: number[] = [];
       // interleave ref/shallow reps so thermal drift hits both equally
-      for (let rep = 0; rep < 7; rep++) {
+      for (let rep = 0; rep < 5; rep++) {
         refS.push(opsPerSec(ref, c.kind, c.n, c.iters));
         shS.push(opsPerSec(shallowRef, c.kind, c.n, c.iters));
       }
@@ -97,7 +101,7 @@ describe('signal() shallowRef vs ref — empirical proof (real useCommandState p
     }
 
     // eslint-disable-next-line no-console
-    console.log('\n  signal() backend — real useCommandState dispatch path (median of 7 interleaved reps)');
+    console.log('\n  signal() backend — real useCommandState dispatch path (median of 5 interleaved reps)');
     for (const [k, v] of Object.entries(results)) {
       const pct = ((v.ratio - 1) * 100);
       // eslint-disable-next-line no-console
@@ -125,5 +129,5 @@ describe('signal() shallowRef vs ref — empirical proof (real useCommandState p
       expect(v.shallow).toBeGreaterThan(0);
       expect(v.ref).toBeGreaterThan(0);
     }
-  }, 30_000);
+  }, 45_000);
 });
