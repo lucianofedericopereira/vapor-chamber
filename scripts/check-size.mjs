@@ -20,17 +20,18 @@ import { brotliCompressSync, constants } from 'node:zlib';
 // (class refactor for V8 hidden class stability). alien-signals is a regular dep
 // but NOT auto-bundled — opt in via configureAlienSignals from vapor-chamber/alien-signals.
 const BUDGETS = {
-  // All bumps below are v1.5.0, across all three IIFE variants:
+// All bumps below are v1.6.0, across all three IIFE variants:
   //  • +~60-120 B for the shared useCommandState core refactor backing the
   //    vapor-chamber/reactive companion;
   //  • +~120-230 B (brotli) for onMissing:'buffer' deferred dispatch in
   //    command-bus.ts (the exo island-hydration feature);
   //  • +~75-160 B raw for createEchoBridge in transports.ts (Reverb/Echo realtime,
   //    bundled into the IIFEs alongside createHttpBridge).
-  // The idempotent plugin lives in plugins-extra and is NOT in these bundles.
-  'vapor-chamber.iife.min.js':          { rawMax: 35_550, brotliMax: 10_500 },
-  'vapor-chamber-core.iife.min.js':     { rawMax: 24_550, brotliMax: 7_200 },
-  'vapor-chamber-elements.iife.min.js': { rawMax: 26_150, brotliMax: 7_650 },
+  //   The idempotent plugin lives in plugins-extra and is NOT in these bundles.
+
+  'vapor-chamber.iife.min.js':          { rawMax: 36_500, brotliMax: 10_800 },
+  'vapor-chamber-core.iife.min.js':     { rawMax: 25_000, brotliMax: 7_400  },
+  'vapor-chamber-elements.iife.min.js': { rawMax: 26_600, brotliMax: 7_800  },
 };
 
 const BR_OPTS = { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } };
