@@ -4,7 +4,7 @@ This project tracks Vue 3.6 while it is in beta. That has direct consequences
 for what's stable, what's transitional, and what will change once Vue 3.6
 ships stable. This file is the source of truth for that distinction.
 
-Last reviewed against **Vue 3.6.0-beta.14** (2026-06-05).
+Last reviewed against **Vue 3.6.0-beta.15** (2026-06-11).
 
 ---
 
@@ -29,7 +29,7 @@ observable.
 
 ## Beta-territory specifics
 
-- **Peer dependency:** `vue: ">=3.5.0 || >=3.6.0-beta.14"`. The lib supports
+- **Peer dependency:** `vue: ">=3.5.0 || >=3.6.0-beta.15"`. The lib supports
   Vue 3.5 (composables only) and Vue 3.6 betas (full Vapor surface).
 - **Vapor APIs are still moving.** `defineVaporCustomElement`, `defineVaporComponent`,
   `defineVaporAsyncComponent` are stable in shape but their underlying behavior
@@ -228,7 +228,7 @@ transport adapter, fully decoupled from Vue, so it wasn't blocked); see
 ## Vue version-support matrix
 
 Which Vue versions each released lib line supports. The peer dep is permissive
-(`>=3.5.0 || >=3.6.0-beta.14`); this table is the *tested* support statement.
+(`>=3.5.0 || >=3.6.0-beta.15`); this table is the *tested* support statement.
 
 | vapor-chamber | Vue 3.5 (composables only) | Vue 3.6 beta | Notes |
 |---------------|----------------------------|--------------|-------|
@@ -260,6 +260,12 @@ mechanical, not archaeological:
       re-export for one minor, then remove.
 - [ ] **`createVaporChamberApp`** — soft-deprecate (`@deprecated` JSDoc), point at
       `import { createVaporApp } from 'vue'`.
+- [ ] **Typed Vapor surface** — once Vue's Vapor types settle at stable, give the
+      `defineVapor*` wrappers first-class inference using Vue's exported types
+      (`DefineVaporComponent`, `VaporComponent`, `VaporPublicProps`) via an isolated
+      `vapor-chamber/vapor` subpath export, so the `vue` type dependency never touches
+      the Vue-less main barrel. Until then the wrappers keep the opt-in `<T = any>`
+      generic added in v1.6.0 (no Vue-type dependency).
 - [ ] **plugin-vue 6.x** — test, then bump the optional peer-dep range.
 - [ ] **Re-measure** IIFE sizes (Rolldown/Vite 8 may shift them) and update README.
 - [ ] **Variant contents** become semver-stable (the beta-era reshuffle freedom ends).

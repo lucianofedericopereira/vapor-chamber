@@ -6,8 +6,8 @@ Security fixes are backported to:
 
 | Version | Supported          |
 |---------|--------------------|
-| 1.2.x   | ✅ active          |
-| 1.1.x   | ✅ critical fixes only (until v1.3.0) |
+| 1.6.x (latest minor) | ✅ active |
+| earlier 1.x minors   | ✅ critical fixes only |
 | < 1.1   | ❌ no longer maintained |
 
 When v2.0 ships, v1.x will receive security fixes for at least 6 months.

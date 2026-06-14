@@ -21,34 +21,58 @@ describe('vaporChamberHMR', () => {
     expect(plugin.resolveId('some-other-module')).toBeUndefined();
   });
 
-  it('loads the HMR shim for the virtual module', () => {
-    const code = plugin.load('\0virtual:vapor-chamber-hmr');
+  it('loads the HMR shim for the virtual module', async () => {
+    const code = await plugin.load('\0virtual:vapor-chamber-hmr');
     expect(code).toContain('__VAPOR_CHAMBER_BUS__');
     expect(code).toContain('getCommandBus');
     expect(code).toContain('setCommandBus');
     expect(code).toContain('import.meta.hot');
   });
 
-  it('does not load non-virtual modules', () => {
-    expect(plugin.load('some-file.ts')).toBeUndefined();
+  it('shim imports the Vue-priming module BEFORE vapor-chamber (v1.6.0 fix)', async () => {
+    const code: string = await plugin.load('\0virtual:vapor-chamber-hmr');
+    const primeIdx = code.indexOf('virtual:vapor-chamber-hmr-vue-prime');
+    const vcIdx = code.indexOf("from 'vapor-chamber'");
+    expect(primeIdx).toBeGreaterThan(-1);
+    expect(vcIdx).toBeGreaterThan(-1);
+    expect(primeIdx).toBeLessThan(vcIdx);
+  });
+
+  it('prime module sets globalThis.__VUE__ when vue resolves', async () => {
+    const ctx = { resolve: async () => ({ id: '/node_modules/vue/index.mjs' }) };
+    const code: string = await plugin.load.call(ctx, '\0virtual:vapor-chamber-hmr-vue-prime');
+    expect(code).toContain("import * as __VC_VUE__ from 'vue'");
+    expect(code).toContain('globalThis.__VUE__ = __VC_VUE__');
+  });
+
+  it('prime module is a no-op when vue does not resolve (non-Vue consumers)', async () => {
+    const ctx = { resolve: async () => null };
+    const code: string = await plugin.load.call(ctx, '\0virtual:vapor-chamber-hmr-vue-prime');
+    expect(code).toBe('export {};');
+    expect(code).not.toContain('vue');
+  });
+
+  it('does not load non-virtual modules', async () => {
+    expect(await plugin.load('some-file.ts')).toBeUndefined();
   });
 
   it('custom moduleId is respected', () => {
     const custom = vaporChamberHMR({ moduleId: 'my-custom-hmr' });
     expect(custom.resolveId('my-custom-hmr')).toBe('\0my-custom-hmr');
+    expect(custom.resolveId('my-custom-hmr-vue-prime')).toBe('\0my-custom-hmr-vue-prime');
     expect(custom.resolveId('virtual:vapor-chamber-hmr')).toBeUndefined();
   });
 
-  it('verbose option adds console.log statements', () => {
+  it('verbose option adds console.log statements', async () => {
     const verbose = vaporChamberHMR({ verbose: true });
-    const code = verbose.load('\0virtual:vapor-chamber-hmr');
+    const code = await verbose.load('\0virtual:vapor-chamber-hmr');
     expect(code).toContain('console.log');
     expect(code).toContain('HMR');
   });
 
-  it('non-verbose mode omits console.log statements', () => {
+  it('non-verbose mode omits console.log statements', async () => {
     const quiet = vaporChamberHMR({ verbose: false });
-    const code = quiet.load('\0virtual:vapor-chamber-hmr');
+    const code = await quiet.load('\0virtual:vapor-chamber-hmr');
     expect(code).not.toContain('console.log');
   });
 
@@ -130,8 +154,8 @@ describe('vaporChamberHMR', () => {
     // Structural assertions — lock in that the generation still emits the guard,
     // the accept-side reset, and the try/catch. These would have caught a silent
     // removal of any of the three pieces (the old tests did not).
-    it('generates the per-cycle dedup guard, the accept-side reset, and a try/catch', () => {
-      const code: string = plugin.load('\0virtual:vapor-chamber-hmr');
+    it('generates the per-cycle dedup guard, the accept-side reset, and a try/catch', async () => {
+      const code: string = await plugin.load('\0virtual:vapor-chamber-hmr');
       // dispose takes the hot `data` bag and guards on a per-cycle flag
       expect(code).toMatch(/\.dispose\(\s*\(\s*data\s*\)\s*=>/);
       expect(code).toContain('if (data.__vc_disposed) return;');
@@ -148,15 +172,16 @@ describe('vaporChamberHMR', () => {
      * `import.meta` to a plain identifier so it can live inside a Function body.
      * Returns the captured accept/dispose callbacks and a stub globalThis.
      */
-    function runShim(deps: {
+    async function runShim(deps: {
       getCommandBus: () => any;
       setCommandBus?: (b: any) => void;
       isVaporAvailable?: () => boolean;
       seedGlobal?: Record<string, any>;
     }) {
-      const raw: string = plugin.load('\0virtual:vapor-chamber-hmr');
+      const raw: string = await plugin.load('\0virtual:vapor-chamber-hmr');
       const body = raw
         .replace(/import\s*\{[^}]*\}\s*from\s*'vapor-chamber';?/, '')
+        .replace(/import\s*'[^']*';?/g, '') // bare side-effect imports (vue-prime)
         .replace(/export\s*\{[^}]*\};?/, '')
         .replace(/import\.meta/g, '__importMeta');
 
@@ -188,11 +213,11 @@ describe('vaporChamberHMR', () => {
       return { captured, hotData, stubGlobal, KEY: '__VAPOR_CHAMBER_BUS__' };
     }
 
-    it('persists the bus on the first dispose but dedupes the second in the same cycle', () => {
+    it('persists the bus on the first dispose but dedupes the second in the same cycle', async () => {
       const getCommandBus = vi.fn(() => ({ id: 'bus' }));
       // Pre-seed the global so module init takes the restore path (setCommandBus),
       // leaving getCommandBus to be called only by dispose.
-      const { captured, hotData } = runShim({
+      const { captured, hotData } = await runShim({
         getCommandBus,
         seedGlobal: { __VAPOR_CHAMBER_BUS__: { id: 'preexisting' } },
       });
@@ -208,9 +233,9 @@ describe('vaporChamberHMR', () => {
       expect(getCommandBus).toHaveBeenCalledTimes(1);
     });
 
-    it('accept() clears the flag so the next cycle persists again', () => {
+    it('accept() clears the flag so the next cycle persists again', async () => {
       const getCommandBus = vi.fn(() => ({ id: 'bus' }));
-      const { captured, hotData } = runShim({
+      const { captured, hotData } = await runShim({
         getCommandBus,
         seedGlobal: { __VAPOR_CHAMBER_BUS__: { id: 'preexisting' } },
       });
@@ -227,10 +252,10 @@ describe('vaporChamberHMR', () => {
       expect(getCommandBus).toHaveBeenCalledTimes(2);
     });
 
-    it('swallows a getCommandBus() throw and preserves the last-stored bus', () => {
+    it('swallows a getCommandBus() throw and preserves the last-stored bus', async () => {
       const sentinel = { id: 'preexisting' };
       const getCommandBus = vi.fn(() => { throw new Error('mid-reload failure'); });
-      const { captured, hotData, stubGlobal, KEY } = runShim({
+      const { captured, hotData, stubGlobal, KEY } = await runShim({
         getCommandBus,
         seedGlobal: { __VAPOR_CHAMBER_BUS__: sentinel },
       });

@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, bench, beforeAll } from 'vitest';
-import { effectScope } from 'vue';
+import { effectScope, version as VUE_VERSION } from 'vue';
 import { createCommandBus, createAsyncCommandBus, configureUid } from '../src/command-bus';
 import { rehydrate, type DehydratedCommand } from '../src/ssr';
 import { persist } from '../src/plugins-io';
@@ -509,7 +509,8 @@ describe('SSR rehydrate throughput', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Transition bridge throughput — Vue 3.6.0-beta.14 baseline
+// Transition bridge throughput — current-Vue baseline (running version is shown
+// in each bench label via VUE_VERSION; recorded baseline blocks below stay literal)
 //
 // Beta.13 fixed two silent-skip bugs: onMove was never called for Vapor or
 // VDOM component moves inside a Vapor TransitionGroup. These benches lock the
@@ -535,6 +536,18 @@ describe('SSR rehydrate throughput', () => {
 //   → scheduler flush improvements in beta.14 account for the uplift
 //   → bridge overhead ~37ns/call (dispatchSafe try/catch vs bare dispatch)
 //   → onMove has higher run-to-run variance (try/catch inhibits V8 inlining under GC)
+//
+// Baselines (v1.6.0, beta.15, 2026-06-11, dev host, median of 3 runs):
+//   all 9 hooks × 1k        707 hz   runs: 684 / 724
+//   onMove only × 10k     1,042 hz   runs: 1,024 / 1,053
+//   onEnter + onLeave × 5k  981 hz   runs: 962 / 992
+//   raw bus.dispatch × 10k 1,815 hz  runs: 1,805 / 1,834
+//   → ~3-8% under the beta.14 reference UNIFORMLY — including raw bus.dispatch,
+//     which has NO Vue dependency, so Vue's version cannot have moved it. The
+//     shift is host/load variance, not a beta.15 regression; numbers land on the
+//     beta.13 reference. beta.15 changed no code on these paths (docs + one guard
+//     on the non-hot v-vc:command click handler). Canonical cross-beta deltas
+//     would need beta.14 re-run on THIS host.
 // ---------------------------------------------------------------------------
 
 describe('transition bridge throughput', () => {
@@ -560,7 +573,7 @@ describe('transition bridge throughput', () => {
     }
   });
 
-  bench('createTransitionBridge — onMove only × 10k (beta.14 baseline)', () => {
+  bench(`createTransitionBridge — onMove only × 10k (vue ${VUE_VERSION})`, () => {
     const bus = createCommandBus({ onMissing: 'ignore' });
     const t = createTransitionBridge({ bus, namespace: 'list' });
     const el = mockEl();
@@ -589,7 +602,8 @@ describe('transition bridge throughput', () => {
 });
 
 // ---------------------------------------------------------------------------
-// useCommandState — immediate vs coalesced (beta.14 v-for/v-if baseline)
+// useCommandState — immediate vs coalesced (current-Vue v-for/v-if baseline;
+// running version shown in bench labels via VUE_VERSION)
 //
 // Beta.13 introduces specialized v-for block operations and reduced v-if branch
 // scope overhead in the Vapor runtime. Both optimizations feed into signal writes
@@ -622,6 +636,13 @@ describe('transition bridge throughput', () => {
 //   coalesced 100 counter            2,105 hz  (+6% vs beta.13) — within noise
 //   → coalesce is throughput-neutral across both array and scalar types (confirmed beta.14)
 //   → use coalesce for correctness (≤1 signal write per burst), not for throughput
+//
+// Baselines (v1.6.0, beta.15, 2026-06-11, dev host, median of 3 runs):
+//   immediate  10 array  19,100 hz    coalesced  10 array  19,100 hz
+//   immediate 100 array   1,934 hz    coalesced 100 array   1,942 hz
+//   immediate 100 counter 1,945 hz    coalesced 100 counter 1,937 hz
+//   → ~3-7% under the beta.14 reference box, uniform across every row → host
+//     variance, not a beta.15 change. Coalesce stays throughput-neutral.
 // ---------------------------------------------------------------------------
 
 describe('useCommandState — immediate vs coalesced dispatch cost', () => {
@@ -748,6 +769,20 @@ describe('useCommandState — immediate vs coalesced dispatch cost', () => {
 //   effectScope + signal + onScopeDispose  ~21,287 hz ← stable
 //   useCommandState 100 dispatches          ~2,100 hz  (+24% vs beta.13)
 //   useCommandState coalesced 100           ~2,115 hz  ← throughput-neutral (within noise)
+//
+// Baselines (v1.6.0, beta.15, 2026-06-11, dev host, 3 runs):
+//   plain { value } object               ~362,000 hz       ← stable (V8 DCE)
+//   alien-signals via alienSignalAdapter  ~8,500-10,700 hz
+//   Vue shallowRef via signal() (v1.5.0)  ~31,000-42,000 hz ← machine-state sensitive
+//        (busy vs idle); the ~4-7× ratio over the old deep ref() is the robust claim
+//   Vue ref + watchEffect subscriber      ~35,000-55,000 hz (±4.5% rme — noisiest row)
+//   effectScope + onScopeDispose only ×1k ~156,000 hz
+//   effectScope + signal + onScopeDispose  ~21,000-25,000 hz
+//   useCommandState 100 dispatches          ~1,650-2,015 hz
+//   → Reactive rows swing 20-30% run-to-run on a shared machine; fallback and
+//     lifecycle rows are stable. signal-shallow-ab (same-process A/B) is the
+//     trustworthy regression guard — it still shows shallowRef faster. No beta.15
+//     reactivity regression; the cross-run spread is host state, not code.
 // ---------------------------------------------------------------------------
 
 describe('signal path comparison — fallback vs alien-signals add-on vs Vue ref', () => {
@@ -801,7 +836,7 @@ describe('signal path comparison — fallback vs alien-signals add-on vs Vue ref
     if (sink < 0) console.log(sink);
   });
 
-  bench('Vue ref + watchEffect subscriber — notify path (beta.14)', async () => {
+  bench(`Vue ref + watchEffect subscriber — notify path (vue ${VUE_VERSION})`, async () => {
     const { ref, watchEffect, effectScope } = await import('vue');
     const scope = effectScope();
     const r = ref(0);
@@ -814,9 +849,9 @@ describe('signal path comparison — fallback vs alien-signals add-on vs Vue ref
     void sink;
   });
 
-  // ── beta.14 lifecycle overhead ────────────────────────────────────────────
+  // ── lifecycle overhead (current Vue) ──────────────────────────────────────
 
-  bench('effectScope + onScopeDispose only × 1k (beta.14 lazy job cost)', async () => {
+  bench(`effectScope + onScopeDispose only × 1k (vue ${VUE_VERSION} lazy job cost)`, async () => {
     const { effectScope } = await import('vue');
     for (let i = 0; i < 1_000; i++) {
       const scope = effectScope();
@@ -828,7 +863,7 @@ describe('signal path comparison — fallback vs alien-signals add-on vs Vue ref
     }
   });
 
-  bench('effectScope + reactive signal + onScopeDispose × 1k (beta.14 full path)', async () => {
+  bench(`effectScope + reactive signal + onScopeDispose × 1k (vue ${VUE_VERSION} full path)`, async () => {
     const { effectScope, onScopeDispose } = await import('vue');
     for (let i = 0; i < 1_000; i++) {
       const scope = effectScope();
@@ -843,7 +878,7 @@ describe('signal path comparison — fallback vs alien-signals add-on vs Vue ref
 
   // ── useCommandState with real Vue refs ────────────────────────────────────
 
-  bench('useCommandState 100 dispatches — Vue ref signal writes (beta.14)', () => {
+  bench(`useCommandState 100 dispatches — Vue ref signal writes (vue ${VUE_VERSION})`, () => {
     effectScope().run(() => {
       const bus = createCommandBus();
       const { state, dispose } = useCommandState<number>(0, { inc: (s) => s + 1 });
@@ -853,7 +888,7 @@ describe('signal path comparison — fallback vs alien-signals add-on vs Vue ref
     });
   });
 
-  bench('useCommandState coalesced 100 dispatches — Vue ref, 1 reactive write (beta.14)', () => {
+  bench(`useCommandState coalesced 100 dispatches — Vue ref, 1 reactive write (vue ${VUE_VERSION})`, () => {
     effectScope().run(() => {
       const bus = createCommandBus();
       const { state, dispose } = useCommandState<number>(0, { inc: (s) => s + 1 }, { coalesce: true });

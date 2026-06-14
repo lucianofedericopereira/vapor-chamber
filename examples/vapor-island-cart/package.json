@@ -1,0 +1,25 @@
+{
+  "name": "vapor-chamber-example-vapor-island-cart",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "Light-DOM Vapor custom-element island cart for vapor-chamber. Run with `npm install && npm run dev`.",
+  "scripts": {
+    "ensure-lib": "node -e \"const{existsSync}=require('fs');if(!existsSync('../../dist/index.js')){console.log('[example] building vapor-chamber from ../../ ...');require('child_process').execSync('npm --prefix ../.. run build',{stdio:'inherit'})}\"",
+    "predev": "npm run ensure-lib",
+    "prebuild": "npm run ensure-lib",
+    "dev": "vite",
+    "build": "vue-tsc --noEmit && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "vapor-chamber": "file:../..",
+    "vue": "^3.6.0-beta.15"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^6.0.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.0.0",
+    "vue-tsc": "^2.2.0"
+  }
+}

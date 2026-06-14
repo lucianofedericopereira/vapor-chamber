@@ -1,10 +1,11 @@
 <!--
   Cross-component aggregate state via `useSharedCommandState`.
 
-  This component subscribes to "is *anything* in flight?" and "what was the
-  last error?" — across the whole app. Even though CartPanel uses its own
-  per-component `useVaporCommand`, the shared state still observes those
-  dispatches because both go through the same bus.
+  Errors are observed BUS-WIDE (v1.6.0): even though CartPanel dispatches via
+  its own per-component `useVaporCommand`, every failed command on the shared
+  bus lands in this panel's error list. `isAnyLoading` tracks dispatches made
+  through `useSharedCommandState().dispatch` (bus-wide in-flight pairing is
+  not guaranteed on all error paths).
 
   Memory math: this approach allocates ~5 signal nodes total. If we instead
   gave every panel a private `useVaporCommand`, we'd allocate 2 signals per
@@ -20,7 +21,8 @@ const { isAnyLoading, errors, errorCount, clear } = useSharedCommandState({ erro
   <section class="panel" style="background: #fafafa;">
     <h2>
       Status
-      <span v-if="isAnyLoading.value" style="font-weight: normal; color: #08c;">
+      <!-- Top-level refs are auto-unwrapped in templates — no .value. -->
+      <span v-if="isAnyLoading" style="font-weight: normal; color: #08c;">
         — loading…
       </span>
     </h2>
@@ -29,13 +31,13 @@ const { isAnyLoading, errors, errorCount, clear } = useSharedCommandState({ erro
       click in Cart or type in Search.
     </p>
     <p>
-      <strong>Recent errors ({{ errorCount.value }}):</strong>
-      <button v-if="errorCount.value > 0" @click="clear" style="margin-left: 0.5rem;">
+      <strong>Recent errors ({{ errorCount }}):</strong>
+      <button v-if="errorCount > 0" @click="clear" style="margin-left: 0.5rem;">
         Clear
       </button>
     </p>
-    <ul v-if="errors.value.length">
-      <li v-for="(e, i) in errors.value" :key="i" class="error">{{ e.message }}</li>
+    <ul v-if="errors.length">
+      <li v-for="(e, i) in errors" :key="i" class="error">{{ e.message }}</li>
     </ul>
     <p v-else class="ok">No errors.</p>
   </section>

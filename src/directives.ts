@@ -1,14 +1,17 @@
 /**
  * vapor-chamber - Directive plugin (opt-in, 0KB when not imported)
  *
- * v1.4.0 — Vue 3.6.0-beta.13 alignment:
- *           • Event invoker wrapping moved to shared runtime helpers (vapor: move
- *             event invoker wrapping into runtime helpers) — click handlers
- *             attached by this plugin land in VDOM components whose compiled
- *             event bindings now share a single invoker wrapper per action type
- *             rather than one closure per element. No code change; VDOM consumers
- *             of this directive benefit automatically on upgrade.
- * v0.4.4 — Added: v-vc:command, v-vc:optimistic directives.
+ * Vue alignment history (one line per version — full per-item detail lives in
+ * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table):
+ *   v1.6.0 / beta.15 — code change: buildHandler() skips dispatch on disabled /
+ *            aria-disabled / in-flight elements, mirroring Vue's "skip disabled
+ *            delegated handlers" (#14948) for the DIRECT listener this directive
+ *            attaches (the runtime fix only covers delegated handlers; the
+ *            platform only guards disabled <button>/<input>, not <a>/<div>).
+ *            Delegation opt-out (#14924) and click-modifier normalization are
+ *            pass-through.
+ *   v1.4.0 / beta.13 — pass-through (shared event invoker wrapping).
+ *   v0.4.4 — Added: v-vc:command, v-vc:optimistic directives.
  *
  * Provides a Vue plugin that installs two directives for declarative command
  * dispatch directly in templates, combining dispatch + loading + error
@@ -85,6 +88,16 @@ function parseJson(s: string | null | undefined): any {
 
 function buildHandler(el: Element, state: DirectiveState): (event: Event) => void {
   return async (_event: Event) => {
+    // Vue 3.6.0-beta.15 (runtime-vapor: skip disabled delegated direct handlers):
+    // mirror Vue's "don't run a handler on a disabled element" rule for the direct
+    // listener this directive attaches. Bail out on re-entrant clicks while a
+    // dispatch is in flight, or when the element is disabled via the DOM property
+    // or aria-disabled (the platform only suppresses clicks on disabled
+    // <button>/<input>, not on <a>/<div>/aria-disabled).
+    if (state.loading) return;
+    if ((el as Partial<HTMLButtonElement>).disabled === true) return;
+    if (typeof el.getAttribute === 'function' && el.getAttribute('aria-disabled') === 'true') return;
+
     const bus = getCommandBus();
 
     state.loading = true;

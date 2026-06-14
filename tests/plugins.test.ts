@@ -114,6 +114,68 @@ describe('validator plugin', () => {
   });
 });
 
+describe('history plugin — undoAction/redoAction triggers', () => {
+  it('repeated undo + redo work when triggers are dispatched through the bus (cart scenario)', () => {
+    const bus = createCommandBus();
+    let total = 0;
+    const h = history({ bus, undoAction: 'cart.undo', redoAction: 'cart.redo' });
+    bus.use(h);
+    bus.register('cart.add', (cmd) => { total += cmd.target as number; }, {
+      undo: (cmd) => { total -= cmd.target as number; },
+    });
+
+    bus.dispatch('cart.add', 1);
+    bus.dispatch('cart.add', 2);
+    expect(total).toBe(3);
+
+    // The footgun this API removes: dispatching the trigger used to be recorded
+    // into history itself, so the second undo popped the trigger (no-op) and the
+    // redo stack was wiped on every dispatch.
+    bus.dispatch('cart.undo', {});
+    bus.dispatch('cart.undo', {});       // second undo must also apply
+    expect(total).toBe(0);
+    expect(h.getState().canRedo).toBe(true); // redo stack survives
+
+    bus.dispatch('cart.redo', {});
+    expect(total).toBe(1);
+    expect(h.getState().past.length).toBe(1);
+  });
+
+  it('trigger actions are excluded from recording even if filter matches them', () => {
+    const bus = createCommandBus();
+    const h = history({
+      bus,
+      filter: cmd => cmd.action.startsWith('cart'),
+      undoAction: 'cart.undo',
+      redoAction: 'cart.redo',
+    });
+    bus.use(h);
+    bus.register('cart.add', () => 'ok');
+
+    bus.dispatch('cart.add', 1);
+    bus.dispatch('cart.undo', {});
+    expect(h.getState().past.length).toBe(0);
+    expect(h.getState().future.length).toBe(1); // not wiped by recording the trigger
+  });
+
+  it('dispose() unregisters the trigger handlers', () => {
+    const bus = createCommandBus({ onMissing: 'ignore' });
+    const h = history({ bus, undoAction: 'u', redoAction: 'r' });
+    bus.use(h);
+    expect(bus.hasHandler('u')).toBe(true);
+    h.dispose();
+    expect(bus.hasHandler('u')).toBe(false);
+    expect(bus.hasHandler('r')).toBe(false);
+  });
+
+  it('warns and skips trigger registration when bus is missing', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    history({ undoAction: 'u' });
+    expect(warn).toHaveBeenCalledOnce();
+    warn.mockRestore();
+  });
+});
+
 describe('history plugin', () => {
   it('should track successful commands', () => {
     const bus = createCommandBus();

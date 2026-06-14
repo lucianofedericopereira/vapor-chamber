@@ -1,0 +1,22 @@
+{
+  "name": "vapor-chamber-example-exo-astro",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "description": "exo-style declarative event-bus directives for Astro pages, over the vapor-chamber bus. Run with `npm install && npm run dev`.",
+  "scripts": {
+    "ensure-lib": "node -e \"const{existsSync}=require('fs');if(!existsSync('../../dist/index.js')){console.log('[example] building vapor-chamber from ../../ ...');require('child_process').execSync('npm --prefix ../.. run build',{stdio:'inherit'})}\"",
+    "predev": "npm run ensure-lib",
+    "prebuild": "npm run ensure-lib",
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "astro": "^5.0.0",
+    "vapor-chamber": "file:../.."
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0"
+  }
+}

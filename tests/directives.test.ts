@@ -105,6 +105,29 @@ describe('createDirectivePlugin', () => {
       vcDir.beforeUnmount(el, { arg: 'command' });
       // After unmount, triggering click should do nothing
     });
+
+    // Vue 3.6.0-beta.15 alignment: skip disabled / in-flight direct handlers.
+    it('skips dispatch when the element is disabled', () => {
+      const el = createElement();
+      el.disabled = true;
+      let calls = 0;
+      bus.register('disabledAction', () => { calls += 1; });
+      const vcDir = app.getDirective('vc');
+      vcDir.mounted(el, { arg: 'command', value: 'disabledAction', modifiers: {} });
+      el.triggerClick();
+      expect(calls).toBe(0);
+    });
+
+    it('skips dispatch when aria-disabled is set', () => {
+      const el = createElement();
+      el.getAttribute = (name: string) => (name === 'aria-disabled' ? 'true' : null);
+      let calls = 0;
+      bus.register('ariaAction', () => { calls += 1; });
+      const vcDir = app.getDirective('vc');
+      vcDir.mounted(el, { arg: 'command', value: 'ariaAction', modifiers: {} });
+      el.triggerClick();
+      expect(calls).toBe(0);
+    });
   });
 });
 

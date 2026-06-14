@@ -247,8 +247,19 @@ async function cancelOrder(id: number) {
 }
 ```
 
-The whitepaper §11.3 mentions `csrf: 'inertia'` and `onRedirect` flags —
-those are roadmap items, not shipped. Use the pattern above today.
+Both `csrf: 'inertia'` and `onRedirect` are **shipped** on `createHttpBridge`:
+`csrf: 'inertia'` defers token management to Inertia's Axios instance instead
+of reading the meta tag, and `onRedirect(url)` is called when the backend
+response signals a redirect — wire it to `router.visit(url)` to let Inertia
+take the navigation:
+
+```ts
+const bridge = createHttpBridge({
+  endpoint: '/api/vc',
+  csrf: 'inertia',
+  onRedirect: (url) => router.visit(url),
+});
+```
 
 ---
 

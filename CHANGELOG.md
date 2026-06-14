@@ -2,6 +2,133 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.6.0 — Vue 3.6.0-beta.15 alignment
+
+### Changed
+
+- **peerDependencies** bumped to `vue: ">=3.5.0 || >=3.6.0-beta.15"`; dev `vue` pinned to
+  `^3.6.0-beta.15`.
+- **`useSharedCommandState` now observes errors BUS-WIDE (`chamber.ts`).** Previously it recorded
+  errors only from dispatches made through its own `dispatch` wrapper — failures from
+  `useVaporCommand`, `useCommand`, or raw `bus.dispatch` were invisible to the shared error
+  list, contradicting its documented "observes the whole bus" behavior (found live: the vapor-sfc
+  StatusBar never updated). It now subscribes `bus.on('*')` and records every failed command on
+  the bus; the wrapper no longer double-records, and the observer unhooks when the last
+  subscriber disposes. `isAnyLoading` stays scoped to the composable's own dispatches (bus-wide
+  in-flight pairing isn't guaranteed on all error paths). +3 regression tests. The vapor-sfc
+  example was also made an honest demo: stateful fake-server handler (totals accumulate),
+  handler-confirmed cart line on success (the happy path previously rendered nothing).
+- **Fixed: `vaporChamberHMR()` made Vue/Vapor detection impossible in Vite dev (`vite-hmr.ts`).**
+  The injected shim import sits at the top of every transformed module, so `vapor-chamber`
+  always evaluated before any user code could prime detection — and the lib's async probe
+  (bare-specifier dynamic `import('vue')`) always fails in browsers. Net effect: with the HMR
+  plugin active, `createVaporChamberApp()` threw on every dev page load. The shim now emits a
+  companion virtual module that sets `globalThis.__VUE__` from the consumer's own `vue` BEFORE
+  importing `vapor-chamber` (no-op when `vue` doesn't resolve, so non-Vue consumers are
+  unaffected). Found by browser-verifying the `vapor-sfc` example, which was broken-by-design in
+  dev; its templates had even been written against the broken behavior (explicit `.value` on
+  top-level refs that Vapor templates auto-unwrap) and its async handlers sat on the sync bus
+  (rejections escaped `lastError`) — both fixed in the example alongside. +3 plugin tests.
+- **`v-vc:command` now skips dispatch on disabled / in-flight elements (`directives.ts`).** Mirrors
+  beta.15's runtime change *skip disabled delegated direct handlers* (#14948) for the **direct**
+  click listener this directive attaches (it is not a delegated handler, so Vue's runtime fix does
+  not reach it automatically). `buildHandler` now bails out when (a) a dispatch is already in flight
+  — preventing a re-entrant double-dispatch from rapid clicks during an async command — or (b) the
+  element is disabled via the DOM `disabled` property or `aria-disabled="true"`. The platform already
+  suppresses clicks on disabled `<button>`/`<input>`, but `v-vc:command` can sit on
+  `<a>`/`<div>`/`aria-disabled` elements it does not guard.
+
+### Docs — Vue 3.6.0-beta.15 alignment notes (all other items pass-through)
+
+Per-file alignment headers updated; these are Vue runtime/compiler fixes that flow through the
+pass-through wrappers with no code change on our side:
+
+- **`transitions.ts`** — *restore transition group hooks after skipped move* (a child whose move was
+  skipped, e.g. a v-show-hidden item, keeps its move hooks so a later real reorder still dispatches
+  `*Move`), *transition group key inheritance aligned with vdom*, *inherited keys kept stable*,
+  *unique keys preserved for multi-root v-for items*, *transition v-if comment handling aligned with
+  vdom*. `onMove` JSDoc updated.
+- **`chamber-vapor.ts`** — *guard interop vnode access* (interop reads of a possibly-absent bridged
+  vnode no longer crash in rapidly mounting/unmounting mixed trees), *clear old keyed direct template
+  refs*, the full **teleport** group (invalid-target handling, disabled-target order, explicit mount-
+  location tracking, CSS-vars-by-mount-location, no target-child moves on reorder, reused raw props
+  proxy), and *avoid retaining fragment classes in app-only bundles* (smaller app-only builds; the
+  library is `sideEffects: false` and tree-shakes alongside it).
+- **`ssr.ts`** — teleport hydration: *track mount location explicitly* and *preserve disabled teleport
+  target order* keep `rehydrate()` command replay in document order around teleport boundaries
+  (builds on beta.13's logical-sibling teleport-range skip); *update teleport css vars by mount
+  location* noted for completeness.
+
+### Added
+
+- **`history()` gains `undoAction` / `redoAction` options.** The plugin registers the undo/redo
+  trigger handlers itself and ALWAYS excludes those actions from recording — removing the footgun
+  where a hand-wired `bus.register('cart.undo', () => h.undo())` recorded the trigger command into
+  history (wiping the redo stack on every dispatch: undo worked once, redo never enabled — found
+  live in the island-cart example). Also adds `dispose()` to unregister the triggers. Guarded by
+  4 new tests in `tests/plugins.test.ts`; the example now uses the new options.
+- **`onMissing:'buffer'` hardening: `bufferTTL` + `onBufferOverflow`.** `bufferTTL` (ms) lazily
+  reaps queued commands that outlive it — on the next push and at flush — so a handler that never
+  arrives (an island that fails to hydrate) can't pin stale commands in memory; expired entries are
+  not replayed. `onBufferOverflow(action, dropped)` fires for both TTL reaps and `bufferLimit`
+  drops, giving production observability (drops were previously dev-console-only). Defaults
+  unchanged. 3 new tests in `tests/deferred-dispatch.test.ts`.
+- **Dev warning for the signal()-before-detection race.** Vue detection is async; a `signal()`
+  created before it resolves is a plain `{ value }` object forever (writes never trigger
+  reactivity) while later signals get `shallowRef` — a silent semantics gap. `configureSignal()`
+  now warns once (dev only) when a reactive backing arrives after plain signals were created, and
+  points at `waitForVueDetection()`. Test: `tests/signal-race-warning.test.ts`.
+- **Typed Vapor wrappers (opt-in).** `defineVaporComponent` / `defineVaporCustomElement` /
+  `defineVaporAsyncComponent` / `createVaporChamberApp` gained a `<T = any>` return generic and
+  `object`-typed params instead of `any` — callers opt in (`defineVaporComponent<MyComp>(opts)`)
+  with zero Vue-type dependency on the main barrel. Full Vue-typed inference is parked for v2.0.0
+  (ROADMAP checklist) once Vue's Vapor types settle.
+- **`prepare` script — git installs now work.** `npm install github:lucianofedericopereira/vapor-chamber`
+  builds `dist/` on install, making the repo an authoritative install source while registry
+  releases lag. Root `npm install` also auto-builds, and the examples gained `predev`/`prebuild`
+  hooks that build the lib on demand — no more manual "build the library first" step.
+
+### Docs & maintenance
+
+- **SSR concurrency warning.** `setCommandBus()` and the ssr.ts examples now state plainly that the
+  shared-bus set/render/reset pattern is per-process and only safe for one render at a time;
+  concurrent SSR servers should create a per-request bus and pass it explicitly. The README's
+  "no shared singletons" bullet was corrected to match reality.
+- **Per-beta alignment headers consolidated (~265 lines removed).** The src file headers in
+  `transitions.ts` / `chamber-vapor.ts` / `ssr.ts` / `directives.ts` no longer duplicate the full
+  per-beta changelog prose — they carry one line per version plus in-file code-change notes, and
+  point at CHANGELOG.md and the whitepaper's alignment log (now genuinely the single source of
+  per-beta detail). Function-level JSDoc keeps behavior-relevant notes only.
+- **README opening rewritten** as a self-contained "what's in the can" — core vs opt-in batteries
+  table, install (registry + git), honest SSR bullet.
+- **Bench labels self-track the running Vue version** (`import { version } from 'vue'`) instead of
+  hardcoded beta tags; recorded 3-run beta.15 dev-host baselines with cross-host variance notes.
+
+- **`examples/laravel-app/`** — runnable, **verified** Laravel example. `setup.sh` scaffolds a fresh
+  skeleton and drops in session-backed action classes (zero migrations), the audited
+  `VaporChamberController` from `../laravel-backend`, a Blade view with the core IIFE and real CSRF
+  (`VaporChamber.connect({ csrf: true })`), and append-safe routes. Verified end-to-end on Laravel 12 /
+  PHP 8.5: happy path (`{ok:true,state}`), session persistence across dispatches, validation → 422,
+  unknown command → 404, missing CSRF → 419. Verification also caught and fixed an append-snippet
+  fatal (duplicate `Route` facade `use` — snippet is now fully-qualified).
+- **`examples/exo-astro/`** — exo-style declarative event-bus directives for Astro pages, vendored
+  self-contained (`v-scope`, `v-command`, `v-bind-text`, `v-show` — a ~150-line Proxy-based scanner,
+  no framework runtime; 4.9 kB gzip client JS total). Headline: **dispatch before hydration** —
+  handlers register 2s late on purpose and `onMissing:'buffer'` + `bufferTTL` + `onBufferOverflow`
+  buffer and replay the clicks. Verified: `astro build` + dev server.
+- **Fixed `examples/vapor-sfc` silent runtime breakage** — its Vite config lacked the
+  `vue` → `vue/dist/vue.runtime-with-vapor.esm-browser.js` alias, so builds succeeded (63 kB bundle)
+  while `createVaporChamberApp()` would throw at runtime ("Vue 3.6+ with Vapor mode required"):
+  Vue's default entry ships no Vapor runtime. Alias + `optimizeDeps` added (bundle now 81 kB with
+  the runtime, matching the island-cart example); `@vitejs/plugin-vue` aligned to `^6.0.0`.
+- **`examples/vapor-island-cart/`** — runnable `<script setup vapor>` example: a light-DOM Vapor
+  **custom-element island** cart. Plain server-rendered HTML upgrades in place to Vapor custom
+  elements (`defineVaporCustomElement`, `shadowRoot: false`) that coordinate through a single command
+  bus (`logger` + `history` undo/redo + cross-tab `sync` + `persist`). Demonstrates HTML-first
+  progressive enhancement and `client:load` / `client:visible` / `client:idle` hydration. Promoted
+  from the `test-draft` working copy and aligned to the `examples/` convention (`vapor-chamber:
+  file:../..`, beta.15 `vue`).
+
 ## v1.5.0 — Vue 3.6.0-beta.14 alignment
 
 ### Changed

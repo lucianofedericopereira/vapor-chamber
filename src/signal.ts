@@ -43,9 +43,16 @@ function syncProbe(): void {
   }
 }
 
+/** Count of signals created as plain `{ value }` objects (no reactive backing).
+ *  Used to warn when a reactive backing arrives AFTER signals were already
+ *  handed out — those early signals stay plain forever (silent semantics gap). */
+let _plainCreations = 0;
+let _raceWarned = false;
+
 const fallbackSignal: CreateSignal = <T>(initial: T): Signal<T> => {
   syncProbe();
   if (_vueRef) return _vueRef(initial) as Signal<T>;
+  _plainCreations++;
   return { value: initial };
 };
 
@@ -56,6 +63,12 @@ let _signalFn: CreateSignal = fallbackSignal;
  * Vue probe completes; also available to consumers who want a custom signal
  * implementation.
  *
+ * Dev note: if any signals were created BEFORE this call resolved a reactive
+ * backing, those signals are plain `{ value }` objects forever — writes to them
+ * will not trigger Vue reactivity, while signals created after this call will.
+ * A one-shot dev warning fires in that case; to guarantee a uniform backing,
+ * `await waitForVueDetection()` before the first `signal()` call.
+ *
  * @example
  * import { ref } from 'vue';
  * import { configureSignal } from 'vapor-chamber';
@@ -63,6 +76,20 @@ let _signalFn: CreateSignal = fallbackSignal;
  */
 export function configureSignal(fn: CreateSignal): void {
   _signalFn = fn;
+  if (
+    _plainCreations > 0 && !_raceWarned &&
+    typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production'
+  ) {
+    _raceWarned = true;
+    console.warn(
+      `[vapor-chamber] Heads-up: ${_plainCreations} signal(s) were created before a ` +
+      'reactive backing was configured (Vue detection is async). Those early signals ' +
+      'are plain { value } objects — writes to them will NOT trigger reactivity, while ' +
+      'signals created from now on will. If you need reactive signals at module-init ' +
+      'time, `await waitForVueDetection()` (from vapor-chamber) before creating them. ' +
+      'Harmless if those early signals are never consumed reactively. Logged once.'
+    );
+  }
 }
 
 export const signal: CreateSignal = <T>(initial: T) => _signalFn(initial);

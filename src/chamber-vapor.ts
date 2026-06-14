@@ -1,69 +1,28 @@
 /**
  * vapor-chamber — Vue 3.6+ Vapor-specific API
  *
- * v1.5.0 — Vue 3.6.0-beta.14 alignment:
- *           • custom-element: avoid retaining hooks on shared definitions — custom
- *             elements created from shared option objects no longer accumulate stale
- *             lifecycle hooks across instances; defineVaporCustomElement() is safe
- *             to call with a reused options object.
- *           • custom-element: update children from reactive props — Vapor custom
- *             elements now correctly re-render children when reactive props change.
- *           • interop: avoid mutating shared interop bridge — the bridge object
- *             returned by getVaporInteropPlugin() is no longer mutated by Vue's
- *             runtime during app setup; callers can safely hold references across
- *             reloads.
- *           • interop: cache normalized interop slot wrappers (perf) — slot wrapper
- *             normalization is memoised; repeated interop boundary crossings no
- *             longer allocate new wrapper functions on each render.
- *           • async component: pass props and slots to loadingComponent — the
- *             loading placeholder receives the same props and slots as the deferred
- *             component; defineVaporAsyncComponent() benefits automatically.
- *           • async component: expose async component alias for SSR runtime —
- *             defineVaporAsyncComponent() output is now correctly tree-shaken when
- *             the SSR runtime is present (alias exposed for SSR code-split paths).
- *           • vapor root: preserve scope id on dynamic root updates — scope IDs are
- *             maintained when the root component updates dynamically, not just on
- *             initial mount (createVaporChamberApp() is pass-through, Vue fix).
- *           • vapor root: update app instance on root HMR reload — the app instance
- *             reference on the root component is refreshed after a hot-reload;
- *             createVaporChamberApp() callers no longer need to re-acquire the app
- *             reference after a root HMR cycle.
- *           • async wrapper: align error component creation — error component
- *             creation inside async wrappers (Suspense boundaries) now aligns with
- *             the VDOM behaviour; useVaporAsyncCommand() error handling is unaffected
- *             at the command-bus level.
- *           • scheduler: reset job queue length after flush — the Vapor scheduler
- *             now correctly resets its internal job counter after each flush cycle,
- *             preventing queue-length drift in apps that batch async commands.
- *           • v-for: skip updated hooks on initial mount — onUpdated hooks no longer
- *             fire during the initial mount pass for v-for items; defineVaporCommand
- *             handlers wired to updated lifecycle hooks won't fire prematurely.
- *           • v-for: avoid fast remove for component v-for — component-level v-for
- *             no longer uses the fast-remove path, fixing cleanup ordering for
- *             defineVaporCommand and useVaporCommand registered inside v-for items.
- *           • v-for: avoid eager evaluation of destructure defaults — destructure
- *             defaults in v-for item patterns are now evaluated lazily; no impact
- *             on command handlers but aligns template compile output.
- *           All changes are in Vue's runtime — wrappers here are pass-through.
- * v1.4.0 — Vue 3.6.0-beta.13 alignment:
- *           • apply interop scope ids to vapor roots — Vapor app roots created with
- *             createVaporChamberApp() now correctly inherit CSS scope IDs from the
- *             parent VDOM tree, fixing scoped-style leakage in mixed Vapor/VDOM apps.
- *           • respect v-once in vdom slot interop — VDOM slot content marked v-once
- *             is no longer re-evaluated after crossing the Vapor interop boundary;
- *             defineVaporComponent() wrappers receive the fix automatically.
- *           • v-once slot snapshots and prop snapshots are preserved correctly;
- *             preserve v-once semantics for slot fallback children.
- *           All changes are in Vue's runtime — wrappers here are pass-through.
- * v1.3.0 — Vue 3.6.0-beta.12 alignment: error recovery in Vapor setup (component
- *           context, fallthrough props, render effects restored after setup errors);
- *           VDOM slots interop normalization; SSR unresolved tag fallback as element.
- *           All changes are in Vue's runtime — wrappers here are pass-through.
- * v1.1.0 — Added: defineVaporCustomElement, defineVaporComponent,
- *           defineVaporAsyncComponent wrappers (Vue 3.6.0-beta.10+);
- *           useVaporAsyncCommand for Suspense-aware async dispatch.
- * v0.6.0 — Added: useVaporCommand composable.
- * v0.4.0 — Added: createVaporChamberApp, getVaporInteropPlugin, defineVaporCommand.
+ * Vue alignment history (one line per version — full per-item detail lives in
+ * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table, the single
+ * source of per-beta detail; this header only records changes to THIS file):
+ *   v1.6.0 / beta.15 — lib-side: the define* wrappers and createVaporChamberApp
+ *            gained an opt-in return generic (`<T = any>`) and `object`-typed
+ *            options instead of `any`. Vue 3.6 exports proper Vapor types now,
+ *            but importing them here would put a hard `vue` type dependency on
+ *            the main barrel and break Vue-less command-bus consumers — callers
+ *            opt in: `defineVaporComponent<MyComp>(opts)`. Vue-side (interop
+ *            vnode guard, keyed template refs, the teleport group, fragment-class
+ *            tree-shaking) is all pass-through.
+ *   v1.5.0 / beta.14 — pass-through (custom-element hooks/props, interop bridge
+ *            stability + slot-wrapper memoisation, async loadingComponent props,
+ *            scope IDs, scheduler flush, v-for lifecycle ordering).
+ *   v1.4.0 / beta.13 — pass-through (interop scope IDs on Vapor roots, v-once in
+ *            VDOM slot interop, v-once slot/prop snapshots).
+ *   v1.3.0 / beta.12 — pass-through (Vapor setup() error recovery, VDOM slot
+ *            interop normalization).
+ *   v1.1.0 — Added: defineVaporCustomElement, defineVaporComponent,
+ *            defineVaporAsyncComponent wrappers (beta.10+); useVaporAsyncCommand.
+ *   v0.6.0 — Added: useVaporCommand. v0.4.0 — Added: createVaporChamberApp,
+ *            getVaporInteropPlugin, defineVaporCommand.
  *
  * Separated from chamber.ts to keep the core composable module CDCC-compliant.
  */
@@ -85,27 +44,19 @@ import type { Handler, RegisterOptions, CommandResult, Command } from './command
  * Create a Vapor app instance with vapor-chamber ready.
  * Requires Vue 3.6+. Throws if Vapor is not available.
  *
- * Vue 3.6.0-beta.14: scope IDs are preserved when the root component updates
- * dynamically, not only on initial mount (runtime-vapor: preserve scope id on
- * dynamic root updates). The app instance reference on the root is also refreshed
- * after a root HMR reload (runtime-vapor: update app instance on root hmr reload)
- * — no code change needed in callers.
- *
- * Vue 3.6.0-beta.13: Vapor app roots now correctly receive CSS scope IDs from
- * their parent VDOM context when mounted inside a mixed Vapor/VDOM tree
- * (runtime-vapor: apply interop scope ids to vapor roots). Scoped styles defined
- * on parent VDOM components are no longer missing from Vapor root descendants.
- *
- * Vue 3.6.0-beta.12: component context, fallthrough prop state, and render
- * effect state are now properly restored when setup() throws — broken Vapor
- * runtime state after setup errors is no longer possible.
+ * Pass-through over Vue's createVaporApp — scope-ID handling, HMR app-instance
+ * refresh, and setup() error recovery are Vue runtime behavior (per-beta detail:
+ * CHANGELOG / whitepaper alignment log).
  *
  * @example
  * import { createVaporChamberApp } from 'vapor-chamber';
  * import App from './App.vue';
  * createVaporChamberApp(App).mount('#app');
  */
-export function createVaporChamberApp(rootComponent: any, rootProps?: any) {
+export function createVaporChamberApp<TApp = any>(
+  rootComponent: object,
+  rootProps?: Record<string, unknown>,
+): TApp {
   const fn = getVaporAppFn();
   if (!fn) {
     throw new Error(
@@ -113,28 +64,17 @@ export function createVaporChamberApp(rootComponent: any, rootProps?: any) {
       'Install vue@^3.6.0-beta.1 or use createApp() for VDOM mode.'
     );
   }
-  return fn(rootComponent, rootProps);
+  return fn(rootComponent, rootProps) as TApp;
 }
 
 /**
  * Returns the vaporInteropPlugin if available (Vue 3.6+).
  * Use this to enable mixed Vapor/VDOM component trees.
  *
- * Vue 3.6.0-beta.14: the interop bridge is no longer mutated by Vue's runtime
- * during app setup (runtime-vapor: avoid mutating shared interop bridge). The
- * returned plugin reference is safe to hold and reuse across HMR cycles.
- * Interop slot wrapper normalization is now memoised — repeated crossings of
- * Vapor↔VDOM boundaries no longer allocate wrapper functions per render
- * (runtime-vapor: cache normalized interop slot wrappers).
- *
- * Vue 3.6.0-beta.13: the interop plugin now correctly applies CSS scope IDs to
- * Vapor roots (runtime-vapor: apply interop scope ids to vapor roots), and
- * respects v-once on VDOM slot content crossing the interop boundary
- * (runtime-vapor: respect v-once in vdom slot interop).
- *
- * Vue 3.6.0-beta.12: VDOM slots are now normalized and exposed during Vapor
- * interop, and VDOM interop state is no longer retained from emits — mixed
- * trees are more correct without any code change here.
+ * Pass-through over Vue's plugin. Since beta.14 the returned reference is safe
+ * to hold across HMR cycles (Vue no longer mutates the bridge), and since
+ * beta.15 interop vnode reads are guarded against absent vnodes (per-beta
+ * detail: CHANGELOG / whitepaper alignment log).
  *
  * @example
  * import { createApp } from 'vue';
@@ -155,16 +95,9 @@ export function getVaporInteropPlugin(): any | null {
  *
  * Wraps Vue 3.6.0-beta.10's `defineVaporCustomElement()`. The generated custom
  * element uses Vapor's compiler-optimized rendering instead of the VDOM, giving
- * zero-overhead DOM updates inside shadow DOM.
- *
- * Vue 3.6.0-beta.14: lifecycle hooks are no longer retained on the shared options
- * object when the same `options` reference is passed to multiple
- * `defineVaporCustomElement()` calls — hooks stay scoped to each element
- * instance (custom-element: avoid retaining custom element hooks on shared
- * definitions). Children are now correctly re-rendered when reactive props
- * change (custom-element: update custom element children from reactive props).
- *
- * SSR runtime is automatically tree-shaken from the generated code (beta.10 fix).
+ * zero-overhead DOM updates inside shadow DOM. Safe to call with a reused
+ * options object, and children re-render on reactive prop changes (beta.14+;
+ * per-beta detail: CHANGELOG / whitepaper alignment log).
  *
  * Returns null if Vue 3.6.0-beta.10+ is not detected — check before calling
  * `customElements.define()`.
@@ -177,10 +110,10 @@ export function getVaporInteropPlugin(): any | null {
  * });
  * if (MyEl) customElements.define('vc-greeting', MyEl);
  */
-export function defineVaporCustomElement(options: any, extraOptions?: any): any | null {
+export function defineVaporCustomElement<T = any>(options: object, extraOptions?: object): T | null {
   const fn = getDefineVaporCustomElementFn();
   if (!fn) return null;
-  return extraOptions !== undefined ? fn(options, extraOptions) : fn(options);
+  return (extraOptions !== undefined ? fn(options, extraOptions) : fn(options)) as T;
 }
 
 /**
@@ -188,44 +121,11 @@ export function defineVaporCustomElement(options: any, extraOptions?: any): any 
  *
  * Wraps Vue 3.6.0-beta.10's `defineVaporComponent()`. Use this to get full
  * TypeScript inference for props, emits, and slots in Vapor components.
+ * Pass-through — emits/$attrs routing, v-once interop, scope IDs, and the
+ * compiler optimizations are Vue behavior (per-beta detail: CHANGELOG /
+ * whitepaper alignment log).
  *
  * Returns null if Vue 3.6.0-beta.10+ is not detected.
- *
- * Vue 3.6.0-beta.11 alignment:
- *   • Generics + runtime props now infer correctly (Vue PR #14770) — pass-through
- *     wrappers like this one preserve the generic flow:
- *       defineVaporComponent<{ label: string }>({ props: { label: String }, ... })
- *   • Declared `emits` listeners are excluded from `$attrs` — if a component
- *     declares `emits: ['select']`, an `onSelect` handler bound by the parent
- *     is routed to the emit channel and will NOT leak into `attrs`. This wrapper
- *     forwards `options` unchanged, so the behavior flows through unmodified.
- *
- * Vue 3.6.0-beta.13 alignment:
- *   • v-once in VDOM slot interop is now respected — slot content marked v-once
- *     that flows into a defineVaporComponent via VDOM interop is no longer
- *     re-evaluated on subsequent renders. Wrapper is pass-through.
- *   • v-once slot prop snapshots are preserved — slot inputs captured at mount
- *     time are not overwritten by later parent re-renders. Pass-through.
- *   • CSS scope IDs are correctly applied when this component is used as a Vapor
- *     root inside a VDOM parent. Pass-through.
- *   Compiler performance (all pass-through):
- *   • Template options (inheritAttrs, emits) are encoded as bit flags instead of
- *     objects — faster option parsing at runtime (vapor: encode template options
- *     as flags).
- *   • Static literal props passed to this component are inlined at compile time
- *     instead of allocated as runtime objects (compiler-vapor: inline static
- *     component literal props).
- *   • Components used exactly once in a template skip resolveComponent() and
- *     are lowered to a direct reference (vapor: lower single-use asset component
- *     resolves).
- *   • Event handlers use a shared onBinding runtime helper instead of per-element
- *     closures (compiler-vapor: use onBinding helper for reactive events;
- *     vapor: move event invoker wrapping into runtime helpers).
- *
- * Vue 3.6.0-beta.12 alignment:
- *   • VDOM interop state is no longer retained from emits — components that emit
- *     events inside VDOM interop trees no longer carry stale interop refs after
- *     the emit call. Wrapper is pass-through; behavior flows through unmodified.
  *
  * @example
  * import { defineVaporComponent } from 'vapor-chamber';
@@ -235,25 +135,20 @@ export function defineVaporCustomElement(options: any, extraOptions?: any): any 
  *   setup(props) { return () => h('div', `Count: ${props.count}`); }
  * });
  */
-export function defineVaporComponent(options: any): any | null {
+export function defineVaporComponent<T = any>(options: object): T | null {
   const fn = getDefineVaporComponentFn();
   if (!fn) return null;
-  return fn(options);
+  return fn(options) as T;
 }
 
 /**
  * defineVaporAsyncComponent — define an async Vapor component for lazy loading.
  *
  * Wraps Vue 3.6.0-beta.10's `defineVaporAsyncComponent()`. Async Vapor
- * components are properly cached by VaporKeepAlive and hydrate under VDOM
- * Suspense boundaries (beta.10 fix).
- *
- * Vue 3.6.0-beta.14: the loading component now receives the same props and
- * slots as the deferred component (runtime-vapor: pass props and slots to
- * loadingComponent) — use this to render a skeleton that matches the final
- * component's shape. An SSR runtime alias is now exposed so the async
- * component chunk is correctly tree-shaken in SSR code-split builds
- * (vapor: expose async component alias for SSR runtime).
+ * components are cached by VaporKeepAlive and hydrate under VDOM Suspense.
+ * The loading placeholder receives the deferred component's props and slots
+ * (beta.14+) — render a skeleton matching the final shape. Per-beta detail:
+ * CHANGELOG / whitepaper alignment log.
  *
  * Returns null if Vue 3.6.0-beta.10+ is not detected.
  *
@@ -261,10 +156,12 @@ export function defineVaporComponent(options: any): any | null {
  * import { defineVaporAsyncComponent } from 'vapor-chamber';
  * const AsyncPanel = defineVaporAsyncComponent(() => import('./Panel.vue'));
  */
-export function defineVaporAsyncComponent(loader: any): any | null {
+export function defineVaporAsyncComponent<T = any>(
+  loader: (() => Promise<unknown>) | object,
+): T | null {
   const fn = getDefineVaporAsyncComponentFn();
   if (!fn) return null;
-  return fn(loader);
+  return fn(loader) as T;
 }
 
 // ---------------------------------------------------------------------------
@@ -372,20 +269,9 @@ export function useVaporCommand() {
  * Vue 3.6.0-beta.10 introduced proper async component hydration under VDOM
  * Suspense. This composable wraps an AsyncCommandBus dispatch with reactive
  * loading/error state, making it safe for `<script setup vapor>` components
- * that await async operations.
- *
- * Vue 3.6.0-beta.14: error component creation inside async wrappers is now
- * aligned with VDOM behaviour (runtime-vapor: align error component creation
- * in async wrapper) — error boundaries around async Vapor components render
- * more consistently. The Vapor scheduler now resets its job queue length after
- * each flush (scheduler: reset job queue length after flush), so async
- * commands queued across multiple dispatch cycles no longer accumulate stale
- * queue-length state; this improves throughput for burst async workloads.
- *
- * Vue 3.6.0-beta.12: component context, fallthrough prop state, and render
- * effect state are restored after setup errors. The try/catch in `dispatch`
- * below captures command-bus errors; Vue now independently ensures its
- * internal runtime state is clean after any setup throw.
+ * that await async operations. Error-boundary rendering and scheduler-flush
+ * behavior around async components are Vue runtime concerns (per-beta detail:
+ * CHANGELOG / whitepaper alignment log).
  *
  * The dispatch function returns a Promise<CommandResult>, matching the
  * AsyncCommandBus interface. Use this when your commands hit async transports

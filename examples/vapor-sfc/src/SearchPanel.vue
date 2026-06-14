@@ -32,9 +32,10 @@ function onInput(e: Event) {
       chars) dispatches a <code>searchExecute</code> command — no reactive
       loading state is allocated per call.
     </p>
+    <!-- query is a top-level ref — auto-unwrapped in the template, no .value -->
     <input
       type="text"
-      :value="query.value"
+      :value="query"
       @input="onInput"
       placeholder="Type to search…"
       style="padding: 0.4rem; width: 200px;"

@@ -1,6 +1,16 @@
 /**
  * vapor-chamber - Vite HMR plugin
  *
+ * v1.6.0 — CODE CHANGE: the injected shim now primes globalThis.__VUE__ from the
+ *           consumer's 'vue' (via a companion virtual module that evaluates before
+ *           'vapor-chamber') so the lib's synchronous Vue/Vapor detection works in
+ *           Vite dev. Before this, the shim's top-of-module injection guaranteed
+ *           vapor-chamber evaluated before any user code could prime detection, and
+ *           the async probe (bare-specifier dynamic import) always fails in
+ *           browsers — so createVaporChamberApp() threw on every dev page load
+ *           whenever this plugin was active. Found by browser-verifying the
+ *           vapor-sfc example. Non-Vue consumers unaffected (the priming module is
+ *           emitted only when 'vue' resolves).
  * v1.5.0 — Vue 3.6.0-beta.14 HMR alignment:
  *           • dedupe HMR parent reloads (hmr: dedupe HMR parent reloads) — Vue now
  *             deduplicates parent reload events at the runtime level; the dispose
@@ -91,6 +101,9 @@ export function vaporChamberHMR(options: VaporChamberHMROptions = {}): any {
   const { verbose = false } = options;
   const virtualModuleId = options.moduleId ?? 'virtual:vapor-chamber-hmr';
   const resolvedVirtualModuleId = '\0' + virtualModuleId;
+  // Vue-priming companion module — see load() below for why it must exist.
+  const primeModuleId = virtualModuleId + '-vue-prime';
+  const resolvedPrimeModuleId = '\0' + primeModuleId;
 
   return {
     name: 'vapor-chamber-hmr',
@@ -98,15 +111,44 @@ export function vaporChamberHMR(options: VaporChamberHMROptions = {}): any {
 
     resolveId(id: string) {
       if (id === virtualModuleId) return resolvedVirtualModuleId;
+      if (id === primeModuleId) return resolvedPrimeModuleId;
     },
 
-    load(id: string) {
+    async load(id: string) {
+      // ── Vue-priming module ──────────────────────────────────────────────
+      // The HMR shim import is injected at the TOP of every transformed
+      // module, so vapor-chamber evaluates before ANY user code — including
+      // any user attempt to set globalThis.__VUE__. And in the browser the
+      // lib's async probe (`import(/* @vite-ignore *​/ 'vue')`) is a bare
+      // specifier import that always fails without an import map. Net effect
+      // (pre-v1.6.0): with this plugin active, Vue/Vapor detection could
+      // NEVER succeed in Vite dev — createVaporChamberApp() threw on every
+      // dev page load. This module fixes it at the right layer: it sets
+      // globalThis.__VUE__ from the consumer's own 'vue' BEFORE the shim
+      // imports 'vapor-chamber' (its module body runs first in DFS order),
+      // so the lib's synchronous probe finds the real Vue module — alias
+      // and all. Emitted only when 'vue' resolves, so non-Vue Vite apps
+      // using this plugin are unaffected.
+      if (id === resolvedPrimeModuleId) {
+        const vueResolved = await (this as any).resolve?.('vue');
+        if (!vueResolved) return 'export {};';
+        return `
+// vapor-chamber HMR shim — Vue priming (must evaluate before 'vapor-chamber')
+import * as __VC_VUE__ from 'vue';
+if (!globalThis.__VUE__ || typeof globalThis.__VUE__.ref !== 'function') {
+  globalThis.__VUE__ = __VC_VUE__;
+}
+export {};
+        `.trim();
+      }
+
       if (id !== resolvedVirtualModuleId) return;
 
       // This module is injected into the app bundle.
       // It patches setCommandBus/getCommandBus to persist across HMR.
       return `
 // vapor-chamber HMR shim — injected by vaporChamberHMR() Vite plugin
+import '${primeModuleId}';
 import { getCommandBus, setCommandBus, resetCommandBus, isVaporAvailable } from 'vapor-chamber';
 
 const KEY = '${HMR_GLOBAL_KEY}';

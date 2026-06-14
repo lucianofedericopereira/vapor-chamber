@@ -99,4 +99,52 @@ describe("onMissing: 'buffer' — deferred dispatch", () => {
     await tick(); // async handlers replay on the microtask/macrotask
     expect(seen).toEqual([1, 2]);
   });
+
+  it('onBufferOverflow fires when bufferLimit drops the oldest', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const dropped: Array<{ action: string; target: any }> = [];
+    const bus = createCommandBus({
+      onMissing: 'buffer',
+      bufferLimit: 2,
+      onBufferOverflow: (action, d) => dropped.push({ action, target: d.target }),
+    });
+    bus.dispatch('q', 1);
+    bus.dispatch('q', 2);
+    bus.dispatch('q', 3); // drops 1
+    warn.mockRestore();
+    expect(dropped).toEqual([{ action: 'q', target: 1 }]);
+  });
+
+  it('bufferTTL reaps expired entries on push and skips them at flush', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000_000);
+      const dropped: any[] = [];
+      const bus = createCommandBus({
+        onMissing: 'buffer',
+        bufferTTL: 100,
+        onBufferOverflow: (_a, d) => dropped.push(d.target),
+      });
+      bus.dispatch('save', 'stale'); // at t=0
+      vi.setSystemTime(1_000_200);   // +200ms — past TTL
+      bus.dispatch('save', 'fresh'); // push reaps 'stale'
+      expect(dropped).toEqual(['stale']);
+
+      vi.setSystemTime(1_000_400);   // 'fresh' now expired too (waited 200ms)
+      const seen: string[] = [];
+      bus.register('save', (cmd) => seen.push(cmd.target as string));
+      expect(seen).toEqual([]);           // expired entry not replayed
+      expect(dropped).toEqual(['stale', 'fresh']); // flush reported the expiry
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('bufferTTL keeps non-expired entries working as before', () => {
+    const bus = createCommandBus({ onMissing: 'buffer', bufferTTL: 60_000 });
+    bus.dispatch('go', 'a');
+    const seen: string[] = [];
+    bus.register('go', (cmd) => seen.push(cmd.target as string));
+    expect(seen).toEqual(['a']);
+  });
 });

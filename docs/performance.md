@@ -503,6 +503,19 @@ bench comment block in `tests/perf.bench.ts`). This is the single, current react
 section; where a number shifted across betas the prior-beta baseline is cited inline (so the
 superseded per-beta notes don't need their own section).
 
+> **beta.15 (v1.6.0):** no perf-affecting change on these paths. The beta.15 alignment was
+> documentation plus one guard on the (non-hot) `v-vc:command` click path; nothing in a measured
+> hot loop changed. A 3-run beta.15 set was recorded on a dev host (see the baseline blocks in
+> `tests/perf.bench.ts`): the stable rows (command bus, transition bridge, `useCommandState`,
+> `effectScope` lifecycle) land ~3–8% under the beta.14 *reference-host* numbers **uniformly —
+> including the Vue-independent raw `bus.dispatch` path**, which Vue's version cannot touch, so that
+> shift is host/load variance, not a regression. The Vue-reactive rows (`shallowRef`, `watchEffect`)
+> swing 20–30% run-to-run by machine state and are recorded as ranges; the same-process
+> `signal-shallow-ab` A/B remains the trustworthy regression guard and still shows `shallowRef`
+> faster. The beta.14 numbers below remain the cross-beta reference (an apples-to-apples cross-beta
+> delta needs beta.14 re-run on the same host). Bench labels now read the running Vue version
+> dynamically (`VUE_VERSION`), so they self-track.
+
 **1. The plain `{ value }` fallback remains the fastest write path at ~372,000 ops/sec.**
 Essentially unchanged from beta.13 (~368k) — within normal run-to-run variance.
 The fallback is not reactive; for push-pull reactivity without Vue, use

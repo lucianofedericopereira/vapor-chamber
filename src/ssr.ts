@@ -1,28 +1,25 @@
 /**
  * vapor-chamber — SSR hydration plugin
  *
- * v1.4.0 — Vue 3.6.0-beta.13 hydration alignment (all Vue runtime fixes,
- *           no vapor-chamber code changes required):
- *           • avoid preserving stale element mismatch content — hydration no
- *             longer retains wrong DOM nodes when server/client markup diverges;
- *             rehydrate() results are now more reliable after mismatch recovery.
- *           • preserve namespace during hydration recovery — SVG and MathML
- *             namespace context is maintained when Vue recovers from hydration
- *             errors; no impact on rehydrate() itself (command-level replay).
- *           • respect allowed prop mismatches during hydration — prop differences
- *             that are permitted (e.g. data-v-inspector) no longer trigger false
- *             hydration warnings; the ignoreUnhandled option is unaffected.
- *           • skip teleport ranges for logical hydration siblings — Teleport
- *             boundaries are correctly excluded from logical sibling walks,
- *             preventing command replay ordering issues in Teleport-heavy apps.
- *           • validate static hydration targets in dev — dev builds now assert
- *             that static element targets exist before hydrating; safe for
- *             rehydrate() callers (command dispatch happens after DOM is ready).
- * v1.1.0 — Dehydrate bus state on the server, rehydrate on the client.
+ * Vue alignment history (one line per version — full per-item detail lives in
+ * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table):
+ *   v1.6.0 / beta.15 — pass-through (teleport mount-location tracking + disabled-
+ *            target order keep rehydrate() command replay in document order).
+ *   v1.4.0 / beta.13 — pass-through (5 hydration fixes: mismatch recovery,
+ *            namespace preservation, allowed prop mismatches, teleport-range
+ *            sibling walks, dev target validation).
+ *   v1.1.0 — module added: dehydrate bus state on the server, rehydrate on client.
  *
  * Per the whitepaper (§14): commands that ran on the server to populate initial
  * state need to replay on the client so reactive signals reflect the same values.
  * This plugin automates the dehydrate/rehydrate pattern as a first-class plugin.
+ *
+ * CONCURRENCY WARNING: the setCommandBus/resetCommandBus pattern below relies on
+ * a module-global shared bus — safe only when the server renders one request at
+ * a time. Under concurrent SSR renders, interleaved requests overwrite each
+ * other's bus (handler/state leakage across requests). For concurrent servers,
+ * create the bus per request and pass it explicitly to your handlers and to
+ * rehydrate()/dehydrate() — skip the shared-bus globals on the server entirely.
  *
  * @example Server entry
  * import { createCommandBus, setCommandBus, resetCommandBus } from 'vapor-chamber';

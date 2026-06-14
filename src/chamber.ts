@@ -214,6 +214,17 @@ export function getCommandBus(): CommandBus {
   return sharedBus;
 }
 
+/**
+ * Replace the shared bus instance.
+ *
+ * SSR WARNING: the shared bus is a module global — one per Node process, not
+ * per request. The set-render-reset pattern (see ssr.ts) is only safe when
+ * requests render strictly one at a time. Under CONCURRENT SSR renders,
+ * interleaved requests stomp each other's bus: handlers and state leak across
+ * requests. For concurrent servers, don't use the shared bus on the server —
+ * create a bus per request and pass it explicitly (every composable and plugin
+ * accepts a `bus` option / argument).
+ */
 export function setCommandBus(bus: CommandBus): void {
   sharedBus = bus;
 }
@@ -383,6 +394,8 @@ type SharedCommandStateEntry = {
   errorCount: Signal<number>;
   refCount: number;
   errorCap: number;
+  /** v1.6.0: bus-wide error observer — unhooked when refCount hits 0. */
+  unsub: () => void;
 };
 
 const _sharedStates = new WeakMap<CommandBus, SharedCommandStateEntry>();
@@ -431,7 +444,7 @@ export function useSharedCommandState(options: UseSharedCommandStateOptions = {}
 
   let state = _sharedStates.get(bus);
   if (!state) {
-    state = {
+    const entry: SharedCommandStateEntry = {
       inFlight: signal(0),
       isAnyLoading: signal(false),
       lastError: signal<Error | null>(null),
@@ -439,7 +452,27 @@ export function useSharedCommandState(options: UseSharedCommandStateOptions = {}
       errorCount: signal(0),
       refCount: 0,
       errorCap,
+      unsub: () => {},
     };
+    // v1.6.0: observe errors BUS-WIDE, not only dispatches made through this
+    // composable's own dispatch wrapper. Any failed command on the bus — from
+    // useVaporCommand, useCommand, raw bus.dispatch, anywhere — lands in the
+    // shared error list. (Both sync and async buses fan results to on('*')
+    // listeners after settling.) inFlight/isAnyLoading remain scoped to this
+    // composable's dispatch wrapper: bus-wide in-flight tracking would need
+    // guaranteed before/after pairing on every dispatch path, which the bus
+    // does not promise for all error paths.
+    entry.unsub = bus.on('*', (_cmd, result) => {
+      if (!result.ok && result.error) {
+        entry.lastError.value = result.error;
+        const next = entry.errors.value.slice();
+        next.push(result.error);
+        while (next.length > entry.errorCap) next.shift();
+        entry.errors.value = next;
+        entry.errorCount.value = next.length;
+      }
+    });
+    state = entry;
     _sharedStates.set(bus, state);
   } else if (errorCap < state.errorCap) {
     // Tighten the cap if the new caller wants a smaller buffer; never grow
@@ -487,12 +520,16 @@ export function useSharedCommandState(options: UseSharedCommandStateOptions = {}
 
     if (result && typeof result.then === 'function') {
       return (result as Promise<CommandResult>).then(
-        (r) => { if (!r.ok && r.error) recordError(r.error); decrement(); return r; },
+        // Settled results are recorded by the bus-wide on('*') observer —
+        // recording here too would double-count (v1.6.0).
+        (r) => { decrement(); return r; },
+        // A rejected dispatch promise bypassed the bus's errResult fan-out,
+        // so no listener fired — record it here.
         (e: Error) => { recordError(e); decrement(); return { ok: false, error: e, value: undefined }; },
       );
     }
 
-    if (!result.ok && result.error) recordError(result.error);
+    // Settled sync results already hit the bus-wide on('*') observer.
     decrement();
     return result;
   }
@@ -507,6 +544,7 @@ export function useSharedCommandState(options: UseSharedCommandStateOptions = {}
   function dispose(): void {
     state!.refCount--;
     if (state!.refCount <= 0) {
+      state!.unsub(); // unhook the bus-wide error observer
       _sharedStates.delete(bus);
     }
   }

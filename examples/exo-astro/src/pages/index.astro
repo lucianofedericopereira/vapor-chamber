@@ -1,0 +1,109 @@
+---
+// Static HTML out — Astro renders this at build time. The ONLY client JS is
+// the bus + the directive scanner; no framework runtime ships to the page.
+---
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>exo on Astro — vapor-chamber</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+      section { border: 1px solid #ccc; border-radius: 8px; padding: 1rem 1.25rem; margin: 1rem 0; }
+      button { padding: .4rem .9rem; border-radius: 6px; border: 1px solid #888; cursor: pointer; }
+      .row { display: flex; justify-content: space-between; align-items: center; margin: .4rem 0; }
+      .muted { color: #777; font-size: .85rem; }
+      #hydration-note { font-weight: 600; }
+    </style>
+  </head>
+  <body>
+    <header>
+      <h1>exo on Astro</h1>
+      <p class="muted">
+        Two independent sections, zero shared code between them. Section A only
+        dispatches named commands; Section B only reads reactive state. The bus
+        buffers clicks that land <em>before</em> the handlers hydrate
+        (<code>onMissing: 'buffer'</code> + <code>bufferTTL</code>) and replays
+        them the moment registration happens.
+      </p>
+      <p id="hydration-note">⏳ Handlers hydrate in 2s — click "Add" NOW to see buffering.</p>
+    </header>
+
+    <!-- Sector A: dispatches named commands into the void. -->
+    <section>
+      <h2>Menu</h2>
+      <div class="row">
+        <span>Coffee — $4.00</span>
+        <button v-command="cart.add" v-target='{"name":"Coffee","price":4}'>Add</button>
+      </div>
+      <div class="row">
+        <span>Tea — $3.00</span>
+        <button v-command="cart.add" v-target='{"name":"Tea","price":3}'>Add</button>
+      </div>
+      <div class="row">
+        <span>Espresso — $5.00</span>
+        <button v-command="cart.add" v-target='{"name":"Espresso","price":5}'>Add</button>
+      </div>
+    </section>
+
+    <!-- Sector B: reads reactive state from the atmosphere. -->
+    <section>
+      <h2>Cart</h2>
+      <p v-show="cartEmpty">Your cart is empty.</p>
+      <div v-show="cartCount">
+        <div class="row"><span>Items</span><strong v-bind-text="cartCount"></strong></div>
+        <div class="row"><span>Total</span><strong>$<span v-bind-text="cartTotal"></span></strong></div>
+        <div class="row"><span>Last added</span><span v-bind-text="lastAdded"></span></div>
+        <button v-command="cart.clear">Clear</button>
+      </div>
+    </section>
+
+    <script>
+      import { createCommandBus, logger } from 'vapor-chamber';
+      import { mountExo, busState } from '../directives/index';
+
+      // Buffer commands dispatched before their handlers exist; drop anything
+      // that waits longer than 30s (an island that never hydrates must not pin
+      // stale clicks in memory). onBufferOverflow gives drops observability.
+      const bus = createCommandBus({
+        onMissing: 'buffer',
+        bufferTTL: 30_000,
+        onBufferOverflow: (action, dropped) =>
+          console.warn(`[exo-astro] dropped buffered "${action}"`, dropped),
+      });
+      bus.use(logger({ filter: (cmd) => cmd.action.startsWith('cart') }));
+
+      busState.cartCount = 0;
+      busState.cartTotal = '0.00';
+      busState.cartEmpty = true;
+      busState.lastAdded = '';
+      mountExo(bus);
+
+      // Simulated late hydration: handlers register 2s after the page is
+      // interactive (override with ?delay=8000 to widen the window). Clicks
+      // made before that are buffered and replayed in order — nothing is lost.
+      const delay = Number(new URLSearchParams(location.search).get('delay')) || 2000;
+      setTimeout(() => {
+        let cents = 0;
+        bus.register('cart.add', (cmd) => {
+          const item = cmd.target as { name: string; price: number };
+          cents += Math.round(item.price * 100);
+          busState.cartCount += 1;
+          busState.cartTotal = (cents / 100).toFixed(2);
+          busState.cartEmpty = false;
+          busState.lastAdded = item.name;
+        });
+        bus.register('cart.clear', () => {
+          cents = 0;
+          busState.cartCount = 0;
+          busState.cartTotal = '0.00';
+          busState.cartEmpty = true;
+          busState.lastAdded = '';
+        });
+        const note = document.getElementById('hydration-note');
+        if (note) note.textContent = '✅ Handlers hydrated — buffered clicks were replayed.';
+      }, delay);
+    </script>
+  </body>
+</html>

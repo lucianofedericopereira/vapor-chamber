@@ -3,12 +3,12 @@
 </p>
 
 <p align="center">
-  A lightweight command bus designed for <a href="https://github.com/vuejs/vue-vapor">Vue Vapor</a>. ~6.7KB. Vue 3.6 Vapor aligned. Optional DevTools integration.
+  A command bus built for <a href="https://github.com/vuejs/vue-vapor">Vue Vapor</a> — a ~2 KB dispatch core with opt-in batteries, each 0 KB until imported. Vue 3.6 Vapor aligned. LGPL-2.1.
 </p>
 
 ## What is Vapor Chamber?
 
-Vapor Chamber is a **command bus for Vue 3.6+ Vapor mode**. It gives every user action a single handler, a composable plugin pipeline, and signal-native reactive state — replacing scattered event listeners and prop-drilling with one predictable, testable flow.
+Vapor Chamber is a **command bus for Vue 3.6+ Vapor mode**. Every user action gets a single handler, a composable plugin pipeline, and signal-native reactive state — replacing scattered event listeners and prop-drilling with one predictable, testable flow.
 
 ```ts
 import { createCommandBus, useCommand } from 'vapor-chamber';
@@ -23,12 +23,37 @@ bus.use(validator({ cartAdd: (cmd) => cmd.target.id ? null : 'Missing ID' }));
 const { dispatch, loading, lastError } = useCommand('cartAdd');
 ```
 
-- **~9.8 KB brotli (full IIFE) / ~6.7 KB brotli (core IIFE) / ~5.7 KB brotli (ESM tree-shaken)** — one runtime dependency (`alien-signals`)
-- **Framework-agnostic core** — the bus itself has no Vue import
-- **Vue 3.6.0-beta.14 aligned** — signals, `onScopeDispose`, `getCurrentScope`, alien-signals internals
-- **Full plugin pipeline** — logger, validator, debounce, throttle, retry, persist, sync, and more
-- **Transport layer** — HTTP bridge, WebSocket bridge, SSE bridge
-- **SSR-safe** — per-request bus isolation, no shared singletons
+**What's in the can** — a small core, and batteries you only pay for if you import them:
+
+| | |
+|---|---|
+| **Core** (the bus) | dispatch/query/emit, plugin pipeline, undo, wildcard listeners — framework-agnostic, no Vue import, ~5.7 KB brotli ESM tree-shaken |
+| **Vue composables** | `useCommand`, `useCommandState`, shared state, Vapor-mode (`useVaporCommand`, `defineVaporCommand`) and full Vapor wrappers |
+| **Plugins** (opt-in) | logger, validator, history (undo/redo), debounce, throttle, retry, persist, cross-tab sync, serialize, idempotent, auth guard |
+| **Transports** (opt-in) | HTTP bridge, WebSocket, SSE, Laravel Echo/Reverb |
+| **Extras** (opt-in, own subpath each) | SSR dehydrate/rehydrate, form bus, HTTP client, schema validation, transitions bridge, devtools, Vite HMR, testing utilities |
+
+- **Vue 3.6.0-beta.15 aligned** — signals, `onScopeDispose`, `getCurrentScope`, alien-signals internals; tracked per beta (see CHANGELOG)
+- **One runtime dependency** (`alien-signals`); `sideEffects: false` — unimported modules tree-shake to zero
+- **IIFE builds for no-bundler pages** — full ~9.8 KB / core ~6.7 KB brotli
+- **SSR support** — dehydrate on the server, replay on the client (see `vapor-chamber/ssr`; the shared-bus helper is per-process — concurrent SSR servers should pass a per-request bus explicitly)
+
+## Install
+
+```bash
+npm install vapor-chamber        # npm registry (releases may lag the repo)
+
+# or install straight from the repo — the authoritative source while Vue 3.6
+# is in beta (a `prepare` script builds it on install):
+npm install github:lucianofedericopereira/vapor-chamber
+```
+
+Requires Node ≥20.19. Vue is an **optional** peer dep (≥3.5 for composables, ≥3.6.0-beta.15 for the full Vapor surface) — the core bus runs without Vue entirely.
+
+**Using Astro?** See [examples/exo-astro](examples/exo-astro) — a declarative directive set
+(`v-scope`, `v-command`, `v-bind-text`, `v-show`) over the vapor-chamber bus for coordinating
+independent Astro page sections, with `onMissing: 'buffer'` (+ `bufferTTL`) so sections can
+dispatch before their handlers hydrate.
 
 ---
 
@@ -222,7 +247,7 @@ API) — single source, multiple outputs.
 npm install vapor-chamber
 ```
 
-**Requirements:** Node.js ≥20.19.0 | Vue ≥3.5.0 (composables) or ≥3.6.0-beta.14 (full Vapor) — optional peer dep | Vite ≥7.0.0 + `@vitejs/plugin-vue` ≥5.0.0 (only required for the `vapor-chamber/vite` HMR plugin and Vapor SFC support)
+**Requirements:** Node.js ≥20.19.0 | Vue ≥3.5.0 (composables) or ≥3.6.0-beta.15 (full Vapor) — optional peer dep | Vite ≥7.0.0 + `@vitejs/plugin-vue` ≥5.0.0 (only required for the `vapor-chamber/vite` HMR plugin and Vapor SFC support)
 
 > **Beta tracking:** this lib follows Vue 3.6 while it is in beta. The Vapor
 > wrappers and the `useVaporCommand` / `useCommand` split are transitional

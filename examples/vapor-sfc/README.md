@@ -23,6 +23,12 @@ npm run dev
 
 Open the printed URL (default `http://localhost:5173`).
 
+The example links to the repo's working tree via `file:../..`, so it always runs
+against your local library code. The library `dist/` builds itself: the repo root
+has a `prepare` script (runs on root `npm install` and on git installs), and this
+example's `predev`/`prebuild` hooks build it on demand if `dist/` is missing.
+No manual step.
+
 ## What to look for
 
 - **CartPanel** — the loading button disables only itself, not the whole page.
@@ -38,7 +44,7 @@ Open the printed URL (default `http://localhost:5173`).
 
 ```
 examples/vapor-sfc/
-├── package.json          # workspace deps — vue@^3.6.0-beta.11, vite@^7
+├── package.json          # workspace deps — vue@^3.6.0-beta.15, vite@^7
 ├── vite.config.ts        # @vitejs/plugin-vue + vaporChamberHMR
 ├── tsconfig.json         # strict TS, ES2022, vue:client types
 ├── index.html            # mount point + minimal styles
@@ -62,7 +68,7 @@ npm run preview    # serve the production build locally
 - This example uses the **local checkout** of vapor-chamber via
   `"file:../.."` in `package.json`. To run against a published version,
   swap to `"vapor-chamber": "^1.2.0"`.
-- Vue 3.6 is currently in beta. The example pins to `^3.6.0-beta.11`. When
+- Vue 3.6 is currently in beta. The example pins to `^3.6.0-beta.15`. When
   Vue 3.6 ships stable, bump to `^3.6.0`.
 - The example registers handlers inline in `App.vue` for clarity. In a real
   app, handlers live in feature modules and are installed at startup.

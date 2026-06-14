@@ -76,13 +76,26 @@ export function history(options: {
   filter?: (cmd: Command) => boolean;
   /** Reference to the command bus — enables undo() to execute inverse handlers */
   bus?: CommandBus;
+  /**
+   * Action name to register as the undo trigger (e.g. 'cart.undo'). The plugin
+   * registers the bus handler itself and ALWAYS excludes this action from
+   * recording — even if `filter` would match it. Without this, a hand-wired
+   * `bus.register('cart.undo', () => h.undo())` records the trigger command
+   * into history (clearing the redo stack and burying real entries), so undo
+   * works once and redo never enables. Requires `bus`.
+   */
+  undoAction?: string;
+  /** Action name to register as the redo trigger. Same semantics as undoAction. */
+  redoAction?: string;
 } = {}): Plugin & {
   getState: () => HistoryState;
   undo: () => Command | undefined;
   redo: () => Command | undefined;
   clear: () => void;
+  /** Unregister the undoAction/redoAction bus handlers (no-op if none). */
+  dispose: () => void;
 } {
-  const { maxSize = 50, filter, bus } = options;
+  const { maxSize = 50, filter, bus, undoAction, redoAction } = options;
   const past: Command[] = [];
   const future: Command[] = [];
   let _replaying = false; // true during redo dispatch — prevents double-recording
@@ -90,7 +103,11 @@ export function history(options: {
   const plugin: Plugin = (cmd, next) => {
     const result = next();
 
-    if (!_replaying && result.ok && (!filter || filter(cmd))) {
+    if (
+      !_replaying && result.ok &&
+      cmd.action !== undoAction && cmd.action !== redoAction &&
+      (!filter || filter(cmd))
+    ) {
       past.push(cmd);
       if (past.length > maxSize) past.shift();
       future.length = 0;
@@ -99,7 +116,7 @@ export function history(options: {
     return result;
   };
 
-  return Object.assign(plugin, {
+  const api = Object.assign(plugin, {
     getState: (): HistoryState => ({
       past: [...past],
       future: [...future],
@@ -142,7 +159,27 @@ export function history(options: {
       past.length = 0;
       future.length = 0;
     },
+
+    dispose: () => {
+      for (const un of _triggerUnregisters) un();
+      _triggerUnregisters.length = 0;
+    },
   });
+
+  // Self-registered undo/redo triggers — recording above always skips them.
+  const _triggerUnregisters: Array<() => void> = [];
+  if (undoAction || redoAction) {
+    if (!bus) {
+      if (typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production') {
+        console.warn("[vapor-chamber] history(): undoAction/redoAction require the `bus` option — triggers not registered.");
+      }
+    } else {
+      if (undoAction) _triggerUnregisters.push(bus.register(undoAction, () => { api.undo(); }));
+      if (redoAction) _triggerUnregisters.push(bus.register(redoAction, () => { api.redo(); }));
+    }
+  }
+
+  return api;
 }
 
 /**

@@ -30,3 +30,9 @@ Thumbs.db
 
 # npm pack output
 *.tgz
+
+# Astro generated artifacts (examples/exo-astro)
+.astro/
+
+# Laravel example scaffold output (examples/laravel-app/setup.sh)
+demo-app/

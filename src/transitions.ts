@@ -1,44 +1,19 @@
 /**
  * vapor-chamber — Transition integration
  *
- * v1.5.0 — Vue 3.6.0-beta.14 alignment:
- *           • onMove is no longer called for v-show-hidden TransitionGroup
- *             children (transition: avoid move transition for hidden v-show group
- *             children). Before beta.14, Vue called onMove for elements with
- *             display:none set by v-show, causing invisible move animations to
- *             be triggered. After beta.14, Vue's runtime skips the onMove call
- *             for those elements — the `*Move` command is never dispatched for
- *             hidden children. No code change needed here; the fix is in Vue's
- *             runtime. Workarounds that guarded against spurious move dispatches
- *             by checking element visibility can be removed.
- *           All changes are in Vue's runtime — wrappers here are pass-through.
- * v1.4.0 — Vue 3.6.0-beta.13 alignment:
- *           • onMove now correctly fires for Vapor component moves in a Vapor
- *             TransitionGroup (runtime-vapor: animate vapor component moves in
- *             TransitionGroup — was silently skipped before beta.13).
- *           • onMove now correctly fires for VDOM component moves inside a Vapor
- *             TransitionGroup (runtime-vapor: animate vdom component moves in
- *             vapor TransitionGroup — same class of bug, separate fix).
- *           • Moves are deferred until all child updates flush before onMove is
- *             called — el is in its final pre-move position when the command
- *             dispatches (runtime-vapor: defer TransitionGroup moves until child
- *             updates flush).
- *           • Transition hooks now apply to slot fallback children inside Vapor
- *             components (runtime-vapor: apply transition hooks to slot fallbacks).
- *           • v-for item keys are preserved through TransitionGroup reorders
- *             (runtime-vapor: preserve v-for item keys in transition group).
- *           Performance (pass-through):
- *           • TransitionGroup no longer resolves its own props twice per render
- *             (runtime-vapor: avoid duplicate TransitionGroup props resolution).
- *           • <Transition v-bind="t"> / <TransitionGroup v-bind="t"> — object
- *             literal v-bind spreads are now expanded inline by the compiler
- *             instead of being spread at runtime (compiler-vapor: expand object
- *             literal v-bind and v-on). The useTransitionCommand() return value
- *             bound via v-bind generates cheaper compiled output in beta.13.
- *           All other changes are in Vue's runtime — wrappers here are pass-through.
- * v1.1.0 — Dispatches bus commands from Vue <Transition> / <TransitionGroup>
- *           lifecycle hooks. Enables animation coordination through the command bus
- *           without direct DOM coupling.
+ * Vue alignment history (one line per version — full per-item detail lives in
+ * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table, the single
+ * source of per-beta detail; this header only records changes to THIS file):
+ *   v1.6.0 / beta.15 — pass-through (transition-group hook restore after skipped
+ *            move, key inheritance/stability, v-if comments, v-show timing).
+ *            onMove() JSDoc updated below — behavior notes live on the API.
+ *   v1.5.0 / beta.14 — pass-through (onMove suppressed for v-show-hidden children;
+ *            see onMove() JSDoc).
+ *   v1.4.0 / beta.13 — pass-through (onMove fires for Vapor+VDOM component moves,
+ *            deferred until child updates flush; see onMove() JSDoc).
+ *   v1.1.0 — module added: dispatches bus commands from <Transition> /
+ *            <TransitionGroup> lifecycle hooks, enabling animation coordination
+ *            through the command bus without direct DOM coupling.
  *
  * Two entry points:
  *   createTransitionBridge — framework-agnostic factory (accepts BaseBus)
@@ -83,6 +58,11 @@ export type TransitionHooks = {
   onLeaveCancelled: (el: Element) => void;
   /**
    * TransitionGroup-only: called when an element moves due to reorder.
+   *
+   * Vue 3.6.0-beta.15: a move that was skipped (e.g. for a v-show-hidden child)
+   * no longer permanently drops the element's move hooks — they are restored, so
+   * a later genuine reorder of that same child dispatches `*Move` as normal. You
+   * do not need to re-register the `*Move` handler after a hidden item reappears.
    *
    * Vue 3.6.0-beta.14: NOT called for elements hidden by v-show (display:none).
    * Vue's runtime skips the hook for v-show-hidden children, so the `*Move`

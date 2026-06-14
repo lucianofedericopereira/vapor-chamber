@@ -223,3 +223,49 @@ describe('useSharedCommandState — disposal', () => {
     c.dispose();
   });
 });
+
+describe('useSharedCommandState — bus-wide error observation (v1.6.0)', () => {
+  it('records errors from dispatches made OUTSIDE its own dispatch wrapper', () => {
+    const bus = createCommandBus();
+    setCommandBus(bus as any);
+    const shared = useSharedCommandState();
+    bus.register('boom', () => { throw new Error('outside failure'); });
+
+    // Dispatch directly on the bus — NOT through shared.dispatch.
+    bus.dispatch('boom', {});
+
+    expect(shared.errorCount.value).toBe(1);
+    expect(shared.lastError.value?.message).toBe('outside failure');
+    expect(shared.errors.value[0].message).toBe('outside failure');
+    shared.dispose();
+    resetCommandBus();
+  });
+
+  it('does not double-record errors from its own dispatch wrapper', () => {
+    const bus = createCommandBus();
+    setCommandBus(bus as any);
+    const shared = useSharedCommandState();
+    bus.register('boom', () => { throw new Error('own failure'); });
+
+    shared.dispatch('boom', {});
+
+    expect(shared.errorCount.value).toBe(1); // listener records once, wrapper does not
+    shared.dispose();
+    resetCommandBus();
+  });
+
+  it('unhooks the bus observer after the last dispose', () => {
+    const bus = createCommandBus();
+    setCommandBus(bus as any);
+    const shared = useSharedCommandState();
+    bus.register('boom', () => { throw new Error('late failure'); });
+    shared.dispose(); // refCount → 0, observer unhooked
+
+    bus.dispatch('boom', {});
+
+    const fresh = useSharedCommandState();
+    expect(fresh.errorCount.value).toBe(0); // late error not retained anywhere
+    fresh.dispose();
+    resetCommandBus();
+  });
+});

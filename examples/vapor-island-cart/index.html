@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vapor light-DOM island — vapor-chamber</title>
+  </head>
+  <body>
+    <!-- Everything below is real, server-rendered HTML: visible with JS off.
+         JS only adds interactivity (the bus) and upgrades <vc-cart> in place. -->
+    <header>
+      <h1>Vapor island cart</h1>
+      <p>Products are plain HTML. The cart is a light-DOM Vapor custom element. They coordinate through one command bus.</p>
+    </header>
+
+    <main class="demo-grid">
+      <!-- Section A: products island. The light-DOM fallback inside is real HTML
+           shown before the element upgrades (HTML-first); once defined, the
+           Vapor widget renders the same list and wires @click → bus. -->
+      <vc-products client:load>
+        <section class="products">
+          <h2>Menu</h2>
+          <ul class="product-list">
+            <li class="product-item"><div><div class="product-name">Coffee</div><div class="product-price">$4.00</div></div></li>
+            <li class="product-item"><div><div class="product-name">Tea</div><div class="product-price">$3.00</div></div></li>
+            <li class="product-item"><div><div class="product-name">Espresso</div><div class="product-price">$5.00</div></div></li>
+          </ul>
+        </section>
+      </vc-products>
+
+      <!-- Section B: the cart island. Light-DOM fallback shows before upgrade. -->
+      <vc-cart client:load>
+        <section class="cart">
+          <h2>Cart</h2>
+          <p class="cart-empty">Your cart is empty.</p>
+        </section>
+      </vc-cart>
+    </main>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

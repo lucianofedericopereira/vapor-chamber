@@ -270,6 +270,22 @@ export type CommandBusOptions = {
    * Default: 256.
    */
   bufferLimit?: number;
+  /**
+   * Max age (ms) a buffered command may wait for its handler when
+   * `onMissing: 'buffer'`. Expired entries are reaped lazily — on the next
+   * buffer push for that action and at flush time — so a handler that never
+   * arrives (e.g. an island that fails to hydrate) cannot pin stale commands
+   * in memory indefinitely. Default: no TTL (entries wait until `bufferLimit`
+   * pushes them out).
+   */
+  bufferTTL?: number;
+  /**
+   * Called when `onMissing: 'buffer'` drops a queued command — either because
+   * the per-action queue hit `bufferLimit` (oldest dropped) or because the
+   * entry outlived `bufferTTL`. Use for observability: without this, drops are
+   * only visible as dev-mode console warnings.
+   */
+  onBufferOverflow?: (action: string, dropped: { target: any; payload: any }) => void;
 };
 
 /** Listener callback for on() subscriptions (wildcard-capable) */
@@ -477,7 +493,7 @@ type SyncState = {
   /** onMissing:'buffer' queue — per-action FIFO of {target,payload}, replayed on
    *  register(). Lazily null unless onMissing:'buffer' is configured, so non-buffer
    *  buses don't allocate it. */
-  deferred: Map<string, Array<{ target: any; payload: any }>> | null;
+  deferred: Map<string, Array<{ target: any; payload: any; at: number }>> | null;
 };
 
 type AsyncState = {
@@ -504,7 +520,7 @@ type AsyncState = {
   /** onMissing:'buffer' queue — per-action FIFO of {target,payload}, replayed on
    *  register(). Lazily null unless onMissing:'buffer' is configured, so non-buffer
    *  buses don't allocate it. */
-  deferred: Map<string, Array<{ target: any; payload: any }>> | null;
+  deferred: Map<string, Array<{ target: any; payload: any; at: number }>> | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -844,14 +860,24 @@ function handleMissing(s: SyncState | AsyncState, cmd: Command, canDefer: boolea
     const d = s.deferred ?? (s.deferred = new Map());
     let q = d.get(cmd.action);
     if (q === undefined) { q = []; d.set(cmd.action, q); }
+    const now = Date.now();
+    // Lazy TTL reap: queue is FIFO, so expired entries cluster at the front.
+    const ttl = s.opts.bufferTTL;
+    if (ttl !== undefined && ttl > 0) {
+      while (q.length > 0 && now - q[0].at > ttl) {
+        const expired = q.shift()!;
+        s.opts.onBufferOverflow?.(cmd.action, { target: expired.target, payload: expired.payload });
+      }
+    }
     const limit = s.opts.bufferLimit ?? 256;
     if (q.length >= limit) {
-      q.shift(); // drop oldest
+      const dropped = q.shift()!; // drop oldest
+      s.opts.onBufferOverflow?.(cmd.action, { target: dropped.target, payload: dropped.payload });
       if (typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production') {
         console.warn(`[vapor-chamber] onMissing:'buffer' queue for "${cmd.action}" hit bufferLimit (${limit}); dropped the oldest pending command. Register a handler, or raise bufferLimit.`);
       }
     }
-    q.push({ target: cmd.target, payload: cmd.payload });
+    q.push({ target: cmd.target, payload: cmd.payload, at: now });
     return okResult(undefined); // accepted; the real handler runs on register()
   }
   const err = new BusError(
@@ -879,8 +905,14 @@ function flushDeferred(s: SyncState | AsyncState, action: string): void {
   if (q === undefined || q.length === 0) return;
   s.deferred.delete(action);
   const isAsync = 'pendingRequests' in s;
+  const ttl = s.opts.bufferTTL;
+  const now = ttl !== undefined && ttl > 0 ? Date.now() : 0;
   for (let i = 0; i < q.length; i++) {
-    const { target, payload } = q[i];
+    const { target, payload, at } = q[i];
+    if (now !== 0 && now - at > ttl!) {
+      s.opts.onBufferOverflow?.(action, { target, payload });
+      continue; // expired while waiting — don't replay stale commands
+    }
     if (isAsync) void asyncDispatch(s as AsyncState, action, target, payload);
     else syncDispatch(s as SyncState, action, target, payload);
   }

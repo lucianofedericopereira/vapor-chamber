@@ -8,19 +8,28 @@
     3. StatusBar — uses useSharedCommandState for cross-component aggregate state
 -->
 <script setup vapor lang="ts">
-import { getCommandBus } from 'vapor-chamber';
+import { createAsyncCommandBus, setCommandBus } from 'vapor-chamber';
 import CartPanel from './CartPanel.vue';
 import SearchPanel from './SearchPanel.vue';
 import StatusBar from './StatusBar.vue';
 
-// Register a few demo handlers on the shared bus. In a real app these would
-// live in handler modules and be installed at app startup.
-const bus = getCommandBus();
+// The handlers below are ASYNC (simulated latency), so the shared bus must be
+// the async bus: its dispatch returns Promise<CommandResult>, which the
+// composables' loading/lastError wiring awaits. On the default SYNC bus an
+// async handler's promise is wrapped as a plain ok-value — rejections escape
+// as unhandled and lastError never fires.
+const bus = createAsyncCommandBus();
+setCommandBus(bus as any); // share it: useVaporCommand/useSharedCommandState pick it up
 
+// Stateful fake server: the cart accumulates across dispatches, so the UI's
+// confirmed totals actually move. (Was stateless — total stuck at $19.99.)
+const serverCart = { count: 0, cents: 0 };
 bus.register('cartAdd', async (cmd) => {
   await new Promise(r => setTimeout(r, 250));
   if (cmd.target?.id < 0) throw new Error('Invalid product id');
-  return { count: 1, total: 19.99, lastAddedId: cmd.target?.id };
+  serverCart.count += cmd.payload?.qty ?? 1;
+  serverCart.cents += 1999;
+  return { count: serverCart.count, total: serverCart.cents / 100, lastAddedId: cmd.target?.id };
 });
 
 bus.register('searchExecute', async (cmd) => {
