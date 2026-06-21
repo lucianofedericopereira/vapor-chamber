@@ -47,8 +47,8 @@ jobs:
       - run: npm run test:run
       - run: node scripts/check-size.mjs
       - run: npm run loc
-      # Generated size docs must match reality. One deterministic matrix entry only.
-      - if: matrix.os == 'ubuntu-latest' && matrix.node == '24'
+      # Generated size docs must match reality. Shifted from 24 to 22 to match deployment environment.
+      - if: matrix.os == 'ubuntu-latest' && matrix.node == '22'
         name: docs bundle sizes are fresh
         run: npm run size:doc && git diff --exit-code docs/BUNDLE-SIZES.md
       # Coverage gate on the canonical entry only (threshold in vitest.config.ts).
