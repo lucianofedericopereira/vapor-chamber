@@ -5,7 +5,7 @@ SFC tree. Three panels show three usage patterns side by side:
 
 | Panel        | Composable                        | When to use                                                       |
 |--------------|-----------------------------------|-------------------------------------------------------------------|
-| `CartPanel`  | `useVaporCommand()`               | Per-component reactive `loading` / `lastError` (button-scoped UI) |
+| `CartPanel`  | `useCommand()`               | Per-component reactive `loading` / `lastError` (button-scoped UI) |
 | `SearchPanel`| `defineVaporCommand()`            | Fire-and-forget hot paths (telemetry, scroll, keystroke search)   |
 | `StatusBar`  | `useSharedCommandState()`         | Cross-component aggregate state (toolbars, status bars)           |
 
@@ -32,7 +32,7 @@ No manual step.
 ## What to look for
 
 - **CartPanel** — the loading button disables only itself, not the whole page.
-  Each `useVaporCommand` instance has its own `loading` signal.
+  Each `useCommand` instance has its own `loading` signal.
 - **SearchPanel** — type 2+ characters; watch the browser console for
   `[searchExecute]` lines. No reactive overhead per keystroke.
 - **StatusBar** — observes both. The "loading…" indicator shows whenever any
@@ -44,14 +44,14 @@ No manual step.
 
 ```
 examples/vapor-sfc/
-├── package.json          # workspace deps — vue@^3.6.0-beta.15, vite@^7
+├── package.json          # workspace deps — vue@^3.6.0-beta.16, vite@^8
 ├── vite.config.ts        # @vitejs/plugin-vue + vaporChamberHMR
 ├── tsconfig.json         # strict TS, ES2022, vue:client types
 ├── index.html            # mount point + minimal styles
 └── src/
     ├── main.ts           # createVaporChamberApp(App).mount('#app')
     ├── App.vue           # registers handlers, composes the three panels
-    ├── CartPanel.vue     # useVaporCommand pattern
+    ├── CartPanel.vue     # useCommand pattern
     ├── SearchPanel.vue   # defineVaporCommand pattern
     └── StatusBar.vue     # useSharedCommandState pattern
 ```
@@ -68,7 +68,7 @@ npm run preview    # serve the production build locally
 - This example uses the **local checkout** of vapor-chamber via
   `"file:../.."` in `package.json`. To run against a published version,
   swap to `"vapor-chamber": "^1.2.0"`.
-- Vue 3.6 is currently in beta. The example pins to `^3.6.0-beta.15`. When
+- Vue 3.6 is currently in beta. The example pins to `^3.6.0-beta.16`. When
   Vue 3.6 ships stable, bump to `^3.6.0`.
 - The example registers handlers inline in `App.vue` for clarity. In a real
   app, handlers live in feature modules and are installed at startup.

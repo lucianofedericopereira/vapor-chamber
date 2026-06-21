@@ -199,9 +199,7 @@ export {
   createVaporChamberApp,
   getVaporInteropPlugin,
   defineVaporCommand,
-  // v0.6.0: Vapor-safe reactive composable (no getCurrentInstance dependency)
-  useVaporCommand,
-  // v1.1.0: Vue 3.6.0-beta.10+ Vapor APIs
+  // v1.1.0: Vue 3.6+ Vapor APIs
   defineVaporCustomElement,
   defineVaporComponent,
   defineVaporAsyncComponent,

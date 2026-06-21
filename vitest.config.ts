@@ -32,22 +32,19 @@ export default defineConfig({
         'src/directives.ts',
       ],
       thresholds: {
-        // Floor reflecting current measured coverage with intentional
-        // headroom (-1 to -2 points) so trivial test additions don't
-        // tighten the gate while genuine regressions still trigger it.
-        // Tighten over time as coverage improves; only lower with an
-        // explicit CHANGELOG note explaining the regression.
+        // Floors sit ~2 points below current measured coverage — tight enough
+        // that a genuine regression trips the gate, loose enough that trivial
+        // test churn doesn't. Ratchet upward as coverage climbs; only lower
+        // with an explicit CHANGELOG note explaining the regression.
         //
-        // Known gaps tracked separately:
-        //   - plugins-extra.ts (0% — cache/circuitBreaker/rateLimit/metrics)
-        //   - utilities.ts    (0% — createChamber/createWorkflow/createReaction)
-        // Both are real public API surface and deserve test coverage in a
-        // follow-up. They're not excluded because excluding would hide the
-        // gap; the global threshold acknowledges the current level.
-        lines: 75,
-        functions: 80,
-        branches: 65,
-        statements: 73,
+        // The command-bus.ts dispatch core is at 100% line + branch coverage.
+        // These globals span the wider optional surface — http / transports /
+        // plugins-io carry environment-bound branches (real HTTP/WS/SSE) that
+        // hold the global branch number below 100%.
+        lines: 90,
+        functions: 90,
+        branches: 82,
+        statements: 89,
       },
     },
   },

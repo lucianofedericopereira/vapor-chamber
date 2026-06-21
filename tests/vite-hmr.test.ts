@@ -136,7 +136,7 @@ describe('vaporChamberHMR', () => {
 
     it('injects HMR import into .vapor.vue files (Vue 3.6+ Vapor SFCs)', () => {
       const result = plugin.transform(
-        "import { useVaporCommand } from 'vapor-chamber';\nconst { dispatch } = useVaporCommand();",
+        "import { useCommand } from 'vapor-chamber';\nconst { dispatch } = useCommand();",
         '/src/ProductCard.vapor.vue'
       );
       expect(result?.code).toContain("import 'virtual:vapor-chamber-hmr'");

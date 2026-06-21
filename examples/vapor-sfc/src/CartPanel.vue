@@ -1,17 +1,23 @@
 <!--
-  Per-component reactive loading state via `useVaporCommand`.
+  Per-component reactive loading state via `useCommand`.
 
   Each button gets its own `loading` / `lastError` signals. Clicking either
   button disables only that button while the dispatch is in flight.
 -->
 <script setup vapor lang="ts">
-import { useVaporCommand, signal } from 'vapor-chamber';
+import { useCommand, signal } from 'vapor-chamber';
+import { asRef } from './_reactive';
 
-const { dispatch, loading, lastError } = useVaporCommand();
+// asRef: vapor-chamber signals are Vue shallowRefs at runtime — typed as such here
+// so vue-tsc auto-unwraps them in the template (see _reactive.ts).
+const cmd = useCommand();
+const { dispatch } = cmd;
+const loading = asRef(cmd.loading);
+const lastError = asRef(cmd.lastError);
 
 // Success feedback: render the handler's CONFIRMED state — the single source
 // of truth. (Without this, a successful dispatch had no visible outcome.)
-const cart = signal<{ count: number; total: number } | null>(null);
+const cart = asRef(signal<{ count: number; total: number } | null>(null));
 
 async function addToCart(id: number) {
   const result = await dispatch('cartAdd', { id }, { qty: 1 });

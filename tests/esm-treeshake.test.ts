@@ -65,8 +65,12 @@ describe.skipIf(!haveDist || !esbuild)('ESM tree-shake regression', () => {
       const src = buf.toString();
 
       // Size budget. Locks the v1.2.0 signal-extraction win.
-      // If this fails, look for a new side-effect import dragging chamber.ts in.
-      expect(br.length, `brotli bundle size grew unexpectedly (${br.length} bytes)`).toBeLessThan(6_500);
+      // If this fails, look for a new side-effect import dragging chamber.ts in
+      // (the forbidden-symbol list below is the precise guard for that).
+      // Ceiling 6_500 → 6_700: the v1.7.0 commandKey canonical-key fix (recursive
+      // key-sort replacer, +~3 B brotli) is in the core path — a deliberate
+      // correctness change, not accidental bloat.
+      expect(br.length, `brotli bundle size grew unexpectedly (${br.length} bytes)`).toBeLessThan(6_700);
 
       // Symbol budget. These are all chamber.ts-only — should NOT appear in a
       // consumer bundle that doesn't import Vue composables.

@@ -2,6 +2,317 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.7.0 — Vue 3.6.0-beta.16 alignment
+
+_Targets **v1.7.0** (not yet published). The breaking `useVaporCommand` removal would be a major
+under strict semver, but **2.0.0 is reserved for the Vue-3.6-stable identity decision** (Vapor-first
+vs bus-first — see ROADMAP). While Vue 3.6 is still beta and there is effectively no userspace to
+break, this cycle ships as a minor; the major bump is held for the post-beta direction call._
+Every one of beta.16's 28 fixes
+was read at the commit level and mapped to our surface. **The beta.16 alignment itself needs
+no vapor-chamber code change** — all fixes are inherited through the pass-through wrappers, are
+compile-time only, or sit *below* our SSR command-replay. A follow-on retrospective of betas
+**9 → 16** (Vue's changelog against ours) then surfaced a few real gaps, fixed here: event-modifier
+support on `v-vc:command`, two corrected version attributions, and the two alignment-log rows we
+had skipped. Verified against beta.16: `tsc --noEmit` clean, **798/798 tests** pass (40 files),
+benches run green with no measured host regression.
+
+### Changed
+
+- **peerDependencies** → `vue: ">=3.5.0 || >=3.6.0-beta.16"`; dev `vue` → `^3.6.0-beta.16`;
+  examples (`vapor-sfc`, `vapor-island-cart`) repinned. Both ranges already admitted beta.16
+  by semver prerelease ordering; the floor is bumped to keep the *tested-version* statement
+  honest — beta.16 is what the suite now runs against.
+- **SFC examples → Vite 8** (`vapor-sfc`, `vapor-island-cart`): `vite ^7 → ^8`, aligning the demos
+  with the library's own toolchain. `@vitejs/plugin-vue ^6` already declares `vite ^5||^6||^7||^8`,
+  so no plugin bump; both build clean (0 vulns, stale beta.15 lockfiles regenerated). The Laravel /
+  Blade / Astro examples are unaffected — they use the IIFE drop-in or Astro's own bundler, not Vite
+  directly. Fixed a pre-existing `vue-tsc` failure surfaced by the rebuild: the Vapor templates use
+  vapor-chamber signals **bare** (Vapor auto-unwraps them at runtime), but `vue-tsc` can't unwrap the
+  deliberately-Vue-free `Signal<T> = { value: T }` type. Added a small `asRef()` helper that re-types
+  a signal as the `ShallowRef` it genuinely is when Vue is present — runtime-honest, and it makes
+  `vue-tsc` auto-unwrap in templates. (The typed `vapor-chamber/vapor` surface on the v2.0 roadmap
+  will remove the helper.)
+
+### Added
+
+- **`v-vc:command` now honors event modifiers** (`directives.ts`). The directive attaches a
+  **direct** `addEventListener`, so Vue's compiled `withModifiers` never reached it — every
+  modifier except the numeric `.timeout` was silently dropped. It now applies `.stop` / `.prevent`
+  (DOM-event actions), `.self` and `.left` / `.middle` / `.right` (dispatch guards), and `.capture`
+  / `.once` / `.passive` (passed as `addEventListener` options, and matched on removal). Surfaced
+  by the beta.9–16 retrospective — Vue's beta.15 click-modifier-normalization fix (`eaefa71`) never
+  reaches a direct listener. +5 tests in `tests/directives.test.ts`.
+
+### Changed — `useVaporCommand` folded into `useCommand` (breaking)
+
+- **`useVaporCommand` is removed; `useCommand` is now the single command composable.** The two had
+  converged: both were Vapor-safe (the "needs a VDOM instance" distinction was obsolete —
+  `useCommand` cleans up via `onScopeDispose`, never touches `getCurrentInstance`), and
+  `useVaporCommand` was just `useCommand` + `register`/`on`/`emit`/`dispose`. `useCommand` now
+  carries that full API — reactive `loading`/`lastError` **plus** `register`/`on`/`emit` with
+  `onScopeDispose` auto-cleanup — Vapor-safe in `<script setup vapor>` and VDOM alike. For
+  fire-and-forget with zero reactive overhead, `defineVaporCommand` is unchanged.
+  - **Migration:** replace `useVaporCommand()` with `useCommand()` — identical return shape.
+  - Removed **clean** (no deprecated alias): pre-release Vue + a tiny userbase made a deprecation
+    cycle not worth the carry. ~60 lines of duplicated logic gone; the IIFE bundles now expose
+    `useCommand` (they previously only exposed `useVaporCommand`).
+  - Swept across examples, README, whitepaper (§9.4 reworked to drop the false `useCommand`-vs-
+    `useVaporCommand` distinction), performance.md, the migration guide, and the ROADMAP (the
+    `useVaporCommand`→`useCommand` merge item is now **done**, shipped ahead of v2.0). The
+    `register`/`on`/`emit`/`dispose` tests now exercise `useCommand`. **798 tests green.**
+- **Examples folder documented.** Added a top-level `examples/README.md` indexing all examples
+  (full-project apps + `feature-*` / `pattern-*` snippets + core usage); the main README's
+  Examples section listed only 6 of them and now surfaces the flagship runnable apps + links the
+  index. (The whitepaper carries no example references — nothing stale there.)
+
+### Removed (dead code)
+
+- **`useVaporAsyncCommand`'s `listeners` array** (`chamber-vapor.ts`). It was copy-pasted from
+  `useVaporCommand` but the composable exposes no `register`/`on`, so nothing could ever populate
+  it — provably always empty, making its `dispose()` a no-op. Removed the array; `dispose` is now
+  an explicit no-op kept for return-shape symmetry. Zero behavior change (798 tests green; the `.`
+  barrel dropped 0.1 KB min). Identified by the DRY audit.
+
+### Inherited behavior worth knowing (no code change)
+
+- **Transitions — `onLeave` now fires for a non-v-show root removed after a v-show branch**
+  (Vue `a816c9e`, *stop persisted leaking to non-v-show roots*). Before beta.16 a latched
+  `persisted=true` made Vapor skip the leave, so `useTransitionCommand` / `createTransitionBridge`
+  silently **dropped the `*Leave` dispatch** in that sequence. The runtime fix gates the
+  carry-forward on an actual v-show marker; our bridge forwards the now-correct hook. `onLeave`
+  JSDoc updated. The other five transition fixes — `fda5bc4` (re-resolve hooks on prop change),
+  `207dce4` / `254a9c0` (type-bucketed leaving cache), `5689b88` (raw-key compare before early
+  removal), `370de63` (out-in branch-key sync) — govern DOM-duplication / stale-branch
+  correctness during rapid toggles; hook signatures unchanged, forwarded as-is.
+- **App lifecycle — `createVaporChamberApp(...)` inherits two hardening fixes directly.**
+  `.mount('#missing')` now **no-ops + dev-warns** instead of throwing (Vue `05bf22a`), and
+  `.unmount()` no longer throws in **production builds** (Vue `52fda7c` — `app._instance` is
+  dev-only, so prod unmount was a real minified-build crash; it now resolves the instance from a
+  WeakMap). We return Vue's app untouched, so consumers get both for free. Caveat now documented:
+  `.mount()` can return `undefined` for a bad selector — don't assume a component proxy.
+
+### Pass-through (substantiated per commit, not waved through)
+
+- **SSR / hydration (`ssr.ts`).** `rehydrate()` is command replay *above* Vue's DOM hydration,
+  so all seven hydration fixes sit below us and only hand our replay a more-correct DOM:
+  `a36f43b` (dynamic props applied on mismatch-recreated nodes), `58aeb40` (static-text patching,
+  prod included), `3daf8f5` (exact tag-mismatch detection — no more `<i>`/`<ins>` prefix
+  collisions), `2d7464c` (static-template clone-cache reused, not re-cloned per adoption),
+  `0c92f54` (v-if empty branches hydrated with static templates), `4eb5dca` (fragment-start
+  warning text), `baa7c59` (empty-container full mount on `createVaporSSRApp`, which we don't
+  wrap). Note: `a36f43b` reduces "Hydration text mismatch" dev-warning counts — nothing in the
+  lib keys off that count.
+- **Props / emit / attrs / events.** `5100a6e` (dynamic v-bind event options parsed like VDOM —
+  `Once`/`Passive`/`Capture`) affects Vue's *compiled* dynamic-event path only; `v-vc:command`
+  attaches a **direct** `addEventListener`, so the beta.15 disabled/in-flight mirror is untouched
+  (the same "direct listener gets no compiled help" property is why we added explicit modifier
+  handling — see **Added**). `ffd671c` (nullish emit sources), `a63b165` (symbol attr stringify),
+  `f53da05` (nullish dynamic props → empty) are internal `prop.ts` / `componentEmits.ts` hardening,
+  inherited.
+- **Compiler (8 fixes).** Compile-time correctness in generated code: `0bf86ef` (setup-let inline
+  assignment), `224e672` (v-html children before text transforms), `780c4ff` (unsafe attr names
+  kept out of static templates), `d80423d` (dynamic modifier arg keys), `898ce5b` / `eb25a7f`
+  (native / static v-model modifier key quoting), `1eaacfa` (slot v-else without adjacent v-if
+  now reported, not crashed), `2c73a96` (empty blocks return `[]`). They reach consumer `.vue` /
+  examples on recompile; we vendor no generator files, so the `genDirectiveModifiers` relocation
+  in `898ce5b` doesn't touch us.
+
+### Performance — technique recorded, not applied
+
+- **`27b0482` (skip SlotFragment for stable slot fallback, #14969).** A coordinated
+  compiler + runtime + shared change: the compiler proves a slot's fallback is unreachable,
+  encodes it as a one-bit `VaporSlotFlags.NON_STABLE` flag on the emitted slot fn, and the
+  runtime picks a lighter `DynamicFragment` (skipping the `SlotFragment` allocation **and** its
+  content-vs-fallback arbitration) whenever the flag is absent. Consumers on beta.16 inherit it by
+  depending on Vue's runtime. The **transferable pattern** — push an uncertainty decision to where
+  the shape is statically known, encode it as a cheap flag, and select a lighter object + simpler
+  path on the proven-safe majority — is logged in the whitepaper alignment table as an opportunity
+  to evaluate against our own hot paths. It is **not** applied this cycle: it intersects the
+  deferred Vapor-first / bus-first identity decision (v2.0.0), and any such change ships only with
+  a measured, same-host A/B — never a guess.
+
+### Retrospective (beta.9 → beta.16 audit)
+
+Walked Vue's per-beta changelog against ours, one beta at a time, to catch anything overlooked.
+Outcome: the wrappers held — every flagged item is genuine pass-through once checked against the
+actual code (the directive receives the live `el` from Vue and cleans up in `beforeUnmount`; the
+HMR shim only saves/restores the bus, never component effects; SSR replay sits above DOM
+hydration). Three real gaps were fixed:
+
+- **Alignment log completed.** The whitepaper "Vue 3.6 alignment log" claimed one row per beta but
+  skipped **beta.9** and **beta.10**; both rows added (pass-through — e.g. beta.9's TransitionGroup
+  parity fixes mean the bus now receives the *corrected* hook set, including no more bogus hooks on
+  unkeyed interop children).
+- **Two attributions corrected** (verified against Vue's tags): the alien-signals reactivity rewrite
+  landed in **3.6.0-alpha.1** (#12349), not beta.8; `defineVapor*` were introduced across
+  **3.6.0-alpha.3–5** (#13059 / #14017 / #13831), not beta.10 (which only tree-shook / async-hydrated
+  them). Fixed in `whitepaper.md`, `chamber-vapor.ts`, `ROADMAP.md`.
+- **Event modifiers on `v-vc:command`** — see **Added** above.
+
+### Core coverage to 100%, lazy buffer allocation, honest coverage docs
+
+A measurement-driven hardening pass on `command-bus.ts` — the dispatch core named in the §19
+Core Guarantee.
+
+- **`command-bus.ts` reaches 100% line + branch + function coverage** (was ~96.7% line /
+  92.2% branch). **+19 tests** in `tests/command-bus-features.test.ts` exercise the
+  previously-untested error/edge branches on the *real* sync/async buses (not the
+  coverage-excluded `TestBus`): throwing `onBefore` hooks, `offAll()` clear-all, the async
+  transactional abort + rollback paths, `query()` on a missing handler, `onMissing:'buffer'`
+  overflow/drop (incl. the production warning-suppression branch), the prefix-cache LRU
+  eviction, idempotent unsubscribe, and the `inspectBus` fallback. Three **provably-unreachable**
+  defensive guards (a caller-guaranteed null-check; two `!results[j].ok` rollback skips that the
+  "halt at first failure" batch semantics make dead) are excluded with `/* v8 ignore */` +
+  rationale, not faked. Suite: **798 passing / 40 files**.
+- **Buffer queue (`deferred`) is now lazily allocated** (`command-bus.ts`) — `null` until the
+  first buffered command, instead of an eager `new Map()` at construction for every
+  `onMissing:'buffer'` bus. A buffer-mode bus whose handlers always beat its dispatches now
+  allocates nothing. The alternative — keeping it eager so the hot-path miss-gate could read
+  `deferred !== null` instead of `opts.onMissing === 'buffer'` — was tested with a same-process
+  A/B and **rejected**: the `deferred !== null` gate is faster only when monomorphic (~3–7%) and
+  *regresses* ~1.7% in apps mixing buffer + non-buffer buses (polymorphic inline cache), so the
+  hot-path gate stays on `onMissing`. Net: simpler constructor, no wasted allocation, the
+  lazy-init branch is now covered by existing tests, and the `.` barrel dropped ~0.1 KB min.
+- **Coverage claims corrected.** Whitepaper §19 "100% branch and line coverage — always" was
+  **false** (global branch was 82.8%); it now states the true, *measured* `command-bus.ts` 100%
+  line+branch+function (behind the `vitest.config` gate, with `testing.ts` excluded as the test
+  harness). `vitest.config.ts` thresholds tightened from a slack 73/65/80/75 to **89/82/90/90**
+  (~2 points under measured — restoring a meaningful regression gate), and the stale
+  "plugins-extra.ts / utilities.ts at 0%" comment removed (both ~93% — their test files exist).
+- **Stale doc numbers synced.** Recursion-depth guard now documented as **max 16** (matches
+  `MAX_DISPATCH_DEPTH`; was "max 10" in three places); the §21 File Map test inventory regenerated
+  from a partial 13-file/466 list to all **40 files / 798 total**; the `command-bus.ts` header
+  size corrected from "~2KB gzipped" to "~3.6 KB brotli core; full ~10–20 KB" → `BUNDLE-SIZES.md`.
+  Version-stamped historical counts (v1.0's 466) left frozen.
+
+### Performance docs re-measured against the bench
+
+`npm run bench` re-run on the current host (Vue 3.6.0-beta.16); `docs/performance.md` corrected
+to the measured same-process ratios — drift went **both** directions:
+
+- **Overstated mitt comparisons brought down.** No-listener emit "2.5× faster than mitt" →
+  **~1.4×**; emit fan-out "1.8× faster than mitt" → **~1.4×**; "within 20% of nanoevents" →
+  **~28% behind** (nanoevents pulled ahead — its no-listener path now ~8× vapor's, vs the old
+  ~3.3×). mitt simply got relatively faster since the numbers were first taken.
+- **Undersold fast-lane raised.** "5.3× faster than mitt" → **~5.6×**; "1.9× faster than
+  nanoevents" → **~2.1×**; fast-lane emit no longer "ties" nanoevents — it **edges it (~1.1×)**.
+- **Stale absolutes refreshed / removed.** The unreproducible "+12% / +26% (415 → 466 ops/sec)"
+  listener-impact line replaced with current fan-out numbers; single-handler `bus.dispatch`
+  ~630 → **~1,800 ops/sec** (~18M dispatches/s); persist `coalesce` ~8.75× → **~23×**; meta-id
+  counter speedup 2.26× → **~2.5×**. Comparative tables re-stated to the current run, ratios
+  written as approximates (one run; machine-sensitivity caveat kept).
+- **Unbenched memory claim labeled.** Whitepaper §9.4's "~64 bytes/signal" table is now marked an
+  order-of-magnitude **estimate** (not a measured heap allocation) — the robust claim is the
+  direction (alien-signals lighter than the 3.5 `Proxy`). The shallowRef-vs-`ref` ratios stay —
+  they're proven by the committed `tests/signal-shallow-ab.test.ts` A/B, not assumed.
+
+### Internal — DRY pass (measure-driven)
+
+- **Disposer teardown → `disposeAll(fns)`** (extracted to `command-bus.ts`). The "run every collected
+  disposer, then clear the list" teardown was repeated across five sites (`useCommand` /
+  `useCommandState` / `useCommandGroup`, `createChamber`'s install, and the `history` plugin) in two
+  idioms (`forEach` ×4, `for-of` ×1). Unified to one plain-loop helper (cold path — runs at teardown,
+  no per-dispose closure). Also fixed a latent inconsistency: `createChamber`'s disposer omitted the
+  `.length = 0` clear, so it wasn't idempotent on double-dispose — now it is, everywhere. +2 tests.
+- **Namespace-join convention → measured, kept inline (not extracted).** The camelCase join (`'cart'`
+  + `'add'` → `'cartAdd'`) is inline-duplicated in `useCommandGroup`, `createChamber`, and the
+  transitions bridge. A shared `prefixAction()` kernel was tried, but a same-process A/B (11 trials
+  ×2, real `bus.dispatch` per hook) measured the extra call **~0.6–1.3% slower** on the per-dispatch
+  paths (`useCommandGroup`, transitions). Not worth it — the three sites now mirror the convention
+  **inline by design**, each with a "do not consolidate — settled" guard comment so it isn't
+  re-DRY'd. (`createChamber` is setup-only/cold, but stays inline too for one consistent shape.)
+
+Net size impact neutral.
+
+### Fixed — `commandKey` canonical key (public-API behavior change)
+
+`commandKey(action, target)` — the public key exported for cache integration and used internally by
+`debounce`, throttle, and request dedup — silently **dropped nested object keys**. Its object path
+was `JSON.stringify(target, Object.keys(target).sort())`, and the array form of that replacer is a
+*top-level allowlist applied recursively*, so `{ q: { page: 2 } }` and `{ q: { page: 3 } }` both
+serialized to `{"q":{}}` and **collided**. Measured against the function's own stated intent
+("stable serialization"), that was a bug — distinct targets produced the same key.
+
+Rewritten to a true canonical serialization: a **function** replacer sorts keys at *every* level, so
+the key is order-independent (the original intent) **and** keeps nested fields in full (arrays keep
+order). Knock-on correctness wins:
+- **`debounce` / throttle** no longer collapse two same-action commands whose targets differ only in
+  a nested field.
+- **Request in-flight dedup** (`asyncRequest`) now reuses `commandKey` instead of a hand-rolled,
+  order-*sensitive* `JSON.stringify(target)`. Identical requests dedup regardless of key order, while
+  nested-different requests stay separate (the old inline key never false-deduped but missed
+  order-different dedups — now both are correct). This resolves the S4b duplication **at the root**:
+  the two keys diverged only because `commandKey` was broken; one correct key now serves both.
+
+**Behavior change:** `commandKey`'s output string for *object* targets is different (nested content
+included, keys sorted at all levels). TanStack-Query-style cache keys built from it change shape — a
+one-time cache miss on upgrade, no data effect. Primitive-target keys are unchanged. Slightly more
+allocation on the object path (a sorted-object rebuild per nested level); the primitive fast path —
+the common debounce/throttle case — is untouched. +6 tests (**798** total).
+
+### Verified
+
+- `npm install` resolves `vue@3.6.0-beta.16`; `prepare` build green (ESM + 3 IIFE variants).
+- `tsc --noEmit`: clean. `vitest run`: **798 passing / 40 files**. `vitest bench`: green; the
+  Vue-independent paths (plain `{ value }` ~368k ops/s, fast-lane ~28.6k) land on the recorded
+  baselines, no regression observed on this host. No controlled cross-beta delta was run (that
+  needs beta.15 re-measured on the same host).
+- `npm audit`: **0 vulnerabilities** after the toolchain bump below (was 3 dev-only advisories:
+  esbuild←vite, markdown-it←typedoc). None ever touched the shipped runtime (`alien-signals` only).
+
+### Build & dev dependencies (dev-only — no runtime or public-API change)
+
+Major dev-toolchain bump; clears all `npm audit` advisories. The shipped library (one runtime
+dep, `alien-signals`) is unaffected.
+
+- **Vite 7 → 8** (now **rolldown**-based, esbuild dropped) · **TypeScript 5.9 → 6.0** · **Biome
+  1.9 → 2.5** · Vitest/coverage 4.0 → 4.1.9 · @types/node, typedoc-plugin-markdown patch bumps.
+- **Size measurement now uses an explicit `esbuild@^0.28.1` devDep** — Vite 8/rolldown no longer
+  bundles esbuild, which `scripts/measure-size.mjs` and the `esm-treeshake` test need. 0.28.1 is
+  above the advisory range (`0.17.0–0.28.0`), so it stays clean; the tree-shake test (which had
+  auto-skipped) runs again.
+- **Bundle size shifted under rolldown:** brotli got **smaller** (IIFE full 10.4→10.2, core
+  7.1→7.0, elements 7.5→7.4 KB) while raw nudged up ~46 B on `core` — `scripts/check-size.mjs`
+  raw ceiling for `core` raised 25_000→25_500 to absorb the toolchain drift; brotli ceilings
+  unchanged. Docs + `docs/BUNDLE-SIZES.md` regenerated to the new numbers.
+- **Fallout fixed:** `tsconfig` gained `"types": ["node"]` (TS 6 stopped auto-resolving the
+  `process` global); `biome.json` migrated to v2 schema, the relocated `useValidTypeof`
+  (`suspicious`→`correctness`) suppression updated, `forEach(fn => fn())` disposers given block
+  bodies (biome 2 `useIterableCallbackReturn`), and `noUnusedFunctionParameters` disabled (test
+  callbacks, not enforced under biome 1). Lint / typecheck / 798 tests / build all green.
+
+### Tooling — honest, automated size & LOC measurement
+
+- **`docs/BUNDLE-SIZES.md`** (generated by `npm run size:doc`) is the canonical, always-current
+  size table — **minified, comment-free** brotli/gzip for every subpath export + IIFE variant
+  (esbuild `--minify` for ESM, so comments never inflate the number). CI regenerates it and
+  `git diff --exit-code`s it, so published sizes can't drift. `npm run size` prints the table.
+- **`npm run loc`** (`scripts/measure-loc.mjs`) splits code vs comment lines (source is ~5,505
+  code / ~3,509 comment) — size is measured as *code*, never raw lines.
+- **Stale size claims corrected** across README / performance.md / whitepaper to measured values:
+  the false "Under 3KB gzipped" → measured ~4 KB gz dispatch core; "~2 KB core" → **3.6 KB
+  brotli** (`createCommandBus`, esbuild-minified); IIFE 9.8/6.7 → current measured. All now point
+  at the generated table.
+- **README size table refreshed + per-version history.** The README IIFE/CDN table was still
+  showing **v1.2.0** sizes (labeled as such — core 6.1 / elements 6.4 / full 8.7 KB brotli);
+  updated to current measured (**7.0 / 7.4 / 10.2**) and given a **Size-by-version** table
+  (v1.2.0 → v1.6.0 → current) so size evolution is visible per release.
+- **Regression verified.** Current IIFE brotli is **≤ the v1.6.0 baseline on every variant**
+  (rolldown shaved 0.1–0.2 KB: core 7.1→7.0, elements 7.5→7.4, full 10.4→10.2 KB) — no size
+  regression from the beta.16 alignment, the directive-modifier addition, or the toolchain bump.
+  `npm run size:check` (`scripts/check-size.mjs`) stays the automated CI guard against future drift.
+
+### CI — modernized GitHub Actions
+
+- **Dedicated `lint + typecheck` job** (runs once, not 4× across the test matrix); the test matrix
+  now covers **Node 20.19.0 / 22 / 24** × ubuntu/macos and drops the redundant explicit build
+  (`npm ci`'s `prepare` already builds `dist/`). `loc` + the `size:doc` freshness `git diff` gate
+  run on one deterministic entry.
+- **All actions pinned to commit SHAs** (with version comments) and bumped to current: checkout
+  v6, setup-node v6, upload-artifact v7, configure-pages v6, upload-pages-artifact v5, deploy-pages
+  v5. Fixed the bench step masking failures (`tee` swallowed the exit code → added `set -o pipefail`).
+
 ## v1.6.0 — Vue 3.6.0-beta.15 alignment
 
 ### Changed

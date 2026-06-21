@@ -2,8 +2,8 @@
  * Tests for src/chamber-vapor.ts — Vue 3.6+ Vapor API
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createVaporChamberApp, getVaporInteropPlugin, defineVaporCommand, useVaporCommand, defineVaporCustomElement, defineVaporComponent, defineVaporAsyncComponent, useVaporAsyncCommand } from '../src/chamber-vapor';
-import { getCommandBus, resetCommandBus, setCommandBus } from '../src/chamber';
+import { createVaporChamberApp, getVaporInteropPlugin, defineVaporCommand, defineVaporCustomElement, defineVaporComponent, defineVaporAsyncComponent, useVaporAsyncCommand } from '../src/chamber-vapor';
+import { getCommandBus, resetCommandBus, setCommandBus, useCommand } from '../src/chamber';
 import { createAsyncCommandBus } from '../src/command-bus';
 
 beforeEach(() => {
@@ -104,15 +104,15 @@ describe('defineVaporCommand', () => {
 });
 
 // ---------------------------------------------------------------------------
-// useVaporCommand
+// useCommand — full composable (register / on / emit / dispose)
 // ---------------------------------------------------------------------------
 
-describe('useVaporCommand', () => {
+describe('useCommand — register/on/emit/dispose', () => {
   it('dispatches commands and tracks loading/error reactively', () => {
     const bus = getCommandBus();
     bus.register('vaporAdd', (cmd) => cmd.target.id);
 
-    const { dispatch, loading, lastError, dispose } = useVaporCommand();
+    const { dispatch, loading, lastError, dispose } = useCommand();
 
     expect(loading.value).toBe(false);
     expect(lastError.value).toBe(null);
@@ -131,7 +131,7 @@ describe('useVaporCommand', () => {
     const bus = getCommandBus();
     bus.register('vaporFail', () => { throw new Error('vapor-boom'); });
 
-    const { dispatch, lastError, dispose } = useVaporCommand();
+    const { dispatch, lastError, dispose } = useCommand();
 
     const result = dispatch('vaporFail', {});
     expect(result.ok).toBe(false);
@@ -143,7 +143,7 @@ describe('useVaporCommand', () => {
 
   it('register() adds handlers through the composable', () => {
     const handler = vi.fn(() => 'registered');
-    const { register, dispatch, dispose } = useVaporCommand();
+    const { register, dispatch, dispose } = useCommand();
 
     register('vaporReg', handler);
     const result = dispatch('vaporReg', { x: 1 });
@@ -159,7 +159,7 @@ describe('useVaporCommand', () => {
     const bus = getCommandBus();
     bus.register('vaporEvt', () => 'ok');
 
-    const { on, dispose } = useVaporCommand();
+    const { on, dispose } = useCommand();
     on('vaporEvt', listener);
 
     bus.dispatch('vaporEvt', {});
@@ -173,7 +173,7 @@ describe('useVaporCommand', () => {
     const listener = vi.fn();
     const bus = getCommandBus();
 
-    const { register, on, dispose } = useVaporCommand();
+    const { register, on, dispose } = useCommand();
     register('vaporClean', handler);
     on('vaporClean', listener);
 
@@ -193,7 +193,7 @@ describe('useVaporCommand', () => {
     const bus = getCommandBus();
     bus.on('cartUpdated', listener);
 
-    const { emit, dispose } = useVaporCommand();
+    const { emit, dispose } = useCommand();
     emit('cartUpdated', { itemCount: 5 });
 
     expect(listener).toHaveBeenCalledOnce();
@@ -214,7 +214,7 @@ describe('useVaporCommand', () => {
       return 'fetched';
     });
 
-    const { dispatch, loading, lastError, dispose } = useVaporCommand();
+    const { dispatch, loading, lastError, dispose } = useCommand();
 
     const resultPromise = dispatch('asyncFetch', {});
     expect(loading.value).toBe(true);

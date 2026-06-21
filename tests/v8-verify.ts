@@ -60,7 +60,7 @@ assert('value' in r3, 'cancel result has value field (monomorphic)');
 // Test 9: plugins
 const bus2 = createCommandBus();
 let pluginSaw = false;
-bus2.use((cmd, next) => { pluginSaw = true; return next(); });
+bus2.use((_cmd, next) => { pluginSaw = true; return next(); });
 bus2.register('x', () => 'ok');
 bus2.dispatch('x', 1);
 assert(pluginSaw === true, 'plugin ran');

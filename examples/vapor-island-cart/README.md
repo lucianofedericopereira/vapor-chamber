@@ -64,4 +64,4 @@ runtime entry ships **no** Vapor runtime, and both the compiled Vapor SFC helper
 vapor-chamber's `defineVaporCustomElement` probe read off `import('vue')` — so the alias points
 `vue` at the build that actually contains Vapor. `vaporChamberHMR()` keeps bus state across HMR.
 
-Aligned with Vue 3.6.0-beta.15 and vapor-chamber ≥1.6.0 (`vapor-chamber: file:../..`).
+Aligned with Vue 3.6.0-beta.16 and vapor-chamber ≥1.6.0 (`vapor-chamber: file:../..`).

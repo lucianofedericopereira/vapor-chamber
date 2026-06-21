@@ -4,6 +4,13 @@
  * Vue alignment history (one line per version — full per-item detail lives in
  * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table, the single
  * source of per-beta detail; this header only records changes to THIS file):
+ *   vNext / beta.16 — pass-through. createVaporChamberApp returns Vue's app
+ *            untouched, so it inherits two hardening fixes directly: .mount() on a
+ *            missing selector now no-ops + dev-warns (was throwing) and can return
+ *            undefined; .unmount() no longer throws in PRODUCTION builds (app._instance
+ *            is dev-only — prod now resolves the root from a WeakMap). Plus pass-through
+ *            prop/emit/attr fixes (nullish dynamic props → empty, nullish emit sources
+ *            skipped, symbol attr values stringified). No wrapper code change.
  *   v1.6.0 / beta.15 — lib-side: the define* wrappers and createVaporChamberApp
  *            gained an opt-in return generic (`<T = any>`) and `object`-typed
  *            options instead of `any`. Vue 3.6 exports proper Vapor types now,
@@ -20,7 +27,8 @@
  *   v1.3.0 / beta.12 — pass-through (Vapor setup() error recovery, VDOM slot
  *            interop normalization).
  *   v1.1.0 — Added: defineVaporCustomElement, defineVaporComponent,
- *            defineVaporAsyncComponent wrappers (beta.10+); useVaporAsyncCommand.
+ *            defineVaporAsyncComponent wrappers (Vue APIs introduced across
+ *            3.6.0-alpha.3–5: #13059 / #14017 / #13831); useVaporAsyncCommand.
  *   v0.6.0 — Added: useVaporCommand. v0.4.0 — Added: createVaporChamberApp,
  *            getVaporInteropPlugin, defineVaporCommand.
  *
@@ -31,14 +39,13 @@ import {
   getCommandBus,
   signal,
   tryAutoCleanup,
-  runDispatch,
   getVaporAppFn,
   getVaporInteropRef,
   getDefineVaporCustomElementFn,
   getDefineVaporComponentFn,
   getDefineVaporAsyncComponentFn,
 } from './chamber';
-import type { Handler, RegisterOptions, CommandResult, Command } from './command-bus';
+import type { Handler, RegisterOptions, CommandResult } from './command-bus';
 
 /**
  * Create a Vapor app instance with vapor-chamber ready.
@@ -87,19 +94,19 @@ export function getVaporInteropPlugin(): any | null {
 }
 
 // ---------------------------------------------------------------------------
-// Vue 3.6.0-beta.10+ Vapor Custom Elements
+// Vapor Custom Elements (Vue 3.6 — defineVaporCustomElement introduced in 3.6.0-alpha.4, #14017)
 // ---------------------------------------------------------------------------
 
 /**
  * defineVaporCustomElement — create a custom element backed by Vapor rendering.
  *
- * Wraps Vue 3.6.0-beta.10's `defineVaporCustomElement()`. The generated custom
+ * Wraps Vue's `defineVaporCustomElement()` (introduced in 3.6.0-alpha.4, #14017). The generated custom
  * element uses Vapor's compiler-optimized rendering instead of the VDOM, giving
  * zero-overhead DOM updates inside shadow DOM. Safe to call with a reused
  * options object, and children re-render on reactive prop changes (beta.14+;
  * per-beta detail: CHANGELOG / whitepaper alignment log).
  *
- * Returns null if Vue 3.6.0-beta.10+ is not detected — check before calling
+ * Returns null if the Vapor runtime (Vue 3.6+) is not detected — check before calling
  * `customElements.define()`.
  *
  * @example
@@ -119,13 +126,13 @@ export function defineVaporCustomElement<T = any>(options: object, extraOptions?
 /**
  * defineVaporComponent — define a Vapor component with proper type inference.
  *
- * Wraps Vue 3.6.0-beta.10's `defineVaporComponent()`. Use this to get full
+ * Wraps Vue's `defineVaporComponent()` (typed since 3.6.0-alpha.5, #13831). Use this to get full
  * TypeScript inference for props, emits, and slots in Vapor components.
  * Pass-through — emits/$attrs routing, v-once interop, scope IDs, and the
  * compiler optimizations are Vue behavior (per-beta detail: CHANGELOG /
  * whitepaper alignment log).
  *
- * Returns null if Vue 3.6.0-beta.10+ is not detected.
+ * Returns null if the Vapor runtime (Vue 3.6+) is not detected.
  *
  * @example
  * import { defineVaporComponent } from 'vapor-chamber';
@@ -144,13 +151,13 @@ export function defineVaporComponent<T = any>(options: object): T | null {
 /**
  * defineVaporAsyncComponent — define an async Vapor component for lazy loading.
  *
- * Wraps Vue 3.6.0-beta.10's `defineVaporAsyncComponent()`. Async Vapor
+ * Wraps Vue's `defineVaporAsyncComponent()` (introduced in 3.6.0-alpha.3, #13059). Async Vapor
  * components are cached by VaporKeepAlive and hydrate under VDOM Suspense.
  * The loading placeholder receives the deferred component's props and slots
  * (beta.14+) — render a skeleton matching the final shape. Per-beta detail:
  * CHANGELOG / whitepaper alignment log.
  *
- * Returns null if Vue 3.6.0-beta.10+ is not detected.
+ * Returns null if the Vapor runtime (Vue 3.6+) is not detected.
  *
  * @example
  * import { defineVaporAsyncComponent } from 'vapor-chamber';
@@ -203,62 +210,6 @@ export function defineVaporCommand(
 }
 
 // ---------------------------------------------------------------------------
-// useVaporCommand
-// ---------------------------------------------------------------------------
-
-/**
- * useVaporCommand — reactive command dispatch designed for Vapor components.
- *
- * Like useCommand() but safe for `<script setup vapor>` where
- * getCurrentInstance() returns null. Provides reactive loading/error signals
- * and relies exclusively on onScopeDispose for cleanup (no onUnmounted path).
- *
- * For fire-and-forget (no loading/error state), prefer defineVaporCommand().
- *
- * @example
- * // In a <script setup vapor> component:
- * import { useVaporCommand } from 'vapor-chamber';
- * const { dispatch, loading, lastError } = useVaporCommand();
- * dispatch('cartAdd', { id: product.id });
- */
-export function useVaporCommand() {
-  const bus = getCommandBus();
-  const loading = signal(false);
-  const lastError = signal<Error | null>(null);
-  const listeners: Array<() => void> = [];
-
-  function dispatch(action: string, target: any, payload?: any): CommandResult | Promise<CommandResult> {
-    return runDispatch(() => bus.dispatch(action, target, payload), loading, lastError);
-  }
-
-  function register(action: string, handler: Handler, opts?: RegisterOptions): () => void {
-    const unregister = bus.register(action, handler, opts);
-    listeners.push(unregister);
-    return unregister;
-  }
-
-  function on(pattern: string, listener: (cmd: Command, result: CommandResult) => void): () => void {
-    const unsub = bus.on(pattern, listener);
-    listeners.push(unsub);
-    return unsub;
-  }
-
-  /** Fire a domain event — notifies on() listeners, no handler required, no result. */
-  function emit(event: string, data?: any): void {
-    bus.emit(event, data);
-  }
-
-  function dispose() {
-    listeners.forEach(fn => fn());
-    listeners.length = 0;
-  }
-
-  tryAutoCleanup(dispose);
-
-  return { dispatch, register, on, emit, loading, lastError, dispose };
-}
-
-// ---------------------------------------------------------------------------
 // useVaporAsyncCommand
 // ---------------------------------------------------------------------------
 
@@ -287,8 +238,12 @@ export function useVaporAsyncCommand(asyncBus?: { dispatch: (action: string, tar
   const bus = asyncBus ?? (getCommandBus() as any);
   const loading = signal(false);
   const lastError = signal<Error | null>(null);
-  const listeners: Array<() => void> = [];
 
+  // Intentionally hand-rolled, NOT routed through the shared runDispatch() that
+  // useCommand / useCommandQuery use. A single async/await is
+  // ~1.2× leaner on the dispatch wrapper than runDispatch's .then-chain (measured);
+  // this is the awaited HTTP/WS path, so keep it lean. Do not "consolidate" into
+  // runDispatch — the consistency isn't worth the wrapper overhead here.
   async function dispatch(action: string, target: any, payload?: any): Promise<CommandResult> {
     loading.value = true;
     lastError.value = null;
@@ -305,10 +260,10 @@ export function useVaporAsyncCommand(asyncBus?: { dispatch: (action: string, tar
     }
   }
 
-  function dispose() {
-    listeners.forEach(fn => fn());
-    listeners.length = 0;
-  }
+  // Dispatch-only composable (no register/on, unlike useCommand) — there are no
+  // subscriptions to tear down. Kept as a no-op for return-shape symmetry with the
+  // other composables (callers may destructure `dispose`).
+  function dispose() {}
 
   tryAutoCleanup(dispose);
 

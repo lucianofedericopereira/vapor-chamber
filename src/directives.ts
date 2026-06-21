@@ -3,6 +3,15 @@
  *
  * Vue alignment history (one line per version — full per-item detail lives in
  * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table):
+ *   vNext / beta.16 — Vue alignment is pass-through (Vue's "parse dynamic v-bind
+ *            event options like VDOM" — Once/Passive/Capture — touches the COMPILED
+ *            dynamic-event path only; v-vc:command attaches a DIRECT addEventListener,
+ *            so the beta.15 disabled/in-flight mirror below is unaffected). LIB-SIDE
+ *            this cycle (surfaced by the beta.9–16 retrospective): v-vc:command now
+ *            honors event modifiers .stop/.prevent/.self/.left/.middle/.right/.capture/
+ *            .once/.passive — the direct listener never received Vue's compiled
+ *            withModifiers, so every modifier except the numeric .timeout was being
+ *            silently dropped.
  *   v1.6.0 / beta.15 — code change: buildHandler() skips dispatch on disabled /
  *            aria-disabled / in-flight elements, mirroring Vue's "skip disabled
  *            delegated handlers" (#14948) for the DIRECT listener this directive
@@ -57,6 +66,16 @@ type DirectiveState = {
   rollback?: (() => void) | null;
   /** Timeout in ms for async dispatch. Default: 30_000 */
   timeout: number;
+  /** `.stop` — call event.stopPropagation() before dispatch. */
+  stop?: boolean;
+  /** `.prevent` — call event.preventDefault() before dispatch. */
+  prevent?: boolean;
+  /** `.self` — only dispatch when event.target is the bound element. */
+  self?: boolean;
+  /** Allowed mouse buttons from `.left`/`.middle`/`.right` (0/1/2). Empty = any. */
+  buttons?: number[];
+  /** `.capture` — capture-phase listener. Also matched on removeEventListener. */
+  capture?: boolean;
 };
 
 const stateMap = new WeakMap<Element, DirectiveState>();
@@ -66,8 +85,13 @@ const stateMap = new WeakMap<Element, DirectiveState>();
 // ---------------------------------------------------------------------------
 //
 // Binding value: action name string (e.g. 'cartAdd')
-// Modifiers: none
 // arg: 'command' (used as the directive name)
+// Modifiers (the directive attaches a DIRECT listener, so Vue's compiled
+// withModifiers never reaches it — they are applied here by hand):
+//   .stop .prevent .self        — DOM-event guards/actions, like v-on
+//   .left .middle .right        — only dispatch for that mouse button
+//   .capture .once .passive     — addEventListener options
+//   .<number> (e.g. .5000)      — async dispatch timeout in ms (default 30000)
 //
 // Additional data attributes read from the element:
 //   data-vc-payload — JSON-encoded payload (optional)
@@ -87,7 +111,17 @@ function parseJson(s: string | null | undefined): any {
 }
 
 function buildHandler(el: Element, state: DirectiveState): (event: Event) => void {
-  return async (_event: Event) => {
+  return async (event: Event) => {
+    // Event modifiers — mirror Vue's compiled withModifiers, which never reaches a
+    // DIRECT addEventListener: .self and mouse-button modifiers abort the dispatch;
+    // .stop / .prevent act on the DOM event. (.capture/.once/.passive are applied as
+    // addEventListener options in mounted().)
+    if (state.self && event.target !== el) return;
+    if (state.buttons && state.buttons.length > 0 &&
+        'button' in event && !state.buttons.includes((event as MouseEvent).button)) return;
+    if (state.stop) event.stopPropagation();
+    if (state.prevent) event.preventDefault();
+
     // Vue 3.6.0-beta.15 (runtime-vapor: skip disabled delegated direct handlers):
     // mirror Vue's "don't run a handler on a disabled element" rule for the direct
     // listener this directive attaches. Bail out on re-entrant clicks while a
@@ -177,7 +211,7 @@ export function createDirectivePlugin(): { install(app: any): void } {
       if (isVaporAvailable()) {
         console.warn(
           '[vapor-chamber] Directives (v-vc:command) are VDOM-only and will not ' +
-          'work inside <script setup vapor> components. Use useVaporCommand() or ' +
+          'work inside <script setup vapor> components. Use useCommand() or ' +
           'defineVaporCommand() for Vapor components. For async operations under ' +
           'Suspense, use useVaporAsyncCommand(). Directives still work in VDOM ' +
           'components within mixed Vapor/VDOM trees (interop plugin required).'
@@ -194,9 +228,15 @@ export function createDirectivePlugin(): { install(app: any): void } {
         mounted(el: Element, binding: { arg?: string; value: any; modifiers: Record<string, boolean> }) {
           if (binding.arg !== 'command') return;
 
-          const timeout = typeof binding.modifiers === 'object' && binding.modifiers
-            ? parseInt(Object.keys(binding.modifiers).find(k => /^\d+$/.test(k)) ?? '', 10) || DEFAULT_DISPATCH_TIMEOUT
-            : DEFAULT_DISPATCH_TIMEOUT;
+          const mods: Record<string, boolean> =
+            (binding.modifiers && typeof binding.modifiers === 'object') ? binding.modifiers : {};
+
+          const timeout = parseInt(Object.keys(mods).find(k => /^\d+$/.test(k)) ?? '', 10) || DEFAULT_DISPATCH_TIMEOUT;
+
+          const buttons: number[] = [];
+          if (mods.left) buttons.push(0);
+          if (mods.middle) buttons.push(1);
+          if (mods.right) buttons.push(2);
 
           const state: DirectiveState = {
             action: binding.value as string,
@@ -204,11 +244,21 @@ export function createDirectivePlugin(): { install(app: any): void } {
             error: null,
             handler: () => {},
             timeout,
+            stop: !!mods.stop,
+            prevent: !!mods.prevent,
+            self: !!mods.self,
+            buttons,
+            capture: !!mods.capture,
           };
 
           state.handler = buildHandler(el, state);
           stateMap.set(el, state);
-          el.addEventListener('click', state.handler);
+
+          const listenerOpts: AddEventListenerOptions = {};
+          if (mods.capture) listenerOpts.capture = true;
+          if (mods.once) listenerOpts.once = true;
+          if (mods.passive) listenerOpts.passive = true;
+          el.addEventListener('click', state.handler, listenerOpts);
         },
 
         updated(el: Element, binding: { arg?: string; value: any }) {
@@ -223,7 +273,7 @@ export function createDirectivePlugin(): { install(app: any): void } {
           if (binding.arg !== 'command') return;
           const state = stateMap.get(el);
           if (state) {
-            el.removeEventListener('click', state.handler);
+            el.removeEventListener('click', state.handler, state.capture ? { capture: true } : undefined);
             stateMap.delete(el);
           }
         },

@@ -35,7 +35,7 @@ function createChamber(namespace: string, handlers: Record<string, any>) {
     for (const [short, handler] of Object.entries(handlers)) {
       unsubs.push(bus.register(actionName(short), handler));
     }
-    return () => { unsubs.forEach(fn => fn()); };
+    return () => { unsubs.forEach(fn => { fn(); }); };
   }
   return { namespace, install, actionName };
 }

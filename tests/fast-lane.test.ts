@@ -27,7 +27,7 @@ describe('createFastLane — compile / dispatch', () => {
 
   it('handler receives data directly — no Command envelope, no Result wrapping', () => {
     const lane = createFastLane();
-    let captured: unknown = undefined;
+    let captured: unknown ;
     const dispatch = lane.compile('any', (data: any) => { captured = data; return 'done'; });
 
     dispatch({ deeply: { nested: 'object' } });

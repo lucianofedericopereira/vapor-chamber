@@ -46,12 +46,11 @@ import {
   defineVaporComponent,
   defineVaporAsyncComponent,
   defineVaporCommand,
-  useVaporCommand,
   useVaporAsyncCommand,
   createVaporChamberApp,
   getVaporInteropPlugin,
 } from './chamber-vapor';
-import { useSharedCommandState } from './chamber';
+import { useSharedCommandState, useCommand } from './chamber';
 import type { AsyncPlugin, Plugin } from './command-bus';
 
 // ---------------------------------------------------------------------------
@@ -225,7 +224,7 @@ const VaporChamber = {
   defineVaporComponent,
   defineVaporAsyncComponent,
   defineVaporCommand,
-  useVaporCommand,
+  useCommand,
   useVaporAsyncCommand,
   useSharedCommandState,
   createVaporChamberApp,

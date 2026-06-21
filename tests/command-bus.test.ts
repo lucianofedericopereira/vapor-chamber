@@ -78,7 +78,7 @@ describe('createCommandBus', () => {
       const bus = createCommandBus();
       const order: string[] = [];
 
-      bus.use((cmd, next) => {
+      bus.use((_cmd, next) => {
         order.push('plugin-before');
         const result = next();
         order.push('plugin-after');
@@ -99,7 +99,7 @@ describe('createCommandBus', () => {
       const bus = createCommandBus();
       const handler = vi.fn(() => 'handler-result');
 
-      bus.use((cmd, next) => {
+      bus.use((_cmd, _next) => {
         return { ok: false, error: new Error('Blocked') };
       });
 
@@ -116,14 +116,14 @@ describe('createCommandBus', () => {
       const bus = createCommandBus();
       const order: string[] = [];
 
-      bus.use((cmd, next) => {
+      bus.use((_cmd, next) => {
         order.push('plugin1-before');
         const result = next();
         order.push('plugin1-after');
         return result;
       });
 
-      bus.use((cmd, next) => {
+      bus.use((_cmd, next) => {
         order.push('plugin2-before');
         const result = next();
         order.push('plugin2-after');
@@ -148,7 +148,7 @@ describe('createCommandBus', () => {
 
     it('should return unsubscribe function', () => {
       const bus = createCommandBus();
-      const plugin = vi.fn((cmd, next) => next());
+      const plugin = vi.fn((_cmd, next) => next());
 
       const unsubscribe = bus.use(plugin);
       bus.register('testAction', () => 'result');
@@ -262,7 +262,7 @@ describe('createAsyncCommandBus', () => {
     const bus = createAsyncCommandBus();
     const order: string[] = [];
 
-    bus.use(async (cmd, next) => {
+    bus.use(async (_cmd, next) => {
       order.push('plugin-before');
       await new Promise((r) => setTimeout(r, 5));
       const result = await next();
@@ -284,7 +284,7 @@ describe('createAsyncCommandBus', () => {
     const bus = createAsyncCommandBus();
     const hookCalled = vi.fn();
 
-    bus.onAfter(async (cmd, result) => {
+    bus.onAfter(async (_cmd, result) => {
       await new Promise((r) => setTimeout(r, 5));
       hookCalled(result);
     });

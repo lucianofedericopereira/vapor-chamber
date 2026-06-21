@@ -31,9 +31,9 @@ describe('core dispatch throughput', () => {
 
   bench('syncDispatch — 3 plugins + 1 listener', () => {
     const bus = createCommandBus();
-    bus.use((cmd, next) => next());
-    bus.use((cmd, next) => next());
-    bus.use((cmd, next) => next());
+    bus.use((_cmd, next) => next());
+    bus.use((_cmd, next) => next());
+    bus.use((_cmd, next) => next());
     bus.on('*', () => {});
     bus.register('test', (cmd) => cmd.target);
     for (let i = 0; i < 10_000; i++) {
@@ -52,7 +52,7 @@ describe('core dispatch throughput', () => {
   bench('syncQuery — 1 plugin + 1 after-hook (full runner path)', () => {
     const bus = createCommandBus();
     bus.register('getUser', (cmd) => ({ id: cmd.target }));
-    bus.use((cmd, next) => next());
+    bus.use((_cmd, next) => next());
     bus.onAfter(() => {});
     for (let i = 0; i < 10_000; i++) {
       bus.query('getUser', i);

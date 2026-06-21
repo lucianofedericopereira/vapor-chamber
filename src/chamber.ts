@@ -12,7 +12,7 @@
  * v0.3.0 — Fixed: signal shim, resetCommandBus, auto-cleanup on Vue unmount.
  */
 
-import { createCommandBus, type CommandBus, type Command, type CommandResult, type Handler, type Plugin, type RegisterOptions, type Listener } from './command-bus';
+import { createCommandBus, disposeAll, type CommandBus, type Command, type CommandResult, type Handler, type Plugin, type RegisterOptions, type Listener } from './command-bus';
 import { configureSignal, signal } from './signal';
 import type { Signal } from './signal';
 
@@ -49,7 +49,7 @@ let _vueDeepRefFn: (<T>(v: T) => { value: T }) | null = null;
 let _hasVapor = false;
 let _createVaporAppFn: any = null;
 let _vaporInteropPluginRef: any = null;
-// Vue 3.6.0-beta.10+ Vapor APIs
+// Vue 3.6+ Vapor APIs (introduced across 3.6.0-alpha.3–5)
 let _defineVaporCustomElementFn: any = null;
 let _defineVaporComponentFn: any = null;
 let _defineVaporAsyncComponentFn: any = null;
@@ -112,7 +112,7 @@ function applyVueModule(vue: any): void {
     _vaporInteropPluginRef = vue.vaporInteropPlugin;
   }
 
-  // Vue 3.6.0-beta.10+: Vapor custom elements and component definitions
+  // Vue 3.6+: Vapor custom elements and component definitions
   if (vue && typeof vue.defineVaporCustomElement === 'function') {
     _defineVaporCustomElementFn = vue.defineVaporCustomElement;
   }
@@ -316,7 +316,7 @@ export function tryKeepAliveHooks(onPause: () => void, onResume: () => void): vo
 
 // ---------------------------------------------------------------------------
 // runDispatch — shared loading/error wrapper used by useCommand, useCommandQuery,
-// and useVaporCommand (chamber-vapor.ts). Accepts a thunk so the bus call is
+// (chamber-vapor.ts). Accepts a thunk so the bus call is
 // made inside the try block.
 // ---------------------------------------------------------------------------
 
@@ -360,20 +360,56 @@ export function runDispatch(
 // ---------------------------------------------------------------------------
 
 /**
- * useCommand - dispatch commands with reactive loading/error state
+ * useCommand — reactive command dispatch with optional bus subscriptions.
  *
- * Auto-cleanup on Vue component unmount or scope disposal.
+ * Returns `dispatch` + reactive `loading` / `lastError`, plus `register` / `on` /
+ * `emit` for managing handlers and listeners with auto-cleanup on scope disposal
+ * (`onScopeDispose`). Vapor-safe — works in `<script setup vapor>` and VDOM alike,
+ * with no `getCurrentInstance()` dependency. For fire-and-forget with zero reactive
+ * overhead, use `defineVaporCommand()` instead.
+ *
+ * (Absorbed the former `useVaporCommand` — the Vapor-safety distinction was obsolete;
+ * this is now the single command composable.)
+ *
+ * @example
+ * const { dispatch, register, on, loading, lastError } = useCommand();
+ * register('cartAdd', (cmd) => addToCart(cmd.target));
+ * dispatch('cartAdd', { id: product.id });
  */
 export function useCommand() {
   const bus = getCommandBus();
   const loading = signal(false);
   const lastError = signal<Error | null>(null);
+  const listeners: Array<() => void> = [];
 
   function dispatch(action: string, target: any, payload?: any): CommandResult | Promise<CommandResult> {
     return runDispatch(() => bus.dispatch(action, target, payload), loading, lastError);
   }
 
-  return { dispatch, loading, lastError };
+  function register(action: string, handler: Handler, opts?: RegisterOptions): () => void {
+    const unregister = bus.register(action, handler, opts);
+    listeners.push(unregister);
+    return unregister;
+  }
+
+  function on(pattern: string, listener: (cmd: Command, result: CommandResult) => void): () => void {
+    const unsub = bus.on(pattern, listener);
+    listeners.push(unsub);
+    return unsub;
+  }
+
+  /** Fire a domain event — notifies on() listeners, no handler required, no result. */
+  function emit(event: string, data?: any): void {
+    bus.emit(event, data);
+  }
+
+  function dispose() {
+    disposeAll(listeners);
+  }
+
+  tryAutoCleanup(dispose);
+
+  return { dispatch, register, on, emit, loading, lastError, dispose };
 }
 
 // ---------------------------------------------------------------------------
@@ -456,7 +492,7 @@ export function useSharedCommandState(options: UseSharedCommandStateOptions = {}
     };
     // v1.6.0: observe errors BUS-WIDE, not only dispatches made through this
     // composable's own dispatch wrapper. Any failed command on the bus — from
-    // useVaporCommand, useCommand, raw bus.dispatch, anywhere — lands in the
+    // useCommand, raw bus.dispatch, anywhere — lands in the
     // shared error list. (Both sync and async buses fan results to on('*')
     // listeners after settling.) inFlight/isAnyLoading remain scoped to this
     // composable's dispatch wrapper: bus-wide in-flight tracking would need
@@ -666,8 +702,7 @@ export function _createCommandState<T>(
   }
 
   const dispose = () => {
-    unregisters.forEach(fn => fn());
-    unregisters.length = 0;
+    disposeAll(unregisters);
   };
 
   tryAutoCleanup(dispose);
@@ -859,6 +894,10 @@ export function useCommandGroup(namespace: string) {
   const bus = getCommandBus();
   const cleanups: Array<() => void> = [];
 
+  // camelCase namespace join ('cart' + 'add' → 'cartAdd'). Inlined, NOT a shared
+  // helper — DO NOT consolidate, settled, do not re-evaluate. This is a per-dispatch
+  // path; a same-process A/B measured a shared-call indirection ~1% slower. Mirrored
+  // inline at all three sites (createChamber / transitions / here) — keep in sync.
   function prefixed(action: string): string {
     return namespace + action.charAt(0).toUpperCase() + action.slice(1);
   }
@@ -898,8 +937,7 @@ export function useCommandGroup(namespace: string) {
   }
 
   function dispose() {
-    cleanups.forEach(fn => fn());
-    cleanups.length = 0;
+    disposeAll(cleanups);
   }
 
   tryAutoCleanup(dispose);

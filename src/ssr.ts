@@ -3,6 +3,14 @@
  *
  * Vue alignment history (one line per version — full per-item detail lives in
  * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table):
+ *   vNext / beta.16 — pass-through. rehydrate() command replay sits ABOVE Vue's DOM
+ *            hydration, so beta.16's 7 hydration fixes (dynamic props on mismatch-
+ *            recreated nodes, static-text patching, exact tag-mismatch detection,
+ *            clone-cache reuse, v-if empty-branch hydration, fragment warning text,
+ *            empty-container full mount on createVaporSSRApp — which we do not wrap)
+ *            are all below us; they only hand replay a more-correct DOM. They also
+ *            reduce "Hydration text mismatch" dev-warnings — the lib keys off nothing
+ *            there.
  *   v1.6.0 / beta.15 — pass-through (teleport mount-location tracking + disabled-
  *            target order keep rehydrate() command replay in document order).
  *   v1.4.0 / beta.13 — pass-through (5 hydration fixes: mismatch recovery,

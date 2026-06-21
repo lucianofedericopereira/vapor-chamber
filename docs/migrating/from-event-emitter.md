@@ -114,7 +114,7 @@ const tools = toAnthropicTools(busSchema);
 
 EventEmitter's `setMaxListeners(n)` warns if you accumulate too many
 listeners; this is a leak detector. vapor-chamber doesn't have an
-equivalent because the lib's composables (`useCommand`, `useVaporCommand`,
+equivalent because the lib's composables (`useCommand`,
 `useSharedCommandState`) auto-cleanup via `tryAutoCleanup` (Vue scope /
 component disposal).
 

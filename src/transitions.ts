@@ -4,6 +4,12 @@
  * Vue alignment history (one line per version — full per-item detail lives in
  * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table, the single
  * source of per-beta detail; this header only records changes to THIS file):
+ *   vNext / beta.16 — pass-through. Inherited correctness: onLeave now fires for a
+ *            non-v-show root removed after a v-show branch (Vue stopped `persisted`
+ *            leaking onto non-v-show roots — the *Leave dispatch was being dropped).
+ *            onLeave() JSDoc updated below. Five other transition fixes (re-resolve
+ *            hooks on prop change, type-bucketed leaving cache, raw-key compare,
+ *            out-in branch-key sync) are internal DOM correctness — hooks unchanged.
  *   v1.6.0 / beta.15 — pass-through (transition-group hook restore after skipped
  *            move, key inheritance/stability, v-if comments, v-show timing).
  *            onMove() JSDoc updated below — behavior notes live on the API.
@@ -53,6 +59,15 @@ export type TransitionHooks = {
   onAfterEnter: (el: Element) => void;
   onEnterCancelled: (el: Element) => void;
   onBeforeLeave: (el: Element) => void;
+  /**
+   * Dispatches `<namespace>Leave` and awaits an async handler before `done()`.
+   *
+   * Vue 3.6.0-beta.16: now fires when a **non-v-show root is structurally removed
+   * after a v-show branch was shown**. Previously a latched `persisted` flag leaked
+   * onto the non-v-show root, so Vapor skipped the leave and this hook (and its
+   * `*Leave` command) never ran. The runtime now gates the carry-forward on an
+   * actual v-show marker, so the dispatch is no longer dropped in that sequence.
+   */
   onLeave: (el: Element, done: () => void) => void;
   onAfterLeave: (el: Element) => void;
   onLeaveCancelled: (el: Element) => void;
@@ -89,6 +104,11 @@ export type TransitionBridge = TransitionHooks & {
 // Internal: action name prefixing (same convention as useCommandGroup)
 // ---------------------------------------------------------------------------
 
+// camelCase namespace join ('modal' + 'enter' → 'modalEnter'). Inlined, NOT a
+// shared helper — DO NOT consolidate, settled, do not re-evaluate. This is the
+// per-hook dispatch hot path; a same-process A/B (interleaved, 11 trials ×2)
+// measured a shared-call indirection ~0.6–1.3% slower here. The convention is
+// mirrored inline at all three sites (useCommandGroup / createChamber / here).
 function prefixed(namespace: string | undefined, hook: string): string {
   if (!namespace) return hook;
   return namespace + hook.charAt(0).toUpperCase() + hook.slice(1);

@@ -234,7 +234,7 @@ describe('sync plugin', () => {
       },
       // Test helper: simulate a message arriving from another tab
       simulateMessage(data: BcMessage) {
-        listeners.forEach(fn => fn({ data }));
+        listeners.forEach(fn => { fn({ data }); });
       },
       get isClosed() { return closed; },
       posted,

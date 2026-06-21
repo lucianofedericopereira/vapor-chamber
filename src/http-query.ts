@@ -32,7 +32,7 @@ export function buildFullUrl(
       if (value === undefined || value === null) continue;
 
       if (Array.isArray(value)) {
-        value.forEach((v, i) => urlObj.searchParams.append(`${key}[${i}]`, String(v)));
+        value.forEach((v, i) => { urlObj.searchParams.append(`${key}[${i}]`, String(v)); });
       } else if (typeof value === 'object') {
         for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
           urlObj.searchParams.append(`${key}[${k}]`, String(v));

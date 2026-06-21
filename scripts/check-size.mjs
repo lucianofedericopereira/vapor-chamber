@@ -29,8 +29,12 @@ const BUDGETS = {
   //    bundled into the IIFEs alongside createHttpBridge).
   //   The idempotent plugin lives in plugins-extra and is NOT in these bundles.
 
+  // Vite 8 (rolldown-based, replacing esbuild) shifted minified output: brotli got
+  // SMALLER across all three (full 10.4→10.2, core 7.1→7.0, elements 7.5→7.4) but raw
+  // nudged up — core raw crossed 25_000 by ~46 B. Raw ceiling absorbs that toolchain
+  // drift; brotli ceilings stay put (the meaningful metric, and it improved).
   'vapor-chamber.iife.min.js':          { rawMax: 36_500, brotliMax: 10_800 },
-  'vapor-chamber-core.iife.min.js':     { rawMax: 25_000, brotliMax: 7_400  },
+  'vapor-chamber-core.iife.min.js':     { rawMax: 25_500, brotliMax: 7_400  },
   'vapor-chamber-elements.iife.min.js': { rawMax: 26_600, brotliMax: 7_800  },
 };
 

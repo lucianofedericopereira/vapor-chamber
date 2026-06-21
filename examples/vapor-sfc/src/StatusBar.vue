@@ -2,19 +2,26 @@
   Cross-component aggregate state via `useSharedCommandState`.
 
   Errors are observed BUS-WIDE (v1.6.0): even though CartPanel dispatches via
-  its own per-component `useVaporCommand`, every failed command on the shared
+  its own per-component `useCommand`, every failed command on the shared
   bus lands in this panel's error list. `isAnyLoading` tracks dispatches made
   through `useSharedCommandState().dispatch` (bus-wide in-flight pairing is
   not guaranteed on all error paths).
 
   Memory math: this approach allocates ~5 signal nodes total. If we instead
-  gave every panel a private `useVaporCommand`, we'd allocate 2 signals per
+  gave every panel a private `useCommand`, we'd allocate 2 signals per
   panel × N panels.
 -->
 <script setup vapor lang="ts">
 import { useSharedCommandState } from 'vapor-chamber';
+import { asRef } from './_reactive';
 
-const { isAnyLoading, errors, errorCount, clear } = useSharedCommandState({ errorCap: 5 });
+// asRef: signals are Vue shallowRefs at runtime — typed as such so vue-tsc
+// auto-unwraps them in the template (see _reactive.ts).
+const shared = useSharedCommandState({ errorCap: 5 });
+const isAnyLoading = asRef(shared.isAnyLoading);
+const errors = asRef(shared.errors);
+const errorCount = asRef(shared.errorCount);
+const { clear } = shared;
 </script>
 
 <template>

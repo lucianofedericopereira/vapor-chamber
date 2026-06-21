@@ -1,6 +1,7 @@
 /**
  * vapor-chamber - Command Bus for Vue Vapor
- * ~2KB gzipped (core + plugins + composables) — DevTools loaded dynamically
+ * ~3.6 KB brotli core; full bundle ~10-20 KB depending on imports (see
+ * docs/BUNDLE-SIZES.md) — DevTools loaded dynamically
  */
 
 // ---------------------------------------------------------------------------
@@ -651,6 +652,22 @@ export function matchesPattern(pattern: string, action: string): boolean {
   return pattern === action;
 }
 
+/**
+ * Run every collected disposer in insertion order, then empty the list so a
+ * second call is a no-op (idempotent teardown). Shared by the composables'
+ * `dispose()` and the chamber/install + history-plugin cleanups. Cold path
+ * (runs at unmount/disposal, never per dispatch) — a plain loop, no closure.
+ *
+ * No try/catch by design — settled, do not "harden". Every disposer collected
+ * here is an internal `register`/`on`/`use`/`respond` unsub (`Map.delete` /
+ * `Array.splice`); none can throw. A throw would mean corrupted internal state,
+ * which should surface loudly during teardown, not be swallowed.
+ */
+export function disposeAll(fns: Array<() => void>): void {
+  for (let i = 0; i < fns.length; i++) fns[i]();
+  fns.length = 0;
+}
+
 function isAsyncFn(fn: Function): boolean {
   return (fn as any)[Symbol.toStringTag] === 'AsyncFunction';
 }
@@ -660,14 +677,26 @@ function isAsyncFn(fn: Function): boolean {
  * Useful for cache invalidation integration (e.g. TanStack Query).
  */
 export function commandKey(action: string, target: any): string {
-  // Fast path: primitives and null don't need JSON.stringify or key sorting
+  // Fast path: primitives and null don't need serialization or key sorting
   if (target === null || target === undefined) return `${action}:${target}`;
   const t = typeof target;
   if (t === 'string' || t === 'number' || t === 'boolean') return `${action}:${target}`;
-  // Object path: sort keys for stable serialization — { b:2, a:1 } and { a:1, b:2 } produce the same key
+  // Object path: canonical, order-independent serialization. A function replacer
+  // rebuilds every object with its keys in sorted order — at EVERY level — so
+  // { b:2, a:1 } and { a:1, b:2 } produce the same key, while nested fields are
+  // preserved in full and arrays keep their order. (The previous top-level array
+  // replacer `Object.keys(target).sort()` silently DROPPED nested keys, collapsing
+  // { q:{page:2} } and { q:{page:3} } to the same key — fixed here.)
   let tkey: string;
   try {
-    tkey = JSON.stringify(target, Object.keys(target).sort());
+    tkey = JSON.stringify(target, (_k, v) => {
+      if (v && typeof v === 'object' && !Array.isArray(v)) {
+        const sorted: Record<string, unknown> = {};
+        for (const k of Object.keys(v).sort()) sorted[k] = v[k];
+        return sorted;
+      }
+      return v;
+    });
   } catch { tkey = String(target); }
   return `${action}:${tkey}`;
 }
@@ -855,8 +884,11 @@ function handleMissing(s: SyncState | AsyncState, cmd: Command, canDefer: boolea
   const mode = s.opts.onMissing ?? 'error';
   if (mode === 'ignore') return okResult(undefined);
   if (mode === 'buffer' && canDefer) {
-    // s.deferred is non-null here — it was allocated at construction when
-    // onMissing:'buffer' was set (opts is readonly, so the mode can't change).
+    // Lazy init: the queue map is born on the first buffered command. Cheaper
+    // than eager allocation (a bus that never buffers allocates nothing), and a
+    // measured A/B showed gating the hot path on `deferred !== null` instead of
+    // this `onMissing` check is only faster when monomorphic — it regresses in
+    // mixed buffer/non-buffer apps — so the hot-path gate stays on onMissing.
     const d = s.deferred ?? (s.deferred = new Map());
     let q = d.get(cmd.action);
     if (q === undefined) { q = []; d.set(cmd.action, q); }
@@ -900,6 +932,7 @@ function handleMissing(s: SyncState | AsyncState, cmd: Command, canDefer: boolea
  * fire-and-forget. Called from register() right after the handler is set.
  */
 function flushDeferred(s: SyncState | AsyncState, action: string): void {
+  /* v8 ignore next -- defensive: the only caller guards `deferred !== null` first */
   if (s.deferred === null) return;
   const q = s.deferred.get(action);
   if (q === undefined || q.length === 0) return;
@@ -1058,6 +1091,7 @@ function syncDispatchBatch(s: SyncState, commands: BatchCommand[], opts: BatchOp
 function syncRollback(s: SyncState, commands: BatchCommand[], results: CommandResult[], failedAt: number): CommandResult[] {
   const rollbacks: CommandResult[] = [];
   for (let j = failedAt - 1; j >= 0; j--) {
+    /* v8 ignore next -- defensive: batch halts at first failure, so every j < failedAt is ok */
     if (!results[j].ok) continue; // skip already-failed commands
     const undo = s.undoHandlers.get(commands[j].action);
     if (!undo) continue; // no undo registered — skip
@@ -1237,8 +1271,9 @@ export function createCommandBus<M extends CommandMap = CommandMap>(options: Com
     dispatchDepth: 0,
     sealed: false,
     throttleTimers: new Set(),
-    // Only allocate the buffer queue when buffering is actually requested.
-    deferred: options.onMissing === 'buffer' ? new Map() : null,
+    // Lazily allocated on the first buffered command (handleMissing), not here —
+    // a buffer-mode bus whose handlers always beat its dispatches allocates nothing.
+    deferred: null,
   };
   const bus: CommandBus<M> = {
     // Sync bus accepts the options arg for type compatibility with BaseBus,
@@ -1445,6 +1480,7 @@ async function asyncDispatchBatch(s: AsyncState, commands: BatchCommand[], opts:
 async function asyncRollback(s: AsyncState, commands: BatchCommand[], results: CommandResult[], failedAt: number): Promise<CommandResult[]> {
   const rollbacks: CommandResult[] = [];
   for (let j = failedAt - 1; j >= 0; j--) {
+    /* v8 ignore next -- defensive: batch halts at first failure, so every j < failedAt is ok */
     if (!results[j].ok) continue;
     const undo = s.undoHandlers.get(commands[j].action);
     if (!undo) continue;
@@ -1474,9 +1510,10 @@ async function asyncRequest(s: AsyncState, action: string, target: any, payload?
   // Pre-flight abort — return immediately, don't dedup or dispatch.
   if (signal?.aborted) return abortedResult(action, signal);
 
-  // Dedup key: action + serialized target (same action+target = same request)
-  let dedupKey: string;
-  try { dedupKey = `${action}:${JSON.stringify(target)}`; } catch { dedupKey = `${action}:${String(target)}`; }
+  // Dedup key — the canonical commandKey: order-independent and nested-faithful,
+  // so the same logical request collapses regardless of key order while distinct
+  // nested targets stay separate (no false-dedup). Shared with debounce/throttle/cache.
+  const dedupKey = commandKey(action, target);
 
   // If an identical request is already in-flight, piggyback on it
   const inflight = s.pendingRequests.get(dedupKey);
@@ -1572,8 +1609,9 @@ export function createAsyncCommandBus<M extends CommandMap = CommandMap>(options
     dispatchDepth: 0,
     sealed: false,
     throttleTimers: new Set(),
-    // Only allocate the buffer queue when buffering is actually requested.
-    deferred: options.onMissing === 'buffer' ? new Map() : null,
+    // Lazily allocated on the first buffered command (handleMissing), not here —
+    // a buffer-mode bus whose handlers always beat its dispatches allocates nothing.
+    deferred: null,
   };
   const bus: AsyncCommandBus<M> = {
     dispatch:          (a, t, p, o)  => asyncDispatch(s, a as string, t, p, undefined, o?.signal),

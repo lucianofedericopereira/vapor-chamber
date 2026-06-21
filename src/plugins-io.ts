@@ -271,7 +271,7 @@ export function sync(
 
     bc.onmessage = (event: MessageEvent<SyncMessage>) => {
       const msg = event.data;
-      if (!msg || !msg.__vc) return;
+      if (!msg?.__vc) return;
 
       const cmd: Command = { action: msg.action, target: msg.target, payload: msg.payload };
 

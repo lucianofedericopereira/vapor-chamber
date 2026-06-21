@@ -48,7 +48,7 @@ describe('useCommandGroup — query / emit / use / on / dispose', () => {
   it('dispose() unhooks registrations, listeners, and plugins', () => {
     const cart = useCommandGroup('cart');
     const calls: string[] = [];
-    cart.use((cmd, next) => { calls.push('plugin'); return next(); });
+    cart.use((_cmd, next) => { calls.push('plugin'); return next(); });
     cart.on('*', () => calls.push('listener'));
     cart.register('add', () => { calls.push('handler'); });
 

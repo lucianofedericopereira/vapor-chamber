@@ -6,6 +6,7 @@
  * These use only the public BaseBus interface. They are optional and tree-shaken.
  */
 
+import { disposeAll } from './command-bus';
 import type { BaseBus, Command, CommandResult, Handler, RegisterOptions, } from './command-bus';
 
 // ---------------------------------------------------------------------------
@@ -45,6 +46,10 @@ export function createChamber(
   handlers: ChamberHandlers,
   opts: ChamberOptions = {},
 ): Chamber {
+  // camelCase namespace join ('cart' + 'add' → 'cartAdd'). Inlined, NOT a shared
+  // helper — DO NOT consolidate, settled, do not re-evaluate. The per-dispatch sites
+  // (useCommandGroup / transitions) measured ~1% slower with a shared call; this site
+  // is setup-only but stays inline for one consistent shape. Keep in sync.
   function actionName(shortName: string): string {
     return namespace + shortName.charAt(0).toUpperCase() + shortName.slice(1);
   }
@@ -56,7 +61,7 @@ export function createChamber(
       const regOpts = opts.options?.[short];
       unsubs.push(bus.register(action, handler, regOpts));
     }
-    return () => { unsubs.forEach(fn => fn()); };
+    return () => { disposeAll(unsubs); };
   }
 
   return { namespace, install, actionName };

@@ -3,7 +3,7 @@
   vapor-chamber composables to dispatch and observe a shared bus.
 
   Renders three panels:
-    1. CartPanel — uses useVaporCommand for per-button loading state
+    1. CartPanel — uses useCommand for per-button loading state
     2. SearchPanel — uses defineVaporCommand for fire-and-forget telemetry
     3. StatusBar — uses useSharedCommandState for cross-component aggregate state
 -->
@@ -19,7 +19,7 @@ import StatusBar from './StatusBar.vue';
 // async handler's promise is wrapped as a plain ok-value — rejections escape
 // as unhandled and lastError never fires.
 const bus = createAsyncCommandBus();
-setCommandBus(bus as any); // share it: useVaporCommand/useSharedCommandState pick it up
+setCommandBus(bus as any); // share it: useCommand/useSharedCommandState pick it up
 
 // Stateful fake server: the cart accumulates across dispatches, so the UI's
 // confirmed totals actually move. (Was stateless — total stuck at $19.99.)

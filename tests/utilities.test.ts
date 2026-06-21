@@ -119,7 +119,7 @@ describe('createWorkflow', () => {
 
     const wf = createWorkflow([{
       action:     'step',
-      mapTarget:  (t, p) => ({ id: p.userId }),
+      mapTarget:  (_t, p) => ({ id: p.userId }),
       mapPayload: (t)    => ({ extra: t.ctx }),
     }]);
 

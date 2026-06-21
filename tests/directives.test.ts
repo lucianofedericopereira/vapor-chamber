@@ -28,9 +28,10 @@ function createMockApp() {
 function createElement(tag = 'button'): any {
   const classes = new Set<string>();
   const listeners = new Map<string, Function>();
+  const listenerOpts = new Map<string, any>();
   const dataset: Record<string, string> = {};
 
-  return {
+  const self: any = {
     tagName: tag.toUpperCase(),
     classList: {
       add(c: string) { classes.add(c); },
@@ -38,15 +39,25 @@ function createElement(tag = 'button'): any {
       has(c: string) { return classes.has(c); },
       contains(c: string) { return classes.has(c); },
     },
-    addEventListener(event: string, fn: Function) { listeners.set(event, fn); },
+    addEventListener(event: string, fn: Function, opts?: any) {
+      listeners.set(event, fn);
+      if (opts !== undefined) listenerOpts.set(event, opts);
+    },
     removeEventListener(event: string) { listeners.delete(event); },
-    triggerClick() { listeners.get('click')?.(new Event('click')); },
+    // Fire the click handler. Pass a custom (duck-typed) event to exercise
+    // modifiers; defaults to a self-targeted plain event.
+    triggerClick(evt?: any) {
+      listeners.get('click')?.(evt ?? { type: 'click', target: self, stopPropagation() {}, preventDefault() {} });
+    },
+    hasClick() { return listeners.has('click'); },
     disabled: false,
     dataset,
     get _classes() { return [...classes]; },
+    get _listenerOpts() { return listenerOpts.get('click'); },
     // Type guard — mock is not HTMLButtonElement by default
     ...(tag === 'button' ? { __isButton: true } : {}),
   };
+  return self;
 }
 
 describe('createDirectivePlugin', () => {
@@ -127,6 +138,69 @@ describe('createDirectivePlugin', () => {
       vcDir.mounted(el, { arg: 'command', value: 'ariaAction', modifiers: {} });
       el.triggerClick();
       expect(calls).toBe(0);
+    });
+
+    // Event modifiers — the direct listener never sees Vue's compiled withModifiers,
+    // so v-vc:command applies .stop/.prevent/.self/.left/.middle/.right/.capture/
+    // .once/.passive itself (the numeric modifier remains the dispatch timeout).
+    describe('event modifiers', () => {
+      it('honors .stop and .prevent on the DOM event', () => {
+        const el = createElement();
+        let calls = 0, stopped = 0, prevented = 0;
+        bus.register('mAction', () => { calls += 1; });
+        const vcDir = app.getDirective('vc');
+        vcDir.mounted(el, { arg: 'command', value: 'mAction', modifiers: { stop: true, prevent: true } });
+        el.triggerClick({ type: 'click', target: el, stopPropagation() { stopped += 1; }, preventDefault() { prevented += 1; } });
+        expect(stopped).toBe(1);
+        expect(prevented).toBe(1);
+        expect(calls).toBe(1);
+      });
+
+      it('honors .self — only dispatches when the event targets the bound element', () => {
+        const el = createElement();
+        let calls = 0;
+        bus.register('selfAction', () => { calls += 1; });
+        const vcDir = app.getDirective('vc');
+        vcDir.mounted(el, { arg: 'command', value: 'selfAction', modifiers: { self: true } });
+        // target is a different element → ignored
+        el.triggerClick({ type: 'click', target: {}, stopPropagation() {}, preventDefault() {} });
+        expect(calls).toBe(0);
+        // target is the bound element → dispatched
+        el.triggerClick({ type: 'click', target: el, stopPropagation() {}, preventDefault() {} });
+        expect(calls).toBe(1);
+      });
+
+      it('honors mouse-button modifiers (.left / .right)', () => {
+        const el = createElement();
+        let calls = 0;
+        bus.register('btnAction', () => { calls += 1; });
+        const vcDir = app.getDirective('vc');
+        vcDir.mounted(el, { arg: 'command', value: 'btnAction', modifiers: { left: true } });
+        // right button (2) → ignored
+        el.triggerClick({ type: 'click', target: el, button: 2, stopPropagation() {}, preventDefault() {} });
+        expect(calls).toBe(0);
+        // left button (0) → dispatched
+        el.triggerClick({ type: 'click', target: el, button: 0, stopPropagation() {}, preventDefault() {} });
+        expect(calls).toBe(1);
+      });
+
+      it('passes .capture / .once / .passive as addEventListener options', () => {
+        const el = createElement();
+        const vcDir = app.getDirective('vc');
+        vcDir.mounted(el, { arg: 'command', value: 'optAction', modifiers: { capture: true, once: true, passive: true } });
+        expect(el._listenerOpts).toEqual({ capture: true, once: true, passive: true });
+      });
+
+      it('still reads the numeric .timeout modifier alongside event modifiers', () => {
+        const el = createElement();
+        let calls = 0;
+        bus.register('tAction', () => { calls += 1; });
+        const vcDir = app.getDirective('vc');
+        // numeric modifier (timeout) + a real event modifier must coexist
+        vcDir.mounted(el, { arg: 'command', value: 'tAction', modifiers: { '5000': true, stop: true } });
+        el.triggerClick({ type: 'click', target: el, stopPropagation() {}, preventDefault() {} });
+        expect(calls).toBe(1);
+      });
     });
   });
 });

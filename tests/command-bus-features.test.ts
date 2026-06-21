@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import { createCommandBus, createAsyncCommandBus, createCommandPool, commandKey, unsealBus, inspectBus, BusError } from '../src/command-bus';
+import { createCommandBus, createAsyncCommandBus, createCommandPool, commandKey, unsealBus, inspectBus, BusError, matchesPattern, disposeAll } from '../src/command-bus';
 import { optimisticUndo } from '../src/plugins-core';
 import { createTestBus } from '../src/testing';
 import { getCommandBus, setCommandBus, resetCommandBus, useCommandBus } from '../src/chamber';
@@ -132,8 +132,8 @@ describe('plugin priority', () => {
     const bus = createCommandBus();
     const order: string[] = [];
 
-    bus.use((cmd, next) => { order.push('low'); return next(); }, { priority: 1 });
-    bus.use((cmd, next) => { order.push('high'); return next(); }, { priority: 10 });
+    bus.use((_cmd, next) => { order.push('low'); return next(); }, { priority: 1 });
+    bus.use((_cmd, next) => { order.push('high'); return next(); }, { priority: 10 });
 
     bus.register('test', () => null);
     bus.dispatch('test', {});
@@ -145,8 +145,8 @@ describe('plugin priority', () => {
     const bus = createCommandBus();
     const order: string[] = [];
 
-    bus.use((cmd, next) => { order.push('first'); return next(); }, { priority: 5 });
-    bus.use((cmd, next) => { order.push('second'); return next(); }, { priority: 5 });
+    bus.use((_cmd, next) => { order.push('first'); return next(); }, { priority: 5 });
+    bus.use((_cmd, next) => { order.push('second'); return next(); }, { priority: 5 });
 
     bus.register('test', () => null);
     bus.dispatch('test', {});
@@ -158,8 +158,8 @@ describe('plugin priority', () => {
     const bus = createCommandBus();
     const order: string[] = [];
 
-    bus.use((cmd, next) => { order.push('default'); return next(); });
-    bus.use((cmd, next) => { order.push('priority'); return next(); }, { priority: 1 });
+    bus.use((_cmd, next) => { order.push('default'); return next(); });
+    bus.use((_cmd, next) => { order.push('priority'); return next(); }, { priority: 1 });
 
     bus.register('test', () => null);
     bus.dispatch('test', {});
@@ -171,8 +171,8 @@ describe('plugin priority', () => {
     const bus = createCommandBus();
     const order: string[] = [];
 
-    const unsub = bus.use((cmd, next) => { order.push('high'); return next(); }, { priority: 10 });
-    bus.use((cmd, next) => { order.push('low'); return next(); }, { priority: 1 });
+    const unsub = bus.use((_cmd, next) => { order.push('high'); return next(); }, { priority: 10 });
+    bus.use((_cmd, next) => { order.push('low'); return next(); }, { priority: 1 });
 
     bus.register('test', () => null);
     unsub();
@@ -1251,7 +1251,7 @@ describe('syncUse async plugin warning', () => {
   it('warns when async function installed on sync bus', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createCommandBus();
-    bus.use(async (cmd, next) => next());
+    bus.use(async (_cmd, next) => next());
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('Async plugin'));
     warn.mockRestore();
   });
@@ -1344,7 +1344,7 @@ describe('createTestBus afterHook silent catch', () => {
 describe('createTestBus double-unsub is a no-op', () => {
   it('calling use() unsub twice does not throw', () => {
     const bus = createTestBus();
-    const unsub = bus.use((cmd, next) => next());
+    const unsub = bus.use((_cmd, next) => next());
     unsub();
     expect(() => unsub()).not.toThrow(); // i === -1 on second call
   });
@@ -1408,7 +1408,7 @@ describe('sync dispatchBatch continueOnError multiple failures', () => {
 describe('sync bus double-unsub is a no-op', () => {
   it('use() unsub called twice does not throw', () => {
     const bus = createCommandBus();
-    const unsub = bus.use((cmd, next) => next());
+    const unsub = bus.use((_cmd, next) => next());
     unsub();
     expect(() => unsub()).not.toThrow();
   });
@@ -1474,7 +1474,7 @@ describe('async register with throttle option', () => {
 describe('async bus double-unsub is a no-op', () => {
   it('use() unsub called twice does not throw', async () => {
     const bus = createAsyncCommandBus();
-    const unsub = bus.use(async (cmd, next) => next());
+    const unsub = bus.use(async (_cmd, next) => next());
     unsub();
     expect(() => unsub()).not.toThrow();
   });
@@ -1766,7 +1766,7 @@ describe('seal() — freeze bus topology', () => {
   it('seal() prevents use() after sealing', () => {
     const bus = createCommandBus();
     bus.seal();
-    expect(() => bus.use((cmd, next) => next())).toThrow(/sealed/i);
+    expect(() => bus.use((_cmd, next) => next())).toThrow(/sealed/i);
   });
 
   it('seal() prevents onBefore() after sealing', () => {
@@ -1949,7 +1949,7 @@ describe('dispose() — full teardown', () => {
     bus.onBefore(() => {});
     bus.onAfter(() => {});
     bus.on('a', () => {});
-    bus.use((cmd, next) => next());
+    bus.use((_cmd, next) => next());
 
     bus.dispose();
 
@@ -2157,7 +2157,7 @@ describe('TestBus seal()', () => {
   it('prevents use after sealing', () => {
     const bus = createTestBus();
     bus.seal();
-    expect(() => bus.use((cmd, next) => next())).toThrow(/sealed/i);
+    expect(() => bus.use((_cmd, next) => next())).toThrow(/sealed/i);
   });
 
   it('clear resets sealed state', () => {
@@ -2384,8 +2384,8 @@ describe('inspectBus (sync)', () => {
     const bus = createCommandBus();
     bus.register('cartAdd', () => 'added', { undo: () => {} });
     bus.register('cartRemove', () => 'removed');
-    bus.use((cmd, next) => next(), { priority: 10 });
-    bus.use((cmd, next) => next(), { priority: 5 });
+    bus.use((_cmd, next) => next(), { priority: 10 });
+    bus.use((_cmd, next) => next(), { priority: 5 });
     bus.onBefore(() => {});
     bus.onAfter(() => {});
     bus.on('cart*', () => {});
@@ -2458,5 +2458,329 @@ describe('TestBus.inspect()', () => {
     expect(info.beforeHookCount).toBe(1);
     expect(info.listenerPatterns).toEqual(['a*']);
     expect(info.sealed).toBe(false);
+  });
+});
+
+// ─── core dispatch — error & edge branches (coverage of the §19 core guarantee) ──
+//
+// These exercise the real createCommandBus/createAsyncCommandBus paths (NOT the
+// TestBus, whose dispatch lives in the coverage-excluded testing.ts), closing the
+// last untested branches in command-bus.ts: hook-throw, offAll-clear-all, the
+// async transactional abort/rollback paths, and the inspectBus fallback.
+
+describe('core dispatch — error & edge branches', () => {
+  it('real sync bus: a throwing onBefore hook cancels dispatch and returns errResult', () => {
+    const bus = createCommandBus();
+    let handlerRan = false;
+    bus.register('act', () => { handlerRan = true; return 1; });
+    bus.onBefore(() => { throw new Error('blocked-by-hook'); });
+
+    const result = bus.dispatch('act', {});
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.message).toBe('blocked-by-hook');
+    expect(handlerRan).toBe(false); // handler never runs — hook short-circuits
+  });
+
+  it('real async bus: a throwing onBefore hook cancels dispatch and returns errResult', async () => {
+    const bus = createAsyncCommandBus();
+    let handlerRan = false;
+    bus.register('act', async () => { handlerRan = true; return 1; });
+    bus.onBefore(async () => { throw new Error('async-blocked'); });
+
+    const result = await bus.dispatch('act', {});
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.message).toBe('async-blocked');
+    expect(handlerRan).toBe(false);
+  });
+
+  it('offAll() with no pattern clears every exact and wildcard listener', () => {
+    const bus = createCommandBus();
+    const hits: string[] = [];
+    bus.on('cartAdd', () => { hits.push('exact'); });
+    bus.on('cart*', () => { hits.push('wild'); });
+    expect(inspectBus(bus).listenerPatterns.length).toBeGreaterThan(0);
+
+    bus.offAll(); // no pattern → clear-all branch
+
+    bus.emit('cartAdd', {});
+    expect(hits).toEqual([]);
+    expect(inspectBus(bus).listenerPatterns).toEqual([]);
+  });
+
+  it('async bus: offAll() clears listeners through the async facade', () => {
+    const bus = createAsyncCommandBus();
+    const hits: string[] = [];
+    bus.on('order*', () => { hits.push('x'); });
+
+    bus.offAll();
+
+    bus.emit('orderPlaced', {});
+    expect(hits).toEqual([]);
+    expect(inspectBus(bus).listenerPatterns).toEqual([]);
+  });
+
+  it('async transactional batch aborted mid-flight rolls back the succeeded command', async () => {
+    const ac = new AbortController();
+    const bus = createAsyncCommandBus();
+    const undoCalls: string[] = [];
+    // first succeeds AND aborts the signal; the loop sees aborted before command 2
+    bus.register('first', async () => { ac.abort(); return 'ok1'; }, { undo: () => { undoCalls.push('undo-first'); } });
+    bus.register('second', async () => 'ok2');
+
+    const result = await bus.dispatchBatch([
+      { action: 'first', target: {} },
+      { action: 'second', target: {} },
+    ], { transactional: true, signal: ac.signal });
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toBeDefined();
+    expect(result.successCount).toBe(0); // rolled back → reported as 0
+    expect(result.rollbacks).toHaveLength(1);
+    expect(undoCalls).toEqual(['undo-first']);
+  });
+
+  it('async transactional rollback captures a throwing undo handler', async () => {
+    const bus = createAsyncCommandBus();
+    bus.register('a', async () => 'ok', { undo: () => { throw new Error('async-undo-broke'); } });
+    bus.register('b', async () => { throw new Error('b-fail'); });
+
+    const result = await bus.dispatchBatch([
+      { action: 'a', target: {} },
+      { action: 'b', target: {} },
+    ], { transactional: true });
+
+    expect(result.ok).toBe(false);
+    expect(result.rollbacks).toHaveLength(1);
+    expect(result.rollbacks![0].ok).toBe(false);
+    expect(result.rollbacks![0].error?.message).toBe('async-undo-broke');
+  });
+
+  it('inspectBus falls back for a bus without the internal inspect symbol', () => {
+    const bus = createTestBus({ passthroughHandlers: true });
+    bus.register('a', () => 1, { undo: () => {} });
+    bus.register('b', () => 2);
+
+    // TestBus exposes a public .inspect() but not the private _INSPECT symbol,
+    // so inspectBus() takes the fallback branch — undoActions is always [] there.
+    const info = inspectBus(bus);
+
+    expect(info.actions).toEqual(['a', 'b']);
+    expect(info.undoActions).toEqual([]);
+    expect(info.responderActions).toEqual([]);
+    expect(info.pluginCount).toBe(0);
+  });
+});
+
+describe('core dispatch — query, rollback, buffer & error defaults', () => {
+  it('sync query() on a missing handler routes through the plugin runner', () => {
+    const bus = createCommandBus();
+    bus.use((_cmd, next) => next()); // installing a plugin forces the runner path
+    const r = bus.query('nope', {});
+    expect(r.ok).toBe(false);
+    expect(r.error?.message).toContain('No handler');
+  });
+
+  it('async query() on a missing handler — bare and plugin-runner paths', async () => {
+    const bare = createAsyncCommandBus();
+    const r1 = await bare.query('nope', {});
+    expect(r1.ok).toBe(false);
+
+    const withPlugin = createAsyncCommandBus();
+    withPlugin.use((_cmd, next) => next());
+    const r2 = await withPlugin.query('nope', {});
+    expect(r2.ok).toBe(false);
+  });
+
+  it('async transactional rollback skips commands without an undo handler', async () => {
+    const bus = createAsyncCommandBus();
+    const undoCalls: string[] = [];
+    bus.register('a', async () => 'ok-a'); // no undo
+    bus.register('b', async () => 'ok-b', { undo: () => { undoCalls.push('undo-b'); } });
+    bus.register('c', async () => { throw new Error('c-fail'); });
+
+    const result = await bus.dispatchBatch([
+      { action: 'a', target: {} },
+      { action: 'b', target: {} },
+      { action: 'c', target: {} },
+    ], { transactional: true });
+
+    expect(result.ok).toBe(false);
+    expect(undoCalls).toEqual(['undo-b']); // 'a' skipped — no undo handler
+    expect(result.rollbacks).toHaveLength(1);
+  });
+
+  it("onMissing:'buffer' drops the oldest and warns when bufferLimit is exceeded", () => {
+    const bus = createCommandBus({ onMissing: 'buffer', bufferLimit: 2 });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    bus.dispatch('later', { id: 1 });
+    bus.dispatch('later', { id: 2 });
+    bus.dispatch('later', { id: 3 }); // exceeds limit → drop oldest (id 1) + warn
+    expect(warn).toHaveBeenCalledTimes(1);
+    warn.mockRestore();
+
+    const seen: number[] = [];
+    bus.register('later', (cmd) => { seen.push(cmd.target.id); });
+    expect(seen).toEqual([2, 3]); // id 1 was dropped before the handler registered
+  });
+
+  it('unsealBus is a safe no-op on a bus without the internal unseal symbol', () => {
+    const bus = createTestBus({ passthroughHandlers: true });
+    expect(() => unsealBus(bus)).not.toThrow();
+  });
+
+  it('BusError applies default severity/emitter and omits cause when opts are absent', () => {
+    const e = new BusError('VC_CORE_MAX_DEPTH', 'boom');
+    expect(e.severity).toBe('error');
+    expect(e.emitter).toBe('core');
+    expect(e.cause).toBeUndefined();
+
+    const e2 = new BusError('VC_CORE_MAX_DEPTH', 'x', { cause: new Error('c'), severity: 'warn', emitter: 'plugin' });
+    expect(e2.cause).toBeInstanceOf(Error);
+    expect(e2.severity).toBe('warn');
+    expect(e2.emitter).toBe('plugin');
+  });
+
+  it('exact-listener unsubscribe is safe after offAll() cleared the bucket', () => {
+    const bus = createCommandBus();
+    const un = bus.on('exactOnly', () => {}); // no wildcard → exact listener
+    bus.offAll(); // clears the exact-listener map
+    expect(() => un()).not.toThrow(); // bucket now undefined → early return
+  });
+
+  it('flushDeferred is a no-op for an action with nothing queued while others are buffered', () => {
+    const bus = createCommandBus({ onMissing: 'buffer' });
+    bus.dispatch('queuedAction', { id: 1 }); // buffers A → deferred.size === 1
+    const seen: unknown[] = [];
+    // size !== 0 so register() DOES call flushDeferred, but the queue for
+    // 'otherAction' is undefined → early return (nothing replayed)
+    bus.register('otherAction', (cmd) => { seen.push(cmd); });
+    expect(seen).toEqual([]);
+    // the genuinely-queued action still replays when its own handler registers
+    const aSeen: number[] = [];
+    bus.register('queuedAction', (cmd) => { aSeen.push(cmd.target.id); });
+    expect(aSeen).toEqual([1]);
+  });
+
+  it('exact-listener unsubscribe is idempotent when called twice', () => {
+    const bus = createCommandBus();
+    const a = () => {};
+    const unA = bus.on('evt', a);
+    bus.on('evt', () => {}); // second listener keeps the bucket alive after unA
+    unA(); // removes 'a' (i !== -1)
+    expect(() => unA()).not.toThrow(); // bucket still exists, 'a' gone → i === -1, no splice
+  });
+
+  it("onMissing:'buffer' overflow skips the dev warning in production", () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const bus = createCommandBus({ onMissing: 'buffer', bufferLimit: 1 });
+
+    bus.dispatch('x', { id: 1 });
+    bus.dispatch('x', { id: 2 }); // overflow, but NODE_ENV==='production' → no warn
+
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
+  it('prefix cache evicts the oldest entry at capacity (bounded LRU)', () => {
+    // matchesPattern memoizes each wildcard prefix in a bounded LRU
+    // (_PREFIX_CACHE_MAX = 256); exceeding it evicts the oldest entry.
+    for (let i = 0; i < 300; i++) {
+      expect(matchesPattern(`evt${i}.*`, `evt${i}.fired`)).toBe(true);
+    }
+    // a fresh distinct pattern still resolves correctly after eviction churn
+    expect(matchesPattern('finalEvt.*', 'finalEvt.x')).toBe(true);
+    expect(matchesPattern('finalEvt.*', 'nope.x')).toBe(false);
+  });
+
+  it('async rollback awaits an undo handler that returns a promise', async () => {
+    const bus = createAsyncCommandBus();
+    const undone: string[] = [];
+    bus.register('a', async () => 'ok', { undo: async () => { undone.push('async-undo'); } });
+    bus.register('b', async () => { throw new Error('b-fail'); });
+
+    const result = await bus.dispatchBatch([
+      { action: 'a', target: {} },
+      { action: 'b', target: {} },
+    ], { transactional: true });
+
+    expect(result.ok).toBe(false);
+    expect(undone).toEqual(['async-undo']);
+    expect(result.rollbacks![0].ok).toBe(true); // awaited promise resolved
+  });
+});
+
+// ─── disposeAll — shared idempotent teardown ────────────────────────────────────
+
+describe('disposeAll — teardown helper', () => {
+  it('runs every disposer in insertion order, then empties the list', () => {
+    const order: number[] = [];
+    const fns = [() => order.push(1), () => order.push(2), () => order.push(3)];
+    disposeAll(fns);
+    expect(order).toEqual([1, 2, 3]);
+    expect(fns).toHaveLength(0); // cleared
+  });
+
+  it('is idempotent — a second call is a no-op', () => {
+    let calls = 0;
+    const fns = [() => { calls++; }, () => { calls++; }];
+    disposeAll(fns);
+    disposeAll(fns); // already empty → nothing re-runs
+    expect(calls).toBe(2);
+  });
+});
+
+// ─── commandKey — canonical key (order-independent, nested-faithful) ─────────────
+
+describe('commandKey — canonical serialization', () => {
+  it('is order-independent at every level', () => {
+    expect(commandKey('x', { a: 1, b: 2 })).toBe(commandKey('x', { b: 2, a: 1 }));
+    expect(commandKey('x', { o: { a: 1, b: 2 } })).toBe(commandKey('x', { o: { b: 2, a: 1 } }));
+  });
+
+  it('distinguishes nested differences — no lossy collapse', () => {
+    // regression: the old top-level array replacer dropped nested keys, colliding these
+    expect(commandKey('s', { q: { page: 2 } })).not.toBe(commandKey('s', { q: { page: 3 } }));
+  });
+
+  it('preserves array order', () => {
+    expect(commandKey('x', { items: [1, 2] })).not.toBe(commandKey('x', { items: [2, 1] }));
+  });
+
+  it('fast-paths primitives and null', () => {
+    expect(commandKey('x', 5)).toBe('x:5');
+    expect(commandKey('x', null)).toBe('x:null');
+    expect(commandKey('x', undefined)).toBe('x:undefined');
+  });
+});
+
+// ─── request() in-flight dedup now uses the canonical commandKey ─────────────────
+
+describe('request() dedup keys on canonical commandKey', () => {
+  it('dedups identical requests regardless of target key order', async () => {
+    const bus = createAsyncCommandBus();
+    let calls = 0;
+    bus.respond('act', async () => { calls++; await new Promise(r => setTimeout(r, 10)); return calls; });
+    const [r1, r2] = await Promise.all([
+      bus.request('act', { a: 1, b: 2 }),
+      bus.request('act', { b: 2, a: 1 }), // same content, different order → now deduped
+    ]);
+    expect(calls).toBe(1);
+    expect(r1.value).toBe(r2.value);
+  });
+
+  it('keeps nested-different requests separate — no false-dedup', async () => {
+    const bus = createAsyncCommandBus();
+    let calls = 0;
+    bus.respond('act', async () => { calls++; await new Promise(r => setTimeout(r, 10)); return calls; });
+    await Promise.all([
+      bus.request('act', { q: { page: 2 } }),
+      bus.request('act', { q: { page: 3 } }),
+    ]);
+    expect(calls).toBe(2);
   });
 });

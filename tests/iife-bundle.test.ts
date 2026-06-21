@@ -68,7 +68,7 @@ describe.skipIf(!haveAll)('IIFE variants — audience-based contracts', () => {
         'mount',
         'defineVaporCustomElement', 'defineWidget',
         'defineVaporComponent', 'defineVaporAsyncComponent',
-        'useVaporCommand', 'useVaporAsyncCommand',
+        'useCommand', 'useVaporAsyncCommand',
       ]);
     });
   });
@@ -95,7 +95,7 @@ describe.skipIf(!haveAll)('IIFE variants — audience-based contracts', () => {
         'persist', 'sync', 'history', 'optimistic',
         'mount',
         'defineVaporComponent', 'defineVaporAsyncComponent',
-        'useVaporCommand', 'useVaporAsyncCommand',
+        'useCommand', 'useVaporAsyncCommand',
       ]);
     });
   });
@@ -119,7 +119,7 @@ describe.skipIf(!haveAll)('IIFE variants — audience-based contracts', () => {
         'defineVaporCustomElement', 'defineWidget', 'emitDOMEvent',
         // full Vapor surface
         'defineVaporComponent', 'defineVaporAsyncComponent',
-        'defineVaporCommand', 'useVaporCommand', 'useVaporAsyncCommand',
+        'defineVaporCommand', 'useCommand', 'useVaporAsyncCommand',
         'createVaporChamberApp',
       ]);
     });

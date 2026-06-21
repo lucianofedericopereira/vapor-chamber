@@ -5,7 +5,7 @@
  */
 
 import type { Command, CommandResult, Plugin, CommandBus } from './command-bus';
-import { BusError, commandKey } from './command-bus';
+import { BusError, commandKey, disposeAll } from './command-bus';
 
 /**
  * Logger plugin - logs all commands and results
@@ -161,8 +161,7 @@ export function history(options: {
     },
 
     dispose: () => {
-      for (const un of _triggerUnregisters) un();
-      _triggerUnregisters.length = 0;
+      disposeAll(_triggerUnregisters);
     },
   });
 

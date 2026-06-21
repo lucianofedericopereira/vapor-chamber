@@ -139,7 +139,7 @@ describe('A7: form isValidating and isBusy', () => {
     const form = createFormBus({
       fields: { email: 'test@x.com' },
       rules: {
-        email: async (v) => {
+        email: async (_v) => {
           validatingDuringRule = form.isValidating.value;
           await new Promise(r => setTimeout(r, 10));
           return null;
