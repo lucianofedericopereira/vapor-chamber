@@ -47,10 +47,20 @@ jobs:
       - run: npm run test:run
       - run: node scripts/check-size.mjs
       - run: npm run loc
-      # Generated size docs must match reality. Shifted from 24 to 22 to match deployment environment.
-      - if: matrix.os == 'ubuntu-latest' && matrix.node == '22'
-        name: docs bundle sizes are fresh
-        run: npm run size:doc && git diff --exit-code docs/BUNDLE-SIZES.md
+      
+      # Automatically updates and commits the bundle size file if GitHub detects a difference
+      - name: Update bundle sizes docs
+        if: matrix.os == 'ubuntu-latest' && matrix.node == '22'
+        run: |
+          npm run size:doc
+          if ! git diff --exit-code docs/BUNDLE-SIZES.md; then
+            git config --global user.name "github-actions[bot]"
+            git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add docs/BUNDLE-SIZES.md
+            git commit -m "docs: auto-update bundle sizes [skip ci]"
+            git push
+          fi
+
       # Coverage gate on the canonical entry only (threshold in vitest.config.ts).
       - if: matrix.os == 'ubuntu-latest' && matrix.node == '24'
         run: npm run test:coverage
