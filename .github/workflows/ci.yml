@@ -28,6 +28,9 @@ jobs:
   test:
     name: test (Node ${{ matrix.node }} / ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # CRITICAL: Allows the github-actions[bot] to push the auto-updated bundle sizes
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
