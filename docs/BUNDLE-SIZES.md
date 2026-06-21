@@ -35,4 +35,4 @@ from it is ~3.6 KB brotli, not 20.3 KB).
 |---|--:|--:|--:|
 | `vapor-chamber (full)` | 35.4 | 11.3 | 10.2 |
 | `vapor-chamber-core` | 24.4 | 7.8 | 7.0 |
-| `vapor-chamber-elements` | 25.9 | 8.3 | 7.4 |
+| `vapor-chamber-elements` | 25.9 | 8.2 | 7.4 |
