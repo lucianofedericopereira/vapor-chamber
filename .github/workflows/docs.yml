@@ -8,6 +8,7 @@ on:
       - 'typedoc.json'
       - 'README.md'
       - 'package.json'
+      - 'docs/BUNDLE-SIZES.md' # <-- Adds trigger when bundle sizes file updates
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
