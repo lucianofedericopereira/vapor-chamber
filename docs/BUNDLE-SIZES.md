@@ -17,7 +17,7 @@ from it is ~3.6 KB brotli, not 20.4 KB).
 
 | export | min KB | gzip KB | brotli KB |
 |---|--:|--:|--:|
-| `.` | 70.0 | 23.1 | 20.4 |
+| `.` | 70.0 | 23.2 | 20.4 |
 | `./transports` | 9.3 | 4.0 | 3.6 |
 | `./directives` | 15.8 | 5.5 | 4.9 |
 | `./transitions` | 14.2 | 4.9 | 4.4 |
@@ -33,6 +33,6 @@ from it is ~3.6 KB brotli, not 20.4 KB).
 
 | variant | min KB | gzip KB | brotli KB |
 |---|--:|--:|--:|
-| `vapor-chamber (full)` | 35.4 | 11.3 | 10.2 |
+| `vapor-chamber (full)` | 35.6 | 11.4 | 10.2 |
 | `vapor-chamber-core` | 24.5 | 7.8 | 7.0 |
-| `vapor-chamber-elements` | 26.0 | 8.3 | 7.4 |
+| `vapor-chamber-elements` | 26.0 | 8.2 | 7.4 |
