@@ -529,6 +529,20 @@ superseded per-beta notes don't need their own section).
 > It is a candidate for our own allocation-on-the-uncertain-branch hot paths, but only lands with a
 > measured same-host A/B and after the Vapor-first/bus-first decision at 3.6 stable — not on a guess.
 
+> **beta.17 (unreleased):** no lib code change again — every beta.17 fix is compiler-vapor
+> (compile-time, below us), runtime slot/hydration/interop (below the command-replay or inherited
+> through the `getVaporInteropPlugin()` pass-through), or a reactivity/scheduler fix the lib never
+> touches. The full bench was re-run against beta.17 on a dev host and is **green**: the
+> Vue-independent rows land on the recorded baselines (plain `{ value }` floor ~368k ops/s, fast-lane
+> ~28.7k, `bus.dispatch` ~1.78k, `emit` with no listeners ~25.4k), confirming no regression; the
+> Vue-reactive rows stay inside their recorded ranges. No controlled cross-beta delta is claimed.
+> **Pattern worth noting:** Vue's #14984 (*preserve render-effect creation order when updating*) had
+> to add creation-order as a scheduler tiebreaker behind component id — the same insertion-order
+> invariant the bus already gets **for free** from JS's stable `Array.prototype.sort` on
+> equal-priority plugins (`byPriority`), and already pins with the `equal priority preserves
+> registration order` regression test. Nothing to act on; the lib's ordering was already correct by
+> construction, but the parallel is a good reminder of why that test stays.
+
 **1. The plain `{ value }` fallback remains the fastest write path at ~372,000 ops/sec.**
 Essentially unchanged from beta.13 (~368k) — within normal run-to-run variance.
 The fallback is not reactive; for push-pull reactivity without Vue, use

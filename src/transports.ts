@@ -249,7 +249,6 @@ export type WsBridgeOptions = {
 
 type PendingRequest = {
   resolve: (result: CommandResult) => void;
-  reject: (error: Error) => void;
   timeoutId: ReturnType<typeof setTimeout>;
 };
 
@@ -338,6 +337,24 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
     }
   }
 
+  /**
+   * Settle every in-flight request immediately with a failure result, and drop
+   * any unsent queued messages. Called on terminal teardown — an explicit
+   * `disconnect()`, or a socket close with no reconnect pending — so a caller
+   * awaiting a response doesn't hang until its per-request timeout fires.
+   * Uses `resolve({ ok:false })`, matching every other settle path: the bus
+   * never rejects a dispatch promise; failures are `CommandResult` values.
+   */
+  function failAllPending(reason: string): void {
+    if (pending.size === 0 && queue.length === 0) return;
+    queue.length = 0;
+    const reqs = Array.from(pending.values());
+    pending.clear();
+    for (const req of reqs) {
+      req.resolve({ ok: false, error: new Error(reason) });
+    }
+  }
+
   function scheduleReconnect(): void {
     if (!reconnect || intentionalClose || reconnectCount >= maxReconnects) return;
     reconnectCount++;
@@ -381,7 +398,13 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
     ws.onclose = (event) => {
       connected.value = false;
       onDisconnect?.(event);
-      if (!intentionalClose) scheduleReconnect();
+      // Reconnect if we still can; otherwise this close is terminal — fail any
+      // in-flight requests now rather than leaving them to hang until timeout.
+      if (!intentionalClose && reconnect && reconnectCount < maxReconnects) {
+        scheduleReconnect();
+      } else {
+        failAllPending('WebSocket connection closed before response');
+      }
     };
 
     ws.onerror = (event) => {
@@ -396,6 +419,9 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
     }
+    // Fail any in-flight requests immediately — the caller explicitly tore the
+    // connection down; don't make them wait out the per-request timeout.
+    failAllPending('WebSocket disconnected');
     ws?.close();
     ws = null;
   }
@@ -434,7 +460,6 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
 
       pending.set(id, {
         resolve: settle,
-        reject: (e) => settle({ ok: false, error: e, value: undefined }),
         timeoutId,
       });
 

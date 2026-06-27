@@ -4,7 +4,7 @@ This project tracks Vue 3.6 while it is in beta. That has direct consequences
 for what's stable, what's transitional, and what will change once Vue 3.6
 ships stable. This file is the source of truth for that distinction.
 
-Last reviewed against **Vue 3.6.0-beta.16** (2026-06-17).
+Last reviewed against **Vue 3.6.0-beta.17** (2026-06-24).
 
 ---
 
@@ -29,7 +29,7 @@ observable.
 
 ## Beta-territory specifics
 
-- **Peer dependency:** `vue: ">=3.5.0 || >=3.6.0-beta.16"`. The lib supports
+- **Peer dependency:** `vue: ">=3.5.0 || >=3.6.0-beta.17"`. The lib supports
   Vue 3.5 (composables only) and Vue 3.6 betas (full Vapor surface).
 - **Vapor APIs are still moving.** `defineVaporCustomElement`, `defineVaporComponent`,
   `defineVaporAsyncComponent` are stable in shape but their underlying behavior
@@ -219,8 +219,8 @@ benchmark numbers, and decision tree.
 | v1.3.0  | Vue 3.6.0-beta.12                | SSR/Hydration alignment, AbortController extensions (request/respond, dispatchBatch, child signals, WS/SSE bridge), useSharedCommandState, TestBus snapshot/time-travel |
 | v1.4.0  | Vue 3.6.0-beta.13                | TransitionGroup fixes, interop scope IDs, SSR hydration fixes, lazy lifecycle jobs, signal.ts plain-object fallback, alien-signals class adapter, alien-signals promoted to dep |
 | v1.5.0  | Vue 3.6.0-beta.14                | Beta.14 alignment (HMR reload dedup, v-show move-hook suppression, custom-element/interop fixes); `signal()` → `shallowRef` (skips deep-Proxy on object/array state); `serialize` plugin (per-key sequential, + cross-tab via Web Locks); `vapor-chamber/reactive` deep-reactivity companion; `onMissing:'buffer'` deferred dispatch (buffer-until-registered, for lazy/island hydration); `idempotent` plugin + HTTP `Idempotency-Key` forwarding (client+wire exactly-once). **Feature set locked here.** |
-| v1.6.x  | Each subsequent 3.6 beta / RC    | **Tracking only** — alignment notes folded into the version table, peer-dep bump, perf re-measure. (beta.16 broke this expectation: it carried a breaking consolidation, so it landed as the v1.7.0 minor instead of a 1.6.x patch.) |
-| v1.7.0  | Vue 3.6.0-beta.16                | **First post-lock delivery (unreleased).** Beta.16 alignment; `v-vc:command` event modifiers; **breaking: `useVaporCommand` removed → `useCommand` is the single composable** (the v2.0 merge, *delivered early* — it never depended on the stable identity call); dispatch core to 100% line+branch+func coverage + lazy buffer allocation; honest size/coverage/perf docs. Ships as a **minor** under the beta-window version policy below. |
+| v1.6.x  | Each subsequent 3.6 beta / RC    | **Tracking only** — alignment notes folded into the version table, peer-dep bump, perf re-measure. (beta.16 broke this expectation: it carried a breaking consolidation, so it landed as the v1.7.0 minor instead of a 1.6.x patch; **beta.17 then folded into that same still-unreleased v1.7.0 as a pure pass-through tracking bump** — no code change.) |
+| v1.7.0  | Vue 3.6.0-beta.16 → beta.17      | **First post-lock delivery (unreleased).** Beta.16 **+ beta.17** alignment (beta.17 is fully pass-through — its compiler/runtime slot, interop, hydration, and reactivity fixes are all below us or inherited through the interop plugin); `v-vc:command` event modifiers; **breaking: `useVaporCommand` removed → `useCommand` is the single composable** (the v2.0 merge, *delivered early* — it never depended on the stable identity call); dispatch core to 100% line+branch+func coverage + lazy buffer allocation; honest size/coverage/perf docs. Ships as a **minor** under the beta-window version policy below. |
 | v2.0.0  | One minor cycle after 3.6 stable | Stable-landing realignment: `vue36` flavor wrapper elimination + registry collapse; remove wrappers' null path; finalize the identity decision. The `useVaporCommand`→`useCommand` merge is already **done** (shipped early in **v1.7.0** — see below). See checklist below. |
 
 **Version policy during the beta window.** While Vue 3.6 is still beta, breaking
@@ -243,7 +243,7 @@ transport adapter, fully decoupled from Vue, so it wasn't blocked); see
 ## Vue version-support matrix
 
 Which Vue versions each released lib line supports. The peer dep is permissive
-(`>=3.5.0 || >=3.6.0-beta.16`); this table is the *tested* support statement.
+(`>=3.5.0 || >=3.6.0-beta.17`); this table is the *tested* support statement.
 
 | vapor-chamber | Vue 3.5 (composables only) | Vue 3.6 beta | Notes |
 |---------------|----------------------------|--------------|-------|
@@ -251,7 +251,7 @@ Which Vue versions each released lib line supports. The peer dep is permissive
 | v1.3.0        | ✅                          | beta.12      | |
 | v1.4.0        | ✅                          | beta.13      | |
 | v1.5.x        | ✅                          | beta.14      | feature-locked |
-| **v1.6.x**    | ✅                          | **beta.15 → beta.16** | current; tracking-only bumps |
+| **v1.6.x**    | ✅                          | **beta.15 → beta.17** | current; tracking-only bumps |
 | v2.0.0        | ✅ (composables)            | **3.6 stable** | `vue36` flavor adds zero-overhead path |
 
 On Vue 3.5 you get the framework-agnostic surface (bus, plugins, transports,

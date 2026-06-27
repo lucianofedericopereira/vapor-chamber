@@ -1,8 +1,6 @@
 # Contributing to vapor-chamber
 
-Thanks for considering a contribution. This document covers what you need to
-get a working dev environment, run tests/benches, and submit a PR that has a
-good chance of landing quickly.
+Thanks for considering a contribution. This document covers what you need to get a working dev environment, run tests/benches, and submit a PR that has a good chance of landing quickly.
 
 ---
 
@@ -100,15 +98,10 @@ If your change might shift bundle size:
 ### Code style
 
 - Biome handles linting. Run `npm run lint` to auto-fix; CI runs `lint:check`.
-- TypeScript strict mode is on. No `any` leaks at the public API boundary;
-  internal `any` is fine where the alternative is verbose generics.
-- Comments are sparse by design — write them when the *why* is non-obvious
-  (a hidden constraint, an invariant, a workaround for a specific bug). Don't
-  paraphrase the code.
-- No emojis in source files. Sparingly in CHANGELOG / docs if explicitly
-  asked.
-- Tests live next to the module they exercise (`src/foo.ts` ↔
-  `tests/foo.test.ts`). Cross-cutting concerns get their own file.
+- TypeScript strict mode is on. No `any` leaks at the public API boundary; internal `any` is fine where the alternative is verbose generics.
+- Comments are sparse by design — write them when the *why* is non-obvious (a hidden constraint, an invariant, a workaround for a specific bug). Don't paraphrase the code.
+- No emojis in source files. Sparingly in CHANGELOG / docs if explicitly asked.
+- Tests live next to the module they exercise (`src/foo.ts` ↔ `tests/foo.test.ts`). Cross-cutting concerns get their own file.
 
 ---
 
@@ -118,21 +111,16 @@ If your change might shift bundle size:
 2. Bump `version` in [package.json](./package.json).
 3. Commit: `release: vX.Y.Z`.
 4. Tag: `git tag vX.Y.Z && git push --tags`.
-5. `npm publish` (the `prepublishOnly` script runs typecheck, lint, tests,
-   build, and size guard — all must pass).
+5. `npm publish` (the `prepublishOnly` script runs typecheck, lint, tests, build, and size guard — all must pass).
 6. GitHub release notes copy the CHANGELOG section verbatim.
 
-Breaking changes only land in major versions. Variant *contents* of the IIFE
-bundles are explicitly not under semver before v2.0 — see
-[ROADMAP.md](./ROADMAP.md). ESM consumers (the main entry) obey strict semver.
+Breaking changes only land in major versions. Variant *contents* of the IIFE bundles are explicitly not under semver before v2.0 — see [ROADMAP.md](./ROADMAP.md). ESM consumers (the main entry) obey strict semver.
 
 ---
 
 ## Reporting bugs
 
-- Reproduction case as a minimal failing test in `tests/`. PRs welcome that
-  add the failing test even without a fix — that's a useful contribution by
-  itself.
+- Reproduction case as a minimal failing test in `tests/`. PRs welcome that add the failing test even without a fix — that's a useful contribution by itself.
 - Vue version, Node version, OS, and which IIFE variant (if applicable).
 - Browser if the issue is browser-specific.
 
@@ -143,13 +131,11 @@ issue.
 
 ## Areas where contributions are welcome
 
-See [ROADMAP.md](./ROADMAP.md) for the strategic plan. Concrete near-term
-items where help is appreciated:
+See [ROADMAP.md](./ROADMAP.md) for the strategic plan. Concrete near-term items where help is appreciated:
 
 - Comparative benchmarks vs `mitt`, `nano-events`, RxJS Subject, Pinia.
 - Real-world integration examples in `examples/` (Rails, Django, Laravel).
-- Additional `examples/` for the IIFE variants — embeddable widget,
-  CDN-only Blade page.
+- Additional `examples/` for the IIFE variants — embeddable widget, CDN-only Blade page.
 - TypeDoc → static API reference site (target: `vapor-chamber.dev` or similar).
 - Migration guides from `mitt` / `event-emitter` / Vuex.
 
@@ -157,5 +143,4 @@ items where help is appreciated:
 
 ## License
 
-By contributing you agree your contributions will be licensed under the LGPL-2.1
-license used by the rest of the project. See [LICENSE](./LICENSE).
+By contributing you agree your contributions will be licensed under the LGPL-2.1 license used by the rest of the project. See [LICENSE](./LICENSE).

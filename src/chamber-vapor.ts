@@ -4,6 +4,12 @@
  * Vue alignment history (one line per version — full per-item detail lives in
  * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table, the single
  * source of per-beta detail; this header only records changes to THIS file):
+ *   vNext / beta.17 — pass-through. Two runtime-vapor interop fixes land below the
+ *            getVaporInteropPlugin() pass-through: VDOM↔Vapor slot updates now fire paired
+ *            beforeUpdate/updated hooks (bcaa753) and the interop slot owner root re-syncs after
+ *            child updates (975dd4d) — mixed Vapor/VDOM trees built on the forwarded plugin inherit
+ *            both with no wrapper change. The renderer-internal slot-validity (b46322a) and
+ *            function-ref tracking (#14986) fixes sit below the define* wrappers. No code change.
  *   vNext / beta.16 — pass-through. createVaporChamberApp returns Vue's app
  *            untouched, so it inherits two hardening fixes directly: .mount() on a
  *            missing selector now no-ops + dev-warns (was throwing) and can return

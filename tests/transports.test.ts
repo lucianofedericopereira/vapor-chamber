@@ -309,6 +309,64 @@ describe('createWsBridge', () => {
     expect(ws.connected.value).toBe(false);
   });
 
+  it('disconnect() fails in-flight requests immediately (no timeout wait)', async () => {
+    vi.useFakeTimers();
+    const bus = createAsyncCommandBus();
+    const ws = createWsBridge({ url: 'ws://localhost' });
+    bus.use(ws);
+    bus.register('save', async () => null);
+    ws.connect();
+    await vi.runAllTimersAsync(); // socket opens
+
+    const promise = bus.dispatch('save', { id: 1 }); // sent, awaiting a server response
+    ws.disconnect();                                  // tear down before any response
+
+    const result = await promise;                     // resolves now, not after the 10s timeout
+    expect(result.ok).toBe(false);
+    expect(result.error?.message).toMatch(/disconnect/i); // disconnect error, not 'timed out'
+  });
+
+  it('a terminal close (reconnect disabled) fails in-flight requests', async () => {
+    vi.useFakeTimers();
+    const bus = createAsyncCommandBus();
+    const ws = createWsBridge({ url: 'ws://localhost', reconnect: false });
+    bus.use(ws);
+    bus.register('save', async () => null);
+    ws.connect();
+    await vi.runAllTimersAsync();
+
+    const promise = bus.dispatch('save', { id: 2 });
+    lastWs.onclose?.({ code: 1006, reason: 'abnormal' }); // dropped, no reconnect coming
+
+    const result = await promise;
+    expect(result.ok).toBe(false);
+    expect(result.error?.message).toMatch(/closed/i);
+  });
+
+  it('a recoverable close (reconnect enabled) does NOT prematurely fail in-flight requests', async () => {
+    vi.useFakeTimers();
+    const bus = createAsyncCommandBus();
+    const ws = createWsBridge({ url: 'ws://localhost', reconnect: true });
+    bus.use(ws);
+    bus.register('save', async () => null);
+    ws.connect();
+    await vi.runAllTimersAsync();
+
+    const promise = bus.dispatch('save', { id: 3 });
+    lastWs.onclose?.({ code: 1006, reason: 'transient' }); // reconnect pending — must survive
+
+    let settledEarly = false;
+    void promise.then(() => { settledEarly = true; });
+    await vi.advanceTimersByTimeAsync(500); // before the per-request timeout
+    expect(settledEarly).toBe(false);
+
+    // Still settles via the existing per-request timeout net, not the close.
+    await vi.advanceTimersByTimeAsync(11_000);
+    const result = await promise;
+    expect(result.ok).toBe(false);
+    expect(result.error?.message).toContain('timed out');
+  });
+
   it('ignores malformed JSON frames without crashing', async () => {
     vi.useFakeTimers();
     const bus = createAsyncCommandBus();

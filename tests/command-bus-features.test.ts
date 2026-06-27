@@ -363,6 +363,42 @@ describe('naming convention', () => {
 
     warn.mockRestore();
   });
+
+  it('validates at query time too', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const bus = createCommandBus({
+      naming: { pattern: /^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)+$/, onViolation: 'warn' },
+    });
+
+    bus.query('InvalidQuery', {});
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('InvalidQuery'));
+
+    warn.mockRestore();
+  });
+
+  it('validates async dispatch action names', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const bus = createAsyncCommandBus({
+      naming: { pattern: /^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)+$/, onViolation: 'warn' },
+    });
+
+    await bus.dispatch('InvalidAsyncDispatch', {});
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('InvalidAsyncDispatch'));
+
+    warn.mockRestore();
+  });
+
+  it('validates async query action names', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const bus = createAsyncCommandBus({
+      naming: { pattern: /^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)+$/, onViolation: 'warn' },
+    });
+
+    await bus.query('InvalidAsyncQuery', {});
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('InvalidAsyncQuery'));
+
+    warn.mockRestore();
+  });
 });
 
 // ─── Wildcard / pattern listeners ─────────────────────────────────────────────

@@ -3,7 +3,7 @@
 Runnable demos and copy-paste snippets for vapor-chamber. The full-project apps
 each have their own README; the single-file snippets are self-contained. The apps
 consume the library via `file:../..` and auto-build `dist/` on demand. Aligned with
-**Vue 3.6.0-beta.16**.
+**Vue 3.6.0-beta.17**.
 
 ## Full-project apps (runnable)
 

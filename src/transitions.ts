@@ -4,6 +4,9 @@
  * Vue alignment history (one line per version — full per-item detail lives in
  * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table, the single
  * source of per-beta detail; this header only records changes to THIS file):
+ *   vNext / beta.17 — pass-through. No <Transition>/<TransitionGroup> change in beta.17 (its
+ *            fixes are slot compilation, interop slot ownership, and hydration); the bridge forwards
+ *            whatever hooks Vue fires, unchanged. No code change.
  *   vNext / beta.16 — pass-through. Inherited correctness: onLeave now fires for a
  *            non-v-show root removed after a v-show branch (Vue stopped `persisted`
  *            leaking onto non-v-show roots — the *Leave dispatch was being dropped).

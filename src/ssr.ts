@@ -3,6 +3,9 @@
  *
  * Vue alignment history (one line per version — full per-item detail lives in
  * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table):
+ *   vNext / beta.17 — pass-through. beta.17's lone hydration fix (#14972 — dynamic native
+ *            element slots hydrated correctly, cf5eefa) sits in Vue's DOM hydration, below
+ *            rehydrate()'s command replay; it only hands replay a more-correct DOM. No code change.
  *   vNext / beta.16 — pass-through. rehydrate() command replay sits ABOVE Vue's DOM
  *            hydration, so beta.16's 7 hydration fixes (dynamic props on mismatch-
  *            recreated nodes, static-text patching, exact tag-mismatch detection,

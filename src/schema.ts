@@ -126,7 +126,6 @@ function validateFields(fields: FieldMap, value: Record<string, any>): string[] 
     const v = value[key];
     if (v === undefined) { errors.push(`${key}: missing`); continue; }
     if (expected === 'array' && !Array.isArray(v)) errors.push(`${key}: expected array`);
-    // biome-ignore lint/correctness/useValidTypeof: `expected` is a runtime-validated typeof string ('string'|'number'|'boolean')
     else if (expected !== 'array' && expected !== 'object' && typeof v !== expected) {
       errors.push(`${key}: expected ${expected}, got ${typeof v}`);
     }

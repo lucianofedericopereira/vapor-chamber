@@ -3,6 +3,9 @@
  *
  * Vue alignment history (one line per version — full per-item detail lives in
  * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table):
+ *   vNext / beta.17 — pass-through. No event/delegation change in beta.17 — its fixes are
+ *            compiler-vapor slot/expression handling plus runtime slot/interop/hydration, none of
+ *            which reach the DIRECT addEventListener this directive attaches. No code change.
  *   vNext / beta.16 — Vue alignment is pass-through (Vue's "parse dynamic v-bind
  *            event options like VDOM" — Once/Passive/Capture — touches the COMPILED
  *            dynamic-event path only; v-vc:command attaches a DIRECT addEventListener,
