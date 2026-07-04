@@ -32,10 +32,9 @@ bus.register('cartAdd', async (cmd) => {
   return { count: serverCart.count, total: serverCart.cents / 100, lastAddedId: cmd.target?.id };
 });
 
-bus.register('searchExecute', async (cmd) => {
-  await new Promise(r => setTimeout(r, 200));
-  return { hits: ['result A', 'result B'], query: cmd.target };
-});
+// NOTE: 'searchExecute' is deliberately NOT registered here —
+// SearchPanel.vue owns it via defineVaporCommand() (a second registration
+// would overwrite it and warn on every load).
 </script>
 
 <template>

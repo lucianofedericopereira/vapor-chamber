@@ -13,26 +13,31 @@ external. **Read this carefully:** the shared command-bus core (~3.6 KB brotli o
 included in *every* row, so the rows are **not additive** — importing two exports does not cost
 their sum (the core is shared once). `.` is the full main barrel measured *import-everything*;
 your app's tree-shaking drops whatever you don't use (e.g. importing just `createCommandBus`
-from it is ~3.6 KB brotli, not 20.4 KB).
+from it is ~3.6 KB brotli, not 20.8 KB).
 
 | export | min KB | gzip KB | brotli KB |
 |---|--:|--:|--:|
-| `.` | 70.0 | 23.2 | 20.4 |
-| `./transports` | 9.3 | 4.0 | 3.6 |
-| `./directives` | 15.8 | 5.5 | 4.9 |
-| `./transitions` | 14.2 | 4.9 | 4.4 |
+| `.` | 71.9 | 23.5 | 20.8 |
+| `./transports` | 9.7 | 4.1 | 3.7 |
+| `./directives` | 16.5 | 5.7 | 5.1 |
+| `./transitions` | 14.9 | 5.1 | 4.6 |
 | `./ssr` | 0.6 | 0.4 | 0.3 |
 | `./vite` | 2.8 | 1.2 | 1.0 |
 | `./fast-lane` | 0.6 | 0.3 | 0.3 |
 | `./observable` | 0.5 | 0.3 | 0.2 |
 | `./standard-schema` | 1.7 | 0.8 | 0.7 |
 | `./alien-signals` | 0.5 | 0.3 | 0.3 |
-| `./reactive` | 13.7 | 4.8 | 4.3 |
+| `./reactive` | 14.4 | 5.0 | 4.5 |
+| `./outbox` | 5.1 | 2.1 | 1.9 |
+| `./mcp` | 3.4 | 1.7 | 1.5 |
+| `./iife` | 35.7 | 11.9 | 10.6 |
+| `./iife-core` | 24.4 | 8.0 | 7.2 |
+| `./iife-elements` | 26.3 | 8.6 | 7.8 |
 
 ## IIFE variants (`<script>` drop-ins)
 
 | variant | min KB | gzip KB | brotli KB |
 |---|--:|--:|--:|
-| `vapor-chamber (full)` | 35.6 | 11.4 | 10.2 |
-| `vapor-chamber-core` | 24.5 | 7.8 | 7.0 |
-| `vapor-chamber-elements` | 26.0 | 8.2 | 7.4 |
+| `vapor-chamber (full)` | 37.4 | 12.0 | 10.8 |
+| `vapor-chamber-core` | 26.0 | 8.4 | 7.6 |
+| `vapor-chamber-elements` | 27.5 | 8.9 | 8.0 |

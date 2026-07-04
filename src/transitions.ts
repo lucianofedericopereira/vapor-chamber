@@ -39,7 +39,7 @@
  * // <Transition v-bind="t"> — all hooks wired automatically
  */
 
-import type { BaseBus } from './command-bus';
+import type { BaseBus, CommandMap } from './command-bus';
 import { signal as chamberSignal, getCommandBus, tryAutoCleanup } from './chamber';
 import type { Signal } from './chamber';
 
@@ -260,7 +260,7 @@ export function createTransitionBridge(
 export function useTransitionCommand(
   options: TransitionBridgeOptions = {},
 ): TransitionBridge {
-  const bus = options.bus ?? getCommandBus();
+  const bus = options.bus ?? getCommandBus<CommandMap>();
   const phase = chamberSignal<TransitionPhase>('idle');
   const hooks = buildHooks(bus, options.namespace, phase);
 

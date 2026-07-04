@@ -8,20 +8,23 @@
  */
 
 'use client'
-import { createAsyncCommandBus, setCommandBus } from 'vapor-chamber'
+import { createAsyncCommandBus, setCommandBus, retry } from 'vapor-chamber'
 import { createHttpBridge } from 'vapor-chamber/transports'
-import { retry, logger } from 'vapor-chamber'
 import { useEffect } from 'react'
 
-// Singleton bus — shared across all 'use client' components
+// Singleton bus — shared across all 'use client' components.
+// Log via onAfter: it observes settled results on the async bus (the sync
+// logger() plugin would see an unresolved Promise here).
 const bus = createAsyncCommandBus()
-bus.use(logger({ collapsed: true }))
+bus.onAfter((cmd, result) => {
+  console.log(`⚡ ${cmd.action}`, result.ok ? result.value : result.error)
+})
 bus.use(retry({ maxAttempts: 3, baseDelay: 200 }))
 bus.use(createHttpBridge({ endpoint: '/api/vc' }))
 
 export function VaporChamberProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
-    setCommandBus(bus as any)
+    setCommandBus(bus) // accepts either bus flavor
   }, [])
   return <>{children}</>
 }

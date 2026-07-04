@@ -38,6 +38,11 @@ const esm = [
   ['./standard-schema', 'src/plugins-schema.ts'],
   ['./alien-signals', 'src/alien-signals.ts'],
   ['./reactive', 'src/reactive.ts'],
+  ['./outbox', 'src/outbox.ts'],
+  ['./mcp', 'src/mcp.ts'],
+  ['./iife', 'src/iife.ts'],
+  ['./iife-core', 'src/iife-core.ts'],
+  ['./iife-elements', 'src/iife-elements.ts'],
 ];
 const iife = [
   ['vapor-chamber (full)', 'dist/vapor-chamber.iife.min.js'],

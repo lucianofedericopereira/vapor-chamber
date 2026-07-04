@@ -9,7 +9,6 @@ import {
   createCommandBus,
   setCommandBus,
   useCommandState,
-  useCommandGroup,
   persist,
 } from 'vapor-chamber'
 

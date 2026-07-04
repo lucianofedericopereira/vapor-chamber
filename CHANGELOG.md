@@ -2,7 +2,140 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.8 — Vue 3.6.0-beta.17 alignment
 
+
+### Added — the typed command contract (define each command once)
+
+- **`GlobalCommands` augmentation** (pinia-style): augment one interface and every
+  `useCommand()` / `getCommandBus()` / `useCommandBus()` call site gets typed
+  dispatch/register with autocomplete and compile errors. Fully backward
+  compatible when unaugmented; `getCommandBus<CommandMap>()` opts out per call
+  site. Enforced by a compile-time contract test (`tsconfig.typecheck.json`,
+  chained into `npm run typecheck`).
+- **`defineSchema` + `CommandsOf<S>`**: const-preserving schema helper so one
+  schema literal yields typed dispatch (`createSchemaCommandBus`), runtime
+  validation, LLM tools, and — via `interface GlobalCommands extends
+  CommandsOf<typeof schema>` — the typed shared bus.
+- **`scripts/generate-laravel.mjs`**: generates the Laravel half from the same
+  schema — `config/vapor-chamber.php` registry + invokable action-class stubs
+  with `Validator::make` rules derived from the field types. Never overwrites
+  edited stubs without `--force`.
+- **`vapor-chamber/outbox`**: offline outbox — matching commands queue durably
+  (localStorage default, zero-dep IndexedDB adapter) while offline, replay in
+  strict FIFO on reconnect with their ORIGINAL `Idempotency-Key`s, so retried
+  writes stay exactly-once end to end. Reactive `pending` count, bounded queue,
+  auto-flush on `'online'`, SSR-safe.
+- **`vapor-chamber/mcp`**: zero-dep Model Context Protocol server from a schema
+  bus — `busToMcpTools`, `createMcpHandler` (JSON-RPC: initialize, ping,
+  tools/list, tools/call), `serveMcpStdio` for Node. Action whitelisting via
+  globs; `agentOrigin()` plugin stamps `meta.origin = 'agent'`.
+- **`CommandMeta.origin`** (`'user' | 'remote' | 'sync' | 'replay' | 'agent'`):
+  marks where a command originated — stamped by the outbox (`'replay'`) and MCP
+  (`'agent'`); type-only in the core.
+- **`logger({ level, badges })`**: log-level filtering (`debug`/`info`/`warn`/
+  `error`) and opt-in `[ OK ]`/`[ FAIL ]` badges — `%c`-styled in browsers,
+  plain text in Node. Default output unchanged.
+- **Retryable/category error metadata**: every `ERROR_CODE_REGISTRY` entry now
+  carries `retryable` + `category`; new `isRetryableCode()`; `RETRYABLE_CODES`
+  exported beside `BusError`. `retry()`'s default predicate now stops on
+  known-permanent `VC_*` codes (validation failures, sealed bus, max depth)
+  instead of blindly retrying — plain Errors retry as before. Registry gaps
+  filled: `VC_CORE_ABORTED`, `VC_VALIDATION_FAILED`.
+- **size**: IIFE budgets +~0.2 KB raw / +0.15 KB brotli for the logger/retry
+  metadata (details in scripts/check-size.mjs); the four new modules are
+  subpath-only and add nothing to the IIFE bundles. Net ESM consumer WIN:
+  `/* @__PURE__ */` on ERROR_CODE_REGISTRY's freeze makes the registry
+  tree-shakeable — it had been silently pinned into every barrel-import bundle
+  since v1.0. The reference consumer bundle drops 7.0 → 6.1 KB brotli, and the
+  tree-shake regression ceiling was LOWERED to lock it in.
+
+### Added
+
+- **Sync-bus footgun guard (dev only)**: dispatching through an async plugin
+  (`retry`, `createHttpBridge`, ...) installed on a bus created with
+  `createCommandBus()` now logs a one-time-per-action warning pointing at
+  `createAsyncCommandBus()` — previously the dispatch silently "failed" with
+  `result.ok === undefined`. DCE'd out of production builds.
+- **`setCommandBus` accepts `AsyncCommandBus`** — the composables already
+  handled thenable results at runtime; callers no longer need an `as any` cast.
+
+### Fixed
+
+- **transports**: the HTTP bridge now surfaces the backend failure body's
+  `error`/`message` as `result.error.message` (with `status`/`code`/`response`
+  preserved and the original error as `cause`) instead of the bare `"HTTP 422"`
+  — matching the documented contract in the Laravel integration guide. The bare
+  status message remains the fallback for bodyless failures.
+- **examples**: a sweep of all example folders fixed copy-paste-breaking bugs —
+  async plugins installed on sync buses (and vice versa) in four pattern files,
+  handlers registered on a local bus while `useCommand()` dispatched on the
+  shared one, local handlers shadowed by the HTTP bridge's forwarding (which
+  never falls through to handlers), a double-wrapped dispatch target, a
+  non-functional undo in the shopping-cart demo, a duplicate `searchExecute`
+  registration in the Vapor SFC app, and a dead error path in the island-cart
+  app. Also: dotted action names normalized to the documented camelCase
+  convention, `'../src'` imports replaced with `'vapor-chamber'`, unused
+  imports removed, and stale README claims corrected.
+- **Laravel docs/examples**: the Sanctum flow's `routes/api.php` snippets used
+  `'/api/vc'`, which Laravel's automatic `api` prefix turns into `/api/api/vc`
+  (404 on every dispatch) — now `'/vc'` with an explanatory note; added Laravel
+  11+ `install:api` / `statefulApi()` steps; the example controller now honors
+  the `Idempotency-Key` header with a short-TTL cache replay and emits
+  machine-readable `code` fields; endpoint drift in the idempotency snippet
+  fixed; `ModelNotFoundException` catch added to the doc's controller snippet.
+
+- **devtools**: the production guard now uses the bare `process.env.NODE_ENV` literal so
+  bundler define-replacement actually fires — previously the `globalThis.`-prefixed read
+  defeated it and `setupDevtools` ran in production browser builds (per-dispatch buffering
+  of the last 100 commands for the app lifetime).
+- **packaging**: `vapor-chamber/iife-core` and `vapor-chamber/iife-elements` exports pointed
+  at dist files the build never produced — both are now built as ESM entries (with rows in
+  `docs/BUNDLE-SIZES.md`).
+- **http**: 401 responses through `createHttpClient` fired `onSessionExpired` (and the
+  `session-expired` window event) twice; now once.
+- **http**: retry sleeps and the `AbortSignal.any` fallback detach their abort listeners when
+  the request settles — previously they accreted on component-lifetime signals per request.
+- **http**: concurrent 419 CSRF refreshes now share one in-flight promise instead of a 100ms
+  polling loop (removes up to 5s of added latency and a stale-result race).
+- **http**: cache and dedupe keys include `responseType`, so a `json` and a `blob` request for
+  the same URL no longer collapse into one; `invalidateCache` patterns still match the URL.
+- **transports**: the WS bridge re-queues unsent messages if the socket closes mid-flush,
+  guards `connect()` against creating a second socket while one is live, and clears a pending
+  reconnect timer on manual connect.
+- **directives**: the async-dispatch timeout race clears its timer when the dispatch wins —
+  previously every click left a live 30s timer.
+- **plugins-extra**: `idempotent()` deletes expired entries on read and caps the completed-key
+  map (new `maxKeys` option, default 500) — previously it grew without bound.
+- **chamber**: `useCommandError` caps its error list (new `errorCap` option, default 50);
+  `useCommandHistory` no longer assigns a fresh empty redo stack on every dispatch (spurious
+  watcher re-runs).
+- **README**: the first example used a `useCommand('action')` signature that doesn't exist and
+  registered on a non-shared bus; duplicate Install section, duplicate `registeredActions()`
+  row, stale v1.0 checklist, and the `~1KB core` claim corrected; embedded feature matrix moved
+  to ROADMAP.md.
+
+### Changed
+
+- **CommandResult is a discriminated union** on `ok` — `if (result.ok)` now narrows; on the
+  failure arm `error` is a guaranteed `Error`. `value` stays optional on success (void
+  commands), so `return { ok: true }` handlers keep compiling.
+- **Async bus**: after-hook fan-out skips the async frame when no after-hooks are registered,
+  and before/after hook loops only `await` actual thenables — several fewer microtask hops per
+  dispatch with sync hooks.
+- **schema**: `schemaValidator` precompiles per-action field checks at creation instead of
+  walking `Object.entries` per dispatch; throttle rejections skip V8 stack capture (expected
+  control flow on a by-design hot path).
+- **form**: `submit()` runs async field validators concurrently (`Promise.all`) instead of
+  sequentially.
+- **packaging**: `types` listed first plus a `default` condition in every export block;
+  `sideEffects` is now an array exempting the side-effect-only `iife*` files from tree-shaking;
+  `src/` ships in the tarball so `declarationMap` go-to-definition works; `vite` peer range
+  loosened `>=7.0.0` → `>=5.0.0` (the HMR plugin uses no Vite runtime APIs).
+- **size**: IIFE budgets bumped for the fixes above plus the bridge error-message
+  feature and the (runtime-inert) sync-bus dev warning that rolldown can't strip
+  (full 36.9 KB raw / 10.6 KB brotli, core 25.5/7.3, elements 27.0/7.7). Details
+  in scripts/check-size.mjs.
 
 ## v1.7.0 — Vue 3.6.0-beta.17 alignment
 

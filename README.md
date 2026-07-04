@@ -11,16 +11,17 @@
 Vapor Chamber is a **command bus for Vue 3.6+ Vapor mode**. Every user action gets a single handler, a composable plugin pipeline, and signal-native reactive state — replacing scattered event listeners and prop-drilling with one predictable, testable flow.
 
 ```ts
-import { createCommandBus, useCommand } from 'vapor-chamber';
+import { getCommandBus, useCommand } from 'vapor-chamber';
 
-const bus = createCommandBus();
+const bus = getCommandBus();
 
 bus.register('cartAdd', (cmd) => addToCart(cmd.target));
 bus.use(logger());
 bus.use(validator({ cartAdd: (cmd) => cmd.target.id ? null : 'Missing ID' }));
 
-// In a component
-const { dispatch, loading, lastError } = useCommand('cartAdd');
+// In a component — same shared bus, with reactive state
+const { dispatch, loading, lastError } = useCommand();
+dispatch('cartAdd', { id: product.id });
 ```
 
 **What's in the can** — a small core, and batteries you only pay for if you import them:
@@ -174,11 +175,15 @@ Sub-path exports avoid pulling in optional modules:
 'vapor-chamber/transports'  → HTTP + WebSocket + SSE bridges only
 'vapor-chamber/directives'  → v-command Vue directive only
 'vapor-chamber/vite'        → Vite HMR plugin only
+'vapor-chamber/transitions'   → View Transitions API helpers only
+'vapor-chamber/ssr'           → SSR dehydrate/replay helpers only
 'vapor-chamber/fast-lane'     → minimal-allocation dispatcher for real-real-hot loops (game ticks, trading data, audio, scroll). Not a bus — see docs/performance.md.
 'vapor-chamber/observable'    → Symbol.observable interop — RxJS / xstream / callbag adapter
 'vapor-chamber/standard-schema'→ Standard Schema v1 validator plugin (Zod / Valibot / ArkType compatible)
 'vapor-chamber/alien-signals' → connector to use alien-signals as the underlying reactive primitive (non-Vue contexts)
 'vapor-chamber/reactive'      → opt-in DEEP reactivity: deepSignal + useDeepCommandState (nested-mutation tracking; the core signal() is shallow+fast by default)
+'vapor-chamber/outbox'        → offline outbox: durable queue + ordered replay with Idempotency-Key (PWA / flaky-network e-commerce)
+'vapor-chamber/mcp'           → zero-dep MCP server from your schema bus — agents drive your commands (whitelist + meta.origin='agent')
 'vapor-chamber/iife'          → IIFE bundle (full)
 'vapor-chamber/iife-core'     → IIFE bundle (no Vapor custom-element, no Suspense paths)
 'vapor-chamber/iife-elements' → IIFE bundle (core + Vapor custom-element)
@@ -258,13 +263,13 @@ is a **decrease**. Verified each release against the prior baseline via `npm run
 
 ---
 
-## Install
+## Requirements
 
-```bash
-npm install vapor-chamber
-```
+Node.js ≥20.19.0 | Vue ≥3.5.0 (composables) or ≥3.6.0-beta.17 (full Vapor) — optional peer dep | Vite ≥5.0.0 + `@vitejs/plugin-vue` ≥5.0.0 (only required for the `vapor-chamber/vite` HMR plugin and Vapor SFC support)
 
-**Requirements:** Node.js ≥20.19.0 | Vue ≥3.5.0 (composables) or ≥3.6.0-beta.17 (full Vapor) — optional peer dep | Vite ≥7.0.0 + `@vitejs/plugin-vue` ≥5.0.0 (only required for the `vapor-chamber/vite` HMR plugin and Vapor SFC support)
+This package is **ESM-only** — no CJS build. Node ≥20 `import`, bundlers, and
+`<script type="module">` all work; for classic `<script>` tags use the
+[IIFE variants](#iife--cdn-variants). (Install instructions: [Install](#install).)
 
 > **Beta tracking:** this lib follows Vue 3.6 while it is in beta. The Vapor
 > wrappers are transitional surfaces that will realign once Vue 3.6 ships
@@ -313,6 +318,52 @@ if (result.ok) {
 } else {
   console.error('Failed:', result.error);
 }
+```
+
+### Define each command once — the typed contract
+
+One schema literal is the single source of truth for types, validation, the
+backend, and AI tools:
+
+```ts
+// commands.ts
+import { defineSchema, createSchemaCommandBus, setCommandBus, type CommandsOf } from 'vapor-chamber';
+
+export const schema = defineSchema({
+  cartAdd: {
+    description: 'Add a product to the cart',
+    target:  { id: 'number', name: 'string' },
+    payload: { qty: 'number' },
+    result:  { count: 'number', total: 'number' },
+  },
+});
+
+setCommandBus(createSchemaCommandBus(schema));   // typed dispatch + runtime validation
+
+declare module 'vapor-chamber' {                 // typed useCommand() everywhere
+  interface GlobalCommands extends CommandsOf<typeof schema> {}
+}
+```
+
+From the same schema: `bus.toTools()` (Anthropic/OpenAI), `vapor-chamber/mcp`
+(agents drive your commands over MCP, whitelisted, stamped `meta.origin`),
+and `node scripts/generate-laravel.mjs commands.mjs` (Laravel config registry +
+action-class stubs with validation rules). Misspell an action or a field in a
+component and it's a compile error, not a runtime 404.
+
+### Gotcha: module-scope signals before Vue boots
+
+Vue detection is asynchronous. A `signal()` / `useCommandState()` created at
+**module scope** (before `createApp` runs) may be created before Vue is
+detected — it stays a plain `{ value }` object and never becomes reactive
+(a one-shot dev-mode warning fires when this happens). Two safe options:
+
+```ts
+// 1. Create reactive state inside components / after app boot (usual case), or
+// 2. await detection explicitly for module-scope state:
+import { waitForVueDetection, signal } from 'vapor-chamber';
+await waitForVueDetection();
+export const count = signal(0); // now Vue-reactive
 ```
 
 ## Vue 3.6 Vapor Mode
@@ -1399,7 +1450,6 @@ See [`examples/`](https://github.com/lucianofedericopereira/vapor-chamber/tree/m
 | `clear()` | Remove all handlers, plugins, hooks, and listeners |
 | `seal()` | Freeze bus configuration — rejects register/use/clear after sealing |
 | `dispose()` | Clean teardown — clears state, cancels timers, marks bus as disposed |
-| `registeredActions()` | Returns `string[]` of all registered action names |
 | `getUndoHandler(action)` | Get the undo handler for an action (`@internal`) |
 
 ### Composables
@@ -1425,165 +1475,9 @@ See [`examples/`](https://github.com/lucianofedericopereira/vapor-chamber/tree/m
 
 ## Roadmap
 
-### Core — target: 100% feature-complete at v1.0
-
-| Feature | Module | Status | Tests |
-|---------|--------|--------|-------|
-| Dispatch / register / unregister | `command-bus` | ✅ v0.1.0 | ✅ 100% (line/branch/func) |
-| Plugin pipeline (sync + async) | `command-bus` | ✅ v0.1.0 | ✅ 100% (line/branch/func) |
-| Plugin priority ordering | `command-bus` | ✅ v0.2.0 | ✅ covered |
-| `onAfter` hooks | `command-bus` | ✅ v0.2.0 | ✅ covered |
-| Dead letter handling (`onMissing`) | `command-bus` | ✅ v0.2.0 | ✅ covered |
-| Command batching + `continueOnError` + `successCount`/`failCount` | `command-bus` | ✅ v0.6.0 | ✅ covered |
-| Naming convention enforcement | `command-bus` | ✅ v0.3.0 | ✅ covered |
-| Wildcard listeners (`on`, `prefix*`) | `command-bus` | ✅ v0.3.0 | ✅ covered |
-| `once()` — one-shot listener | `command-bus` | ✅ v0.6.0 | ✅ covered |
-| `offAll(pattern?)` — mass unsubscribe | `command-bus` | ✅ v0.6.0 | ✅ covered |
-| `onBefore(hook)` — pre-dispatch hook, cancelable | `command-bus` | ✅ v0.6.0 | ✅ covered |
-| Request / response pattern + timeout | `command-bus` | ✅ v0.3.0 | ✅ covered |
-| Per-command throttle + undo at register | `command-bus` | ✅ v0.3.0 | ✅ covered |
-| `bus.hasHandler()` introspection | `command-bus` | ✅ v0.3.0 | ✅ covered |
-| `bus.clear()` | `command-bus` | ✅ v0.5.0 | ✅ covered |
-| `BaseBus` structural interface | `command-bus` | ✅ v0.6.0 | ✅ covered |
-| `query()` — CQRS read-only dispatch (skips beforeHooks) | `command-bus` | ✅ v1.0 | ✅ covered |
-| `emit()` — domain events (no handler, no result) | `command-bus` | ✅ v1.0 | ✅ covered |
-| `Command.meta` — auto-stamped id, ts, correlationId, causationId | `command-bus` | ✅ v1.0 | ✅ covered |
-| `registeredActions()` — introspection | `command-bus` | ✅ v1.0 | ✅ covered |
-| `commandKey(action, target)` export | `command-bus` | ✅ v0.6.0 | ✅ covered |
-| `BusError` structured error class (code, severity, emitter) | `command-bus` | ✅ v1.0 | ✅ covered |
-| `inspectBus(bus)` — tree-shakeable topology introspection | `command-bus` | ✅ v1.0 | ✅ covered |
-| `bus.seal()` / `unsealBus(bus)` — freeze configuration | `command-bus` | ✅ v1.0 | ✅ covered |
-| `bus.dispose()` — clean teardown with timer cancellation | `command-bus` | ✅ v1.0 | ✅ covered |
-| `createCommandPool(size)` — pre-allocated object pool | `command-bus` | ✅ v1.0 | ✅ covered |
-| Transactional batch with undo rollback | `command-bus` | ✅ v1.0 | ✅ covered |
-| Recursion depth guard (max 10) | `command-bus` | ✅ v1.0 | ✅ covered |
-| V8 optimizations (monomorphic shapes, index loops, extracted try/catch) | `command-bus` | ✅ v1.0 | ✅ bench |
-| SSR isolation (independent bus instances) | `command-bus` | ✅ v0.5.0 | ✅ covered |
-| `createTestBus` record + assert | `testing` | ✅ v0.2.0 | ✅ harness (excluded) |
-| `createTestBus` snapshot & time-travel | `testing` | ✅ v0.4.3 | ✅ covered |
-| `TestBus.on()` / `once()` / `offAll()` real implementations | `testing` | ✅ v0.6.0 | ✅ covered |
-
-### Plugins — optional, fully implemented
-
-| Feature | Module | Status | Tests |
-|---------|--------|--------|-------|
-| `logger` | `plugins-core` | ✅ v0.1.0 | ✅ 100% lines |
-| `validator` | `plugins-core` | ✅ v0.1.0 | ✅ covered |
-| `history` + bus-backed undo/redo | `plugins-core` | ✅ v0.3.0 | ✅ covered |
-| `debounce` (stale-closure fix) | `plugins-core` | ✅ v0.3.0 | ✅ covered |
-| `throttle` | `plugins-core` | ✅ v0.3.0 | ✅ covered |
-| `authGuard` | `plugins-core` | ✅ v0.3.0 | ✅ covered |
-| `optimistic` | `plugins-core` | ✅ v0.3.0 | ✅ covered |
-| `optimisticUndo` — auto-rollback via registered undo handlers | `plugins-core` | ✅ v1.0 | ✅ covered |
-| `retry` with configurable backoff + glob filter | `plugins-io` | ✅ v0.4.2 | ✅ 100% lines |
-| `persist` (localStorage / custom storage) | `plugins-io` | ✅ v0.4.2 | ✅ covered |
-| `sync` (BroadcastChannel cross-tab) | `plugins-io` | ✅ v0.4.2 | ✅ covered |
-| `cache` — LRU query result caching with TTL + glob filter | `plugins-extra` | ✅ v1.0 | ✅ covered |
-| `circuitBreaker` — per-action closed/open/half-open resilience | `plugins-extra` | ✅ v1.0 | ✅ covered |
-| `rateLimit` — per-action sliding window limiter | `plugins-extra` | ✅ v1.0 | ✅ covered |
-| `metrics` — lightweight telemetry (count, duration, errorRate) | `plugins-extra` | ✅ v1.0 | ✅ covered |
-| `serialize` — per-key sequential processing (async; prevents same-key races; `scope:'cross-tab'` via Web Locks) | `plugins-extra` | ✅ v1.5 | ✅ covered |
-| `idempotent` — collapse duplicate commands (double-submit/retry); stamps `Idempotency-Key` for the HTTP bridge | `plugins-extra` | ✅ v1.5 | ✅ covered |
-
-### Utilities — optional, tree-shaken
-
-| Feature | Module | Status | Tests |
-|---------|--------|--------|-------|
-| `createChamber` — declarative namespace grouping | `utilities` | ✅ v1.0 | ✅ covered |
-| `createWorkflow` — saga pattern with compensation | `utilities` | ✅ v1.0 | ✅ covered |
-| `createReaction` — declarative cross-domain rules | `utilities` | ✅ v1.0 | ✅ covered |
-
-### Transport layer — optional, fully implemented
-
-| Feature | Module | Status | Tests |
-|---------|--------|--------|-------|
-| `postCommand` — POST with retry, CSRF, timeout, session | `http` | ✅ v0.5.0 | ✅ 100% lines |
-| `readCsrfToken` — meta / cookie / hidden input | `http` | ✅ v0.5.0 | ✅ covered |
-| `HttpError.code` — machine-readable code from response body | `http` | ✅ v0.6.0 | ✅ covered |
-| 419 vs 401 fix — CSRF expiry ≠ session expiry | `http` | ✅ v0.6.0 | ✅ covered |
-| `createHttpBridge` — fetch plugin | `transports` | ✅ v0.4.2 | ✅ 100% lines |
-| `HttpBridgeOptions.noRetry` — per-action retry disable | `transports` | ✅ v0.6.0 | ✅ covered |
-| `HttpBridgeOptions.scopeController` — Vapor lifecycle abort | `transports` | ✅ v0.6.0 | ✅ covered |
-| `createWsBridge` — WebSocket plugin + reconnect + bounded queue | `transports` | ✅ v0.6.0 | ✅ covered |
-| `WsBridge.connected` — reactive signal for connection state | `transports` | ✅ v0.6.0 | ✅ covered |
-| `createSseBridge` — server-push EventSource, accepts `BaseBus` | `transports` | ✅ v0.6.0 | ✅ covered |
-| `createEchoBridge` — Laravel Echo/Reverb realtime (public/private/presence → bus) | `transports` | ✅ v1.5.0 | ✅ covered |
-
-### Vue composables — optional, requires Vue ≥3.5
-
-| Feature | Module | Status | Tests |
-|---------|--------|--------|-------|
-| `useCommand` — reactive loading/error | `chamber` | ✅ v0.1.0 | ✅ ~96% lines |
-| `useCommandState` | `chamber` | ✅ v0.2.0 | ✅ covered |
-| `useCommandHistory` — reactive undo/redo | `chamber` | ✅ v0.2.0 | ✅ covered |
-| `useCommandGroup` — namespace isolation | `chamber` | ✅ v0.4.1 | ✅ covered |
-| `useCommandError` — error boundary | `chamber` | ✅ v0.4.1 | ✅ covered |
-| `getCommandBus` / `setCommandBus` / `resetCommandBus` | `chamber` | ✅ v0.1.0 | ✅ covered |
-| Signal shim + `configureSignal` | `chamber` | ✅ v0.3.0 | ✅ covered |
-| `onScopeDispose` lifecycle alignment | `chamber` | ✅ v0.4.0 | ✅ covered |
-| `isVaporAvailable()` | `chamber` | ✅ v0.4.0 | ✅ covered |
-| `createVaporChamberApp` / `getVaporInteropPlugin` / `defineVaporCommand` | `chamber-vapor` | ✅ v0.4.0 | ✅ covered |
-| `useCommand` — Vapor-safe reactive composable (register/on/emit/dispose) | `chamber` | ✅ v0.6.0 | ✅ covered |
-| `tryAutoCleanup` dev warning (no scope/instance) | `chamber` | ✅ v0.6.0 | ✅ covered |
-| `waitForVueDetection()` — async Vue probe | `chamber` | ✅ v0.6.0 | ✅ covered |
-
-### Extras — optional, per-feature opt-in
-
-| Feature | Module | Status | Tests |
-|---------|--------|--------|-------|
-| `createFormBus` — reactive form + sync/async validation | `form` | ✅ v0.6.0 | ✅ ~92% lines |
-| `FormBus` headless mode (`reactive: false`) | `form` | ✅ v0.6.0 | ✅ covered |
-| Schema layer — `createSchemaCommandBus`, `toTools`, `synthesize` | `schema` | ✅ v0.5.0 | ✅ 100% lines |
-| Schema auto-validation (`schemaValidator` auto-installed) | `schema` | ✅ v1.0 | ✅ covered |
-| `SynthesizeOptions.adapter` — custom LLM adapter | `schema` | ✅ v0.6.0 | ✅ covered |
-| `ERROR_CODE_REGISTRY` — structured error lookup table | `schema` | ✅ v1.0 | ✅ covered |
-| `busApiSchema()` — JSON schema of bus API for LLM prompts | `schema` | ✅ v1.0 | ✅ covered |
-| `describeErrorCodes()` — plain-text error table for LLM system prompts | `schema` | ✅ v1.0 | ✅ covered |
-| `setupDevtools` — Vue DevTools panel | `devtools` | ✅ v0.4.0 | ✅ covered |
-| `createDirectivePlugin` — `v-command` directive + Vapor compat warning | `directives` | ✅ v0.6.0 | ✅ covered |
-| Vite HMR plugin (+ `.vapor.vue` support) | `vite-hmr` | ✅ v0.6.0 | ✅ covered |
-| IIFE / CDN bundle | `iife` | ✅ v0.5.0 | 🔧 bundle entry |
-
-### v1.0 checklist
-
-| Item | Status |
-|------|--------|
-| Core (`command-bus`) at 100% line+branch+func coverage | ✅ Done |
-| All tests green (884/884, 0 failures) | ✅ Done |
-| Optional modules clearly marked in exports | ✅ Done |
-| Transport layer fully tested (HTTP + WS + SSE) | ✅ Done |
-| Plugins fully tested | ✅ Done |
-| camelCase naming convention locked in | ✅ Done |
-| `onBefore` / `offAll` / `once` on both buses | ✅ Done (v0.6.0) |
-| `query()` — CQRS read-only dispatch | ✅ Done (v1.0) |
-| `emit()` — domain events (no handler required) | ✅ Done (v1.0) |
-| `Command.meta` — auto-stamped id, timestamp, tracing | ✅ Done (v1.0) |
-| `registeredActions()` — introspection | ✅ Done (v1.0) |
-| `TestBus.onBefore` fires for real | ✅ Done (v1.0) |
-| `BaseBus` structural interface for cross-bus utilities | ✅ Done (v0.6.0) |
-| V8 engine optimizations (monomorphic shapes, no .slice() in hot paths) | ✅ Done (v1.0) |
-| `BusError` structured error class with codes, severity, emitter | ✅ Done (v1.0) |
-| `ERROR_CODE_REGISTRY` + `busApiSchema()` for LLM integration | ✅ Done (v1.0) |
-| `createChamber`, `createWorkflow`, `createReaction` utilities | ✅ Done (v1.0) |
-| `cache`, `circuitBreaker`, `rateLimit`, `metrics` plugins | ✅ Done (v1.0) |
-| LLM-friendly naming (`TargetOf`/`PayloadOf`/`ResultOf`) + `@example` JSDoc | ✅ Done (v1.0) |
-| Self-correcting error messages with fix suggestions | ✅ Done (v1.0) |
-| CSRF / 419 / session-expiry correctness | ✅ Done (v0.6.0) |
-| Form async validation | ✅ Done (v0.6.0) |
-| `HttpError.code` structured error codes | ✅ Done (v0.6.0) |
-| WS queue cap (`maxQueueSize`) | ✅ Done (v0.6.0) |
-| `synthesize` LLM adapter (proxy / OpenAI support) | ✅ Done (v0.6.0) |
-| Transactional batch with undo rollback | ✅ Done (v1.0) |
-| `optimisticUndo` plugin — auto-rollback via undo handlers | ✅ Done (v1.0) |
-| Schema auto-validation (`schemaValidator` auto-installed) | ✅ Done (v1.0) |
-| `inspectBus()` — tree-shakeable bus topology introspection | ✅ Done (v1.0) |
-| `bus.seal()` / `unsealBus()` — freeze configuration | ✅ Done (v1.0) |
-| `bus.dispose()` — clean teardown | ✅ Done (v1.0) |
-| `createCommandPool` — object pool for hot paths | ✅ Done (v1.0) |
-| Recursion depth guard (max 10) | ✅ Done (v1.0) |
-| Architectural whitepaper | ✅ Done (v0.6.0) |
-| `chamber.ts` branch coverage | ✅ ~87% branch / ~94% stmts (target met) |
-| Publish to npm as `vapor-chamber@1.0.0` | ⬜ Pending |
+The full feature matrix (per-module status, versions, and test coverage) and the
+forward plan live in [ROADMAP.md](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/ROADMAP.md)
+— the single source of truth, shipped with the npm package.
 
 ## Documentation
 
@@ -1591,7 +1485,7 @@ See [`docs/whitepaper.md`](https://github.com/lucianofedericopereira/vapor-chamb
 
 ## Design Goals
 
-1. **Minimal** — ~1KB core, no dependencies
+1. **Minimal** — ~3.6 KB brotli core (measured: [docs/BUNDLE-SIZES.md](docs/BUNDLE-SIZES.md)); the core has zero runtime dependencies — `alien-signals` is opt-in and never auto-bundled
 2. **Vapor-native** — Built for signals, not VDOM
 3. **Composable** — Plugins for everything
 4. **Type-safe** — Full TypeScript support

@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi, } from 'vitest';
-import { createCommandBus, createAsyncCommandBus, resetCommandBus, retry } from '../src/index';
+import { createCommandBus, createAsyncCommandBus, resetCommandBus, retry, BusError } from '../src/index';
 import { persist, sync } from '../src/plugins';
 
 // ---------------------------------------------------------------------------
@@ -513,5 +513,52 @@ describe('retry plugin', () => {
       expect(delays.slice(0, 3)).toEqual([100, 200, 400]);
       vi.restoreAllMocks();
     });
+  });
+
+  it('default predicate stops immediately on a non-retryable BusError', async () => {
+    const bus = createAsyncCommandBus();
+    bus.use(retry({ maxAttempts: 4, baseDelay: 0 }));
+
+    let attempts = 0;
+    bus.register('save', async () => {
+      attempts++;
+      throw new BusError('VC_VALIDATION_FAILED', 'bad payload', { emitter: 'schema' });
+    });
+
+    const result = await bus.dispatch('save', {});
+    expect(result.ok).toBe(false);
+    expect(attempts).toBe(1); // permanent code — no retries wasted
+  });
+
+  it('default predicate keeps retrying retryable BusError codes', async () => {
+    const bus = createAsyncCommandBus();
+    bus.use(retry({ maxAttempts: 3, baseDelay: 0 }));
+
+    let attempts = 0;
+    bus.register('call', async () => {
+      attempts++;
+      throw new BusError('VC_CORE_REQUEST_TIMEOUT', 'timed out', { emitter: 'core' });
+    });
+
+    const result = await bus.dispatch('call', {});
+    expect(result.ok).toBe(false);
+    expect(attempts).toBe(3); // transient code — retried to maxAttempts
+  });
+
+  it('default predicate still retries plain (non-Bus) errors, even with a code field', async () => {
+    const bus = createAsyncCommandBus();
+    bus.use(retry({ maxAttempts: 3, baseDelay: 0 }));
+
+    let attempts = 0;
+    bus.register('read', async () => {
+      attempts++;
+      const err = new Error('no such file') as Error & { code: string };
+      err.code = 'ENOENT'; // non-VC_ code — behaves like a plain error
+      throw err;
+    });
+
+    const result = await bus.dispatch('read', {});
+    expect(result.ok).toBe(false);
+    expect(attempts).toBe(3); // unchanged pre-v1.3 behavior for plain errors
   });
 });

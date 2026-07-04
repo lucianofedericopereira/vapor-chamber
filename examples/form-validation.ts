@@ -4,7 +4,7 @@
  * Demonstrates: validator plugin, error handling
  */
 
-import { createCommandBus, validator, logger } from '../src';
+import { createCommandBus, validator, logger } from 'vapor-chamber';
 
 // Types
 interface LoginForm {
@@ -23,7 +23,7 @@ const bus = createCommandBus();
 bus.use(logger());
 
 bus.use(validator({
-  'form.login': (cmd) => {
+  'formLogin': (cmd) => {
     const { email, password } = cmd.target as LoginForm;
 
     if (!email?.includes('@')) {
@@ -35,7 +35,7 @@ bus.use(validator({
     return null;
   },
 
-  'form.register': (cmd) => {
+  'formRegister': (cmd) => {
     const { email, password, confirmPassword, username } = cmd.target as RegisterForm;
 
     if (!username || username.length < 3) {
@@ -55,13 +55,13 @@ bus.use(validator({
 }));
 
 // Handlers
-bus.register('form.login', (cmd) => {
+bus.register('formLogin', (cmd) => {
   const { email } = cmd.target as LoginForm;
   // In real app: call API
   return { success: true, user: { email } };
 });
 
-bus.register('form.register', (cmd) => {
+bus.register('formRegister', (cmd) => {
   const { email, username } = cmd.target as RegisterForm;
   // In real app: call API
   return { success: true, user: { email, username } };
@@ -69,28 +69,28 @@ bus.register('form.register', (cmd) => {
 
 // Usage
 console.log('--- Valid login ---');
-const loginResult = bus.dispatch('form.login', {
+const loginResult = bus.dispatch('formLogin', {
   email: 'user@example.com',
   password: 'securepassword123'
 });
 console.log('Result:', loginResult);
 
 console.log('\n--- Invalid login (bad email) ---');
-const badEmailResult = bus.dispatch('form.login', {
+const badEmailResult = bus.dispatch('formLogin', {
   email: 'not-an-email',
   password: 'securepassword123'
 });
 console.log('Result:', badEmailResult);
 
 console.log('\n--- Invalid login (short password) ---');
-const shortPwResult = bus.dispatch('form.login', {
+const shortPwResult = bus.dispatch('formLogin', {
   email: 'user@example.com',
   password: '123'
 });
 console.log('Result:', shortPwResult);
 
 console.log('\n--- Valid registration ---');
-const registerResult = bus.dispatch('form.register', {
+const registerResult = bus.dispatch('formRegister', {
   username: 'johndoe',
   email: 'john@example.com',
   password: 'securepassword123',
@@ -99,7 +99,7 @@ const registerResult = bus.dispatch('form.register', {
 console.log('Result:', registerResult);
 
 console.log('\n--- Invalid registration (password mismatch) ---');
-const mismatchResult = bus.dispatch('form.register', {
+const mismatchResult = bus.dispatch('formRegister', {
   username: 'johndoe',
   email: 'john@example.com',
   password: 'securepassword123',

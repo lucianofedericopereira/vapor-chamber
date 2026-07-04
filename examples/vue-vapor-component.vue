@@ -3,11 +3,13 @@
 
   Demonstrates: useCommand, useCommandState, useCommandHistory composables
 
-  Note: This example shows the expected API when Vue Vapor is released.
-  The composables use Vapor's signal-based reactivity.
+  Works in Vapor (`<script setup vapor>` with Vue 3.6+) and VDOM alike — the
+  composables never touch getCurrentInstance(), so only the script attribute
+  differs between the two modes.
 -->
 
 <script setup lang="ts">
+import { onUnmounted } from 'vue';
 import {
   useCommand,
   useCommandState,
@@ -15,12 +17,12 @@ import {
   getCommandBus,
   validator,
   signal
-} from '../src';
+} from 'vapor-chamber';
 
 // Get shared bus and add validation
 const bus = getCommandBus();
 bus.use(validator({
-  'todo.add': (cmd) => {
+  'todoAdd': (cmd) => {
     if (!cmd.target?.trim()) return 'Todo text cannot be empty';
     return null;
   }
@@ -45,7 +47,7 @@ interface TodoState {
 const { state: todos } = useCommandState<TodoState>(
   { items: [], filter: 'all' },
   {
-    'todo.add': (state, cmd) => ({
+    'todoAdd': (state, cmd) => ({
       ...state,
       items: [...state.items, {
         id: Date.now(),
@@ -54,24 +56,24 @@ const { state: todos } = useCommandState<TodoState>(
       }]
     }),
 
-    'todo.toggle': (state, cmd) => ({
+    'todoToggle': (state, cmd) => ({
       ...state,
       items: state.items.map(t =>
         t.id === cmd.target ? { ...t, done: !t.done } : t
       )
     }),
 
-    'todo.remove': (state, cmd) => ({
+    'todoRemove': (state, cmd) => ({
       ...state,
       items: state.items.filter(t => t.id !== cmd.target)
     }),
 
-    'todo.clear-completed': (state) => ({
+    'todoClearCompleted': (state) => ({
       ...state,
       items: state.items.filter(t => !t.done)
     }),
 
-    'todo.filter': (state, cmd) => ({
+    'todoFilter': (state, cmd) => ({
       ...state,
       filter: cmd.target as TodoState['filter']
     })
@@ -80,7 +82,7 @@ const { state: todos } = useCommandState<TodoState>(
 
 // Undo/redo for todo actions
 const { canUndo, canRedo, undo, redo } = useCommandHistory({
-  filter: (cmd) => cmd.action.startsWith('todo.') && cmd.action !== 'todo.filter'
+  filter: (cmd) => cmd.action.startsWith('todo') && cmd.action !== 'todoFilter'
 });
 
 // Computed filtered items — access todos.value properties directly without
@@ -100,26 +102,29 @@ const newTodoText = signal('');
 function addTodo() {
   if (!newTodoText.value.trim()) return;
 
-  const result = dispatch('todo.add', newTodoText.value.trim());
-  if (result.ok) {
+  // dispatch() is typed CommandResult | Promise<CommandResult> (the shared bus
+  // may be sync or async) — this app's shared bus is sync, so narrow with an
+  // instanceof check that also keeps an async bus working.
+  const result = dispatch('todoAdd', newTodoText.value.trim());
+  if (!(result instanceof Promise) && result.ok) {
     newTodoText.value = '';
   }
 }
 
 function toggleTodo(id: number) {
-  dispatch('todo.toggle', id);
+  dispatch('todoToggle', id);
 }
 
 function removeTodo(id: number) {
-  dispatch('todo.remove', id);
+  dispatch('todoRemove', id);
 }
 
 function clearCompleted() {
-  dispatch('todo.clear-completed', null);
+  dispatch('todoClearCompleted', null);
 }
 
 function setFilter(filter: TodoState['filter']) {
-  dispatch('todo.filter', filter);
+  dispatch('todoFilter', filter);
 }
 
 // Stats as a reactive signal — updated after every todo command so the template
@@ -128,15 +133,14 @@ const stats = signal({ total: 0, active: 0, completed: 0 });
 
 // Store the unsubscribe so the hook is removed when the component unmounts.
 const unsubscribeStats = bus.onAfter((cmd) => {
-  if (!cmd.action.startsWith('todo.')) return;
+  if (!cmd.action.startsWith('todo')) return;
   const items = todos.value.items;
   const active = items.filter(t => !t.done).length;
   stats.value = { total: items.length, active, completed: items.length - active };
 });
 
 // Wire cleanup to the component lifecycle so the hook doesn't leak.
-// Replace with Vapor's equivalent when its lifecycle API stabilises.
-// onUnmounted(unsubscribeStats);
+onUnmounted(unsubscribeStats);
 </script>
 
 <template>

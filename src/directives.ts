@@ -49,7 +49,7 @@
  */
 
 import { getCommandBus, isVaporAvailable } from './chamber';
-import type { Command } from './command-bus';
+import type { Command, CommandMap } from './command-bus';
 
 // ---------------------------------------------------------------------------
 // Internal state per element (stored via WeakMap)
@@ -135,7 +135,7 @@ function buildHandler(el: Element, state: DirectiveState): (event: Event) => voi
     if ((el as Partial<HTMLButtonElement>).disabled === true) return;
     if (typeof el.getAttribute === 'function' && el.getAttribute('aria-disabled') === 'true') return;
 
-    const bus = getCommandBus();
+    const bus = getCommandBus<CommandMap>();
 
     state.loading = true;
     state.error = null;
@@ -164,14 +164,21 @@ function buildHandler(el: Element, state: DirectiveState): (event: Event) => voi
 
       // Handle result (may be a Promise if using async bus shim)
       if (result && typeof (result as any).then === 'function') {
-        // Race against timeout to prevent infinite loading states
+        // Race against timeout to prevent infinite loading states. Clear the
+        // timer when the dispatch wins the race — otherwise every click leaves
+        // a live timer (default 30s) pinning this closure.
+        let timeoutId: ReturnType<typeof setTimeout> | undefined;
         const timeoutPromise = new Promise<{ ok: false; error: Error }>((resolve) => {
-          setTimeout(
+          timeoutId = setTimeout(
             () => resolve({ ok: false, error: new Error(`Directive dispatch "${state.action}" timed out after ${state.timeout}ms`) }),
             state.timeout
           );
         });
-        resolved = await Promise.race([(result as unknown as Promise<any>), timeoutPromise]);
+        try {
+          resolved = await Promise.race([(result as unknown as Promise<any>), timeoutPromise]);
+        } finally {
+          clearTimeout(timeoutId);
+        }
       } else {
         resolved = result;
       }

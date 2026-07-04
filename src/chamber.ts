@@ -12,7 +12,7 @@
  * v0.3.0 — Fixed: signal shim, resetCommandBus, auto-cleanup on Vue unmount.
  */
 
-import { createCommandBus, disposeAll, type CommandBus, type Command, type CommandResult, type Handler, type Plugin, type RegisterOptions, type Listener } from './command-bus';
+import { createCommandBus, disposeAll, type CommandBus, type AsyncCommandBus, type Command, type CommandResult, type CommandMap, type TargetOf, type PayloadOf, type ResultOf, type Handler, type Plugin, type RegisterOptions, type Listener } from './command-bus';
 import { configureSignal, signal } from './signal';
 import type { Signal } from './signal';
 
@@ -205,13 +205,49 @@ export function getVueDeepRefFn(): (<T>(v: T) => { value: T }) | null { return _
 // Shared command bus instance
 // ---------------------------------------------------------------------------
 
+/**
+ * GlobalCommands — module-augmentation hook that types the SHARED bus
+ * (pinia-style). Augment it once in your app and every `useCommand()` /
+ * `getCommandBus()` call site gets typed dispatch/register with autocomplete
+ * and compile errors:
+ *
+ * @example
+ * declare module 'vapor-chamber' {
+ *   interface GlobalCommands {
+ *     cartAdd: { target: Product; payload: { qty: number }; result: Cart };
+ *     cartClear: { target: null; result: Cart };
+ *   }
+ * }
+ *
+ * Unaugmented, everything stays exactly as loose as before (string actions,
+ * `any` targets). Schema users: derive the entries with `CommandsOf<S>` from
+ * './schema' instead of writing them by hand.
+ */
+// biome-ignore lint/suspicious/noEmptyInterface: augmentation hook by design
+export interface GlobalCommands {}
+
+/**
+ * The CommandMap the shared bus is typed with: `GlobalCommands` when augmented,
+ * the loose default `CommandMap` otherwise. Wrapped in a mapped type because
+ * interfaces have no implicit index signature and would fail the CommandMap
+ * constraint.
+ */
+export type SharedCommandMap = [keyof GlobalCommands] extends [never]
+  ? CommandMap
+  : { [K in keyof GlobalCommands]: GlobalCommands[K] };
+
 let sharedBus: CommandBus | null = null;
 
-export function getCommandBus(): CommandBus {
+/**
+ * Get the shared bus. Typed with {@link SharedCommandMap} — augment
+ * {@link GlobalCommands} to make every call site typed. Pass an explicit map
+ * to override per call site (`getCommandBus<CommandMap>()` opts back out).
+ */
+export function getCommandBus<M extends CommandMap = SharedCommandMap>(): CommandBus<M> {
   if (!sharedBus) {
     sharedBus = createCommandBus();
   }
-  return sharedBus;
+  return sharedBus as CommandBus<M>;
 }
 
 /**
@@ -224,9 +260,14 @@ export function getCommandBus(): CommandBus {
  * requests. For concurrent servers, don't use the shared bus on the server —
  * create a bus per request and pass it explicitly (every composable and plugin
  * accepts a `bus` option / argument).
+ *
+ * Accepts either bus flavor — the composables' dispatch path already handles
+ * thenable results (`runDispatch` awaits them), so an AsyncCommandBus works at
+ * runtime; previously callers had to cast. `getCommandBus()`'s static type
+ * stays `CommandBus` for compatibility.
  */
-export function setCommandBus(bus: CommandBus): void {
-  sharedBus = bus;
+export function setCommandBus(bus: CommandBus | AsyncCommandBus): void {
+  sharedBus = bus as CommandBus;
 }
 
 /**
@@ -377,17 +418,27 @@ export function runDispatch(
  * dispatch('cartAdd', { id: product.id });
  */
 export function useCommand() {
-  const bus = getCommandBus();
+  // Untyped internally; the public dispatch/register signatures below carry
+  // the SharedCommandMap typing (GlobalCommands augmentation).
+  const bus = getCommandBus<CommandMap>();
   const loading = signal(false);
   const lastError = signal<Error | null>(null);
   const listeners: Array<() => void> = [];
 
-  function dispatch(action: string, target: any, payload?: any): CommandResult | Promise<CommandResult> {
+  function dispatch<A extends keyof SharedCommandMap & string>(
+    action: A,
+    target: TargetOf<SharedCommandMap, A>,
+    payload?: PayloadOf<SharedCommandMap, A>,
+  ): CommandResult<ResultOf<SharedCommandMap, A>> | Promise<CommandResult<ResultOf<SharedCommandMap, A>>> {
     return runDispatch(() => bus.dispatch(action, target, payload), loading, lastError);
   }
 
-  function register(action: string, handler: Handler, opts?: RegisterOptions): () => void {
-    const unregister = bus.register(action, handler, opts);
+  function register<A extends keyof SharedCommandMap & string>(
+    action: A,
+    handler: (cmd: Command<A, TargetOf<SharedCommandMap, A>, PayloadOf<SharedCommandMap, A>>) => ResultOf<SharedCommandMap, A> | Promise<ResultOf<SharedCommandMap, A>>,
+    opts?: RegisterOptions,
+  ): () => void {
+    const unregister = bus.register(action, handler as Handler, opts);
     listeners.push(unregister);
     return unregister;
   }
@@ -475,7 +526,7 @@ export type UseSharedCommandStateOptions = {
  * Auto-cleanup on Vue scope/component disposal via tryAutoCleanup.
  */
 export function useSharedCommandState(options: UseSharedCommandStateOptions = {}) {
-  const bus = options.bus ?? getCommandBus();
+  const bus = options.bus ?? getCommandBus<CommandMap>();
   const errorCap = options.errorCap ?? 10;
 
   let state = _sharedStates.get(bus);
@@ -671,7 +722,7 @@ export function _createCommandState<T>(
   createSignal: <V>(v: V) => Signal<V>,
 ): { state: Signal<T>; dispose: () => void } {
   const { coalesce = false } = options;
-  const bus = getCommandBus();
+  const bus = getCommandBus<CommandMap>();
   const state = createSignal(initial);
   const unregisters: Array<() => void> = [];
 
@@ -716,9 +767,10 @@ export function _createCommandState<T>(
 
 /**
  * useCommandBus - lightweight composable wrapper around the shared bus.
+ * Typed via GlobalCommands augmentation, same as getCommandBus().
  */
-export function useCommandBus() {
-  return getCommandBus();
+export function useCommandBus<M extends CommandMap = SharedCommandMap>(): CommandBus<M> {
+  return getCommandBus<M>();
 }
 
 // ---------------------------------------------------------------------------
@@ -736,7 +788,7 @@ export function useCommandHistory(options: {
   filter?: (cmd: Command) => boolean;
 } = {}) {
   const { maxSize = 50, filter } = options;
-  const bus = getCommandBus();
+  const bus = getCommandBus<CommandMap>();
 
   const past = signal<Command[]>([]);
   const future = signal<Command[]>([]);
@@ -748,12 +800,17 @@ export function useCommandHistory(options: {
   const unsubscribe = bus.onAfter((cmd, result) => {
     if (paused) return;
     if (result.ok && (!filter || filter(cmd))) {
-      const newPast = [...past.value, cmd];
-      if (newPast.length > maxSize) newPast.shift();
+      // One allocation: slice drops the oldest only when at cap, push appends.
+      const newPast = past.value.slice(past.value.length >= maxSize ? 1 : 0);
+      newPast.push(cmd);
       past.value = newPast;
-      future.value = [];
+      // Only clear the redo stack when there is one — a fresh [] every dispatch
+      // is a new identity that re-triggers every future/canRedo watcher.
+      if (future.value.length !== 0) {
+        future.value = [];
+        canRedo.value = false;
+      }
       canUndo.value = true;
-      canRedo.value = false;
     }
   });
 
@@ -851,7 +908,7 @@ export function useCommandHistory(options: {
  * // data.value = result.value after query completes
  */
 export function useCommandQuery() {
-  const bus = getCommandBus();
+  const bus = getCommandBus<CommandMap>();
   const data = signal<any>(null);
   const loading = signal(false);
   const lastError = signal<Error | null>(null);
@@ -891,7 +948,7 @@ export function useCommandQuery() {
  * orders.dispatch('cancel', { id }) // dispatches 'ordersCancel'
  */
 export function useCommandGroup(namespace: string) {
-  const bus = getCommandBus();
+  const bus = getCommandBus<CommandMap>();
   const cleanups: Array<() => void> = [];
 
   // camelCase namespace join ('cart' + 'add' → 'cartAdd'). Inlined, NOT a shared
@@ -963,9 +1020,11 @@ export function useCommandGroup(namespace: string) {
  */
 export function useCommandError(options: {
   filter?: (cmd: Command) => boolean;
+  /** Max errors retained — oldest are dropped first (ring buffer). Default: 50. */
+  errorCap?: number;
 } = {}) {
-  const { filter } = options;
-  const bus = getCommandBus();
+  const { filter, errorCap = 50 } = options;
+  const bus = getCommandBus<CommandMap>();
 
   type ErrorEntry = { cmd: Command; error: Error; timestamp: number };
   const errors = signal<ErrorEntry[]>([]);
@@ -977,7 +1036,10 @@ export function useCommandError(options: {
     if (!result.ok && result.error) {
       if (!filter || filter(cmd)) {
         latestError.value = result.error;
-        errors.value = [...errors.value, { cmd, error: result.error, timestamp: Date.now() }];
+        const next = errors.value.slice();
+        next.push({ cmd, error: result.error, timestamp: Date.now() });
+        while (next.length > errorCap) next.shift();
+        errors.value = next;
       }
     }
   });

@@ -23,6 +23,11 @@ use App\Http\Controllers\VaporChamberController;
 //
 // Place this in routes/web.php so the 'web' middleware group applies
 // (session, VerifyCsrfToken, etc.).
+//
+// Client tip: without Sanctum there is no /sanctum/csrf-cookie endpoint, so
+// pass `csrfCookieUrl: ''` to createHttpBridge/postCommand — the default 419
+// auto-refresh would otherwise re-read the (stale) meta tag and retry with
+// the same expired token.
 
 Route::post('/api/vc', VaporChamberController::class)
     ->middleware(['web'])
@@ -40,9 +45,16 @@ Route::post('/api/vc', VaporChamberController::class)
 //
 // Place this in routes/api.php — Sanctum's stateful guard hooks the cookie
 // session. The lib auto-fetches /sanctum/csrf-cookie on 419 and retries.
+//
+// NOTE the path: routes/api.php routes are automatically prefixed with `api`,
+// so '/vc' here resolves to '/api/vc' — writing '/api/vc' would resolve to
+// '/api/api/vc' and 404 every dispatch. On Laravel 11+ also run
+// `php artisan install:api` (creates routes/api.php) and enable
+// `$middleware->statefulApi()` in bootstrap/app.php so Sanctum treats the SPA
+// as stateful.
 
 /*
-Route::post('/api/vc', VaporChamberController::class)
+Route::post('/vc', VaporChamberController::class)   // → /api/vc
     ->middleware(['auth:sanctum'])
     ->name('api.vc');
 */

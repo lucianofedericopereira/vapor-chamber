@@ -122,12 +122,20 @@ async function runRulesAsync<T extends Record<string, any>>(
   values: T,
 ): Promise<Partial<Record<keyof T, string>>> {
   const errs: Partial<Record<keyof T, string>> = {};
+  // Run fields concurrently — two 300ms server-side validators cost 300ms, not
+  // 600ms. Sync rules resolve immediately; per-field error mapping is preserved.
+  const keys: Array<keyof T> = [];
+  const results: Array<string | null | undefined | Promise<string | null | undefined>> = [];
   for (const key in rules) {
     if (!(key in values)) continue;
     const rule = rules[key as keyof T];
     if (!rule) continue;
-    const msg = await rule(values[key as keyof T], values);
-    if (msg) errs[key as keyof T] = msg;
+    keys.push(key as keyof T);
+    results.push(rule(values[key as keyof T], values));
+  }
+  const settled = await Promise.all(results);
+  for (let i = 0; i < keys.length; i++) {
+    if (settled[i]) errs[keys[i]] = settled[i] as string;
   }
   return errs;
 }

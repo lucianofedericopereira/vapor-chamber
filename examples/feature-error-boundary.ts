@@ -8,9 +8,7 @@
 import {
   createCommandBus,
   setCommandBus,
-  useCommand,
   useCommandError,
-  useCommandGroup,
 } from 'vapor-chamber'
 
 const bus = createCommandBus()
@@ -56,7 +54,7 @@ const authErrors = useCommandError({
 
 bus.dispatch('cartAdd', {})           // ignored by both
 bus.dispatch('orderSubmit', {})       // captured by orderErrors
-bus.dispatch('userLogin', { target: { password: 'short' } })  // captured by authErrors
+bus.dispatch('userLogin', { password: 'short' })  // captured by authErrors
 
 console.log('Order errors:', orderErrors.errors.value.length)  // → 1
 console.log('Auth errors:', authErrors.errors.value.length)    // → 1
@@ -92,9 +90,11 @@ console.log('Auth errors:', authErrors.errors.value.length)    // → 1
 
 bus.dispatch('orderSubmit', {})
 
+// The global `errors` list kept capturing after clearErrors() above, so its
+// first entry is the line-57 cartAdd failure.
 const entry = errors.value[0]
-console.log('Error action:', entry.cmd.action)    // 'orderSubmit'
-console.log('Error message:', entry.error.message) // 'Payment gateway timeout'
+console.log('Error action:', entry.cmd.action)    // 'cartAdd'
+console.log('Error message:', entry.error.message) // 'Product ID is required'
 console.log('Timestamp:', new Date(entry.timestamp).toISOString())
 
 export {}

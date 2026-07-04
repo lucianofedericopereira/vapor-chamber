@@ -7,18 +7,24 @@
  * resources/js/app.ts
  */
 
-import { createCommandBus, useCommand, useCommandGroup, useCommandError } from 'vapor-chamber'
+import { createAsyncCommandBus, setCommandBus, retry } from 'vapor-chamber'
 import { createHttpBridge, createSseBridge } from 'vapor-chamber/transports'
 import { createDirectivePlugin } from 'vapor-chamber/directives'
-import { logger, retry, persist } from 'vapor-chamber'
-import { createApp, ref } from 'vue'
+import { createApp } from 'vue'
 import App from './App.vue'
 
-// 1. Create the bus
-const bus = createCommandBus()
+// 1. Create the bus. ASYNC bus — retry and createHttpBridge are async plugins;
+//    on a sync createCommandBus() they'd return a Promise where a result is
+//    expected and every dispatch would silently fail.
+const bus = createAsyncCommandBus()
 
-// 2. Install plugins (before transport so they run before forwarding)
-bus.use(logger({ collapsed: true, filter: (cmd) => !cmd.action.startsWith('analytics') }))
+// 2. Install plugins (before transport so they run before forwarding).
+//    Log via onAfter — it observes settled results on the async bus.
+bus.onAfter((cmd, result) => {
+  if (!cmd.action.startsWith('analytics')) {
+    console.log(`⚡ ${cmd.action}`, result.ok ? result.value : result.error)
+  }
+})
 bus.use(retry({ maxAttempts: 3, baseDelay: 300, actions: ['api*', 'order*'] }))
 
 // 3. Install HTTP transport — all unhandled commands go to the server
@@ -40,14 +46,14 @@ const sse = createSseBridge({
 })
 sse.install(bus)
 
-// 5. Create Vue app
+// 5. Make this bus the shared one. useCommand(), the directives, and every
+//    other composable dispatch on getCommandBus() — a provide()'d bus would
+//    never be seen by them.
+setCommandBus(bus)
+
+// 6. Create Vue app + install directive plugin (opt-in)
 const app = createApp(App)
-
-// 6. Install directive plugin (opt-in)
 app.use(createDirectivePlugin())
-
-// 7. Provide bus to the app
-app.provide('bus', bus)
 
 app.mount('#app')
 

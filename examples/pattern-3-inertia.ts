@@ -8,15 +8,21 @@
  * resources/js/app.ts
  */
 
-import { createCommandBus, useCommand, useCommandGroup } from 'vapor-chamber'
+import { createAsyncCommandBus, setCommandBus } from 'vapor-chamber'
 import { createHttpBridge } from 'vapor-chamber/transports'
 import { createDirectivePlugin } from 'vapor-chamber/directives'
 import { createApp, h } from 'vue'
 import { createInertiaApp } from '@inertiajs/vue3'
 
-// Shared bus — lives outside the Inertia page lifecycle
-const bus = createCommandBus()
-bus.use(createHttpBridge({ endpoint: '/api/vc', csrf: true }))
+// ASYNC bus (createHttpBridge is an async plugin) — it lives outside the
+// Inertia page lifecycle. `csrf: 'inertia'` defers token management to
+// Inertia's Axios instance instead of reading the DOM.
+const bus = createAsyncCommandBus()
+bus.use(createHttpBridge({ endpoint: '/api/vc', csrf: 'inertia' }))
+
+// Make it the shared bus — useCommand() in page components dispatches on
+// getCommandBus(), not on a provide()'d instance.
+setCommandBus(bus)
 
 createInertiaApp({
   resolve: (name) => {
@@ -28,7 +34,6 @@ createInertiaApp({
 
     app.use(plugin)
     app.use(createDirectivePlugin())
-    app.provide('bus', bus)
 
     app.mount(el)
   },
@@ -49,7 +54,7 @@ createInertiaApp({
  *
  * // Cancel with page transition after success
  * async function cancelOrder(id: number) {
- *   const result = await dispatch('order.cancel', { id })
+ *   const result = await dispatch('orderCancel', { id })
  *   if (result.ok) router.visit('/orders') // Inertia router
  * }
  * </script>

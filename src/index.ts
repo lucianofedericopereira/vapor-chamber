@@ -23,14 +23,21 @@
  *     iife         — UMD/IIFE bundle (see 'vapor-chamber/iife')
  *
  * Sub-path exports that avoid pulling in optional code:
- *   'vapor-chamber/transports'    — HTTP + WS + SSE bridges
- *   'vapor-chamber/transitions'   — <Transition> hook → bus dispatch
- *   'vapor-chamber/ssr'           — SSR dehydrate/rehydrate
- *   'vapor-chamber/directives'    — v-command directive
- *   'vapor-chamber/vite'          — Vite HMR plugin
- *   'vapor-chamber/iife'          — IIFE bundle (full)
- *   'vapor-chamber/iife-core'     — IIFE bundle (no Vapor custom-element, no Suspense paths)
- *   'vapor-chamber/iife-elements' — IIFE bundle (core + Vapor custom-element)
+ *   'vapor-chamber/transports'      — HTTP + WS + SSE bridges
+ *   'vapor-chamber/transitions'     — <Transition> hook → bus dispatch
+ *   'vapor-chamber/ssr'             — SSR dehydrate/rehydrate
+ *   'vapor-chamber/directives'      — v-command directive
+ *   'vapor-chamber/vite'            — Vite HMR plugin
+ *   'vapor-chamber/fast-lane'       — minimal-allocation dispatcher for hot loops
+ *   'vapor-chamber/observable'      — Symbol.observable interop (RxJS / xstream / callbag)
+ *   'vapor-chamber/standard-schema' — Standard Schema v1 validator plugin (Zod / Valibot / ArkType)
+ *   'vapor-chamber/alien-signals'   — alien-signals as the reactive primitive (non-Vue)
+ *   'vapor-chamber/reactive'        — opt-in deep reactivity (deepSignal + useDeepCommandState)
+ *   'vapor-chamber/outbox'          — offline outbox (durable queue + Idempotency-Key replay)
+ *   'vapor-chamber/mcp'             — MCP server from a schema bus (agent surface)
+ *   'vapor-chamber/iife'            — IIFE bundle (full)
+ *   'vapor-chamber/iife-core'       — IIFE bundle (no Vapor custom-element, no Suspense paths)
+ *   'vapor-chamber/iife-elements'   — IIFE bundle (core + Vapor custom-element)
  *
  * Changelog:
  *   v0.3.0 — Naming convention, wildcard listeners, request/response, authGuard, optimistic
@@ -77,6 +84,7 @@ export {
   buildRunner,
   matchesPattern,
   BusError,
+  RETRYABLE_CODES,
   type CommandPool,
   type BusInspection,
   type BusErrorCode,
@@ -106,6 +114,9 @@ export {
   type RegisterOptions,
   type Listener,
   type CommandMap,
+  type TargetOf,
+  type PayloadOf,
+  type ResultOf,
 } from './command-bus';
 
 // Testing utilities (CORE — zero runtime deps, for test environments only)
@@ -178,6 +189,9 @@ export {
   resetCommandBus,
   useCommandBus,
   useCommand,
+  // v1.8.0: typed command contract — augment GlobalCommands for typed dispatch
+  type GlobalCommands,
+  type SharedCommandMap,
   useSharedCommandState,
   type UseSharedCommandStateOptions,
   useCommandState,
@@ -289,6 +303,9 @@ export {
   type FieldMap,
   type FieldType,
   type InferMap,
+  // v1.8.0: typed command contract
+  defineSchema,
+  type CommandsOf,
   type SchemaCommandBus,
   type AsyncSchemaCommandBus,
   type SchemaCommandBusOptions,
@@ -305,4 +322,6 @@ export {
   describeErrorCodes,
   busApiSchema,
   type ErrorCodeEntry,
+  // v1.8.0: retryable/category metadata
+  isRetryableCode,
 } from './schema';

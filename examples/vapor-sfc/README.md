@@ -67,7 +67,7 @@ npm run preview    # serve the production build locally
 
 - This example uses the **local checkout** of vapor-chamber via
   `"file:../.."` in `package.json`. To run against a published version,
-  swap to `"vapor-chamber": "^1.2.0"`.
+  swap to `"vapor-chamber": "^1.7.0"`.
 - Vue 3.6 is currently in beta. The example pins to `^3.6.0-beta.17`. When
   Vue 3.6 ships stable, bump to `^3.6.0`.
 - The example registers handlers inline in `App.vue` for clarity. In a real

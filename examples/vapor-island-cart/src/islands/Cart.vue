@@ -1,10 +1,10 @@
 <script setup vapor lang="ts">
 import { cart } from '../store';
-import { useCommand } from '../composables/useCommand';
+import { useAction } from '../composables/useAction';
 
-const clearCmd = useCommand('cart.clear');
-const undoCmd  = useCommand('cart.undo');
-const redoCmd  = useCommand('cart.redo');
+const clearCmd = useAction('cartClear');
+const undoCmd  = useAction('cartUndo');
+const redoCmd  = useAction('cartRedo');
 </script>
 
 <!-- No <style>: LIGHT-DOM custom element — page CSS applies directly. -->

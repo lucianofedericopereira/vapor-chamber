@@ -4,7 +4,7 @@ import { bus, products } from '../store';
 // The emitter island. Each button dispatches a typed product straight onto the
 // shared bus via @click — no document listener, no closest(), no JSON.parse.
 function add(p: (typeof products)[number]) {
-  bus.dispatch('cart.add', p);
+  bus.dispatch('cartAdd', p);
 }
 </script>
 

@@ -44,12 +44,12 @@ interface CommandEntry {
  * app.mount('#app');
  */
 export function setupDevtools(bus: Observable, app: unknown): () => void {
-  // Guard: no-op in production. Bundlers (Vite, webpack, Rollup) replace
-  // process.env.NODE_ENV with 'production' in prod builds, making this entire
+  // Guard: no-op in production. Bundlers (Vite, webpack, Rollup) replace the
+  // bare process.env.NODE_ENV literal in prod builds, making this entire
   // function body dead code that tree-shakers eliminate for a true 0KB footprint.
-  // globalThis cast avoids requiring @types/node while preserving the replacement target.
-  const env = (globalThis as any).process?.env?.NODE_ENV as string | undefined;
-  if (env === 'production') {
+  // Must stay a bare literal — wrapping it (globalThis., typeof guards) breaks
+  // the replacement. IIFE builds pre-define it (scripts/build.mjs); Node reads it natively.
+  if (process.env.NODE_ENV === 'production') {
     return () => {};
   }
 

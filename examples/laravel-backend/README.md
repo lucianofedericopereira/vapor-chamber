@@ -33,6 +33,15 @@ panels, Reverb realtime, queued commands).
   - Anything else → 500 + `{ ok: false, error: 'Internal error' }` (and
     `report()`s the original)
 
+## Idempotency (double-submit protection)
+
+When the JS side enables the `idempotent()` plugin, retried/replayed commands
+carry an `Idempotency-Key` header. The controller honors it with a short-TTL
+cache: a second POST with the same key replays the cached response instead of
+running the action again — so a network retry can't create a duplicate order.
+No setup needed beyond a working Laravel cache store; the TTL (60s) matches the
+JS plugin's default.
+
 ## Smoke test
 
 ```bash

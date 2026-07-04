@@ -757,9 +757,9 @@ Three IIFE variants ship under `dist/`, split by **audience / deployment shape**
 
 | Variant   | Audience                                                  | Brotli |
 |-----------|-----------------------------------------------------------|--------|
-| core      | Sprinkled JS on server-rendered pages — Blade / Rails / Django | 7.0 KB |
-| elements  | Embeddable widgets via custom elements                    | 7.4 KB |
-| full      | SPAs that grew big (realtime + undo/redo + persistence)   | 10.2 KB |
+| core      | Sprinkled JS on server-rendered pages — Blade / Rails / Django | 7.3 KB |
+| elements  | Embeddable widgets via custom elements                    | 7.7 KB |
+| full      | SPAs that grew big (realtime + undo/redo + persistence)   | 10.6 KB |
 
 _(Generated, always-current per-export sizes: [BUNDLE-SIZES.md](./BUNDLE-SIZES.md).)_
 

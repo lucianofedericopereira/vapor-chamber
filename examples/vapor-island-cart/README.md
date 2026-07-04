@@ -9,17 +9,17 @@ Everything on the page is real, server-rendered HTML — visible with JavaScript
 *upgrades* `<vc-products>` and `<vc-cart>` in place into Vapor custom elements
 (`defineVaporCustomElement(..., { shadowRoot: false })`, so page CSS still applies) and wires their
 interactivity. The two islands never talk to each other directly: the products island dispatches
-`cart.add` onto the bus, the cart island reads reactive `cart` state the handler mutates.
+`cartAdd` onto the bus, the cart island reads reactive `cart` state the handler mutates.
 
 | Island         | Role     | Bus usage                                                  |
 |----------------|----------|------------------------------------------------------------|
-| `<vc-products>`| Emitter  | `bus.dispatch('cart.add', product)` from `@click`          |
-| `<vc-cart>`    | Consumer | reads reactive `cart`; dispatches `cart.clear/undo/redo`   |
+| `<vc-products>`| Emitter  | `bus.dispatch('cartAdd', product)` from `@click`          |
+| `<vc-cart>`    | Consumer | reads reactive `cart`; dispatches `cartClear/Undo/Redo`   |
 
 The bus (`src/store.ts`) is wired with four plugins:
 
 - **`logger`** — logs `cart.*` commands.
-- **`history`** — bus-backed undo/redo for `cart.add` (`cart.undo` / `cart.redo`).
+- **`history`** — bus-backed undo/redo for `cartAdd` (`cartUndo` / `cartRedo`).
 - **`sync`** — cross-tab sync over a `BroadcastChannel`; open two tabs and watch them stay in step.
 - **`persist`** — restores the cart from `localStorage` on reload.
 

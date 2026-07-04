@@ -208,7 +208,22 @@ export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
 
       return { ok: true, value: res.data?.state };
     } catch (e) {
-      return { ok: false, error: e as Error };
+      // postCommand throws HttpError on non-2xx with the parsed body attached.
+      // Surface the backend's own error/message (e.g. Laravel validation text)
+      // instead of the bare "HTTP 422" — the documented contract is that the
+      // failure body's `error` becomes `result.error.message`.
+      const src = e as Error & { response?: { data?: unknown }; status?: number; code?: string };
+      const body = src.response?.data as { error?: unknown; message?: unknown } | null | undefined;
+      const msg = body?.error ?? body?.message;
+      if (typeof msg === 'string' && msg.length > 0) {
+        const err = new Error(msg, { cause: src }) as Error & { status?: number; code?: string; response?: unknown };
+        err.name = src.name;
+        if (src.status !== undefined) err.status = src.status;
+        if (src.code !== undefined) err.code = src.code;
+        err.response = src.response;
+        return { ok: false, error: err };
+      }
+      return { ok: false, error: src };
     }
   };
 }
@@ -319,7 +334,8 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
   function flushQueue(): void {
     const items = queue.splice(0);
     const now = Date.now();
-    for (const { id, envelope, timeout, queuedAt } of items) {
+    for (let i = 0; i < items.length; i++) {
+      const { id, envelope, timeout, queuedAt } = items[i];
       const elapsed = now - queuedAt;
       if (elapsed >= timeout) {
         // Message expired while queued — reject it instead of sending stale commands
@@ -333,6 +349,12 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
       }
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ id, ...envelope }));
+      } else {
+        // Socket closed mid-flush — re-queue the remainder so they either go
+        // out on reconnect or settle via failAllPending/expiry, instead of
+        // silently hanging until each per-request timeout.
+        queue.unshift(...items.slice(i));
+        return;
       }
     }
   }
@@ -366,9 +388,18 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
 
   function connect(): void {
     if (typeof WebSocket === 'undefined') return;
+    // Already connecting/connected — a second socket would orphan the first
+    // with its handlers still live. Manual connect() also supersedes any
+    // pending reconnect timer.
+    if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
+    if (reconnectTimer !== null) {
+      clearTimeout(reconnectTimer);
+      reconnectTimer = null;
+    }
     intentionalClose = false;
 
-    ws = new WebSocket(url);
+    const socket = new WebSocket(url);
+    ws = socket;
 
     ws.onopen = () => {
       reconnectCount = 0;
@@ -397,6 +428,9 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
 
     ws.onclose = (event) => {
       connected.value = false;
+      // This socket is dead — drop the reference (unless a newer socket already
+      // replaced it) so the connect() liveness guard lets the next attempt through.
+      if (ws === socket) ws = null;
       onDisconnect?.(event);
       // Reconnect if we still can; otherwise this close is terminal — fail any
       // in-flight requests now rather than leaving them to hang until timeout.

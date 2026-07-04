@@ -31,9 +31,9 @@ bus.use(logger({ filter: cmd => cmd.action.startsWith('cart') }));
 export const cartHistory = mkHistory({
   maxSize: 50,
   bus,
-  filter: cmd => cmd.action === 'cart.add',
-  undoAction: 'cart.undo',
-  redoAction: 'cart.redo',
+  filter: cmd => cmd.action === 'cartAdd',
+  undoAction: 'cartUndo',
+  redoAction: 'cartRedo',
 });
 bus.use(cartHistory);
 
@@ -53,7 +53,7 @@ if (saved) {
 
 // Handlers
 bus.register(
-  'cart.add',
+  'cartAdd',
   (cmd) => {
     const p = cmd.target as Product;
     runningTotal += Math.round(p.price * 100);
@@ -72,7 +72,7 @@ bus.register(
   },
 );
 
-bus.register('cart.clear', () => {
+bus.register('cartClear', () => {
   runningTotal = 0; cart.count = 0; cart.total = 0; cart.empty = true; cart.lastAdded = '';
 });
 

@@ -4,7 +4,7 @@
  * Demonstrates: async command bus, async plugins, error handling
  */
 
-import { createAsyncCommandBus, type AsyncPlugin } from '../src';
+import { createAsyncCommandBus, type AsyncPlugin } from 'vapor-chamber';
 
 // Types
 interface User {
@@ -57,7 +57,7 @@ const retryPlugin: AsyncPlugin = async (cmd, next) => {
 };
 
 // Only apply retry to specific actions
-const retryableActions = ['user.fetch', 'user.update'];
+const retryableActions = ['userFetch', 'userUpdate'];
 bus.use(async (cmd, next) => {
   if (retryableActions.includes(cmd.action)) {
     return retryPlugin(cmd, next);
@@ -74,7 +74,7 @@ const fakeUsers: User[] = [
 let failCount = 0; // Simulate intermittent failures
 
 // Handlers
-bus.register('user.fetch', async (cmd) => {
+bus.register('userFetch', async (cmd) => {
   const { id } = cmd.target as { id: number };
 
   // Simulate API delay
@@ -95,12 +95,12 @@ bus.register('user.fetch', async (cmd) => {
   return user;
 });
 
-bus.register('user.list', async () => {
+bus.register('userList', async () => {
   await new Promise(r => setTimeout(r, 100));
   return [...fakeUsers];
 });
 
-bus.register('user.create', async (cmd) => {
+bus.register('userCreate', async (cmd) => {
   const userData = cmd.target as Omit<User, 'id'>;
   await new Promise(r => setTimeout(r, 100));
 
@@ -113,7 +113,7 @@ bus.register('user.create', async (cmd) => {
   return newUser;
 });
 
-bus.register('user.update', async (cmd) => {
+bus.register('userUpdate', async (cmd) => {
   const { id } = cmd.target as { id: number };
   const updates = cmd.payload as Partial<User>;
 
@@ -131,26 +131,26 @@ bus.register('user.update', async (cmd) => {
 // Usage
 async function main() {
   console.log('--- Fetching user (will retry on failure) ---');
-  const fetchResult = await bus.dispatch('user.fetch', { id: 1 });
+  const fetchResult = await bus.dispatch('userFetch', { id: 1 });
   console.log('Result:', fetchResult);
 
   console.log('\n--- Listing all users ---');
-  const listResult = await bus.dispatch('user.list', null);
+  const listResult = await bus.dispatch('userList', null);
   console.log('Result:', listResult);
 
   console.log('\n--- Creating new user ---');
-  const createResult = await bus.dispatch('user.create', {
+  const createResult = await bus.dispatch('userCreate', {
     name: 'Charlie',
     email: 'charlie@example.com'
   });
   console.log('Result:', createResult);
 
   console.log('\n--- Updating user ---');
-  const updateResult = await bus.dispatch('user.update', { id: 1 }, { name: 'Alice Smith' });
+  const updateResult = await bus.dispatch('userUpdate', { id: 1 }, { name: 'Alice Smith' });
   console.log('Result:', updateResult);
 
   console.log('\n--- Fetching non-existent user ---');
-  const notFoundResult = await bus.dispatch('user.fetch', { id: 999 });
+  const notFoundResult = await bus.dispatch('userFetch', { id: 999 });
   console.log('Result:', notFoundResult);
 }
 

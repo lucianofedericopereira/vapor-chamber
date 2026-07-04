@@ -44,7 +44,10 @@ export function invalidateCacheByPattern(pattern: string | RegExp): void {
   const regex = pattern instanceof RegExp ? pattern : new RegExp(pattern);
   const keysToDelete: string[] = [];
   for (const key of _cache.keys()) {
-    if (regex.test(key)) keysToDelete.push(key);
+    // Keys are `responseType:fullUrl` — match user patterns against the URL
+    // part so anchored patterns like /^\/api/ keep working.
+    const url = key.slice(key.indexOf(':') + 1);
+    if (regex.test(url)) keysToDelete.push(key);
   }
   for (const key of keysToDelete) _cache.delete(key);
 }

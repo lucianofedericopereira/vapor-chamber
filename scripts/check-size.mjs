@@ -33,9 +33,25 @@ const BUDGETS = {
   // SMALLER across all three (full 10.4→10.2, core 7.1→7.0, elements 7.5→7.4) but raw
   // nudged up — core raw crossed 25_000 by ~46 B. Raw ceiling absorbs that toolchain
   // drift; brotli ceilings stay put (the meaningful metric, and it improved).
-  'vapor-chamber.iife.min.js':          { rawMax: 36_500, brotliMax: 10_800 },
-  'vapor-chamber-core.iife.min.js':     { rawMax: 25_500, brotliMax: 7_400  },
-  'vapor-chamber-elements.iife.min.js': { rawMax: 26_600, brotliMax: 7_800  },
+
+  // v1.7.x bumps, two batches:
+  //  • raw ~+0.3-0.6 KB — leak/correctness fixes: idempotent() eviction cap,
+  //    useCommandError ring buffer, abort-listener detach in http retries, WS
+  //    reconnect guards, directive timeout clear, schema validator precompile,
+  //    CommandResult union.
+  //  • raw ~+0.7 KB / brotli ~+0.2 KB — HTTP bridge surfaces backend body
+  //    error messages (feature code), plus the sync-bus async-plugin dev
+  //    warning. The warning is inert in these bundles (its env check folds to
+  //    false at runtime) but rolldown's minifier doesn't constant-fold
+  //    `typeof process < "u" && !1`, so its string ships as dead bytes —
+  //    revisit if oxc gains that fold.
+  // v1.8.0 bumps: logger level filtering + [ OK ]/[ FAIL ] badges (+~295 B min
+  // in plugins-core), RETRYABLE_CODES beside BusError (+~170 B), retry()
+  // registry-aware default (+~100 B). The outbox/mcp/typed-contract modules are
+  // subpath-only and do NOT ship in these bundles.
+  'vapor-chamber.iife.min.js':          { rawMax: 38_400, brotliMax: 11_150 },
+  'vapor-chamber-core.iife.min.js':     { rawMax: 26_800, brotliMax: 7_800  },
+  'vapor-chamber-elements.iife.min.js': { rawMax: 28_400, brotliMax: 8_250  },
 };
 
 const BR_OPTS = { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } };

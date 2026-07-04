@@ -14,7 +14,7 @@ Requirements:
 git clone https://github.com/lucianofedericopereira/vapor-chamber.git
 cd vapor-chamber
 npm install
-npm run test:run    # 558+ tests, ~4s
+npm run test:run    # full test suite, ~4s
 npm run build       # tsc + Vite library build + IIFE variants
 ```
 

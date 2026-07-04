@@ -492,6 +492,11 @@ export type IdempotentOptions = {
    * (the HTTP bridge sends it as an `Idempotency-Key` header). Default: true.
    */
   stampMeta?: boolean;
+  /**
+   * Max completed keys remembered at once — oldest is evicted first, so memory
+   * stays bounded on long-lived buses with many distinct targets. Default: 500.
+   */
+  maxKeys?: number;
 };
 
 /**
@@ -517,7 +522,7 @@ export type IdempotentOptions = {
  * // two rapid orderCreate dispatches → one handler run, one backend write
  */
 export function idempotent(options: IdempotentOptions = {}): AsyncPlugin {
-  const { key, ttl = 60_000, actions, stampMeta = true } = options;
+  const { key, ttl = 60_000, actions, stampMeta = true, maxKeys = 500 } = options;
   const matchesActions = makeActionFilter(actions);
   // key → completed result (with timestamp) OR the in-flight promise.
   const done = new Map<string, { at: number; result: CommandResult }>();
@@ -536,14 +541,23 @@ export function idempotent(options: IdempotentOptions = {}): AsyncPlugin {
 
     const cached = done.get(k);
     const now = Date.now();
-    if (cached && now - cached.at < ttl) return cached.result; // collapse repeats within TTL
+    if (cached) {
+      if (now - cached.at < ttl) return cached.result; // collapse repeats within TTL
+      done.delete(k); // expired — drop so the map doesn't retain stale results
+    }
 
     const run = Promise.resolve(next()).then(
       (result) => {
         inflight.delete(k);
         // Cache only successes. A failed result (resolved errResult, ok:false)
         // is NOT cached so a genuine retry runs again.
-        if (result?.ok) done.set(k, { at: Date.now(), result });
+        if (result?.ok) {
+          if (done.size >= maxKeys) {
+            const oldest = done.keys().next().value;
+            if (oldest !== undefined) done.delete(oldest);
+          }
+          done.set(k, { at: Date.now(), result });
+        }
         return result;
       },
       (err) => {

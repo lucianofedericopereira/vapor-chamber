@@ -49,11 +49,13 @@ use App\Http\Controllers\VaporChamberController;
 Route::post('/api/vc', VaporChamberController::class)->middleware(['web']);
 ```
 
-Or under Sanctum if you're doing SPA cookie auth:
+Or under Sanctum if you're doing SPA cookie auth — note the path: routes in
+`routes/api.php` are auto-prefixed with `api`, so `'/vc'` resolves to `/api/vc`
+(writing `'/api/vc'` here would resolve to `/api/api/vc` and 404 every dispatch):
 
 ```php
-// routes/api.php
-Route::post('/api/vc', VaporChamberController::class)
+// routes/api.php  ('/vc' → /api/vc — the api prefix is added automatically)
+Route::post('/vc', VaporChamberController::class)
     ->middleware(['auth:sanctum']);
 ```
 
@@ -69,6 +71,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 
 class VaporChamberController extends Controller
 {
@@ -93,6 +96,8 @@ class VaporChamberController extends Controller
             return response()->json(['ok' => false, 'error' => $e->getMessage()], 422);
         } catch (AuthorizationException $e) {
             return response()->json(['ok' => false, 'error' => $e->getMessage()], 403);
+        } catch (ModelNotFoundException $e) {
+            return response()->json(['ok' => false, 'error' => 'Resource not found'], 404);
         } catch (\Throwable $e) {
             report($e);
             return response()->json(['ok' => false, 'error' => 'Internal error'], 500);
@@ -191,6 +196,7 @@ For SPA / Inertia setups using cookie-based session auth:
 composer require laravel/sanctum
 php artisan vendor:publish --provider="Laravel\Sanctum\SanctumServiceProvider"
 php artisan migrate
+php artisan install:api   # Laravel 11+: creates routes/api.php (absent on a fresh skeleton)
 ```
 
 ```php
@@ -199,8 +205,17 @@ php artisan migrate
 ```
 
 ```php
-// routes/api.php
-Route::post('/api/vc', VaporChamberController::class)
+// bootstrap/app.php (Laravel 11+) — without this every request 401s:
+// Sanctum only treats SPA requests as stateful when the middleware is enabled.
+->withMiddleware(function (Middleware $middleware) {
+    $middleware->statefulApi();
+})
+```
+
+```php
+// routes/api.php — auto-prefixed with `api`, so '/vc' → /api/vc
+// (writing '/api/vc' here would resolve to /api/api/vc and 404)
+Route::post('/vc', VaporChamberController::class)
     ->middleware(['auth:sanctum']);
 ```
 
@@ -630,7 +645,7 @@ import { createHttpBridge } from 'vapor-chamber/transports';
 const bus = createAsyncCommandBus();
 // idempotent OUTERMOST (higher priority) so the key is stamped before the bridge builds the request
 bus.use(idempotent({ actions: ['order*', 'checkout*'] }), { priority: 100 });
-bus.use(createHttpBridge({ endpoint: '/commands', csrf: true }));
+bus.use(createHttpBridge({ endpoint: '/api/vc', csrf: true }));
 
 // two rapid clicks → one handler run, one backend write
 bus.dispatch('checkoutSubmit', { cartId });
@@ -641,7 +656,18 @@ For commands that must also never *interleave* (two writes to the same account),
 add `serialize({ key })` — it orders same-key commands locally while `idempotent`
 collapses identical ones. Together they give exactly-once semantics on the client.
 The only backend contract is the standard one: honor the `Idempotency-Key` header
-(persist the key with its result; return the stored result on a repeat).
+(persist the key with its result; return the stored result on a repeat). The
+example controller implements exactly this with a short-TTL cache:
+
+```php
+// VaporChamberController (see examples/laravel-backend/) — replay a processed key
+$idempotencyKey = $request->header('Idempotency-Key');
+$cacheKey = $idempotencyKey ? "vc:idem:{$command}:{$idempotencyKey}" : null;
+if ($cacheKey && ($cached = Cache::get($cacheKey)) !== null) {
+    return response()->json($cached);   // second write with the same key → cached result
+}
+// ... run the action, then Cache::put($cacheKey, $body, 60) on success
+```
 
 > Deeply-reactive command state two-way bound with `v-model`? The opt-in
 > `vapor-chamber/reactive` companion (`useDeepCommandState` / `deepSignal`) adds

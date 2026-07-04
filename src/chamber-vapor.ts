@@ -51,7 +51,7 @@ import {
   getDefineVaporComponentFn,
   getDefineVaporAsyncComponentFn,
 } from './chamber';
-import type { Handler, RegisterOptions, CommandResult } from './command-bus';
+import type { Handler, RegisterOptions, CommandResult, CommandMap } from './command-bus';
 
 /**
  * Create a Vapor app instance with vapor-chamber ready.
@@ -201,7 +201,7 @@ export function defineVaporCommand(
   handler: Handler,
   options?: RegisterOptions
 ) {
-  const bus = getCommandBus();
+  const bus = getCommandBus<CommandMap>();
   const unregister = bus.register(action, handler, options);
 
   function dispatch(target: any, payload?: any): CommandResult {

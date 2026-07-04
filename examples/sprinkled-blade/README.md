@@ -16,7 +16,15 @@ WordPress, or any other server-rendered framework.
 
 ## Run
 
-Two terminals:
+First, build the library once so the IIFE bundle exists (this demo has no
+package.json of its own — `index.html` loads `../../dist/vapor-chamber-core.iife.min.js`):
+
+```bash
+# repo root — creates dist/
+npm install
+```
+
+Then two terminals:
 
 ```bash
 # Terminal 1: backend mock (emulates Laravel/Rails/Django route)

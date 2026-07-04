@@ -331,3 +331,128 @@ biggest pending change. It's blocked on Vue 3.6 RC — no need to land it in bet
 
 For performance characteristics, optimization philosophy, and tuning options
 see [docs/performance.md](./docs/performance.md).
+
+---
+
+## Appendix: feature matrix
+
+Per-module implementation status (moved here from the README — this file is the
+single source of truth for feature status).
+
+### Core
+
+| Feature | Module | Status | Tests |
+|---------|--------|--------|-------|
+| Dispatch / register / unregister | `command-bus` | ✅ v0.1.0 | ✅ 100% (line/branch/func) |
+| Plugin pipeline (sync + async) | `command-bus` | ✅ v0.1.0 | ✅ 100% (line/branch/func) |
+| Plugin priority ordering | `command-bus` | ✅ v0.2.0 | ✅ covered |
+| `onAfter` hooks | `command-bus` | ✅ v0.2.0 | ✅ covered |
+| Dead letter handling (`onMissing`) | `command-bus` | ✅ v0.2.0 | ✅ covered |
+| Command batching + `continueOnError` + `successCount`/`failCount` | `command-bus` | ✅ v0.6.0 | ✅ covered |
+| Naming convention enforcement | `command-bus` | ✅ v0.3.0 | ✅ covered |
+| Wildcard listeners (`on`, `prefix*`) | `command-bus` | ✅ v0.3.0 | ✅ covered |
+| `once()` — one-shot listener | `command-bus` | ✅ v0.6.0 | ✅ covered |
+| `offAll(pattern?)` — mass unsubscribe | `command-bus` | ✅ v0.6.0 | ✅ covered |
+| `onBefore(hook)` — pre-dispatch hook, cancelable | `command-bus` | ✅ v0.6.0 | ✅ covered |
+| Request / response pattern + timeout | `command-bus` | ✅ v0.3.0 | ✅ covered |
+| Per-command throttle + undo at register | `command-bus` | ✅ v0.3.0 | ✅ covered |
+| `bus.hasHandler()` introspection | `command-bus` | ✅ v0.3.0 | ✅ covered |
+| `bus.clear()` | `command-bus` | ✅ v0.5.0 | ✅ covered |
+| `BaseBus` structural interface | `command-bus` | ✅ v0.6.0 | ✅ covered |
+| `query()` — CQRS read-only dispatch (skips beforeHooks) | `command-bus` | ✅ v1.0 | ✅ covered |
+| `emit()` — domain events (no handler, no result) | `command-bus` | ✅ v1.0 | ✅ covered |
+| `Command.meta` — auto-stamped id, ts, correlationId, causationId | `command-bus` | ✅ v1.0 | ✅ covered |
+| `registeredActions()` — introspection | `command-bus` | ✅ v1.0 | ✅ covered |
+| `commandKey(action, target)` export | `command-bus` | ✅ v0.6.0 | ✅ covered |
+| `BusError` structured error class (code, severity, emitter) | `command-bus` | ✅ v1.0 | ✅ covered |
+| `inspectBus(bus)` — tree-shakeable topology introspection | `command-bus` | ✅ v1.0 | ✅ covered |
+| `bus.seal()` / `unsealBus(bus)` — freeze configuration | `command-bus` | ✅ v1.0 | ✅ covered |
+| `bus.dispose()` — clean teardown with timer cancellation | `command-bus` | ✅ v1.0 | ✅ covered |
+| `createCommandPool(size)` — pre-allocated object pool | `command-bus` | ✅ v1.0 | ✅ covered |
+| Transactional batch with undo rollback | `command-bus` | ✅ v1.0 | ✅ covered |
+| Recursion depth guard (max 10) | `command-bus` | ✅ v1.0 | ✅ covered |
+| V8 optimizations (monomorphic shapes, index loops, extracted try/catch) | `command-bus` | ✅ v1.0 | ✅ bench |
+| SSR isolation (independent bus instances) | `command-bus` | ✅ v0.5.0 | ✅ covered |
+| `createTestBus` record + assert | `testing` | ✅ v0.2.0 | ✅ harness (excluded) |
+| `createTestBus` snapshot & time-travel | `testing` | ✅ v0.4.3 | ✅ covered |
+| `TestBus.on()` / `once()` / `offAll()` real implementations | `testing` | ✅ v0.6.0 | ✅ covered |
+
+### Plugins
+
+| Feature | Module | Status | Tests |
+|---------|--------|--------|-------|
+| `logger` | `plugins-core` | ✅ v0.1.0 | ✅ 100% lines |
+| `validator` | `plugins-core` | ✅ v0.1.0 | ✅ covered |
+| `history` + bus-backed undo/redo | `plugins-core` | ✅ v0.3.0 | ✅ covered |
+| `debounce` (stale-closure fix) | `plugins-core` | ✅ v0.3.0 | ✅ covered |
+| `throttle` | `plugins-core` | ✅ v0.3.0 | ✅ covered |
+| `authGuard` | `plugins-core` | ✅ v0.3.0 | ✅ covered |
+| `optimistic` | `plugins-core` | ✅ v0.3.0 | ✅ covered |
+| `optimisticUndo` — auto-rollback via registered undo handlers | `plugins-core` | ✅ v1.0 | ✅ covered |
+| `retry` with configurable backoff + glob filter | `plugins-io` | ✅ v0.4.2 | ✅ 100% lines |
+| `persist` (localStorage / custom storage) | `plugins-io` | ✅ v0.4.2 | ✅ covered |
+| `sync` (BroadcastChannel cross-tab) | `plugins-io` | ✅ v0.4.2 | ✅ covered |
+| `cache` — LRU query result caching with TTL + glob filter | `plugins-extra` | ✅ v1.0 | ✅ covered |
+| `circuitBreaker` — per-action closed/open/half-open resilience | `plugins-extra` | ✅ v1.0 | ✅ covered |
+| `rateLimit` — per-action sliding window limiter | `plugins-extra` | ✅ v1.0 | ✅ covered |
+| `metrics` — lightweight telemetry (count, duration, errorRate) | `plugins-extra` | ✅ v1.0 | ✅ covered |
+| `serialize` — per-key sequential processing (async; prevents same-key races; `scope:'cross-tab'` via Web Locks) | `plugins-extra` | ✅ v1.5 | ✅ covered |
+| `idempotent` — collapse duplicate commands (double-submit/retry); stamps `Idempotency-Key` for the HTTP bridge | `plugins-extra` | ✅ v1.5 | ✅ covered |
+
+### Utilities
+
+| Feature | Module | Status | Tests |
+|---------|--------|--------|-------|
+| `createChamber` — declarative namespace grouping | `utilities` | ✅ v1.0 | ✅ covered |
+| `createWorkflow` — saga pattern with compensation | `utilities` | ✅ v1.0 | ✅ covered |
+| `createReaction` — declarative cross-domain rules | `utilities` | ✅ v1.0 | ✅ covered |
+
+### Transport layer
+
+| Feature | Module | Status | Tests |
+|---------|--------|--------|-------|
+| `postCommand` — POST with retry, CSRF, timeout, session | `http` | ✅ v0.5.0 | ✅ 100% lines |
+| `readCsrfToken` — meta / cookie / hidden input | `http` | ✅ v0.5.0 | ✅ covered |
+| `HttpError.code` — machine-readable code from response body | `http` | ✅ v0.6.0 | ✅ covered |
+| 419 vs 401 fix — CSRF expiry ≠ session expiry | `http` | ✅ v0.6.0 | ✅ covered |
+| `createHttpBridge` — fetch plugin | `transports` | ✅ v0.4.2 | ✅ 100% lines |
+| `HttpBridgeOptions.noRetry` — per-action retry disable | `transports` | ✅ v0.6.0 | ✅ covered |
+| `HttpBridgeOptions.scopeController` — Vapor lifecycle abort | `transports` | ✅ v0.6.0 | ✅ covered |
+| `createWsBridge` — WebSocket plugin + reconnect + bounded queue | `transports` | ✅ v0.6.0 | ✅ covered |
+| `WsBridge.connected` — reactive signal for connection state | `transports` | ✅ v0.6.0 | ✅ covered |
+| `createSseBridge` — server-push EventSource, accepts `BaseBus` | `transports` | ✅ v0.6.0 | ✅ covered |
+| `createEchoBridge` — Laravel Echo/Reverb realtime (public/private/presence → bus) | `transports` | ✅ v1.5.0 | ✅ covered |
+
+### Vue composables (requires Vue ≥3.5)
+
+| Feature | Module | Status | Tests |
+|---------|--------|--------|-------|
+| `useCommand` — Vapor-safe reactive composable (register/on/emit/dispose, loading/error) | `chamber` | ✅ v0.6.0 | ✅ ~96% lines |
+| `useCommandState` | `chamber` | ✅ v0.2.0 | ✅ covered |
+| `useCommandHistory` — reactive undo/redo | `chamber` | ✅ v0.2.0 | ✅ covered |
+| `useCommandGroup` — namespace isolation | `chamber` | ✅ v0.4.1 | ✅ covered |
+| `useCommandError` — error boundary | `chamber` | ✅ v0.4.1 | ✅ covered |
+| `getCommandBus` / `setCommandBus` / `resetCommandBus` | `chamber` | ✅ v0.1.0 | ✅ covered |
+| Signal shim + `configureSignal` | `chamber` | ✅ v0.3.0 | ✅ covered |
+| `onScopeDispose` lifecycle alignment | `chamber` | ✅ v0.4.0 | ✅ covered |
+| `isVaporAvailable()` | `chamber` | ✅ v0.4.0 | ✅ covered |
+| `createVaporChamberApp` / `getVaporInteropPlugin` / `defineVaporCommand` | `chamber-vapor` | ✅ v0.4.0 | ✅ covered |
+| `tryAutoCleanup` dev warning (no scope/instance) | `chamber` | ✅ v0.6.0 | ✅ covered |
+| `waitForVueDetection()` — async Vue probe | `chamber` | ✅ v0.6.0 | ✅ covered |
+
+### Extras
+
+| Feature | Module | Status | Tests |
+|---------|--------|--------|-------|
+| `createFormBus` — reactive form + sync/async validation | `form` | ✅ v0.6.0 | ✅ ~92% lines |
+| `FormBus` headless mode (`reactive: false`) | `form` | ✅ v0.6.0 | ✅ covered |
+| Schema layer — `createSchemaCommandBus`, `toTools`, `synthesize` | `schema` | ✅ v0.5.0 | ✅ 100% lines |
+| Schema auto-validation (`schemaValidator` auto-installed) | `schema` | ✅ v1.0 | ✅ covered |
+| `SynthesizeOptions.adapter` — custom LLM adapter | `schema` | ✅ v0.6.0 | ✅ covered |
+| `ERROR_CODE_REGISTRY` — structured error lookup table | `schema` | ✅ v1.0 | ✅ covered |
+| `busApiSchema()` — JSON schema of bus API for LLM prompts | `schema` | ✅ v1.0 | ✅ covered |
+| `describeErrorCodes()` — plain-text error table for LLM system prompts | `schema` | ✅ v1.0 | ✅ covered |
+| `setupDevtools` — Vue DevTools panel | `devtools` | ✅ v0.4.0 | ✅ covered |
+| `createDirectivePlugin` — `v-command` directive + Vapor compat warning | `directives` | ✅ v0.6.0 | ✅ covered |
+| Vite HMR plugin (+ `.vapor.vue` support) | `vite-hmr` | ✅ v0.6.0 | ✅ covered |
+| IIFE / CDN bundle | `iife` | ✅ v0.5.0 | 🔧 bundle entry |

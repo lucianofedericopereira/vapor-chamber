@@ -9,33 +9,69 @@ import { BusError, commandKey, disposeAll } from './command-bus';
 
 /**
  * Logger plugin - logs all commands and results
+ *
+ * Successful dispatches log at 'info', failed dispatches at 'error'.
+ * The default `level: 'info'` shows both (unchanged output); raise it to
+ * 'warn' or 'error' to hide successful dispatches and only see failures.
+ *
+ * @example
+ * bus.use(logger()); // ⚡ cartAdd — everything, as before
+ *
+ * @example
+ * // Failures only, with fixed-width [  OK  ] / [ FAIL ] badges
+ * // (colored via %c in browsers, plain brackets in Node)
+ * bus.use(logger({ level: 'error', badges: true }));
  */
 export function logger(options: {
   collapsed?: boolean;
   filter?: (cmd: Command) => boolean;
+  /** Minimum level to log. Ok results log at 'info', failures at 'error'. Default: 'info'. */
+  level?: 'debug' | 'info' | 'warn' | 'error';
+  /** Prefix the group label with a fixed-width [  OK  ] / [ FAIL ] badge. Default: false. */
+  badges?: boolean;
 } = {}): Plugin {
-  const { collapsed = true, filter } = options;
+  const { collapsed = true, filter, level = 'info', badges = false } = options;
+  // Ok results log at 'info', failures at 'error' — only 'warn'/'error' can suppress.
+  const skipOk = level === 'warn' || level === 'error';
 
   return (cmd, next) => {
     if (filter && !filter(cmd)) return next();
 
-    const label = `⚡ ${cmd.action}`;
     const log = collapsed ? console.groupCollapsed : console.group;
+    const open = (ok: boolean): void => {
+      const label = `⚡ ${cmd.action}`;
+      if (!badges) {
+        log(label);
+      } else {
+        const badge = `[ ${ok ? ' OK ' : 'FAIL'} ]`;
+        if (typeof window !== 'undefined') log(`%c${badge}%c ${label}`, `background:${ok ? '#2a6' : '#c33'};color:#fff;font-family:monospace`, '');
+        else log(`${badge} ${label}`);
+      }
+    };
+    const close = (result: CommandResult): CommandResult => {
+      console.log('target:', cmd.target);
+      if (cmd.payload !== undefined) console.log('payload:', cmd.payload);
+      if (result.ok) {
+        console.log('result:', result.value);
+      } else {
+        console.error('error:', result.error);
+      }
+      console.groupEnd();
+      return result;
+    };
 
-    log(label);
-    console.log('target:', cmd.target);
-    if (cmd.payload !== undefined) console.log('payload:', cmd.payload);
-
-    const result = next();
-
-    if (result.ok) {
-      console.log('result:', result.value);
-    } else {
-      console.error('error:', result.error);
+    // Fast path (defaults): open the group before the handler runs so nested
+    // dispatch logs stay grouped — output identical to previous versions.
+    if (!badges && !skipOk) {
+      open(true);
+      return close(next());
     }
-    console.groupEnd();
 
-    return result;
+    // Deferred path: the badge / suppression decision needs the result first.
+    const result = next();
+    if (result.ok && skipOk) return result;
+    open(result.ok);
+    return close(result);
   };
 }
 

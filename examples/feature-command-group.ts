@@ -5,7 +5,7 @@
  * Each group operates on the same shared bus but with a namespace prefix.
  */
 
-import { createCommandBus, setCommandBus, useCommandGroup, useCommandState } from 'vapor-chamber'
+import { createCommandBus, setCommandBus, useCommandGroup } from 'vapor-chamber'
 
 const bus = createCommandBus()
 setCommandBus(bus)

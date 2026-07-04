@@ -24,17 +24,19 @@ httpBus.use(createHttpBridge({
     'Accept-Language': navigator.language,
   },
   timeout: 15_000,                     // 15s timeout
-  actions: ['cart*', 'order*'],      // only forward these; others stay local
+  actions: ['cart*', 'order*'],      // only these are forwarded to the server
 }))
 
-// Local handlers run first; if missing, HTTP bridge forwards to server
-httpBus.register('cartAddLocal', (cmd) => {
-  // This stays local — not forwarded
+// The bridge handles every command matching `actions` itself — it does NOT
+// fall through to local handlers. Anything that must stay local needs a name
+// outside the forwarded globs.
+httpBus.register('uiCartApply', (cmd) => {
+  // 'uiCartApply' matches neither 'cart*' nor 'order*' → runs locally
   return { applied: true, item: cmd.target }
 })
 
 await httpBus.dispatch('cartAdd', { id: 1 }, { qty: 2 })    // → POST /api/vc
-await httpBus.dispatch('cartAddLocal', { id: 99 })           // → local only
+await httpBus.dispatch('uiCartApply', { id: 99 })            // → local only
 
 // ─── WebSocket Bridge ─────────────────────────────────────────────────────────
 
@@ -53,8 +55,8 @@ wsBus.use(wsBridge)
 wsBridge.connect()                // explicit connect — allows deferring connection
 
 // Commands are queued during disconnect and flushed on reconnect
-await wsBus.dispatch('chat.send', { roomId: 'general' }, { text: 'Hello!' })
-await wsBus.dispatch('presence.join', { userId: 42, roomId: 'general' })
+await wsBus.dispatch('chatSend', { roomId: 'general' }, { text: 'Hello!' })
+await wsBus.dispatch('presenceJoin', { userId: 42, roomId: 'general' })
 
 console.log('WS open?', wsBridge.isConnected())
 
@@ -65,7 +67,7 @@ console.log('WS open?', wsBridge.isConnected())
 
 const mainBus = createCommandBus()
 
-mainBus.register('notifications.new', (cmd) => {
+mainBus.register('notificationsNew', (cmd) => {
   const notification = cmd.target as { id: string; message: string }
   console.log('[Notification]', notification.message)
   // Update UI reactively via useCommandState
@@ -79,7 +81,7 @@ const sseBridge = createSseBridge({
   url: '/api/vc/stream',
   withCredentials: true,           // send cookies with SSE request
   onEvent: (event, bus) => {
-    // Server sends: { "command": "notifications.new", "target": { "id": "...", "message": "..." } }
+    // Server sends: { "command": "notificationsNew", "target": { "id": "...", "message": "..." } }
     const data = JSON.parse(event.data) as { command: string; target: any }
     bus.dispatch(data.command, data.target)
   },
@@ -104,7 +106,7 @@ const productionSse = createSseBridge({
     bus.dispatch(command, target)
   },
 })
-productionSse.install(productionBus as any)
+productionSse.install(productionBus) // accepts BaseBus — no cast needed
 
 // Commands flow out via HTTP; server events flow in via SSE
 // Full bidirectional without WebSocket complexity

@@ -13,9 +13,11 @@ import {
   describeSchema,
   createSchemaCommandBus,
   createAsyncSchemaCommandBus,
+  ERROR_CODE_REGISTRY,
+  isRetryableCode,
   type BusSchema,
 } from '../src/schema';
-import { createCommandBus } from '../src/command-bus';
+import { createCommandBus, RETRYABLE_CODES } from '../src/command-bus';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -517,5 +519,31 @@ describe('createAsyncSchemaCommandBus auto-validation', () => {
     const result = await bus.dispatch('cartAdd', { id: 'string-ok' as any });
     expect(result.ok).toBe(true);
     expect(result.value).toBe('string-ok');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// ERROR_CODE_REGISTRY retry metadata
+// ---------------------------------------------------------------------------
+
+describe('ERROR_CODE_REGISTRY retry metadata', () => {
+  const CATEGORIES = ['general', 'network', 'validation', 'internal', 'logic'];
+
+  it('every entry declares retryable and a valid category', () => {
+    for (const e of ERROR_CODE_REGISTRY) {
+      expect(typeof e.retryable, `${e.code} retryable`).toBe('boolean');
+      expect(CATEGORIES, `${e.code} category`).toContain(e.category);
+    }
+  });
+
+  it('stays in sync with RETRYABLE_CODES in command-bus', () => {
+    const fromRegistry = ERROR_CODE_REGISTRY.filter(e => e.retryable).map(e => e.code).sort();
+    expect([...RETRYABLE_CODES].sort()).toEqual(fromRegistry);
+  });
+
+  it('isRetryableCode consults the registry, undefined for unknown codes', () => {
+    expect(isRetryableCode('VC_CORE_THROTTLED')).toBe(true);
+    expect(isRetryableCode('VC_CORE_MAX_DEPTH')).toBe(false);
+    expect(isRetryableCode('NOT_A_CODE')).toBeUndefined();
   });
 });

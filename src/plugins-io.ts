@@ -4,7 +4,7 @@
  * retry, persist, sync
  */
 
-import { matchesPattern, type Command, type CommandResult, type AsyncPlugin, type Plugin } from './command-bus';
+import { matchesPattern, RETRYABLE_CODES, type Command, type CommandResult, type AsyncPlugin, type Plugin } from './command-bus';
 
 // ---------------------------------------------------------------------------
 // Retry plugin
@@ -28,7 +28,16 @@ export type RetryOptions = {
    * Default: all actions.
    */
   actions?: string[];
-  /** Return true if the error is retryable. Default: always retry. */
+  /**
+   * Return true if the error is retryable.
+   *
+   * Default: BusErrors (a `.code` starting with 'VC_') are retried only when
+   * the code is transient per RETRYABLE_CODES (throttled, rate-limited,
+   * timeout, circuit-open, ...) — known-permanent codes (validation, sealed
+   * bus, max depth, ...) stop retrying immediately instead of wasting
+   * attempts. All other errors are always retried. (Before v1.3 the default
+   * retried everything; behavior for plain Errors is unchanged.)
+   */
   isRetryable?: (error: Error, attempt: number) => boolean;
 };
 
@@ -38,8 +47,17 @@ function retryDelay(strategy: 'fixed' | 'linear' | 'exponential', base: number, 
   return base * Math.pow(2, attempt - 1);
 }
 
+/** Default isRetryable: consult RETRYABLE_CODES for BusErrors, retry everything else. */
+function defaultIsRetryable(error: Error): boolean {
+  const code = (error as { code?: unknown }).code;
+  return typeof code !== 'string' || !code.startsWith('VC_') || RETRYABLE_CODES.has(code);
+}
+
 /**
  * retry — async plugin that retries failed dispatches with configurable backoff.
+ *
+ * By default, permanent BusError codes (e.g. validation failures) are not
+ * retried — see RetryOptions.isRetryable to customize.
  *
  * @example
  * const bus = createAsyncCommandBus()
@@ -51,7 +69,7 @@ export function retry(options: RetryOptions = {}): AsyncPlugin {
     baseDelay = 200,
     strategy = 'exponential',
     actions,
-    isRetryable = () => true,
+    isRetryable = defaultIsRetryable,
   } = options;
 
   return async (cmd: Command, next: () => CommandResult | Promise<CommandResult>): Promise<CommandResult> => {

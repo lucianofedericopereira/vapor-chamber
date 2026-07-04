@@ -5,7 +5,7 @@
   Drop VaporChamber into any Blade template via script tag.
 
   Backend receives: { "command": "cartAdd", "target": {...}, "payload": {...} }
-  Backend returns:  { "state": { "cart": { "count": 3 } } }
+  Backend returns:  { "state": { "count": 3 } }
 -->
 <!DOCTYPE html>
 <html lang="en">
@@ -32,12 +32,14 @@
     }),
   })
 
-  // Persist cart count across page reloads
+  // Persist cart count across page reloads. persist() is used here only for
+  // its load()/save() storage helpers — we save explicitly below, because the
+  // HTTP transport handles matching commands itself (it does not fall through
+  // to local plugins/handlers).
   const cartPersist = VaporChamber.persist({
     key: 'vc:cart',
     getState: () => ({ count: parseInt(document.getElementById('cart-count').textContent) }),
   })
-  bus.use(cartPersist)
 
   // Restore on page load
   const saved = cartPersist.load()
@@ -45,12 +47,14 @@
     document.getElementById('cart-count').textContent = saved.count + ' items'
   }
 
-  // Register local side effects (UI updates after server responds)
-  bus.register('cartAdd', async (cmd) => {
-    // The HTTP bridge sends the command to the server and returns state
-    // This handler runs AFTER the transport middleware resolves
-    const countEl = document.getElementById('cart-count')
-    countEl.textContent = (parseInt(countEl.textContent) + (cmd.payload?.quantity ?? 1)) + ' items'
+  // Local side effects go in a LISTENER, not a handler: the HTTP transport
+  // forwards every matching command to the server (a registered handler would
+  // never run). on() listeners fire after the dispatch settles, with the
+  // server's state in result.value.
+  bus.on('cartAdd', (cmd, result) => {
+    if (!result.ok) return
+    document.getElementById('cart-count').textContent = result.value.count + ' items'
+    cartPersist.save()
   })
 
   // Wire up button

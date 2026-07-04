@@ -11,37 +11,43 @@
  * resources/js/islands/analytics.ts
  */
 
-import { createAsyncCommandBus, useCommandState, useCommandGroup } from 'vapor-chamber'
+import { createAsyncCommandBus, persist } from 'vapor-chamber'
 import { createHttpBridge } from 'vapor-chamber/transports'
-import { persist, sync } from 'vapor-chamber'
 import { ref } from 'vue'
 
 // Each island creates its own isolated bus.
 // Livewire and Vapor Chamber manage separate DOM scopes — no conflict.
+//
+// NOTE: register and dispatch directly on the LOCAL bus. useCommandGroup()
+// always attaches to the shared getCommandBus() instance, which would defeat
+// the per-island isolation this pattern is about — namespace by naming the
+// actions instead ('analytics*').
 function mountAnalyticsIsland(el: HTMLElement, endpoint: string) {
   const bus = createAsyncCommandBus()
-  bus.use(createHttpBridge({ endpoint }))
+  bus.use(createHttpBridge({ endpoint, actions: ['analyticsLoad*'] }))
 
-  // Namespace all analytics commands
-  const analytics = useCommandGroup('analytics')
-
-  // Persist the selected period across page navigations
+  // Persist the selected period across page navigations.
+  // persist() is a sync plugin; on this async bus its save-on-dispatch hook
+  // would see an unresolved Promise, so save explicitly via onAfter instead
+  // and use the plugin object only for load()/save()/clear().
   const period = ref<'day' | 'week' | 'month'>('week')
   const periodPersist = persist({
     key: 'vc:analytics:period',
     getState: () => period.value,
   })
-  bus.use(periodPersist as any)
   period.value = periodPersist.load() ?? 'week'
-
-  // Register local command handlers
-  analytics.register('setPeriod', (cmd) => {
-    period.value = cmd.target.period
-    // Trigger data reload
-    return bus.dispatch('analytics.loadMetrics', { period: period.value })
+  bus.onAfter((cmd, result) => {
+    if (cmd.action === 'analyticsSetPeriod' && result.ok) periodPersist.save()
   })
 
-  return { bus, analytics, period }
+  // Register local command handlers
+  bus.register('analyticsSetPeriod', (cmd) => {
+    period.value = cmd.target.period
+    // Trigger data reload — forwarded to the backend by the HTTP bridge
+    return bus.dispatch('analyticsLoadMetrics', { period: period.value })
+  })
+
+  return { bus, period }
 }
 
 /*

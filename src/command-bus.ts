@@ -120,6 +120,28 @@ export class BusError extends Error {
   }
 }
 
+/**
+ * BusError codes that mark transient failures — safe to retry.
+ *
+ * Deliberately a tiny standalone set (not a registry lookup): the full
+ * ERROR_CODE_REGISTRY lives in the schema/LLM layer, which retry() consumers
+ * must not pull into their bundles. tests/schema.test.ts asserts this set
+ * stays in sync with the registry's `retryable: true` entries.
+ *
+ * @example
+ * if (result.error instanceof BusError && RETRYABLE_CODES.has(result.error.code)) {
+ *   // transient — safe to re-dispatch
+ * }
+ */
+export const RETRYABLE_CODES: ReadonlySet<string> = new Set([
+  'VC_CORE_HANDLER_THREW',
+  'VC_CORE_REQUEST_TIMEOUT',
+  'VC_CORE_THROTTLED',
+  'VC_PLUGIN_CIRCUIT_OPEN',
+  'VC_PLUGIN_RATE_LIMITED',
+  'VC_UNKNOWN',
+]);
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -140,6 +162,25 @@ export type CommandMeta = {
    * reject duplicate writes. Not set by default — only when `idempotent` runs.
    */
   idempotencyKey?: string;
+  /**
+   * Where the command originated. `undefined` (the default) means local user
+   * code called dispatch directly. The core never sets this field — dispatchers
+   * that proxy external traffic (bridges, sync layers, replay tooling, agent
+   * endpoints) stamp it post-hoc via plugins so downstream plugins, hooks, and
+   * listeners can distinguish local intent from mirrored or machine-driven
+   * commands (e.g. skip re-broadcasting a `'sync'` command, or audit-log
+   * everything marked `'agent'`).
+   *
+   * Well-known values: `'user'`, `'remote'`, `'sync'`, `'replay'`, `'agent'` —
+   * but any string is accepted for custom origins.
+   *
+   * @example
+   * bus.use((cmd, next) => {
+   *   if (cmd.meta?.origin === 'agent') console.info('LLM-driven:', cmd.action);
+   *   return next();
+   * });
+   */
+  origin?: 'user' | 'remote' | 'sync' | 'replay' | 'agent' | (string & {});
 };
 
 export type Command<A extends string = string, T = any, P = any> = {
@@ -166,11 +207,16 @@ export type DispatchOptions = {
   signal?: AbortSignal;
 };
 
-export type CommandResult<V = any> = {
-  ok: boolean;
-  value?: V;
-  error?: Error;
-};
+/**
+ * Result of a dispatch/query — a discriminated union on `ok`.
+ *
+ * `if (result.ok)` narrows away `error`; on the failure arm `error` is a
+ * guaranteed `Error` (no `!` or `?.` needed). `value` stays optional on the
+ * success arm because void commands legitimately produce no value.
+ */
+export type CommandResult<V = any> =
+  | { ok: true; value?: V; error?: undefined }
+  | { ok: false; error: Error; value?: undefined };
 
 export type Handler<T = any, P = any, R = any> = (cmd: Command<string, T, P>) => R;
 export type AsyncHandler<T = any, P = any, R = any> = (cmd: Command<string, T, P>) => Promise<R>;
@@ -307,11 +353,11 @@ export type Listener = (cmd: Command, result: CommandResult) => void;
 export type CommandMap = Record<string, { target?: any; payload?: any; result?: any }>;
 
 /** Extract the target type for action A from a CommandMap. Used in typed bus interfaces. */
-type TargetOf<M extends CommandMap, A extends keyof M> = M[A] extends { target: infer T } ? T : any;
+export type TargetOf<M extends CommandMap, A extends keyof M> = M[A] extends { target: infer T } ? T : any;
 /** Extract the payload type for action A from a CommandMap. */
-type PayloadOf<M extends CommandMap, A extends keyof M> = M[A] extends { payload: infer P } ? P : any;
+export type PayloadOf<M extends CommandMap, A extends keyof M> = M[A] extends { payload: infer P } ? P : any;
 /** Extract the result type for action A from a CommandMap. */
-type ResultOf<M extends CommandMap, A extends keyof M> = M[A] extends { result: infer R } ? R : any;
+export type ResultOf<M extends CommandMap, A extends keyof M> = M[A] extends { result: infer R } ? R : any;
 
 // ---------------------------------------------------------------------------
 // Interfaces
@@ -798,7 +844,17 @@ function wrapThrottle(handler: Handler | AsyncHandler, wait: number, timers: Set
       return (handler as Handler)(cmd);
     }
     const retryIn = wait - (now - last);
-    throw new BusError('VC_CORE_THROTTLED', `Handler "${cmd.action}" throttled. Retry in ${retryIn}ms.`, { emitter: 'core', action: cmd.action, context: { retryIn, wait } });
+    // The rejected branch is the hot one by design (throttle exists for
+    // scroll/mousemove-frequency sources), and V8 stack capture dominates its
+    // cost. A throttle rejection is expected control flow — code/context carry
+    // everything actionable — so skip the stack. No-op outside V8.
+    const savedLimit = (Error as any).stackTraceLimit;
+    (Error as any).stackTraceLimit = 0;
+    try {
+      throw new BusError('VC_CORE_THROTTLED', `Handler "${cmd.action}" throttled. Retry in ${retryIn}ms.`, { emitter: 'core', action: cmd.action, context: { retryIn, wait } });
+    } finally {
+      (Error as any).stackTraceLimit = savedLimit;
+    }
   };
 }
 
@@ -1023,8 +1079,35 @@ function _syncDispatchInner(s: SyncState, action: string, target: any, payload?:
     return tryCatchHandler(handler, cmd);
   });
   const result = s.runner(cmd, execute);
+  devWarnThenableResult(result, action);
   syncRunHooks(s, cmd, result);
   return result;
+}
+
+// Dev-only footgun guard: an ASYNC plugin (retry, createHttpBridge, ...) on a
+// SYNC bus makes the runner return the plugin's Promise as the CommandResult —
+// `result.ok` is undefined and every dispatch silently "fails". Warn once per
+// action in dev. The env check is hoisted to module scope: process.env reads
+// go through a slow C++ interceptor, so a per-dispatch read costs ~150ns on
+// this hot path (measured: 3 plugins + 1 listener bench dropped 1,240 → 350
+// ops/s with the read inline). Bundler define-replacement still folds the
+// module-level const to false and DCEs the branch in production builds — the
+// bare process.env.NODE_ENV literal is load-bearing: `process.env?.NODE_ENV`
+// (optional chain) does NOT match the define and the warning ships to prod.
+// The typeof guard short-circuits in browsers, so no ReferenceError either way.
+const _devMode = typeof process !== 'undefined' && process.env.NODE_ENV !== 'production';
+const _thenableWarned = new Set<string>();
+function devWarnThenableResult(result: CommandResult, action: string): void {
+  if (_devMode) {
+    if (result && typeof (result as unknown as PromiseLike<unknown>).then === 'function' && !_thenableWarned.has(action)) {
+      _thenableWarned.add(action);
+      console.warn(
+        `[vapor-chamber] dispatch("${action}") on a SYNC bus returned a Promise — an async plugin ` +
+        `(retry, createHttpBridge, ...) is installed on a bus created with createCommandBus(). ` +
+        `Use createAsyncCommandBus() instead; result.ok is undefined on this dispatch.`,
+      );
+    }
+  }
 }
 
 /** Read-only query — skips beforeHooks, runs handler + plugins, fires afterHooks. */
@@ -1050,6 +1133,7 @@ function syncQuery(s: SyncState, action: string, target: any, payload?: any): Co
     return tryCatchHandler(handler, cmd);
   };
   const result = s.runner(cmd, execute);
+  devWarnThenableResult(result, action);
   syncRunHooks(s, cmd, result);
   return result;
 }
@@ -1333,11 +1417,27 @@ function asyncRebuildRunner(s: AsyncState): void {
   s.runner = buildAsyncRunner(s.pluginEntries.slice().sort(byPriority).map(e => e.plugin));
 }
 
-async function asyncRunHooks(s: AsyncState, cmd: Command, result: CommandResult): Promise<void> {
-  // V8 opt: index-based loops, no .slice()
+// Returns void (not a promise) when there are no after-hooks, so callers can
+// skip the await entirely — an async frame + microtask hop per dispatch
+// otherwise, even on a bus with zero hooks. Callers: `const h = asyncRunHooks(...);
+// if (h) await h;`
+function asyncRunHooks(s: AsyncState, cmd: Command, result: CommandResult): void | Promise<void> {
+  if (s.afterHooks.length === 0) {
+    fanOutListeners(s.exactListeners, s.wildcardListeners, cmd.action, cmd, result);
+    return;
+  }
+  return asyncRunAfterHooks(s, cmd, result);
+}
+
+async function asyncRunAfterHooks(s: AsyncState, cmd: Command, result: CommandResult): Promise<void> {
+  // V8 opt: index-based loops, no .slice(). Sync hooks (loggers, guards) are
+  // the common case — the thenable check saves a microtask hop per hook.
   const ah = s.afterHooks;
   for (let i = 0, len = ah.length; i < len; i++) {
-    try { await ah[i](cmd, result); } catch (e) { console.error('[vapor-chamber] Hook error:', e); }
+    try {
+      const r = ah[i](cmd, result) as unknown;
+      if (r && typeof (r as PromiseLike<void>).then === 'function') await r;
+    } catch (e) { console.error('[vapor-chamber] Hook error:', e); }
   }
   fanOutListeners(s.exactListeners, s.wildcardListeners, cmd.action, cmd, result);
 }
@@ -1378,7 +1478,8 @@ async function _asyncDispatchInner(s: AsyncState, action: string, target: any, p
   // After-hooks still run so loggers / metrics see the aborted command.
   if (signal?.aborted) {
     const result = abortedResult(action, signal);
-    await asyncRunHooks(s, cmd, result);
+    const h = asyncRunHooks(s, cmd, result);
+    if (h) await h;
     return result;
   }
 
@@ -1395,13 +1496,18 @@ async function _asyncDispatchInner(s: AsyncState, action: string, target: any, p
     return handleMissing(s, cmd, true);
   }
 
-  // V8 opt: index-based loop, no .slice()
+  // V8 opt: index-based loop, no .slice(). Sync before-hooks (guards, loggers)
+  // are the common case — the thenable check skips a microtask hop per hook.
   const bh = s.beforeHooks;
   for (let i = 0, len = bh.length; i < len; i++) {
-    try { await bh[i](cmd); }
+    try {
+      const r = bh[i](cmd) as unknown;
+      if (r && typeof (r as PromiseLike<void>).then === 'function') await r;
+    }
     catch (e) {
       const result = errResult(e as Error);
-      await asyncRunHooks(s, cmd, result);
+      const h = asyncRunHooks(s, cmd, result);
+      if (h) await h;
       return result;
     }
   }
@@ -1411,7 +1517,8 @@ async function _asyncDispatchInner(s: AsyncState, action: string, target: any, p
     return tryCatchAsyncHandler(handler, cmd);
   });
   const result = await s.runner(cmd, execute);
-  await asyncRunHooks(s, cmd, result);
+  const h = asyncRunHooks(s, cmd, result);
+  if (h) await h;
   return result;
 }
 
@@ -1425,7 +1532,8 @@ async function asyncQuery(s: AsyncState, action: string, target: any, payload?: 
     return tryCatchAsyncHandler(handler, cmd);
   };
   const result = await s.runner(cmd, execute);
-  await asyncRunHooks(s, cmd, result);
+  const h = asyncRunHooks(s, cmd, result);
+  if (h) await h;
   return result;
 }
 

@@ -4,7 +4,7 @@
  * Demonstrates: writing custom plugins for various use cases
  */
 
-import { createCommandBus, type Plugin, type Command } from '../src';
+import { createCommandBus, type Plugin, type Command } from 'vapor-chamber';
 
 // ============================================
 // Plugin 1: Analytics
@@ -131,13 +131,13 @@ bus.use(analyticsPlugin((event, data) => {
 
 bus.use(authGuardPlugin(
   () => authenticated,
-  ['admin.', 'user.delete']
+  ['admin', 'userDelete']
 ));
 
 bus.use(rateLimiterPlugin(3, 1000)); // Max 3 requests per second
 
 bus.use(transformPlugin({
-  'item.add': (cmd) => ({
+  'itemAdd': (cmd) => ({
     ...cmd,
     payload: {
       ...cmd.payload,
@@ -149,7 +149,7 @@ bus.use(transformPlugin({
 // Demo optimistic updates
 const optimisticState = { value: 0 };
 bus.use(optimisticPlugin((cmd) => {
-  if (cmd.action === 'counter.increment') {
+  if (cmd.action === 'counterIncrement') {
     const oldValue = optimisticState.value;
     optimisticState.value++; // Optimistic update
     return () => { optimisticState.value = oldValue; }; // Rollback
@@ -157,44 +157,44 @@ bus.use(optimisticPlugin((cmd) => {
   return null;
 }));
 
-bus.register('counter.increment', () => {
+bus.register('counterIncrement', () => {
   // Simulate failure sometimes
   if (Math.random() > 0.5) throw new Error('Random failure');
   return optimisticState.value;
 });
 
 // Handlers
-bus.register('item.add', (cmd) => {
+bus.register('itemAdd', (cmd) => {
   return { item: cmd.target, metadata: cmd.payload };
 });
 
-bus.register('admin.settings', (cmd) => {
+bus.register('adminSettings', (cmd) => {
   return { settings: cmd.target };
 });
 
-bus.register('public.info', () => {
+bus.register('publicInfo', () => {
   return { info: 'This is public' };
 });
 
 // Demo usage
 console.log('--- Public action (no auth required) ---');
-console.log(bus.dispatch('public.info', null));
+console.log(bus.dispatch('publicInfo', null));
 
 console.log('\n--- Admin action (not authenticated) ---');
-console.log(bus.dispatch('admin.settings', { theme: 'dark' }));
+console.log(bus.dispatch('adminSettings', { theme: 'dark' }));
 
 console.log('\n--- Login (set authenticated) ---');
 authenticated = true;
 
 console.log('\n--- Admin action (now authenticated) ---');
-console.log(bus.dispatch('admin.settings', { theme: 'dark' }));
+console.log(bus.dispatch('adminSettings', { theme: 'dark' }));
 
 console.log('\n--- Item add with auto-transform ---');
-console.log(bus.dispatch('item.add', { name: 'Widget' }, { quantity: 5 }));
+console.log(bus.dispatch('itemAdd', { name: 'Widget' }, { quantity: 5 }));
 
 console.log('\n--- Rate limit test (4 rapid requests) ---');
 for (let i = 0; i < 4; i++) {
-  const result = bus.dispatch('public.info', null);
+  const result = bus.dispatch('publicInfo', null);
   console.log(`Request ${i + 1}:`, result.ok ? 'OK' : result.error?.message);
 }
 

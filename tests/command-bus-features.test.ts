@@ -2820,3 +2820,34 @@ describe('request() dedup keys on canonical commandKey', () => {
     expect(calls).toBe(2);
   });
 });
+
+describe('dev warning — async plugin on a sync bus', () => {
+  afterEach(() => vi.restoreAllMocks());
+
+  it('warns once per action when a sync dispatch returns a thenable', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const bus = createCommandBus();
+    // async plugin on a sync bus — the classic footgun
+    bus.use(((_cmd: any, next: any) => Promise.resolve(next())) as any);
+    bus.register('oops', () => 1);
+
+    bus.dispatch('oops', {});
+    bus.dispatch('oops', {}); // second dispatch must not warn again
+
+    const matching = warn.mock.calls.filter(c => String(c[0]).includes('SYNC bus returned a Promise'));
+    expect(matching.length).toBe(1);
+    expect(String(matching[0][0])).toContain('oops');
+    expect(String(matching[0][0])).toContain('createAsyncCommandBus');
+  });
+
+  it('does not warn for sync plugins returning real results', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const bus = createCommandBus();
+    bus.use((_cmd, next) => next());
+    bus.register('fine', () => 1);
+
+    const r = bus.dispatch('fine', {});
+    expect(r.ok).toBe(true);
+    expect(warn.mock.calls.filter(c => String(c[0]).includes('SYNC bus returned a Promise')).length).toBe(0);
+  });
+});

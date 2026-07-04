@@ -1,0 +1,14 @@
+{
+  // Compile-time contract tests (GlobalCommands augmentation etc.).
+  // Separate program: the augmentation must not leak into the build emit,
+  // and rootDir "src" excludes tests/ from the main project.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "emitDeclarationOnly": false,
+    "rootDir": ".",
+    "declaration": false,
+    "declarationMap": false
+  },
+  "include": ["src/**/*", "tests/typed-contract.typecheck.ts"]
+}

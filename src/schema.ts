@@ -49,6 +49,43 @@ export type InferMap<S extends BusSchema> = {
   }
 };
 
+/** Alias for {@link InferMap} — reads better at GlobalCommands augmentation sites. */
+export type CommandsOf<S extends BusSchema> = InferMap<S>;
+
+/**
+ * defineSchema — identity helper that PRESERVES field-type literals, so the
+ * schema keeps its inference power. Without it, `{ id: 'number' }` widens to
+ * `Record<string, string>` and every inferred type collapses to `any`.
+ *
+ * The complete one-source-of-truth wiring:
+ *
+ * @example
+ * // commands.ts — define once
+ * export const schema = defineSchema({
+ *   cartAdd: {
+ *     description: 'Add a product to the cart',
+ *     target:  { id: 'number', name: 'string' },
+ *     payload: { qty: 'number' },
+ *     result:  { count: 'number', total: 'number' },
+ *   },
+ * });
+ *
+ * // → typed schema bus (validation + LLM tools included)
+ * const bus = createSchemaCommandBus(schema);
+ *
+ * // → typed SHARED bus for every useCommand()/getCommandBus() call site
+ * declare module 'vapor-chamber' {
+ *   interface GlobalCommands extends CommandsOf<typeof schema> {}
+ * }
+ * setCommandBus(bus);
+ *
+ * // → Laravel stubs + registry: node scripts/generate-laravel.mjs commands.mjs
+ * // → agent tools: bus.toTools() / vapor-chamber/mcp
+ */
+export function defineSchema<const S extends BusSchema>(schema: S): S {
+  return schema;
+}
+
 // ---------------------------------------------------------------------------
 // Tool format types (minimal — only what's needed externally)
 // ---------------------------------------------------------------------------
@@ -119,10 +156,22 @@ function buildInputProperties(def: ActionSchema) {
   return props;
 }
 
-function validateFields(fields: FieldMap, value: Record<string, any>): string[] {
-  const errors: string[] = [];
+// Pre-extracted [field, expectedType] pairs ('any' filtered out at compile).
+type CompiledChecks = Array<readonly [string, string]>;
+
+function compileFields(fields: FieldMap): CompiledChecks {
+  const checks: CompiledChecks = [];
   for (const [key, expected] of Object.entries(fields)) {
-    if (expected === 'any') continue;
+    if (expected !== 'any') checks.push([key, expected] as const);
+  }
+  return checks;
+}
+
+function runChecks(checks: CompiledChecks, value: Record<string, any>): string[] {
+  const errors: string[] = [];
+  for (let i = 0, len = checks.length; i < len; i++) {
+    const key = checks[i][0];
+    const expected = checks[i][1];
     const v = value[key];
     if (v === undefined) { errors.push(`${key}: missing`); continue; }
     if (expected === 'array' && !Array.isArray(v)) errors.push(`${key}: expected array`);
@@ -131,6 +180,10 @@ function validateFields(fields: FieldMap, value: Record<string, any>): string[] 
     }
   }
   return errors;
+}
+
+function validateFields(fields: FieldMap, value: Record<string, any>): string[] {
+  return runChecks(compileFields(fields), value);
 }
 
 // ---------------------------------------------------------------------------
@@ -165,15 +218,25 @@ export function toTools(schema: BusSchema, provider: 'anthropic' | 'openai' = 'a
 // ---------------------------------------------------------------------------
 
 export function schemaValidator(schema: BusSchema): Plugin {
+  // Precompile per-action checks once. The validator sits on the default-on
+  // dispatch path of createSchemaCommandBus and the schema is fixed at creation,
+  // so walking Object.entries(fields) per command is pure re-allocation.
+  const compiled = new Map<string, { target: CompiledChecks | null; payload: CompiledChecks | null }>();
+  for (const [action, def] of Object.entries(schema)) {
+    compiled.set(action, {
+      target: def.target ? compileFields(def.target) : null,
+      payload: def.payload !== undefined ? compileFields(def.payload) : null,
+    });
+  }
   return (cmd, next) => {
-    const def = schema[cmd.action];
-    if (!def) return next();
-    if (def.target && cmd.target && typeof cmd.target === 'object') {
-      const errs = validateFields(def.target, cmd.target);
+    const c = compiled.get(cmd.action);
+    if (!c) return next();
+    if (c.target && cmd.target && typeof cmd.target === 'object') {
+      const errs = runChecks(c.target, cmd.target);
       if (errs.length) return { ok: false, error: new Error(`[vapor-chamber] Validation failed for "${cmd.action}": ${errs.join(', ')}`) };
     }
-    if (def.payload !== undefined && cmd.payload !== undefined && typeof cmd.payload === 'object') {
-      const errs = validateFields(def.payload, cmd.payload);
+    if (c.payload && cmd.payload !== undefined && typeof cmd.payload === 'object') {
+      const errs = runChecks(c.payload, cmd.payload);
       if (errs.length) return { ok: false, error: new Error(`[vapor-chamber] Validation failed for "${cmd.action}": ${errs.join(', ')}`) };
     }
     return next();
@@ -413,6 +476,14 @@ export type ErrorCodeEntry = {
   code: BusErrorCode;
   severity: BusSeverity;
   emitter: BusEmitter;
+  /**
+   * Whether re-dispatching can plausibly succeed (transient failure, e.g.
+   * throttle/timeout) — false for permanent failures (validation, config).
+   * Must stay in sync with RETRYABLE_CODES in command-bus.ts (asserted in tests).
+   */
+  retryable: boolean;
+  /** Broad failure category for filtering, telemetry, and LLM error handling. */
+  category: 'general' | 'network' | 'validation' | 'internal' | 'logic';
   message: string;
   /** Human-readable fix suggestion for LLMs and developers. */
   fix: string;
@@ -434,29 +505,34 @@ export type ErrorCodeEntry = {
  *   .map(e => `${e.code} (${e.severity}): ${e.message} → Fix: ${e.fix}`)
  *   .join('\n');
  */
-export const ERROR_CODE_REGISTRY: readonly ErrorCodeEntry[] = Object.freeze([
+// @__PURE__ lets bundlers tree-shake the whole registry out of consumer
+// bundles that never touch it (Object.freeze at module level otherwise reads
+// as a side effect and pins ~1 KB into every barrel-import bundle).
+export const ERROR_CODE_REGISTRY: readonly ErrorCodeEntry[] = /* @__PURE__ */ Object.freeze([
   // Core
-  { code: 'VC_CORE_NO_HANDLER',       severity: 'error', emitter: 'core',     message: 'No handler registered for action',                  fix: 'Register a handler with bus.register(action, handler) before dispatching.' },
-  { code: 'VC_CORE_HANDLER_THREW',     severity: 'error', emitter: 'core',     message: 'Handler threw an exception during execution',       fix: 'Add try/catch in your handler or check the error in result.error.' },
-  { code: 'VC_CORE_BEFORE_CANCEL',     severity: 'warn',  emitter: 'hook',     message: 'A beforeHook threw to cancel the dispatch',         fix: 'This is intentional cancellation. Check the beforeHook logic or remove the hook.' },
-  { code: 'VC_CORE_NAMING_VIOLATION',  severity: 'warn',  emitter: 'core',     message: 'Action name does not match the naming pattern',     fix: 'Rename the action to match the pattern or adjust naming config in createCommandBus().' },
-  { code: 'VC_CORE_HANDLER_OVERWRITE', severity: 'info',  emitter: 'core',     message: 'A handler was overwritten without unregistering',   fix: 'Call the unregister function returned by register() before re-registering.' },
-  { code: 'VC_CORE_REQUEST_TIMEOUT',   severity: 'error', emitter: 'core',     message: 'request() timed out waiting for a response',        fix: 'Increase the timeout option or check that respond() is registered for this action.' },
-  { code: 'VC_CORE_THROTTLED',         severity: 'warn',  emitter: 'core',     message: 'Handler throttled, too many calls in window',       fix: 'Wait for the throttle window to pass. Check context.retryIn for the remaining wait time.' },
+  { code: 'VC_CORE_NO_HANDLER',       severity: 'error', emitter: 'core',     retryable: false, category: 'internal',   message: 'No handler registered for action',                  fix: 'Register a handler with bus.register(action, handler) before dispatching.' },
+  { code: 'VC_CORE_HANDLER_THREW',     severity: 'error', emitter: 'core',     retryable: true,  category: 'general',    message: 'Handler threw an exception during execution',       fix: 'Add try/catch in your handler or check the error in result.error.' },
+  { code: 'VC_CORE_BEFORE_CANCEL',     severity: 'warn',  emitter: 'hook',     retryable: false, category: 'logic',      message: 'A beforeHook threw to cancel the dispatch',         fix: 'This is intentional cancellation. Check the beforeHook logic or remove the hook.' },
+  { code: 'VC_CORE_NAMING_VIOLATION',  severity: 'warn',  emitter: 'core',     retryable: false, category: 'validation', message: 'Action name does not match the naming pattern',     fix: 'Rename the action to match the pattern or adjust naming config in createCommandBus().' },
+  { code: 'VC_CORE_HANDLER_OVERWRITE', severity: 'info',  emitter: 'core',     retryable: false, category: 'internal',   message: 'A handler was overwritten without unregistering',   fix: 'Call the unregister function returned by register() before re-registering.' },
+  { code: 'VC_CORE_REQUEST_TIMEOUT',   severity: 'error', emitter: 'core',     retryable: true,  category: 'network',    message: 'request() timed out waiting for a response',        fix: 'Increase the timeout option or check that respond() is registered for this action.' },
+  { code: 'VC_CORE_THROTTLED',         severity: 'warn',  emitter: 'core',     retryable: true,  category: 'general',    message: 'Handler throttled, too many calls in window',       fix: 'Wait for the throttle window to pass. Check context.retryIn for the remaining wait time.' },
+  { code: 'VC_CORE_ABORTED',           severity: 'warn',  emitter: 'core',     retryable: false, category: 'general',    message: 'Dispatch aborted via its AbortSignal before completion', fix: 'Intentional cancellation (ac.abort()). Re-dispatch explicitly if the abort was premature.' },
+  { code: 'VC_VALIDATION_FAILED',      severity: 'error', emitter: 'plugin',   retryable: false, category: 'validation', message: 'Schema or per-action validation rejected the dispatch', fix: 'Fix the target/payload fields listed in the error message to match the declared schema.' },
   // Plugins
-  { code: 'VC_PLUGIN_CIRCUIT_OPEN',    severity: 'error', emitter: 'plugin',   message: 'Circuit breaker is open due to consecutive failures', fix: 'Wait for resetTimeout to elapse. The circuit will transition to half-open and retry.' },
-  { code: 'VC_PLUGIN_RATE_LIMITED',    severity: 'error', emitter: 'plugin',   message: 'Rate limit exceeded for this action',               fix: 'Reduce call frequency or increase the max/window in rateLimit() options.' },
-  { code: 'VC_PLUGIN_CACHE_MISS',      severity: 'info',  emitter: 'plugin',   message: 'Cache miss — handler will be called',               fix: 'This is informational. Increase TTL or warm the cache if needed.' },
+  { code: 'VC_PLUGIN_CIRCUIT_OPEN',    severity: 'error', emitter: 'plugin',   retryable: true,  category: 'network',    message: 'Circuit breaker is open due to consecutive failures', fix: 'Wait for resetTimeout to elapse. The circuit will transition to half-open and retry.' },
+  { code: 'VC_PLUGIN_RATE_LIMITED',    severity: 'error', emitter: 'plugin',   retryable: true,  category: 'general',    message: 'Rate limit exceeded for this action',               fix: 'Reduce call frequency or increase the max/window in rateLimit() options.' },
+  { code: 'VC_PLUGIN_CACHE_MISS',      severity: 'info',  emitter: 'plugin',   retryable: false, category: 'general',    message: 'Cache miss — handler will be called',               fix: 'This is informational. Increase TTL or warm the cache if needed.' },
   // Workflow
-  { code: 'VC_WORKFLOW_STEP_FAILED',       severity: 'error', emitter: 'workflow', message: 'A workflow step failed, running compensations',  fix: 'Check the step handler. Compensations run automatically for previous steps.' },
-  { code: 'VC_WORKFLOW_COMPENSATE_FAILED', severity: 'error', emitter: 'workflow', message: 'A compensation step also failed',               fix: 'Manual intervention needed. Check the compensation handler for errors.' },
+  { code: 'VC_WORKFLOW_STEP_FAILED',       severity: 'error', emitter: 'workflow', retryable: false, category: 'logic',    message: 'A workflow step failed, running compensations',  fix: 'Check the step handler. Compensations run automatically for previous steps.' },
+  { code: 'VC_WORKFLOW_COMPENSATE_FAILED', severity: 'error', emitter: 'workflow', retryable: false, category: 'internal', message: 'A compensation step also failed',               fix: 'Manual intervention needed. Check the compensation handler for errors.' },
   // Hooks/Listeners
-  { code: 'VC_CORE_MAX_DEPTH',         severity: 'error', emitter: 'core',     message: 'Recursive dispatch depth exceeded',                 fix: 'A listener or reaction is re-dispatching in a loop. Break the cycle or add a guard condition.' },
-  { code: 'VC_CORE_SEALED',           severity: 'error', emitter: 'core',     message: 'Mutation attempted on a sealed bus',                fix: 'The bus was sealed with bus.seal(). Register all handlers/plugins before calling seal().' },
-  { code: 'VC_HOOK_ERROR',             severity: 'warn',  emitter: 'hook',     message: 'An afterHook threw (logged, not fatal)',            fix: 'Fix the error in your onAfter hook. Hook errors do not affect dispatch results.' },
-  { code: 'VC_LISTENER_ERROR',         severity: 'warn',  emitter: 'listener', message: 'An on() listener threw (logged, not fatal)',        fix: 'Fix the error in your on() listener. Listener errors do not affect dispatch results.' },
+  { code: 'VC_CORE_MAX_DEPTH',         severity: 'error', emitter: 'core',     retryable: false, category: 'logic',      message: 'Recursive dispatch depth exceeded',                 fix: 'A listener or reaction is re-dispatching in a loop. Break the cycle or add a guard condition.' },
+  { code: 'VC_CORE_SEALED',           severity: 'error', emitter: 'core',     retryable: false, category: 'logic',      message: 'Mutation attempted on a sealed bus',                fix: 'The bus was sealed with bus.seal(). Register all handlers/plugins before calling seal().' },
+  { code: 'VC_HOOK_ERROR',             severity: 'warn',  emitter: 'hook',     retryable: false, category: 'internal',   message: 'An afterHook threw (logged, not fatal)',            fix: 'Fix the error in your onAfter hook. Hook errors do not affect dispatch results.' },
+  { code: 'VC_LISTENER_ERROR',         severity: 'warn',  emitter: 'listener', retryable: false, category: 'internal',   message: 'An on() listener threw (logged, not fatal)',        fix: 'Fix the error in your on() listener. Listener errors do not affect dispatch results.' },
   // Generic
-  { code: 'VC_UNKNOWN',                severity: 'error', emitter: 'core',     message: 'Unclassified error',                                fix: 'Check the error message and stack trace for details.' },
+  { code: 'VC_UNKNOWN',                severity: 'error', emitter: 'core',     retryable: true,  category: 'general',    message: 'Unclassified error',                                fix: 'Check the error message and stack trace for details.' },
 ]);
 
 /**
@@ -470,6 +546,19 @@ export const ERROR_CODE_REGISTRY: readonly ErrorCodeEntry[] = Object.freeze([
  */
 export function getErrorEntry(code: BusErrorCode): ErrorCodeEntry | undefined {
   return ERROR_CODE_REGISTRY.find(e => e.code === code);
+}
+
+/**
+ * Is this BusError code a transient (retryable) failure? Consults the registry.
+ * Returns undefined for codes not in ERROR_CODE_REGISTRY.
+ *
+ * @example
+ * if (result.error instanceof BusError && isRetryableCode(result.error.code) === false) {
+ *   // permanent failure — don't re-dispatch
+ * }
+ */
+export function isRetryableCode(code: string): boolean | undefined {
+  return ERROR_CODE_REGISTRY.find(e => e.code === code)?.retryable;
 }
 
 /**

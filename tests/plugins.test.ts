@@ -57,6 +57,74 @@ describe('logger plugin', () => {
     bus.dispatch('userLogin', {});
     expect(log).not.toHaveBeenCalled();
   });
+
+  it('level: "warn" suppresses ok dispatches but still logs failures', () => {
+    const bus = createCommandBus();
+    const group = vi.spyOn(console, 'groupCollapsed').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'groupEnd').mockImplementation(() => {});
+
+    bus.use(logger({ level: 'warn' }));
+    bus.register('quietAction', () => 'fine');
+
+    bus.dispatch('quietAction', {}); // ok → info → suppressed
+    expect(group).not.toHaveBeenCalled();
+    expect(log).not.toHaveBeenCalled();
+
+    bus.dispatch('missingAction', {}); // no handler → error → logged
+    expect(group).toHaveBeenCalledWith('⚡ missingAction');
+    expect(error).toHaveBeenCalledWith('error:', expect.anything());
+  });
+
+  it('level: "debug" keeps logging ok dispatches like the default', () => {
+    const bus = createCommandBus();
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'groupCollapsed').mockImplementation(() => {});
+    vi.spyOn(console, 'groupEnd').mockImplementation(() => {});
+
+    bus.use(logger({ level: 'debug' }));
+    bus.register('act', () => 'ok');
+    bus.dispatch('act', {});
+
+    expect(log).toHaveBeenCalledWith('result:', 'ok');
+  });
+
+  it('badges: true prefixes fixed-width [  OK  ] / [ FAIL ] badges (plain text in Node)', () => {
+    const bus = createCommandBus();
+    const group = vi.spyOn(console, 'groupCollapsed').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'groupEnd').mockImplementation(() => {});
+
+    bus.use(logger({ badges: true }));
+    bus.register('goodAction', () => 'ok');
+
+    bus.dispatch('goodAction', {});
+    expect(group).toHaveBeenCalledWith('[  OK  ] ⚡ goodAction');
+
+    bus.dispatch('badAction', {}); // no handler → failure
+    expect(group).toHaveBeenCalledWith('[ FAIL ] ⚡ badAction');
+  });
+
+  it('badges: true uses %c styling when window exists', () => {
+    vi.stubGlobal('window', {});
+    const bus = createCommandBus();
+    const group = vi.spyOn(console, 'groupCollapsed').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'groupEnd').mockImplementation(() => {});
+
+    bus.use(logger({ badges: true }));
+    bus.register('act', () => 'ok');
+    bus.dispatch('act', {});
+
+    expect(group).toHaveBeenCalledWith(
+      '%c[  OK  ]%c ⚡ act',
+      expect.stringContaining('monospace'),
+      '',
+    );
+    vi.unstubAllGlobals();
+  });
 });
 
 describe('validator plugin', () => {

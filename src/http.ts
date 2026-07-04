@@ -77,7 +77,6 @@ type CsrfResult = { token: string; headerName: string };
 type CsrfCacheEntry = CsrfResult & { expiresAt: number };
 
 let _csrfCache: CsrfCacheEntry | null = null;
-let _csrfRefreshing = false;
 
 /** Read CSRF token from DOM: meta tag → cookie → hidden input. TTL-cached for 5 min. */
 export function readCsrfToken(): CsrfResult | null {
@@ -126,41 +125,31 @@ export function invalidateCsrfCache(): void {
   _csrfCache = null;
 }
 
-let _csrfRefreshResult: boolean = false;
+let _csrfRefreshPromise: Promise<void> | null = null;
 
-async function refreshCsrfOnce(cookieUrl: string): Promise<void> {
-  if (_csrfRefreshing) {
-    // Coalesce: wait for the in-flight refresh instead of doing a duplicate
-    let ticks = 0;
-    while (_csrfRefreshing && ticks < 50) {
-      await new Promise<void>(r => setTimeout(r, 100));
-      ticks++;
+function refreshCsrfOnce(cookieUrl: string): Promise<void> {
+  // Coalesce: concurrent 419s share the single in-flight refresh promise —
+  // waiters resolve/reject the instant it settles, no polling.
+  if (_csrfRefreshPromise) return _csrfRefreshPromise;
+  _csrfRefreshPromise = (async () => {
+    try {
+      // Fetch the CSRF cookie endpoint so the backend issues a fresh
+      // XSRF-TOKEN cookie (Laravel Sanctum's `/sanctum/csrf-cookie` is the
+      // most common shape; other frameworks expose equivalent endpoints).
+      // Only fetch if cookieUrl is a non-empty string.
+      if (typeof cookieUrl === 'string' && cookieUrl.length > 0) {
+        try { await fetch(cookieUrl, { method: 'GET', credentials: 'same-origin' }); } catch { /* ignore network errors */ }
+      }
+      invalidateCsrfCache();
+      const freshToken = readCsrfToken(); // re-read DOM / cookie after fetch
+      if (!freshToken) {
+        throw new Error('[vapor-chamber] CSRF refresh failed: no token found in DOM after refresh');
+      }
+    } finally {
+      _csrfRefreshPromise = null;
     }
-    // Check if the refresh that we waited for actually succeeded
-    if (!_csrfRefreshResult) {
-      throw new Error('[vapor-chamber] CSRF refresh failed: token unavailable after refresh');
-    }
-    return;
-  }
-  _csrfRefreshing = true;
-  _csrfRefreshResult = false;
-  try {
-    // Fetch the CSRF cookie endpoint so the backend issues a fresh
-    // XSRF-TOKEN cookie (Laravel Sanctum's `/sanctum/csrf-cookie` is the
-    // most common shape; other frameworks expose equivalent endpoints).
-    // Only fetch if cookieUrl is a non-empty string.
-    if (typeof cookieUrl === 'string' && cookieUrl.length > 0) {
-      try { await fetch(cookieUrl, { method: 'GET', credentials: 'same-origin' }); } catch { /* ignore network errors */ }
-    }
-    invalidateCsrfCache();
-    const freshToken = readCsrfToken(); // re-read DOM / cookie after fetch
-    if (!freshToken) {
-      throw new Error('[vapor-chamber] CSRF refresh failed: no token found in DOM after refresh');
-    }
-    _csrfRefreshResult = true;
-  } finally {
-    _csrfRefreshing = false;
-  }
+  })();
+  return _csrfRefreshPromise;
 }
 
 // ---------------------------------------------------------------------------
@@ -191,23 +180,42 @@ function backoffMs(attempt: number): number {
 // AbortSignal utilities
 // ---------------------------------------------------------------------------
 
-function combineSignals(a: AbortSignal, b: AbortSignal): AbortSignal {
-  if (typeof AbortSignal.any === 'function') return AbortSignal.any([a, b]);
-  // Fallback for environments without AbortSignal.any
+type CombinedSignal = { signal: AbortSignal; detach: () => void };
+
+function combineSignals(a: AbortSignal, b: AbortSignal): CombinedSignal {
+  // AbortSignal.any listeners are platform-managed (GC-safe) — nothing to detach.
+  if (typeof AbortSignal.any === 'function') {
+    return { signal: AbortSignal.any([a, b]), detach: () => {} };
+  }
+  // Fallback for environments without AbortSignal.any. Callers MUST detach()
+  // when the request settles — the user signal is typically component-lifetime,
+  // so listeners left behind accrete once per request until unmount.
   const ctrl = new AbortController();
   const abort = () => ctrl.abort();
   a.addEventListener('abort', abort, { once: true });
   b.addEventListener('abort', abort, { once: true });
-  return ctrl.signal;
+  return {
+    signal: ctrl.signal,
+    detach: () => {
+      a.removeEventListener('abort', abort);
+      b.removeEventListener('abort', abort);
+    },
+  };
 }
 
 function sleepMs(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise<void>((resolve, reject) => {
-    const id = setTimeout(resolve, ms);
-    signal?.addEventListener('abort', () => {
+    const onAbort = () => {
       clearTimeout(id);
       reject(new DOMException('Aborted', 'AbortError'));
-    }, { once: true });
+    };
+    // Detach on normal resolve too — the signal outlives this sleep, and the
+    // listener would otherwise pin the timer closure per retry sleep.
+    const id = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    signal?.addEventListener('abort', onAbort, { once: true });
   });
 }
 
@@ -283,11 +291,13 @@ export async function postCommand<T = unknown>(
 
     const timeoutCtrl = new AbortController();
     const timeoutId = setTimeout(() => timeoutCtrl.abort(), timeout);
-    const signal = userSignal ? combineSignals(userSignal, timeoutCtrl.signal) : timeoutCtrl.signal;
+    const combined = userSignal ? combineSignals(userSignal, timeoutCtrl.signal) : null;
+    const signal = combined ? combined.signal : timeoutCtrl.signal;
 
     try {
       const res = await doFetch<T>(url, serialized, headers, signal);
       clearTimeout(timeoutId);
+      combined?.detach();
 
       if (!res.ok) {
         if (SESSION_EXPIRED_STATUS.includes(res.status)) handleSessionExpiry(res.status, url, onSessionExpired);
@@ -301,6 +311,11 @@ export async function postCommand<T = unknown>(
           attempt--;
           continue;
         }
+
+        // NOTE: unlike clientRequest, a 419 that survives the refresh retry is
+        // NOT escalated to session expiry here — postCommand's documented
+        // contract (whitepaper §5.7, pinned by tests) is that 419 never fires
+        // onSessionExpired; the bridge surfaces it as an HttpError instead.
 
         // Retry on retryable status codes
         if (RETRY_STATUS.includes(res.status) && attempt < retry) {
@@ -318,6 +333,7 @@ export async function postCommand<T = unknown>(
       return res;
     } catch (e) {
       clearTimeout(timeoutId);
+      combined?.detach();
       const err = e as Error;
       if (err.name === 'AbortError') throw userSignal?.aborted ? err : timeoutError(url, timeout);
       if (attempt >= retry) throw err;
@@ -505,11 +521,13 @@ async function clientRequest<T>(
 
     const timeoutCtrl = new AbortController();
     const timeoutId = setTimeout(() => timeoutCtrl.abort(), timeout);
-    const signal = userSignal ? combineSignals(userSignal, timeoutCtrl.signal) : timeoutCtrl.signal;
+    const combined = userSignal ? combineSignals(userSignal, timeoutCtrl.signal) : null;
+    const signal = combined ? combined.signal : timeoutCtrl.signal;
 
     try {
       const res = await doClientFetch<T>(fullUrl, method, headersObj, body, responseType, signal);
       clearTimeout(timeoutId);
+      combined?.detach();
 
       if (!res.ok) {
         if (SESSION_EXPIRED_STATUS.includes(res.status)) handleSessionExpiry(res.status, fullUrl, onSessionExpired);
@@ -524,8 +542,9 @@ async function clientRequest<T>(
           continue;
         }
 
-        // Session expiry after CSRF retry exhausted
-        if (res.status === 401 || (res.status === 419 && csrfRetried)) {
+        // CSRF expiry that survived the refresh retry is effectively a dead
+        // session too. 401 already notified above via SESSION_EXPIRED_STATUS.
+        if (res.status === 419 && csrfRetried) {
           handleSessionExpiry(res.status, fullUrl, onSessionExpired);
         }
 
@@ -544,6 +563,7 @@ async function clientRequest<T>(
       return res;
     } catch (e) {
       clearTimeout(timeoutId);
+      combined?.detach();
       const err = e as Error;
       if (err.name === 'AbortError') throw userSignal?.aborted ? err : timeoutError(fullUrl, timeout);
       if (attempt >= maxRetries) throw err;
@@ -619,7 +639,11 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
     const dedupe = config.dedupe ?? true;
 
     const fullUrl = buildFullUrl(url, config.baseURL, config.params);
-    const dedupeKey = `${method}:${fullUrl}`;
+    // responseType is part of both keys — a concurrent get(url) (json) and
+    // get(url, { responseType: 'blob' }) must not collapse to one request or
+    // one cache slot, or the loser receives the wrong data type.
+    const dedupeKey = `${method}:${responseType}:${fullUrl}`;
+    const cacheKey = `${responseType}:${fullUrl}`;
 
     // Request deduplication for GET
     if (isIdempotent && dedupe) {
@@ -630,7 +654,7 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
     // LRU cache for GET
     const cacheEnabled = config.cache && isIdempotent;
     if (cacheEnabled) {
-      const cached = getCached(fullUrl);
+      const cached = getCached(cacheKey);
       if (cached) return cached as HttpResponse<T>;
     }
 
@@ -665,7 +689,7 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
       // Cache successful GET responses
       if (cacheEnabled && response.ok) {
         const ttl = typeof config.cache === 'object' ? config.cache.ttl : CACHE_DEFAULT_TTL;
-        setCache(fullUrl, response, ttl);
+        setCache(cacheKey, response, ttl);
       }
 
       return response as HttpResponse<T>;

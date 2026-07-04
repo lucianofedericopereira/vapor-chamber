@@ -53,6 +53,22 @@ describe('createHttpBridge', () => {
     expect(result.error?.message).toContain('422');
   });
 
+  it('surfaces the backend body error message on HTTP failure status', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 422,
+      json: async () => ({ ok: false, error: 'The quantity field is required.' }),
+    }));
+
+    const bus = createAsyncCommandBus();
+    bus.use(createHttpBridge({ endpoint: '/api/vc' }));
+
+    const result = await bus.dispatch('fail', {});
+    expect(result.ok).toBe(false);
+    expect(result.error?.message).toBe('The quantity field is required.');
+    expect((result.error as any).status).toBe(422);
+  });
+
   it('reads XSRF-TOKEN cookie when csrf: true', async () => {
     invalidateCsrfCache();
 

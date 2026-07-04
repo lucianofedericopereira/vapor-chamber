@@ -23,7 +23,7 @@ consume the library via `file:../..` and auto-build `dist/` on demand. Aligned w
 | [`feature-command-group.ts`](./feature-command-group.ts) | `useCommandGroup` — namespace isolation |
 | [`feature-cross-tab-sync.ts`](./feature-cross-tab-sync.ts) | `sync` plugin — cross-tab coordination (BroadcastChannel) |
 | [`feature-error-boundary.ts`](./feature-error-boundary.ts) | `useCommandError` — component-scoped error boundary |
-| [`feature-persistence.ts`](./feature-persistence.ts) | `persist` plugin — localStorage / sessionStorage / cookie |
+| [`feature-persistence.ts`](./feature-persistence.ts) | `persist` plugin — localStorage / sessionStorage / custom storage (incl. IndexedDB) |
 | [`feature-retry.ts`](./feature-retry.ts) | `retry` plugin — configurable backoff for failed dispatches |
 | [`feature-transitions.ts`](./feature-transitions.ts) | Transition-dispatched commands (the transitions bridge) |
 | [`feature-transports.ts`](./feature-transports.ts) | HTTP / WebSocket / SSE transport plugins |
@@ -46,7 +46,7 @@ consume the library via `file:../..` and auto-build `dist/` on demand. Aligned w
 |------|-------|
 | [`shopping-cart.ts`](./shopping-cart.ts) | Cart with validation, history, and undo/redo |
 | [`form-validation.ts`](./form-validation.ts) | Form validation with error handling |
-| [`async-api.ts`](./async-api.ts) | Async handlers with the retry plugin |
+| [`async-api.ts`](./async-api.ts) | Async handlers with a hand-rolled retry wrapper (see `feature-retry.ts` for the built-in plugin) |
 | [`realtime-search.ts`](./realtime-search.ts) | Debounced search queries |
 | [`custom-plugins.ts`](./custom-plugins.ts) | Analytics, auth-guard, rate-limiter plugins |
 | [`vue-vapor-component.vue`](./vue-vapor-component.vue) | Full Vue Vapor todo app |

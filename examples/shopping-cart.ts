@@ -4,7 +4,7 @@
  * Demonstrates: handlers, validator, history, logger plugins
  */
 
-import { createCommandBus, validator, history, logger } from '../src';
+import { createCommandBus, validator, history, logger } from 'vapor-chamber';
 
 // Types
 interface Product {
@@ -35,10 +35,17 @@ bus.use(validator({
   'cartUpdate': (cmd) => cmd.payload?.quantity >= 0 ? null : 'Invalid quantity'
 }));
 
-const historyPlugin = history({ filter: (cmd) => cmd.action.startsWith('cart') });
+// Pass `bus` so undo() executes the inverse handlers registered below with
+// `{ undo }` — without it, undo() only pops the history stack and the cart
+// state would stay unchanged.
+const historyPlugin = history({ bus, filter: (cmd) => cmd.action.startsWith('cart') });
 bus.use(historyPlugin);
 
-// Handlers
+// Handlers — each mutating command registers its inverse via `{ undo }`
+function recalcTotal() {
+  cart.total = cart.items.reduce((sum, i) => sum + i.price * i.quantity, 0);
+}
+
 bus.register('cartAdd', (cmd) => {
   const product = cmd.target as Product;
   const quantity = cmd.payload?.quantity ?? 1;
@@ -50,15 +57,38 @@ bus.register('cartAdd', (cmd) => {
     cart.items.push({ ...product, quantity });
   }
 
-  cart.total = cart.items.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  recalcTotal();
   return { ...cart };
+}, {
+  undo: (cmd) => {
+    const product = cmd.target as Product;
+    const quantity = cmd.payload?.quantity ?? 1;
+    const item = cart.items.find(i => i.id === product.id);
+    if (item) {
+      item.quantity -= quantity;
+      if (item.quantity <= 0) cart.items = cart.items.filter(i => i.id !== product.id);
+    }
+    recalcTotal();
+    return { ...cart };
+  },
 });
 
 bus.register('cartRemove', (cmd) => {
   const product = cmd.target as Product;
+  const removed = cart.items.find(i => i.id === product.id);
+  // Stash what we removed on the command so the inverse can restore it
+  if (cmd.payload === undefined) cmd.payload = {};
+  cmd.payload.removed = removed;
   cart.items = cart.items.filter(i => i.id !== product.id);
-  cart.total = cart.items.reduce((sum, i) => sum + i.price * i.quantity, 0);
+  recalcTotal();
   return { ...cart };
+}, {
+  undo: (cmd) => {
+    const removed = cmd.payload?.removed as CartItem | undefined;
+    if (removed) cart.items.push(removed);
+    recalcTotal();
+    return { ...cart };
+  },
 });
 
 bus.register('cartUpdate', (cmd) => {
