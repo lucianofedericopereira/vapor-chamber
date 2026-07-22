@@ -32,7 +32,7 @@ dispatch('cartAdd', { id: product.id });
 | **Vue composables** | `useCommand`, `useCommandState`, shared state, Vapor-mode (`defineVaporCommand`) and full Vapor wrappers |
 | **Plugins** (opt-in) | logger, validator, history (undo/redo), debounce, throttle, retry, persist, cross-tab sync, serialize, idempotent, auth guard |
 | **Transports** (opt-in) | HTTP bridge, WebSocket, SSE, Laravel Echo/Reverb |
-| **Extras** (opt-in, own subpath each) | SSR dehydrate/rehydrate, form bus, HTTP client, schema validation, transitions bridge, devtools, Vite HMR, testing utilities |
+| **Extras** (opt-in, own subpath each) | SSR dehydrate/rehydrate, form bus, HTTP client, streaming JSON parser, schema validation, transitions bridge, devtools, Vite HMR, testing utilities |
 
 - **Vue 3.6.0-beta.17 aligned** — signals, `onScopeDispose`, `getCurrentScope`, alien-signals internals; tracked per beta (see CHANGELOG)
 - **One runtime dependency** (`alien-signals`); `sideEffects: false` — unimported modules tree-shake to zero
@@ -287,6 +287,15 @@ This package is **ESM-only** — no CJS build. Node ≥20 `import`, bundlers, an
 > CSRF flows, Sanctum, Inertia coexistence, Filament panels, Reverb
 > realtime, queued commands). Runnable PHP companions live in
 > [examples/laravel-backend/](https://github.com/lucianofedericopereira/vapor-chamber/tree/main/examples/laravel-backend).
+>
+> **Routing (in-box subpath):** the [`vapor-chamber/router`](docs/router.md)
+> subpath is a router for Vue 3.6 over Laravel Blade: one thin server
+> catch-all, path = navigation, query = state, route tables and data loaders
+> delivered as data. Loading is pluggable via a loader SPI — the in-box
+> `vapor-chamber/router-fetch` preset covers plain-JSON backends, and any other
+> backend convention is a preset you supply. The bus keeps owning writes
+> (commands); the router owns reads (URL-addressed data). Inertia/vue-router
+> coexistence notes below remain valid for apps using those instead.
 >
 > **API reference:** generate locally with `npm run docs` (TypeDoc → `docs/api/`).
 > The generated site is `.gitignore`d so it stays fresh per release. Hosting it
@@ -667,6 +676,28 @@ bus.use(m);
 console.log(m.summary()); // { cartAdd: { count: 42, avgMs: 1.2, errorRate: 0.02 } }
 ```
 
+### supersede
+
+Auto-cancels the previous in-flight dispatch for the same key when a new one starts — the stale request is genuinely aborted via `AbortController`, not just ignored on arrival. Ideal for type-ahead search, autosave, or any rapidly re-fired command where only the latest matters. Async plugin:
+
+```typescript
+import { createAsyncCommandBus, supersede } from 'vapor-chamber';
+
+const bus = createAsyncCommandBus();
+
+// Default key = commandKey(action, target) — the same default `idempotent`
+// uses, so distinct actions never collide and are never silently dropped.
+bus.use(supersede());
+
+// Restrict to specific actions, or derive a custom key:
+bus.use(supersede({
+  actions: ['searchQuery', 'draftSave'],           // glob patterns; default: all
+  key: (cmd) => `${cmd.action}:${cmd.target?.id ?? ''}`,  // return null/undefined to skip
+}));
+```
+
+Because the bridges forward `cmd.signal` into their outbound `fetch`, a superseded HTTP request is cancelled at the network layer, not merely discarded.
+
 ### LLM Integration Schemas
 
 ```typescript
@@ -931,6 +962,36 @@ The backend response shape:
 ```
 `result.value` will be the contents of `state`.
 
+### createBatchingHttpBridge
+
+Same backend contract as `createHttpBridge` — CSRF, retry, timeout, and session-expiry all reuse the same request path — but every command dispatched within a batching window is coalesced into a single `POST`, then matched back to each caller by id. The coalescing is invisible to the call site: each `dispatch()` still resolves with its own result.
+
+```typescript
+import { createAsyncCommandBus } from 'vapor-chamber';
+import { createBatchingHttpBridge } from 'vapor-chamber/transports';
+
+const bus = createAsyncCommandBus();
+
+bus.use(createBatchingHttpBridge({
+  endpoint: '/api/vc/batch',
+  csrf: true,
+  window: 'microtask',   // default: coalesce every dispatch in the same tick — zero added latency
+  // window: 20,          // or hold the queue open N ms to also catch separate ticks
+}));
+
+// Two dispatches issued in the same tick → ONE HTTP round trip:
+bus.dispatch('formSet', { field: 'email' }, { value: 'a@b.com' });
+bus.dispatch('cartAdd', product, { quantity: 2 });
+```
+
+Request / response shape (matched by `id`):
+```json
+// → POST /api/vc/batch
+{ "commands": [{ "id": "c1", "command": "formSet", "target": { "field": "email" }, "payload": { "value": "a@b.com" } }] }
+// ←
+{ "results": [{ "id": "c1", "ok": true, "state": {} }] }
+```
+
 ### createWsBridge
 
 WebSocket transport with auto-reconnect:
@@ -998,7 +1059,15 @@ realtime.install(bus);   // OrderShipped → bus.emit('OrderShipped', payload)
 
 ## HTTP Client
 
-`postCommand` is exposed for use outside the transport plugin when you need direct HTTP control:
+Two levels, same underlying retry/timeout/CSRF machinery (`src/http.ts`):
+
+- **`postCommand`** — the single-purpose POST helper `createHttpBridge` builds
+  on. Use it directly when you need one-off HTTP control outside the
+  transport plugin.
+- **`createHttpClient`** — a full multi-method client (GET/POST/PUT/PATCH/
+  DELETE) with interceptors, LRU caching, request dedup, safe mode, and file
+  download — for any HTTP need in an app already using vapor-chamber,
+  command-bus or not.
 
 ```typescript
 import { postCommand } from 'vapor-chamber';
@@ -1013,6 +1082,90 @@ const response = await postCommand('/api/commands', {
   retry: 2,
   onSessionExpired: (status) => router.push('/login'),
 });
+```
+
+### createHttpClient
+
+```typescript
+import { createHttpClient } from 'vapor-chamber';
+
+const http = createHttpClient({ baseURL: '/api', csrf: true });
+
+const users = await http.get('/users', { params: { page: 1 } });
+await http.post('/cart', { itemId: 1, qty: 2 });
+await http.put('/cart/1', { qty: 5 });
+await http.delete('/cart/1');
+
+// Safe mode — never throws
+const result = await http.safe.post('/login', credentials);
+if (result.error) console.log(result.error.message);
+
+// File download
+await http.download('/export/csv', 'products.csv');
+
+// Interceptors
+http.interceptors.request.use((config) => {
+  config.headers = { ...config.headers, 'X-Custom': '1' };
+  return config;
+});
+
+// Scoped instance sharing the same interceptors
+const adminHttp = http.create({ baseURL: '/admin/api', headers: { 'X-Admin': 'true' } });
+```
+
+Retry (`retry`, default 2 for GET/0 for mutations) covers 5xx/429/408 *and*
+timeouts — a timeout competes for the same retry budget as a bad response
+instead of always failing on the first attempt. `TimeoutError` is distinct
+from a caller-triggered `AbortError` (`isCancel`-style checks are unaffected
+by retries).
+
+**Caching (GET only)** — `cache: true` for a flat TTL, or an object for more:
+
+```typescript
+// Stale-while-revalidate: a hit past `ttl` but inside `ttl + staleTtl` is
+// served instantly (`stale: true`) while a background fetch refreshes it.
+const res = await http.get('/dashboard/stats', { cache: { ttl: 30_000, staleTtl: 5 * 60_000 } });
+if (res.revalidation) {
+  const fresh = await res.revalidation; // push into your own state when it lands
+}
+
+// serveStaleOnError: a *transient* failure (timeout/network/5xx — see
+// classifyError) with a retained entry — even past its stale window —
+// resolves instead of rejecting, e.g. { data, stale: true, servedOnError: true, error }.
+// Business errors (4xx) are never masked this way.
+await http.get('/dashboard/stats', { cache: { ttl: 30_000, serveStaleOnError: true } });
+```
+
+**`silent`** — per-request opt-out for a host-provided global error handler
+(fire-and-forget telemetry, background prefetch shouldn't surface UI noise):
+
+```typescript
+await http.post('/analytics/beacon', payload, { silent: true }).catch((e) => {
+  e.silent; // true — a global handler can check this and skip the toast
+});
+```
+
+`classifyError(error)` (from `vapor-chamber/http-errors` or the `http.ts`
+module) is the one named transience rule behind `serveStaleOnError`:
+`transient = timeout || no response || status >= 500` — a 4xx is always a
+business error, never transient, no matter how tempting it is to retry a
+flaky-looking 429.
+
+## Streaming JSON Parser
+
+`vapor-chamber/stream-parser` — a dependency-free incremental JSON parser for
+progressively consuming a streamed `fetch()`/SSE response body without
+buffering the whole payload (LLM/AI streaming completions, large exports).
+Subpath-only; adds nothing to the IIFE bundles.
+
+```typescript
+import { createStreamParser } from 'vapor-chamber/stream-parser';
+
+const parser = createStreamParser({
+  onValue: (key, value, path) => console.log(key, value, path),
+});
+const response = await fetch('/api/stream');
+await parser.stream(response);
 ```
 
 ## Batch Dispatch
@@ -1378,7 +1531,8 @@ Connect a bus to Vue DevTools. Adds a **Commands** timeline layer and a **Vapor 
 
 ```typescript
 import { createApp } from 'vue';
-import { getCommandBus, setupDevtools } from 'vapor-chamber';
+import { getCommandBus } from 'vapor-chamber';
+import { setupDevtools } from 'vapor-chamber/devtools';   // opt-in subpath
 
 const app = createApp(App);
 setupDevtools(getCommandBus(), app);
@@ -1394,7 +1548,7 @@ See [`examples/`](https://github.com/lucianofedericopereira/vapor-chamber/tree/m
 | [`vapor-sfc`](https://github.com/lucianofedericopereira/vapor-chamber/tree/main/examples/vapor-sfc) | `<script setup vapor>` SFC tree — `useCommand` / `defineVaporCommand` / `useSharedCommandState` |
 | [`vapor-island-cart`](https://github.com/lucianofedericopereira/vapor-chamber/tree/main/examples/vapor-island-cart) | Light-DOM Vapor custom-element islands coordinating through one bus |
 | [`exo-astro`](https://github.com/lucianofedericopereira/vapor-chamber/tree/main/examples/exo-astro) | Declarative directives for Astro — dispatch *before* hydration |
-| [`laravel-app`](https://github.com/lucianofedericopereira/vapor-chamber/tree/main/examples/laravel-app) | Verified Laravel 12: Blade + core IIFE + real CSRF (419/401) |
+| [`laravel-app`](https://github.com/lucianofedericopereira/vapor-chamber/tree/main/examples/laravel-app) | Verified Laravel app (13.x): Blade + core IIFE + real CSRF (419/401) |
 
 **Single-file snippets** (plus `feature-*` / `pattern-*` files — see the [index](https://github.com/lucianofedericopereira/vapor-chamber/tree/main/examples)):
 
@@ -1471,7 +1625,7 @@ See [`examples/`](https://github.com/lucianofedericopereira/vapor-chamber/tree/m
 | `isVaporAvailable()` | Returns true if Vue 3.6+ Vapor mode is detected |
 | `createVaporChamberApp(component, props?)` | Create a Vapor app instance (requires Vue 3.6+) |
 | `getVaporInteropPlugin()` | Returns `vaporInteropPlugin` for mixed trees |
-| `setupDevtools(bus, app)` | Connect bus to Vue DevTools |
+| `setupDevtools(bus, app)` | Connect bus to Vue DevTools — import from `vapor-chamber/devtools`, needs the `@vue/devtools-api` peer |
 
 ## Roadmap
 

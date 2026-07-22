@@ -196,6 +196,28 @@ describe('postCommand — user abort', () => {
 });
 
 // ---------------------------------------------------------------------------
+// silent flag
+// ---------------------------------------------------------------------------
+
+describe('postCommand — silent flag', () => {
+  it('stamps error.silent when config.silent is true', async () => {
+    (globalThis.fetch as any).mockResolvedValue(mockResponse(500, { message: 'boom' }));
+
+    const err = await postCommand('/api/cmd', {}, { silent: true }).catch((e: any) => e);
+
+    expect(err.silent).toBe(true);
+  });
+
+  it('does not stamp without the flag', async () => {
+    (globalThis.fetch as any).mockResolvedValue(mockResponse(500, { message: 'boom' }));
+
+    const err = await postCommand('/api/cmd', {}).catch((e: any) => e);
+
+    expect(err.silent).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Session expiry
 // ---------------------------------------------------------------------------
 

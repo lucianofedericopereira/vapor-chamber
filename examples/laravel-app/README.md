@@ -23,6 +23,11 @@ cd demo-app && php artisan serve
 Needs PHP ≥ 8.2 and Composer. `setup.sh` is idempotent and builds the
 vapor-chamber `dist/` on demand for the IIFE copy.
 
+`composer create-project` always pulls the **current** Laravel skeleton — last
+verified end-to-end on **Laravel 13.21** with PHP 8.5. Nothing here pins a
+major: the wiring is one route, one controller and two action classes, which
+has not changed shape since Laravel 11.
+
 ## What's demonstrated
 
 - **One endpoint, many commands** — the action name travels in the JSON body,

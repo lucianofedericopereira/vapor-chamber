@@ -31,6 +31,11 @@ const schemaSource = `export default {
   ping: {
     description: 'Health check with no fields',
   },
+  cartCheckout: {
+    description: 'Charge the cart and place the order',
+    authorize: 'checkout',
+    target: { cartId: 'number' },
+  },
 };
 `;
 
@@ -107,6 +112,22 @@ describe('generate-laravel — schema → Laravel backend codegen', () => {
     expect(orderCreate).toContain("'payload.options' => 'required|array',");
   });
 
+  it('emits a Gate::forUser($user)->authorize(...) call ahead of validation when "authorize" is set', () => {
+    const stub = readFileSync(actionPath('CartCheckout'), 'utf8');
+    expect(stub).toContain('use Illuminate\\Support\\Facades\\Gate;');
+    expect(stub).toContain("Gate::forUser($user)->authorize('checkout', [$target, $payload]);");
+    expect(stub).toContain('Requires the "checkout" ability');
+    // authorization runs before validation — an unauthorized caller learns nothing
+    // about the shape of data it isn't allowed to touch
+    expect(stub.indexOf('Gate::forUser')).toBeLessThan(stub.indexOf('Validator::make('));
+  });
+
+  it('omits the Gate import and call entirely when "authorize" is not set', () => {
+    const ping = readFileSync(actionPath('Ping'), 'utf8');
+    expect(ping).not.toContain('Gate::forUser');
+    expect(ping).not.toContain('use Illuminate\\Support\\Facades\\Gate;');
+  });
+
   it('skips the Validator block entirely when an action declares no target/payload fields', () => {
     const ping = readFileSync(actionPath('Ping'), 'utf8');
     expect(ping).toContain('class Ping');
@@ -171,6 +192,12 @@ describe('generate-laravel — schema → Laravel backend codegen', () => {
     const r1 = run([badField, '--out', join(dir, 'bad-out')]);
     expect(r1.status).toBe(1);
     expect(r1.stderr).toContain('invalid type "integer"');
+
+    const badAuthorize = join(dir, 'bad-authorize.mjs');
+    writeFileSync(badAuthorize, "export default { cartCheckout: { authorize: '' } };\n");
+    const r1b = run([badAuthorize, '--out', join(dir, 'bad-out')]);
+    expect(r1b.status).toBe(1);
+    expect(r1b.stderr).toContain('authorize must be a non-empty ability name string');
 
     const notObject = join(dir, 'bad-shape.mjs');
     writeFileSync(notObject, 'export default 42;\n');

@@ -5,7 +5,7 @@
   "type": "module",
   "description": "End-to-end <script setup vapor> example for vapor-chamber. Run with `npm install && npm run dev`.",
   "scripts": {
-    "ensure-lib": "node -e \"const{existsSync}=require('fs');if(!existsSync('../../dist/index.js')){console.log('[example] building vapor-chamber from ../../ ...');require('child_process').execSync('npm --prefix ../.. run build',{stdio:'inherit'})}\"",
+    "ensure-lib": "node ../ensure-lib.mjs",
     "predev": "npm run ensure-lib",
     "prebuild": "npm run ensure-lib",
     "dev": "vite",

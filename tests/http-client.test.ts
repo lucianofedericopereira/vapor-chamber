@@ -230,6 +230,77 @@ describe('createHttpClient — retry', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Timeout retry — a timeout-triggered abort must compete for the same
+// retry budget as a 5xx/429/408 response, not throw on the first attempt
+// regardless of `retry`.
+// ---------------------------------------------------------------------------
+
+describe('createHttpClient — timeout retry', () => {
+  it('retries a GET after a timeout instead of failing on the first attempt', async () => {
+    let attempts = 0;
+    (globalThis.fetch as any).mockImplementation((_url: string, init: RequestInit) => {
+      attempts++;
+      const thisAttempt = attempts;
+      return new Promise((resolve, reject) => {
+        if (thisAttempt === 1) {
+          init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+        } else {
+          resolve(jsonResponse(200, { ok: true }));
+        }
+      });
+    });
+
+    vi.useFakeTimers();
+    const http = createHttpClient();
+    const promise = http.get('/api/slow', { timeout: 100, retry: 1 });
+    await vi.advanceTimersByTimeAsync(3000);
+    const res = await promise;
+
+    expect(res.data).toEqual({ ok: true });
+    expect(attempts).toBe(2);
+  });
+
+  it('rejects with TimeoutError (not AbortError) once retries are exhausted', async () => {
+    (globalThis.fetch as any).mockImplementation((_url: string, init: RequestInit) =>
+      new Promise((_, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
+      })
+    );
+
+    vi.useFakeTimers();
+    const http = createHttpClient();
+    const promise = http.get('/api/slow', { timeout: 50, retry: 1 });
+    const assertion = expect(promise).rejects.toMatchObject({ name: 'TimeoutError' });
+    await vi.advanceTimersByTimeAsync(3000);
+    await assertion;
+  });
+});
+
+// ---------------------------------------------------------------------------
+// silent flag — stamped on thrown errors for a caller's global error handler
+// ---------------------------------------------------------------------------
+
+describe('createHttpClient — silent flag', () => {
+  it('stamps error.silent when config.silent is true', async () => {
+    (globalThis.fetch as any).mockImplementation(async () => jsonResponse(500, { message: 'boom' }));
+
+    const http = createHttpClient();
+    const err = await http.post('/api/x', {}, { silent: true }).catch((e: any) => e);
+
+    expect(err.silent).toBe(true);
+  });
+
+  it('does not stamp without the flag', async () => {
+    (globalThis.fetch as any).mockImplementation(async () => jsonResponse(500, { message: 'boom' }));
+
+    const http = createHttpClient();
+    const err = await http.post('/api/x', {}).catch((e: any) => e);
+
+    expect(err.silent).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Request deduplication
 // ---------------------------------------------------------------------------
 
@@ -322,6 +393,117 @@ describe('createHttpClient — cache', () => {
     await http.get('/api/data', { cache: true, dedupe: false });
 
     expect(fetchCount).toBe(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Stale-while-revalidate (cache.staleTtl)
+// ---------------------------------------------------------------------------
+
+describe('createHttpClient — stale-while-revalidate', () => {
+  it('serves a stale hit instantly and revalidates in the background', async () => {
+    let fetchCount = 0;
+    (globalThis.fetch as any).mockImplementation(async () => {
+      fetchCount++;
+      return jsonResponse(200, { n: fetchCount });
+    });
+
+    const http = createHttpClient();
+    const cache = { ttl: 1, staleTtl: 10_000 };
+
+    const r1 = await http.get('/api/thing', { cache, dedupe: false });
+    expect(r1.data).toEqual({ n: 1 });
+    expect(r1.stale).toBeFalsy();
+
+    await new Promise((r) => setTimeout(r, 10)); // past ttl, inside staleTtl
+
+    const r2 = await http.get('/api/thing', { cache, dedupe: false });
+    expect(r2.stale).toBe(true);
+    expect(r2.data).toEqual({ n: 1 }); // stale data served immediately, even
+    // though the background revalidation fetch has already been dispatched
+    // (it starts synchronously alongside the stale return, not lazily).
+
+    const fresh = await r2.revalidation;
+    expect(fresh?.data).toEqual({ n: 2 });
+    expect(fetchCount).toBe(2);
+  });
+
+  it('a stale entry is a plain miss once past both ttl and staleTtl', async () => {
+    let fetchCount = 0;
+    (globalThis.fetch as any).mockImplementation(async () => {
+      fetchCount++;
+      return jsonResponse(200, { n: fetchCount });
+    });
+
+    const http = createHttpClient();
+    const cache = { ttl: 1, staleTtl: 1 };
+
+    await http.get('/api/thing', { cache, dedupe: false });
+    await new Promise((r) => setTimeout(r, 15)); // past both windows
+
+    const r2 = await http.get('/api/thing', { cache, dedupe: false });
+    expect(r2.stale).toBeFalsy();
+    expect(fetchCount).toBe(2); // no stale hit — a real blocking refetch
+  });
+});
+
+// ---------------------------------------------------------------------------
+// serveStaleOnError (opt-in resilience)
+// ---------------------------------------------------------------------------
+
+describe('createHttpClient — serveStaleOnError', () => {
+  it('serves the retained entry on a transient failure (500)', async () => {
+    let attempts = 0;
+    (globalThis.fetch as any).mockImplementation(async () => {
+      attempts++;
+      return attempts === 1 ? jsonResponse(200, { v: 1 }) : jsonResponse(500, { message: 'down' });
+    });
+
+    const http = createHttpClient();
+    const cache = { ttl: 1, serveStaleOnError: true };
+
+    await http.get('/api/thing', { cache, dedupe: false });
+    await new Promise((r) => setTimeout(r, 10)); // entry expires but is retained
+
+    const res = await http.get('/api/thing', { cache, dedupe: false, retry: 0 });
+
+    expect(res.servedOnError).toBe(true);
+    expect(res.stale).toBe(true);
+    expect(res.data).toEqual({ v: 1 });
+    expect(res.error).toBeTruthy();
+  });
+
+  it('does NOT mask a business error (422)', async () => {
+    let attempts = 0;
+    (globalThis.fetch as any).mockImplementation(async () => {
+      attempts++;
+      return attempts === 1 ? jsonResponse(200, { v: 1 }) : jsonResponse(422, { message: 'nope' });
+    });
+
+    const http = createHttpClient();
+    const cache = { ttl: 1, serveStaleOnError: true };
+
+    await http.get('/api/biz', { cache, dedupe: false });
+    await new Promise((r) => setTimeout(r, 10));
+
+    await expect(http.get('/api/biz', { cache, dedupe: false, retry: 0 })).rejects.toThrow();
+  });
+
+  it('expired entries stay a plain miss without the flag', async () => {
+    let attempts = 0;
+    (globalThis.fetch as any).mockImplementation(async () => {
+      attempts++;
+      return jsonResponse(200, { v: attempts });
+    });
+
+    const http = createHttpClient();
+    const cache = { ttl: 1 };
+
+    await http.get('/api/plain', { cache, dedupe: false });
+    await new Promise((r) => setTimeout(r, 10));
+    await http.get('/api/plain', { cache, dedupe: false });
+
+    expect(attempts).toBe(2);
   });
 });
 

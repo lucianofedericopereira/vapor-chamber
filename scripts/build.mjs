@@ -42,6 +42,10 @@ await build({
         'reactive':   'src/reactive.ts',
         'outbox':     'src/outbox.ts',
         'mcp':        'src/mcp.ts',
+        'stream-parser': 'src/stream-parser.ts',
+        'devtools':   'src/devtools.ts',
+        'router/index':       'src/router/index.ts',
+        'router-fetch/index': 'src/router-fetch/index.ts',
         'iife':       'src/iife.ts',
         'iife-core':  'src/iife-core.ts',
         'iife-elements': 'src/iife-elements.ts',
@@ -79,7 +83,13 @@ for (const v of iifeVariants) {
           formats: ['iife'],
           fileName: () => `${v.name}.iife${min ? '.min' : ''}.js`,
         },
-        rollupOptions: { output: { banner, exports: 'named' } },
+        // exports: 'default' — the IIFE global must BE the API object, so a
+        // plain <script> user can call VaporChamber.connect(). With 'named',
+        // rollup wraps the module's exports and assigns
+        // { VaporChamber, default } to the global instead, so every documented
+        // call site (VaporChamber.connect, .createCommandBus, …) is undefined
+        // and the API only reachable as VaporChamber.VaporChamber.
+        rollupOptions: { output: { banner, exports: 'default' } },
         emptyOutDir: false,
         minify: min,
         sourcemap: !min,

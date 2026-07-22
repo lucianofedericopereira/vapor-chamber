@@ -41,6 +41,13 @@ export type HttpConfig = {
   headers?: Record<string, string>;
   /** Called when a 401 session-expired response is received */
   onSessionExpired?: (status: number) => void;
+  /**
+   * Stamps a thrown error's `.silent` so a caller-provided global error
+   * handler can skip it — for fire-and-forget requests (best-effort
+   * telemetry, background prefetch) that shouldn't surface UI noise.
+   * Default: false.
+   */
+  silent?: boolean;
 };
 
 export type HttpResponse<T = unknown> = {
@@ -48,6 +55,14 @@ export type HttpResponse<T = unknown> = {
   status: number;
   headers: Record<string, string>;
   ok: boolean;
+  /** True when this response was served from a stale (past-fresh) cache entry. */
+  stale?: boolean;
+  /** Present on a stale hit: resolves with the fresh response once the background revalidation lands. */
+  revalidation?: Promise<HttpResponse<T>>;
+  /** True when this is a retained cache entry served in place of a transient failure (`cache.serveStaleOnError`). */
+  servedOnError?: boolean;
+  /** The transient error `servedOnError` masked — surfaced alongside the stale data, never silently dropped. */
+  error?: unknown;
 };
 
 export type HttpError = Error & {
@@ -56,6 +71,8 @@ export type HttpError = Error & {
   status?: number;
   /** Machine-readable error code from response body (e.g. `'CART_ITEM_LIMIT_EXCEEDED'`). */
   code?: string;
+  /** Set when the request's `silent: true` config opts the caller out of a global error handler/toast. */
+  silent?: boolean;
 };
 
 // ---------------------------------------------------------------------------
@@ -270,7 +287,7 @@ export async function postCommand<T = unknown>(
   body: unknown,
   config: HttpConfig = {},
 ): Promise<HttpResponse<T>> {
-  const { timeout = 10_000, retry = 0, signal: userSignal, csrf = false, csrfCookieUrl = DEFAULT_CSRF_COOKIE_URL, headers: extra = {}, onSessionExpired } = config;
+  const { timeout = 10_000, retry = 0, signal: userSignal, csrf = false, csrfCookieUrl = DEFAULT_CSRF_COOKIE_URL, headers: extra = {}, onSessionExpired, silent = false } = config;
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -327,16 +344,25 @@ export async function postCommand<T = unknown>(
           continue;
         }
 
-        throw httpError(`HTTP ${res.status}`, res);
+        const failed = httpError(`HTTP ${res.status}`, res);
+        if (silent) failed.silent = true;
+        throw failed;
       }
 
       return res;
     } catch (e) {
       clearTimeout(timeoutId);
       combined?.detach();
-      const err = e as Error;
-      if (err.name === 'AbortError') throw userSignal?.aborted ? err : timeoutError(url, timeout);
-      if (attempt >= retry) throw err;
+      const err = e as HttpError;
+      if (err.name === 'AbortError' && userSignal?.aborted) throw err;
+      // A timeout-triggered abort is a transient failure, not a user cancel —
+      // it must compete for the same retry budget as a 5xx/429/408 response
+      // instead of always throwing on the first attempt regardless of `retry`.
+      const failure = err.name === 'AbortError' ? timeoutError(url, timeout) : err;
+      if (attempt >= retry) {
+        if (silent) failure.silent = true;
+        throw failure;
+      }
       await sleepMs(backoffMs(attempt), userSignal);
     }
   }
@@ -365,8 +391,17 @@ export type HttpRequestConfig = HttpConfig & {
   baseURL?: string;
   /** Response parsing mode. Default: 'json' */
   responseType?: ResponseType;
-  /** Enable LRU caching for GET (true = default TTL, or { ttl: ms }) */
-  cache?: boolean | { ttl: number };
+  /**
+   * Enable LRU caching for GET. `true` = default TTL, no stale window.
+   * `{ ttl }` sets the fresh-window duration. `{ staleTtl }` opts into
+   * stale-while-revalidate: a hit within `ttl + staleTtl` past `ttl` is
+   * served instantly with `{ stale: true, revalidation: Promise }` attached,
+   * while a background fetch refreshes the entry. `serveStaleOnError` is a
+   * separate opt-in: a transient failure (timeout/network/5xx) with ANY
+   * retained entry (even past its stale window) resolves to
+   * `{ stale: true, servedOnError: true, error }` instead of rejecting.
+   */
+  cache?: boolean | { ttl?: number; staleTtl?: number; serveStaleOnError?: boolean };
   /** Enable request deduplication for GET. Default: true */
   dedupe?: boolean;
   /** @internal marks a CSRF-retried request */
@@ -445,7 +480,8 @@ function createInterceptorManager<T>(): InterceptorManager<T> & { forEach(fn: (h
 // Imports from internal helpers
 // ---------------------------------------------------------------------------
 
-import { getCached, setCache, clearAllCache, invalidateCacheByPattern, getInflight, setInflight, CACHE_DEFAULT_TTL } from './http-cache';
+import { getCached, getCachedAny, setCache, clearAllCache, invalidateCacheByPattern, getInflight, setInflight, CACHE_DEFAULT_TTL } from './http-cache';
+import { classifyError } from './http-errors';
 import { buildFullUrl } from './http-query';
 
 // ---------------------------------------------------------------------------
@@ -565,8 +601,11 @@ async function clientRequest<T>(
       clearTimeout(timeoutId);
       combined?.detach();
       const err = e as Error;
-      if (err.name === 'AbortError') throw userSignal?.aborted ? err : timeoutError(fullUrl, timeout);
-      if (attempt >= maxRetries) throw err;
+      if (err.name === 'AbortError' && userSignal?.aborted) throw err;
+      // Same rule as postCommand: a timeout must retry like any other
+      // transient failure instead of always throwing on the first attempt.
+      const failure = err.name === 'AbortError' ? timeoutError(fullUrl, timeout) : err;
+      if (attempt >= maxRetries) throw failure;
       await sleepMs(backoffMs(attempt), userSignal);
     }
   }
@@ -651,11 +690,16 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
       if (inflight) return inflight as Promise<HttpResponse<T>>;
     }
 
-    // LRU cache for GET
+    // LRU cache for GET. A fresh hit short-circuits; a stale hit (within
+    // cache.staleTtl) is captured and served below with a background
+    // revalidation attached — the stale-while-revalidate path.
     const cacheEnabled = config.cache && isIdempotent;
+    const cacheCfg = typeof config.cache === 'object' ? config.cache : {};
+    let staleResponse: HttpResponse | null = null;
     if (cacheEnabled) {
       const cached = getCached(cacheKey);
-      if (cached) return cached as HttpResponse<T>;
+      if (cached && !cached.stale) return cached.data as HttpResponse<T>;
+      if (cached) staleResponse = cached.data as HttpResponse;
     }
 
     // Build headers and body
@@ -688,20 +732,46 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
 
       // Cache successful GET responses
       if (cacheEnabled && response.ok) {
-        const ttl = typeof config.cache === 'object' ? config.cache.ttl : CACHE_DEFAULT_TTL;
-        setCache(cacheKey, response, ttl);
+        setCache(cacheKey, response, cacheCfg.ttl ?? CACHE_DEFAULT_TTL, cacheCfg.staleTtl ?? 0);
       }
 
       return response as HttpResponse<T>;
     }).catch((err) => {
       // Run response error interceptors
       responseInterceptors.forEach(({ onRejected }) => { if (onRejected) onRejected(err); });
+      if (config.silent) (err as HttpError).silent = true;
       throw err;
     });
 
     // Track in-flight GET for deduplication
     if (isIdempotent && dedupe) {
       setInflight(dedupeKey, fetchPromise);
+    }
+
+    // Stale-while-revalidate: serve the stale response now; the fetch above
+    // finishes in the background and setCache()s on success. `revalidation`
+    // lets a caller push the fresh data into its own state when it lands.
+    if (staleResponse) {
+      fetchPromise.catch(() => {}); // background failure must not surface as an unhandled rejection
+      return { ...staleResponse, stale: true, revalidation: fetchPromise } as HttpResponse<T>;
+    }
+
+    // cache.serveStaleOnError (opt-in): a transient failure (timeout/network/
+    // 5xx per classifyError) with ANY retained entry for this URL — even one
+    // past its stale window — resolves to { stale, servedOnError, error }
+    // instead of rejecting. Business errors (4xx) and user aborts always
+    // surface; deduped followers share this promise's outcome.
+    if (cacheEnabled && cacheCfg.serveStaleOnError) {
+      return fetchPromise.catch((error) => {
+        const aborted = (error as HttpError)?.name === 'AbortError';
+        if (!aborted && classifyError(error).transient) {
+          const retained = getCachedAny(cacheKey);
+          if (retained) {
+            return { ...(retained.data as HttpResponse<T>), stale: true, servedOnError: true, error };
+          }
+        }
+        throw error;
+      });
     }
 
     return fetchPromise;

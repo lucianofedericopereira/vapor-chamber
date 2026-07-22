@@ -569,3 +569,83 @@ export function idempotent(options: IdempotentOptions = {}): AsyncPlugin {
     return run;
   };
 }
+
+// ---------------------------------------------------------------------------
+// supersede — auto-abort the previous in-flight dispatch for the same key
+//
+// A rapid second dispatch for the same logical slot silently cancels the
+// stale in-flight one instead of racing it. vapor-chamber already threads
+// `cmd.signal` all the way to `fetch()` (see transports.ts) — this plugin
+// generalizes that existing wiring into automatic per-key cancellation
+// instead of asking every caller to build and swap their own
+// AbortController by hand.
+// ---------------------------------------------------------------------------
+
+export type SupersedeOptions = {
+  /**
+   * Derive the supersede key from a command. Commands resolving to the SAME
+   * key auto-cancel their predecessor; different keys race independently.
+   * Return `null`/`undefined` to skip superseding for that command.
+   * Default: `commandKey(action, target)` — same default `idempotent` uses,
+   * which already includes the action name, so distinct actions never
+   * collide and are never silently dropped by this plugin.
+   */
+  key?: (cmd: Command) => string | null | undefined;
+  /** Restrict to specific actions (glob patterns). Default: all. */
+  actions?: string[];
+};
+
+/**
+ * supersede — auto-cancel the previous in-flight dispatch for the same key.
+ *
+ * Built for rapid-fire reads that can overwrite each other in flight — a
+ * search box re-querying on every keystroke, a filter changing before the
+ * previous fetch lands. Without it, a slow first response can arrive AFTER a
+ * faster second one and clobber it with stale data. With it, the first
+ * dispatch's AbortSignal fires the instant a second dispatch for the same key
+ * starts — `createHttpBridge` / `createBatchingHttpBridge` already forward
+ * `cmd.signal` to `fetch()`, so the stale request is genuinely cancelled, not
+ * merely ignored once it resolves.
+ *
+ * **Async bus only** — mutates `cmd.signal` before the rest of the pipeline
+ * runs, which is only meaningful for cancelable async dispatches.
+ *
+ * @example
+ * const bus = createAsyncCommandBus();
+ * bus.use(supersede({ actions: ['productSearch'] }));
+ * bus.use(createHttpBridge({ endpoint: '/api/vc' }));
+ * // three quick productSearch dispatches → only the last one's response is
+ * // ever awaited; the first two are aborted mid-flight, not just discarded
+ */
+export function supersede(options: SupersedeOptions = {}): AsyncPlugin {
+  const { key, actions } = options;
+  const matchesActions = makeActionFilter(actions);
+  const controllers = new Map<string, AbortController>();
+
+  return (cmd, next) => {
+    if (!matchesActions(cmd.action)) return next();
+    const raw = key ? key(cmd) : commandKey(cmd.action, cmd.target);
+    if (raw == null) return next();
+    const k = String(raw);
+
+    // Cancel this key's previous in-flight dispatch, if any.
+    controllers.get(k)?.abort();
+
+    const ctrl = new AbortController();
+    controllers.set(k, ctrl);
+
+    // Merge with any caller-supplied signal — same AbortSignal.any-with-
+    // fallback pattern used throughout transports.ts.
+    cmd.signal = cmd.signal
+      ? (typeof AbortSignal.any === 'function' ? AbortSignal.any([cmd.signal, ctrl.signal]) : ctrl.signal)
+      : ctrl.signal;
+
+    const result = Promise.resolve(next());
+    result.finally(() => {
+      // Only clear the map entry if we're still the current controller for
+      // this key — a newer dispatch may already have replaced us.
+      if (controllers.get(k) === ctrl) controllers.delete(k);
+    });
+    return result;
+  };
+}

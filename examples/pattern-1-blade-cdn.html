@@ -18,12 +18,28 @@
 <!-- Blade template: resources/views/cart.blade.php -->
 <div id="app">
   <button id="add-btn">Add to cart</button>
+  <button id="clear-btn">Clear</button>
   <span id="cart-count">0 items</span>
   <p id="error-msg" style="color:red;display:none"></p>
 </div>
 
-<!-- CDN: no npm, no build -->
-<script src="https://cdn.jsdelivr.net/npm/vapor-chamber/dist/vapor-chamber.iife.min.js"></script>
+<!-- No npm, no build — one script tag. Three ways to serve that tag:
+     1. self-hosted (below): what `examples/laravel-app` actually does — it
+        copies the IIFE into public/js/. Best default for Blade: no third-party
+        origin in your CSP, no CDN outage in your checkout path.
+     2. CDN, VERSION-PINNED:
+        <script src="https://cdn.jsdelivr.net/npm/vapor-chamber@1.9/dist/vapor-chamber.iife.min.js"></script>
+     3. CDN, unpinned — `npm/vapor-chamber/...` with no @version. Avoid: it
+        resolves to whatever is published *now* and is edge-cached, so the page
+        silently changes under you on every release, and it can never be run
+        against unreleased code. This example used to do that, which made it
+        the one example nobody could verify before publishing — and the one
+        that shipped broken.
+
+     Local path so this file is runnable today:
+       node examples/static-server.mjs
+       open http://localhost:3000/examples/pattern-1-blade-cdn.html -->
+<script src="../../dist/vapor-chamber.iife.min.js"></script>
 <script>
   const { bus, dispatch } = VaporChamber.createApp({
     transport: VaporChamber.http({
@@ -51,24 +67,42 @@
   // forwards every matching command to the server (a registered handler would
   // never run). on() listeners fire after the dispatch settles, with the
   // server's state in result.value.
-  bus.on('cartAdd', (cmd, result) => {
+  // One listener for both commands: whatever the server says the cart is,
+  // that is what the page shows — and only then is it persisted. The local
+  // copy is a cache of the server's answer, never a second source of truth.
+  bus.on('cartAdd', (cmd, result) => render(result))
+  bus.on('cartClear', (cmd, result) => render(result))
+
+  function render(result) {
     if (!result.ok) return
     document.getElementById('cart-count').textContent = result.value.count + ' items'
     cartPersist.save()
-  })
+  }
 
-  // Wire up button
-  const btn = document.getElementById('add-btn')
-  btn.addEventListener('click', async () => {
+  // Wire up buttons. Note both go through the SAME dispatch path — a button
+  // is just a call site; the transport decides where the command runs.
+  const send = async (btn, action, target, payload) => {
     btn.disabled = true
-    const result = await dispatch('cartAdd', { id: 1 }, { quantity: 1 })
+    const result = await dispatch(action, target, payload)
     btn.disabled = false
-    if (!result.ok) {
-      const err = document.getElementById('error-msg')
+    const err = document.getElementById('error-msg')
+    if (result.ok) {
+      err.style.display = 'none'
+    } else {
       err.textContent = result.error?.message ?? 'Unknown error'
       err.style.display = ''
     }
-  })
+  }
+
+  const addBtn = document.getElementById('add-btn')
+  addBtn.addEventListener('click', () => send(addBtn, 'cartAdd', { id: 1 }, { quantity: 1 }))
+
+  // Clear resets the SERVER cart; the listener above then overwrites the
+  // persisted copy with the server's zero. Without this, a restored count
+  // from localStorage has no way back down — the page would keep showing a
+  // number the backend no longer agrees with.
+  const clearBtn = document.getElementById('clear-btn')
+  clearBtn.addEventListener('click', () => send(clearBtn, 'cartClear', {}, null))
 </script>
 
 <!--

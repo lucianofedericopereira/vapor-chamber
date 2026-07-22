@@ -4,7 +4,7 @@
 
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { createAsyncCommandBus, createCommandBus, invalidateCsrfCache } from '../src/index';
-import { createHttpBridge, createWsBridge, createSseBridge } from '../src/transports';
+import { createHttpBridge, createBatchingHttpBridge, createWsBridge, createSseBridge } from '../src/transports';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -132,6 +132,145 @@ describe('createHttpBridge', () => {
     const result = await bus.dispatch('cartAdd', {});
     expect(result.ok).toBe(false);
     expect(result.error?.message).toBe('network down');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// createBatchingHttpBridge
+// ---------------------------------------------------------------------------
+
+describe('createBatchingHttpBridge', () => {
+  it('coalesces same-tick dispatches into one POST with commands[], matched back by id', async () => {
+    const fetchMock = vi.fn(async (_url: string, init: any) => {
+      const body = JSON.parse(init.body);
+      return {
+        ok: true,
+        json: async () => ({
+          results: body.commands.map((c: any) => ({
+            id: c.id,
+            ok: true,
+            state: c.command === 'cartAdd' ? { count: 1 } : { formOk: true },
+          })),
+        }),
+      };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const bus = createAsyncCommandBus();
+    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch' }));
+
+    const [a, b] = await Promise.all([
+      bus.dispatch('cartAdd', { id: 1 }, { quantity: 2 }),
+      bus.dispatch('formSet', { field: 'email' }, { value: 'a@b.com' }),
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledOnce(); // one round trip for both dispatches
+    const [url, init] = fetchMock.mock.calls[0];
+    expect(url).toBe('/api/vc/batch');
+    const body = JSON.parse(init.body);
+    expect(body.commands).toHaveLength(2);
+    expect(body.commands[0].command).toBe('cartAdd');
+    expect(body.commands[0].target).toEqual({ id: 1 });
+    expect(body.commands[1].command).toBe('formSet');
+
+    expect(a.ok).toBe(true);
+    expect(a.value).toEqual({ count: 1 });
+    expect(b.ok).toBe(true);
+    expect(b.value).toEqual({ formOk: true });
+  });
+
+  it('does not batch dispatches from separate ticks — each flush is its own POST', async () => {
+    const fetchMock = vi.fn(async (_url: string, init: any) => {
+      const body = JSON.parse(init.body);
+      return { ok: true, json: async () => ({ results: body.commands.map((c: any) => ({ id: c.id, ok: true, state: 1 })) }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const bus = createAsyncCommandBus();
+    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch' }));
+
+    await bus.dispatch('a', {});
+    await bus.dispatch('b', {});
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('an HTTP failure status fails every queued command in the batch', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({ error: 'boom' }) }));
+
+    const bus = createAsyncCommandBus();
+    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch' }));
+
+    const [a, b] = await Promise.all([bus.dispatch('a', {}), bus.dispatch('b', {})]);
+    expect(a.ok).toBe(false);
+    expect(b.ok).toBe(false);
+    expect(a.error?.message).toBe('boom');
+  });
+
+  it('reports a per-command failure without affecting sibling commands', async () => {
+    const fetchMock = vi.fn(async (_url: string, init: any) => {
+      const body = JSON.parse(init.body);
+      return {
+        ok: true,
+        json: async () => ({
+          results: body.commands.map((c: any) =>
+            c.command === 'fail' ? { id: c.id, ok: false, error: 'nope' } : { id: c.id, ok: true, state: 1 },
+          ),
+        }),
+      };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const bus = createAsyncCommandBus();
+    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch' }));
+
+    const [ok, bad] = await Promise.all([bus.dispatch('ok', {}), bus.dispatch('fail', {})]);
+    expect(ok.ok).toBe(true);
+    expect(bad.ok).toBe(false);
+    expect(bad.error?.message).toBe('nope');
+  });
+
+  it('fails a command with a clear error if the backend response omits its result', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ results: [] }) }));
+
+    const bus = createAsyncCommandBus();
+    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch' }));
+
+    const result = await bus.dispatch('cartAdd', {});
+    expect(result.ok).toBe(false);
+    expect(result.error?.message).toContain('missing a result');
+  });
+
+  it('actions filter skips non-matching commands (falls through to next)', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ results: [] }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
+    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', actions: ['cart*'] }));
+
+    await bus.dispatch('userLogin', {});
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('a numeric window batches dispatches issued within that many ms', async () => {
+    vi.useFakeTimers();
+    const fetchMock = vi.fn(async (_url: string, init: any) => {
+      const body = JSON.parse(init.body);
+      return { ok: true, json: async () => ({ results: body.commands.map((c: any) => ({ id: c.id, ok: true, state: 1 })) }) };
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const bus = createAsyncCommandBus();
+    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', window: 20 }));
+
+    const p1 = bus.dispatch('a', {});
+    await vi.advanceTimersByTimeAsync(10);
+    const p2 = bus.dispatch('b', {});
+    await vi.advanceTimersByTimeAsync(15); // past the 20ms window opened by the first dispatch
+
+    await Promise.all([p1, p2]);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    vi.useRealTimers();
   });
 });
 

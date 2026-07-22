@@ -9,12 +9,31 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>exo on Astro — vapor-chamber</title>
     <style>
-      body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
+      body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+      /* Two independent sectors, side by side — they share a layout and
+         nothing else: no shared code, no shared state, only the bus. */
+      /* stretch (the grid default) rather than start: both cards take the full
+         row height, so the two sectors stay level as the order grows. */
+      .sectors { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; align-items: stretch; }
+      @media (max-width: 700px) { .sectors { grid-template-columns: 1fr; } }
+      .sectors section { margin: 0; }   /* the grid owns the gaps */
       section { border: 1px solid #ccc; border-radius: 8px; padding: 1rem 1.25rem; margin: 1rem 0; }
       button { padding: .4rem .9rem; border-radius: 6px; border: 1px solid #888; cursor: pointer; }
       .row { display: flex; justify-content: space-between; align-items: center; margin: .4rem 0; }
       .muted { color: #777; font-size: .85rem; }
       #hydration-note { font-weight: 600; }
+      .ticket { width: 100%; border-collapse: collapse; margin: .5rem 0 1rem; }
+      .ticket th { text-align: left; font-size: .75rem; text-transform: uppercase;
+                   letter-spacing: .04em; color: #666; border-bottom: 1px solid #ddd;
+                   padding: .5rem 0; }
+      .ticket td { padding: .5rem 0; border-bottom: 1px solid #f2f2f2; font-size: .95rem; }
+      .ticket .right { text-align: right; font-variant-numeric: tabular-nums; }
+      .ticket .total td { border-top: 2px solid #333; border-bottom: none; padding-top: .75rem; }
+      /* The price column is a real column: prices line up against each other,
+         and the button sits in its own shrink-to-fit action column. */
+      .ticket .action { width: 1%; white-space: nowrap; text-align: right; padding-left: 1rem; }
+      .ticket .qty { width: 1%; white-space: nowrap; text-align: center; color: #666;
+                     font-variant-numeric: tabular-nums; padding: 0 .75rem; }
     </style>
   </head>
   <body>
@@ -30,38 +49,100 @@
       <p id="hydration-note">⏳ Handlers hydrate in 2s — click "Add" NOW to see buffering.</p>
     </header>
 
-    <!-- Sector A: dispatches named commands into the void. -->
+    <main class="sectors">
+
+    <!-- Sector A: dispatches named commands into the void. Static HTML — the
+         menu is authored, not rendered: no directive reads it, each row only
+         carries the command it dispatches. -->
     <section>
       <h2>Menu</h2>
-      <div class="row">
-        <span>Coffee — $4.00</span>
-        <button v-command="cart.add" v-target='{"name":"Coffee","price":4}'>Add</button>
-      </div>
-      <div class="row">
-        <span>Tea — $3.00</span>
-        <button v-command="cart.add" v-target='{"name":"Tea","price":3}'>Add</button>
-      </div>
-      <div class="row">
-        <span>Espresso — $5.00</span>
-        <button v-command="cart.add" v-target='{"name":"Espresso","price":5}'>Add</button>
+      <table class="ticket">
+        <thead>
+          <tr><th>Item</th><th class="right">Price</th><th class="action"></th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Coffee</td>
+            <td class="right">$4.00</td>
+            <td class="action">
+              <button v-command="cart.add" v-target='{"name":"Coffee","price":4}'>Add</button>
+            </td>
+          </tr>
+          <tr>
+            <td>Tea</td>
+            <td class="right">$3.00</td>
+            <td class="action">
+              <button v-command="cart.add" v-target='{"name":"Tea","price":3}'>Add</button>
+            </td>
+          </tr>
+          <tr>
+            <td>Espresso</td>
+            <td class="right">$5.00</td>
+            <td class="action">
+              <button v-command="cart.add" v-target='{"name":"Espresso","price":5}'>Add</button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <!-- Sector B: reads reactive state from the atmosphere.
+
+         Every node that starts HIDDEN carries style="display:none" in the
+         markup. The script is a module, so it runs after parse: without the
+         inline style the empty cart's table and buttons would paint first and
+         disappear a frame later. The HTML owns the initial state; v-show owns
+         every state after it. -->
+    <section>
+      <h2>Order</h2>
+      <p v-show="cartEmpty">Your cart is empty.</p>
+
+      <div v-show="cartCount" style="display:none">
+        <table class="ticket">
+          <thead>
+            <tr><th>Item</th><th class="qty">Qty</th><th class="right">Amount</th></tr>
+          </thead>
+          <!-- v-each: one <tr> per entry, each clone scoped to its own item —
+               so `v-bind-text="name"` inside a row reads that row's item.
+               Adding the same item again mutates that row's qty/amount in
+               place; the write is one level deep inside the array, and the
+               list still re-renders. -->
+          <tbody v-each="items">
+            <tr>
+              <td v-bind-text="name"></td>
+              <td class="qty">×<span v-bind-text="qty"></span></td>
+              <td class="right" v-bind-text="amount"></td>
+            </tr>
+          </tbody>
+          <tfoot>
+            <tr class="total">
+              <td colspan="2"><strong>Total</strong> — <span v-bind-text="cartCount"></span> item(s)</td>
+              <td class="right"><strong>$<span v-bind-text="cartTotal"></span></strong></td>
+            </tr>
+          </tfoot>
+        </table>
+
+        <!-- v-scope: section-local UI state. `open` is declared here so it
+             resolves locally; `lastAdded` is not, so it falls through to the
+             bus state — one subtree, both sources, neither aware of the other.
+             Even this toggle goes through the bus: the handler writes the
+             scope via scopeOf(), the click site never mutates anything. -->
+        <div id="details" v-scope='{"open":false}'>
+          <button v-command="ui.toggleDetails">Details</button>
+          <button v-command="cart.clear">Clear</button>
+          <p class="muted" v-show="open" style="display:none">
+            Local <code>open</code> = true. Last added:
+            <span v-bind-text="lastAdded"></span> (read from the bus, not the scope).
+          </p>
+        </div>
       </div>
     </section>
 
-    <!-- Sector B: reads reactive state from the atmosphere. -->
-    <section>
-      <h2>Cart</h2>
-      <p v-show="cartEmpty">Your cart is empty.</p>
-      <div v-show="cartCount">
-        <div class="row"><span>Items</span><strong v-bind-text="cartCount"></strong></div>
-        <div class="row"><span>Total</span><strong>$<span v-bind-text="cartTotal"></span></strong></div>
-        <div class="row"><span>Last added</span><span v-bind-text="lastAdded"></span></div>
-        <button v-command="cart.clear">Clear</button>
-      </div>
-    </section>
+    </main>
 
     <script>
       import { createCommandBus, logger } from 'vapor-chamber';
-      import { mountExo, busState } from '../directives/index';
+      import { mountExo, busState, scopeOf } from '../directives/index';
 
       // Buffer commands dispatched before their handlers exist; drop anything
       // that waits longer than 30s (an island that never hydrates must not pin
@@ -74,6 +155,7 @@
       });
       bus.use(logger({ filter: (cmd) => cmd.action.startsWith('cart') }));
 
+      busState.items = [];          // the ticket lines — v-each renders these
       busState.cartCount = 0;
       busState.cartTotal = '0.00';
       busState.cartEmpty = true;
@@ -86,20 +168,52 @@
       const delay = Number(new URLSearchParams(location.search).get('delay')) || 2000;
       setTimeout(() => {
         let cents = 0;
+        // Handlers RETURN the new cart state as well as writing it: the return
+        // value becomes `result.value` on the dispatch, which is what the
+        // logger prints and what an HTTP bridge would send back. Returning
+        // nothing is legal — it just logs `result: undefined`.
+        const cart = () => ({
+          count: busState.cartCount,
+          total: busState.cartTotal,
+          lastAdded: busState.lastAdded,
+        });
+        const money = (c: number) => `$${(c / 100).toFixed(2)}`;
         bus.register('cart.add', (cmd) => {
           const item = cmd.target as { name: string; price: number };
-          cents += Math.round(item.price * 100);
+          const unit = Math.round(item.price * 100);
+          cents += unit;
+          // Aggregate by name: a repeat Add bumps the existing line rather
+          // than stacking a duplicate. Formatting lives in the handler, never
+          // in a directive — the scanner only prints the string it is handed.
+          const line = busState.items.find((row) => row.name === item.name);
+          if (line) {
+            line.qty += 1;                      // a write one level deep…
+            line.amount = money(line.qty * unit); // …and the row re-renders
+          } else {
+            busState.items.push({ name: item.name, qty: 1, amount: money(unit) });
+          }
           busState.cartCount += 1;
           busState.cartTotal = (cents / 100).toFixed(2);
           busState.cartEmpty = false;
           busState.lastAdded = item.name;
+          return cart();
         });
         bus.register('cart.clear', () => {
           cents = 0;
+          busState.items = [];
           busState.cartCount = 0;
           busState.cartTotal = '0.00';
           busState.cartEmpty = true;
           busState.lastAdded = '';
+          return cart();
+        });
+        // Local scope state is written by a handler too — same discipline,
+        // narrower blast radius: only this element's scope re-renders.
+        const details = document.getElementById('details');
+        bus.register('ui.toggleDetails', () => {
+          const scope = details && scopeOf(details);
+          if (scope) scope.open = !scope.open;
+          return { open: scope?.open };
         });
         const note = document.getElementById('hydration-note');
         if (note) note.textContent = '✅ Handlers hydrated — buffered clicks were replayed.';

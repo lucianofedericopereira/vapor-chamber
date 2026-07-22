@@ -75,7 +75,12 @@ npm run build         # produces dist/ + prints sizes
 npm run size:check    # fails if any IIFE variant exceeds its brotli budget
 ```
 
-All five must pass. CI runs the same set on Node 20 and 22, on Linux and macOS.
+All five must pass. CI runs the same set on Node 20, 22 and 24, on Linux and macOS.
+
+The `examples/` workspaces are not part of that gate — they build against the
+working tree on demand. `examples/exo-astro` needs Node ≥ 22.12 (Astro 7's own
+floor); its directive scanner is covered by the repo suite, so `npm test` from
+the root does exercise that example's code.
 
 ### Performance work
 

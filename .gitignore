@@ -34,5 +34,21 @@ Thumbs.db
 # Astro generated artifacts (examples/exo-astro)
 .astro/
 
+# Incremental / temp build state
+*.tsbuildinfo
+vite.config.*.timestamp-*
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example
+
+# Machine-local editor/agent settings
+.claude/settings.local.json
+
+# Local scratch notes (not part of the project)
+rc1.txt
+resume.txt
+
 # Laravel example scaffold output (examples/laravel-app/setup.sh)
 demo-app/

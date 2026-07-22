@@ -227,6 +227,53 @@ const { dispatch } = VaporChamber.connect({ endpoint: '/api/vc' });
 The lib auto-fetches `/sanctum/csrf-cookie` on a 419 response and retries
 once. No extra client config.
 
+### CORS — required when the page and the API are different origins
+
+Flow B typically means a Vite dev server (`localhost:5173`) talking to
+`localhost:8000` — a cross-origin pair, so every dispatch is preceded by a
+preflight. The bridge always sends `X-Requested-With: XMLHttpRequest` (it is
+what makes Laravel answer 419/401 as **JSON** instead of redirecting to a login
+page), and `Idempotency-Key` whenever the `idempotent()` plugin is enabled. A
+header the preflight does not allow fails the whole request *before it reaches
+Laravel*, and the browser reports it uselessly — Chrome says only
+`Failed to fetch`; Firefox at least names the header.
+
+```php
+// config/cors.php  — `php artisan config:publish cors` to create it
+'paths' => ['api/*', 'sanctum/csrf-cookie'],
+'allowed_origins' => [env('FRONTEND_URL', 'http://localhost:5173')],
+'allowed_headers' => [
+    'Content-Type',
+    'Accept',
+    'X-Requested-With',    // ← always sent; omit it and every dispatch fails
+    'X-CSRF-TOKEN',        // ← Flow A (Blade meta tag)
+    'X-XSRF-TOKEN',        // ← Flow B (Sanctum cookie)
+    'Idempotency-Key',     // ← only with the idempotent() plugin
+],
+'supports_credentials' => true,   // required for the cookie flows
+```
+
+`'allowed_headers' => ['*']` also works and is common in dev, but note it does
+**not** cover credentials in every proxy setup — listing them is the safer
+default. Same-origin deployments (Blade serving the page and the endpoint, i.e.
+Flow A) need none of this: there is no preflight at all.
+
+---
+
+## With vapor-chamber/router (the family stack)
+
+The first-choice navigation layer for Blade apps is the in-box
+`vapor-chamber/router` subpath: Laravel keeps ONE catch-all
+(`Route::view('/admin/{any?}', 'admin.shell')->where('any', '.*')`), the
+Blade shell inlines the permission-filtered route table as JSON, and the
+router owns everything inside — reads via route-declared loaders
+(`load: "/api/vc/products?page={page}"`, aborted on supersede; the in-box
+`vapor-chamber/router-fetch` preset covers plain JSON, or supply your own
+preset to unwrap a house envelope), writes via this package's commands. The
+split is CQRS across the two subpaths:
+**bus = C (writes), router = R + URL state (reads)**. See
+`examples/pattern-6-vapor-router.ts`.
+
 ---
 
 ## Inertia coexistence
@@ -683,7 +730,7 @@ php artisan serve
 
 # In your Blade layout
 <meta name="csrf-token" content="{{ csrf_token() }}">
-<script src="https://cdn.jsdelivr.net/npm/vapor-chamber/dist/vapor-chamber-core.iife.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vapor-chamber@1.9/dist/vapor-chamber-core.iife.min.js"></script>
 <script>
   const { dispatch } = VaporChamber.connect({ endpoint: '/api/vc' });
   dispatch('cartAdd', { id: 1 }, { qty: 2 }).then(r => console.log(r));

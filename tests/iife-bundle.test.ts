@@ -23,14 +23,22 @@ const variants = {
 
 const haveAll = Object.values(variants).every(f => existsSync(dist(f)));
 
+/**
+ * Load a variant exactly the way a <script> tag does: whatever ends up on the
+ * global IS the API. No unwrapping — an earlier version of this helper fell
+ * back through `outer.default ?? outer.VaporChamber ?? outer`, which happily
+ * passed while the shipped global was really `{ VaporChamber, default }` and
+ * every documented call site (`VaporChamber.connect(...)`) threw
+ * "is not a function" in the browser.
+ */
 function loadNamespace(file: string): Record<string, unknown> {
   const src = readFileSync(dist(file), 'utf8');
   const sandbox: any = {};
   vm.createContext(sandbox);
   vm.runInContext(src, sandbox);
-  const outer = sandbox.VaporChamber;
-  if (!outer) throw new Error(`${file} did not expose VaporChamber`);
-  return (outer.default ?? outer.VaporChamber ?? outer) as Record<string, unknown>;
+  const ns = sandbox.VaporChamber;
+  if (!ns) throw new Error(`${file} did not expose VaporChamber`);
+  return ns as Record<string, unknown>;
 }
 
 // Helper: assert a list of names are functions / undefined on the namespace.
@@ -46,6 +54,21 @@ function assertAbsent(ns: Record<string, unknown>, names: string[]) {
 }
 
 describe.skipIf(!haveAll)('IIFE variants — audience-based contracts', () => {
+  // ---------------------------------------------------------------------
+  // The global shape itself, before any per-variant contract: a <script>
+  // user calls VaporChamber.connect(), not VaporChamber.VaporChamber.connect
+  // and not VaporChamber.default.connect.
+  // ---------------------------------------------------------------------
+  describe.each(Object.entries(variants))('%s: global shape', (_name, file) => {
+    it('puts the API directly on window.VaporChamber, never nested', () => {
+      const ns = loadNamespace(file);
+      expect(typeof ns.createCommandBus).toBe('function');
+      expect(typeof ns.connect).toBe('function');
+      expect(ns.VaporChamber).toBeUndefined(); // no self-nesting
+      expect(ns.default).toBeUndefined(); // no module-namespace wrapper
+    });
+  });
+
   // -------------------------------------------------------------------------
   // CORE — sprinkled JS (Blade / Rails / Django). Bus + HTTP + light plugins.
   // -------------------------------------------------------------------------

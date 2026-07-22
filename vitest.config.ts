@@ -7,9 +7,17 @@ export default defineConfig({
     include: ['tests/**/*.test.ts'],
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'json', 'html'],
+      reporter: ['text', 'json', 'json-summary', 'html'],
+      // Anchored, and examples explicitly excluded: `src/**/*.ts` also matches
+      // nested source trees like examples/exo-astro/src/**, so example code
+      // was silently counted toward the library's thresholds. The gate must
+      // measure what ships in dist/, nothing else.
       include: ['src/**/*.ts'],
       // Excluded from coverage:
+      //  - examples/**, tests/**: `src/**/*.ts` also matches nested source
+      //    trees like examples/exo-astro/src/**, so example code was silently
+      //    counted toward the library's thresholds. The gate measures what
+      //    ships in dist/, nothing else.
       //  - index.ts / plugins.ts: pure re-export aggregators
       //  - iife*.ts: thin namespace builders for `<script>` tag use; the
       //    underlying surface is covered via the regular test files
@@ -17,10 +25,14 @@ export default defineConfig({
       //    server, not a unit test environment
       //  - testing.ts: test-only utility (createTestBus); covering it
       //    would mean tests that test the test helper
-      //  - devtools.ts, directives.ts: require a real Vue runtime to
-      //    exercise the public surface. Covered indirectly by integration
-      //    in consumer projects; not easily unit-testable.
+      //  - directives.ts: requires a real Vue runtime to exercise the public
+      //    surface. Covered indirectly by integration in consumer projects and
+      //    by examples/feature-directives.html; not easily unit-testable.
+      //  (devtools.ts is NO LONGER excluded: v1.9 promotes it to its own
+      //   public subpath, and a published entry point should be measured.)
       exclude: [
+        'examples/**',
+        'tests/**',
         'src/index.ts',
         'src/plugins.ts',
         'src/iife.ts',
@@ -28,7 +40,6 @@ export default defineConfig({
         'src/iife-elements.ts',
         'src/vite-hmr.ts',
         'src/testing.ts',
-        'src/devtools.ts',
         'src/directives.ts',
       ],
       thresholds: {
@@ -41,10 +52,13 @@ export default defineConfig({
         // These globals span the wider optional surface — http / transports /
         // plugins-io carry environment-bound branches (real HTTP/WS/SSE) that
         // hold the global branch number below 100%.
-        lines: 90,
-        functions: 90,
-        branches: 82,
-        statements: 89,
+        // Ratcheted for v1.9 (measured: 97.06 / 96.66 / 88.11 / 95.43 after the
+        // devtools subpath and router error paths were covered). The previous
+        // floors sat ~7 points low, which let a real regression pass unnoticed.
+        lines: 95,
+        functions: 94,
+        branches: 86,
+        statements: 93,
       },
     },
   },

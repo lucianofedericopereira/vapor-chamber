@@ -21,7 +21,7 @@ import {
   readCsrfToken,
   invalidateCsrfCache,
 } from '../src/http';
-import { clearAllCache } from '../src/http-cache';
+import { clearAllCache, getCached, setCache } from '../src/http-cache';
 
 // ---------------------------------------------------------------------------
 // Fetch mock helper (mirrors the existing test files)
@@ -489,5 +489,22 @@ describe('createHttpClient — safe.put/patch/delete (743-745)', () => {
     const [, init] = (globalThis.fetch as any).mock.calls[0];
     expect(init.method).toBe('DELETE');
     expect(init.body).toBeUndefined();
+  });
+});
+
+describe('http cache — LRU eviction at the size ceiling', () => {
+  it('evicts the LEAST RECENTLY USED entry, not simply the oldest', () => {
+    clearAllCache();
+    for (let i = 0; i < 50; i++) setCache(`key-${i}`, { i }, 60_000); // fills to CACHE_MAX_SIZE
+
+    // Reading key-0 promotes it to most-recently-used, so key-1 becomes the
+    // eviction candidate. This is what makes it an LRU rather than a FIFO.
+    expect(getCached('key-0')).not.toBeNull();
+
+    setCache('key-50', { i: 50 }, 60_000); // 51st insert → one eviction
+    expect(getCached('key-1')).toBeNull(); // the least recently used went
+    expect(getCached('key-0')).not.toBeNull(); // the recently read one stayed
+    expect(getCached('key-50')).not.toBeNull();
+    clearAllCache();
   });
 });

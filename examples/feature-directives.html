@@ -1,118 +1,178 @@
 <!--
   Feature example: Directive plugin — v-vc:command, v-vc-payload, v-vc-optimistic
   ================================================================================
-  Declarative dispatch directly in templates.
-  Combines dispatch + loading state + error handling without <script setup> wiring.
+  Declarative dispatch straight from the template: no <script setup> wiring, no
+  per-button click handler. The directive owns the whole interaction — dispatch,
+  in-flight state, disable-while-busy, error class, optimistic rollback.
 
-  Install once in main.ts:
-    import { createDirectivePlugin } from 'vapor-chamber/directives'
-    app.use(createDirectivePlugin())
+  RUNNABLE, no build step. From the repo root:
+
+      npm run build                       # once, so dist/ exists
+      node examples/static-server.mjs     # → http://localhost:3000
+      # then open
+      #   http://localhost:3000/examples/feature-directives.html
+
+  It runs on plain ESM + an import map. Vue is pulled from the repo's own
+  node_modules so the page works offline; a real page would point the import
+  map at a CDN, or just bundle like every other example here.
+
+  IMPORTANT: these directives are VDOM-only. Inside <script setup vapor> use
+  useCommand() / defineVaporCommand() instead — the plugin warns if it detects
+  Vapor. That boundary is deliberate, not a gap.
 -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>vapor-chamber — directive plugin demo</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; }
+  .panel { border: 1px solid #ddd; padding: 1rem 1.25rem; margin: 1rem 0; border-radius: 6px; }
+  .panel h2 { margin-top: 0; font-size: 1rem; }
+  .row { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
+  button { padding: .5rem 1rem; cursor: pointer; border: 1px solid #888; border-radius: 6px; background: #fff; }
+  button:disabled { cursor: wait; }
+  code { background: #f5f5f5; padding: .1rem .3rem; border-radius: 3px; font-size: .9em; }
+  .muted { color: #777; font-size: .85rem; }
+  /* Reserve the space these fill in, so nothing below them moves. */
+  pre { background: #f5f5f5; padding: .5rem; border-radius: 4px; font-size: 12px; overflow: auto; min-height: 7em; }
+  .count { font-variant-numeric: tabular-nums; min-width: 12ch; display: inline-block; }
 
-<!--
-  Basic usage — dispatch on click, no script setup needed:
+  /* The two classes the directive manages. Nothing here is wired up in JS —
+     the directive adds and removes them around every dispatch. */
+  .vc-loading { opacity: .55; }
+  .vc-loading::after { content: ' …'; }
+  .vc-error { border-color: #c00; color: #c00; }
+</style>
+</head>
+<body>
 
-  <button v-vc:command="'cartAdd'">
-    Add to cart
-  </button>
+<h1>Directive plugin</h1>
+<p class="muted">
+  Every button below dispatches through <code>v-vc:command</code>. There is no
+  click handler anywhere in this file — the directive adds
+  <code>.vc-loading</code> while a dispatch is in flight, disables the button,
+  adds <code>.vc-error</code> on failure, and runs optimistic rollbacks.
+</p>
 
-  Adds .vc-loading while dispatch is in flight.
-  Adds .vc-error if the dispatch fails.
-  Disables the button while loading.
--->
+<div id="app">
+  <div class="panel">
+    <h2>1 — dispatch on click</h2>
+    <div class="row">
+      <button v-vc:command="'cartAdd'">Add to cart</button>
+      <span class="count">{{ cart.count }} in cart</span>
+    </div>
+    <p class="muted">The handler sleeps 400ms, so the loading state is actually visible.</p>
+  </div>
 
-<!--
-  With payload from data attribute (JSON):
+  <div class="panel">
+    <h2>2 — payload from a data attribute (static JSON)</h2>
+    <div class="row">
+      <button v-vc:command="'cartAdd'" data-vc-payload='{"qty":3}'>Add 3</button>
+      <button v-vc:command="'cartAdd'" data-vc-payload='{"qty":10}'>Add 10</button>
+    </div>
+    <p class="muted"><code>data-vc-payload</code> / <code>data-vc-target</code> are parsed as JSON.</p>
+  </div>
 
-  <button
-    v-vc:command="'cartAdd'"
-    data-vc-payload='{"id": 1, "qty": 2}'>
-    Add to cart
-  </button>
--->
+  <div class="panel">
+    <h2>3 — reactive payload via v-vc-payload</h2>
+    <div class="row">
+      <label>qty <input type="number" v-model.number="qty" min="1" max="99" style="width:5rem"></label>
+      <button v-vc:command="'cartAdd'" v-vc-payload="{ qty }">Add {{ qty }}</button>
+    </div>
+    <p class="muted">The binding wins over the data attribute, and tracks changes.</p>
+  </div>
 
-<!--
-  With reactive payload from v-vc-payload directive:
+  <div class="panel">
+    <h2>4 — a failing dispatch adds .vc-error</h2>
+    <div class="row">
+      <button v-vc:command="'cartAddFailing'">Add (server says no)</button>
+      <span class="muted">{{ lastError || 'no error yet' }}</span>
+    </div>
+  </div>
 
-  <button
-    v-vc:command="'productFavorite'"
-    v-vc-payload="{ id: product.id, userId: currentUser.id }">
-    ♥ Favorite
-  </button>
--->
-
-<!--
-  With optimistic update — rollback on failure:
-
-  <script setup>
-  import { useCommandState } from 'vapor-chamber'
-
-  const { state: cart } = useCommandState({ count: 0 }, {
-    'cartAdd': (s) => ({ count: s.count + 1 })
-  })
-
-  // Optimistic: apply before server confirms, rollback if it fails
-  function onOptimisticAdd(cmd) {
-    const prev = cart.value.count
-    cart.value = { count: cart.value.count + 1 }  // apply immediately
-    return () => { cart.value = { count: prev } }  // rollback function
-  }
-  </script>
-
-  <button
-    v-vc:command="'cartAdd'"
-    v-vc-payload="{ id: product.id }"
-    v-vc-optimistic="onOptimisticAdd">
-    Add (optimistic)
-  </button>
--->
-
-<!--
-  CSS classes applied automatically:
-
-  .vc-loading {
-    opacity: 0.6;
-    cursor: wait;
-    pointer-events: none;
-  }
-
-  .vc-error {
-    border: 1px solid red;
-    background: #fff5f5;
-  }
-
-  .vc-error::after {
-    content: ' ✗';
-    color: red;
-  }
--->
-
-<!--
-  Full example component:
-
-  <template>
-    <form>
-      <input v-model="email" type="email" placeholder="Email" />
-      <input v-model="password" type="password" placeholder="Password" />
-
-      <button
-        v-vc:command="'authLogin'"
-        v-vc-payload="{ email, password }">
-        Sign in
+  <div class="panel">
+    <h2>5 — optimistic update, rolled back on failure</h2>
+    <div class="row">
+      <button v-vc:command="'cartAddFailing'" v-vc-optimistic="bumpOptimistically">
+        Add optimistically (fails → rolls back)
       </button>
-    </form>
+      <span class="count">{{ cart.count }} in cart</span>
+    </div>
+    <p class="muted">
+      The count jumps immediately, then snaps back when the dispatch fails:
+      <code>v-vc-optimistic</code> returns the rollback the directive calls.
+    </p>
+  </div>
 
-    <ul>
-      <li v-for="item in cart.items" :key="item.id">
-        {{ item.name }}
-        <button
-          v-vc:command="'cartRemove'"
-          v-vc-payload="{ id: item.id }">
-          Remove
-        </button>
-      </li>
-    </ul>
-  </template>
--->
+  <div class="panel">
+    <h2>Telemetry</h2>
+    <pre>{{ log.join('\n') || '(waiting…)' }}</pre>
+  </div>
+</div>
 
-<!-- Zero cost when createDirectivePlugin() is not imported. -->
+<script type="importmap">
+{
+  "imports": {
+    "vue": "/node_modules/vue/dist/vue.esm-browser.js"
+  }
+}
+</script>
+
+<script type="module">
+  import { createApp, reactive, ref } from 'vue';
+  // Straight from the built package — the same files npm publishes.
+  import { createAsyncCommandBus, setCommandBus, logger } from '/dist/index.js';
+  import { createDirectivePlugin } from '/dist/directives.js';
+
+  const cart = reactive({ count: 0 });
+  const log = reactive([]);
+  const lastError = ref('');
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // An ASYNC bus: the directive awaits the dispatch, which is what makes the
+  // .vc-loading window observable at all.
+  const bus = createAsyncCommandBus();
+
+  bus.register('cartAdd', async (cmd) => {
+    await sleep(400);
+    cart.count += cmd.payload?.qty ?? 1;
+    return { count: cart.count };
+  });
+
+  bus.register('cartAddFailing', async () => {
+    await sleep(400);
+    throw new Error('Out of stock');
+  });
+
+  bus.use(logger());
+  bus.on('*', (cmd, result) => {
+    const ts = new Date().toTimeString().slice(0, 8);
+    log.unshift(`[${ts}] ${cmd.action} → ${result.ok ? 'ok' : 'fail: ' + result.error?.message}`);
+    if (!result.ok) lastError.value = result.error?.message ?? 'failed';
+    if (log.length > 6) log.pop();
+  });
+
+  // The directives resolve the bus through getCommandBus(): one global bus per
+  // page, exactly as a Blade/Rails page would have.
+  setCommandBus(bus);
+
+  createApp({
+    setup() {
+      const qty = ref(2);
+      // Returning a function = the rollback the directive runs on failure.
+      const bumpOptimistically = (cmd) => {
+        const added = cmd.payload?.qty ?? 1;
+        cart.count += added;
+        return () => { cart.count -= added; };
+      };
+      return { cart, log, qty, lastError, bumpOptimistically };
+    },
+  })
+    .use(createDirectivePlugin())
+    .mount('#app');
+</script>
+
+</body>
+</html>

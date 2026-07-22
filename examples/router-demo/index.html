@@ -1,0 +1,388 @@
+<!--
+  vapor-chamber/router — runnable demo.
+
+  The shape it models: the server owns ONE catch-all (`/admin/{any?}` in
+  Laravel; here `examples/static-server.mjs` returns this file for every URL
+  under /examples/router-demo), and the router owns every URL inside it.
+
+      PATH = navigation.   QUERY = state.
+
+  Run, from the repo root:
+      npm run build
+      node examples/static-server.mjs
+      open http://localhost:3000/examples/router-demo/
+
+  No build step: plain ESM + an import map, loading the same `dist/` files npm
+  publishes. Vue comes from the repo's node_modules so this works offline.
+
+  What is worth watching, because none of it is wired up by hand here:
+    · links are intercepted document-wide — no @click on any <a>
+    · `data-active` / `data-exact-active` are stamped onto those anchors
+    · loaders run on navigation and commit atomically with the page
+    · ?page= is STATE: it refetches without remounting the component
+    · back/forward walk both path and query
+    · a deep link (or F5 on /products/17) is served by the catch-all
+-->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>vapor-chamber/router — demo</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 860px; margin: 2rem auto; padding: 0 1rem; }
+  nav { display: flex; gap: .25rem; border-bottom: 2px solid #eee; padding-bottom: .5rem; margin-bottom: 1rem; flex-wrap: wrap; }
+  nav a { padding: .4rem .8rem; border-radius: 6px; text-decoration: none; color: #333; }
+  nav a:hover { background: #f2f2f2; }
+  /* Stamped by the router itself — never assigned in this file.
+     ACTIVE  = this link is the current page OR an ancestor of it. Query is
+               ignored, because query is state, not navigation: "Products" and
+               "Products p3" are the same destination.
+     EXACT   = same path as the current page.
+     On /products/7 you should see three actives (both Products links are
+     ancestors, Product #7 is exact) and exactly one exact. */
+  /* `!important` on color is defensive, not normally needed. "Force readable
+     text" / dark-mode browser extensions inject `a { color: … !important }`,
+     which overrides the tab text while leaving our background — producing a
+     blue tab with black (extension-forced) text. This wins that fight so the
+     active tab stays legible regardless of extensions. (The tell-tale is a
+     `content.js` / "Ignoring unsupported entryTypes: longtask" console line —
+     that is the extension, not this page.) */
+  nav a[data-active] { background: #eef4ff; color: #1a4bd6 !important; }
+  nav a[data-exact-active] { background: #1a4bd6; color: #fff !important; font-weight: 600; }
+  /* Deep links opt out of the tab treatment: they are still stamped active
+     (same path), but styling them as tabs is what made two entries look
+     wrongly "both selected". */
+  .deeplinks { margin: -.5rem 0 1rem; }
+  .deeplinks a { color: #1a4bd6; margin-right: .6rem; }
+  .deeplinks a[data-active], .deeplinks a[data-exact-active] { background: none; color: #1a4bd6; font-weight: 400; }
+  .panel { border: 1px solid #ddd; border-radius: 8px; padding: 1rem 1.25rem; margin: 1rem 0; }
+  table { width: 100%; border-collapse: collapse; }
+  th { text-align: left; font-size: .75rem; text-transform: uppercase; letter-spacing: .04em;
+       color: #666; border-bottom: 1px solid #ddd; padding: .5rem 0; }
+  th a.sort { color: #666; text-decoration: none; cursor: pointer; white-space: nowrap; }
+  th a.sort:hover { color: #1a4bd6; }
+  td { padding: .5rem .5rem; border-bottom: 1px solid #f4f4f4; }
+  /* Zebra striping. nth-child(odd) rather than a class on each row: the rows
+     are re-rendered from loader data on every page change, so the stripe must
+     follow POSITION in the table, not identity of the item. */
+  tbody tr:nth-child(odd) { background: #fafafa; }
+  .right { text-align: right; font-variant-numeric: tabular-nums; }
+  .muted { color: #777; font-size: .85rem; }
+  .bar { display: flex; gap: .5rem; align-items: center; margin-top: .75rem; flex-wrap: wrap; }
+  button { padding: .35rem .8rem; border: 1px solid #888; border-radius: 6px; background: #fff; cursor: pointer; }
+  button:disabled { opacity: .4; cursor: default; }
+  /* Reserve the rows so pagination does not reflow the page under the cursor. */
+  tbody { min-height: 22em; }
+  .err { color: #c00; }
+  code { background: #f5f5f5; padding: .1rem .3rem; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<h1>vapor-chamber/router</h1>
+<p class="muted">
+  Path = navigation, query = state. The address bar is the source of truth —
+  copy any URL into a new tab, or hit reload, and you land in the same place.
+</p>
+
+<!-- Plain anchors. No click handlers anywhere in this file: the router
+     intercepts them document-wide and stamps the active attributes. -->
+<nav>
+  <a href="/examples/router-demo/">Home</a>
+  <a href="/examples/router-demo/products">Products</a>
+  <a href="/examples/router-demo/products/7">Product #7</a>
+  <a href="/examples/router-demo/nope">Broken link</a>
+</nav>
+
+<!-- Deep links live OUTSIDE the tab bar on purpose. `?page=3` is the same
+     destination as `/products` — query is state, not navigation — so the
+     router marks both links active, exactly as vue-router does. Two tabs
+     lighting up together is not a bug, but a tab bar should still have one
+     entry per destination, so these sit here instead. -->
+<p class="muted deeplinks">
+  Deep links (query state, same destination as Products):
+  <a href="/examples/router-demo/products?page=3">?page=3</a>
+  <a href="/examples/router-demo/products?sort=price">?sort=price</a>
+  <a href="/examples/router-demo/products?page=2&amp;sort=name">?page=2&amp;sort=name</a>
+</p>
+
+<!-- Live readout of what the router stamped on each nav anchor. This is the
+     demo explaining itself: ACTIVE = current page or an ancestor of it,
+     EXACT = same path. If a tab looks wrong, this line says what it actually
+     carries. -->
+<p class="muted" id="stamps">stamps: —</p>
+
+<!-- Boot diagnostics. An example that fails silently teaches nothing: if the
+     module throws, never evaluates, or mounts nothing, say so ON THE PAGE
+     instead of only in a console the reader may not have open. -->
+<div id="boot-error" class="panel err" style="display:none"></div>
+<div id="app"></div>
+
+<script>
+  // Classic script, deliberately BEFORE the module: it is already running when
+  // the module is evaluated, so it catches errors the module cannot catch
+  // itself (parse errors, failed imports, anything thrown at top level).
+  window.__vcrFail = function (label, detail) {
+    var box = document.getElementById('boot-error');
+    box.style.display = '';
+    box.textContent = '⚠ ' + label + ': ' + detail;
+    console.error('[router-demo]', label, detail);
+  };
+  window.addEventListener('error', function (e) {
+    window.__vcrFail('script error', (e.error && (e.error.stack || e.error.message)) || e.message);
+  });
+  window.addEventListener('unhandledrejection', function (e) {
+    var r = e.reason || {};
+    window.__vcrFail('unhandled rejection', (r.code ? '[' + r.code + '] ' : '') + (r.stack || r.message || String(r)));
+  });
+  // Watchdog: covers the case nothing can catch — the module never ran at all.
+  setTimeout(function () {
+    var app = document.getElementById('app');
+    if (app && app.children.length === 0) {
+      window.__vcrFail(
+        'nothing mounted after 2s',
+        'the module script did not render. Check the Network tab for a failed import of /dist/router/index.js, /dist/router-fetch/index.js or /node_modules/vue/dist/vue.esm-browser.js — the page needs `npm run build` at the repo root and `node examples/static-server.mjs`.',
+      );
+    }
+  }, 2000);
+</script>
+
+<!-- The route table, delivered inline exactly as a Blade shell would emit it
+     (`{ inline: '#vcr-routes' }`). In production a generator writes this from
+     the server's own route definitions, already permission-filtered. -->
+<script type="application/json" id="vcr-routes">
+{
+  "base": "/examples/router-demo",
+  "version": "demo-1",
+  "routes": [
+    { "name": "home", "path": "/", "component": "Home",
+      "meta": { "title": "Home", "menu": 1 } },
+
+    { "name": "products", "path": "/products", "component": "ProductList",
+      "load": "/api/items?page={page}&per_page={per_page}&sort={sort}",
+      "query": {
+        "page":     { "type": "int", "default": 1, "history": "push" },
+        "per_page": { "type": "int", "default": 10 },
+        "sort":     { "type": "string", "default": "id" }
+      },
+      "meta": { "title": "Products", "menu": 2, "preheat": true } },
+
+    { "name": "product", "path": "/products/:id(\\d+)", "component": "ProductDetail",
+      "load": "/api/items/{id}",
+      "params": { "id": "int" },
+      "meta": { "title": "Product" } },
+
+    { "name": "notFound", "path": "/*", "component": "NotFound" }
+  ]
+}
+</script>
+
+<script type="importmap">
+{ "imports": { "vue": "/node_modules/vue/dist/vue.esm-browser.js" } }
+</script>
+
+<script type="module">
+  import { createApp, computed } from 'vue';
+  import {
+    createRouter, RouterOutlet,
+    useRouter, useRoute, useRouteData, useRouteError, useQueryParam, usePagination, useMenu,
+  } from '/dist/router/index.js';
+  import { fetchLoaders } from '/dist/router-fetch/index.js';
+
+  const Home = {
+    setup() {
+      // NOTE for readers: refs returned from setup() are AUTO-UNWRAPPED in the
+      // template, so templates below never write `.value`. The one exception
+      // is a `useQueryParam()` handle, which is a plain writable object rather
+      // than a ref — hence `page.value = n` in script, never in a template.
+      const menu = useMenu();
+      return { menu };
+    },
+    template: `
+      <div class="panel">
+        <h2>Home</h2>
+        <p class="muted">
+          This page has no <code>load</code>, so no request is made for it.
+        </p>
+        <p>Menu projected from the route table (<code>useMenu()</code>, never authored twice):</p>
+        <ul><li v-for="item in menu" :key="item.name">
+          <a :href="item.href">{{ item.title }}</a>
+        </li></ul>
+      </div>`,
+  };
+
+  const ProductList = {
+    setup() {
+      // usePagination reads the loader's envelope and gives back the whole
+      // pager: rows, page (a real ref backed by ?page=), totals, bounds, a
+      // windowed pageRange and the router's in-flight flag. Paging is STATE,
+      // not navigation — the component is never remounted, and `page` pushes
+      // by convention so Back walks the pages.
+      const { items, page, pageRange, total, lastPage, hasNext, hasPrev, next, prev, go, loading } =
+        usePagination();
+      const sort = useQueryParam('sort');
+      const router = useRouter();
+
+      // Current sort split into column + direction. One URL param carries both,
+      // via the leading-'-' convention: "price" asc, "-price" desc.
+      const cur = computed(() => {
+        const raw = sort.value ?? 'id';
+        return raw.startsWith('-') ? { field: raw.slice(1), desc: true } : { field: raw, desc: false };
+      });
+
+      const sortBy = (field) => {
+        // Same column → invert direction. Different column → that column, asc.
+        const next = cur.value.field === field ? (cur.value.desc ? field : '-' + field) : field;
+        // Re-sorting resets to page 1: the row you were on has no meaning under
+        // a new order. Both params in ONE setQuery = one navigation, one
+        // refetch — not a page write and a sort write racing each other.
+        router.setQuery({ sort: next, page: 1 });
+      };
+
+      // Everything below is a ref or a function, so the template needs no
+      // `.value` anywhere — refs returned from setup() auto-unwrap.
+      return {
+        rows: items, page, pageRange, total, lastPage, hasNext, hasPrev,
+        next, prev, go, loading,
+        sortArrow: (field) => (cur.value.field === field ? (cur.value.desc ? ' ▾' : ' ▴') : ''),
+        sortBy,
+      };
+    },
+    template: `
+      <div class="panel">
+        <h2>Products</h2>
+        <table>
+          <thead><tr>
+            <th><a href="#" class="sort" @click.prevent="sortBy('id')">#{{ sortArrow('id') }}</a></th>
+            <th><a href="#" class="sort" @click.prevent="sortBy('name')">Item{{ sortArrow('name') }}</a></th>
+            <th class="right"><a href="#" class="sort" @click.prevent="sortBy('price')">Price{{ sortArrow('price') }}</a></th>
+            <th class="right"><a href="#" class="sort" @click.prevent="sortBy('stock')">Stock{{ sortArrow('stock') }}</a></th>
+          </tr></thead>
+          <tbody>
+            <tr v-for="item in rows" :key="item.id">
+              <td>{{ item.id }}</td>
+              <td><a :href="'/examples/router-demo/products/' + item.id">{{ item.name }}</a></td>
+              <td class="right">\${{ item.price.toFixed(2) }}</td>
+              <td class="right">{{ item.stock }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="bar">
+          <button :disabled="!hasPrev" @click="prev()">Prev</button>
+          <!-- pageRange is windowed: first + last always shown, 0 = elision. -->
+          <template v-for="(n, i) in pageRange" :key="i">
+            <span v-if="n === 0" class="muted">…</span>
+            <button v-else :disabled="n === page" @click="go(n)">{{ n }}</button>
+          </template>
+          <button :disabled="!hasNext" @click="next()">Next</button>
+          <span class="muted">
+            page {{ page }} / {{ lastPage }} · {{ total }} items
+            <span v-if="loading">· loading…</span>
+          </span>
+        </div>
+        <p class="muted">
+          Watch the URL: paging rewrites <code>?page=</code> only. The component
+          is never remounted, and Back steps through the pages you visited.
+        </p>
+      </div>`,
+  };
+
+  const ProductDetail = {
+    setup() {
+      const route = useRoute();
+      const item = useRouteData();
+      return { item, id: computed(() => route.value.params.id) };
+    },
+    template: `
+      <div class="panel">
+        <h2>{{ item?.name ?? 'Loading…' }}</h2>
+        <p class="muted">path param id = <code>{{ id }}</code>
+          (typed <code>int</code> by the table), interpolated into the row's
+          <code>load</code> template.</p>
+        <table><tbody>
+          <tr><td>Price</td><td class="right">\${{ item?.price?.toFixed(2) ?? '—' }}</td></tr>
+          <tr><td>Stock</td><td class="right">{{ item?.stock ?? '—' }}</td></tr>
+        </tbody></table>
+        <p class="bar"><a href="/examples/router-demo/products">← Back to products</a></p>
+      </div>`,
+  };
+
+  const NotFound = {
+    setup() {
+      // useRoute() must run DURING setup — it injects the router, and inject()
+      // needs an active component instance. Calling it lazily inside the
+      // computed would run it on first render, outside that window.
+      const route = useRoute();
+      return { path: computed(() => route.value.path) };
+    },
+    template: `
+      <div class="panel">
+        <h2>404</h2>
+        <p class="muted">No row matched <code>{{ path }}</code> — the
+          splat row caught it. The server never saw this navigation.</p>
+      </div>`,
+  };
+
+  const Shell = {
+    components: { RouterOutlet },
+    setup() {
+      const { latestError, clear } = useRouteError();
+      return { error: latestError, clear };
+    },
+    template: `
+      <div>
+        <p v-if="error" class="err">
+          Navigation error: <code>{{ error.code }}</code>
+          — {{ error.message }}
+          <button @click="clear()">dismiss</button>
+        </p>
+        <RouterOutlet />
+      </div>`,
+  };
+
+  const router = createRouter({
+    routes: { inline: '#vcr-routes' },
+    components: { Home, ProductList, ProductDetail, NotFound },
+    loaders: fetchLoaders(),
+  });
+
+  const app = createApp(Shell);
+  app.config.errorHandler = (err, _instance, info) =>
+    window.__vcrFail('vue error (' + info + ')', (err && (err.stack || err.message)) || String(err));
+  app.config.warnHandler = (msg) => window.__vcrFail('vue warning', msg);
+
+  app.use(router);
+  // Mount IMMEDIATELY — do not gate the mount on isReady(). If the first
+  // navigation fails, gating means the page renders nothing at all and the
+  // reader is left with a blank screen and no clue; mounting first means the
+  // shell (and its error banner) is on screen to explain what went wrong.
+  app.mount('#app');
+  router.isReady().catch((e) =>
+    window.__vcrFail('router failed to start', (e && (e.code ? '[' + e.code + '] ' : '') + e.message) || String(e)),
+  );
+
+  // Report what the router stamped, after every committed navigation.
+  const stampsEl = document.getElementById('stamps');
+  const reportStamps = () => {
+    const parts = [...document.querySelectorAll('nav a')].map((a) => {
+      const label = a.textContent.trim();
+      const state = a.hasAttribute('data-exact-active')
+        ? 'EXACT'
+        : a.hasAttribute('data-active')
+          ? 'active'
+          : '—';
+      return `${label}=${state}`;
+    });
+    const loc = router.currentRoute.value.location;
+    stampsEl.textContent = `stamps @ ${loc.path}${location.search} → ${parts.join('  ')}`;
+  };
+  router.afterEach(() => queueMicrotask(reportStamps));
+  queueMicrotask(reportStamps);
+
+  // Handy for poking at it from the console.
+  window.router = router;
+</script>
+
+</body>
+</html>

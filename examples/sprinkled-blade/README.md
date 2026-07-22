@@ -24,19 +24,31 @@ package.json of its own — `index.html` loads `../../dist/vapor-chamber-core.ii
 npm install
 ```
 
-Then two terminals:
+Then one process — the mock backend serves the page too:
 
 ```bash
-# Terminal 1: backend mock (emulates Laravel/Rails/Django route)
 cd examples/sprinkled-blade
-node mock-server.mjs
-
-# Terminal 2: serve the static HTML
-cd examples/sprinkled-blade
-npx serve .          # → http://localhost:3000
+node mock-server.mjs         # → http://localhost:3001
 ```
 
-Open the printed URL. Click "Add to cart" — you should see:
+Open <http://localhost:3001>. The cart count is **rendered into the HTML** by
+the backend (the Blade `{{ $cart->count }}` moment): first paint is correct, so
+there is no startup fetch and no flicker. Same origin, so no CORS at all.
+
+To see the other half of the trade-off, serve the file statically instead:
+
+```bash
+node ../static-server.mjs    # → http://localhost:3000/examples/sprinkled-blade/index.html
+node mock-server.mjs         # backend still on :3001
+```
+
+Now the page is cross-origin: the count arrives empty and is filled by one
+`cartState` dispatch (that is the flicker server-rendering buys away), and every
+dispatch is preceded by a CORS preflight — which is why the backend's
+`Access-Control-Allow-Headers` must list `X-Requested-With`, the header the
+bridge always sends.
+
+Click "Add to cart" — you should see:
 
 - The cart counter updating
 - A telemetry log line per dispatch

@@ -12,7 +12,7 @@
  *     chamber      — Vue composables: useCommand, useCommandBus, useCommandGroup, …
  *     chamber-vapor — Vue 3.6+ Vapor-specific API (requires Vue 3.6)
  *     http         — postCommand, createHttpClient, CSRF token reading
- *     transports   — createHttpBridge, createWsBridge, createSseBridge
+ *     transports   — createHttpBridge, createBatchingHttpBridge, createWsBridge, createSseBridge
  *     form         — createFormBus, reactive form state
  *     schema       — LLM tool-use layer, synthesize, toTools
  *     devtools     — @vue/devtools-api integration (requires @vue/devtools-api)
@@ -35,6 +35,7 @@
  *   'vapor-chamber/reactive'        — opt-in deep reactivity (deepSignal + useDeepCommandState)
  *   'vapor-chamber/outbox'          — offline outbox (durable queue + Idempotency-Key replay)
  *   'vapor-chamber/mcp'             — MCP server from a schema bus (agent surface)
+ *   'vapor-chamber/stream-parser'   — incremental JSON parser for streamed fetch/SSE bodies
  *   'vapor-chamber/iife'            — IIFE bundle (full)
  *   'vapor-chamber/iife-core'       — IIFE bundle (no Vapor custom-element, no Suspense paths)
  *   'vapor-chamber/iife-elements'   — IIFE bundle (core + Vapor custom-element)
@@ -147,6 +148,7 @@ export {
   metrics,
   serialize,
   idempotent,
+  supersede,
   type CacheOptions,
   type CircuitBreakerOptions,
   type RateLimitOptions,
@@ -154,6 +156,7 @@ export {
   type MetricsOptions,
   type SerializeOptions,
   type IdempotentOptions,
+  type SupersedeOptions,
 } from './plugins-extra';
 
 // ── OPTIONAL ──────────────────────────────────────────────────────────────────
@@ -242,10 +245,12 @@ export {
 // Transport plugins — optional; prefer 'vapor-chamber/transports' to avoid pulling http.ts
 export {
   createHttpBridge,
+  createBatchingHttpBridge,
   createWsBridge,
   createSseBridge,
   createEchoBridge,
   type HttpBridgeOptions,
+  type BatchingHttpBridgeOptions,
   type WsBridgeOptions,
   type SseBridgeOptions,
   type EchoBridgeOptions,
@@ -286,8 +291,15 @@ export {
   type FormRules,
 } from './form';
 
-// DevTools integration — optional, requires @vue/devtools-api (loaded dynamically)
-export { setupDevtools } from './devtools';
+// DevTools integration lives on its own subpath: `vapor-chamber/devtools`.
+// It is NOT re-exported here on purpose. The barrel is what every consumer's
+// bundler pre-bundles, and devtools carries a dynamic import of the optional
+// `@vue/devtools-api` peer — from the barrel that specifier reaches apps that
+// never asked for devtools and do not have the peer installed, and their dev
+// server fails to resolve it. On a subpath it only reaches importers who opted
+// in, who are exactly the people who installed the peer.
+//
+//   import { setupDevtools } from 'vapor-chamber/devtools';
 
 // Schema / LLM layer — optional, for AI-assisted command dispatch
 export {

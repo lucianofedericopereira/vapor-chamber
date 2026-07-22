@@ -50,7 +50,7 @@ php artisan serve
 
 ```html
 <meta name="csrf-token" content="{{ csrf_token() }}">
-<script src="https://cdn.jsdelivr.net/npm/vapor-chamber/dist/vapor-chamber-core.iife.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vapor-chamber@1.9/dist/vapor-chamber-core.iife.min.js"></script>
 <script>
   const { dispatch } = VaporChamber.connect({ endpoint: '/api/vc' });
   dispatch('cartAdd', { id: 1 }, { qty: 2 }).then(r => console.log(r));

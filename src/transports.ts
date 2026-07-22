@@ -2,6 +2,7 @@
  * vapor-chamber - Transport plugins
  *
  * v0.4.2 — Added: createHttpBridge, createWsBridge, createSseBridge.
+ * v1.9.0 (unreleased) — Added: createBatchingHttpBridge.
  *
  * Transports are AsyncPlugin factories that forward commands to a backend.
  * Use with createAsyncCommandBus() for full async dispatch support.
@@ -225,6 +226,144 @@ export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
       }
       return { ok: false, error: src };
     }
+  };
+}
+
+// ---------------------------------------------------------------------------
+// createBatchingHttpBridge
+//
+// createHttpBridge handles one dispatch per request; this variant adds
+// microtask-coalescing on top — a burst of dispatches issued in the same tick
+// is batched into one round trip — without changing that contract for anyone
+// not opting in.
+// ---------------------------------------------------------------------------
+
+export type BatchingHttpBridgeOptions = HttpBridgeOptions & {
+  /**
+   * How long to hold the queue open before flushing.
+   *   • `'microtask'` (default) — coalesce every dispatch issued within the
+   *     same JS tick (`queueMicrotask`). Zero added latency: a synchronous
+   *     burst of dispatches (e.g. a `formSet` immediately followed by a
+   *     `submit`) becomes one HTTP round trip.
+   *   • a number (ms) — hold the queue open for a small window instead,
+   *     catching dispatches from separate ticks (e.g. two quick, distinct
+   *     user interactions) at the cost of that much added latency.
+   */
+  window?: 'microtask' | number;
+};
+
+type BatchedCommandEnvelope = { id: string; command: string; target: any; payload?: any; idempotencyKey?: string };
+type BatchedResult = { id: string; ok?: boolean; state?: any; error?: string };
+type BatchResponse = { results?: BatchedResult[] };
+
+type QueuedBatchEntry = { id: string; cmd: Command; resolve: (result: CommandResult) => void };
+
+/**
+ * createBatchingHttpBridge — coalescing fetch-based transport plugin.
+ *
+ * Same per-dispatch call shape and backend options as {@link createHttpBridge}
+ * (CSRF, retry, timeout, session-expiry are all reused via the same
+ * `postCommand`/`httpClient` path), but every command dispatched within the
+ * batching window is queued and sent as ONE POST:
+ *
+ *   { commands: [{ id, command, target, payload }, ...] }
+ *
+ * matched back against:
+ *
+ *   { results: [{ id, ok, state, error }, ...] }
+ *
+ * Each queued command's own dispatch promise resolves independently — a
+ * caller dispatches exactly as it would against createHttpBridge; the
+ * coalescing is invisible to the call site.
+ *
+ * @example
+ * const bus = createAsyncCommandBus()
+ * bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', csrf: true }))
+ * // two dispatches issued in the same tick → one HTTP round trip:
+ * bus.dispatch('formSet', { field: 'email' }, { value: 'a@b.com' })
+ * bus.dispatch('cartAdd', product, { quantity: 2 })
+ */
+export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): AsyncPlugin {
+  const { endpoint, actions, csrf = false, csrfCookieUrl, headers = {}, timeout = 10_000, retry = 0, noRetry = [], signal, onSessionExpired, scopeController, httpClient, window: flushWindow = 'microtask' } = options;
+  const csrfFlag = csrf === 'inertia' ? false : csrf;
+  const effectiveSignal = scopeController && signal
+    ? (typeof AbortSignal.any === 'function' ? AbortSignal.any([signal, scopeController.signal]) : signal)
+    : scopeController?.signal ?? signal;
+
+  let queue: QueuedBatchEntry[] = [];
+  let scheduled = false;
+  let seq = 0;
+
+  function scheduleFlush(): void {
+    if (scheduled) return;
+    scheduled = true;
+    if (flushWindow === 'microtask') queueMicrotask(flush);
+    else setTimeout(flush, flushWindow);
+  }
+
+  async function flush(): Promise<void> {
+    const batch = queue;
+    queue = [];
+    scheduled = false;
+    if (batch.length === 0) return;
+
+    // A batch containing any non-retryable command (payments, etc.) must not
+    // retry the whole request — retrying would resend that command too.
+    const effectiveRetry = batch.some(({ cmd }) => noRetry.includes(cmd.action)) ? 0 : retry;
+
+    const commands: BatchedCommandEnvelope[] = batch.map(({ id, cmd }) => {
+      const entry: BatchedCommandEnvelope = { id, command: cmd.action, target: cmd.target, payload: cmd.payload };
+      if (cmd.meta?.idempotencyKey) entry.idempotencyKey = cmd.meta.idempotencyKey;
+      return entry;
+    });
+
+    try {
+      const res = httpClient
+        ? await httpClient.post<BatchResponse>(endpoint, { commands }, {
+            csrf: csrfFlag, csrfCookieUrl, headers, timeout, retry: effectiveRetry, signal: effectiveSignal, onSessionExpired,
+          })
+        : await postCommand<BatchResponse>(endpoint, { commands }, {
+            csrf: csrfFlag, csrfCookieUrl, headers, timeout, retry: effectiveRetry, signal: effectiveSignal, onSessionExpired,
+          });
+
+      if (!res.ok) {
+        const msg = (res.data as any)?.message ?? (res.data as any)?.error ?? `HTTP ${res.status}`;
+        const err = new Error(msg);
+        for (const entry of batch) entry.resolve({ ok: false, error: err });
+        return;
+      }
+
+      const byId = new Map((res.data?.results ?? []).map((r) => [r.id, r]));
+      for (const entry of batch) {
+        const r = byId.get(entry.id);
+        if (!r) {
+          entry.resolve({ ok: false, error: new Error(`[vapor-chamber] batch response missing a result for "${entry.cmd.action}" (id ${entry.id})`) });
+        } else if (r.ok === false) {
+          entry.resolve({ ok: false, error: new Error(r.error ?? 'Backend error') });
+        } else {
+          entry.resolve({ ok: true, value: r.state });
+        }
+      }
+    } catch (e) {
+      // Same error-unwrapping contract as createHttpBridge: surface the
+      // backend's own error/message instead of the bare "HTTP 422".
+      const src = e as Error & { response?: { data?: unknown }; status?: number; code?: string };
+      const body = src.response?.data as { error?: unknown; message?: unknown } | null | undefined;
+      const msg = body?.error ?? body?.message;
+      const err = typeof msg === 'string' && msg.length > 0 ? (new Error(msg, { cause: src }) as Error) : src;
+      for (const entry of batch) entry.resolve({ ok: false, error: err });
+    }
+  }
+
+  return (cmd: Command, next: () => CommandResult | Promise<CommandResult>) => {
+    if (actions?.length && !actions.some((p) => matchesPattern(p, cmd.action))) return next();
+    if (cmd.signal?.aborted) return Promise.resolve(abortedResult(cmd.action, cmd.signal));
+
+    return new Promise<CommandResult>((resolve) => {
+      const id = `${Date.now()}-${++seq}`;
+      queue.push({ id, cmd, resolve });
+      scheduleFlush();
+    });
   };
 }
 

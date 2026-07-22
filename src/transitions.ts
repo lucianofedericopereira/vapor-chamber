@@ -139,13 +139,7 @@ function buildHooks(
 
   /** Dispatch with done() callback — awaits async results before calling done(). */
   function dispatchWithDone(hook: string, el: Element, done: () => void): void {
-    let result: any;
-    try {
-      result = dispatchSafe(hook, el);
-    } catch {
-      done();
-      return;
-    }
+    const result = dispatchSafe(hook, el); // dispatchSafe never throws (own try/catch)
     if (result && typeof result.then === 'function') {
       (result as Promise<any>).then(() => done(), () => done());
     } else {

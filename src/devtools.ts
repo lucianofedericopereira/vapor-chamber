@@ -95,8 +95,19 @@ export function setupDevtools(bus: Observable, app: unknown): () => void {
   // Dynamic import — zero cost if @vue/devtools-api is not installed.
   // Using a variable prevents TypeScript from attempting module resolution
   // on an optional peer dependency that may not be installed.
-  // Variable indirection + @vite-ignore prevents Vite/Rolldown from
-  // statically analyzing and bundling this optional peer dependency.
+  //
+  // A plain literal here is correct BECAUSE this module is only reachable
+  // through the `vapor-chamber/devtools` subpath. A bundler must be able to
+  // resolve the specifier for devtools to work at all (a browser cannot
+  // resolve a bare "@vue/devtools-api" at runtime), and the only way to reach
+  // this file is to import the subpath — which means you opted in and
+  // installed the peer.
+  //
+  // It must NEVER be re-exported from `src/index.ts`. From the barrel this
+  // specifier lands in every consumer's pre-bundle, including apps that never
+  // wanted devtools and do not have the optional peer, and their dev server
+  // dies with "Failed to resolve import" before any of this code runs.
+  // `tests/dist-optional-peers.test.ts` enforces exactly that boundary.
   const devtoolsModule = '@vue/devtools-api';
   import(/* @vite-ignore */ devtoolsModule)
     .then(({ setupDevtoolsPlugin }: any) => {

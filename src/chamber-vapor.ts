@@ -4,6 +4,8 @@
  * Vue alignment history (one line per version — full per-item detail lives in
  * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table, the single
  * source of per-beta detail; this header only records changes to THIS file):
+ *   vNext / rc.1 — pass-through. All 13 runtime-vapor/hydration fixes land below the define
+ *            wrappers, createVaporChamberApp, and getVaporInteropPlugin. No wrapper change.
  *   vNext / beta.17 — pass-through. Two runtime-vapor interop fixes land below the
  *            getVaporInteropPlugin() pass-through: VDOM↔Vapor slot updates now fire paired
  *            beforeUpdate/updated hooks (bcaa753) and the interop slot owner root re-syncs after

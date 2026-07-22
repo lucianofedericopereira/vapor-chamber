@@ -220,6 +220,22 @@ describe('createTransitionBridge', () => {
 
     expect(dispatched).toEqual(['move']);
   });
+
+  it('swallows a synchronous dispatch throw (naming:throw) — transitions never break', () => {
+    // A strict naming bus throws synchronously in dispatch() when the action
+    // violates the pattern. dispatchSafe's catch must absorb it for both the
+    // direct path (onMove) and the done() path (onEnter), and done() still fires.
+    const strictBus = createCommandBus({
+      naming: { pattern: /^app:/, onViolation: 'throw' },
+      onMissing: 'ignore',
+    });
+    const t = createTransitionBridge({ bus: strictBus, namespace: 'list' });
+    const done = vi.fn();
+
+    expect(() => t.onMove(mockEl())).not.toThrow();       // 'listMove' → throws → swallowed
+    expect(() => t.onEnter(mockEl(), done)).not.toThrow(); // 'listEnter' → throws → swallowed
+    expect(done).toHaveBeenCalledTimes(1);                 // dispatchWithDone still calls done()
+  });
 });
 
 describe('useTransitionCommand', () => {

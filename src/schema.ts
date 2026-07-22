@@ -23,6 +23,21 @@ export type ActionSchema = {
   target?:  FieldMap;
   payload?: FieldMap;
   result?:  FieldMap;
+  /**
+   * Laravel Gate ability name required to run this action — declarative,
+   * server-enforced authorization. Purely descriptive on the bus itself
+   * (auth must be server-side, so
+   * `schemaValidator` never checks it); `scripts/generate-laravel.mjs` reads
+   * it to emit `Gate::forUser($user)->authorize('<ability>', ...)` into the
+   * generated action-class stub, ahead of the existing validation block.
+   *
+   * @example
+   * cartCheckout: {
+   *   authorize: 'checkout',
+   *   target: { cartId: 'number' },
+   * },
+   */
+  authorize?: string;
 };
 
 export type BusSchema = Record<string, ActionSchema>;
@@ -67,6 +82,11 @@ export type CommandsOf<S extends BusSchema> = InferMap<S>;
  *     target:  { id: 'number', name: 'string' },
  *     payload: { qty: 'number' },
  *     result:  { count: 'number', total: 'number' },
+ *   },
+ *   cartCheckout: {
+ *     description: 'Charge the cart and place the order',
+ *     authorize: 'checkout',           // → Gate::forUser($user)->authorize('checkout', ...)
+ *     target:  { cartId: 'number' },
  *   },
  * });
  *
@@ -505,9 +525,10 @@ export type ErrorCodeEntry = {
  *   .map(e => `${e.code} (${e.severity}): ${e.message} → Fix: ${e.fix}`)
  *   .join('\n');
  */
-// @__PURE__ lets bundlers tree-shake the whole registry out of consumer
-// bundles that never touch it (Object.freeze at module level otherwise reads
-// as a side effect and pins ~1 KB into every barrel-import bundle).
+// The pure-call annotation just below lets bundlers tree-shake the whole
+// registry out of consumer bundles that never touch it (Object.freeze at
+// module level otherwise reads as a side effect and pins ~1 KB into every
+// barrel-import bundle).
 export const ERROR_CODE_REGISTRY: readonly ErrorCodeEntry[] = /* @__PURE__ */ Object.freeze([
   // Core
   { code: 'VC_CORE_NO_HANDLER',       severity: 'error', emitter: 'core',     retryable: false, category: 'internal',   message: 'No handler registered for action',                  fix: 'Register a handler with bus.register(action, handler) before dispatching.' },

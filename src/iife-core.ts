@@ -95,5 +95,9 @@ if (typeof globalThis !== 'undefined') {
   (globalThis as any).VaporChamber = VaporChamber;
 }
 
+// Default export only: the IIFE build assigns the DEFAULT export to the
+// `VaporChamber` global, so the API object lands directly on window
+// (`VaporChamber.connect(...)`). A second named export would force the
+// bundler to emit a module-namespace wrapper — `{ VaporChamber, default }`
+// — and every documented call site would be undefined in a <script> tag.
 export default VaporChamber;
-export { VaporChamber };

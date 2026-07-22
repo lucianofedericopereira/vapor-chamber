@@ -2,6 +2,14 @@
  * vapor-chamber — HTTP response cache + request deduplication
  *
  * Internal module used by createHttpClient. Not exported publicly.
+ *
+ * Cache entries carry a fresh window (`freshUntil`) and, when a caller opts
+ * into `cache.staleTtl`, a longer stale window (`staleUntil >= freshUntil`).
+ * Inside `freshUntil` → a fresh hit (no fetch). Between the two → a stale
+ * hit: served instantly while the caller attaches a background revalidation
+ * (see http.ts). Past `staleUntil` → a miss, but the entry is NOT deleted —
+ * `getCachedAny` still finds it as a last resort for `cache.serveStaleOnError`.
+ * Only LRU size pressure or an explicit `invalidateCacheByPattern` removes it.
  */
 
 // ---------------------------------------------------------------------------
@@ -11,29 +19,39 @@
 const CACHE_MAX_SIZE = 50;
 const CACHE_DEFAULT_TTL = 30_000; // 30 seconds
 
-type CacheEntry = { data: any; expires: number };
+type CacheEntry = { data: any; freshUntil: number; staleUntil: number };
+
+export type CacheHit = { data: any; stale: boolean };
 
 const _cache = new Map<string, CacheEntry>();
 
-export function getCached(key: string): any | null {
+/** A fresh or stale hit; `null` on a plain miss. Never deletes on read. */
+export function getCached(key: string): CacheHit | null {
   const entry = _cache.get(key);
-  if (entry && Date.now() < entry.expires) {
-    // LRU: move to end (most recently used)
-    _cache.delete(key);
-    _cache.set(key, entry);
-    return entry.data;
-  }
-  if (entry) _cache.delete(key);
-  return null;
+  if (!entry) return null;
+
+  const now = Date.now();
+  if (now >= entry.staleUntil) return null; // expired past any stale window — retained, not a hit
+
+  // LRU: move to end (most recently used)
+  _cache.delete(key);
+  _cache.set(key, entry);
+  return { data: entry.data, stale: now >= entry.freshUntil };
 }
 
-export function setCache(key: string, data: any, ttl: number = CACHE_DEFAULT_TTL): void {
+/** Last-resort lookup for `cache.serveStaleOnError` — ignores freshness entirely, never evicts. */
+export function getCachedAny(key: string): CacheEntry | null {
+  return _cache.get(key) ?? null;
+}
+
+export function setCache(key: string, data: any, ttl: number = CACHE_DEFAULT_TTL, staleTtl = 0): void {
   // Evict oldest (first item) if at max size
   if (_cache.size >= CACHE_MAX_SIZE) {
     const firstKey = _cache.keys().next().value;
     if (firstKey !== undefined) _cache.delete(firstKey);
   }
-  _cache.set(key, { data, expires: Date.now() + ttl });
+  const now = Date.now();
+  _cache.set(key, { data, freshUntil: now + ttl, staleUntil: now + ttl + staleTtl });
 }
 
 export function clearAllCache(): void {

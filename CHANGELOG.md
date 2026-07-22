@@ -2,6 +2,302 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.9.0 — Vue 3.6.0-rc1 alignment
+
+Adds `createBatchingHttpBridge`, declarative per-action authorization, the
+`supersede` plugin, and the in-box `vapor-chamber/router` +
+`vapor-chamber/router-fetch` subpaths.
+
+### Added
+
+- **Coverage gate corrected and ratcheted.** Two problems: the include glob
+  `src/**/*.ts` also matched nested source trees, so `examples/exo-astro/src/**`
+  was silently counted toward the library's thresholds; and `devtools.ts` was
+  excluded outright while v1.9 promotes it to a **public subpath** — a
+  published entry point measured at nothing. Examples and tests are now
+  excluded explicitly, `devtools.ts` is measured (40.5% → **97.3%** statements,
+  12.5% → **81.3%** branch, 46.9% → **100%** lines, via `@vue/devtools-api`
+  added as a devDependency so the plugin body is reachable at all), and the
+  floors moved from 90/90/82/89 to **95/94/86/93** — the old ones sat ~7 points
+  below reality, wide enough for a genuine regression to pass unnoticed.
+  New tests also close the router's delivery error paths (missing/empty inline
+  element, remote-payload base warning, `routes_load_failed`) and the blade
+  hook branches.
+- **`usePagination()`** (`vapor-chamber/router`) — pagination over a
+  loader-backed list, driven entirely by the URL: `items`, a writable `page`
+  ref, `total` / `perPage` / `lastPage`, `hasNext` / `hasPrev`,
+  `next` / `prev` / `go`, a windowed `pageRange` (first and last page always
+  present, `0` marking an elision) and `loading` (the router's own in-flight
+  flag). A page change stays STATE — no matching, no guards, no remount, only
+  the loaders whose template depends on the key refetch, with the previous
+  request aborted. Reading the response is the only backend-specific part, so
+  every extractor is overridable; the defaults accept `{ items | data }` with
+  `{ total, per_page | perPage, last_page | lastPage }` or their `meta`
+  nesting, covering Laravel's paginator and most plain-JSON APIs. It was
+  documented in `docs/router.md` and had never been implemented — building the
+  runnable router example is what surfaced that.
+- **`createBatchingHttpBridge`** (`src/transports.ts`) — coalesces every
+  command dispatched within the same microtask (or an explicit `window` ms)
+  into one `POST { commands: [...] }`, matched back by id against
+  `{ results: [...] }`. Reuses the existing CSRF/retry/timeout path
+  (`postCommand`) rather than duplicating it. The Laravel example controller
+  (`examples/laravel-backend/VaporChamberController.php`) gained a `batch()`
+  action demonstrating the endpoint shape.
+- **Declarative per-action authorization** (`src/schema.ts` — new
+  `ActionSchema.authorize?: string`; `scripts/generate-laravel.mjs`). When
+  set, `generate-laravel.mjs` emits
+  `Gate::forUser($user)->authorize(ability, ...)` into the generated action
+  stub, ahead of the existing `Validator::make` block. Purely descriptive on
+  the bus itself — auth is enforced server-side only.
+- **`supersede`** plugin (`src/plugins-extra.ts`) — auto-cancels the previous
+  in-flight dispatch for the same key (default: `commandKey(action, target)`,
+  matching `idempotent`'s default) when a new one for that key starts.
+  Implemented on top of vapor-chamber's existing `cmd.signal → fetch`
+  forwarding (`AbortController`/`AbortSignal.any`) — the stale request is
+  genuinely cancelled, not just ignored on arrival.
+- **`vapor-chamber/router` + `vapor-chamber/router-fetch`** (new subpaths,
+  `src/router/`, `src/router-fetch/`) — the router for Vue 3.6 over a
+  server-owned catch-all (Laravel Blade the worked example) now ships **in-box**
+  as a subpath of the single `vapor-chamber` package (path = navigation,
+  query = state; generator-emitted route tables). Data loading is pluggable via
+  a loader SPI: the in-box `router-fetch` subpath is the plain-JSON preset, and
+  any other backend convention is a preset returning `LoaderHandlers`.
+  Subpath-only — adds nothing to the core or the IIFE bundles.
+  See [`docs/router.md`](docs/router.md) and the pattern below.
+- **`examples/pattern-6-vapor-router.ts`** — the family-stack pattern: reads
+  through `vapor-chamber/router` (URL-addressed data, abort-on-supersede
+  loaders, `?page=2` as state not navigation) alongside writes through
+  vapor-chamber's own bus/`createHttpBridge` (unchanged from pattern-2), one
+  Laravel catch-all route serving a Blade shell with an inlined,
+  permission-filtered route table.
+- **`vapor-chamber/stream-parser`** (new subpath, `src/stream-parser.ts`) —
+  dependency-free incremental JSON parser (bytes → state machine → values)
+  for progressively consuming a streamed `fetch()`/SSE response body without
+  buffering the whole payload — LLM/AI streaming completions, large exports.
+  Reorganized into small per-state-group handler methods rather than one
+  large dispatch switch (CDCC); the `true`/`false`/`null` keyword states
+  collapse from ten near-duplicate cases into one target-string index walk.
+  Subpath-only — adds nothing to the IIFE bundles.
+- **`cache.staleTtl`** (`http.ts`/`http-cache.ts`) — opt-in stale-while-
+  revalidate for GET caching. A hit inside `ttl` is fresh (unchanged); a hit
+  between `ttl` and `ttl + staleTtl` is stale — served instantly as
+  `{ stale: true, revalidation: Promise }` while a background fetch
+  refreshes the entry, instead of always blocking on a refetch once `ttl`
+  passes.
+- **`cache.serveStaleOnError`** — opt-in resilience: when a request fails
+  with a *transient* error (timeout, network, or 5xx — see `classifyError`
+  below) and a retained cache entry exists for that URL (even past its
+  stale window — expired entries are no longer deleted on read, only by LRU
+  pressure or explicit invalidation), it resolves to
+  `{ stale: true, servedOnError: true, error }` instead of rejecting.
+  Business errors (4xx) and user aborts are never masked.
+- **`classifyError`** (new `src/http-errors.ts`) — the single named
+  transience rule (`timeout || no response || status >= 500`) driving
+  `serveStaleOnError`, extracted so it can't drift from the retry logic's
+  own status-code lists.
+- **`silent` config flag** — `config.silent: true` stamps `error.silent`
+  on anything thrown by `postCommand`/`clientRequest`, so a caller-provided
+  global error handler can skip fire-and-forget requests (best-effort
+  telemetry, background prefetch) without UI noise.
+
+### Fixed
+
+- **Timeout-triggered aborts now retry** (`postCommand` and `clientRequest`
+  in `src/http.ts`). Previously any `AbortError` — a genuine user cancel
+  *or* the internal timeout controller firing — threw immediately, skipping
+  the `attempt >= retry` / backoff path entirely. A `retry: 2` GET was
+  protected against 5xx/429/408 but silently got zero protection against a
+  timeout. Now only a caller-supplied `signal` aborting throws immediately;
+  a timeout competes for the same retry budget as any other transient
+  failure, and still surfaces as `TimeoutError` (never mistaken for a user
+  cancel — `isCancel`-style checks are unaffected) once retries are
+  exhausted. Covered by two new tests in `tests/http-client.test.ts`.
+- **`.npmignore` deleted** — it was dead and self-contradicting: `package.json`
+  has a `files` array, which takes precedence, and the ignore file claimed to
+  exclude `src/` while `files` ships it. Verified inert (`npm pack --dry-run`
+  byte-identical with and without it: 226 files, 949.6 kB). Keeping it meant a
+  future removal of `files` would silently change the published shape.
+- **Every IIFE global was double-nested — the whole `<script>` audience was
+  broken** (`scripts/build.mjs`, `src/iife*.ts`). All three variants shipped
+  `window.VaporChamber = { VaporChamber, default }`, so the documented entry
+  point of the no-build path — `VaporChamber.connect({ endpoint })`, and
+  equally `.createCommandBus`, `.http`, every plugin — threw
+  "is not a function"; the API was only reachable as
+  `VaporChamber.VaporChamber.connect`. Cause: the entries carried *both* a
+  default and a named export, so rollup emitted a module-namespace wrapper and
+  assigned that to the global name, clobbering the module's own
+  `globalThis.VaporChamber = …`. The IIFE entries are now default-export only
+  and build with `output.exports: 'default'`, so the global *is* the API
+  object. `tests/iife-bundle.test.ts` missed this for the worst reason — its
+  loader unwrapped `outer.default ?? outer.VaporChamber ?? outer` before
+  asserting, testing a shape no browser sees; it now reads the global exactly
+  as a `<script>` tag does, and asserts the absence of both wrappers.
+  Found by running `examples/sprinkled-blade` in a browser.
+- **BREAKING (small): `useQueryParam()` now returns a real `Ref`.** It was a
+  lookalike object with a `value` accessor, so `isRef()` was false and Vue did
+  **not** auto-unwrap it in templates — making it the one composable in the
+  module whose templates needed `.value`, while `useRoute` / `useRouteData` /
+  `useMenu` did not. It is now built with `customRef`, keeps
+  `push` / `replace` / `clear`, and reads/writes identically in script
+  (`page.value = 3`). Templates that wrote `{{ page.value }}` become
+  `{{ page }}`.
+- **`{ inline: … }` route tables ignored the payload's `base` — so NO link was
+  ever intercepted** (`src/router/index.ts`). `base` must be known before the
+  history is built, but the inline payload was only read during `start()`, so
+  the router ran on base `''`. `canHandle` then received unstripped paths,
+  never matched the (base-relative) table, and **every in-app navigation became
+  a full page load** — with the documented "falls back to the payload's base"
+  silently not applying to the primary Blade delivery shape. The inline payload
+  is now read synchronously at construction (it is already in the DOM — that is
+  what "inline" means), via a deliberately total helper: a missing element,
+  malformed JSON or a non-DOM environment return null and leave diagnosis to
+  `start()`, so the constructor stays pure. A remote `{ url }` payload genuinely
+  cannot inform `base` (the history exists before the fetch resolves) and now
+  says so in dev instead of misbehaving the same way.
+- **An unmatched URL could reload forever** (`src/router/index.ts`).
+  `unmatched` is a `HARD_NAV_CODE`, so the router handed the URL back to the
+  server — correct only if the server can answer differently. Behind the
+  catch-all this router is designed for, the shell comes back, the router says
+  `unmatched` again, and `location.assign()` fires again: an endless reload
+  storm that **survives refreshes**, because the offending URL stays in the
+  address bar. Any stale bookmark, mistyped link or deleted route could pin a
+  user in it. The router now hard-navigates only when the target differs from
+  the current URL, and otherwise logs what happened and how to fix it (add a
+  `path: "/*"` row).
+- **A malformed path segment compiled to a dead route, silently**
+  (`src/router/table.ts`). `PARAM_RE` does not match vue-router's `:name*`, so
+  the segment fell through to the `static` branch and compiled to the *literal*
+  text — a row that can never match any URL, with no warning. `/:pathMatch*`
+  and typos like `/:id(\d+` both did this; the only symptom was a 404
+  somewhere else (and, before the fix above, a reload loop). A segment opening
+  with `:` that does not parse as a param is now a coded `invalid_path` error in
+  dev, naming the supported forms (`:name`, `:name(regex)`, `:name?`, trailing
+  `/*`). Production stays lenient, per dev-trusts-generator.
+- **BREAKING (dev-tooling only): `setupDevtools` moved to its own subpath.**
+  `import { setupDevtools } from 'vapor-chamber'` becomes
+  `import { setupDevtools } from 'vapor-chamber/devtools'`. It is no longer
+  re-exported from the barrel, and that is the actual fix for the bug below:
+  the barrel is what every consumer's bundler pre-bundles, so a dynamic import
+  of the optional `@vue/devtools-api` peer sitting in it reached apps that
+  never asked for devtools and did not install the peer. On a subpath the
+  specifier only reaches importers who opted in — who are exactly the people
+  who installed it — so the specifier is a plain literal again and devtools
+  *works* under a bundler instead of silently no-oping.
+  `tests/dist-optional-peers.test.ts` now enforces the boundary rather than
+  banning the literal outright: an optional peer may be resolved statically
+  from its opt-in subpath, never from anything reachable via the package root.
+- **Optional `@vue/devtools-api` peer broke every Vite/Astro consumer**
+  (`src/devtools.ts`). `dist/` emitted `import("@vue/devtools-api")` as a
+  *literal* specifier: the source deliberately routed it through a variable so
+  bundlers could not resolve it statically, but the build constant-folded the
+  variable straight back into the literal. Vite pre-bundles the package, fails
+  to resolve a peer that most apps never install, and returns 500 for the dep
+  bundle — surfacing as an unhandled rejection plus a dev-server reload loop,
+  with `@vite-ignore` powerless because the *pre-bundled* dep is re-analyzed.
+  The specifier is now assembled at runtime (`['@vue', 'devtools-api'].join('/')`),
+  which the folder cannot evaluate, so it stays dynamic in `dist/` and a missing
+  peer falls into the existing `.catch()` as designed.
+- **`examples/exo-astro` — stale dot-path bindings** (example code, not
+  shipped in `dist/`). The example's directive scanner wrapped only the top
+  level of a reactive object, so the documented `v-bind-text="cart.count"` /
+  `v-show="cart.hasItems"` bindings rendered once and then never updated:
+  a nested write mutated an inner object whose effect set was empty.
+  `reactive()` now wraps plain objects and arrays at every depth against one
+  shared effect set (exotic values — `Date`, `Map`, DOM nodes, class
+  instances — are stored untouched, and a cyclic graph terminates). Also:
+  `scan()` is idempotent, so re-running it after a client-side page swap
+  (`astro:page-load`) re-wires new nodes without double-binding clicks or
+  resetting live scope state; a binding now resolves against the nearest
+  `v-scope` that *declared* its head key and falls through to the global bus
+  state otherwise, so one subtree can mix local UI state and bus state; and
+  the new `scopeOf(el)` export lets a command handler write local scope state
+  without breaking the "the only write path is `v-command`" rule. Covered by
+  `tests/examples/exo-astro-directives.test.ts` (24 specs) — the example is
+  published as copy-paste code, so its contract is now pinned like the
+  library's. The example requires Node ≥ 22.12 (Astro 7's floor); the library
+  itself still supports Node ≥ 20.19.
+
+### Examples
+
+Not shipped in `dist/` — but the run that produced the two `Fixed` entries
+above was a browser pass over every example, and each of these was a real
+defect a reader would have hit.
+
+- **Every example ran STALE library code.** `"vapor-chamber": "file:../.."`
+  does not symlink when the root package has a `prepare` script: npm packs the
+  library and installs a frozen *copy*, so an example kept running whatever
+  `dist/` looked like at install time — a fixed bug reproduced indefinitely in
+  the browser. New shared [`examples/ensure-lib.mjs`](examples/ensure-lib.mjs),
+  wired into all three apps' `predev`/`prebuild`, mirrors the built `dist/`
+  into the installed copy and drops Vite's pre-bundle cache (keyed on
+  manifests, not contents — it would serve the stale bundle otherwise).
+- **`examples/static-server.mjs`** (new) — static host for the no-build pages:
+  serves the repo root so `../../dist/...` resolves, sends
+  `Cache-Control: no-store` (a browser heuristically caching an un-headered
+  bundle means testing the build from ten minutes ago), and answers
+  `POST /api/vc` with the same `{ command, target, payload }` →
+  `{ ok, state }` contract as the other backends, so a dispatching page
+  completes instead of 404-ing.
+- **`exo-astro`** — the directive scanner gained `v-each` (repeat a row
+  prototype per array entry, each clone scoped to its item; prototype taken
+  from a `<template>` child or, where parsers disagree about templates in
+  table sections, the detached first element child). Bindings now resolve
+  against the nearest scope that *declared* the key and fall through to bus
+  state otherwise, so a subtree mixes local and bus state; `scopeOf(el)` lets a
+  handler write scope state without breaking "the only write path is
+  `v-command`"; `scan()` is idempotent for `astro:page-load`. The demo page
+  became a two-column invoice-style ticket that aggregates repeat items
+  (`Coffee ×3`) — a write one level deep into the array, which only reaches the
+  DOM because of the deep-reactivity fix above. Controls that start hidden now
+  carry `style="display:none"` in the markup: the script is a module, so
+  without it the empty cart's table and buttons painted before the first
+  effect.
+- **`sprinkled-blade`** — three fixes and a shape change. The mock backend's
+  CORS allowlist omitted `X-Requested-With`, which the bridge always sends, so
+  every dispatch failed the preflight (Chrome reports only `Failed to fetch`).
+  The page hardcoded `0 items` while the server held the real cart — in a demo
+  whose lesson is *the server owns the state*. `cartClear` existed in the mock
+  with no UI to call it. The backend now also serves the page with the cart
+  **rendered into it** (`data-hydrated`), so the client skips its startup fetch
+  entirely: one process, same origin, no CORS, no flicker — with the static
+  cross-origin path kept, because the contrast is the lesson. Remaining UI
+  flicker was the demo's own doing: a status line blanked on click and refilled
+  milliseconds later, a busy state that strobed on a local round trip (now on a
+  120ms threshold), and elements that reserved no space.
+- **`examples/router-demo/` (new)** — the first runnable proof of the headline
+  v1.9 feature, and the reason three of the router fixes above exist. No build
+  step (plain ESM + an import map against the published `dist/` files): a
+  Blade-style inline route table, `router-fetch` loaders against the mock API
+  in `static-server.mjs` (which also serves a **catch-all** for the demo's base,
+  so deep links and F5 behave like Laravel), `usePagination` with a windowed
+  pager, four sortable columns that toggle direction and reset to page 1 in a
+  single `setQuery`, document-wide link interception with `data-active`
+  stamping, a client-rendered 404 and a `useRouteError` boundary. It also
+  carries its own boot diagnostics — a classic script installed before the
+  module plus a watchdog — because an example that fails silently teaches
+  nothing.
+- **`feature-directives.html` was not runnable at all** — 2,666 bytes of pure
+  HTML comments, advertised as *"`v-vc:command` in the browser"*. Now a real
+  page (plain ESM + an import map, no build step) demonstrating all three
+  directives across five panels, including `.vc-loading` / `.vc-error` and an
+  optimistic update that rolls back. It is the only runnable coverage
+  `src/directives.ts` has, being excluded from the coverage gate as
+  "requires a real Vue runtime".
+- **`pattern-1-blade-cdn.html` pointed at an UNVERSIONED CDN URL** — i.e. the
+  *published* package, never the working tree, edge-cached and silently
+  re-pointed by every release. It was the one example nobody could run before
+  publishing, and the one that shipped broken. It now loads local `dist/`
+  (self-hosting is also what `laravel-app` does and what a CSP-constrained
+  Blade app wants), with the CDN form documented in-file and version-pinned.
+  Every unversioned `cdn.jsdelivr.net/npm/vapor-chamber/` URL across the docs
+  was pinned to `@1.9` for the same reason. It also gained a Clear button:
+  `persist()` restored the count on load with no way to bring it back down, so
+  the page could show a number the backend no longer agreed with.
+- **`docs/integrations/laravel.md`** gained a CORS section — the cross-origin
+  Sanctum case needs `X-Requested-With` (and `Idempotency-Key` with the
+  `idempotent()` plugin) on the preflight allowlist, which was documented
+  nowhere.
+
 ## v1.8 — Vue 3.6.0-beta.17 alignment
 
 

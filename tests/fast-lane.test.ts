@@ -167,3 +167,48 @@ describe('createFastLane — isolation between instances', () => {
     expect(b.registeredActions()).toEqual(['act']);
   });
 });
+
+describe('fast-lane unsubscribe edge cases', () => {
+  it('unsubscribing twice is safe, and the bucket is dropped when it empties', () => {
+    const lane = createFastLane();
+    const seen: number[] = [];
+    const off = lane.on<number>('tick', (n) => seen.push(n));
+
+    lane.emit('tick', 1);
+    off();
+    lane.emit('tick', 2); // no listeners left
+    expect(() => off()).not.toThrow(); // bucket already deleted → early return
+    lane.emit('tick', 3);
+
+    expect(seen).toEqual([1]);
+  });
+
+  it('unsubscribing a listener that is no longer in a live bucket is a no-op', () => {
+    // The bucket still exists (another listener holds it open) but this
+    // listener is already gone — indexOf returns -1 and nothing is spliced.
+    const lane = createFastLane();
+    const kept: number[] = [];
+    const off = lane.on<number>('tick', () => {});
+    lane.on<number>('tick', (n) => kept.push(n));
+
+    off();
+    expect(() => off()).not.toThrow();
+    lane.emit('tick', 1);
+    expect(kept).toEqual([1]);
+  });
+
+  it('removing one of several listeners keeps the rest', () => {
+    const lane = createFastLane();
+    const a: number[] = [];
+    const b: number[] = [];
+    const offA = lane.on<number>('tick', (n) => a.push(n));
+    lane.on<number>('tick', (n) => b.push(n));
+
+    lane.emit('tick', 1);
+    offA();
+    lane.emit('tick', 2);
+
+    expect(a).toEqual([1]);
+    expect(b).toEqual([1, 2]);
+  });
+});
