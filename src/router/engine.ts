@@ -78,7 +78,23 @@ export function createEngine(ctx: EngineContext) {
   const beforeGuards: NavigationGuard[] = [];
   const afterHooks: AfterEachHook[] = [];
   let pendingId = 0;
-  let controller: AbortController | null = null;
+
+  // Two lanes, two controllers. They MUST NOT share one: a query-only change
+  // aborting the controller would kill an in-flight PATH navigation's loaders,
+  // and because runLoaders maps an aborted signal to a 'cancelled' RouterError,
+  // the engine reads that as supersession — the navigation is dropped without
+  // ever reaching onError. Silent, and the URL never moves.
+  let navController: AbortController | null = null;
+  let refetchController: AbortController | null = null;
+
+  // `isLoading` is DERIVED, never assigned from a lane directly — two lanes
+  // writing one flag disagreed about who owned it, so a finishing navigation
+  // cleared the flag while a query refetch was still in flight.
+  let navLoading = false;
+  let refetchLoading = false;
+  function syncLoading(): void {
+    isLoading.value = navLoading || refetchLoading;
+  }
 
   // ---- location resolution ---------------------------------------------------
 
@@ -184,9 +200,12 @@ export function createEngine(ctx: EngineContext) {
     const id = ++pendingId;
     const cancelled = () => pendingId !== id;
     // Abort the PREVIOUS navigation's in-flight loads the moment this one
-    // starts (vue-router data-loaders timing — verified against source).
-    controller?.abort();
-    const own = (controller = new AbortController());
+    // starts (vue-router data-loaders timing — verified against source), and
+    // any query refetch too: its results are keyed to a snapshot this
+    // navigation is about to replace.
+    navController?.abort();
+    refetchController?.abort();
+    const own = (navController = new AbortController());
 
     try {
       for (const guard of beforeGuards) {
@@ -197,7 +216,8 @@ export function createEngine(ctx: EngineContext) {
       }
 
       const leaf = leafOf(to) as TableRecord;
-      isLoading.value = leaf.loadChain.length > 0;
+      navLoading = leaf.loadChain.length > 0;
+      syncLoading();
       const [render, data] = await Promise.all([
         ctx.resolveRender(leaf.renderChain, to),
         leaf.loadChain.length ? ctx.runLoaders(leaf.loadChain, to, own.signal) : Promise.resolve(EMPTY_DATA as Map<string, unknown>),
@@ -220,7 +240,10 @@ export function createEngine(ctx: EngineContext) {
       ctx.onError(wrapped, to);
       return revert(wrapped, opts);
     } finally {
-      if (pendingId === id) isLoading.value = false;
+      if (pendingId === id) {
+        navLoading = false;
+        syncLoading();
+      }
     }
   }
 
@@ -256,9 +279,10 @@ export function createEngine(ctx: EngineContext) {
     const affected = ctx.loadAffectedBy(leaf.loadChain, keys);
     if (!affected.length) return;
 
-    controller?.abort();
-    const own = (controller = new AbortController());
-    isLoading.value = true;
+    refetchController?.abort();
+    const own = (refetchController = new AbortController());
+    refetchLoading = true;
+    syncLoading();
     void ctx
       .runLoaders(affected, to, own.signal)
       .then((fresh) => {
@@ -274,7 +298,10 @@ export function createEngine(ctx: EngineContext) {
         ctx.onError(error, to); // page keeps stale data; useRouteError surfaces it
       })
       .finally(() => {
-        if (controller === own) isLoading.value = false;
+        if (refetchController === own) {
+          refetchLoading = false;
+          syncLoading();
+        }
       });
   }
 

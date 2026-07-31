@@ -46,9 +46,13 @@ const router = createRouter({
 // ---- one island ----------------------------------------------------------------
 
 // import { createApp } from 'vue';
-// const app = createApp(AdminShell);
-// app.use(router);           // <RouterOutlet/> renders the matched page
+// import { RouterOutlet } from 'vapor-chamber/router/vdom';
+// const app = createApp(AdminShell);   // AdminShell registers RouterOutlet
+// app.use(router);                     //   locally and renders <RouterOutlet/>
 // app.mount('#admin');
+//
+// RouterOutlet is NOT registered globally by app.use(router): a global
+// registration pins Vue's vDOM runtime into every bundle, Vapor ones included.
 
 // Inside a list page component:
 //   const page = useQueryParam<number>('page');   // typed by the route row

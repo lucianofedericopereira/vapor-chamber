@@ -185,9 +185,13 @@
 <script type="module">
   import { createApp, computed } from 'vue';
   import {
-    createRouter, RouterOutlet,
+    createRouter,
     useRouter, useRoute, useRouteData, useRouteError, useQueryParam, usePagination, useMenu,
   } from '/dist/router/index.js';
+  // <RouterOutlet> lives on the vdom subpath — importing it is what opts you
+  // into Vue's virtual-DOM runtime. Register it locally (as Shell does below);
+  // the router deliberately does not register it globally.
+  import { RouterOutlet } from '/dist/router/vdom.js';
   import { fetchLoaders } from '/dist/router-fetch/index.js';
 
   const Home = {

@@ -182,7 +182,37 @@ export function createRouteTable(rows: readonly RouteRecord[]): RouteTable {
     (record as { queryDefs: TableRecord['queryDefs'] }).queryDefs = queryDefs;
   }
 
+  // Fully-static rows resolved by map instead of by regex scan.
+  //
+  // Safe only where it cannot jump the queue: resolve() returns the FIRST
+  // matching row in server-priority order, so a static row is admitted only
+  // when no EARLIER parameterised row also matches its path. `/products/new`
+  // sitting behind `/products/:id` therefore stays on the scan and keeps
+  // matching `:id`, exactly as before.
+  //
+  // Groups never match a URL, so they neither enter the map nor block anyone.
+  const staticByPath = new Map<string, TableRecord>();
+  {
+    const blockers: TableRecord[] = [];
+    for (const record of records) {
+      if (record.group) continue;
+      if (!record.segments.every((segment) => segment.kind === 'static')) {
+        blockers.push(record);
+        continue;
+      }
+      const path = renderSegments(record.segments, {}).path as string;
+      if (blockers.some((blocker) => blocker.re.test(path))) continue;
+      const key = staticKey(path);
+      if (!staticByPath.has(key)) staticByPath.set(key, record);
+    }
+  }
+
   function resolve(path: string): { record: TableRecord; params: RouteParams } | null {
+    // Mirrors the scan's matching rules: the compiled RegExp is
+    // case-insensitive and tolerates one trailing slash.
+    const exact = staticByPath.get(staticKey(path));
+    if (exact) return { record: exact, params: {} };
+
     for (const record of records) {
       if (record.group) continue; // pure groups never match a URL themselves
       const m = record.re.exec(path);
@@ -207,6 +237,12 @@ export function createRouteTable(rows: readonly RouteRecord[]): RouteTable {
   }
 
   return { records, resolve, getRecord: (name) => byName.get(name), buildPath };
+}
+
+/** Map key for a static path: case-folded, at most one trailing slash, '/' kept. */
+function staticKey(path: string): string {
+  const lower = path.toLowerCase();
+  return lower.length > 1 ? lower.replace(/\/$/, '') : lower;
 }
 
 function decodePathPart(part: string): string {

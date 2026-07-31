@@ -21,14 +21,12 @@
 import { createHttpClient } from '../http';
 import type { HttpClient } from '../http';
 import { computed, getCurrentScope, onScopeDispose, shallowRef } from 'vue';
-import { makeBladeComponent } from './blade';
 import { installDomIntegration, preheatIdle, stampActiveLinks } from './dom';
 import { createEngine } from './engine';
 import { HARD_NAV_CODES, isRouterError, routerError } from './errors';
 import { type RouterHistory, canUseWebHistory, createMemoryHistory, createWebHistory, stripBase } from './history';
 import { ROUTER_KEY } from './keys';
 import { type LoaderHandlers, defaultAffects, runLoaders } from './loaders';
-import { RouterOutlet } from './outlet';
 import type { Router } from './router-type';
 import { type RouteTable, createRouteTable } from './table';
 import type {
@@ -46,8 +44,11 @@ import { resolveQueryHistory } from './url';
 
 // ---- public surface ------------------------------------------------------------
 
-export { makeBladeComponent } from './blade';
-export type { BladeHooks } from './blade';
+// NOTE: RouterOutlet / makeBladeComponent are deliberately NOT re-exported
+// here — they live in `vapor-chamber/router/vdom`. A static re-export is a
+// static reference: it drags defineComponent/h into this entry's chunk (and
+// degrades the on-demand blade import below into a static one), which puts
+// Vue's vDOM runtime in every consumer's bundle. See ./vdom.ts.
 export {
   onBeforeLeave,
   useBreadcrumbs,
@@ -71,7 +72,6 @@ export type { ResolveBaseOptions } from './history';
 export type { RouterHistory } from './history';
 export { defaultAffects, interpolateLoad, runLoaders } from './loaders';
 export type { LoaderHandlers, PrefixHandler, UrlHandler } from './loaders';
-export { RouterOutlet } from './outlet';
 export type { Router } from './router-type';
 export { compilePath, createRouteTable } from './table';
 export type { RouteTable } from './table';
@@ -246,6 +246,12 @@ export function createRouter<TName extends string = string>(options: RouterOptio
           } catch (cause) {
             throw routerError('blade_fetch_failed', `blade fetch failed for "${to.fullPath}"`, { to, cause });
           }
+          // Imported here, not at module scope: blade.ts is a vDOM component
+          // (defineComponent/h/onMounted). A static import would put the vDOM
+          // runtime in every consumer's graph, including Vapor apps that never
+          // declare a blade row. This function is already async, so the only
+          // cost is one extra chunk fetched the first time a blade row is hit.
+          const { makeBladeComponent } = await import('./blade');
           return {
             record,
             component: makeBladeComponent(html, { hydrate: options.hydrate, dehydrate: options.dehydrate }),
@@ -484,7 +490,11 @@ export function createRouter<TName extends string = string>(options: RouterOptio
     },
     install: (app) => {
       app.provide(ROUTER_KEY, router);
-      app.component('RouterOutlet', RouterOutlet);
+      // Deliberately NOT app.component('RouterOutlet', …). A global
+      // registration is a live reference from the router to a vDOM component,
+      // which pins Vue's virtual-DOM runtime into every consumer's bundle —
+      // including Vapor apps that never render one. Import <RouterOutlet>
+      // where you use it. (vue-router hit the same wall; see plan.md §2.)
       void start();
     },
     destroy: () => {

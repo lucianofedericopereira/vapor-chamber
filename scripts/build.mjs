@@ -45,6 +45,7 @@ await build({
         'stream-parser': 'src/stream-parser.ts',
         'devtools':   'src/devtools.ts',
         'router/index':       'src/router/index.ts',
+        'router/vdom':        'src/router/vdom.ts',
         'router-fetch/index': 'src/router-fetch/index.ts',
         'iife':       'src/iife.ts',
         'iife-core':  'src/iife-core.ts',

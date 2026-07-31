@@ -45,9 +45,40 @@ is a coded `load_failed`.
 
 | Subpath / extension point | Role |
 |---|---|
-| `vapor-chamber/router` (this) | the router: table, engine, dom, outlet, loader SPI |
+| `vapor-chamber/router` (this) | the router: table, engine, dom, loader SPI — **no vDOM** |
+| `vapor-chamber/router/vdom` | `RouterOutlet`, `makeBladeComponent` — opts you into Vue's vDOM runtime |
 | `vapor-chamber/router-fetch` | in-box preset: plain-JSON URL loaders, any backend |
 | your own preset | implement `LoaderHandlers` (`prefixes` + `url` + `affects`) |
+
+### Why the outlet is a separate subpath
+
+`RouterOutlet` is a `defineComponent` + `h()` component. Anything that can
+reach it *statically* pins Vue's virtual-DOM runtime into the consumer's
+bundle — so a Vapor app that never renders one would still pay for it. Two
+consequences, both deliberate:
+
+- **`app.use(router)` does not register `<RouterOutlet>` globally.** Import it
+  and register it locally where you use it.
+- **It is not re-exported from `vapor-chamber/router`.** A static re-export is
+  a static reference and would defeat the split.
+
+Measured on the built `dist/` (`tests/router/vdom-boundary.test.ts`), the
+bindings each entry retains from `vue`:
+
+| entry | retains |
+|---|---|
+| `vapor-chamber/router` | `computed customRef getCurrentScope inject onScopeDispose shallowRef` |
+| `vapor-chamber/router/vdom` | `defineComponent h inject provide` |
+
+Blade rows need no import from you: the router pulls `makeBladeComponent` in
+on demand, as a separate chunk, the first time it renders one.
+
+> **Breaking in v1.11.0:** `RouterOutlet`, `makeBladeComponent` and
+> `BladeHooks` moved from `vapor-chamber/router` to `vapor-chamber/router/vdom`,
+> and `app.use(router)` no longer registers `<RouterOutlet>` globally. Apps that
+> relied on the global registration must register it locally. Shipped in a minor
+> deliberately — the router is experimental, and keeping deprecated re-exports
+> would reinstate the static reference this change exists to remove.
 
 Core mechanics are preset-independent: loaders run on navigation with an
 AbortController created per navigation (**a newer navigation aborts the
@@ -146,8 +177,49 @@ const crumbs = useBreadcrumbs(); // the matched parent chain, titled rows only,
   useMenu useBreadcrumbs usePagination onBeforeLeave` — all
   scope-auto-disposing.
 
+## Vapor interop
+
+Measured against `vue@3.6.0-rc.2`, not inferred from the
+[Vapor roadmap](https://github.com/vuejs/core/issues/13687). Fixture:
+`tests/router/vapor-fixture.test.ts`.
+
+**provide/inject works in Vapor, at both levels.** The roadmap lists
+"Provide/Inject System" unchecked, but on a real `createVaporApp` app both
+`app.provide(...)` → `inject(...)` (which backs every composable here) and
+component-level `provide(...)` → `inject(...)` (which backs nested
+`<RouterOutlet>` depth) resolve correctly. So the composable surface and outlet
+nesting are **not** blocked on that roadmap item.
+
+What still ties the outlet to the vDOM runtime is its own render path:
+`outlet.ts` uses `defineComponent` + `h()`. A Vapor-native outlet is a
+`defineVaporComponent` + `createComponent` rewrite, not a wait on upstream.
+
+Two constraints worth knowing before writing your own Vapor test or app:
+
+- Vapor ships as a **physically separate dist file**
+  (`vue/dist/vue.runtime-with-vapor.esm-*.js`). A bare `import 'vue'` never
+  resolves to it outside a bundler's per-app alias — see `chamber.ts` §probeVue
+  and whitepaper §11.6.
+- Never mix that build with a plain `import 'vue'` in the same context. Two
+  separately-imported Vue dists are two disconnected reactivity instances, and
+  the failure is silent. Import `provide`, `inject`, `defineVaporComponent` and
+  friends from the *same* module you got `createVaporApp` from.
+
+Roadmap items this router does **not** depend on, by design:
+
+| Item | Why |
+| --- | --- |
+| Async Component | lazy routes use the router's own `import()` + cache, resolved before the snapshot commits — never `defineAsyncComponent` |
+| Suspense | the two-phase commit means a pending state is never rendered, so there is no boundary to need |
+
+Still genuinely gated upstream: **KeepAlive** (nothing caches an inactive
+route's state), **Transition** (route transitions; the View Transitions API is
+the DOM-native way around it), and **SSR/Hydration** for blade rows —
+`fetchBlade` is undefined off-browser, so a blade row under SSR throws
+`blade_unconfigured`.
+
 ## Status
 
 Experimental, covered by the router node specs (`npm test`). Next: a reference
 route generator + generated modules (E2E proof), browser playground,
-Vapor-native outlet after measuring interop.
+Vapor-native outlet (interop now measured — see above).

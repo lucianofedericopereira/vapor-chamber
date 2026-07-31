@@ -40,6 +40,12 @@ const esm = [
   ['./reactive', 'src/reactive.ts'],
   ['./outbox', 'src/outbox.ts'],
   ['./mcp', 'src/mcp.ts'],
+  // Router. `./router` is deliberately vDOM-free — the outlet and blade
+  // components live behind `./router/vdom` so a Vapor consumer does not pay
+  // for Vue's virtual-DOM runtime. See tests/router/vdom-boundary.test.ts.
+  ['./router', 'src/router/index.ts'],
+  ['./router/vdom', 'src/router/vdom.ts'],
+  ['./router-fetch', 'src/router-fetch/index.ts'],
   ['./iife', 'src/iife.ts'],
   ['./iife-core', 'src/iife-core.ts'],
   ['./iife-elements', 'src/iife-elements.ts'],

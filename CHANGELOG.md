@@ -2,6 +2,110 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.11.0 — router: vDOM boundary + two engine fixes
+
+Router work driven by reading the [Vapor roadmap](https://github.com/vuejs/core/issues/13687)
+against this router's own code. Every claim below is measured on
+`vue@3.6.0-rc.2`, not inferred from the roadmap's checkboxes.
+
+### BREAKING — `RouterOutlet` moved subpath, no longer globally registered
+
+Shipped in a minor deliberately: the router is documented as experimental, and
+the alternative (deprecated re-exports for a window) would reinstate the exact
+static reference the change exists to remove.
+
+- `RouterOutlet`, `makeBladeComponent` and `BladeHooks` moved from
+  `vapor-chamber/router` to **`vapor-chamber/router/vdom`**.
+- `app.use(router)` **no longer registers `<RouterOutlet>` globally**. Register
+  it locally where you use it.
+
+```js
+// before
+import { createRouter, RouterOutlet } from 'vapor-chamber/router';
+// after
+import { createRouter } from 'vapor-chamber/router';
+import { RouterOutlet } from 'vapor-chamber/router/vdom';
+```
+
+**Why.** `RouterOutlet` is a `defineComponent` + `h()` component, so anything
+that reaches it statically pins Vue's virtual-DOM runtime into the consumer's
+bundle — a Vapor app that never renders one still paid for it. Bindings
+retained from `vue`, measured on built `dist/`:
+
+| entry | before | after |
+| --- | --- | --- |
+| `vapor-chamber/router` | `computed customRef defineComponent getCurrentScope h inject onBeforeUnmount onMounted onScopeDispose provide shallowRef` | `computed customRef getCurrentScope inject onScopeDispose shallowRef` |
+| `vapor-chamber/router/vdom` | — | `defineComponent h inject provide` |
+
+Dropping the global registration and making blade an on-demand import were both
+necessary but **neither moved the measurement**: under `preserveModules: false`
+a static re-export keeps the module in the same Rollup chunk, which degraded the
+dynamic import back into a static one. Only the subpath split broke it.
+
+Blade rows need no import from you — the router pulls `makeBladeComponent` in
+on demand, as its own chunk, the first time it renders one.
+
+Gate: `tests/router/vdom-boundary.test.ts`.
+
+### Fixed — a query change during navigation silently dropped it
+
+`navigate` and `refetchAffected` shared one `AbortController`. Typing in a
+search box while a navigation was still loading aborted that navigation's
+loaders; because `runLoaders` maps an aborted signal to a `cancelled`
+RouterError, the engine read it as supersession and dropped the navigation
+**without dispatching to `onError`** — no error, no feedback, URL unmoved.
+
+Each lane now owns its controller. A path navigation still aborts both (a
+refetch's results key to a snapshot it is about to replace); a query refetch
+aborts only its own.
+
+### Fixed — `isLoading` cleared while a refetch was still in flight
+
+The two lanes released the flag under different ownership rules
+(`pendingId === id` vs `controller === own`), so a settling navigation could
+clear it while a query refetch was still loading — spinners vanished early.
+`isLoading` is now derived from per-lane flags and never assigned directly.
+Public type is unchanged (`Readonly<ShallowRef<boolean>>`).
+
+Both fixes gated by `tests/router/abort-repro.test.ts`, verified to fail
+without them.
+
+### Performance — static routes resolve by map
+
+`resolve()` scanned every record and executed its `RegExp`. Fully-static rows
+now resolve through a `Map` built at table-compile time. Median of 4 runs,
+301-row table, 20 000 resolves: a static row at the end of the table went
+**~193 ms → ~0.8 ms** (9.7 µs → 0.04 µs per call). Parameterised rows and
+misses are unchanged; table build costs +0.04 ms.
+
+Correctness is preserved exactly: `resolve()` returns the first match in
+server-priority order, so a static row enters the map only when no **earlier**
+parameterised row also matches its path. `/products/new` declared after
+`/products/:id` still resolves to `:id`. Gate: `tests/router/static-map.test.ts`.
+
+### Docs
+
+- `docs/router.md` gains a **Vapor interop** section recording that
+  provide/inject works in Vapor at both levels on rc.2 — app-level (which backs
+  every composable) and component-level (which backs nested outlet depth). The
+  roadmap lists "Provide/Inject System" unchecked; that does not mean basic
+  provide/inject is missing, and this router's composable surface is not blocked
+  on it. What still ties the outlet to vDOM is its own render path.
+- Also documented: Vapor ships as a physically separate dist, and mixing it with
+  a plain `import 'vue'` yields two disconnected reactivity instances, silently.
+  Fixture: `tests/router/vapor-fixture.test.ts`.
+- **README rewritten.** It had drifted: beta.17 alignment, 884 tests / 47 files,
+  and IIFE sizes from an older build. Now regenerated against `docs/` — rc.2,
+  1271 tests / 79 files, current sizes — with the router documented as a feature
+  rather than a footnote, a contents bar, and long code folded into `<details>`
+  blocks (1651 → 1300 lines; ~416 visible when collapsed). Dropped the
+  "size by version" table, which stopped at an unreleased v1.7.0; the generated
+  size doc and this changelog cover that ground.
+- **`scripts/measure-size.mjs` now tracks the router subpaths.** `./router`,
+  `./router/vdom` and `./router-fetch` were never measured, so the vDOM split
+  had no number attached to it. First readings: 11.6 / 0.4 / 3.5 KB brotli.
+- `docs/BUNDLE-SIZES.md` and `docs/COVERAGE.md` regenerated.
+
 ## v1.10.0 — Vue 3.6.0-rc.2 alignment
 
 Every rc.2 PR read at source (not just changelog titles) against every file that
