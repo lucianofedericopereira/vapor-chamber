@@ -4,6 +4,15 @@
  * Vue alignment history (one line per version — full per-item detail lives in
  * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table, the single
  * source of per-beta detail; this header only records changes to THIS file):
+ *   vNext / rc.2 — pass-through. All 12 runtime-vapor fixes (effect-scope restore on
+ *            setCurrentInstance #15141, transition/suspense/async-setup/interop-hydration
+ *            timing #15129/#15130/#15132/#15133/#15139/#15140/#15144/#15145/#15147, slot
+ *            anchor #15131, interop prop validation #15111) land below the define*
+ *            wrappers, createVaporChamberApp, and getVaporInteropPlugin — this file holds
+ *            no effect scopes, instances, or interop state of its own, only forwards Vue's.
+ *            Verified directly: this module creates no renderEffect/Suspense boundary and
+ *            calls setCurrentInstance nowhere, so #15141/#15129 (both about instance-context
+ *            restoration around those calls) have no analog here. No wrapper change.
  *   vNext / rc.1 — pass-through. All 13 runtime-vapor/hydration fixes land below the define
  *            wrappers, createVaporChamberApp, and getVaporInteropPlugin. No wrapper change.
  *   vNext / beta.17 — pass-through. Two runtime-vapor interop fixes land below the

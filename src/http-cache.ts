@@ -48,6 +48,7 @@ export function setCache(key: string, data: any, ttl: number = CACHE_DEFAULT_TTL
   // Evict oldest (first item) if at max size
   if (_cache.size >= CACHE_MAX_SIZE) {
     const firstKey = _cache.keys().next().value;
+    /* v8 ignore next -- defensive: size >= CACHE_MAX_SIZE (>0) already guarantees a first key */
     if (firstKey !== undefined) _cache.delete(firstKey);
   }
   const now = Date.now();

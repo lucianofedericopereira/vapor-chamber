@@ -3,6 +3,32 @@
  *
  * Vue alignment history (one line per version — full per-item detail lives in
  * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table):
+ *   vNext / rc.2 — Vue's compiler-vapor event delegation flips from opt-OUT to
+ *            opt-IN (#15127, BREAKING): compiled `@click` in .vue Vapor SFCs now
+ *            attaches direct per-element listeners unless the template writes
+ *            `.delegate` explicitly; `compilerOptions.eventDelegation` is removed
+ *            entirely. Pass-through for THIS file — v-vc:command has always
+ *            attached a DIRECT addEventListener (it's a runtime directive, never
+ *            routed through compiler-vapor's delegated-events codegen), so Vue's
+ *            flip doesn't change this directive's existing behavior at all. The
+ *            other 12 rc.2 fixes are runtime-vapor suspense/hydration/transition/
+ *            interop internals below this VDOM-only directive; no code change.
+ *            LIB-SIDE, inspired by studying the .delegate design (not required
+ *            by it): v-vc:command gains its OWN opt-in `.delegate` modifier —
+ *            one shared document-level click listener instead of one per
+ *            element, for large v-for'd action lists (tables, cart rows). Same
+ *            trade-off Vue just made opt-in for the same reason (an ancestor's
+ *            `.stop` can pre-empt a delegated descendant), so it defaults OFF
+ *            here too. Incompatible with `.capture`/`.once`/`.passive` (no
+ *            per-element listener to hang them on) — falls back to a direct
+ *            listener with a dev warning, mirroring Vue's own
+ *            `.delegate modifier is not supported...` compiler warning.
+ *            MEASURED (tests/perf.bench.ts, 5k elements): mount+unmount is
+ *            ~1.3x SLOWER in delegate mode, not faster — the payoff is
+ *            standing LISTENER COUNT while mounted (1 vs N), not attach/
+ *            detach speed. Don't reach for `.delegate` as a mount-cost
+ *            optimization; it's a memory/retained-listener trade for large,
+ *            mostly-static lists, same as Vue's own default reasoning.
  *   vNext / beta.17 — pass-through. No event/delegation change in beta.17 — its fixes are
  *            compiler-vapor slot/expression handling plus runtime slot/interop/hydration, none of
  *            which reach the DIRECT addEventListener this directive attaches. No code change.
@@ -79,9 +105,57 @@ type DirectiveState = {
   buttons?: number[];
   /** `.capture` — capture-phase listener. Also matched on removeEventListener. */
   capture?: boolean;
+  /** `.delegate` — dispatched via the shared document-level listener instead of
+   *  a direct one on this element. See "Opt-in delegation" below. */
+  delegate?: boolean;
 };
 
 const stateMap = new WeakMap<Element, DirectiveState>();
+
+// ---------------------------------------------------------------------------
+// Opt-in delegation (.delegate modifier) — lib-side, not required by Vue
+// ---------------------------------------------------------------------------
+//
+// Mirrors the trade-off Vue 3.6.0-rc.2 made opt-in for compiled `@click`
+// (#15127): one shared listener instead of one per element, at the cost that
+// an ancestor's `.stop` can pre-empt a delegated descendant before the event
+// ever reaches the shared listener. Same reason it defaults OFF here.
+//
+// Simplified vs. Vue's own compiler-vapor delegation (which replays every
+// matching listener along the DOM path): only the CLOSEST delegated ancestor
+// of the click target fires. v-vc:command elements are leaf controls
+// (buttons/links) in practice — nesting two dispatching elements isn't a
+// supported pattern in delegate mode; use the default (direct) mode for that.
+let delegatedListenerCount = 0;
+let delegatedListenerDoc: Document | null = null;
+
+function delegatedClickHandler(event: Event): void {
+  let node = event.target as Element | null;
+  while (node) {
+    const state = stateMap.get(node);
+    if (state?.delegate) {
+      state.handler(event);
+      return;
+    }
+    node = node.parentElement;
+  }
+}
+
+function addDelegatedElement(el: Element): void {
+  if (delegatedListenerCount === 0) {
+    delegatedListenerDoc = el.ownerDocument ?? document;
+    delegatedListenerDoc.addEventListener('click', delegatedClickHandler);
+  }
+  delegatedListenerCount++;
+}
+
+function removeDelegatedElement(): void {
+  delegatedListenerCount = Math.max(0, delegatedListenerCount - 1);
+  if (delegatedListenerCount === 0 && delegatedListenerDoc) {
+    delegatedListenerDoc.removeEventListener('click', delegatedClickHandler);
+    delegatedListenerDoc = null;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // v-vc:command
@@ -94,6 +168,11 @@ const stateMap = new WeakMap<Element, DirectiveState>();
 //   .stop .prevent .self        — DOM-event guards/actions, like v-on
 //   .left .middle .right        — only dispatch for that mouse button
 //   .capture .once .passive     — addEventListener options
+//   .delegate                   — one shared document listener instead of a
+//                                  per-element one (see "Opt-in delegation"
+//                                  above); incompatible with .capture/.once/
+//                                  .passive, which fall back to a direct
+//                                  listener with a dev warning if combined
 //   .<number> (e.g. .5000)      — async dispatch timeout in ms (default 30000)
 //
 // Additional data attributes read from the element:
@@ -248,6 +327,24 @@ export function createDirectivePlugin(): { install(app: any): void } {
           if (mods.middle) buttons.push(1);
           if (mods.right) buttons.push(2);
 
+          // .delegate shares one document-level listener, so it has nowhere to
+          // hang per-element addEventListener options. Mirrors Vue's own
+          // compiler-vapor warning for the same incompatible combo (#15127):
+          // "delegate modifier is not supported... the listener will be
+          // attached directly."
+          let delegate = !!mods.delegate;
+          if (delegate && (mods.capture || mods.once || mods.passive)) {
+            if (typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production') {
+              console.warn(
+                '[vapor-chamber] v-vc:command.delegate is incompatible with ' +
+                '.capture/.once/.passive (delegation shares one document-level ' +
+                'listener with no per-element options). Attaching a direct ' +
+                'listener instead.'
+              );
+            }
+            delegate = false;
+          }
+
           const state: DirectiveState = {
             action: binding.value as string,
             loading: false,
@@ -259,10 +356,16 @@ export function createDirectivePlugin(): { install(app: any): void } {
             self: !!mods.self,
             buttons,
             capture: !!mods.capture,
+            delegate,
           };
 
           state.handler = buildHandler(el, state);
           stateMap.set(el, state);
+
+          if (delegate) {
+            addDelegatedElement(el);
+            return;
+          }
 
           const listenerOpts: AddEventListenerOptions = {};
           if (mods.capture) listenerOpts.capture = true;
@@ -283,7 +386,11 @@ export function createDirectivePlugin(): { install(app: any): void } {
           if (binding.arg !== 'command') return;
           const state = stateMap.get(el);
           if (state) {
-            el.removeEventListener('click', state.handler, state.capture ? { capture: true } : undefined);
+            if (state.delegate) {
+              removeDelegatedElement();
+            } else {
+              el.removeEventListener('click', state.handler, state.capture ? { capture: true } : undefined);
+            }
             stateMap.delete(el);
           }
         },

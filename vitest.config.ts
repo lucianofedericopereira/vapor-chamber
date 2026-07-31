@@ -4,6 +4,28 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    reporters: ['dot'],
+    silent: 'passed-only',
+    // tests/router/dom.test.ts has several cases that deliberately let a
+    // click fall through to "let the browser handle it" (that's the behavior
+    // under test). Without this, happy-dom's default BrowserFrameValidator
+    // treats that as a real top-level navigation and issues an actual
+    // fetch() to the target URL, which 404s against whatever's listening on
+    // localhost:3000 and logs a `GET ... 404` straight to stdout — a genuine
+    // network call the test suite has no business making. Disabling
+    // main-frame navigation makes happy-dom fall back to just setting
+    // window.location (PropertySymbol.setURL) instead, which is the only
+    // part of that behavior these tests (and the afterEach reset below) ever
+    // actually rely on.
+    environmentOptions: {
+      happyDOM: {
+        settings: {
+          navigation: {
+            disableMainFrameNavigation: true,
+          },
+        },
+      },
+    },
     include: ['tests/**/*.test.ts'],
     coverage: {
       provider: 'v8',

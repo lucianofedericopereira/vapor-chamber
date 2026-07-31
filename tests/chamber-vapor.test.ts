@@ -342,4 +342,27 @@ describe('useVaporAsyncCommand', () => {
 
     dispose();
   });
+
+  it('falls back to result.error ?? null when a failed result carries no error object', async () => {
+    // A non-throwing failure with no `error` field — distinct from the thrown-
+    // error case above, which always produces a truthy result.error.
+    const asyncBus = { dispatch: async () => ({ ok: false as const }) };
+
+    const { dispatch, lastError } = useVaporAsyncCommand(asyncBus);
+    const result = await dispatch('missingError', {});
+
+    expect(result.ok).toBe(false);
+    expect(lastError.value).toBeNull();
+  });
+
+  it('defaults to the shared command bus when no asyncBus is given', async () => {
+    const bus = getCommandBus();
+    bus.register('shared', (cmd) => ({ echoed: cmd.target }));
+
+    const { dispatch } = useVaporAsyncCommand();
+    const result = await dispatch('shared', { id: 1 });
+
+    expect(result.ok).toBe(true);
+    expect(result.value).toEqual({ echoed: { id: 1 } });
+  });
 });

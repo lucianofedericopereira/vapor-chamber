@@ -2,6 +2,226 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.10.0 — Vue 3.6.0-rc.2 alignment
+
+Every rc.2 PR read at source (not just changelog titles) against every file that
+touches Vue: `src/chamber.ts`, `chamber-vapor.ts`, `directives.ts`, `ssr.ts`,
+`transitions.ts`. Full per-item detail is the new rc.2 row in the whitepaper's
+"Vue 3.6 alignment log" (`docs/whitepaper.md`, §9); this entry is the summary.
+
+### Vue alignment
+
+- **compiler-vapor: event delegation flips opt-OUT → opt-IN (#15127,
+  BREAKING in Vue).** Compiled `@click` in `.vue` Vapor SFCs now attaches a
+  direct per-element listener unless the template writes `.delegate`
+  explicitly; `compilerOptions.eventDelegation` is gone (the beta.15 opt-out,
+  #14924, has nothing left to opt out of). **Pass-through for `v-vc:command`**
+  — it has always attached a direct `addEventListener` itself (a runtime
+  directive, never routed through compiler-vapor's delegated-events codegen),
+  so this change doesn't touch its existing behavior. It DOES silently change
+  the perf profile of any `.vue` Vapor SFC in this repo that compiles a
+  `@click` inside a `v-for` — see `examples/vapor-island-cart` below.
+- **13 runtime-vapor / compiler-vapor fixes, all pass-through, no code
+  change** (effect-scope restore on `setCurrentInstance` #15141; transition
+  hooks lost across vdom-interop mount/unmount/move #15133/#15140; prod-only
+  setup-error crash under `onErrorCaptured` #15130; interop slot anchor
+  #15131; Suspense-boundary hook/effect deferral #15139/#15144; deferred
+  vdom-hydration interop #15132; pending-async-component placeholder position
+  #15147; async-setup instance-context restore #15129; hydration "logical
+  child" cache #15145; vdom-interop prop validation #15111; v-for/helper-name
+  codegen collision #15124). Every one of these sits below where this
+  library's Vue touchpoints reach (thin wrappers over `createVaporApp`,
+  `vaporInteropPlugin`, `defineVapor*`; `getCurrentScope()`/`onScopeDispose()`
+  only, never the internal restore path; `rehydrate()` above DOM hydration;
+  transition hook bodies, never `vnode.transition` itself) — confirmed file
+  by file, not assumed by category. Two real prior failure modes are now
+  closed upstream even though no lib code changed: a vdom
+  `<Transition mode="out-in">` wrapped around a vapor page no longer
+  deadlocks (relevant to `useTransitionCommand` + page-level transitions,
+  Nuxt-style), and a first vdom→vapor `<Suspense>` navigation no longer kills
+  that page's watchers (any composable here called from such a page's
+  `setup()` was previously swept into that teardown with zero userland
+  workaround available).
+
+### Added
+
+- **`.delegate` modifier for `v-vc:command`** (`src/directives.ts`) — opt-in,
+  not required by Vue's change, but directly inspired by studying it: one
+  shared document-level click listener instead of one per element, for large
+  `v-for`'d action lists (tables, cart rows). Mirrors Vue's own trade-off
+  exactly, including the reason it stays opt-in (an ancestor's `.stop` can
+  pre-empt a delegated descendant) and the incompatibility with
+  `.capture`/`.once`/`.passive` (dev-warns, falls back to a direct listener).
+  **Measured, not assumed** (`tests/perf.bench.ts`, 5k elements): delegate
+  mode is **~1.3x slower to mount+unmount**, correcting an initial assumption
+  that it would be faster. The real payoff is standing listener count (1 vs
+  N) while mounted, not attach/detach speed — documented as a memory/
+  retained-listener trade for large, mostly-static lists, not a blanket
+  optimization. 6 new tests cover registration, closest-ancestor dispatch,
+  shared-listener refcounting, and the incompatible-modifiers fallback.
+
+### Changed
+
+- **`examples/vapor-island-cart/src/islands/Products.vue`** — comment updated
+  to explain the rc.2 default flip: this 3-item `v-for` list got a free
+  document listener under Vue's old default and now gets 3 direct ones. Left
+  as plain `@click` (nothing to win at 3 items, and delegate mode measures
+  slightly slower to mount) with a note on when `.delegate` earns its keep
+  (hundreds/thousands of rows).
+- **`vue` bumped to `3.6.0-rc.2`** in `devDependencies` and the
+  `peerDependencies` floor (`package.json`), and in `examples/vapor-island-cart`
+  and `examples/vapor-sfc` (both were still on `^3.6.0-beta.17`).
+- **`vue-tsc` bumped `^2.2.0 → ^3.3.8`** in both example packages — the old
+  range pulled in a `minimatch`/`brace-expansion` chain with 4 high-severity
+  `npm audit` advisories (DoS via unbounded expansion, dev-only, not shipped).
+  Both examples audit clean and build clean on the new version.
+- **Test-run hygiene, ported from a local working copy that had drifted ahead
+  of this one** (`vitest.config.ts`, `tests/generate-laravel.test.ts`):
+  `reporters: ['dot']` + `silent: 'passed-only'` for quieter runs; a
+  happy-dom `disableMainFrameNavigation` setting so `tests/router/dom.test.ts`'s
+  intentional "let the browser handle it" click-fallthrough cases stop
+  issuing a real network fetch that 404-logged to stdout; and
+  `stdio: ['ignore', 'pipe', 'pipe']` on the Laravel-generator test's
+  `execFileSync` call so the generated script's own output no longer leaks
+  into the test run's console.
+
+### Fixed
+
+- **Flaky `tests/devtools.test.ts`** — `withDevtools()` raced a hardcoded
+  `setTimeout(0)` against the dynamic `import('@vue/devtools-api')` actually
+  resolving, instead of waiting for the real side effect. Under load the
+  import can take longer than one macrotask, so the assertion sometimes ran
+  before the plugin had registered anything (observed: 1 failure in a full
+  suite run). Replaced with `vi.waitFor()` polling the actual mock-call state.
+- **`examples/pattern-6-vapor-router.ts` — two real API-misuse bugs**, both
+  caught by the new type-check below and neither would have surfaced any
+  other way (this file isn't built, run, or part of any package.json):
+  `createHttpBridge({ bus, endpoint, csrf })` treated `bus` as a config
+  option — it isn't one; `createHttpBridge()` returns a plugin, installed via
+  `bus.use(...)`, exactly like `pattern-2` already shows. And the bus itself
+  was `createCommandBus()` (sync) with an async plugin (`createHttpBridge`)
+  installed on it — the same mistake `command-bus.ts`'s own dev-only runtime
+  warning exists to catch, just never triggered here because the snippet is
+  never executed. Fixed to `createAsyncCommandBus()` + `bus.use(...)`.
+- **`examples/feature-transports.ts`** — `httpBus.register('uiCartApply', (cmd)
+  => ({ applied: true, item: cmd.target }))` registered a SYNC handler on an
+  `AsyncCommandBus`, whose `register()` requires an `AsyncHandler` (must
+  return a `Promise`). Caught by the same broadened type-check. Made the
+  handler `async`.
+
+### Process
+
+- **`examples/tsconfig.patterns.json`** (new) + **`examples/patterns-ambient.d.ts`**
+  (new) — type-checks every top-level example/pattern script (17 files:
+  `pattern-2`/`3`/`5`/`6`, `async-api`, `custom-plugins`, all seven
+  `feature-*.ts`, `form-validation`, `realtime-search`, `shopping-cart`)
+  against the real library types, wired into `npm run typecheck` so it can't
+  be forgotten. This is the actual fix for the bugs above: they're old,
+  exact-API-shape mistakes that had
+  nothing to catch them because `tsconfig.json`'s `include` is `src/**/*`
+  only — example/pattern files were never checked by anything. Ambient stubs
+  (`declare module '*.vue'`, `declare module '@inertiajs/vue3'`) keep the
+  check focused on vapor-chamber's own API surface rather than failing on
+  illustrative imports that only exist in a real consuming project.
+  `pattern-4-nextjs.tsx` stays excluded — checking its JSX needs
+  `@types/react`, a real devDependency to add for one snippet that otherwise
+  only exercises the same `getCommandBus()`/`dispatch` surface the other four
+  already do. `pattern-1-blade-cdn.html` is plain HTML, nothing to check.
+
+### Coverage
+
+Branch coverage was the weakest metric (88.92%) and got the most attention —
+all genuine previously-untested logic, no padding:
+- `http-cache.ts`'s `getCachedAny` and `invalidateCacheByPattern` had **zero**
+  prior tests despite being exported — now 100%.
+- `reactive.ts`'s `deepSignal()` fallback (Vue not yet detected → shallow
+  signal) — every existing test awaited detection first, so the documented
+  fallback was never actually exercised.
+- `signal.ts`'s own standalone `__VUE__` probe (bypassed by `chamber.ts`'s
+  normal wiring, only reachable when `signal.ts` is used standalone) — neither
+  its shallowRef nor its ref-only branch had a test.
+- `chamber-vapor.ts`'s actual *success* paths (`createVaporChamberApp`
+  returning an app, not just its throw; `defineVaporCustomElement`'s
+  extraOptions branch; `useVaporAsyncCommand`'s default-bus fallback and its
+  `error ?? null` fallback) — the existing suite only ever reached the "Vapor
+  not available" throw, because Node's plain `import('vue')` never exposes the
+  Vapor surface at all in this test environment (see the whitepaper §11.6 note
+  below) — not a timing gap, so the fix mocks `__VUE__` the same way
+  `tests/vue-global-detection.test.ts` already does, not `waitForVueDetection()`.
+- Two genuinely unreachable defensive branches (`http-cache.ts`'s eviction
+  guard, `signal.ts`'s `typeof globalThis` check) marked `v8 ignore` with a
+  reason, matching the project's existing convention, instead of forcing
+  contrived tests. `blade.ts`'s `el.value` null-guard in `onBeforeUnmount` was
+  left alone for the same reason — only reachable by contriving Vue internals.
+- Result: statements 95.86 → 95.97%, **branches 88.92 → 89.51%**, lines 97.36 →
+  97.47% (functions unchanged, already high). 14 new tests.
+- **`transports.ts`** (worst-covered file, 78.39% branches) — a second pass:
+  `createBatchingHttpBridge`'s custom-`httpClient` `!ok` path had the same gap
+  `createHttpBridge` did (`postCommand()` throws on failure, so this branch is
+  only reachable via a custom client that resolves `{ok:false}` instead — one
+  existed for the single bridge, none for the batching one). Three
+  `createWsBridge` reconnect guards: `reconnect:false` actually disabling
+  reconnection, the `maxReconnects` cap actually stopping (needed consecutive
+  failures with no successful open in between — `reconnectCount` resets to 0
+  on every `onopen`, so naively "failing" 3 times with real opens in between
+  never hit the cap), and `connect()` refusing to create a second socket while
+  one is already `CONNECTING`/`OPEN` (the mock had no `CONNECTING` state to
+  begin with — added one). Plus: a mid-flush socket death correctly re-queuing
+  the remainder instead of dropping it or sending into a dead socket, a stale
+  duplicate close event from a superseded socket not nulling the live one, the
+  default `'WebSocket error'` message when a failure response omits `error`,
+  pre-flight abort, and the idempotent-settle guard. Along the way, confirmed
+  `scheduleReconnect()`'s own internal bail condition is dead code — its only
+  call site already filters with the identical condition before calling it —
+  marked `v8 ignore` rather than chased. Result: 78.39 → 84.02% branches, 100%
+  lines. 8 new tests.
+- **Final quick-win pass — overall branches crossed 90%** (89.94 → 90.39%),
+  10 more tests: `devtools.ts`'s inspector-panel tags/state for a *failed*
+  command (every existing test only ever dispatched successful ones), an
+  omitted (not just empty-string) `filter`, and the 100-entry buffer eviction
+  — **100% branches**, up from 81.25%. `http-query.ts`'s `buildFullUrl` had
+  never run under a real `window` at all (every caller is in the plain
+  `node` test environment) — added a `happy-dom`-scoped file for the
+  browser-origin and already-absolute-URL branches — **100%**, up from
+  91.66%. `history.ts`'s Safari-throttle fallback (`pushState`/`replaceState`
+  throwing → `location.assign`/`replace`) — 84 → 88%. `outbox.ts`'s
+  `hydrate()` no-op when nothing was persisted (null or empty array) and
+  `localStorageOutbox`'s "valid JSON, not an array" case — 81.7 → 84.14%.
+
+- **`docs/whitepaper.md` §11.6** — new section: why `isVaporAvailable()`
+  correctly reports `false` in every no-bundler context (Vue 3.6 ships Vapor as
+  a physically separate dist file, `vue.runtime-with-vapor.esm-*.js`; only
+  `@vitejs/plugin-vue`'s app-wide alias wires it up, which is why the Vite
+  examples get it for free and the CDN/IIFE path doesn't), and how to opt in
+  anyway via `window.__VUE__` before vapor-chamber loads — the existing
+  synchronous MPA/devtools-hook probe already handles it correctly. Explicitly
+  documents why an automatic dynamic-import fallback was considered and
+  rejected: verified directly that two separately-imported Vue dist files are
+  disconnected reactivity-engine instances (a `ref()` from one is invisible to
+  a `watchEffect` from the other, silently), so guessing a second import would
+  risk introducing that bug rather than fixing anything. Mirrored as a code
+  comment at the sync-probe call site in `src/chamber.ts`.
+
+### Verified against rc.2
+
+`tsc` clean (including the new `examples/tsconfig.patterns.json` gate), lint
+clean, **1293/1293** tests pass (75/75 files, up from 1102/1102 at rc.1),
+coverage 96.23/90.39/96.88/97.66 (statements/branches/functions/lines, all
+above the 95/94/86/93 floors — **branches crossed 90%**), size gate green,
+IIFE 10.8/7.5/8.0 KB brotli (unchanged from rc.1 within rounding).
+
+Every runnable example actually run, not just built: `laravel-app`'s
+`setup.sh` end-to-end (`composer create-project` → `php artisan serve` → the
+README's own curl smoke test — happy path, validation failure, unknown
+command all matched exactly), `sprinkled-blade`'s mock server (same-origin
+dispatch + server-rendered state on reload), `vapor-island-cart` and
+`vapor-sfc` (real `vue-tsc --noEmit && vite build` against Vue 3.6.0-rc.2,
+plus a manual browser pass on `vapor-island-cart`), `exo-astro` (`astro
+build`, output matches the documented invoice-ticket markup). `router-demo`'s
+static assets all verified serving correctly, but its interactive routing
+needs a real browser to confirm — not concluded either way from an
+inconclusive happy-dom module-script result.
+
 ## v1.9.0 — Vue 3.6.0-rc1 alignment
 
 Adds `createBatchingHttpBridge`, declarative per-action authorization, the

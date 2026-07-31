@@ -1,7 +1,7 @@
 /**
  * Tests for src/directives.ts — v-vc:command, v-vc:payload, v-vc:optimistic
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createDirectivePlugin } from '../src/directives';
 import { createCommandBus } from '../src/command-bus';
 import { setCommandBus, resetCommandBus } from '../src/chamber';
@@ -24,8 +24,25 @@ function createMockApp() {
   };
 }
 
+// Minimal mock document — stands in for the real `document` the .delegate
+// modifier registers a shared listener on (tests/directives.test.ts runs in
+// the plain 'node' vitest environment, no real DOM/happy-dom).
+function createMockDocument() {
+  const listeners = new Map<string, Function>();
+  return {
+    addEventListener(type: string, fn: Function) { listeners.set(type, fn); },
+    removeEventListener(type: string) { listeners.delete(type); },
+    // Simulate the browser invoking the delegated listener after an event
+    // bubbled all the way to document.
+    dispatchClick(target: any, evt?: any) {
+      listeners.get('click')?.(evt ?? { type: 'click', target, stopPropagation() {}, preventDefault() {} });
+    },
+    hasClickListener() { return listeners.has('click'); },
+  };
+}
+
 // Minimal mock element
-function createElement(tag = 'button'): any {
+function createElement(tag = 'button', opts: { parent?: any; ownerDocument?: any } = {}): any {
   const classes = new Set<string>();
   const listeners = new Map<string, Function>();
   const listenerOpts = new Map<string, any>();
@@ -52,6 +69,8 @@ function createElement(tag = 'button'): any {
     hasClick() { return listeners.has('click'); },
     disabled: false,
     dataset,
+    parentElement: opts.parent ?? null,
+    ownerDocument: opts.ownerDocument,
     get _classes() { return [...classes]; },
     get _listenerOpts() { return listenerOpts.get('click'); },
     // Type guard — mock is not HTMLButtonElement by default
@@ -200,6 +219,92 @@ describe('createDirectivePlugin', () => {
         vcDir.mounted(el, { arg: 'command', value: 'tAction', modifiers: { '5000': true, stop: true } });
         el.triggerClick({ type: 'click', target: el, stopPropagation() {}, preventDefault() {} });
         expect(calls).toBe(1);
+      });
+    });
+
+    // Vue 3.6.0-rc.2 (#15127) flipped compiler-vapor event delegation to
+    // opt-in. v-vc:command mirrors the same trade-off with its own opt-in
+    // `.delegate` modifier: one shared document listener instead of one per
+    // element.
+    describe('.delegate modifier', () => {
+      // The delegation registry (attach/detach refcount) is shared MODULE
+      // state, same as it would be in a real page with one `document` — each
+      // test below mounts and unmounts in balance so it doesn't leak into
+      // the next test.
+
+      it('does not attach a direct listener on the element', () => {
+        const doc = createMockDocument();
+        const el = createElement('button', { ownerDocument: doc });
+        const vcDir = app.getDirective('vc');
+        vcDir.mounted(el, { arg: 'command', value: 'a', modifiers: { delegate: true } });
+        expect(el.hasClick()).toBe(false);
+        expect(doc.hasClickListener()).toBe(true);
+        vcDir.beforeUnmount(el, { arg: 'command' });
+      });
+
+      it('dispatches via the shared document listener', () => {
+        const doc = createMockDocument();
+        const el = createElement('button', { ownerDocument: doc });
+        let calls = 0;
+        bus.register('a', () => { calls += 1; });
+        const vcDir = app.getDirective('vc');
+        vcDir.mounted(el, { arg: 'command', value: 'a', modifiers: { delegate: true } });
+        doc.dispatchClick(el);
+        expect(calls).toBe(1);
+        vcDir.beforeUnmount(el, { arg: 'command' });
+      });
+
+      it('walks up to the closest delegated ancestor of the click target', () => {
+        const doc = createMockDocument();
+        const button = createElement('button', { ownerDocument: doc });
+        const icon = createElement('span', { parent: button, ownerDocument: doc });
+        let calls = 0;
+        bus.register('a', () => { calls += 1; });
+        const vcDir = app.getDirective('vc');
+        vcDir.mounted(button, { arg: 'command', value: 'a', modifiers: { delegate: true } });
+        // Click lands on the inner <span>, not the delegated <button> itself.
+        doc.dispatchClick(icon);
+        expect(calls).toBe(1);
+        vcDir.beforeUnmount(button, { arg: 'command' });
+      });
+
+      it('shares one document listener across many delegated elements', () => {
+        const doc = createMockDocument();
+        const vcDir = app.getDirective('vc');
+        const els = Array.from({ length: 5 }, () => createElement('button', { ownerDocument: doc }));
+        for (const el of els) {
+          vcDir.mounted(el, { arg: 'command', value: 'a', modifiers: { delegate: true } });
+        }
+        expect(doc.hasClickListener()).toBe(true);
+        // Unmount all but one — listener must stay attached.
+        for (const el of els.slice(0, -1)) {
+          vcDir.beforeUnmount(el, { arg: 'command' });
+        }
+        expect(doc.hasClickListener()).toBe(true);
+        // Unmount the last one — listener is removed.
+        vcDir.beforeUnmount(els[els.length - 1], { arg: 'command' });
+        expect(doc.hasClickListener()).toBe(false);
+      });
+
+      it('falls back to a direct listener with a warning when combined with .capture/.once/.passive', () => {
+        const doc = createMockDocument();
+        const el = createElement('button', { ownerDocument: doc });
+        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        const vcDir = app.getDirective('vc');
+        vcDir.mounted(el, { arg: 'command', value: 'a', modifiers: { delegate: true, once: true } });
+        expect(el.hasClick()).toBe(true);
+        expect(doc.hasClickListener()).toBe(false);
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('.delegate is incompatible'));
+        warnSpy.mockRestore();
+      });
+
+      it('beforeUnmount on a non-delegated element does not touch the document listener', () => {
+        const doc = createMockDocument();
+        const el = createElement('button', { ownerDocument: doc });
+        const vcDir = app.getDirective('vc');
+        vcDir.mounted(el, { arg: 'command', value: 'a', modifiers: {} });
+        vcDir.beforeUnmount(el, { arg: 'command' });
+        expect(doc.hasClickListener()).toBe(false);
       });
     });
   });

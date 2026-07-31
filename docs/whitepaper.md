@@ -487,6 +487,7 @@ version-agnostic, and each new beta is one added row.
 | **beta.16** (Jun) | Transitions (6): transition-group leave bucketed by type, raw-key compare before early removal, out-in branch key kept in sync when leave defers render, hooks re-resolved on prop change, leaving cache shared for unkeyed children, `persisted` no longer leaks onto non-v-show roots. Hydration (7): dynamic props applied on mismatch-recreated nodes, static-template clone-cache reused (not re-cloned per adoption), exact tag-mismatch detection, fragment-start warning text, full-mount fallback for empty SSR containers, static-text mismatches patched (prod included), v-if empty branches hydrated with static templates. App lifecycle: no-op mount for a missing selector, unmount safe without dev instance state (prod). Props/emit/attrs/events: nullish dynamic props → empty, nullish emit sources skipped, symbol attr values stringified, dynamic v-bind event options (`Once`/`Passive`/`Capture`) parsed like VDOM. Compiler (8): setup-let inline assignment, v-html-before-text, unsafe attr names kept out of templates, dynamic/static/native v-model modifier key quoting, slot v-else-without-v-if reporting, empty blocks return `[]`. Perf: **SlotFragment skipped for stable slot fallback** (#14969). | **Fully pass-through — no lib code change** (every commit read at source). Two consumer-visible inheritances: `createTransitionBridge`/`useTransitionCommand` `onLeave` now fires for a non-v-show root removed after a v-show branch (was dropped — `a816c9e`); `createVaporChamberApp(...).mount('#missing')` no-ops instead of throwing and `.unmount()` is prod-safe (`05bf22a` / `52fda7c`). Our `rehydrate()` sits above DOM hydration, so the 7 hydration fixes are below us. **Perf technique to evaluate (measured, post-stable):** #14969 proves slot-fallback reachability at compile time, encodes it as a one-bit flag on the emitted fn, and the runtime selects a lighter `DynamicFragment` over `SlotFragment` when the flag is absent — the "prove-it-at-compile-time, pay-for-the-wrapper-only-when-unprovable" pattern, a candidate for our own hot paths once the Vapor-first/bus-first identity (v2.0.0) is settled. |
 | **beta.17** (Jun) | Compiler-vapor (7): stable slot roots kept on the fast path, non-stable slots avoided for stable root siblings, slot-root tracking skipped for slot outlets, forwarded slot-fallback validity tracked, unsafe repeated expression replacements avoided; perf — redundant text-run slicing avoided, child-context analysis cached. Runtime-vapor (7): slot validity aligned for component roots, dynamic native-element slots hydrated correctly (#14972), **VDOM-interop update hooks paired** (`beforeUpdate`/`updated`, `bcaa753`), **tracking paused when invoking function refs** (#14986), **render-effect creation order preserved on update** (scheduler tiebreaker behind component id, #14984), interop slot owner root re-synced after child updates (`975dd4d`); perf — redundant slot-content validity checks avoided. | **Fully pass-through — no lib code change** (every commit read at source). The two interop fixes land below `getVaporInteropPlugin()`'s pass-through, so mixed Vapor/VDOM trees inherit paired slot hooks (`bcaa753`) and the slot-owner-root re-sync (`975dd4d`) for free; #14972 sits below `rehydrate()`'s command replay; the seven compiler-vapor fixes are compile-time, inherited by recompiling the Vapor SFC examples. **Pattern noted, nothing to act on:** #14984 had to add render-effect *creation order* as a scheduler tiebreaker behind component id — the same insertion-order invariant the bus already gets for free from JS's stable `Array.prototype.sort` on equal-priority plugins (`byPriority`), already pinned by the `equal priority preserves registration order` test. #14986 (pause tracking on function refs) is **N/A** — the lib uses no template/function refs and only *writes* signals from dispatch callbacks, never reads inside a tracked effect. Verified against beta.17: `tsc` clean, **884/884 tests** pass, bench green on the recorded baselines, IIFE sizes unchanged (10.2 / 7.0 / 7.4 KB brotli). |
 | **rc.1** (`6fa3447`, Jul) | **Vue 3.6 enters RC — Vapor feature-complete.** All 13 fixes are runtime-vapor / hydration internals (slot-anchor + hydration-anchor management, v-show transition on a VDOM child #15074, v-if/v-show on transition roots #15069, remove unsafe slot dry runs from VDOM interop #15089/#15031, forwarded-slot/async-setup hydration). | **Fully pass-through — no lib code change** (diffs read at source). The anchor/hydration/dry-run fixes are all renderer-internal — the lib collects no slot vnodes and holds no hydration anchors, so #15089/#06778e7 have no analog here; the two transition fixes reach `createTransitionBridge`/`useTransitionCommand` as a corrected hook set. Verified against rc.1: `tsc` clean, **1102/1102** pass, IIFE 10.8/7.6/8.0 KB brotli. |
+| **rc.2** (Jul) | **compiler-vapor: event delegation flips opt-OUT → opt-IN (#15127, BREAKING).** Compiled `@click` in Vapor SFCs now attaches a direct per-element listener unless the template writes `.delegate` explicitly; `compilerOptions.eventDelegation` is removed entirely (the beta.15 opt-out, #14924, is gone — there's nothing left to opt out of). One internal compiler-vapor codegen fix (#15124 — v-for loop variables no longer collide with runtime-helper names, e.g. `v-for="child in items"` clashing with the `child()` DOM helper). The other 12 fixes are runtime-vapor internals surfaced by testing Vapor against Nuxt: effect-scope not restored to "no scope" after `setCurrentInstance`, freezing a vapor page's watchers on its first vdom→vapor `<Suspense>` navigation (#15141); a vapor block's transition hooks dropped across interop mount/unmount/move, deadlocking a vdom `<Transition mode="out-in">` wrapped around a vapor page (#15133, #15140); prod-only crash when a vapor `setup()` throws under `onErrorCaptured` (#15130); slot anchor missing for interop slot content without SSR fragment markers, e.g. `RouterLink` (#15131); vapor mount/activated hooks and post-render effects not deferred to an owning `<Suspense>` boundary (#15139, #15144); vapor components never hydrating when deferred past the root hydration pass via interop, e.g. `hydrateOnVisible()` (#15132); pending-async-component placeholder position lost across Suspense/KeepAlive (#15147); async setup's re-entry losing instance context, warning `renderEffect called without active EffectScope` (#15129); the "logical child" hydration cache left stale after mismatch-recovery node replacement (#15145); vdom-interop bypassing prop validation entirely (#15111). | **Pass-through for all 13 runtime-vapor/compiler-vapor fixes — no lib code change** (every diff read at source, not just titles). `createVaporChamberApp` / `getVaporInteropPlugin` / `defineVapor*` forward Vue's own functions untouched; `rehydrate()` replays commands *above* Vue's DOM hydration; `createTransitionBridge`/`useTransitionCommand` only supply hook bodies Vue calls into; `tryAutoCleanup()` calls the public `getCurrentScope()`/`onScopeDispose()` pair, never the internal restore path #15141 fixed. Confirmed no example's `v-for` variable collides with a compiler-vapor helper name (#15124 N/A here). Two real, non-theoretical unblocks worth knowing even though no code changed: a vdom `<Transition mode="out-in">` around a vapor page no longer deadlocks (#15133/#15140 — relevant to anyone pairing `useTransitionCommand` with page-level transitions, Nuxt-style), and a first vdom→vapor `<Suspense>` navigation no longer kills that page's watchers (#15141 — any composable here called from such a page's `setup()` was swept into that teardown with no userland workaround possible). **LIB-SIDE, inspired by studying #15127 rather than required by it:** `v-vc:command` gains its own opt-in `.delegate` modifier (`src/directives.ts`) — one shared document-level listener instead of one per element, mirroring Vue's exact opt-in trade-off (an ancestor's `.stop` can pre-empt a delegated descendant) and its incompatibility with `.capture`/`.once`/`.passive` (dev-warns, falls back to direct). **Measured, not assumed** (`tests/perf.bench.ts`, 5k elements): delegate mode is **~1.3x slower to mount+unmount**, not faster — correcting an initial assumption. Its real payoff is standing listener count (1 vs N) for large, mostly-static lists, so it's documented as a memory trade, not a speed one; `examples/vapor-island-cart`'s 3-item product list is left as plain `@click` (nothing to win at that size) with a comment explaining when to reach for `.delegate` instead. Verified against rc.2: `tsc` clean, **1259/1259** tests pass (71/71 files, coverage 95.86/88.92/96.88/97.36 stmt/branch/fn/line, all above the 95/94/86/93 floors), lint clean, IIFE 10.8/7.5/8.0 KB brotli (unchanged from rc.1 within rounding). |
 
 Vapor Chamber auto-detects Vue at module load and wires `signal()` to **`shallowRef()`**, not
 `ref()`. The distinction matters and is easy to get wrong: the alien-signals rewrite changed the
@@ -664,6 +665,11 @@ app.use(createDirectivePlugin())
 
 CSS classes applied automatically: `.vc-loading` (disables button) and `.vc-error` on failure.
 
+Modifiers: `.stop` `.prevent` `.self` `.left` `.middle` `.right` `.capture` `.once` `.passive`
+`.<number>` (dispatch timeout in ms), and `.delegate` (§rc.2 alignment log row) — opts a
+`v-for`'d list into one shared document listener instead of one per element. Incompatible with
+`.capture`/`.once`/`.passive`; falls back to a direct listener with a dev warning if combined.
+
 **Vapor compatibility note:** Directives are VDOM-only. When Vapor mode is detected,
 `createDirectivePlugin.install()` emits a console warning pointing to `useCommand()` or
 `defineVaporCommand()`. Directives still work in VDOM components within a mixed VDOM/Vapor tree.
@@ -789,6 +795,39 @@ Vapor composables surface use the `full` bundle.
 Variant contents are not stable across major versions before v2.0 — see
 ROADMAP.md. ESM consumers (the `vapor-chamber` main entry) always get the
 full surface.
+
+**Vapor mode detection without a bundler.** `isVaporAvailable()` /
+`createVaporChamberApp()` will report Vapor as unavailable here even with
+Vue 3.6 installed, and that is correct, not a bug: Vue ships Vapor as a
+**physically separate build** (`vue.runtime-with-vapor.esm-browser.js`) —
+the plain `vue.esm-browser.js` a `<script type="module">` or bare
+`import('vue')` resolves to never contains it. `@vitejs/plugin-vue` aliases
+the whole app's `vue` import to the with-vapor build once it detects
+`<script setup vapor>` usage, which is *why* the Vite-built examples
+(`vapor-island-cart`, `vapor-sfc`) get Vapor for free and this zero-build
+path doesn't.
+
+To get real Vapor detection here, load the with-vapor build yourself and
+assign it to `window.__VUE__` **before** vapor-chamber's script tag — the
+library's synchronous `globalThis.__VUE__` probe (the same mechanism MPA /
+devtools-hook pages use) picks it up correctly:
+
+```html
+<script type="module">
+  import * as Vue from 'https://cdn.jsdelivr.net/npm/vue@3.6/dist/vue.runtime-with-vapor.esm-browser.prod.js';
+  window.__VUE__ = Vue;
+</script>
+<script src="https://cdn.jsdelivr.net/npm/vapor-chamber@1.9/dist/vapor-chamber-core.iife.min.js"></script>
+```
+
+**Do not** also load the plain `vue.esm-browser.js` elsewhere on the same
+page. Each Vue dist file bundles its own independent copy of the reactivity
+engine — two different files, even both genuinely "Vue," are two disconnected
+module instances with no shared effect-tracking state. Verified directly: a
+`ref()` created via one build is invisible to a `watchEffect` created via the
+other (a plain assignment never re-triggers it). Silent, no warning, no
+error — just reactivity that stops working across the boundary. One page,
+one Vue build, always.
 
 **Backend (Laravel — no Livewire dependency):**
 ```php

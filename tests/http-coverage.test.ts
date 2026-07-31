@@ -21,7 +21,7 @@ import {
   readCsrfToken,
   invalidateCsrfCache,
 } from '../src/http';
-import { clearAllCache, getCached, setCache } from '../src/http-cache';
+import { clearAllCache, getCached, getCachedAny, invalidateCacheByPattern, setCache } from '../src/http-cache';
 
 // ---------------------------------------------------------------------------
 // Fetch mock helper (mirrors the existing test files)
@@ -506,5 +506,47 @@ describe('http cache — LRU eviction at the size ceiling', () => {
     expect(getCached('key-0')).not.toBeNull(); // the recently read one stayed
     expect(getCached('key-50')).not.toBeNull();
     clearAllCache();
+  });
+});
+
+describe('getCachedAny — last-resort lookup for cache.serveStaleOnError', () => {
+  afterEach(() => clearAllCache());
+
+  it('returns the entry even past its stale window (getCached would call it a miss)', () => {
+    setCache('json:/api/x', { x: 1 }, /* ttl */ -1, /* staleTtl */ 0); // already expired
+    expect(getCached('json:/api/x')).toBeNull(); // ordinary lookup: a miss
+    expect(getCachedAny('json:/api/x')).toMatchObject({ data: { x: 1 } }); // last resort: still there
+  });
+
+  it('returns null on a genuine miss', () => {
+    expect(getCachedAny('json:/api/never-set')).toBeNull();
+  });
+});
+
+describe('invalidateCacheByPattern', () => {
+  afterEach(() => clearAllCache());
+
+  it('removes entries whose URL (not the responseType prefix) matches a RegExp', () => {
+    setCache('json:/api/users/1', { id: 1 }, 60_000);
+    setCache('json:/api/users/2', { id: 2 }, 60_000);
+    setCache('json:/api/orders/1', { id: 1 }, 60_000);
+
+    invalidateCacheByPattern(/^\/api\/users/);
+
+    expect(getCachedAny('json:/api/users/1')).toBeNull();
+    expect(getCachedAny('json:/api/users/2')).toBeNull();
+    expect(getCachedAny('json:/api/orders/1')).not.toBeNull(); // untouched
+  });
+
+  it('accepts a plain string pattern, constructed into a RegExp', () => {
+    setCache('json:/api/orders/1', { id: 1 }, 60_000);
+    invalidateCacheByPattern('/api/orders');
+    expect(getCachedAny('json:/api/orders/1')).toBeNull();
+  });
+
+  it('is a no-op when nothing matches', () => {
+    setCache('json:/api/orders/1', { id: 1 }, 60_000);
+    invalidateCacheByPattern(/^\/api\/nothing-here/);
+    expect(getCachedAny('json:/api/orders/1')).not.toBeNull();
   });
 });

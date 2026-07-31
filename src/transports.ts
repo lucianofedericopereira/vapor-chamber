@@ -517,6 +517,8 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
   }
 
   function scheduleReconnect(): void {
+    /* v8 ignore next -- defensive: scheduleReconnect's only call site (onclose)
+       already guards with this exact condition before calling it */
     if (!reconnect || intentionalClose || reconnectCount >= maxReconnects) return;
     reconnectCount++;
     const delay = reconnectDelay * reconnectCount;

@@ -1,0 +1,55 @@
+{
+  // Type-checks the top-level example/pattern reference snippets against the
+  // real library types (paths below map straight into ../src). Nothing else
+  // runs these files — they're not part of any package.json, not built, not
+  // tested — so before this config existed, real API-misuse bugs could sit
+  // indefinitely with nothing to catch them (found two this way in
+  // pattern-6-vapor-router.ts: createHttpBridge({ bus, ... }) treating `bus`
+  // as a config option instead of a plugin for bus.use(), and a sync
+  // createCommandBus() with that async plugin installed on it). See
+  // examples/patterns-ambient.d.ts for why this isn't a strict "zero errors
+  // including missing imports" check.
+  //
+  // Excluded, each for its own reason:
+  //   pattern-1-blade-cdn.html, feature-directives.html — plain HTML, nothing to check
+  //   pattern-4-nextjs.tsx — needs @types/react/@types/react-dom just to parse
+  //     JSX, a real devDependency to add for one snippet that otherwise only
+  //     exercises the same getCommandBus()/dispatch surface the others do
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noImplicitAny": false,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "esModuleInterop": true,
+    "types": ["node", "vite/client"],
+    "paths": {
+      "vapor-chamber": ["../src/index.ts"],
+      "vapor-chamber/vite": ["../src/vite-hmr.ts"],
+      "vapor-chamber/standard-schema": ["../src/plugins-schema.ts"],
+      "vapor-chamber/*": ["../src/*"]
+    }
+  },
+  "include": [
+    "async-api.ts",
+    "custom-plugins.ts",
+    "feature-command-group.ts",
+    "feature-cross-tab-sync.ts",
+    "feature-error-boundary.ts",
+    "feature-persistence.ts",
+    "feature-retry.ts",
+    "feature-transitions.ts",
+    "feature-transports.ts",
+    "feature-vite-hmr.ts",
+    "form-validation.ts",
+    "pattern-2-laravel-vite.ts",
+    "pattern-3-inertia.ts",
+    "pattern-5-filament.ts",
+    "pattern-6-vapor-router.ts",
+    "realtime-search.ts",
+    "shopping-cart.ts",
+    "patterns-ambient.d.ts"
+  ]
+}

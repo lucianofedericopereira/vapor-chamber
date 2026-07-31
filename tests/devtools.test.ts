@@ -96,7 +96,12 @@ describe('setupDevtools — the @vue/devtools-api integration', () => {
     const { setupDevtools: fresh } = await import('../src/devtools');
     const bus = createCommandBus({ onMissing: 'ignore' });
     const stop = fresh(bus, {});
-    await new Promise((r) => setTimeout(r, 0)); // let the dynamic import settle
+    // Poll for the actual side effect instead of racing a fixed setTimeout(0)
+    // against the dynamic import — a fixed tick is flaky under load (the
+    // import + module transform can take longer than one macrotask).
+    await vi.waitFor(() => {
+      if (api.addTimelineLayer.mock.calls.length === 0) throw new Error('devtools plugin not ready yet');
+    });
     return { bus, api: Object.assign(api, { handlers }), stop };
   }
 
@@ -186,6 +191,47 @@ describe('setupDevtools — the @vue/devtools-api integration', () => {
     const missing: any = { inspectorId: 'vapor-chamber', nodeId: 'does-not-exist' };
     api.handlers.state(missing);
     expect(missing.state).toBeUndefined();
+    stop();
+  });
+
+  it('tags a failed command red in the tree and fills its error in the state panel', async () => {
+    const { bus, api, stop } = await withDevtools();
+    bus.register('bad', () => { throw new Error('nope'); });
+    bus.dispatch('bad', {});
+
+    const tree: any = { inspectorId: 'vapor-chamber', filter: '' };
+    api.handlers.tree(tree);
+    expect(tree.rootNodes[0].tags[0]).toMatchObject({ label: 'error', backgroundColor: 0xff4444 });
+
+    const state: any = { inspectorId: 'vapor-chamber', nodeId: tree.rootNodes[0].id };
+    api.handlers.state(state);
+    expect(state.state.result).toEqual(
+      expect.arrayContaining([{ key: 'ok', value: false }, { key: 'error', value: 'nope' }]),
+    );
+    // No payload was dispatched — the `payload` key must be entirely absent, not undefined.
+    expect(state.state.command.map((e: any) => e.key)).not.toContain('payload');
+    stop();
+  });
+
+  it('defaults an omitted filter to match everything', async () => {
+    const { bus, api, stop } = await withDevtools();
+    bus.register('cartAdd', () => 1);
+    bus.dispatch('cartAdd', {});
+
+    const noFilter: any = { inspectorId: 'vapor-chamber' }; // filter key entirely absent
+    api.handlers.tree(noFilter);
+    expect(noFilter.rootNodes.map((n: any) => n.label)).toEqual(['cartAdd']);
+    stop();
+  });
+
+  it('keeps only the last 100 commands in the buffer', async () => {
+    const { bus, api, stop } = await withDevtools();
+    bus.register('tick', () => 1);
+    for (let i = 0; i < 105; i++) bus.dispatch('tick', { i });
+
+    const tree: any = { inspectorId: 'vapor-chamber', filter: '' };
+    api.handlers.tree(tree);
+    expect(tree.rootNodes.length).toBe(100);
     stop();
   });
 

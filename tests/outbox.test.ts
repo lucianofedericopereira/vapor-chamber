@@ -333,6 +333,18 @@ describe('createOutbox — hydrate and lifecycle', () => {
     createOutbox({ storage: memoryStorage(), autoFlush: false });
     expect(add).not.toHaveBeenCalled();
   });
+
+  it('hydrate() is a no-op when storage has nothing persisted (load() resolves null)', async () => {
+    const outbox = createOutbox({ storage: memoryStorage(), isOnline: () => true, autoFlush: false });
+    await outbox.hydrate();
+    expect(outbox.pending.value).toBe(0);
+  });
+
+  it('hydrate() is a no-op when the persisted queue is an empty array', async () => {
+    const outbox = createOutbox({ storage: memoryStorage([]), isOnline: () => true, autoFlush: false });
+    await outbox.hydrate();
+    expect(outbox.pending.value).toBe(0);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -378,6 +390,16 @@ describe('localStorageOutbox', () => {
     const s = localStorageOutbox();
     expect(await s.load()).toBeNull();
     expect(warn).toHaveBeenCalled();
+  });
+
+  it('returns null when the stored JSON parses but is not an array', async () => {
+    vi.stubGlobal('localStorage', {
+      getItem: () => JSON.stringify({ not: 'an array' }),
+      setItem: () => {},
+      removeItem: () => {},
+    });
+    const s = localStorageOutbox();
+    expect(await s.load()).toBeNull();
   });
 });
 

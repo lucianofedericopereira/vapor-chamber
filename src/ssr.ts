@@ -3,6 +3,19 @@
  *
  * Vue alignment history (one line per version — full per-item detail lives in
  * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table):
+ *   vNext / rc.2 — pass-through. Four hydration fixes land below rehydrate()'s command
+ *            replay, which sits ABOVE Vue's DOM hydration and only ever hands it a
+ *            more-correct DOM: slot anchor created for unwrapped interop slot content
+ *            missing SSR `<!--[-->` markers (#15131 — e.g. a vapor component's slot
+ *            invoked directly by a render function, as `RouterLink` does); vapor
+ *            components now hydrate correctly when their hydration is DEFERRED past the
+ *            root pass via `defineAsyncComponent`/`hydrateOnVisible()` through interop
+ *            (#15132 — previously silently inert, no error); pending-async-component
+ *            placeholder position preserved across Suspense/KeepAlive (#15147); the
+ *            "logical child" cache resynced after mismatch-recovery node replacement
+ *            (#15145). None of these are reachable from this module — it holds no DOM
+ *            references, hydration anchors, or interop state, only replays bus commands
+ *            after Vue's own hydration completes. No code change.
  *   vNext / beta.17 — pass-through. beta.17's lone hydration fix (#14972 — dynamic native
  *            element slots hydrated correctly, cf5eefa) sits in Vue's DOM hydration, below
  *            rehydrate()'s command replay; it only hands replay a more-correct DOM. No code change.

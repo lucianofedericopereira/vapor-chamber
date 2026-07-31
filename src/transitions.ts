@@ -4,6 +4,19 @@
  * Vue alignment history (one line per version — full per-item detail lives in
  * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table, the single
  * source of per-beta detail; this header only records changes to THIS file):
+ *   vNext / rc.2 — pass-through, but unblocks a real prior failure mode. #15133 and
+ *            #15140 fix the vdom-interop layer losing a vapor block's `vnode.transition`
+ *            across mount/unmount/move — concretely, a vdom `<Transition mode="out-in">`
+ *            wrapped around a vapor page (the Nuxt `NuxtPage` + page-transition shape)
+ *            could deadlock entirely: the leaving page never resolved and the incoming
+ *            one never mounted, because `afterLeave` — the hook this bridge's onLeave
+ *            forwards to your handler — was never invoked. This module only supplies the
+ *            hook bodies Vue calls into; it never reads or writes `vnode.transition`
+ *            itself, so there was no workaround available at this layer and none needed
+ *            now. If `useTransitionCommand`'s onLeave previously seemed to "hang" around
+ *            a vapor page under an out-in transition, that was this bug, not a dispatch
+ *            issue — no code change here, but worth knowing the class of report is closed
+ *            upstream, not something to keep working around in app code.
  *   vNext / beta.17 — pass-through. No <Transition>/<TransitionGroup> change in beta.17 (its
  *            fixes are slot compilation, interop slot ownership, and hydration); the bridge forwards
  *            whatever hooks Vue fires, unchanged. No code change.

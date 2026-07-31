@@ -31,6 +31,7 @@ let _syncProbed = false;
 function syncProbe(): void {
   if (_syncProbed) return;
   _syncProbed = true;
+  /* v8 ignore next -- defensive: globalThis is unconditionally present in Node/browser/happy-dom */
   if (typeof globalThis !== 'undefined') {
     const vue = (globalThis as any).__VUE__;
     // Prefer shallowRef — the library replaces signal values wholesale, so the

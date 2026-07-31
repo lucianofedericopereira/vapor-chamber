@@ -1,6 +1,20 @@
 /**
  * vapor-chamber - Vue Vapor integration
  *
+ * v1.10.0 — Vue 3.6.0-rc.2 alignment: #15141 fixed a bug where
+ *           `setCurrentInstance`'s restore step re-triggered the default
+ *           active-scope instead of truly restoring "no scope" — on a first
+ *           client-side vdom→vapor navigation through `<Suspense>`, the vapor
+ *           page mounted and was immediately torn down, killing every
+ *           watcher created during its setup(). `tryAutoCleanup()` below only
+ *           calls the PUBLIC `getCurrentScope()`/`onScopeDispose()` pair, not
+ *           the internal restore path itself, so this was never a bug IN this
+ *           function — but any composable here called from a vapor page's
+ *           setup() reached via that exact navigation was swept up in the
+ *           same teardown as the rest of that page's reactive state, with no
+ *           userland workaround possible. Now fixed upstream; no code change
+ *           needed here, but Nuxt-style vdom-shell/vapor-page apps using
+ *           useCommand()/useCommandState() etc. inherit the fix for free.
  * v1.3.0 — Vue 3.6.0-beta.12 alignment: error recovery (component context,
  *           fallthrough props, render effects restored after setup errors);
  *           VDOM slots interop normalization; no code changes needed here.
@@ -130,6 +144,22 @@ function probeVue(): void {
 
   // 1. Synchronous probe: check globalThis.__VUE__ (set by Vue devtools or bundler)
   //    This gives immediate availability for signal() calls at module init time.
+  //
+  //    ALSO the only reliable way to get Vapor detection without a bundler
+  //    (no-build IIFE / sprinkled-JS pages, docs/whitepaper.md §11.6): the async
+  //    probe below resolves a bare `import('vue')`, which Vue 3.6 NEVER wires to
+  //    the Vapor-enabled build outside a bundler's alias magic (@vitejs/plugin-vue
+  //    does this per-app when it sees `<script setup vapor>`) — Vapor is a
+  //    physically separate dist file (vue.runtime-with-vapor.esm-*.js). A
+  //    no-bundler page that wants Vapor should import that build itself and
+  //    assign it to window.__VUE__ before this module's probe runs, exactly like
+  //    the MPA/devtools-hook case this branch already handles. Do NOT try to
+  //    "fix" this with a second dynamic import of the with-vapor build as a
+  //    fallback here — verified directly that two separately-imported Vue dist
+  //    files are two disconnected reactivity-engine instances (a ref() from one
+  //    is invisible to a watchEffect from the other, silently, no error), so an
+  //    automatic fallback would risk introducing exactly that bug rather than
+  //    fixing anything.
   if (typeof globalThis !== 'undefined' && (globalThis as any).__VUE__) {
     try {
       // If Vue is already loaded as a global (common in MPA / server-rendered

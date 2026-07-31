@@ -30,7 +30,7 @@ httpBus.use(createHttpBridge({
 // The bridge handles every command matching `actions` itself — it does NOT
 // fall through to local handlers. Anything that must stay local needs a name
 // outside the forwarded globs.
-httpBus.register('uiCartApply', (cmd) => {
+httpBus.register('uiCartApply', async (cmd) => {
   // 'uiCartApply' matches neither 'cart*' nor 'order*' → runs locally
   return { applied: true, item: cmd.target }
 })

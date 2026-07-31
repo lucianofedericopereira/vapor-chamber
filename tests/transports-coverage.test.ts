@@ -6,7 +6,7 @@
  */
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { createAsyncCommandBus, createCommandBus } from '../src/index';
-import { createHttpBridge, createWsBridge, createSseBridge, createEchoBridge } from '../src/transports';
+import { createHttpBridge, createBatchingHttpBridge, createWsBridge, createSseBridge, createEchoBridge } from '../src/transports';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -89,11 +89,54 @@ describe('createHttpBridge redirect & error-body paths', () => {
 });
 
 // ---------------------------------------------------------------------------
+// createBatchingHttpBridge — same !ok-without-throwing gap as createHttpBridge
+// above, but on the batching bridge's own flush(): postCommand() throws on a
+// real HTTP failure, so this branch is likewise only reachable through a
+// custom httpClient that resolves { ok: false, ... } instead.
+// ---------------------------------------------------------------------------
+
+describe('createBatchingHttpBridge — custom httpClient !ok path (329-333)', () => {
+  it('fails every queued command with the extracted message when httpClient resolves !ok', async () => {
+    const httpClient = {
+      post: vi.fn().mockResolvedValue({
+        ok: false,
+        status: 422,
+        headers: {},
+        data: { message: 'batch validation exploded' },
+      }),
+    } as any;
+
+    const bus = createAsyncCommandBus();
+    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', httpClient }));
+
+    const [a, b] = await Promise.all([bus.dispatch('a', {}), bus.dispatch('b', {})]);
+    expect(a.ok).toBe(false);
+    expect(b.ok).toBe(false);
+    expect(a.error?.message).toBe('batch validation exploded');
+    expect(b.error?.message).toBe('batch validation exploded');
+  });
+
+  it('falls back to error field then HTTP status when no message present', async () => {
+    const httpClient = {
+      post: vi.fn().mockResolvedValue({ ok: false, status: 500, headers: {}, data: {} }),
+    } as any;
+
+    const bus = createAsyncCommandBus();
+    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', httpClient }));
+
+    const result = await bus.dispatch('a', {});
+    expect(result.ok).toBe(false);
+    expect(result.error?.message).toBe('HTTP 500');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // WebSocket mock (mirrors transports.test.ts) with a manual-open variant so we
 // can hold the socket CLOSED to exercise queue paths deterministically.
 // ---------------------------------------------------------------------------
 
 class MockWebSocket {
+  static CONNECTING = 0;
   static OPEN = 1;
   static CLOSED = 3;
   /** When false, the constructor does NOT auto-open — tests open manually. */
@@ -298,6 +341,198 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     const evt = new Event('error');
     sockets[0].onerror?.(evt);
     expect(onError).toHaveBeenCalledWith(evt);
+
+    ws.disconnect();
+  });
+
+  it('reconnect: false — an unintentional close never schedules a reconnect (520)', async () => {
+    vi.useFakeTimers();
+    const ws = createWsBridge({ url: 'ws://localhost', reconnect: false });
+    ws.connect();
+    await vi.runAllTimersAsync();
+    expect(sockets.length).toBe(1);
+
+    sockets[0].onclose?.({ code: 1006, reason: 'dropped' });
+    await vi.advanceTimersByTimeAsync(60_000);
+    await vi.runAllTimersAsync();
+
+    expect(sockets.length).toBe(1); // no reconnect socket ever created
+    ws.disconnect();
+  });
+
+  it('stops reconnecting once maxReconnects is reached (520)', async () => {
+    vi.useFakeTimers();
+    // Sockets never auto-open here: onopen resets reconnectCount to 0 on any
+    // successful connection, so testing the cap needs CONSECUTIVE failures
+    // with no open in between.
+    MockWebSocket.autoOpen = false;
+    const ws = createWsBridge({
+      url: 'ws://localhost',
+      reconnect: true,
+      reconnectDelay: 10,
+      maxReconnects: 2,
+    });
+    ws.connect();
+    expect(sockets.length).toBe(1);
+
+    // Two consecutive unintentional closes → two reconnects (hits the cap
+    // exactly). Delay is reconnectDelay * reconnectCount, so it grows each
+    // attempt (10ms, then 20ms) — advance generously rather than exactly.
+    sockets[0].onclose?.({ code: 1006, reason: 'dropped' });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(sockets.length).toBe(2);
+
+    sockets[1].onclose?.({ code: 1006, reason: 'dropped' });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(sockets.length).toBe(3);
+
+    // A third close must NOT schedule another reconnect — cap already reached.
+    sockets[2].onclose?.({ code: 1006, reason: 'dropped' });
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(sockets.length).toBe(3);
+
+    ws.disconnect();
+  });
+
+  it('connect() is a no-op while a socket is already CONNECTING/OPEN (533)', async () => {
+    vi.useFakeTimers();
+    const ws = createWsBridge({ url: 'ws://localhost' });
+    ws.connect();
+    expect(sockets.length).toBe(1);
+
+    // Real WebSockets start CONNECTING synchronously (the mock defaults
+    // straight to OPEN) — force it to test the guard specifically.
+    sockets[0].readyState = MockWebSocket.CONNECTING;
+    ws.connect(); // must not create a second socket while CONNECTING
+    expect(sockets.length).toBe(1);
+
+    sockets[0].readyState = MockWebSocket.OPEN;
+    ws.connect(); // still a no-op while OPEN
+    expect(sockets.length).toBe(1);
+
+    await vi.runAllTimersAsync();
+    ws.disconnect();
+  });
+
+  it('re-queues the remainder of a flush if the socket closes mid-loop (495-496)', async () => {
+    vi.useFakeTimers();
+    MockWebSocket.autoOpen = false; // hold socket CLOSED so both dispatches queue
+
+    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
+    const ws = createWsBridge({ url: 'ws://localhost', reconnect: false });
+    bus.use(ws);
+    ws.connect();
+
+    const first = bus.dispatch('cartAdd', { id: 1 });
+    const second = bus.dispatch('cartUpdate', { id: 2 });
+
+    // Simulate the socket dying mid-flush: the first send "succeeds" but flips
+    // the socket CLOSED as a side effect, so flushQueue's loop must re-queue
+    // the second item rather than send it into a dead socket or drop it.
+    const realSend = sockets[0].send.bind(sockets[0]);
+    let sendCount = 0;
+    sockets[0].send = (data: string) => {
+      sendCount++;
+      realSend(data);
+      if (sendCount === 1) sockets[0].readyState = MockWebSocket.CLOSED;
+    };
+
+    sockets[0].open(); // readyState -> OPEN, fires onopen -> flushQueue()
+    expect(sockets[0].sent.length).toBe(1); // only the first item got out
+    const sentFirst = JSON.parse(sockets[0].sent[0]);
+    expect(sentFirst.command).toBe('cartAdd');
+    sockets[0].receive({ id: sentFirst.id, ok: true });
+    expect((await first).ok).toBe(true);
+
+    // The second item was re-queued, not lost — a later open flushes it.
+    sockets[0].open();
+    expect(sockets[0].sent.length).toBe(2);
+    const sentSecond = JSON.parse(sockets[0].sent[1]);
+    expect(sentSecond.command).toBe('cartUpdate');
+    sockets[0].receive({ id: sentSecond.id, ok: true });
+    expect((await second).ok).toBe(true);
+
+    ws.disconnect();
+  });
+
+  it('defaults to a generic message when an error response omits data.error (560)', async () => {
+    vi.useFakeTimers();
+    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
+    const ws = createWsBridge({ url: 'ws://localhost', reconnect: false });
+    bus.use(ws);
+    ws.connect();
+    await vi.runAllTimersAsync();
+
+    const result = bus.dispatch('cartAdd', { id: 1 });
+    const sent = JSON.parse(sockets[0].sent[0]);
+    sockets[0].receive({ id: sent.id, ok: false }); // no `error` field at all
+
+    expect((await result).error?.message).toBe('WebSocket error');
+    ws.disconnect();
+  });
+
+  it('a stale close from a superseded socket does not null out the current one (574)', async () => {
+    vi.useFakeTimers();
+    const ws = createWsBridge({ url: 'ws://localhost', reconnect: true, reconnectDelay: 10, maxReconnects: 5 });
+    ws.connect();
+    await vi.runAllTimersAsync();
+    expect(sockets.length).toBe(1);
+
+    // socket[0] closes unintentionally → reconnect fires → socket[1] takes over.
+    sockets[0].onclose?.({ code: 1006, reason: 'dropped' });
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.runAllTimersAsync();
+    expect(sockets.length).toBe(2);
+    expect(ws.isConnected()).toBe(true);
+
+    // A delayed/duplicate close event from the now-defunct socket[0] must not
+    // clear the reference to the current, live socket[1].
+    sockets[0].onclose?.({ code: 1006, reason: 'stale duplicate event' });
+
+    // If it had wrongly nulled the reference, connect() would think nothing is
+    // live and create a spurious third socket.
+    ws.connect();
+    expect(sockets.length).toBe(2);
+    expect(ws.isConnected()).toBe(true);
+
+    ws.disconnect();
+  });
+
+  it('pre-flight abort resolves immediately without ever sending (612)', async () => {
+    vi.useFakeTimers();
+    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
+    const ws = createWsBridge({ url: 'ws://localhost', reconnect: false });
+    bus.use(ws);
+    ws.connect();
+    await vi.runAllTimersAsync();
+
+    const controller = new AbortController();
+    controller.abort();
+    const result = await bus.dispatch('cartAdd', { id: 1 }, undefined, { signal: controller.signal });
+
+    expect(result.ok).toBe(false);
+    expect(sockets[0].sent.length).toBe(0); // never sent — aborted before dispatch
+    ws.disconnect();
+  });
+
+  it('a late timeout after the response already settled is a no-op (620)', async () => {
+    vi.useFakeTimers();
+    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
+    const ws = createWsBridge({ url: 'ws://localhost', reconnect: false, timeout: 50 });
+    bus.use(ws);
+    ws.connect();
+    await vi.runAllTimersAsync();
+
+    const result = bus.dispatch('cartAdd', { id: 1 });
+    const sent = JSON.parse(sockets[0].sent[0]);
+    // Response arrives well before the timeout — settles as a success.
+    sockets[0].receive({ id: sent.id, ok: true, state: 42 });
+    expect((await result).ok).toBe(true);
+
+    // The timeout firing afterwards must not overwrite the already-settled
+    // result (settle()'s `if (settled) return;` guard).
+    await vi.advanceTimersByTimeAsync(100);
+    expect((await result).value).toBe(42);
 
     ws.disconnect();
   });

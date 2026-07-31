@@ -43,7 +43,10 @@ type RunResult = { status: number; stdout: string; stderr: string };
 
 function run(args: string[]): RunResult {
   try {
-    const stdout = execFileSync(process.execPath, [script, ...args], { encoding: 'utf8' });
+    const stdout = execFileSync(process.execPath, [script, ...args], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     return { status: 0, stdout, stderr: '' };
   } catch (e: any) {
     return { status: e.status ?? 1, stdout: e.stdout ?? '', stderr: e.stderr ?? '' };

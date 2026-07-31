@@ -21,15 +21,16 @@
  *   <div id="admin"></div>
  */
 
-import { createCommandBus, createHttpBridge, setCommandBus } from 'vapor-chamber';
+import { createAsyncCommandBus, createHttpBridge, setCommandBus } from 'vapor-chamber';
 import { createRouter, useQueryParam, useRouter } from 'vapor-chamber/router';
 // Loader preset for plain JSON backends: 'vapor-chamber/router-fetch'.
 
 // ---- writes: the bus, unchanged ------------------------------------------------
 
-const bus = createCommandBus();
+// ASYNC bus — createHttpBridge is an async plugin (same reasoning as pattern-2).
+const bus = createAsyncCommandBus();
 setCommandBus(bus);
-createHttpBridge({ bus, endpoint: '/api/vc', csrf: true });
+bus.use(createHttpBridge({ endpoint: '/api/vc', csrf: true }));
 
 // ---- reads: the router ---------------------------------------------------------
 
