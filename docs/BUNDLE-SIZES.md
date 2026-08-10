@@ -13,21 +13,21 @@ external. **Read this carefully:** the shared command-bus core (~3.6 KB brotli o
 included in *every* row, so the rows are **not additive** — importing two exports does not cost
 their sum (the core is shared once). `.` is the full main barrel measured *import-everything*;
 your app's tree-shaking drops whatever you don't use (e.g. importing just `createCommandBus`
-from it is ~3.6 KB brotli, not 22.9 KB).
+from it is ~3.6 KB brotli, not 23.0 KB).
 
 | export | min KB | gzip KB | brotli KB |
 |---|--:|--:|--:|
-| `.` | 79.1 | 26.0 | 22.9 |
+| `.` | 79.3 | 26.1 | 23.0 |
 | `./transports` | 11.6 | 4.7 | 4.2 |
 | `./directives` | 17.5 | 6.1 | 5.5 |
-| `./transitions` | 15.2 | 5.3 | 4.7 |
+| `./transitions` | 15.2 | 5.2 | 4.7 |
 | `./ssr` | 1.6 | 0.8 | 0.7 |
 | `./vite` | 3.0 | 1.3 | 1.1 |
 | `./fast-lane` | 0.9 | 0.5 | 0.4 |
 | `./observable` | 0.5 | 0.3 | 0.2 |
 | `./standard-schema` | 1.7 | 0.8 | 0.7 |
 | `./alien-signals` | 0.5 | 0.3 | 0.3 |
-| `./reactive` | 14.8 | 5.2 | 4.6 |
+| `./reactive` | 14.8 | 5.1 | 4.6 |
 | `./outbox` | 5.1 | 2.1 | 1.9 |
 | `./mcp` | 3.9 | 1.9 | 1.7 |
 | `./router` | 35.2 | 13.6 | 12.4 |
@@ -43,4 +43,4 @@ from it is ~3.6 KB brotli, not 22.9 KB).
 |---|--:|--:|--:|
 | `vapor-chamber (full)` | 38.1 | 12.3 | 11.1 |
 | `vapor-chamber-core` | 26.6 | 8.6 | 7.7 |
-| `vapor-chamber-elements` | 28.0 | 9.1 | 8.1 |
+| `vapor-chamber-elements` | 28.0 | 9.0 | 8.1 |
