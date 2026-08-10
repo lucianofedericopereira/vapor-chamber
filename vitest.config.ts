@@ -77,10 +77,10 @@ export default defineConfig({
         // Ratcheted for v1.9 (measured: 97.06 / 96.66 / 88.11 / 95.43 after the
         // devtools subpath and router error paths were covered). The previous
         // floors sat ~7 points low, which let a real regression pass unnoticed.
-        lines: 95,
+        lines: 96,
         functions: 94,
-        branches: 86,
-        statements: 93,
+        branches: 88,
+        statements: 94,
       },
     },
   },

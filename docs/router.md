@@ -151,8 +151,16 @@ const crumbs = useBreadcrumbs(); // the matched parent chain, titled rows only,
   optimistic update.
 - **Preset-internal compile caches** — a prefix handler may pre-compile
   per-record closures (record identity → fn); the SPI never sees it.
-- **Chamber http LRU** — url handlers can pass `cache: { ttl }` for
-  reference-data endpoints.
+- **Chamber http LRU** — in-box since v1.12.0:
+  `fetchLoaders({ cache: true })`, or `{ ttl, staleTtl, serveStaleOnError }`
+  for the full fresh/stale window. Off by default. A route row overrides the
+  preset per record via `meta.cache` — `{ cache: { ttl: 3_600_000 } }` on a
+  countries table, `{ cache: false }` on live inventory. With `staleTtl` set,
+  a past-fresh entry commits **immediately** and the refresh runs behind it:
+  `router.isRevalidating` is true while it does (separate from `isLoading`,
+  which stays false — the page has data), and the fresh value patches into
+  `snapshot.data` when it lands. A custom preset gets the same channel through
+  the loader SPI's `ctx.revalidate(promise)`.
 - Measured baseline: the SPI itself costs ~20µs per navigation on a
   5k-row local source — specialize only past profiling, not before.
 
@@ -212,11 +220,29 @@ Roadmap items this router does **not** depend on, by design:
 | Async Component | lazy routes use the router's own `import()` + cache, resolved before the snapshot commits — never `defineAsyncComponent` |
 | Suspense | the two-phase commit means a pending state is never rendered, so there is no boundary to need |
 
-Still genuinely gated upstream: **KeepAlive** (nothing caches an inactive
-route's state), **Transition** (route transitions; the View Transitions API is
-the DOM-native way around it), and **SSR/Hydration** for blade rows —
-`fetchBlade` is undefined off-browser, so a blade row under SSR throws
-`blade_unconfigured`.
+Still not usable here, though the reasons differ:
+
+- **KeepAlive** — the roadmap box is now **checked**, and that is not the same
+  as working. Two correctness issues are open against it:
+  [#15228](https://github.com/vuejs/core/issues/15228) (a cached child renders
+  against a nullish prop) and
+  [#15237](https://github.com/vuejs/core/issues/15237) (KeepAlive scopes are
+  not paused while deactivated). Nothing caches an inactive route's state here
+  yet. Worth knowing if you rely on `tryKeepAliveHooks` in `chamber.ts`: it
+  hand-solves what #15237 proposes doing natively, so if that lands the manual
+  pause/resume becomes double-suppression and should be removed in the same
+  release.
+- **Transition** — route transitions; the View Transitions API is the
+  DOM-native way around it.
+- **SSR/Hydration** for blade rows — `fetchBlade` is undefined off-browser, so
+  a blade row under SSR throws `blade_unconfigured`.
+
+The rule applied symmetrically: an unchecked box does not mean missing (see the
+provide/inject fixture above, measured working while the box was unchecked),
+and a checked box does not mean working. Still unchecked and worth keeping in
+mind when reading anything that cites the roadmap: Vue Router, Suspense
+(VaporSuspense pending), DevTools Integration, Nuxt, VitePress, Vue Test
+Utils.
 
 ## Status
 

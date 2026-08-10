@@ -49,9 +49,32 @@ const BUDGETS = {
   // in plugins-core), RETRYABLE_CODES beside BusError (+~170 B), retry()
   // registry-aware default (+~100 B). The outbox/mcp/typed-contract modules are
   // subpath-only and do NOT ship in these bundles.
-  'vapor-chamber.iife.min.js':          { rawMax: 38_400, brotliMax: 11_150 },
-  'vapor-chamber-core.iife.min.js':     { rawMax: 26_800, brotliMax: 7_800  },
-  'vapor-chamber-elements.iife.min.js': { rawMax: 28_400, brotliMax: 8_250  },
+  // TODO burn-down bumps (33 findings closed). rev 28 of the working list
+  // predicted this check would need them — the budgets had ~0.1 KB brotli
+  // headroom left and four of the items touch IIFE-bundled modules — and
+  // recorded the decision up front: **correctness goes over size**, grant the
+  // bumps rather than shave the fixes to fit. Measured deltas, brotli:
+  // full +0.17 KB, core +0.11 KB, elements +0.08 KB. What is in them:
+  //  • command-bus.ts — re-entrant plugin runners (one closure per level in
+  //    place of a shared cursor, both sync and async), identity-based cursor
+  //    correction in `fanOutListeners`, `__origin` in `stampMeta`, the
+  //    transactional/continueOnError dev-warn.
+  //  • http.ts / http-cache.ts — the response cache moved into
+  //    `createHttpClient`'s closure (per client), literal-substring
+  //    invalidation with metachar escaping, and the non-transient re-throw
+  //    that stops 4xx re-entering retry.
+  //  • freeze.ts — new shared module (dev-only deep freeze) pulled in by both
+  //    caches.
+  //  • stream-parser.ts — chunked `flush()`.
+  //  • schema.ts — non-object target/payload rejection + the `'object'` arm.
+  //  • directives.ts — per-document delegation map + the composedPath walk.
+  // Dev-only strings (the new warnings) ship as dead bytes in these bundles
+  // for the reason already noted above: rolldown does not constant-fold
+  // `typeof process < "u" && !1`, so the messages survive minification even
+  // though the branch cannot run. Same caveat, same revisit condition.
+  'vapor-chamber.iife.min.js':          { rawMax: 39_600, brotliMax: 11_500 },
+  'vapor-chamber-core.iife.min.js':     { rawMax: 27_600, brotliMax: 8_050  },
+  'vapor-chamber-elements.iife.min.js': { rawMax: 29_100, brotliMax: 8_450  },
 };
 
 const BR_OPTS = { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } };

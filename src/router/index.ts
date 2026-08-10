@@ -63,7 +63,8 @@ export {
 export type { Pagination, PaginationOptions, QueryParamHandle } from './composables';
 export { buildBreadcrumbs, buildMenu } from './menu';
 export type { Breadcrumb, MenuItem } from './menu';
-export { preheatIdle, stampActiveLinks } from './dom';
+export { preheatIdle, stampActiveLinks, type IdlePreheatOptions } from './dom';
+export type { HistoryListener } from './history';
 export { START_LOCATION } from './engine';
 export { HARD_NAV_CODES, isRouterError, routerError } from './errors';
 export type { RouterError, RouterErrorCode } from './errors';
@@ -71,12 +72,20 @@ export { canUseWebHistory, createMemoryHistory, createWebHistory, normalizeBase,
 export type { ResolveBaseOptions } from './history';
 export type { RouterHistory } from './history';
 export { defaultAffects, interpolateLoad, runLoaders } from './loaders';
-export type { LoaderHandlers, PrefixHandler, UrlHandler } from './loaders';
+export type { LoaderContext, LoaderHandlers, PrefixHandler, UrlHandler } from './loaders';
 export type { Router } from './router-type';
 export { compilePath, createRouteTable } from './table';
 export type { RouteTable } from './table';
 export type * from './types';
 export { decodeQueryParam, encodeQueryParam, parseQuery, pathActivity, resolveQueryHistory, stringifyQuery } from './url';
+
+// Same guarded form as `./menu.ts` and `./table.ts`. A bare
+// `process.env.NODE_ENV` read is a ReferenceError in the router's headline
+// delivery — Blade inline payloads, `examples/router-demo` (plain ESM + import
+// map), pattern-1 no-build — where there is no bundler define and no `process`.
+// (`command-bus.ts` and `devtools.ts` keep bare literals on purpose: those are
+// bundler-only surfaces where the literal is load-bearing for DCE.)
+const DEV = typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
 
 export type RoutesSource =
   | readonly RouteRecord[]
@@ -287,7 +296,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
         window.location.assign(href);
         return;
       }
-      if (process.env.NODE_ENV !== 'production') {
+      if (DEV) {
         console.error(
           `[vapor-chamber-router] ${error.code} for "${href}", which is already the current URL — refusing to hard-navigate (it would reload forever behind a catch-all). Add a catch-all row (path: "/*") so the client can render its own 404.`,
           error,
@@ -302,7 +311,10 @@ export function createRouter<TName extends string = string>(options: RouterOptio
     getTable: () => tableRef.value,
     history,
     resolveRender,
-    runLoaders: (records, to, signal) => runLoaders(loaders, records, to, signal),
+    runLoaders: (records, to, signal) =>
+      runLoaders(loaders, records, to, signal, (recordName, revalidation, at) =>
+        engine.trackRevalidation(recordName, revalidation, at),
+      ),
     loadAffectedBy: (records, keys) => records.filter((record) => affects(record, keys)),
     onError: dispatchError,
     onCommit: (snapshot, _from, info) => {
@@ -332,7 +344,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
     try {
       const response = await http.get<unknown>(url, { retry: 2 });
       const payload = unwrapRoutesPayload(response.data);
-      if (process.env.NODE_ENV !== 'production') warnRemoteBase(payload);
+      if (DEV) warnRemoteBase(payload);
       tableRef.value = createRouteTable(payload.routes);
     } catch (cause) {
       throw isRouterError(cause)
@@ -402,6 +414,17 @@ export function createRouter<TName extends string = string>(options: RouterOptio
 
       if (hasWindow && options.links !== false) {
         const stampRoot = (options.linksRoot ? document.querySelector(options.linksRoot) : null) ?? document;
+        // NOTE (measured, 2026-08-10): active-link stamping runs ONLY on path
+        // changes. `afterEach` does not fire on query-only commits — the
+        // engine's query fast path (`commitQueryLocation` + `refetchAffected`,
+        // and `setQuery` likewise) returns before the after-hook loop — so the
+        // per-keystroke full-document walk that a `setQuery`-driven search box
+        // would imply does not happen, and no memo is needed here. That is
+        // also correct: `data-active`/`data-exact-active` derive from
+        // `location.path` alone, so a query-only commit cannot move any stamp.
+        // `tests/perf.bench.ts` carries the walk's cost per commit, so the
+        // trade-off is a number rather than an assumption if stamping ever
+        // moves onto the query path.
         const stamp = () => stampActiveLinks(history.base, engine.snapshot.value.location.path, stampRoot);
 
         teardowns.push(
@@ -452,6 +475,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
     routes,
     base: history.base,
     isLoading: engine.isLoading,
+    isRevalidating: engine.isRevalidating,
     lastError,
     push: (to: RouteLocationRaw) => engine.navigate(to),
     replace: (to: RouteLocationRaw) => engine.navigate(to, { replace: true }),

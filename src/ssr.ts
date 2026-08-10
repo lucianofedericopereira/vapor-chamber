@@ -45,6 +45,15 @@
  * create the bus per request and pass it explicitly to your handlers and to
  * rehydrate()/dehydrate() — skip the shared-bus globals on the server entirely.
  *
+ * The HTTP cache used to be this warning's undocumented sibling: it was a
+ * module-level singleton, so a fresh bus per request did NOT give a fresh
+ * cache, and the key (`responseType:fullUrl`) has no auth dimension — user A's
+ * authenticated GET answered user B's identical URL. As of v1.12.0 the cache
+ * and the in-flight dedupe map live in `createHttpClient()`'s closure, so the
+ * rule for both hazards is now the same one: **create it per request**. A
+ * client created once at module scope and shared across renders re-opens the
+ * same hole by hand.
+ *
  * @example Server entry
  * import { createCommandBus, setCommandBus, resetCommandBus } from 'vapor-chamber';
  * import { createSSRPlugin } from 'vapor-chamber/ssr';
@@ -71,6 +80,8 @@
  */
 
 import type { Command, CommandResult, Plugin, BaseBus } from './command-bus';
+
+const DEV = typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -111,6 +122,14 @@ export type SSRPlugin = {
   clear(): void;
   /** Number of recorded commands. */
   size(): number;
+  /**
+   * How many commands were dropped at the `maxCommands` cap. Non-zero means
+   * the client will rehydrate PARTIAL state — server/client divergence. Check
+   * it after `dehydrate()` rather than trusting the render silently: a cap
+   * that reads as "recorded everything" when it didn't is the failure mode
+   * this accessor exists to make visible.
+   */
+  dropped(): number;
 };
 
 export type RehydrateOptions = {
@@ -140,6 +159,8 @@ export type RehydrateOptions = {
 export function createSSRPlugin(options: SSRPluginOptions = {}): SSRPlugin {
   const { filter, maxCommands = 500 } = options;
   const recorded: DehydratedCommand[] = [];
+  let droppedCount = 0;
+  let capWarned = false;
 
   const plugin: Plugin = (cmd: Command, next: () => CommandResult): CommandResult => {
     const result = next();
@@ -150,6 +171,19 @@ export function createSSRPlugin(options: SSRPluginOptions = {}): SSRPlugin {
           target: cmd.target,
           ...(cmd.payload !== undefined ? { payload: cmd.payload } : {}),
         });
+      } else {
+        // Dropping past the cap used to be completely silent: the client
+        // rehydrated partial state and nothing anywhere said so. Warn once
+        // (not per command — a blown cap means thousands) and keep a count.
+        droppedCount++;
+        if (!capWarned && DEV) {
+          capWarned = true;
+          console.warn(
+            `[vapor-chamber] SSR command recording hit maxCommands (${maxCommands}) at "${cmd.action}". ` +
+              'Further commands are dropped and the client will rehydrate PARTIAL state. ' +
+              'Raise maxCommands, or narrow what is recorded with the `filter` option.',
+          );
+        }
       }
     }
     return result;
@@ -161,13 +195,19 @@ export function createSSRPlugin(options: SSRPluginOptions = {}): SSRPlugin {
 
   function clear(): void {
     recorded.length = 0;
+    droppedCount = 0;
+    capWarned = false;
   }
 
   function size(): number {
     return recorded.length;
   }
 
-  return { plugin, dehydrate, clear, size };
+  function dropped(): number {
+    return droppedCount;
+  }
+
+  return { plugin, dehydrate, clear, size, dropped };
 }
 
 // ---------------------------------------------------------------------------
@@ -191,6 +231,7 @@ export function rehydrate(
 ): CommandResult[] {
   const { ignoreUnhandled = true, filter } = options;
   const results: CommandResult[] = [];
+  let asyncWarned = false;
 
   for (const cmd of commands) {
     if (filter && !filter(cmd)) continue;
@@ -199,7 +240,68 @@ export function rehydrate(
 
     try {
       const result = bus.dispatch(cmd.action, cmd.target, cmd.payload);
+      // `BaseBus.dispatch` returns `any`, so an AsyncCommandBus type-checks
+      // here — and this loop is sync. A pending promise pushed as a
+      // CommandResult is a lie: `result.ok` reads `undefined`, the try/catch
+      // above catches nothing that rejects later, and a failed replay surfaces
+      // as an unhandled rejection while `results` reports nothing wrong. Say
+      // so instead, and point at the function that actually handles this.
+      if (isThenable(result)) {
+        (result as Promise<CommandResult>).catch(() => {
+          /* already reported below — never an unhandled rejection */
+        });
+        if (!asyncWarned && DEV) {
+          asyncWarned = true;
+          console.warn(
+            `[vapor-chamber] rehydrate() received a pending dispatch for "${cmd.action}" — ` +
+              'this bus is asynchronous and rehydrate() is synchronous. ' +
+              'Use `await rehydrateAsync(bus, commands)` instead.',
+          );
+        }
+        results.push({
+          ok: false,
+          error: new Error(
+            `[vapor-chamber] rehydrate() cannot replay "${cmd.action}" on an async bus — use rehydrateAsync()`,
+          ),
+        });
+        continue;
+      }
       results.push(result);
+    } catch (e) {
+      results.push({ ok: false, error: e as Error });
+    }
+  }
+
+  return results;
+}
+
+function isThenable(value: unknown): boolean {
+  return value != null && typeof (value as { then?: unknown }).then === 'function';
+}
+
+/**
+ * rehydrate for an `AsyncCommandBus` — the common case as soon as any handler
+ * hits an HTTP transport.
+ *
+ * Awaits each dispatch **in order**, preserving the module's design intent
+ * (deterministic replay before the app goes interactive). A rejected dispatch
+ * becomes `{ ok: false, error }` in the results, exactly as a thrown one does
+ * on the sync path — never an unhandled rejection.
+ */
+export async function rehydrateAsync(
+  bus: BaseBus,
+  commands: DehydratedCommand[],
+  options: RehydrateOptions = {},
+): Promise<CommandResult[]> {
+  const { ignoreUnhandled = true, filter } = options;
+  const results: CommandResult[] = [];
+
+  for (const cmd of commands) {
+    if (filter && !filter(cmd)) continue;
+    if (ignoreUnhandled && !bus.hasHandler(cmd.action)) continue;
+
+    try {
+      results.push(await bus.dispatch(cmd.action, cmd.target, cmd.payload));
     } catch (e) {
       results.push({ ok: false, error: e as Error });
     }

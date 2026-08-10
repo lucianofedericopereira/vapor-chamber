@@ -294,6 +294,79 @@ describe('usePagination', () => {
     router.destroy();
   });
 
+  // Item 26: the push convention lives in `resolveQueryHistory`, keyed on the
+  // literal string 'page' — so a custom key silently lost the history half of
+  // usePagination's documented promise.
+  it('a custom key still pushes, so Back steps through pages', async () => {
+    const CUSTOM: RouteRecord[] = [
+      { name: 'home', path: '/', component: 'List' },
+      {
+        name: 'items',
+        path: '/items',
+        component: 'List',
+        load: '/api/items?p={p}',
+        query: { p: { type: 'int', default: 1 } }, // no `history` declaration
+      },
+    ];
+    const router = createRouter({
+      base: '/admin',
+      history: createMemoryHistory('/admin'),
+      routes: CUSTOM,
+      components: { List: { name: 'List' } },
+      loaders: { url: async () => ({ items: [], total: 30, per_page: 10, last_page: 3 }) },
+    });
+    await router.isReady();
+    await router.push('/items');
+
+    const p = withRouter(router, () => usePagination({ key: 'p' }));
+    p.next();
+    await new Promise((r) => setTimeout(r, 20));
+    p.next();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(router.currentRoute.value.location.query.p).toBe('3');
+
+    router.back();
+    await new Promise((r) => setTimeout(r, 20));
+    // Was '1' — both writes had been replaceState, so Back skipped the trail.
+    expect(router.currentRoute.value.location.query.p).toBe('2');
+    router.destroy();
+  });
+
+  it("a route's own history declaration still beats the composable convention", async () => {
+    const DECLARED: RouteRecord[] = [
+      { name: 'home', path: '/', component: 'List' },
+      {
+        name: 'items',
+        path: '/items',
+        component: 'List',
+        load: '/api/items?p={p}',
+        query: { p: { type: 'int', default: 1, history: 'replace' } }, // explicit
+      },
+    ];
+    const router = createRouter({
+      base: '/admin',
+      history: createMemoryHistory('/admin'),
+      routes: DECLARED,
+      components: { List: { name: 'List' } },
+      loaders: { url: async () => ({ items: [], total: 30, per_page: 10, last_page: 3 }) },
+    });
+    await router.isReady();
+    await router.push('/items');
+
+    const p = withRouter(router, () => usePagination({ key: 'p' }));
+    p.next();
+    await new Promise((r) => setTimeout(r, 20));
+    p.next();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(router.currentRoute.value.location.query.p).toBe('3');
+
+    router.back();
+    await new Promise((r) => setTimeout(r, 20));
+    // The route asked for replace; the composable does not override it.
+    expect(router.currentRoute.value.location.query.p ?? '1').toBe('1');
+    router.destroy();
+  });
+
   it('hasNext/hasPrev bound the ends', async () => {
     const router = pagedRouter({ items: [], total: 10, per_page: 10, last_page: 1 });
     await router.isReady();
@@ -358,6 +431,87 @@ describe('usePagination', () => {
       expect(p.total.value).toBe(0);
       expect(p.lastPage.value).toBe(1);
       expect(p.hasNext.value).toBe(false);
+    });
+    router.destroy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// usePagination — remaining fallback branches (rev: coverage push)
+// ---------------------------------------------------------------------------
+
+describe('usePagination — extractor fallbacks and pageRange elisions', () => {
+  const PAGED: RouteRecord[] = [
+    {
+      name: 'items',
+      path: '/items',
+      component: 'List',
+      load: '/api/items?page={page}',
+      query: { page: { type: 'int', default: 1, history: 'push' } },
+    },
+  ];
+  function pagedRouter(payload: unknown) {
+    return createRouter({
+      base: '/admin',
+      history: createMemoryHistory('/admin'),
+      routes: PAGED,
+      components: { List: { name: 'List' } },
+      loaders: { url: async () => payload },
+    });
+  }
+
+  it('with no total anywhere, total falls back to items.length and perPage to items.length', async () => {
+    const router = pagedRouter({ items: [{ id: 1 }, { id: 2 }, { id: 3 }] });
+    await router.isReady();
+    await router.push('/items');
+    withRouter(router, () => {
+      const p = usePagination();
+      expect(p.total.value).toBe(3);     // items.length fallback
+      expect(p.perPage.value).toBe(3);   // items.length fallback
+      expect(p.lastPage.value).toBe(1);  // ceil(3/3)
+      expect(p.hasNext.value).toBe(false);
+    });
+    router.destroy();
+  });
+
+  it('with an EMPTY payload every extractor bottoms out safely', async () => {
+    const router = pagedRouter({});
+    await router.isReady();
+    await router.push('/items');
+    withRouter(router, () => {
+      const p = usePagination();
+      expect(p.items.value).toEqual([]);
+      expect(p.total.value).toBe(0);
+      expect(p.perPage.value).toBe(1);   // final `|| 1` guard
+      expect(p.lastPage.value).toBe(1);  // Math.max(1, …)
+      expect(p.pageRange.value).toEqual([1]);
+    });
+    router.destroy();
+  });
+
+  it('pageRange elides on both sides mid-range and honours a custom window', async () => {
+    const router = pagedRouter({ items: [], total: 500, per_page: 10, last_page: 50 });
+    await router.isReady();
+    await router.push('/items?page=25');
+    withRouter(router, () => {
+      const p = usePagination({ window: 5 });
+      const range = p.pageRange.value;
+      expect(range[0]).toBe(1);
+      expect(range[range.length - 1]).toBe(50);
+      expect(range.filter((n) => n === 0)).toHaveLength(2); // '…' both sides
+      expect(range).toContain(25);
+    });
+    router.destroy();
+  });
+
+  it('pageRange elides only the far side when current sits near the start', async () => {
+    const router = pagedRouter({ items: [], total: 500, per_page: 10, last_page: 50 });
+    await router.isReady();
+    await router.push('/items?page=2');
+    withRouter(router, () => {
+      const range = usePagination().pageRange.value;
+      expect(range[0]).toBe(1);
+      expect(range.filter((n) => n === 0)).toHaveLength(1); // elision on the right only
     });
     router.destroy();
   });

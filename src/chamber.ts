@@ -826,9 +826,20 @@ export function useCommandHistory(options: {
   const canRedo = signal(false);
 
   let paused = false;
+  /** One-shot identity fallback for redos whose primitive payload cannot
+   *  carry the `__origin` marker — see redo(). */
+  let expectedRedo: Command | null = null;
 
   const unsubscribe = bus.onAfter((cmd, result) => {
-    if (paused) return;
+    // `paused` brackets TIME (a KeepAlive deactivation), not one dispatch —
+    // that distinction is why it is still a flag here and why redo() no longer
+    // uses one. A redo is identified by the marker it dispatched with.
+    if (paused || cmd.meta?.origin === 'redo') return;
+    const exp = expectedRedo;
+    if (exp && cmd.action === exp.action && cmd.target === exp.target && cmd.payload === exp.payload) {
+      expectedRedo = null; // one-shot — consumed by the first match
+      return;
+    }
     if (result.ok && (!filter || filter(cmd))) {
       // One allocation: slice drops the oldest only when at cap, push appends.
       const newPast = past.value.slice(past.value.length >= maxSize ? 1 : 0);
@@ -877,14 +888,37 @@ export function useCommandHistory(options: {
     const cmd = f.pop();
     if (cmd) {
       future.value = f;
-      // Pause tracking so the re-dispatch doesn't double-record
-      paused = true;
+      // Suppression rides ON the dispatch. A `paused = true` flag cleared in
+      // `finally` held only on a sync bus, where onAfter fires inside
+      // dispatch(). On an async bus dispatch returns a pending promise and the
+      // hook fires when it SETTLES — after the flag was cleared — so the redo
+      // was recorded twice: once here, once by the unsuppressed hook. Undo
+      // then needed two steps to walk back one redo, and the duplicate wiped
+      // the redo stack again.
+      //
+      // With `__origin: 'redo'` the hook recognises it and skips, so the
+      // manual push below is the single write path on both bus types.
+      //
+      // A PRIMITIVE payload (string/number/array) cannot carry the marker —
+      // wrapping it would change what the handler receives. For those the
+      // hook falls back to a one-shot identity match (`expectedRedo` below):
+      // same action + same target + same payload reference, consumed on
+      // first hit. Narrower than the marker (an identical concurrent
+      // dispatch settling inside the window could be swallowed instead),
+      // but strictly better than the double-record it replaces.
+      const markable =
+        cmd.payload === null || cmd.payload === undefined ||
+        (typeof cmd.payload === 'object' && !Array.isArray(cmd.payload));
+      const payload = !markable
+        ? cmd.payload
+        : cmd.payload === null || cmd.payload === undefined
+          ? { __origin: 'redo' }
+          : { ...(cmd.payload as object), __origin: 'redo' };
+      if (!markable) expectedRedo = cmd;
       try {
-        bus.dispatch(cmd.action, cmd.target, cmd.payload);
+        bus.dispatch(cmd.action, cmd.target, payload);
       } catch (e) {
         console.error(`[vapor-chamber] Redo dispatch error for "${cmd.action}":`, e);
-      } finally {
-        paused = false;
       }
       past.value = [...past.value, cmd];
       canUndo.value = true;

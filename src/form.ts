@@ -244,17 +244,36 @@ export function createFormBus<T extends Record<string, any>>(
   }
 
   async function submit(): Promise<boolean> {
+    // Re-entry guard. `isSubmitting` was never checked at entry, so a
+    // double-click ran two overlapping submits: two onSubmit round-trips and
+    // two `finally` blocks fighting over isSubmitting/isValidating (the first
+    // to finish cleared the flag while the second was still in flight).
+    // First-write-wins is chosen over supersede semantics because the
+    // in-flight call may already have reached the server — cancelling the
+    // *local* half of a submit that has been sent is the more surprising of
+    // the two. Callers wanting last-write-wins have the `supersede` plugin.
+    if (isSubmitting.value) return false;
+
     // Touch all fields so errors become visible
     const allTouched: Partial<Record<keyof T, boolean>> = {};
     for (const k in initial) allTouched[k as keyof T] = true;
     touched.value = allTouched;
+
+    // ONE snapshot, validated and submitted. `values` is live state and this
+    // function reads it across an await: validation ran against the values at
+    // call time (the module's own pitch for concurrent rules is a 300ms
+    // server-side validator), while `onSubmit` then read whatever was current
+    // when it resolved. A `set()` landing in that window meant validation
+    // passed values that were never submitted, and values were submitted that
+    // were never validated.
+    const snapshot = { ...values.value } as T;
 
     // Run all rules — awaits async validators too
     // Set isValidating so the UI can show loading state during async validation
     isValidating.value = true;
     updateBusy();
     try {
-      const errs = await runRulesAsync(rules, values.value);
+      const errs = await runRulesAsync(rules, snapshot);
       errors.value = errs;
       isValid.value = Object.keys(errs).length === 0;
     } finally {
@@ -266,7 +285,7 @@ export function createFormBus<T extends Record<string, any>>(
     isSubmitting.value = true;
     updateBusy();
     try {
-      if (onSubmit) await onSubmit(values.value);
+      if (onSubmit) await onSubmit(snapshot);
       return true;
     } finally {
       isSubmitting.value = false;

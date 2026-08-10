@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // Self-contained on purpose: NO `extends`.
+  //
+  // `tests/examples/exo-astro-directives.test.ts` imports `index.ts` directly,
+  // and Vite's oxc transform resolves the *nearest* tsconfig for every file it
+  // touches. Without this file that lookup lands on
+  // `examples/exo-astro/tsconfig.json`, whose `"extends": "astro/tsconfigs/base"`
+  // only resolves after `npm install` has run *inside the example* — so a
+  // root-only install (fresh clone, CI) failed the root suite with
+  // `[TSCONFIG_ERROR] Failed to load tsconfig`.
+  //
+  // The options below are the transform-relevant subset of
+  // `astro/tsconfigs/base` copied verbatim, so the example's own `astro build`
+  // sees identical semantics for these files.
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "verbatimModuleSyntax": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "forceConsistentCasingInFileNames": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "allowJs": true,
+    "jsx": "preserve",
+    "strict": true
+  },
+  "include": ["**/*"]
+}

@@ -1,10 +1,11 @@
 # Roadmap
 
-This project tracks Vue 3.6 while it is in beta. That has direct consequences
-for what's stable, what's transitional, and what will change once Vue 3.6
-ships stable. This file is the source of truth for that distinction.
+This project tracks Vue 3.6 through its **release-candidate** phase (rc.1
+landed 2026-07-18; rc.2 on 2026-07-22). That has direct consequences for what's
+stable, what's transitional, and what will change once Vue 3.6 ships stable.
+This file is the source of truth for that distinction.
 
-Last reviewed against **Vue 3.6.0-beta.17** (2026-06-24).
+Last reviewed against **Vue 3.6.0-rc.2** (2026-07-22).
 
 ---
 
@@ -27,10 +28,10 @@ continues; new feature work does not. A genuinely new capability request is park
 until after 3.6 stable, when the deployment patterns that would justify it are
 observable.
 
-## Beta-territory specifics
+## Pre-stable specifics
 
-- **Peer dependency:** `vue: ">=3.5.0 || >=3.6.0-beta.17"`. The lib supports
-  Vue 3.5 (composables only) and Vue 3.6 betas (full Vapor surface).
+- **Peer dependency:** `vue: ">=3.5.0 || >=3.6.0-rc.2"`. The lib supports
+  Vue 3.5 (composables only) and Vue 3.6 RCs (full Vapor surface).
 - **Vapor APIs are still moving.** `defineVaporCustomElement`, `defineVaporComponent`,
   `defineVaporAsyncComponent` are stable in shape but their underlying behavior
   keeps shifting. The APIs were introduced across **3.6.0-alpha.3–5**
@@ -213,21 +214,31 @@ benchmark numbers, and decision tree.
 
 ## Version targets
 
-| Version | Trigger                          | Headline                                                                 |
-|---------|----------------------------------|--------------------------------------------------------------------------|
-| v1.2.x  | Vue 3.6.0-beta.11+               | Beta-aligned: docs, build pipeline, IIFE split, regression tests, V8-aligned hot path, listener bucketing, persist coalescing |
-| v1.3.0  | Vue 3.6.0-beta.12                | SSR/Hydration alignment, AbortController extensions (request/respond, dispatchBatch, child signals, WS/SSE bridge), useSharedCommandState, TestBus snapshot/time-travel |
-| v1.4.0  | Vue 3.6.0-beta.13                | TransitionGroup fixes, interop scope IDs, SSR hydration fixes, lazy lifecycle jobs, signal.ts plain-object fallback, alien-signals class adapter, alien-signals promoted to dep |
-| v1.5.0  | Vue 3.6.0-beta.14                | Beta.14 alignment (HMR reload dedup, v-show move-hook suppression, custom-element/interop fixes); `signal()` → `shallowRef` (skips deep-Proxy on object/array state); `serialize` plugin (per-key sequential, + cross-tab via Web Locks); `vapor-chamber/reactive` deep-reactivity companion; `onMissing:'buffer'` deferred dispatch (buffer-until-registered, for lazy/island hydration); `idempotent` plugin + HTTP `Idempotency-Key` forwarding (client+wire exactly-once). **Feature set locked here.** |
-| v1.6.x  | Each subsequent 3.6 beta / RC    | **Tracking only** — alignment notes folded into the version table, peer-dep bump, perf re-measure. (beta.16 broke this expectation: it carried a breaking consolidation, so it landed as the v1.7.0 minor instead of a 1.6.x patch; **beta.17 then folded into that same still-unreleased v1.7.0 as a pure pass-through tracking bump** — no code change.) |
-| v1.7.0  | Vue 3.6.0-beta.16 → beta.17      | **First post-lock delivery (unreleased).** Beta.16 **+ beta.17** alignment (beta.17 is fully pass-through — its compiler/runtime slot, interop, hydration, and reactivity fixes are all below us or inherited through the interop plugin); `v-vc:command` event modifiers; **breaking: `useVaporCommand` removed → `useCommand` is the single composable** (the v2.0 merge, *delivered early* — it never depended on the stable identity call); dispatch core to 100% line+branch+func coverage + lazy buffer allocation; honest size/coverage/perf docs. Ships as a **minor** under the beta-window version policy below. |
-| v2.0.0  | One minor cycle after 3.6 stable | Stable-landing realignment: `vue36` flavor wrapper elimination + registry collapse; remove wrappers' null path; finalize the identity decision. The `useVaporCommand`→`useCommand` merge is already **done** (shipped early in **v1.7.0** — see below). See checklist below. |
+Per-release detail lives in **one** place: whitepaper §9's per-release rows
+(`docs/whitepaper.md`), with `CHANGELOG.md` as the narrative. This file used to
+carry a third copy of that table, which drifted — it still ended at
+*v1.7.0 (unreleased)* long after v1.11.0 shipped. v1.10.0 made the same call for
+the README's size table (deleted rather than re-synced) and it holds here:
+a third copy is a third thing to keep true.
 
-**Version policy during the beta window.** While Vue 3.6 is still beta, breaking
-changes ship as **minors**, not majors — the peer dep is a moving beta and there is
-effectively no userspace to protect, so a deprecation cycle would cost more than it
-saves. **2.0.0 is reserved for the post-stable identity decision** (Vapor-first vs
-bus-first; the `vue36` flavor + registry collapse), keeping the major bump meaningful.
+What this file still owns, because §9 does not:
+
+| Version | Trigger | What changes about the *contract* |
+|---------|---------|-----------------------------------|
+| current line | Each 3.6 RC | Tracking bumps: peer dep, alignment notes, perf re-measure. No contract change. |
+| v2.0.0 | One minor cycle after 3.6 stable | Stable-landing realignment: `vue36` flavor wrapper elimination + registry collapse; remove wrappers' null path; finalize the identity decision. The `useVaporCommand`→`useCommand` merge already shipped early, in v1.7.0. See the checklist below. |
+
+**Version policy before 3.6 stable.** Breaking changes ship as **minors**, not
+majors. The original justification was "the peer dep is a moving beta" — Vue is
+no longer in beta, so that basis has expired and is not what the policy now
+rests on. What it rests on: the pre-stable peer dep is still a moving target
+(rc.2 today), and the surfaces that have actually taken breaking changes are the
+ones documented experimental — v1.11.0's `RouterOutlet` subpath move cited the
+router's experimental status, not the beta window, and that is the standard
+going forward. A breaking change to a surface documented as stable needs a
+major, beta window or not. **2.0.0 remains reserved for the post-stable identity
+decision** (Vapor-first vs bus-first; the `vue36` flavor + registry collapse),
+keeping the major bump meaningful.
 Corollary — **we deliver first**: any v2.0-roadmapped item that does *not* depend on
 the stable identity call ships early in a minor as soon as it's ready (the
 `useVaporCommand`→`useCommand` merge landed this way in v1.7.0).
@@ -243,16 +254,15 @@ transport adapter, fully decoupled from Vue, so it wasn't blocked); see
 ## Vue version-support matrix
 
 Which Vue versions each released lib line supports. The peer dep is permissive
-(`>=3.5.0 || >=3.6.0-beta.17`); this table is the *tested* support statement.
+(`>=3.5.0 || >=3.6.0-rc.2`, matching `package.json`); this table is the *tested*
+support statement.
 
-| vapor-chamber | Vue 3.5 (composables only) | Vue 3.6 beta | Notes |
-|---------------|----------------------------|--------------|-------|
-| v1.2.x        | ✅                          | beta.11+     | first beta-aligned line |
-| v1.3.0        | ✅                          | beta.12      | |
-| v1.4.0        | ✅                          | beta.13      | |
-| v1.5.x        | ✅                          | beta.14      | feature-locked |
-| **v1.6.x**    | ✅                          | **beta.15 → beta.17** | current; tracking-only bumps |
-| v2.0.0        | ✅ (composables)            | **3.6 stable** | `vue36` flavor adds zero-overhead path |
+| vapor-chamber | Vue 3.5 (composables only) | Vue 3.6 | Notes |
+|---------------|----------------------------|---------|-------|
+| v1.2.x – v1.5.x | ✅ | beta.11 → beta.14 | the beta-aligned lines; v1.5.x feature-locked |
+| v1.6.x – v1.7.0 | ✅ | beta.15 → beta.17 | tracking-only bumps + the first post-lock delivery |
+| **v1.8.0 →** | ✅ | **rc.1 → rc.2** | current; tested against rc.2 |
+| v2.0.0 | ✅ (composables) | **3.6 stable** | `vue36` flavor adds zero-overhead path |
 
 On Vue 3.5 you get the framework-agnostic surface (bus, plugins, transports,
 composables with `onScopeDispose` cleanup). The full Vapor surface

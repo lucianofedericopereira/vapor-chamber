@@ -53,7 +53,14 @@ describe('runLoaders — the SPI', () => {
       locationWith({}),
       new AbortController().signal,
     );
-    expect(handler).toHaveBeenCalledWith('products', expect.anything(), products, expect.anything());
+    // 5th arg is the LoaderContext (the stale-while-revalidate channel).
+    expect(handler).toHaveBeenCalledWith(
+      'products',
+      expect.anything(),
+      products,
+      expect.anything(),
+      expect.objectContaining({ revalidate: expect.any(Function) }),
+    );
     expect(results.get('products')).toEqual({ from: 'products' });
   });
 

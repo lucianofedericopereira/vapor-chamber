@@ -18,6 +18,24 @@ import { isRouterError, routerError } from './errors';
 import type { QueryParamDef, RouteLocation, TableRecord } from './types';
 import { decodeQueryParam } from './url';
 
+/**
+ * Per-record channel handed to a loader handler, bound to the record and
+ * location of this run — so it cannot be misattributed when a navigation and
+ * a query refetch overlap. Optional, and appended last: handlers written
+ * against the four-argument signature keep working untouched.
+ */
+export type LoaderContext = {
+  /**
+   * Report a background refresh behind stale data you are returning now.
+   * The engine flips `router.isRevalidating` and patches `snapshot.data` when
+   * the promise resolves — dropping it if the location has since changed, and
+   * leaving the stale data in place if it rejects. Without this a
+   * stale-while-revalidate response would refresh the HTTP cache but never the
+   * page.
+   */
+  revalidate: (fresh: Promise<unknown>) => void;
+};
+
 /** Handles `load` values under a registered prefix
  *  ('rows:products' → ref 'products'). */
 export type PrefixHandler = (
@@ -25,6 +43,7 @@ export type PrefixHandler = (
   location: RouteLocation,
   record: TableRecord,
   signal: AbortSignal,
+  ctx: LoaderContext,
 ) => unknown | Promise<unknown>;
 
 /** Handles plain URL-template `load` values. Receives the RAW template —
@@ -34,6 +53,7 @@ export type UrlHandler = (
   location: RouteLocation,
   record: TableRecord,
   signal: AbortSignal,
+  ctx: LoaderContext,
 ) => unknown | Promise<unknown>;
 
 export type LoaderHandlers = {
@@ -82,17 +102,22 @@ export async function runLoaders(
   records: readonly TableRecord[],
   location: RouteLocation,
   signal: AbortSignal,
+  /** Wired by createRouter — see LoaderContext.revalidate. */
+  onRevalidate?: (recordName: string, revalidation: Promise<unknown>, location: RouteLocation) => void,
 ): Promise<Map<string, unknown>> {
   const results = new Map<string, unknown>();
   await Promise.all(
     records.map(async (record) => {
       const template = record.load as string;
       const prefixed = matchPrefix(template, handlers);
+      const ctx: LoaderContext = {
+        revalidate: (fresh) => onRevalidate?.(record.name, fresh, location),
+      };
       try {
         if (prefixed) {
-          results.set(record.name, await prefixed[1](template.slice(prefixed[0].length), location, record, signal));
+          results.set(record.name, await prefixed[1](template.slice(prefixed[0].length), location, record, signal, ctx));
         } else if (handlers.url) {
-          results.set(record.name, await handlers.url(template, location, record, signal));
+          results.set(record.name, await handlers.url(template, location, record, signal, ctx));
         } else {
           throw routerError('load_failed', `no loader handler for "${template}" — register a preset`, {
             to: location,

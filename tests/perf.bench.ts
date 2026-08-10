@@ -15,6 +15,7 @@ import { persist } from '../src/plugins-io';
 import { createFastLane } from '../src/fast-lane';
 import { createTransitionBridge } from '../src/transitions';
 import { createDirectivePlugin } from '../src/directives';
+import { stampActiveLinks } from '../src/router/dom';
 import { useCommandState, signal, waitForVueDetection } from '../src/chamber';
 import { alienSignalAdapter } from '../src/alien-signals';
 import { signal as _alienSignal } from 'alien-signals';
@@ -324,8 +325,16 @@ describe('fast lane — single-handler hot dispatch (10k)', () => {
 });
 
 describe('fast lane — multi-subscriber emit fan-out (10k events × 3 listeners)', () => {
-  bench('vapor-chamber fast-lane emit', () => {
+  bench('vapor-chamber fast-lane emit (live, default)', () => {
     const lane = createFastLane();
+    lane.on('evt', () => {});
+    lane.on('evt', () => {});
+    lane.on('evt', () => {});
+    for (let i = 0; i < 10_000; i++) lane.emit('evt', i);
+  });
+
+  bench("vapor-chamber fast-lane emit (removal: 'snapshot')", () => {
+    const lane = createFastLane({ removal: 'snapshot' });
     lane.on('evt', () => {});
     lane.on('evt', () => {});
     lane.on('evt', () => {});
@@ -617,6 +626,56 @@ describe('transition bridge throughput', () => {
 // invisible to a mount/unmount-cost bench), which is why it stays opt-in
 // exactly like Vue's own default: worth it for large, mostly-static lists,
 // not a blanket win.
+// ---------------------------------------------------------------------------
+// Active-link stamping — the piece that scales with PAGE SIZE rather than
+// route count. `afterEach` fires on query-only commits too (usePagination, a
+// sort toggle, a search box calling setQuery per keystroke), and on those the
+// path is unchanged so every stamp recomputes to the value already in the DOM.
+// The router's `stamp` closure memoises the last stamped path; these rows are
+// what that memo is worth on a page with a mega-menu and a footer.
+// ---------------------------------------------------------------------------
+
+describe('active-link stamping — N anchors × M commits', () => {
+  const ANCHORS = 500;
+  const COMMITS = 50;
+
+  function buildRoot(n: number): ParentNode {
+    // A minimal ParentNode: stampActiveLinks only calls querySelectorAll, and
+    // each anchor only needs href + the attribute methods.
+    const anchors = Array.from({ length: n }, (_, i) => {
+      const attrs = new Set<string>();
+      return {
+        href: `https://example.test/admin/section-${i % 25}/item-${i}`,
+        getAttribute: () => null,
+        hasAttribute: (name: string) => attrs.has(name),
+        removeAttribute: (name: string) => attrs.delete(name),
+        toggleAttribute: (name: string, force: boolean) => {
+          if (force) attrs.add(name);
+          else attrs.delete(name);
+          return force;
+        },
+      } as unknown as HTMLAnchorElement;
+    });
+    return { querySelectorAll: () => anchors } as unknown as ParentNode;
+  }
+
+  const root = buildRoot(ANCHORS);
+
+  bench(`${COMMITS} PATH commits × ${ANCHORS} anchors (full walk, unavoidable)`, () => {
+    for (let i = 0; i < COMMITS; i++) {
+      stampActiveLinks('/admin', `/section-${i % 25}/item-${i}`, root);
+    }
+  });
+
+  bench(`${COMMITS} QUERY-ONLY commits × ${ANCHORS} anchors (what the memo skips)`, () => {
+    // Same path every time — this is the per-keystroke case, and every one of
+    // these walks produced stamps identical to the ones already there.
+    for (let i = 0; i < COMMITS; i++) {
+      stampActiveLinks('/admin', '/section-3/item-3', root);
+    }
+  });
+});
+
 describe('directive delegation (.delegate) — mount/unmount cost at scale', () => {
   const N = 5_000;
 

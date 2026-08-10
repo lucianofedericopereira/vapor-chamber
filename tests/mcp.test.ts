@@ -2,8 +2,10 @@
  * Tests for the MCP layer: busToMcpTools, createMcpHandler, agentOrigin, serveMcpStdio
  */
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { busToMcpTools, createMcpHandler, agentOrigin, serveMcpStdio } from '../src/mcp';
+import { busToMcpTools, createMcpHandler, agentOrigin, serveMcpStdio, MCP_SERVER_VERSION } from '../src/mcp';
 import type { McpTool } from '../src/mcp';
 import { createSchemaCommandBus, createAsyncSchemaCommandBus } from '../src/schema';
 import type { BusSchema } from '../src/schema';
@@ -96,7 +98,7 @@ describe('createMcpHandler — protocol', () => {
     const reply: any = await handle({ jsonrpc: '2.0', id: 2, method: 'initialize', params: {} });
 
     expect(reply.result.protocolVersion).toBe('2025-06-18');
-    expect(reply.result.serverInfo).toEqual({ name: 'vapor-chamber', version: '1.7.0' });
+    expect(reply.result.serverInfo).toEqual({ name: 'vapor-chamber', version: MCP_SERVER_VERSION });
   });
 
   it('ping replies with an empty result', async () => {
@@ -372,5 +374,38 @@ describe('serveMcpStdio', () => {
     expect(replies.find((r) => r.error)?.error.code).toBe(-32700);
     const toolsReply = replies.find((r) => r.id === 2);
     expect(toolsReply.result.tools.map((t: McpTool) => t.name)).toEqual(['cartAdd', 'cartClear', 'ping']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Item 17 — the two defaults.
+// ---------------------------------------------------------------------------
+
+describe('createMcpHandler defaults', () => {
+  it('the advertised server version tracks package.json', async () => {
+    // It sat at a hardcoded '1.7.0' for four releases, so every `initialize`
+    // handshake reported a version that no longer existed. This assertion is
+    // the release checklist: bump the package, this fails until the constant
+    // follows.
+    const pkg = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8'));
+    expect(MCP_SERVER_VERSION).toBe(pkg.version);
+  });
+
+  it('warns when `actions` is omitted, naming what it exposed', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    createMcpHandler(makeBus());
+
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('cartAdd'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('writes included'));
+    warn.mockRestore();
+  });
+
+  it("does not warn when exposure is declared — including the explicit ['*']", () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    createMcpHandler(makeBus(), { actions: ['cartAdd'] });
+    createMcpHandler(makeBus(), { actions: ['*'] });
+
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
   });
 });

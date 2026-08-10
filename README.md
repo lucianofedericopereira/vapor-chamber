@@ -44,7 +44,7 @@ A small core, and batteries you only pay for if you import them.
 - **Vue 3.6.0-rc.2 aligned** — signals, `onScopeDispose`, `getCurrentScope`, alien-signals internals; tracked per release in the [CHANGELOG](CHANGELOG.md)
 - **One runtime dependency** (`alien-signals`); unimported modules tree-shake to zero
 - **ESM-only**, plus three IIFE `<script>` drop-ins for no-bundler pages
-- **1271 tests** across 79 files · 96.0% statements · 97.5% lines ([full table](docs/COVERAGE.md))
+- **1421 tests** across 81 files · 96.7% statements · 98.2% lines ([full table](docs/COVERAGE.md))
 
 ## Contents
 
@@ -1127,7 +1127,7 @@ optional and tree-shaken when unimported.
    form.ts · schema.ts · devtools.ts · directives.ts · vite-hmr.ts
 ```
 
-**Coverage:** 96.0% statements · 89.5% branches · 96.9% functions · 97.5% lines across **1271 tests**
+**Coverage:** 96.7% statements · 91.0% branches · 96.7% functions · 98.2% lines across **1421 tests**
 (79 files). The dispatch core is at 100% line + branch + function. Per-file table:
 [docs/COVERAGE.md](docs/COVERAGE.md); run `npm run test:coverage` for live numbers.
 

@@ -103,3 +103,49 @@ describe('createMemoryHistory — state() and destroy()', () => {
     expect(cb).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// Previously uncovered branches: outside-base fallback, non-__vr state,
+// resolveBase window-pathname default
+// ---------------------------------------------------------------------------
+
+describe('createWebHistory — fallback branches', () => {
+  it('location() falls back to "/" when the current pathname is outside the base', () => {
+    window.history.replaceState(null, '', '/elsewhere/page');
+    const history = createWebHistory('/app');
+    // '/elsewhere/page' does not start with '/app' → stripBase null → '/'
+    expect(history.location()).toBe('/');
+    history.destroy();
+  });
+
+  it('a popstate whose state carries no __vr computes delta against position 0', () => {
+    window.history.replaceState(null, '', '/x');
+    const history = createWebHistory('');
+    const seen: Array<{ delta: number }> = [];
+    history.listen((_p, info) => seen.push({ delta: info.delta }));
+
+    history.push('/a'); // position 1
+    // Simulate a popstate to an entry created OUTSIDE the router (no __vr):
+    window.dispatchEvent(new PopStateEvent('popstate', { state: { foreign: true } }));
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].delta).toBe(-1); // 0 (no __vr) minus lastPosition 1
+    history.destroy();
+  });
+
+  it('boot on a history entry that already has __vr does not restamp position 0', () => {
+    window.history.replaceState({ __vr: 3 }, '', '/deep');
+    const history = createWebHistory('');
+    history.push('/next'); // 3 → 4
+    expect((window.history.state as { __vr: number }).__vr).toBe(4);
+    history.destroy();
+  });
+});
+
+describe('resolveBase — window-pathname default (happy-dom)', () => {
+  it('reads window.location.pathname when no pathname option is given', async () => {
+    const { resolveBase } = await import('../../src/router/history');
+    window.history.replaceState(null, '', '/en/checkout');
+    expect(resolveBase({ locales: ['en', 'it'] })).toBe('/en');
+  });
+});

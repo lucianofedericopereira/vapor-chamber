@@ -359,6 +359,15 @@ export async function postCommand<T = unknown>(
       // it must compete for the same retry budget as a 5xx/429/408 response
       // instead of always throwing on the first attempt regardless of `retry`.
       const failure = err.name === 'AbortError' ? timeoutError(url, timeout) : err;
+      // A non-transient response thrown above (`throw failed`) lands here too,
+      // and this catch used to retry everything that wasn't a user abort — so
+      // a 422 validation failure re-sent the mutation `retry` times. Re-throw
+      // anything that carries a response classifyError calls permanent; the
+      // RETRY_STATUS `continue` above still owns the transient statuses.
+      if (failure.response && !classifyError(failure).transient) {
+        if (silent) failure.silent = true;
+        throw failure;
+      }
       if (attempt >= retry) {
         if (silent) failure.silent = true;
         throw failure;
@@ -480,7 +489,7 @@ function createInterceptorManager<T>(): InterceptorManager<T> & { forEach(fn: (h
 // Imports from internal helpers
 // ---------------------------------------------------------------------------
 
-import { getCached, getCachedAny, setCache, clearAllCache, invalidateCacheByPattern, getInflight, setInflight, CACHE_DEFAULT_TTL } from './http-cache';
+import { createResponseCache, CACHE_DEFAULT_TTL } from './http-cache';
 import { classifyError } from './http-errors';
 import { buildFullUrl } from './http-query';
 
@@ -605,6 +614,11 @@ async function clientRequest<T>(
       // Same rule as postCommand: a timeout must retry like any other
       // transient failure instead of always throwing on the first attempt.
       const failure = err.name === 'AbortError' ? timeoutError(fullUrl, timeout) : err;
+      // Same guard as postCommand: `throw httpError(...)` above re-enters this
+      // catch, and retrying it re-sends the request. Only responses
+      // classifyError calls transient (5xx / no response / timeout) may retry;
+      // 4xx — 404, 403, and above all 422 on a mutation — surface immediately.
+      if ((failure as HttpError).response && !classifyError(failure).transient) throw failure;
       if (attempt >= maxRetries) throw failure;
       await sleepMs(backoffMs(attempt), userSignal);
     }
@@ -648,6 +662,10 @@ async function clientRequest<T>(
 export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = {}): HttpClient {
   const requestInterceptors = createInterceptorManager<HttpRequestConfig>();
   const responseInterceptors = createInterceptorManager<HttpResponse>();
+  // Owned by this client — see http-cache.ts. `create()` below mints a fresh
+  // one for the derived client, so one instance's clearCache() can never empty
+  // another's, and a per-request client under SSR is genuinely isolated.
+  const cache = createResponseCache();
 
   async function request<T = unknown>(url: string, options: HttpRequestConfig = {}): Promise<HttpResponse<T>> {
     // Merge instance defaults with per-call options
@@ -686,7 +704,7 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
 
     // Request deduplication for GET
     if (isIdempotent && dedupe) {
-      const inflight = getInflight(dedupeKey);
+      const inflight = cache.getInflight(dedupeKey);
       if (inflight) return inflight as Promise<HttpResponse<T>>;
     }
 
@@ -697,7 +715,7 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
     const cacheCfg = typeof config.cache === 'object' ? config.cache : {};
     let staleResponse: HttpResponse | null = null;
     if (cacheEnabled) {
-      const cached = getCached(cacheKey);
+      const cached = cache.get(cacheKey);
       if (cached && !cached.stale) return cached.data as HttpResponse<T>;
       if (cached) staleResponse = cached.data as HttpResponse;
     }
@@ -732,7 +750,7 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
 
       // Cache successful GET responses
       if (cacheEnabled && response.ok) {
-        setCache(cacheKey, response, cacheCfg.ttl ?? CACHE_DEFAULT_TTL, cacheCfg.staleTtl ?? 0);
+        cache.set(cacheKey, response, cacheCfg.ttl ?? CACHE_DEFAULT_TTL, cacheCfg.staleTtl ?? 0);
       }
 
       return response as HttpResponse<T>;
@@ -745,7 +763,7 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
 
     // Track in-flight GET for deduplication
     if (isIdempotent && dedupe) {
-      setInflight(dedupeKey, fetchPromise);
+      cache.setInflight(dedupeKey, fetchPromise);
     }
 
     // Stale-while-revalidate: serve the stale response now; the fetch above
@@ -765,7 +783,7 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
       return fetchPromise.catch((error) => {
         const aborted = (error as HttpError)?.name === 'AbortError';
         if (!aborted && classifyError(error).transient) {
-          const retained = getCachedAny(cacheKey);
+          const retained = cache.getAny(cacheKey);
           if (retained) {
             return { ...(retained.data as HttpResponse<T>), stale: true, servedOnError: true, error };
           }
@@ -847,7 +865,7 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
       ...newDefaults,
       headers: { ...instanceDefaults.headers, ...newDefaults?.headers },
     }),
-    clearCache: clearAllCache,
-    invalidateCache: invalidateCacheByPattern,
+    clearCache: () => cache.clear(),
+    invalidateCache: (pattern) => cache.invalidate(pattern),
   };
 }

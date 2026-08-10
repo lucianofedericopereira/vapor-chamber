@@ -183,6 +183,44 @@ describe('fast-lane unsubscribe edge cases', () => {
     expect(seen).toEqual([1]);
   });
 
+  // The gap this block looked like it covered but didn't: unsubscribe DURING
+  // an emit, which shifts the array under the loop.
+  it('a listener that unsubscribes itself mid-emit does not skip its neighbour', () => {
+    const lane = createFastLane();
+    const seen: string[] = [];
+
+    lane.on<number>('tick', () => seen.push('first'));
+    const off = lane.on<number>('tick', () => {
+      seen.push('second');
+      off(); // the once-pattern
+    });
+    lane.on<number>('tick', () => seen.push('third'));
+
+    lane.emit('tick', 1);
+    expect(seen).toEqual(['first', 'second', 'third']); // 'third' was skipped
+
+    seen.length = 0;
+    lane.emit('tick', 2);
+    expect(seen).toEqual(['first', 'third']); // and the once-listener is gone
+  });
+
+  it('a listener that removes a peer mid-emit does not skip another', () => {
+    const lane = createFastLane();
+    const seen: string[] = [];
+
+    let offSecond = () => {};
+    lane.on<number>('tick', () => {
+      seen.push('first');
+      offSecond(); // remove a LATER peer
+    });
+    offSecond = lane.on<number>('tick', () => seen.push('second'));
+    lane.on<number>('tick', () => seen.push('third'));
+
+    lane.emit('tick', 1);
+    // 'second' is gone before its turn; 'third' must still fire.
+    expect(seen).toEqual(['first', 'third']);
+  });
+
   it('unsubscribing a listener that is no longer in a live bucket is a no-op', () => {
     // The bucket still exists (another listener holds it open) but this
     // listener is already gone — indexOf returns -1 and nothing is spliced.
@@ -210,5 +248,91 @@ describe('fast-lane unsubscribe edge cases', () => {
 
     expect(a).toEqual([1]);
     expect(b).toEqual([1, 2]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// removal: 'snapshot' vs 'live' — the mid-emit unsubscribe CONTRACT per mode.
+// These two suites assert DIFFERENT outcomes for the same scenario on
+// purpose: the divergence IS the documented difference between the modes.
+// ---------------------------------------------------------------------------
+
+describe("removal: 'live' (default) — bus-parity semantics", () => {
+  it('a peer removed mid-emit does NOT run in that emit', () => {
+    const lane = createFastLane(); // default = live
+    const seen: string[] = [];
+    let offSecond: () => void = () => {};
+    lane.on('tick', () => { seen.push('first'); offSecond(); });
+    offSecond = lane.on('tick', () => seen.push('second'));
+    lane.on('tick', () => seen.push('third'));
+
+    lane.emit('tick', 1);
+    expect(seen).toEqual(['first', 'third']);
+  });
+
+  it('single-listener fast path: self-removal during the call still completes and unsubscribes', () => {
+    const lane = createFastLane();
+    const seen: number[] = [];
+    const off = lane.on<number>('tick', (n) => { seen.push(n); off(); });
+    lane.emit('tick', 1);
+    lane.emit('tick', 2); // listener gone — bucket dropped, no-op
+    expect(seen).toEqual([1]);
+  });
+});
+
+describe("removal: 'snapshot' — copy-on-write semantics", () => {
+  it('a peer removed mid-emit STILL runs once in that emit (the documented divergence)', () => {
+    const lane = createFastLane({ removal: 'snapshot' });
+    const seen: string[] = [];
+    let offSecond: () => void = () => {};
+    lane.on('tick', () => { seen.push('first'); offSecond(); });
+    offSecond = lane.on('tick', () => seen.push('second'));
+    lane.on('tick', () => seen.push('third'));
+
+    lane.emit('tick', 1);
+    // Snapshot: the emit fans out to the list as of emit start.
+    expect(seen).toEqual(['first', 'second', 'third']);
+    seen.length = 0;
+    lane.emit('tick', 2);
+    // The removal is fully visible from the NEXT emit on.
+    expect(seen).toEqual(['first', 'third']);
+  });
+
+  it('a listener added mid-emit does not run until the next emit', () => {
+    const lane = createFastLane({ removal: 'snapshot' });
+    const seen: string[] = [];
+    lane.on('tick', () => {
+      seen.push('a');
+      if (!seen.includes('late-registered')) {
+        seen.push('late-registered');
+        lane.on('tick', () => seen.push('late'));
+      }
+    });
+    lane.emit('tick', 1);
+    expect(seen).not.toContain('late');
+    lane.emit('tick', 2);
+    expect(seen).toContain('late');
+  });
+
+  it('self-removal works and the bucket drops when it empties', () => {
+    const lane = createFastLane({ removal: 'snapshot' });
+    const seen: number[] = [];
+    const off = lane.on<number>('tick', (n) => { seen.push(n); off(); });
+    lane.emit('tick', 1); // runs once (snapshot), then removed
+    lane.emit('tick', 2);
+    expect(seen).toEqual([1]);
+    expect(() => off()).not.toThrow(); // idempotent on a dropped bucket
+  });
+
+  it('double-unsubscribe is a no-op and leaves peers intact', () => {
+    const lane = createFastLane({ removal: 'snapshot' });
+    const seen: number[] = [];
+    const fn = (n: number) => seen.push(n);
+    const off = lane.on<number>('tick', fn);
+    lane.on<number>('tick', (n) => seen.push(n * 10));
+    off();
+    off();
+    lane.emit('tick', 1);
+    expect(seen).toEqual([10]);
   });
 });

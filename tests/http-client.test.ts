@@ -3,7 +3,6 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createHttpClient } from '../src/http';
-import { clearAllCache } from '../src/http-cache';
 
 // ---------------------------------------------------------------------------
 // Fetch mock helpers
@@ -29,7 +28,7 @@ function jsonResponse(status: number, body: unknown) {
 }
 
 beforeEach(() => {
-  clearAllCache();
+  // Each createHttpClient() owns its cache (item 6) — nothing global to reset.
   vi.stubGlobal('fetch', vi.fn());
 });
 
@@ -226,6 +225,50 @@ describe('createHttpClient — retry', () => {
     const http = createHttpClient();
     await expect(http.post('/api/cmd', {})).rejects.toThrow();
     expect(attempts).toBe(1);
+  });
+
+  // The missing negative case. RETRY_STATUS only governs the polite path
+  // (Retry-After parsing); a status outside it is thrown *inside* the try and
+  // used to re-enter retry through the catch, which for a mutation means
+  // re-sending it.
+  it('POST with retry configured does NOT retry a 422', async () => {
+    let attempts = 0;
+    (globalThis.fetch as any).mockImplementation(async () => {
+      attempts++;
+      return jsonResponse(422, { message: 'validation failed' });
+    });
+
+    const http = createHttpClient();
+    await expect(http.post('/api/cmd', { qty: -1 }, { retry: 2 })).rejects.toMatchObject({
+      response: { status: 422 },
+    });
+    expect(attempts).toBe(1); // was 3 — the mutation was re-sent twice
+  });
+
+  it('GET with retry configured does NOT retry a 404', async () => {
+    let attempts = 0;
+    (globalThis.fetch as any).mockImplementation(async () => {
+      attempts++;
+      return jsonResponse(404, { message: 'nope' });
+    });
+
+    const http = createHttpClient();
+    await expect(http.get('/api/missing', { retry: 2 })).rejects.toThrow();
+    expect(attempts).toBe(1); // was 3 — every backoff burned before surfacing
+  });
+
+  it('still retries a 500 when retry is configured on a POST', async () => {
+    let attempts = 0;
+    (globalThis.fetch as any).mockImplementation(async () => {
+      attempts++;
+      if (attempts < 3) return jsonResponse(500, { error: 'server' });
+      return jsonResponse(200, { ok: true });
+    });
+
+    const http = createHttpClient();
+    const res = await http.post('/api/cmd', {}, { retry: 2 });
+    expect(res.ok).toBe(true);
+    expect(attempts).toBe(3);
   });
 });
 

@@ -8,6 +8,9 @@
 
 import type { Command, CommandResult, Plugin, AsyncPlugin } from './command-bus';
 import { matchesPattern, commandKey, BusError } from './command-bus';
+import { freezeCached } from './freeze';
+
+const DEV = typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
 
 function makeActionFilter(patterns: string[] | undefined): (action: string) => boolean {
   if (!patterns?.length) return () => true;
@@ -51,17 +54,48 @@ export function cache(options: CacheOptions = {}): Plugin & {
   const matchesActions = makeActionFilter(actions);
 
   // LRU-style cache: Map preserves insertion order, we move accessed entries to end
-  const store = new Map<string, { result: CommandResult; expiresAt: number }>();
+  const store = new Map<string, { result: CommandResult; expiresAt: number; action: string }>();
+
+  // action → the keys stored under it. Entries are keyed by `getKey`, which a
+  // custom `key` option can make ANY shape — so action-wide invalidation
+  // cannot recompute them. It used to try (`commandKey(action, target)` and a
+  // `action + ':'` prefix scan, both the DEFAULT key shape), which meant every
+  // `invalidate()` call silently deleted nothing whenever `key` was set — and
+  // `key` exists precisely for callers whose identity ISN'T `action:target`.
+  // Recording the mapping at insert time makes action-wide invalidation work
+  // for any key shape instead of documenting a hole.
+  const byAction = new Map<string, Set<string>>();
 
   function getKey(cmd: Command): string {
     return keyFn ? keyFn(cmd) : commandKey(cmd.action, cmd.target);
+  }
+
+  function remember(key: string, action: string): void {
+    let keys = byAction.get(action);
+    if (!keys) {
+      keys = new Set();
+      byAction.set(action, keys);
+    }
+    keys.add(key);
+  }
+
+  /** Single removal path — the index must never outlive the entry. */
+  function dropKey(key: string): void {
+    const entry = store.get(key);
+    if (entry === undefined) return;
+    store.delete(key);
+    const keys = byAction.get(entry.action);
+    if (keys) {
+      keys.delete(key);
+      if (keys.size === 0) byAction.delete(entry.action);
+    }
   }
 
   function evictIfNeeded(): void {
     while (store.size > maxSize) {
       // Delete oldest (first inserted)
       const firstKey = store.keys().next().value;
-      if (firstKey !== undefined) store.delete(firstKey);
+      if (firstKey !== undefined) dropKey(firstKey);
     }
   }
 
@@ -79,40 +113,55 @@ export function cache(options: CacheOptions = {}): Plugin & {
     }
 
     // Cache miss or expired
-    store.delete(k);
+    dropKey(k);
     const result = next();
+
+    function store_(r: CommandResult): void {
+      // Every later hit gets this exact object back — see freeze.ts.
+      store.set(k, { result: freezeCached(r), expiresAt: Date.now() + ttl, action: cmd.action });
+      remember(k, cmd.action);
+      evictIfNeeded();
+    }
 
     // Handle async results (Promise from async bus)
     if (result && typeof result.then === 'function') {
       return result.then((r: CommandResult) => {
-        if (r.ok) {
-          store.set(k, { result: r, expiresAt: Date.now() + ttl });
-          evictIfNeeded();
-        }
+        if (r.ok) store_(r);
         return r;
       });
     }
 
-    if (result.ok) {
-      store.set(k, { result, expiresAt: Date.now() + ttl });
-      evictIfNeeded();
-    }
+    if (result.ok) store_(result);
     return result;
   };
 
   return Object.assign(plugin, {
     invalidate(action: string, target?: any): void {
       if (target !== undefined) {
-        const k = commandKey(action, target);
-        store.delete(k);
-      } else {
-        // Invalidate all entries for this action
-        const keysToDelete: string[] = [];
-        store.forEach((_v, k) => { if (k.startsWith(action + ':')) keysToDelete.push(k); });
-        for (const k of keysToDelete) store.delete(k);
+        // Targeted invalidation needs the entry's exact key, and a custom
+        // `key` fn receives the whole Command — payload included — so there is
+        // nothing to recompute from (action, target) alone. Say so instead of
+        // deleting nothing quietly; action-wide invalidation below still works.
+        if (keyFn) {
+          if (DEV) {
+            console.warn(
+              `[vapor-chamber] cache().invalidate("${action}", target) cannot address entries stored ` +
+                'under a custom `key` function — the key may depend on the payload. ' +
+                `Use invalidate("${action}") to clear every entry for the action.`,
+            );
+          }
+          return;
+        }
+        dropKey(commandKey(action, target));
+        return;
       }
+      // Invalidate all entries for this action — index-driven, so it holds for
+      // any key shape.
+      const keys = byAction.get(action);
+      if (!keys) return;
+      for (const k of [...keys]) dropKey(k);
     },
-    clear(): void { store.clear(); },
+    clear(): void { store.clear(); byAction.clear(); },
     size(): number { return store.size; },
   });
 }

@@ -274,6 +274,7 @@ export {
 export {
   createSSRPlugin,
   rehydrate,
+  rehydrateAsync,
   type DehydratedCommand,
   type SSRPluginOptions,
   type SSRPlugin,

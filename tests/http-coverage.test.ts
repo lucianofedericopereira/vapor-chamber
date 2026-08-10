@@ -21,7 +21,7 @@ import {
   readCsrfToken,
   invalidateCsrfCache,
 } from '../src/http';
-import { clearAllCache, getCached, getCachedAny, invalidateCacheByPattern, setCache } from '../src/http-cache';
+import { createResponseCache } from '../src/http-cache';
 
 // ---------------------------------------------------------------------------
 // Fetch mock helper (mirrors the existing test files)
@@ -47,8 +47,9 @@ function jsonResponse(status: number, body: unknown) {
 }
 
 beforeEach(() => {
+  // No global cache reset: each createHttpClient() owns its cache, so tests
+  // are isolated by construction (item 6).
   invalidateCsrfCache();
-  clearAllCache();
   vi.stubGlobal('fetch', vi.fn());
 });
 
@@ -492,61 +493,137 @@ describe('createHttpClient — safe.put/patch/delete (743-745)', () => {
   });
 });
 
-describe('http cache — LRU eviction at the size ceiling', () => {
+describe('response cache — per-instance LRU', () => {
   it('evicts the LEAST RECENTLY USED entry, not simply the oldest', () => {
-    clearAllCache();
-    for (let i = 0; i < 50; i++) setCache(`key-${i}`, { i }, 60_000); // fills to CACHE_MAX_SIZE
+    const cache = createResponseCache();
+    for (let i = 0; i < 50; i++) cache.set(`key-${i}`, { i }, 60_000); // fills to CACHE_MAX_SIZE
 
     // Reading key-0 promotes it to most-recently-used, so key-1 becomes the
     // eviction candidate. This is what makes it an LRU rather than a FIFO.
-    expect(getCached('key-0')).not.toBeNull();
+    expect(cache.get('key-0')).not.toBeNull();
 
-    setCache('key-50', { i: 50 }, 60_000); // 51st insert → one eviction
-    expect(getCached('key-1')).toBeNull(); // the least recently used went
-    expect(getCached('key-0')).not.toBeNull(); // the recently read one stayed
-    expect(getCached('key-50')).not.toBeNull();
-    clearAllCache();
+    cache.set('key-50', { i: 50 }, 60_000); // 51st insert → one eviction
+    expect(cache.get('key-1')).toBeNull(); // the least recently used went
+    expect(cache.get('key-0')).not.toBeNull(); // the recently read one stayed
+    expect(cache.get('key-50')).not.toBeNull();
+  });
+
+  // Item 6: the maps used to be module-level, so every client shared one
+  // cache and one dedupe map — an instance illusion, and under concurrent SSR
+  // a cross-request leak (the key has no auth/cookie dimension).
+  it('two caches are independent — one clear() cannot empty the other', () => {
+    const a = createResponseCache();
+    const b = createResponseCache();
+    a.set('json:/api/me', { user: 'A' }, 60_000);
+    b.set('json:/api/me', { user: 'B' }, 60_000);
+
+    expect(a.get('json:/api/me')?.data).toEqual({ user: 'A' });
+    expect(b.get('json:/api/me')?.data).toEqual({ user: 'B' });
+
+    a.clear();
+    expect(a.get('json:/api/me')).toBeNull();
+    expect(b.get('json:/api/me')?.data).toEqual({ user: 'B' });
+  });
+
+  it('in-flight dedupe is per instance too', async () => {
+    const a = createResponseCache();
+    const b = createResponseCache();
+    const promise = Promise.resolve('A');
+    a.setInflight('GET:json:/api/me', promise);
+
+    expect(a.getInflight('GET:json:/api/me')).toBe(promise);
+    expect(b.getInflight('GET:json:/api/me')).toBeUndefined();
+    await promise;
   });
 });
 
-describe('getCachedAny — last-resort lookup for cache.serveStaleOnError', () => {
-  afterEach(() => clearAllCache());
-
-  it('returns the entry even past its stale window (getCached would call it a miss)', () => {
-    setCache('json:/api/x', { x: 1 }, /* ttl */ -1, /* staleTtl */ 0); // already expired
-    expect(getCached('json:/api/x')).toBeNull(); // ordinary lookup: a miss
-    expect(getCachedAny('json:/api/x')).toMatchObject({ data: { x: 1 } }); // last resort: still there
+describe('getAny — last-resort lookup for cache.serveStaleOnError', () => {
+  it('returns the entry even past its stale window (get would call it a miss)', () => {
+    const cache = createResponseCache();
+    cache.set('json:/api/x', { x: 1 }, /* ttl */ -1, /* staleTtl */ 0); // already expired
+    expect(cache.get('json:/api/x')).toBeNull(); // ordinary lookup: a miss
+    expect(cache.getAny('json:/api/x')).toMatchObject({ data: { x: 1 } }); // last resort: still there
   });
 
   it('returns null on a genuine miss', () => {
-    expect(getCachedAny('json:/api/never-set')).toBeNull();
+    expect(createResponseCache().getAny('json:/api/never-set')).toBeNull();
   });
 });
 
-describe('invalidateCacheByPattern', () => {
-  afterEach(() => clearAllCache());
-
+describe('cache.invalidate', () => {
   it('removes entries whose URL (not the responseType prefix) matches a RegExp', () => {
-    setCache('json:/api/users/1', { id: 1 }, 60_000);
-    setCache('json:/api/users/2', { id: 2 }, 60_000);
-    setCache('json:/api/orders/1', { id: 1 }, 60_000);
+    const cache = createResponseCache();
+    cache.set('json:/api/users/1', { id: 1 }, 60_000);
+    cache.set('json:/api/users/2', { id: 2 }, 60_000);
+    cache.set('json:/api/orders/1', { id: 1 }, 60_000);
 
-    invalidateCacheByPattern(/^\/api\/users/);
+    cache.invalidate(/^\/api\/users/);
 
-    expect(getCachedAny('json:/api/users/1')).toBeNull();
-    expect(getCachedAny('json:/api/users/2')).toBeNull();
-    expect(getCachedAny('json:/api/orders/1')).not.toBeNull(); // untouched
+    expect(cache.getAny('json:/api/users/1')).toBeNull();
+    expect(cache.getAny('json:/api/users/2')).toBeNull();
+    expect(cache.getAny('json:/api/orders/1')).not.toBeNull(); // untouched
   });
 
-  it('accepts a plain string pattern, constructed into a RegExp', () => {
-    setCache('json:/api/orders/1', { id: 1 }, 60_000);
-    invalidateCacheByPattern('/api/orders');
-    expect(getCachedAny('json:/api/orders/1')).toBeNull();
+  it('treats a plain string as a literal substring', () => {
+    const cache = createResponseCache();
+    cache.set('json:/api/orders/1', { id: 1 }, 60_000);
+    cache.invalidate('/api/orders');
+    expect(cache.getAny('json:/api/orders/1')).toBeNull();
   });
 
   it('is a no-op when nothing matches', () => {
-    setCache('json:/api/orders/1', { id: 1 }, 60_000);
-    invalidateCacheByPattern(/^\/api\/nothing-here/);
-    expect(getCachedAny('json:/api/orders/1')).not.toBeNull();
+    const cache = createResponseCache();
+    cache.set('json:/api/orders/1', { id: 1 }, 60_000);
+    cache.invalidate(/^\/api\/nothing-here/);
+    expect(cache.getAny('json:/api/orders/1')).not.toBeNull();
+  });
+
+  // Item 9: `new RegExp(pattern)` on a plain string threw on this library's
+  // OWN output — buildFullUrl serializes arrays as `ids[0]=`, so the key holds
+  // a literal `[`.
+  it('does not throw on a URL containing regex metacharacters', () => {
+    const cache = createResponseCache();
+    cache.set('json:/api/products?ids[0]=1&ids[1]=2', { ok: true }, 60_000);
+
+    expect(() => cache.invalidate('/api/products?ids[0]=1&ids[1]=2')).not.toThrow();
+    expect(cache.getAny('json:/api/products?ids[0]=1&ids[1]=2')).toBeNull();
+  });
+
+  it('matches a query string literally instead of treating ? as a quantifier', () => {
+    const cache = createResponseCache();
+    cache.set('json:/api/products?page=1', { page: 1 }, 60_000);
+    cache.set('json:/api/productsage=1', { decoy: true }, 60_000);
+
+    cache.invalidate('/api/products?page=1');
+
+    expect(cache.getAny('json:/api/products?page=1')).toBeNull();
+    // `?` as a quantifier made '/api/product' + 'sage=1' a match — it is not.
+    expect(cache.getAny('json:/api/productsage=1')).not.toBeNull();
+  });
+
+  it('warns in dev when an anchored string looks like an intended regex', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    createResponseCache().invalidate('^/api/users');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('literal'));
+    warn.mockRestore();
+  });
+});
+
+describe('cached responses are immutable in dev (item 8)', () => {
+  it('freezes the stored response and its payload', () => {
+    const cache = createResponseCache();
+    const response = { data: { items: [{ id: 1 }] }, status: 200, ok: true, headers: {} };
+    cache.set('json:/api/items', response, 60_000);
+
+    const hit = cache.get('json:/api/items')?.data as typeof response;
+    // A consumer sorting/deleting in place used to silently rewrite the cache
+    // for every later hit. Now it throws at the mutation site.
+    expect(() => {
+      (hit.data.items as { id: number }[]).push({ id: 2 });
+    }).toThrow();
+    expect(() => {
+      (hit as { status: number }).status = 500;
+    }).toThrow();
+    expect(hit.data.items).toHaveLength(1);
   });
 });

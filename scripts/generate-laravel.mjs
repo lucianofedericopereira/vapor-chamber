@@ -32,6 +32,12 @@ import { pathToFileURL } from 'node:url';
 const FIELD_TYPES = new Set(['string', 'number', 'boolean', 'array', 'object', 'any']);
 
 // FieldType → Laravel validation rule. 'any' means "no rule" (validated as null).
+//
+// `object` and `array` both decode to a PHP array, so `required|array` alone
+// cannot tell a JSON object from a JSON list — and `schemaValidator` on the TS
+// side rejects an array for an `'object'` field (JSON Schema semantics). An
+// extra `array_is_list` check keeps the two sides of the SAME schema agreeing;
+// without it a payload the browser refuses would sail through the server.
 const RULES = {
   string: 'required|string',
   number: 'required|numeric',
@@ -40,6 +46,15 @@ const RULES = {
   object: 'required|array',
   any: null,
 };
+
+/** Field types needing a rule the string syntax can't express. */
+const OBJECT_SHAPE_RULE = [
+  "['required', 'array', function (string $attribute, mixed $value, \\Closure $fail): void {",
+  '    if (array_is_list($value)) {',
+  '        $fail("The {$attribute} field must be an object, not a list.");',
+  '    }',
+  '}]',
+];
 
 // ---------------------------------------------------------------------------
 // Naming — mirrors src/schema.ts normalizeSchema() so PHP names match the bus
@@ -170,7 +185,7 @@ function validationRules(def) {
   const rules = [];
   for (const section of ['target', 'payload']) {
     for (const [field, type] of Object.entries(def[section] ?? {})) {
-      if (RULES[type]) rules.push([`${section}.${field}`, RULES[type]]);
+      if (RULES[type]) rules.push([`${section}.${field}`, RULES[type], type === 'object']);
     }
   }
   return rules;
@@ -203,7 +218,15 @@ function renderActionClass(action, def, namespace) {
       '        Validator::make(',
       "            ['target' => $target, 'payload' => $payload],",
       '            [',
-      ...rules.map(([key, rule]) => `                ${phpString(key)} => ${phpString(rule)},`),
+      ...rules.flatMap(([key, rule, isObject]) =>
+        isObject
+          ? [
+              `                ${phpString(key)} => ${OBJECT_SHAPE_RULE[0]}`,
+              ...OBJECT_SHAPE_RULE.slice(1, -1).map((line) => `                ${line}`),
+              `                ${OBJECT_SHAPE_RULE[OBJECT_SHAPE_RULE.length - 1]},`,
+            ]
+          : [`                ${phpString(key)} => ${phpString(rule)},`],
+      ),
       '            ],',
       '        )->validate();',
       '',

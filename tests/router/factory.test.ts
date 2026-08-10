@@ -113,6 +113,118 @@ describe('createRouter — public methods', () => {
     expect(onErr).toHaveBeenCalled();
   });
 
+  // Items 15 + 30 — after-hooks are post-commit observers. They must not be
+  // able to un-commit a navigation, and removing one must not skip its
+  // neighbour.
+  it('a throwing afterEach hook does not un-commit the navigation', async () => {
+    const onErr = vi.fn();
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const router = makeRouter();
+    router.onError(onErr);
+    router.afterEach(() => {
+      throw new Error('analytics blew up');
+    });
+    const second = vi.fn();
+    router.afterEach(second);
+
+    await router.isReady();
+    const result = await router.push('/list');
+
+    expect(result).toBeNull(); // was a component_load_failed RouterError
+    expect(router.currentRoute.value.location.name).toBe('list'); // stayed committed
+    expect(onErr).not.toHaveBeenCalled(); // no phantom failure reported
+    expect(second).toHaveBeenCalled(); // containment is per hook
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('afterEach hook threw'), expect.anything());
+    error.mockRestore();
+  });
+
+  it('a one-shot afterEach does not skip the next hook', async () => {
+    const router = makeRouter();
+    await router.isReady(); // register after the initial navigation, so exactly one nav is under test
+
+    const second = vi.fn();
+    const off = router.afterEach(() => {
+      off(); // the one-shot pattern: "do this on the next navigation only"
+    });
+    router.afterEach(second);
+
+    await router.push('/list');
+
+    expect(second).toHaveBeenCalledTimes(1); // was 0 — the splice shifted it past
+  });
+
+  it('a self-removing beforeEach guard does not skip the next guard', async () => {
+    const router = makeRouter();
+    await router.isReady();
+
+    const second = vi.fn(() => true);
+    const off = router.beforeEach(() => {
+      off();
+      return true;
+    });
+    router.beforeEach(second);
+
+    await router.push('/list');
+
+    expect(second).toHaveBeenCalledTimes(1); // was 0 — never called on this navigation
+    expect(router.currentRoute.value.location.name).toBe('list');
+  });
+
+  // Item 12 was filed on the premise that `afterEach` fires on query-only
+  // commits, making the full-document active-link walk a per-keystroke cost
+  // for a `setQuery`-driven search box. Measured: it does not. The engine's
+  // query fast path returns before the after-hook loop, so stamping runs on
+  // path changes only — which is also the correct behaviour, since the stamps
+  // derive from `location.path` alone. Pinned here so the premise can't
+  // silently become true.
+  it('after-hooks (and so active-link stamping) run on path changes only', async () => {
+    document.body.innerHTML = '<a href="/admin/list">List</a><a href="/admin/">Home</a>';
+    const router = createRouter({
+      base: '/admin',
+      history: createMemoryHistory('/admin'),
+      routes: [
+        { name: 'home', path: '/', component: 'Home' },
+        { name: 'list', path: '/list', component: 'List', query: { q: {} } },
+      ],
+      components: {
+        Home: defineComponent({ render: () => h('span', 'home') }),
+        List: defineComponent({ render: () => h('span', 'list') }),
+      },
+    });
+    await router.isReady();
+    await router.push('/list');
+
+    const real = document.querySelectorAll.bind(document);
+    let walks = 0;
+    const spy = vi.spyOn(document, 'querySelectorAll').mockImplementation((selector: string) => {
+      if (selector === 'a[href]') walks++;
+      return real(selector);
+    });
+    const after = vi.fn();
+    router.afterEach(after);
+
+    router.setQuery({ q: 'sh' });
+    router.setQuery({ q: 'sho' });
+    await new Promise((r) => setTimeout(r, 20));
+    await router.push('/list?q=shoe'); // query-only via push() takes the same fast path
+
+    expect(router.currentRoute.value.location.query.q).toBe('shoe'); // the commits happened
+    expect(after).not.toHaveBeenCalled();
+    expect(walks).toBe(0);
+
+    await router.push('/'); // a real path change
+    expect(after).toHaveBeenCalledTimes(1);
+    expect(walks).toBe(1);
+
+    // …and the stamps are right, which is why skipping query commits is safe.
+    const list = document.querySelector('a[href="/admin/list"]') as HTMLAnchorElement;
+    expect(list.hasAttribute('data-active')).toBe(false);
+
+    spy.mockRestore();
+    router.destroy();
+    document.body.innerHTML = '';
+  });
+
   it('setRoutes swaps the table; resolve builds hrefs', async () => {
     const router = makeRouter();
     await router.isReady();

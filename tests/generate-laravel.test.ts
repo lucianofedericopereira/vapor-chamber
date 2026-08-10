@@ -112,7 +112,14 @@ describe('generate-laravel — schema → Laravel backend codegen', () => {
 
     const orderCreate = readFileSync(actionPath('OrderCreate'), 'utf8');
     expect(orderCreate).toContain("'payload.items' => 'required|array',");
-    expect(orderCreate).toContain("'payload.options' => 'required|array',");
+    // An 'object' field gets more than `required|array`: a decoded JSON list
+    // and a decoded JSON object are BOTH PHP arrays, and schemaValidator on
+    // the TS side rejects a list for an 'object' field — so without the extra
+    // check a payload the browser refuses would pass on the server. The two
+    // sides of one schema have to agree.
+    expect(orderCreate).toContain("'payload.options' => ['required', 'array', function");
+    expect(orderCreate).toContain('array_is_list($value)');
+    expect(orderCreate).toContain('must be an object, not a list');
   });
 
   it('emits a Gate::forUser($user)->authorize(...) call ahead of validation when "authorize" is set', () => {

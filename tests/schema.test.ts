@@ -360,6 +360,104 @@ describe('schemaValidator', () => {
     bus.dispatch('cartAdd', { id: 'wrong' }, { qty: 1 });
     expect(handler).not.toHaveBeenCalled();
   });
+
+  // Item 32a: both guards were `typeof x === 'object'`, so a non-object value
+  // bypassed the whole block and reached the handler malformed. Required-ness
+  // was enforced only for callers who already passed an object — and the
+  // caller class this gate exists for (an LLM, via the MCP layer's raw
+  // `args?.payload`) is exactly the one that sends a string where an object
+  // belongs.
+  describe('non-object target/payload (item 32a)', () => {
+    const cases: Array<[string, unknown]> = [
+      ['null', null],
+      ['a number', 42],
+      ['a string', 'oops'],
+      ['an array', [1, 2]],
+    ];
+
+    for (const [label, value] of cases) {
+      it(`rejects ${label} target against a fielded schema`, () => {
+        const bus = createCommandBus();
+        bus.use(schemaValidator(cartSchema));
+        const handler = vi.fn(() => 'ok');
+        bus.register('cartAdd', handler);
+
+        const result = bus.dispatch('cartAdd', value, { qty: 1 });
+        expect(result.ok).toBe(false);
+        expect(result.error?.message).toContain('target: expected object');
+        expect(handler).not.toHaveBeenCalled();
+      });
+
+      it(`rejects ${label} payload against a fielded schema`, () => {
+        const bus = createCommandBus();
+        bus.use(schemaValidator(cartSchema));
+        const handler = vi.fn(() => 'ok');
+        bus.register('cartAdd', handler);
+
+        const result = bus.dispatch('cartAdd', { id: 1 }, value);
+        expect(result.ok).toBe(false);
+        expect(result.error?.message).toContain('payload: expected object');
+        expect(handler).not.toHaveBeenCalled();
+      });
+    }
+
+    it('an ABSENT payload still passes when the schema declares one', () => {
+      // undefined is not "the wrong shape", it is "not provided" — and the MCP
+      // tool schema only requires `payload` for actions that declare one, so
+      // this stays the documented skip.
+      const bus = createCommandBus();
+      bus.use(schemaValidator(cartSchema));
+      bus.register('cartClear', () => 'ok');
+
+      expect(bus.dispatch('cartClear', { force: true }).ok).toBe(true);
+    });
+  });
+
+  // Item 32b: `'object'` was excluded from BOTH the array branch and the
+  // typeof branch, so it was presence-checked only.
+  describe("'object' fields are type-checked (item 32b)", () => {
+    const searchSchema: BusSchema = {
+      search: { target: { q: 'string' }, payload: { filters: 'object' } },
+    };
+
+    it('rejects a number where an object is declared', () => {
+      const bus = createCommandBus();
+      bus.use(schemaValidator(searchSchema));
+      bus.register('search', () => 'ok');
+
+      const result = bus.dispatch('search', { q: 'shoes' }, { filters: 42 });
+      expect(result.ok).toBe(false);
+      expect(result.error?.message).toContain('filters: expected object, got number');
+    });
+
+    it('rejects an array where an object is declared (JSON Schema semantics)', () => {
+      const bus = createCommandBus();
+      bus.use(schemaValidator(searchSchema));
+      bus.register('search', () => 'ok');
+
+      const result = bus.dispatch('search', { q: 'shoes' }, { filters: [1, 2] });
+      expect(result.ok).toBe(false);
+      expect(result.error?.message).toContain('filters: expected object, got array');
+    });
+
+    it('rejects null where an object is declared', () => {
+      const bus = createCommandBus();
+      bus.use(schemaValidator(searchSchema));
+      bus.register('search', () => 'ok');
+
+      const result = bus.dispatch('search', { q: 'shoes' }, { filters: null });
+      expect(result.ok).toBe(false);
+      expect(result.error?.message).toContain('filters: expected object, got null');
+    });
+
+    it('accepts a plain object', () => {
+      const bus = createCommandBus();
+      bus.use(schemaValidator(searchSchema));
+      bus.register('search', () => 'ok');
+
+      expect(bus.dispatch('search', { q: 'shoes' }, { filters: { color: 'red' } }).ok).toBe(true);
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

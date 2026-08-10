@@ -2,9 +2,9 @@
  * Tests for ssr.ts — createSSRPlugin + rehydrate
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { createCommandBus, setCommandBus, resetCommandBus } from '../src';
-import { createSSRPlugin, rehydrate } from '../src/ssr';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { createAsyncCommandBus, createCommandBus, setCommandBus, resetCommandBus } from '../src';
+import { createSSRPlugin, rehydrate, rehydrateAsync } from '../src/ssr';
 
 describe('createSSRPlugin', () => {
   let bus: ReturnType<typeof createCommandBus>;
@@ -190,5 +190,107 @@ describe('rehydrate', () => {
   it('handles empty command list', () => {
     const results = rehydrate(bus, []);
     expect(results).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The async bus — the common case as soon as a handler hits a transport, and
+// the one `rehydrate()` silently mishandled: `BaseBus.dispatch` returns `any`,
+// so an AsyncCommandBus type-checks, and pending promises were pushed into
+// `results` typed as CommandResult (`result.ok` → undefined).
+// ---------------------------------------------------------------------------
+
+describe('rehydrate on an async bus', () => {
+  it('refuses instead of pushing pending promises as results', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const bus = createAsyncCommandBus();
+    let ran = 0;
+    bus.register('setUser', async () => {
+      ran++;
+      return 'ok';
+    });
+
+    const results = rehydrate(bus, [{ action: 'setUser', target: { id: 1 } }]);
+
+    expect(results).toHaveLength(1);
+    expect(results[0].ok).toBe(false); // was `undefined` — neither true nor false
+    expect(results[0].error?.message).toContain('rehydrateAsync');
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('rehydrateAsync'));
+    warn.mockRestore();
+    await vi.waitFor(() => expect(ran).toBe(1)); // the dispatch itself still ran
+  });
+
+  it('rehydrateAsync replays in order and resolves real results', async () => {
+    const bus = createAsyncCommandBus();
+    const order: string[] = [];
+    bus.register('first', async () => {
+      await new Promise((r) => setTimeout(r, 5));
+      order.push('first');
+      return 1;
+    });
+    bus.register('second', async () => {
+      order.push('second');
+      return 2;
+    });
+
+    const results = await rehydrateAsync(bus, [
+      { action: 'first', target: {} },
+      { action: 'second', target: {} },
+    ]);
+
+    expect(order).toEqual(['first', 'second']); // sequential, not raced
+    expect(results.map((r) => r.ok)).toEqual([true, true]);
+    expect(results.map((r) => r.value)).toEqual([1, 2]);
+  });
+
+  it('rehydrateAsync turns a rejected replay into { ok: false }, not an unhandled rejection', async () => {
+    const bus = createAsyncCommandBus();
+    bus.register('boom', async () => {
+      throw new Error('transport down');
+    });
+
+    const results = await rehydrateAsync(bus, [{ action: 'boom', target: {} }]);
+
+    expect(results).toHaveLength(1);
+    expect(results[0].ok).toBe(false);
+    expect(results[0].error?.message).toBe('transport down');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// maxCommands: the cap dropped everything past it with no warning and no
+// signal — the client rehydrated partial state and nothing said so.
+// ---------------------------------------------------------------------------
+
+describe('createSSRPlugin — maxCommands truncation', () => {
+  it('warns once and counts what it dropped', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const bus = createCommandBus();
+    const ssr = createSSRPlugin({ maxCommands: 2 });
+    bus.use(ssr.plugin);
+    bus.register('inc', () => 'ok');
+
+    for (let i = 0; i < 5; i++) bus.dispatch('inc', { i });
+
+    expect(ssr.size()).toBe(2);
+    expect(ssr.dehydrate()).toHaveLength(2);
+    expect(ssr.dropped()).toBe(3);
+    expect(warn).toHaveBeenCalledTimes(1); // once, not once per dropped command
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('maxCommands'));
+    warn.mockRestore();
+  });
+
+  it('dropped() is 0 under the cap, and clear() resets it', () => {
+    const bus = createCommandBus();
+    const ssr = createSSRPlugin({ maxCommands: 10 });
+    bus.use(ssr.plugin);
+    bus.register('inc', () => 'ok');
+
+    bus.dispatch('inc', {});
+    expect(ssr.dropped()).toBe(0);
+
+    ssr.clear();
+    expect(ssr.size()).toBe(0);
+    expect(ssr.dropped()).toBe(0);
   });
 });

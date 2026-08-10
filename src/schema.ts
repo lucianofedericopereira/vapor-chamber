@@ -187,6 +187,11 @@ function compileFields(fields: FieldMap): CompiledChecks {
   return checks;
 }
 
+/** True for a plain object — arrays excluded, matching JSON Schema's `object`. */
+function isPlainObject(v: unknown): boolean {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
 function runChecks(checks: CompiledChecks, value: Record<string, any>): string[] {
   const errors: string[] = [];
   for (let i = 0, len = checks.length; i < len; i++) {
@@ -194,12 +199,26 @@ function runChecks(checks: CompiledChecks, value: Record<string, any>): string[]
     const expected = checks[i][1];
     const v = value[key];
     if (v === undefined) { errors.push(`${key}: missing`); continue; }
-    if (expected === 'array' && !Array.isArray(v)) errors.push(`${key}: expected array`);
-    else if (expected !== 'array' && expected !== 'object' && typeof v !== expected) {
+    if (expected === 'array') {
+      if (!Array.isArray(v)) errors.push(`${key}: expected array, got ${describe(v)}`);
+    } else if (expected === 'object') {
+      // `'object'` used to be presence-checked ONLY — excluded from the array
+      // branch and from the typeof branch alike — so `{ filters: 'object' }`
+      // happily accepted `filters: 42`. Arrays do not satisfy `'object'`, per
+      // JSON Schema (and per `InferField`, which maps it to Record<string, any>).
+      if (!isPlainObject(v)) errors.push(`${key}: expected object, got ${describe(v)}`);
+    } else if (typeof v !== expected) {
       errors.push(`${key}: expected ${expected}, got ${typeof v}`);
     }
   }
   return errors;
+}
+
+/** typeof, but distinguishing null and arrays — the two that matter here. */
+function describe(v: unknown): string {
+  if (v === null) return 'null';
+  if (Array.isArray(v)) return 'array';
+  return typeof v;
 }
 
 function validateFields(fields: FieldMap, value: Record<string, any>): string[] {
@@ -248,16 +267,38 @@ export function schemaValidator(schema: BusSchema): Plugin {
       payload: def.payload !== undefined ? compileFields(def.payload) : null,
     });
   }
+  const fail = (action: string, errs: string[]): CommandResult => ({
+    ok: false,
+    error: new Error(`[vapor-chamber] Validation failed for "${action}": ${errs.join(', ')}`),
+  });
   return (cmd, next) => {
     const c = compiled.get(cmd.action);
     if (!c) return next();
-    if (c.target && cmd.target && typeof cmd.target === 'object') {
-      const errs = runChecks(c.target, cmd.target);
-      if (errs.length) return { ok: false, error: new Error(`[vapor-chamber] Validation failed for "${cmd.action}": ${errs.join(', ')}`) };
+    // A NON-OBJECT value must fail, not skip. Both guards used to read
+    // `typeof x === 'object'`, so a schema declaring required fields let
+    // `target: null` / `42` / `"oops"` — or `payload: "large"` against
+    // `{ qty: 'number' }` — bypass the whole block and reach the handler
+    // malformed: required-ness was enforced only for callers who already
+    // passed an object. This gate's most important caller is an LLM (the MCP
+    // layer forwards `args?.payload` raw), i.e. exactly the caller class most
+    // likely to send a string where an object belongs, into the check built to
+    // stop that.
+    if (c.target && c.target.length > 0 && !isPlainObject(cmd.target)) {
+      return fail(cmd.action, [`target: expected object, got ${describe(cmd.target)}`]);
     }
-    if (c.payload && cmd.payload !== undefined && typeof cmd.payload === 'object') {
+    if (c.target && isPlainObject(cmd.target)) {
+      const errs = runChecks(c.target, cmd.target);
+      if (errs.length) return fail(cmd.action, errs);
+    }
+    // An ABSENT payload still skips: `actionToMcpTool` only declares (and
+    // requires) `payload` for actions whose schema has one, and a schema with
+    // no payload fields compiles to zero checks anyway.
+    if (c.payload && c.payload.length > 0 && cmd.payload !== undefined && !isPlainObject(cmd.payload)) {
+      return fail(cmd.action, [`payload: expected object, got ${describe(cmd.payload)}`]);
+    }
+    if (c.payload && isPlainObject(cmd.payload)) {
       const errs = runChecks(c.payload, cmd.payload);
-      if (errs.length) return { ok: false, error: new Error(`[vapor-chamber] Validation failed for "${cmd.action}": ${errs.join(', ')}`) };
+      if (errs.length) return fail(cmd.action, errs);
     }
     return next();
   };

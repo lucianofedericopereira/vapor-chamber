@@ -89,6 +89,59 @@ describe('createWorkflow — adversarial compensation', () => {
     expect(result.compensations?.every((c) => c.ok)).toBe(true);
   });
 
+  // Item 31: steps ran with MAPPED inputs, compensations with the raw workflow
+  // arguments — so a step that derived a sub-entity was compensated against
+  // the parent (or against nothing at all).
+  it('compensates with the mapped target/payload the step actually acted on', async () => {
+    const bus = createCommandBus();
+    const seen: Array<{ action: string; target: unknown; payload: unknown }> = [];
+    const record = (action: string) => (cmd: { target: unknown; payload: unknown }) => {
+      seen.push({ action, target: cmd.target, payload: cmd.payload });
+    };
+
+    bus.register('reserve', record('reserve'));
+    bus.register('releaseReserve', record('releaseReserve'));
+    bus.register('orderCreate', () => {
+      throw new Error('inventory gone');
+    });
+
+    const wf = createWorkflow([
+      {
+        action: 'reserve',
+        compensate: 'releaseReserve',
+        mapTarget: (target: any) => ({ reservationId: `${target.cartId}-res` }),
+        mapPayload: (_t: any, payload: any) => ({ qty: payload.qty }),
+      },
+      { action: 'orderCreate' },
+    ]);
+
+    const result = await wf.run(bus, { cartId: 'cart-7' }, { qty: 3 });
+
+    expect(result.ok).toBe(false);
+    const compensation = seen.find((c) => c.action === 'releaseReserve');
+    // Was { cartId: 'cart-7' } / { qty: 3 } — the raw workflow arguments, so
+    // the release addressed the cart instead of the reservation it created.
+    expect(compensation?.target).toEqual({ reservationId: 'cart-7-res' });
+    expect(compensation?.payload).toEqual({ qty: 3 });
+  });
+
+  it('steps without mappers compensate exactly as before', async () => {
+    const bus = createCommandBus();
+    const seen: unknown[] = [];
+    bus.register('a', () => 1);
+    bus.register('undoA', (cmd) => {
+      seen.push(cmd.target);
+    });
+    bus.register('b', () => {
+      throw new Error('nope');
+    });
+
+    const wf = createWorkflow([{ action: 'a', compensate: 'undoA' }, { action: 'b' }]);
+    await wf.run(bus, { id: 1 }, { note: 'x' });
+
+    expect(seen).toEqual([{ id: 1 }]); // unchanged: mapped === raw
+  });
+
   it('all steps succeed → ok, no compensations', async () => {
     const bus = createCommandBus();
     bus.register('a', () => 1);

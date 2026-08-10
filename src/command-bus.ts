@@ -251,7 +251,12 @@ export type BatchOptions = {
    * skips it entirely; aborting mid-flight stops further commands from
    * dispatching (the in-flight one runs to completion since per-command
    * abort already happened or is the handler's responsibility) and the
-   * batch result is `{ ok: false, error: AbortError, results: [...partial] }`.
+   * batch result is
+   * `{ ok: false, error: BusError('VC_CORE_ABORTED'), results: [...partial] }`
+   * — a BusError rather than the raw DOMException so the code is queryable
+   * (see `abortedResult`; a caller-supplied `signal.reason` is passed through
+   * unchanged). Under `transactional`, rollback runs first and
+   * `successCount` is reported as 0.
    * Async bus only — sync `dispatchBatch` accepts the option for type
    * uniformity but ignores it.
    */
@@ -628,17 +633,43 @@ async function tryCatchAsyncHandler(handler: AsyncHandler, cmd: Command): Promis
   catch (e) { return errResult(e as Error); }
 }
 
-/** Stamp a command with auto-generated metadata. */
+/**
+ * Stamp a command with auto-generated metadata.
+ *
+ * The `__`-prefixed payload keys are the established convention for
+ * per-dispatch meta without a signature change: they travel **with** the
+ * dispatch rather than beside it.
+ *
+ * `__origin` was added for a family of four bugs that all shared one shape —
+ * a module-level flag set before a dispatch and cleared in `finally`
+ * (`_mcpDispatching` in mcp.ts, `receiving` in sync(), `paused` in redo(),
+ * and the reaction guard). On a sync bus the dispatch completes inside the
+ * `try`, so the flag holds and the tests pass. On an **async** bus the
+ * dispatch returns a pending promise, the plugin chain runs a microtask later,
+ * and `finally` has already fired — so the flag was cleared before the thing
+ * it was guarding happened. The failure modes ranged from misattributed audit
+ * origins to an infinite cross-tab broadcast loop. A marker on the dispatch is
+ * race-free by construction, and one fix site serves all of them.
+ */
 function stampMeta(payload: any): CommandMeta {
   // Read __causationId once — it is both `causationId` and `correlationId`'s fallback.
   // V8 does not CSE the repeated optional-chain read (measured ~5–9% on an isolated A/B with
   // the common no-ids payload; end-to-end it's within noise, dwarfed by uid()/Date.now()).
   // Behavior-identical; reading once also avoids a double getter invocation on exotic payloads.
-  // Field set/order unchanged — hidden class preserved for monomorphic dispatch.
+  // `origin` is always present (undefined when unset) rather than conditionally
+  // added — one field set, one hidden class, monomorphic dispatch preserved.
   const causationId = payload?.__causationId;
   const correlationId = payload?.__correlationId ?? causationId;
-  return { ts: Date.now(), id: uid(), correlationId, causationId };
+  return { ts: Date.now(), id: uid(), correlationId, causationId, origin: payload?.__origin };
 }
+
+/**
+ * Internal — exported for `testing.ts` so the TestBus stamps the same meta the
+ * real buses do. Underscored: not public API, not in the docs, may change.
+ * Duplicating the `__`-key convention in the double is exactly how the double
+ * drifts from the thing it doubles.
+ */
+export { stampMeta as _stampMeta };
 
 function validateNaming(action: string, naming?: NamingConvention): void {
   if (!naming) return;
@@ -661,8 +692,16 @@ function isWildcardPattern(pattern: string): boolean {
 
 /**
  * Walk listener buckets for an action. Exact-match bucket is O(1) lookup; wildcard
- * bucket is walked with matchesPattern. Both loops handle in-flight unsubscribe
- * via the lenBefore/i-- pattern (a listener may remove itself or peers).
+ * bucket is walked with matchesPattern. Both loops survive in-flight
+ * unsubscribe (a listener may remove itself or peers).
+ *
+ * The cursor is corrected by IDENTITY, not by length. The older `if (len <
+ * lenBefore) i--` shape handled self-removal but over-corrected the other
+ * direction: a listener that removed a LATER peer shrank the array without
+ * moving anything at or before `i`, so the decrement re-invoked the listener
+ * that had just run — a duplicate side effect on every dispatch that hit that
+ * shape. `bucket[i] !== listener` is the exact test for "the cursor moved",
+ * and subtracting the full shrinkage handles removing several at once.
  */
 function fanOutListeners(
   exact: Map<string, Listener[]>,
@@ -675,8 +714,9 @@ function fanOutListeners(
   if (ex !== undefined) {
     for (let i = 0; i < ex.length; i++) {
       const lenBefore = ex.length;
-      try { ex[i](cmd, result); } catch (e) { console.error('[vapor-chamber] Listener error:', e); }
-      if (ex.length < lenBefore) i--;
+      const listener = ex[i];
+      try { listener(cmd, result); } catch (e) { console.error('[vapor-chamber] Listener error:', e); }
+      if (ex.length < lenBefore && ex[i] !== listener) i -= lenBefore - ex.length;
     }
   }
   for (let i = 0; i < wild.length; i++) {
@@ -684,7 +724,7 @@ function fanOutListeners(
     if (matchesPattern(entry.pattern, action)) {
       const lenBefore = wild.length;
       try { entry.listener(cmd, result); } catch (e) { console.error('[vapor-chamber] Listener error:', e); }
-      if (wild.length < lenBefore) i--;
+      if (wild.length < lenBefore && wild[i] !== entry) i -= lenBefore - wild.length;
     }
   }
 }
@@ -862,14 +902,36 @@ function wrapThrottle(handler: Handler | AsyncHandler, wait: number, timers: Set
 // Sync runner
 // ---------------------------------------------------------------------------
 
+// `next` is index-parameterized: each level's continuation captures its own
+// position, so the chain does not depend on when — or how often — a plugin
+// calls it.
+//
+// The old shared cursor (`plugins[i++]` closed over one `i`) broke on
+// RE-INVOCATION: `retry()` calls `next()` once per attempt, so attempt 1
+// exhausted the index and attempt 2 fell straight through to `execute()`,
+// silently skipping every plugin downstream of retry — the HTTP bridge,
+// logging, metrics, cache, idempotent stamping.
+//
+// PERF NOTE, and the reason this is not the cheaper shape: one closure per
+// plugin level per dispatch costs ~13.5% on the documented hot-path row
+// ("syncDispatch — 3 plugins + 1 listener", interleaved same-machine A/B:
+// ~1261 → ~1090 ops/s). A save/restore cursor (`level = idx` in a `finally`)
+// measures identical to the old shared cursor and is re-entrant — but it is
+// WRONG, and the suite says so: `debounce`/`throttle` call `next()` from a
+// timer, long after `plugin(cmd, next)` returned and the `finally` restored
+// the cursor, so the deferred call re-enters the debounce plugin itself and
+// the handler never runs (`tests/plugins.test.ts` "should debounce specified
+// actions", `tests/plugins-core-coverage.test.ts`). The old shared cursor
+// survived debounce only by accident — its exhausted index happened to land
+// on `execute()`. Deferred continuations are a first-class case here, so
+// correctness takes the 13.5%.
 export function buildRunner(plugins: Plugin[]) {
   return function run(cmd: Command, execute: () => CommandResult): CommandResult {
-    let i = 0;
-    function next(): CommandResult {
-      const plugin = plugins[i++];
-      return plugin ? plugin(cmd, next) : execute();
+    function nextFrom(idx: number): CommandResult {
+      const plugin = plugins[idx];
+      return plugin ? plugin(cmd, () => nextFrom(idx + 1)) : execute();
     }
-    return next();
+    return nextFrom(0);
   };
 }
 
@@ -1153,7 +1215,25 @@ function syncEmit(s: SyncState, event: string, data?: any): void {
   fanOutListeners(s.exactListeners, s.wildcardListeners, event, cmd, EMIT_RESULT);
 }
 
+/**
+ * `BatchOptions` documents `transactional` as "mutually exclusive with
+ * `continueOnError`", but nothing enforced it: code order silently let
+ * transactional win, so a caller who set both got all-or-nothing semantics
+ * while reading their own options as best-effort. Loud in dev, per the
+ * house convention.
+ */
+function warnBatchOptionConflict(opts: BatchOptions): void {
+  if (_devMode && opts.transactional && opts.continueOnError) {
+    console.warn(
+      '[vapor-chamber] dispatchBatch({ transactional: true, continueOnError: true }) — these are ' +
+        'mutually exclusive. `transactional` wins: the batch stops at the first failure and rolls back. ' +
+        'Drop one of the two.',
+    );
+  }
+}
+
 function syncDispatchBatch(s: SyncState, commands: BatchCommand[], opts: BatchOptions = {}): BatchResult {
+  warnBatchOptionConflict(opts);
   const results: CommandResult[] = [];
   let firstError: Error | undefined;
   let failCount = 0;
@@ -1398,14 +1478,24 @@ export function createCommandBus<M extends CommandMap = CommandMap>(options: Com
 // Async runner
 // ---------------------------------------------------------------------------
 
+// Same shape and same reasoning as `buildRunner` above — and here a
+// save/restore cursor would be unsound for a second reason on top of deferred
+// continuations: `plugin(cmd, next)` returns a PENDING PROMISE, so a `finally`
+// fires while the chain below is still running. That is exactly the
+// flag-across-await bug this release replaced with `__origin` elsewhere.
+//
+// The async case is also the one that bites hardest: `retry()` +
+// `createHttpBridge` is the canonical pairing, and with a shared cursor
+// attempt 2 skipped the bridge entirely, reporting a local outcome the server
+// never saw. The async path is dominated by the awaits around it, so the
+// per-level closure does not register here.
 function buildAsyncRunner(plugins: AsyncPlugin[]) {
   return function run(cmd: Command, execute: () => Promise<CommandResult>): Promise<CommandResult> {
-    let i = 0;
-    function next(): CommandResult | Promise<CommandResult> {
-      const plugin = plugins[i++];
-      return plugin ? plugin(cmd, next) : execute();
+    function nextFrom(idx: number): CommandResult | Promise<CommandResult> {
+      const plugin = plugins[idx];
+      return plugin ? plugin(cmd, () => nextFrom(idx + 1)) : execute();
     }
-    return Promise.resolve(next());
+    return Promise.resolve(nextFrom(0));
   };
 }
 
@@ -1547,6 +1637,7 @@ function asyncEmit(s: AsyncState, event: string, data?: any): void {
 }
 
 async function asyncDispatchBatch(s: AsyncState, commands: BatchCommand[], opts: BatchOptions = {}): Promise<BatchResult> {
+  warnBatchOptionConflict(opts);
   const signal = opts.signal;
   const results: CommandResult[] = [];
   let firstError: Error | undefined;

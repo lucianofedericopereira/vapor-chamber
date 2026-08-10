@@ -31,7 +31,7 @@ import type {
   PluginOptions, BatchCommand, BatchResult, CommandBus,
   Listener, RegisterOptions, BusInspection,
 } from './command-bus';
-import { buildRunner, matchesPattern, BusError } from './command-bus';
+import { buildRunner, matchesPattern, BusError, _stampMeta } from './command-bus';
 
 export interface RecordedDispatch {
   cmd: Command;
@@ -130,7 +130,13 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
   }
 
   function _dispatchInner(action: string, target: any, payload?: any): CommandResult {
-    const cmd: Command = { action, target, payload };
+    // Stamped exactly like the real buses. Without meta, every meta consumer
+    // takes its defensive no-op branch under test and NOTHING FAILS — the
+    // `idempotent` plugin never stamps a key, the outbox never sets its replay
+    // key, the HTTP bridge never forwards `Idempotency-Key`. A test wiring
+    // those plugins to a TestBus exercised the degraded path and passed,
+    // verifying nothing about the behaviour it named.
+    const cmd: Command = { action, target, payload, meta: _stampMeta(payload) };
 
     // Run beforeHooks — throw cancels dispatch
     const bh = beforeHooks;
@@ -164,7 +170,7 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
   }
 
   function query(action: string, target: any, payload?: any): CommandResult {
-    const cmd: Command = { action, target, payload };
+    const cmd: Command = { action, target, payload, meta: _stampMeta(payload) };
     // Skip beforeHooks — reads don't trigger mutation gates
     const handler = handlers.get(action);
     const execute = (): CommandResult => {

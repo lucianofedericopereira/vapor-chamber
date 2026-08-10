@@ -117,6 +117,54 @@ describe('vaporChamberHMR', () => {
       expect(result).toBeUndefined();
     });
 
+    // Item 22: three loose guards, one file.
+    it("declares apply: 'serve' — the guard NODE_ENV cannot fool", () => {
+      // `--mode staging` or a programmatic build may never set NODE_ENV, and
+      // if that check misses, the shim + virtual module + globalThis
+      // bus-persistence keys ship in the production bundle. Vite's own
+      // mechanism cannot be fooled: the plugin does not run on build at all.
+      expect(plugin.apply).toBe('serve');
+    });
+
+    it('emits a one-line-shift sourcemap rather than map: null', () => {
+      const code = "import { createCommandBus } from 'vapor-chamber';\nconst bus = createCommandBus();\nbus.dispatch('x', {});";
+      const result = plugin.transform(code, '/src/app.ts');
+
+      expect(result?.map).not.toBeNull();
+      expect(result.map.version).toBe(3);
+      expect(result.map.sources).toEqual(['/src/app.ts']);
+      expect(result.map.sourcesContent).toEqual([code]);
+      // Line 1 of the output is the injected import (unmapped); every original
+      // line then maps one line down, column-for-column.
+      expect(result.map.mappings).toBe(';AAAA;AACA;AACA');
+      // The output really is exactly one line longer.
+      expect(result.code.split('\n')).toHaveLength(code.split('\n').length + 1);
+    });
+
+    it('matches an import, not a passing mention of the package name', () => {
+      // The predicate was `code.includes('vapor-chamber')`, which hits
+      // comments and string literals — while the comment above it claimed
+      // "only the app entry".
+      expect(
+        plugin.transform("// TODO: migrate this to vapor-chamber\nexport const x = 1;", '/src/notes.ts'),
+      ).toBeUndefined();
+      expect(
+        plugin.transform("const docsUrl = 'https://example.test/vapor-chamber';", '/src/links.ts'),
+      ).toBeUndefined();
+
+      // …and still matches the real shapes.
+      expect(plugin.transform("import 'vapor-chamber';", '/src/a.ts')?.code).toContain('virtual:');
+      expect(
+        plugin.transform("import { createCommandBus } from 'vapor-chamber';", '/src/b.ts')?.code,
+      ).toContain('virtual:');
+      expect(
+        plugin.transform("export { retry } from 'vapor-chamber/plugins';", '/src/c.ts')?.code,
+      ).toContain('virtual:');
+      expect(
+        plugin.transform("const m = await import('vapor-chamber/router');", '/src/d.ts')?.code,
+      ).toContain('virtual:');
+    });
+
     it('skips in production', () => {
       vi.stubGlobal('process', { env: { NODE_ENV: 'production' } });
       const result = plugin.transform(

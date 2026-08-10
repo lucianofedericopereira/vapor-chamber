@@ -48,11 +48,11 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
-      # examples/exo-astro/node_modules is gitignored, but tests/examples/
-      # exo-astro-directives.test.ts imports the example's source directly,
-      # and its tsconfig.json extends astro/tsconfigs/base — so Vite's oxc
-      # transform can't load that tsconfig without astro installed.
-      - run: npm ci --prefix examples/exo-astro
+      # No `npm ci --prefix examples/exo-astro` needed: tests/examples/
+      # exo-astro-directives.test.ts imports that example's source directly,
+      # and Vite's oxc transform resolves the nearest tsconfig — which is now
+      # the self-contained examples/exo-astro/src/directives/tsconfig.json.
+      # The root install alone is enough; keep it that way.
       - run: npm run test:run
       - run: node scripts/check-size.mjs
       - run: npm run loc

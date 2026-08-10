@@ -98,3 +98,44 @@ describe('idempotent plugin', () => {
     expect(runs).toBe(2); // 'ping' not in scope → not deduped
   });
 });
+
+// ---------------------------------------------------------------------------
+// done-cache bounds + rejection path
+// ---------------------------------------------------------------------------
+
+describe('idempotent — done-cache eviction and rejection', () => {
+  it('evicts the oldest done entry past maxKeys, so the evicted command re-runs', async () => {
+    const bus = createAsyncCommandBus();
+    bus.use(idempotent({ maxKeys: 1 }));
+    let runs = 0;
+    bus.register('op', async (cmd) => { runs++; return cmd.target.id; });
+
+    await bus.dispatch('op', { id: 'a' });   // cached
+    await bus.dispatch('op', { id: 'b' });   // caches b, evicts a (maxKeys: 1)
+    await bus.dispatch('op', { id: 'a' });   // a was evicted — must run again
+
+    expect(runs).toBe(3);
+
+    // And the still-cached key is served without a re-run:
+    await bus.dispatch('op', { id: 'a' });   // a is now the cached one
+    expect(runs).toBe(3);
+  });
+
+  it('a thrown/rejected dispatch is not cached — the retry genuinely re-runs', async () => {
+    const bus = createAsyncCommandBus();
+    bus.use(idempotent());
+    let attempts = 0;
+    bus.register('flaky', async () => {
+      attempts++;
+      if (attempts === 1) throw new Error('boom');
+      return 'ok';
+    });
+
+    const first = await bus.dispatch('flaky', { id: 1 });
+    expect(first.ok).toBe(false);
+
+    const second = await bus.dispatch('flaky', { id: 1 });
+    expect(second.ok).toBe(true);
+    expect(attempts).toBe(2); // failure was not served from the done cache
+  });
+});

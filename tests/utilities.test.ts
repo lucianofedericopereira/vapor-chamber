@@ -200,8 +200,10 @@ describe('createReaction', () => {
     }).install(bus);
 
     bus.dispatch('src', {});
+    // The reaction also rides `__reactionHops` (cycle cap) and `__causationId`
+    // (tracing) on the payload — same `__`-key convention as the rest of the bus.
     expect(handler).toHaveBeenCalledWith(expect.objectContaining({
-      payload: { echo: 1 },
+      payload: expect.objectContaining({ echo: 1 }),
     }));
   });
 

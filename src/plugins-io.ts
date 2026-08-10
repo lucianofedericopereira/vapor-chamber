@@ -281,8 +281,6 @@ export function sync(
   const localDispatch: ((action: string, target: any, payload?: any) => any) | null =
     busRef?.dispatch ?? null;
 
-  let receiving = false;
-
   function open(): void {
     if (typeof BroadcastChannel === 'undefined') return;
     bc = new BroadcastChannel(channel);
@@ -299,20 +297,65 @@ export function sync(
       }
 
       if (localDispatch) {
-        receiving = true;
-        try { localDispatch(msg.action, msg.target, msg.payload); }
-        finally { receiving = false; }
+        // Echo suppression rides ON the dispatch, not beside it. It used to be
+        // a `receiving = true` flag cleared in a `finally`, which holds only on
+        // a sync bus (the dispatch completes inside the try). On an async bus
+        // `localDispatch` returns a pending promise and the plugin chain runs a
+        // microtask later — after `finally` already cleared the flag.
+        //
+        // MEASURED, and worth recording because it is not what you would
+        // predict: on an async bus that flag never actually mattered, because
+        // the plugin below never broadcast anything at all (it read `.ok` off a
+        // promise). Fixing that no-op is what makes the flag's race reachable —
+        // with the broadcast working and the flag still in place, two tabs
+        // ping-pong forever, every hop a real dispatch through handlers,
+        // plugins and transports. So the marker is a PREREQUISITE for the
+        // no-op fix, not an independent cleanup.
+        //
+        // `__origin` is read by stampMeta, so `meta.origin === 'sync'` is set
+        // before any plugin sees the command, on both bus types.
+        const payload =
+          msg.payload === null || msg.payload === undefined
+            ? { __origin: 'sync' }
+            : typeof msg.payload === 'object' && !Array.isArray(msg.payload)
+              ? { ...msg.payload, __origin: 'sync' }
+              : msg.payload;
+        localDispatch(msg.action, msg.target, payload);
       }
     };
   }
 
   open();
 
+  function broadcast(cmd: Command): void {
+    // A command that arrived FROM another tab must not be sent back out.
+    // `meta.origin` is stamped by the core from the `__origin` key the receive
+    // path dispatches with, so it is already set by the time any plugin runs —
+    // on a sync bus and an async one alike.
+    if (cmd.meta?.origin === 'sync') return;
+    if (filter && !filter(cmd)) return;
+    bc?.postMessage({ __vc: true, action: cmd.action, target: cmd.target, payload: cmd.payload } satisfies SyncMessage);
+  }
+
   const plugin: Plugin = (cmd, next) => {
     const result = next();
-    if (result.ok && !receiving && (!filter || filter(cmd))) {
-      bc?.postMessage({ __vc: true, action: cmd.action, target: cmd.target, payload: cmd.payload } satisfies SyncMessage);
+    // `sync()` is typed as a sync Plugin and installs happily on an
+    // AsyncCommandBus — where `next()` returns a PENDING PROMISE. Reading
+    // `result.ok` on it yields `undefined`, so this plugin used to broadcast
+    // nothing at all on an async bus: cross-tab sync was silently dead, with
+    // no warning, for every setup whose handlers are async. Decide after it
+    // settles instead.
+    if (result !== null && typeof (result as { then?: unknown })?.then === 'function') {
+      (result as unknown as Promise<CommandResult>)
+        .then((settled) => {
+          if (settled?.ok) broadcast(cmd);
+        })
+        .catch(() => {
+          /* a rejected dispatch is not a broadcast-worthy success */
+        });
+      return result;
     }
+    if (result.ok) broadcast(cmd);
     return result;
   };
 

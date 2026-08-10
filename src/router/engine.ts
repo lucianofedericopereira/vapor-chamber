@@ -37,6 +37,10 @@ import type {
 } from './types';
 import { parseQuery, stringifyQuery } from './url';
 
+// Guarded form, same as ./menu.ts / ./table.ts — the router ships to
+// no-bundler contexts where `process` is undefined (see ./index.ts).
+const DEV = typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
+
 export const START_LOCATION: RouteLocation = Object.freeze({
   name: null,
   path: '/',
@@ -74,6 +78,8 @@ export function createEngine(ctx: EngineContext) {
   const snapshot = shallowRef<RouteSnapshot>(Object.freeze({ location: START_LOCATION, render: [], data: EMPTY_DATA }));
   /** True while loaders run (full navigations and query refetches). */
   const isLoading = shallowRef(false);
+  /** True while at least one stale-while-revalidate refresh is in flight. */
+  const isRevalidating = shallowRef(false);
 
   const beforeGuards: NavigationGuard[] = [];
   const afterHooks: AfterEachHook[] = [];
@@ -94,6 +100,44 @@ export function createEngine(ctx: EngineContext) {
   let refetchLoading = false;
   function syncLoading(): void {
     isLoading.value = navLoading || refetchLoading;
+  }
+
+  // Revalidation is a THIRD lane, and deliberately not folded into
+  // `isLoading`: a stale-while-revalidate hit commits real data immediately,
+  // so the page is not loading — it is showing something while a refresh runs
+  // behind it. That distinction is the one thing swrv's `isValidating` names
+  // that this router had no word for. A counter rather than a boolean, since
+  // several records in one chain can revalidate at once.
+  let revalidateCount = 0;
+  function syncRevalidating(): void {
+    isRevalidating.value = revalidateCount > 0;
+  }
+
+  /**
+   * A loader preset serving stale data reports its background refresh here
+   * (`LoaderHandlers.onRevalidate`). The fresh value patches into the snapshot
+   * exactly like a query refetch: only if this location is still the committed
+   * one, and always as a new frozen snapshot.
+   */
+  function trackRevalidation(recordName: string, revalidation: Promise<unknown>, to: RouteLocation): void {
+    revalidateCount++;
+    syncRevalidating();
+    void revalidation
+      .then((fresh) => {
+        const current = snapshot.value;
+        if (current.location.fullPath !== to.fullPath) return; // navigated away — drop it
+        setRouteData(recordName, fresh);
+      })
+      .catch(() => {
+        // A failed background refresh leaves the stale data in place. It is
+        // not a navigation failure and must not reach ctx.onError: the commit
+        // already succeeded, and `cache.serveStaleOnError` exists precisely so
+        // this degrades quietly.
+      })
+      .finally(() => {
+        revalidateCount--;
+        syncRevalidating();
+      });
   }
 
   // ---- location resolution ---------------------------------------------------
@@ -206,10 +250,19 @@ export function createEngine(ctx: EngineContext) {
     navController?.abort();
     refetchController?.abort();
     const own = (navController = new AbortController());
+    let committed = false;
 
     try {
-      for (const guard of beforeGuards) {
-        const verdict = await guard(to, from);
+      // Indexed, not for…of: a guard's unsubscribe closure splices this same
+      // array, so a self-removing guard — `const off = router.beforeEach(() =>
+      // { off(); … })`, the one-shot pattern — shifts it under a live iterator
+      // and the next guard is silently skipped for this navigation. Same
+      // lesson the bus already learned in notifyListeners (lenBefore/i--);
+      // here the loop is async, so the length is compared after each await.
+      for (let i = 0; i < beforeGuards.length; i++) {
+        const lenBefore = beforeGuards.length;
+        const verdict = await beforeGuards[i](to, from);
+        if (beforeGuards.length < lenBefore) i -= lenBefore - beforeGuards.length;
         if (cancelled()) return revert(routerError('cancelled', `navigation to "${to.fullPath}" superseded`, { to }), opts);
         if (verdict === false) return revert(routerError('aborted', `navigation to "${to.fullPath}" refused by guard`, { to }), opts);
         if (verdict && verdict !== true) return navigate(verdict, { replace: opts.replace });
@@ -227,10 +280,22 @@ export function createEngine(ctx: EngineContext) {
       const next: RouteSnapshot = Object.freeze({ location: to, render: Object.freeze(render), data });
       if (!opts.popstate) ctx.history[opts.replace ? 'replace' : 'push'](to.fullPath);
       snapshot.value = next;
+      committed = true;
       ctx.onCommit?.(next, from, { popstate: opts.popstate === true });
-      for (const hook of afterHooks) hook(to, from);
+      runAfterHooks(to, from);
       return null;
     } catch (error) {
+      // A post-commit observer must never re-enter the pre-commit failure
+      // path. `committed` is the boundary: past it the navigation succeeded,
+      // the URL moved, and the snapshot is live — reporting `onError` and
+      // running `revert()` (which on a popstate walks the URL back while the
+      // snapshot still shows the new page) would manufacture a phantom
+      // failure. runAfterHooks contains its own throws, so in practice only
+      // ctx.onCommit can land here after the commit.
+      if (committed) {
+        console.error('[vapor-chamber-router] post-commit hook threw (logged, not fatal)', error);
+        return null;
+      }
       if (cancelled() || isRouterError(error, 'cancelled')) {
         return revert(routerError('cancelled', `navigation to "${to.fullPath}" superseded`, { to }), opts);
       }
@@ -244,6 +309,34 @@ export function createEngine(ctx: EngineContext) {
         navLoading = false;
         syncLoading();
       }
+    }
+  }
+
+  /**
+   * After-hooks are post-commit observers — user surface (`router.afterEach`)
+   * *and* internal (the active-link stamp registers here). Two rules, both
+   * learned elsewhere in this codebase:
+   *
+   * - **Each hook is contained.** One throwing analytics hook used to be
+   *   enough to wrap a committed navigation as `component_load_failed`, fire
+   *   `ctx.onError`, and `revert()` the URL out from under a live snapshot.
+   *   The bus's `notifyListeners` already does it this way ("listener threw
+   *   (logged, not fatal)").
+   * - **Self-removal doesn't skip a neighbour.** The unsubscribe closure
+   *   splices this array, so the one-shot pattern (`const off =
+   *   router.afterEach(() => { off(); … })` — "scroll to top on this next
+   *   navigation") shifted it under a `for…of` iterator. Same lenBefore/i--
+   *   guard as the bus.
+   */
+  function runAfterHooks(to: RouteLocation, from: RouteLocation): void {
+    for (let i = 0; i < afterHooks.length; i++) {
+      const lenBefore = afterHooks.length;
+      try {
+        afterHooks[i](to, from);
+      } catch (error) {
+        console.error('[vapor-chamber-router] afterEach hook threw (logged, not fatal)', error);
+      }
+      if (afterHooks.length < lenBefore) i -= lenBefore - afterHooks.length;
     }
   }
 
@@ -340,6 +433,21 @@ export function createEngine(ctx: EngineContext) {
    *  in hand: a bus command's response, a websocket push, an optimistic
    *  update. Snapshot rules preserved: one new frozen snapshot, reactive. */
   function setRouteData(recordName: string, value: unknown): void {
+    // A typo'd recordName used to create an orphan entry no outlet ever reads
+    // — silent, and off-brand for a router that dev-warns on malformed path
+    // segments and unmatched-URL loops. Dev-trusts-generator cuts the other
+    // way here: loud in dev, lenient in prod. Checked against the compiled
+    // table, which is at hand.
+    if (DEV) {
+      const table = ctx.getTable();
+      if (table && !table.getRecord(recordName)) {
+        console.warn(
+          `[vapor-chamber-router] setRouteData("${recordName}") — no route record by that name. ` +
+            'The value lands in the snapshot but no outlet reads it (useRouteData resolves by record name). ' +
+            'Check the spelling against your route table.',
+        );
+      }
+    }
     const current = snapshot.value;
     const data = new Map(current.data);
     data.set(recordName, value);
@@ -349,6 +457,8 @@ export function createEngine(ctx: EngineContext) {
   return {
     snapshot,
     isLoading,
+    isRevalidating,
+    trackRevalidation,
     navigate,
     resolveLocation,
     handlePop,

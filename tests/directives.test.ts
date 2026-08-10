@@ -286,6 +286,87 @@ describe('createDirectivePlugin', () => {
         expect(doc.hasClickListener()).toBe(false);
       });
 
+      // Item 29: at document level the event target is retargeted to the
+      // shadow HOST, so a parentElement walk from it never reaches the real
+      // element and the click silently did nothing. `router/dom.ts` link
+      // interception already documents the composed-path fix.
+      it('dispatches for a delegated element inside a shadow root', () => {
+        const doc = createMockDocument();
+        const host = createElement('my-widget', { ownerDocument: doc });
+        const button = createElement('button', { ownerDocument: doc }); // lives in the shadow root
+        let calls = 0;
+        bus.register('a', () => { calls += 1; });
+        const vcDir = app.getDirective('vc');
+        vcDir.mounted(button, { arg: 'command', value: 'a', modifiers: { delegate: true } });
+
+        // What the browser actually delivers at document level: target is the
+        // host, but composedPath() still carries the inner element.
+        doc.dispatchClick(host, {
+          type: 'click',
+          target: host,
+          composedPath: () => [button, host, doc],
+          stopPropagation() {},
+          preventDefault() {},
+        });
+
+        expect(calls).toBe(1); // was 0 — the control rendered and did nothing
+        vcDir.beforeUnmount(button, { arg: 'command' });
+      });
+
+      it('does not fire for a delegated element outside the event path', () => {
+        const doc = createMockDocument();
+        const unrelated = createElement('button', { ownerDocument: doc });
+        const clicked = createElement('div', { ownerDocument: doc });
+        let calls = 0;
+        bus.register('a', () => { calls += 1; });
+        const vcDir = app.getDirective('vc');
+        vcDir.mounted(unrelated, { arg: 'command', value: 'a', modifiers: { delegate: true } });
+
+        doc.dispatchClick(clicked, {
+          type: 'click',
+          target: clicked,
+          composedPath: () => [clicked, doc],
+          stopPropagation() {},
+          preventDefault() {},
+        });
+
+        expect(calls).toBe(0);
+        vcDir.beforeUnmount(unrelated, { arg: 'command' });
+      });
+
+      it('attaches a listener per document (iframe / popup)', () => {
+        // The count was global and the document single, so delegated elements
+        // in a second document bumped the count and got no listener at all.
+        const docA = createMockDocument();
+        const docB = createMockDocument();
+        const elA = createElement('button', { ownerDocument: docA });
+        const elB = createElement('button', { ownerDocument: docB });
+        let calls = 0;
+        bus.register('a', () => { calls += 1; });
+        const vcDir = app.getDirective('vc');
+
+        vcDir.mounted(elA, { arg: 'command', value: 'a', modifiers: { delegate: true } });
+        vcDir.mounted(elB, { arg: 'command', value: 'a', modifiers: { delegate: true } });
+
+        expect(docA.hasClickListener()).toBe(true);
+        expect(docB.hasClickListener()).toBe(true); // was false
+
+        docB.dispatchClick(elB);
+        expect(calls).toBe(1); // was 0
+
+        // Unmounting every element of the first document must not strand the
+        // second document's listener.
+        vcDir.beforeUnmount(elA, { arg: 'command' });
+        expect(docA.hasClickListener()).toBe(false);
+        expect(docB.hasClickListener()).toBe(true);
+
+        docB.dispatchClick(elB);
+        expect(calls).toBe(2);
+
+        vcDir.beforeUnmount(elB, { arg: 'command' });
+        expect(docB.hasClickListener()).toBe(false);
+      });
+
       it('falls back to a direct listener with a warning when combined with .capture/.once/.passive', () => {
         const doc = createMockDocument();
         const el = createElement('button', { ownerDocument: doc });

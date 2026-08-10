@@ -28,6 +28,11 @@ export type Router<TName extends string = string> = {
   base: string;
   /** True while loaders run (navigations and query refetches). */
   isLoading: Readonly<ShallowRef<boolean>>;
+  /** True while a stale-while-revalidate refresh runs behind data already on
+   *  screen. Deliberately separate from `isLoading`: a stale hit commits real
+   *  data, so the page is showing something, not waiting for it. Only ever
+   *  true when a loader read opted into `cache.staleTtl`. */
+  isRevalidating: Readonly<ShallowRef<boolean>>;
   /** Latest navigation error (null after clear) — see useRouteError(). */
   lastError: ShallowRef<unknown>;
   push: (to: RouteLocationRaw<TName>) => Promise<RouterError | null>;

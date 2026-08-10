@@ -245,3 +245,137 @@ describe('createFormBus — bus injection', () => {
     expect(seen).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// submit() races — `values` is live state, and submit() used to read it twice
+// across an await.
+// ---------------------------------------------------------------------------
+
+describe('createFormBus — submit() races', () => {
+  it('validates and submits the SAME values when a set() lands mid-validation', async () => {
+    // set() also runs the rules (live per-field feedback), so every invocation
+    // parks — collect all the resolvers and release them together.
+    const releases: Array<() => void> = [];
+    const validated: string[] = [];
+    const submitted: string[] = [];
+
+    const form = createFormBus({
+      fields: { email: 'valid@example.com' },
+      rules: {
+        // The module's own pitch for concurrent rules: a slow server-side check.
+        email: async (value: string) => {
+          validated.push(value);
+          await new Promise<void>((resolve) => {
+            releases.push(resolve);
+          });
+          return null;
+        },
+      },
+      onSubmit: async (values) => {
+        submitted.push((values as { email: string }).email);
+      },
+    });
+
+    const pending = form.submit();
+    await vi.waitFor(() => expect(releases.length).toBeGreaterThan(0));
+
+    form.set('email', 'changed-after-validation@example.com'); // lands mid-flight
+    for (const release of releases) release();
+    await pending;
+
+    expect(validated[0]).toBe('valid@example.com');
+    // Was 'changed-after-validation@example.com': the value submitted had
+    // never been validated, and the value validated was never submitted.
+    expect(submitted).toEqual(['valid@example.com']);
+  });
+
+  it('a double-click does not run two overlapping submits', async () => {
+    let releaseSubmit: (() => void) | null = null;
+    let calls = 0;
+
+    const form = createFormBus({
+      fields: { name: 'Alice' },
+      onSubmit: async () => {
+        calls++;
+        await new Promise<void>((resolve) => {
+          releaseSubmit = resolve;
+        });
+      },
+    });
+
+    const first = form.submit();
+    await vi.waitFor(() => expect(releaseSubmit).not.toBeNull());
+    const second = await form.submit(); // the second click
+
+    expect(second).toBe(false); // refused, not queued behind the first
+    expect(calls).toBe(1);
+    expect(form.isSubmitting.value).toBe(true); // still owned by the first call
+
+    releaseSubmit?.();
+    expect(await first).toBe(true);
+    expect(form.isSubmitting.value).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// formValidate — the internal sync-validation command (dispatchable directly,
+// e.g. from a plugin or a toolbar's "check form" affordance)
+// ---------------------------------------------------------------------------
+
+describe('formValidate internal command', () => {
+  it('touches every field, records sync errors, and reports validity', () => {
+    const form = createFormBus({
+      fields: { email: '', age: '' },
+      rules: {
+        email: (v) => (v.includes('@') ? null : 'Invalid email'),
+        age: (v) => (v.length > 0 ? null : 'Required'),
+      },
+    });
+
+    const result = form.bus.dispatch('formValidate', {});
+
+    expect(result.ok).toBe(true);
+    expect(result.value).toEqual({
+      valid: false,
+      errors: { email: 'Invalid email', age: 'Required' },
+    });
+    // All fields touched so errors become visible in the UI
+    expect(form.touched.value).toEqual({ email: true, age: true });
+    expect(form.isValid.value).toBe(false);
+    expect(form.errors.value).toEqual({ email: 'Invalid email', age: 'Required' });
+  });
+
+  it('reports valid: true and clears errors once fields pass', () => {
+    const form = createFormBus({
+      fields: { email: '' },
+      rules: { email: (v) => (v.includes('@') ? null : 'Invalid email') },
+    });
+    form.set('email', 'a@b.com');
+
+    const result = form.bus.dispatch('formValidate', {});
+
+    expect(result.value).toEqual({ valid: true, errors: {} });
+    expect(form.isValid.value).toBe(true);
+  });
+});
+
+describe('rule/values mismatch and optional onSubmit', () => {
+  it('a rule for a key not present in fields is skipped by sync and async validation', async () => {
+    const form = createFormBus({
+      fields: { email: 'a@b.com' },
+      // `ghost` has a rule but no field — must be ignored, not crash or error
+      rules: { email: (v) => (v.includes('@') ? null : 'bad'), ghost: () => 'never' } as never,
+    });
+    form.set('email', 'x@y.z'); // live sync validation path
+    expect(form.errors.value).toEqual({});
+    const ok = await form.submit(); // async validation path
+    expect(ok).toBe(true);
+    expect(form.errors.value).toEqual({});
+  });
+
+  it('submit() without an onSubmit resolves true after validation alone', async () => {
+    const form = createFormBus({ fields: { name: 'x' } });
+    await expect(form.submit()).resolves.toBe(true);
+    expect(form.isSubmitting.value).toBe(false);
+  });
+});

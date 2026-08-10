@@ -73,7 +73,30 @@ export type FastLane = {
   clear(): void;
 };
 
-export function createFastLane(): FastLane {
+export type FastLaneOptions = {
+  /**
+   * What a mid-emit unsubscribe means for the CURRENT emit. Chosen once at
+   * factory time — the emit/unsub closures are built per mode, so the hot
+   * path carries zero mode-branching.
+   *
+   * - `'live'` (default) — matches the main bus: a listener removed during
+   *   an emit (by itself or a peer) does NOT run in that emit. Costs an
+   *   identity guard per listener call.
+   * - `'snapshot'` — the emit fans out to the subscriber list as it was
+   *   when the emit started; a listener removed mid-emit still runs once.
+   *   Unsubscribe replaces the bucket array instead of splicing it (the
+   *   same copy-on-write nanoevents uses), so the emit loop is one call
+   *   per slot with no guards. Allocation moves to the cold unsub path;
+   *   the hot path stays allocation-free either way.
+   *
+   * Opt into `'snapshot'` only when a measured fan-out hot loop says so —
+   * see docs/performance.md §Tuning.
+   */
+  removal?: 'live' | 'snapshot';
+};
+
+export function createFastLane(options: FastLaneOptions = {}): FastLane {
+  const snapshot = options.removal === 'snapshot';
   // Two parallel maps: one for compile()-style single dispatch, one for
   // emit()-style multi-listener fan-out. Kept separate so compile()'s
   // returned closure can reference a single function via Map lookup, not
@@ -102,20 +125,68 @@ export function createFastLane(): FastLane {
     let bucket = listeners.get(action);
     if (bucket === undefined) { bucket = []; listeners.set(action, bucket); }
     bucket.push(listener);
-    return () => {
-      const b = listeners.get(action);
-      if (b === undefined) return;
-      const i = b.indexOf(listener);
-      if (i !== -1) b.splice(i, 1);
-      if (b.length === 0) listeners.delete(action);
-    };
+    return snapshot
+      ? () => {
+          // Copy-on-write (nanoevents-style): replace the array, never splice
+          // it. An emit that started earlier keeps iterating the array it
+          // captured — that is what makes snapshot-emit guard-free. Allocation
+          // here is fine: unsubscribe is the cold path.
+          const b = listeners.get(action);
+          if (b === undefined) return;
+          const next = b.filter((l) => l !== listener);
+          if (next.length === 0) listeners.delete(action);
+          else if (next.length !== b.length) listeners.set(action, next);
+        }
+      : () => {
+          const b = listeners.get(action);
+          if (b === undefined) return;
+          const i = b.indexOf(listener);
+          if (i !== -1) b.splice(i, 1);
+          if (b.length === 0) listeners.delete(action);
+        };
   }
 
-  function emit<T>(action: string, data: T): void {
-    const bucket = listeners.get(action);
-    if (bucket === undefined) return;
-    for (let i = 0; i < bucket.length; i++) bucket[i](data);
-  }
+  // Two emit implementations, selected once at factory time — the hot path
+  // never branches on mode. Both share the single-listener fast path: with
+  // one listener there is no neighbour to skip or double-invoke, so the
+  // guard question is moot and the loop machinery is pure overhead.
+  const emit: <T>(action: string, data: T) => void = snapshot
+    ? (action, data) => {
+        // SNAPSHOT mode: unsub replaces arrays (see on() above), so the ref
+        // captured here is never mutated mid-flight — one call per slot, no
+        // guards. Contract: a listener removed during this emit still runs
+        // once; a listener added during it does not run until the next.
+        const bucket = listeners.get(action);
+        if (bucket === undefined) return;
+        if (bucket.length === 1) { bucket[0](data); return; }
+        for (let i = 0, len = bucket.length; i < len; i++) bucket[i](data);
+      }
+    : (action, data) => {
+        const bucket = listeners.get(action);
+        if (bucket === undefined) return;
+        if (bucket.length === 1) { bucket[0](data); return; }
+        // LIVE mode (default, bus parity): a listener may unsubscribe itself
+        // (the once-pattern) or a peer during its own call, and `on()`'s
+        // unsub closure splices this live array — so the next listener shifts
+        // into the index just consumed and is silently skipped for this emit.
+        // Same identity guard the main bus uses in notifyListeners. This
+        // module drops envelope, results, plugins, wildcards and tracing on
+        // purpose; it does not drop correctness, and the guard is
+        // allocation-free, which is this file's only currency. (The guard's
+        // per-call cost is why `removal: 'snapshot'` exists — see
+        // FastLaneOptions.)
+        for (let i = 0; i < bucket.length; i++) {
+          const lenBefore = bucket.length;
+          const listener = bucket[i];
+          listener(data);
+          // Only removals at or BEFORE the cursor shift it. Testing the length
+          // alone over-corrects: a listener that removes a LATER peer shrinks
+          // the array without moving anything at `i`, and decrementing would
+          // re-invoke the listener that just ran. `bucket[i] !== listener` is
+          // the exact signal, and holds for multi-removal too.
+          if (bucket.length < lenBefore && bucket[i] !== listener) i -= lenBefore - bucket.length;
+        }
+      };
 
   function registeredActions(): string[] {
     return Array.from(handlers.keys());

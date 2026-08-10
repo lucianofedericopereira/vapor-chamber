@@ -108,6 +108,11 @@ type DirectiveState = {
   /** `.delegate` — dispatched via the shared document-level listener instead of
    *  a direct one on this element. See "Opt-in delegation" below. */
   delegate?: boolean;
+  /** The document this element's delegated listener was counted against.
+   *  Recorded at mount so teardown decrements the RIGHT document — an element
+   *  can be moved between documents, and `ownerDocument` at unmount time is
+   *  not necessarily the one it registered with. */
+  delegatedDoc?: Document | null;
 };
 
 const stateMap = new WeakMap<Element, DirectiveState>();
@@ -126,10 +131,39 @@ const stateMap = new WeakMap<Element, DirectiveState>();
 // of the click target fires. v-vc:command elements are leaf controls
 // (buttons/links) in practice — nesting two dispatching elements isn't a
 // supported pattern in delegate mode; use the default (direct) mode for that.
-let delegatedListenerCount = 0;
-let delegatedListenerDoc: Document | null = null;
+// Delegated elements are counted PER DOCUMENT. A single count + a single
+// `delegatedListenerDoc` meant the listener only ever attached to whichever
+// document happened to register first: delegated elements in an iframe or a
+// `window.open` popup bumped the count and got no listener at all, and
+// unmounting the first document's elements while others remained stranded the
+// listener on the wrong document. Both failed as SILENT no-dispatch — the
+// control renders, clicks do nothing, no error — which is the worst shape for
+// an opt-in perf flag, because turning `.delegate` on CONVERTS WORKING
+// CONTROLS INTO DEAD ONES.
+const delegatedDocs = new Map<Document, number>();
 
 function delegatedClickHandler(event: Event): void {
+  // composedPath crosses shadow boundaries; a parentElement walk stops at the
+  // shadow root, and at document level `event.target` has been retargeted to
+  // the shadow HOST — so the stateMap lookup never found the real element and
+  // a delegated control inside a shadow root simply never dispatched.
+  // `router/dom.ts` link interception documents this same fix; the delegated
+  // handler predates that lesson.
+  const path = event.composedPath?.();
+  if (path) {
+    for (const node of path) {
+      const state = stateMap.get(node as Element);
+      if (state?.delegate) {
+        state.handler(event);
+        return;
+      }
+      // Stop at the document — beyond it the path holds Window, and an
+      // ancestor match outside the event's tree is not ours to fire.
+      if ((node as Node).nodeType === 9 /* DOCUMENT_NODE */) break;
+    }
+    return;
+  }
+  // Fallback for environments without composedPath (same shape as dom.ts).
   let node = event.target as Element | null;
   while (node) {
     const state = stateMap.get(node);
@@ -141,20 +175,24 @@ function delegatedClickHandler(event: Event): void {
   }
 }
 
-function addDelegatedElement(el: Element): void {
-  if (delegatedListenerCount === 0) {
-    delegatedListenerDoc = el.ownerDocument ?? document;
-    delegatedListenerDoc.addEventListener('click', delegatedClickHandler);
-  }
-  delegatedListenerCount++;
+function addDelegatedElement(el: Element): Document {
+  const doc = el.ownerDocument ?? document;
+  const count = delegatedDocs.get(doc) ?? 0;
+  if (count === 0) doc.addEventListener('click', delegatedClickHandler);
+  delegatedDocs.set(doc, count + 1);
+  return doc;
 }
 
-function removeDelegatedElement(): void {
-  delegatedListenerCount = Math.max(0, delegatedListenerCount - 1);
-  if (delegatedListenerCount === 0 && delegatedListenerDoc) {
-    delegatedListenerDoc.removeEventListener('click', delegatedClickHandler);
-    delegatedListenerDoc = null;
+function removeDelegatedElement(doc: Document | null): void {
+  if (!doc) return;
+  const count = delegatedDocs.get(doc);
+  if (count === undefined) return;
+  if (count <= 1) {
+    doc.removeEventListener('click', delegatedClickHandler);
+    delegatedDocs.delete(doc);
+    return;
   }
+  delegatedDocs.set(doc, count - 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -363,7 +401,7 @@ export function createDirectivePlugin(): { install(app: any): void } {
           stateMap.set(el, state);
 
           if (delegate) {
-            addDelegatedElement(el);
+            state.delegatedDoc = addDelegatedElement(el);
             return;
           }
 
@@ -387,7 +425,7 @@ export function createDirectivePlugin(): { install(app: any): void } {
           const state = stateMap.get(el);
           if (state) {
             if (state.delegate) {
-              removeDelegatedElement();
+              removeDelegatedElement(state.delegatedDoc ?? null);
             } else {
               el.removeEventListener('click', state.handler, state.capture ? { capture: true } : undefined);
             }

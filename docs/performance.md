@@ -392,14 +392,29 @@ necessary to support `remove()` + `clear()`).
 
 For multi-listener fan-out (3 listeners):
 
-| Lib / Path                          | ops/sec |
-|-------------------------------------|---------|
-| **vapor-chamber `fast-lane.emit`**  | **~7,390** |
-| nanoevents                          | ~6,650  |
-| vapor-chamber `bus.emit` (general)  | ~4,570  |
-| mitt                                | ~3,400  |
+| Lib / Path                                        | ops/sec |
+|---------------------------------------------------|---------|
+| nanoevents                                        | ~6,700–7,400 |
+| **fast-lane `emit` — `removal: 'snapshot'`**      | **~6,200–6,650** |
+| **fast-lane `emit` — `'live'` (default)**         | **~5,700–6,000** |
+| vapor-chamber `bus.emit` (general)                | ~4,300  |
+| mitt                                              | ~3,000  |
 
-Edges out nanoevents (~1.1×); ~2.2× faster than mitt.
+(v1.12.0 — ranges across quiet-machine runs; the mode gap, not the
+absolutes, is the robust claim.) In v1.12.0 the emit loop gained the
+unsub-during-emit identity guard: a listener removed mid-emit (by itself or
+a peer) no longer skips or double-invokes a neighbor. That guard is the
+default (`'live'`, matching the main bus) and costs this row ~10–15% vs the
+pre-guard loop. `createFastLane({ removal: 'snapshot' })` opts into
+copy-on-write unsubscription instead — the same design nanoevents ships,
+which is why its row sits at parity with nanoevents: the emit loop returns
+to one call per slot, and a listener removed mid-emit still runs once in
+that emit (each mode's contract is pinned by its own test in
+`tests/fast-lane.test.ts`). Pick `'snapshot'` only off a measured fan-out
+bottleneck; the remaining sliver to nanoevents is its plain-object event
+lookup vs our `Map.get`. Single-handler `compile()` dispatch is untouched
+by all of this — the headline row and its ~2.1× lead over nanoevents stand,
+and both modes share a new single-listener fast path on `emit`.
 
 ### When to pick which
 
@@ -444,13 +459,16 @@ two-check guard — but vapor-chamber stays comfortably ahead of mitt.
 
 | Lib                                | ops/sec    | Relative |
 |------------------------------------|------------|----------|
-| nanoevents                         | ~6,600     | 1.0×     |
-| raw `Map<string, Set<fn>>`         | ~5,590     | 1.2×     |
-| **vapor-chamber `bus.emit`**       | **~4,730** | 1.4×     |
-| mitt                               | ~3,380     | 2.0×     |
+| nanoevents                         | ~7,610     | 1.0×     |
+| raw `Map<string, Set<fn>>`         | ~5,530     | 1.4×     |
+| **vapor-chamber `bus.emit`**       | **~4,860** | 1.6×     |
+| mitt                               | ~3,340     | 2.3×     |
 
-vapor-chamber `emit` is **~1.4× faster than mitt** and ~28% behind nanoevents —
-competitive with the lightest event emitters in the ecosystem.
+vapor-chamber `emit` is **~1.5× faster than mitt** and ~36% behind nanoevents —
+competitive with the lightest event emitters in the ecosystem. (v1.12.0:
+`notifyListeners`' unsub-during-emit guard was corrected to compare by
+identity — the old length-only heuristic could re-invoke a listener that
+removed a *later* peer. Cost within run-to-run variance on this row.)
 
 ### Dispatch with single handler (10k)
 
@@ -665,6 +683,23 @@ serialize-once → discard workloads. Not actionable.
 meta, command). For serialize-once paths, write idiomatic code; V8's
 JSON.stringify has its own fast paths that don't benefit from shape
 preservation tricks.
+
+### Copy-on-write listener buckets (fast-lane emit) — shipped as an opt-in
+
+Considered in v1.12.0 to recover the fan-out position vs nanoevents after
+the unsub-during-emit identity guard landed, and initially rejected because
+it changes removal semantics (a listener removed mid-emit still runs once —
+snapshot semantics, the same design nanoevents itself ships), and silently
+swapping semantics for a bench row is not a trade this lib makes.
+
+**Resolution: shipped as `createFastLane({ removal: 'snapshot' })`** — off
+by default (`'live'` keeps bus parity), chosen at factory time so the hot
+path carries zero mode-branching, each mode's mid-emit-unsubscribe contract
+pinned by its own test. The consumer who opts in has read the trade at the
+option's doc comment; nobody gets snapshot semantics by accident. Measured:
+snapshot mode lands at parity with nanoevents (~0.9–1.0×), which is the
+honest apples-to-apples — same semantics, same speed. See the fan-out table
+above.
 
 ### Parallel after-hooks
 

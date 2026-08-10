@@ -144,6 +144,34 @@ describe('postCommand — retry', () => {
     await vi.runAllTimersAsync();
     await assertion;
   });
+
+  // postCommand is createHttpBridge's transport, so this is every bus command
+  // dispatched with `retry` configured: a 422 used to be thrown inside the try,
+  // caught by the retry catch, and re-sent — the exact mutation replay that
+  // Idempotency-Key forwarding exists to make survivable.
+  it('does NOT retry a 422 validation failure', async () => {
+    (globalThis.fetch as any).mockResolvedValue(mockResponse(422, { message: 'validation_failed' }));
+
+    vi.useFakeTimers();
+    const promise = postCommand('/api/cmd', {}, { retry: 2 });
+    const assertion = expect(promise).rejects.toMatchObject({ name: 'HttpError', status: 422 });
+    await vi.runAllTimersAsync();
+    await assertion;
+
+    expect((globalThis.fetch as any).mock.calls).toHaveLength(1); // was 3
+  });
+
+  it('does NOT retry a 403', async () => {
+    (globalThis.fetch as any).mockResolvedValue(mockResponse(403));
+
+    vi.useFakeTimers();
+    const promise = postCommand('/api/cmd', {}, { retry: 2 });
+    const assertion = expect(promise).rejects.toMatchObject({ name: 'HttpError', status: 403 });
+    await vi.runAllTimersAsync();
+    await assertion;
+
+    expect((globalThis.fetch as any).mock.calls).toHaveLength(1);
+  });
 });
 
 // ---------------------------------------------------------------------------

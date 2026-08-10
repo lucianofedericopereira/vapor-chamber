@@ -90,6 +90,43 @@ const HMR_GLOBAL_KEY = '__VAPOR_CHAMBER_BUS__';
 const HMR_MODE_KEY = '__VAPOR_CHAMBER_MODE__';
 
 /**
+ * Matches an actual `import`/`export … from 'vapor-chamber…'` (or a
+ * `require`/dynamic `import()` of one) rather than the bare substring
+ * 'vapor-chamber' — which also hits comments, string literals and this
+ * library's own doc blocks.
+ */
+const IMPORTS_VAPOR_CHAMBER =
+  /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s+)['"]vapor-chamber(?:\/[^'"]*)?['"]/;
+
+/**
+ * Sourcemap for a transform that prepends exactly ONE line and changes nothing
+ * else: every original line N maps to output line N+1, column-for-column.
+ *
+ * `map: null` is not "no change" to Vite — it is "no mapping information",
+ * which it treats as identity, so the injected line silently shifted every
+ * stack frame, breakpoint and error-overlay location by one. This plugin only
+ * ever runs in dev, which is the only place those matter.
+ *
+ * Hand-built rather than pulled from magic-string: this is the whole VLQ
+ * alphabet needed for a pure line shift — each line's single segment is
+ * "output col 0 ← source 0, this line, col 0", i.e. AAAA for the first mapped
+ * line and AACA (advance one source line) for every line after it.
+ */
+function lineShiftMap(id: string, code: string): { version: 3; sources: string[]; sourcesContent: string[]; names: string[]; mappings: string } {
+  const lineCount = code.split('\n').length;
+  // First output line is the injected import: no mapping.
+  // Then one segment per original line, each advancing the source line by 1.
+  const mappings = `;AAAA${';AACA'.repeat(Math.max(0, lineCount - 1))}`;
+  return {
+    version: 3,
+    sources: [id],
+    sourcesContent: [code],
+    names: [],
+    mappings,
+  };
+}
+
+/**
  * vaporChamberHMR — Vite plugin for state-preserving hot reload.
  *
  * Injects a small runtime shim that:
@@ -108,6 +145,13 @@ export function vaporChamberHMR(options: VaporChamberHMROptions = {}): any {
   return {
     name: 'vapor-chamber-hmr',
     enforce: 'pre' as const,
+    // Vite's own dev-only mechanism, and strictly stronger than the
+    // `process.env.NODE_ENV` check in `transform` below: NODE_ENV can be
+    // anything under `--mode staging` or a programmatic build that never sets
+    // it, and if that check misses, the shim + virtual module + the
+    // `globalThis` bus-persistence keys ship in the production bundle. This
+    // one property cannot be fooled — the plugin simply does not run on build.
+    apply: 'serve' as const,
 
     resolveId(id: string) {
       if (id === virtualModuleId) return resolvedVirtualModuleId;
@@ -201,12 +245,18 @@ export { getCommandBus, setCommandBus, resetCommandBus };
       `.trim();
     },
 
-    // Transform: inject HMR shim import into the app entry point
+    // Transform: inject the HMR shim into every module that imports
+    // vapor-chamber. (The comment here used to say "only the app entry" while
+    // the predicate matched every non-node_modules file mentioning the
+    // package — harmless at runtime, since the module graph dedupes the
+    // virtual import, but it described a different design. The predicate is
+    // now an IMPORT match rather than a substring one, so a passing mention in
+    // a comment or a string literal no longer pulls the shim in.)
     transform(code: string, id: string) {
-      // Only inject into the app entry (files that import vapor-chamber directly)
-      // and only in development mode
+      // `apply: 'serve'` above is the real production guard; this stays as a
+      // belt-and-braces check for anyone invoking the transform directly.
       if (process.env.NODE_ENV === 'production') return;
-      if (!code.includes('vapor-chamber')) return;
+      if (!IMPORTS_VAPOR_CHAMBER.test(code)) return;
       if (id.includes('node_modules')) return;
       if (id.includes(resolvedVirtualModuleId)) return;
       // Match standard Vue files + Vapor SFCs (.vapor.vue compiled by
@@ -216,10 +266,15 @@ export { getCommandBus, setCommandBus, resetCommandBus };
       // Avoid double-injection
       if (code.includes(virtualModuleId)) return;
 
-      // Prepend the HMR shim import
+      // Prepend the HMR shim import, and emit the one-line offset sourcemap it
+      // implies. `map: null` told Vite "no mapping information", which it
+      // reads as identity — so every transformed file's stack traces,
+      // breakpoints and error-overlay frames were off by one line, in dev,
+      // which is the only place this plugin runs.
+      const injected = `import '${virtualModuleId}';`;
       return {
-        code: `import '${virtualModuleId}';\n${code}`,
-        map: null,
+        code: `${injected}\n${code}`,
+        map: lineShiftMap(id, code),
       };
     },
   };

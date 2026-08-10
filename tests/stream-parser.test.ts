@@ -97,6 +97,37 @@ describe('StreamParser — strings and escapes', () => {
     parser.end();
     expect(values[0]?.value).toBe('é 😀');
   });
+
+  // The module's headline input is an LLM completion or an export row — one
+  // long string value. `String.fromCharCode.apply` passes the buffer as call
+  // arguments, and engines cap argument counts, so the whole parse threw
+  // RangeError somewhere past ~65k characters.
+  it('round-trips a 1MB string value byte-identically', () => {
+    const { parser, values, errors } = collect();
+    const big = 'x'.repeat(1_000_000);
+    parser.write(`{"completion":"${big}"}`);
+    parser.end();
+
+    expect(errors).toEqual([]);
+    expect(values[0]?.key).toBe('completion');
+    expect(values[0]?.value).toBe(big);
+    expect((values[0].value as string).length).toBe(1_000_000);
+  });
+
+  it('keeps a surrogate pair intact across a flush-chunk boundary', () => {
+    // flush() converts in 8192-unit chunks, and the split is on UTF-16 units —
+    // so a pair can straddle a boundary. Concatenating the halves must still
+    // yield one code point. 8191 'x' + 😀 puts the high surrogate at index
+    // 8191 and the low surrogate at 8192, exactly on the seam.
+    const { parser, values, errors } = collect();
+    const value = `${'x'.repeat(8191)}😀tail`;
+    parser.write(`{"s":"${value}"}`);
+    parser.end();
+
+    expect(errors).toEqual([]);
+    expect(values[0]?.value).toBe(value);
+    expect([...(values[0].value as string)].at(8191)).toBe('😀');
+  });
 });
 
 describe('StreamParser — chunked / streamed input', () => {
@@ -179,5 +210,59 @@ describe('StreamParser — object/array lifecycle callbacks', () => {
     // no keys of their own — `path`'s index disambiguates array members),
     // so the scalar array element still reports key "list".
     expect(events).toEqual(['obj-start', 'arr-start', 'value:list', 'arr-end', 'obj-end']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Number-format error paths + uppercase exponent (previously uncovered states)
+// ---------------------------------------------------------------------------
+
+describe('number edge states', () => {
+  const parseWithErrors = (input: string) => {
+    const errors: string[] = [];
+    const values: unknown[] = [];
+    const parser = createStreamParser({
+      onError: (e) => errors.push(e.message),
+      onValue: (_k, v) => values.push(v),
+    });
+    parser.write(input);
+    parser.end();
+    return { errors, values };
+  };
+
+  it('a dot with no following digit is an error', () => {
+    const { errors } = parseWithErrors('{"n": 1.}');
+    expect(errors.some((m) => m.includes('Expected digit after .'))).toBe(true);
+  });
+
+  it('an exponent with no digit or sign is an error', () => {
+    const { errors } = parseWithErrors('{"n": 1e}');
+    expect(errors.some((m) => m.includes('Expected digit or sign after exponent'))).toBe(true);
+  });
+
+  it('an exponent sign with no following digit is an error', () => {
+    const { errors } = parseWithErrors('{"n": 1e+}');
+    expect(errors.some((m) => m.includes('Expected digit after exponent sign'))).toBe(true);
+  });
+
+  it('uppercase E exponents parse (both bare and after a fraction)', () => {
+    const { errors, values } = parseWithErrors('{"a": 2E3, "b": 1.5E+2}');
+    expect(errors).toEqual([]);
+    expect(values).toContain(2000);
+    expect(values).toContain(150);
+  });
+
+  it('signed exponent digits accumulate across chunk boundaries', () => {
+    const errors: string[] = [];
+    const values: unknown[] = [];
+    const parser = createStreamParser({
+      onError: (e) => errors.push(e.message),
+      onValue: (_k, v) => values.push(v),
+    });
+    parser.write('{"n": 1e-');
+    parser.write('2}');
+    parser.end();
+    expect(errors).toEqual([]);
+    expect(values).toContain(0.01);
   });
 });

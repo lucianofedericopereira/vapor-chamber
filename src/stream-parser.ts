@@ -97,6 +97,9 @@ const PARENT_ARRAY = 2;
 // String buffer — avoids += string-concat GC pressure
 // ============================================================
 
+/** UTF-16 units per `fromCharCode.apply` call — see StringBuffer.flush. */
+const FLUSH_CHUNK = 8192;
+
 class StringBuffer {
   private buf: Uint16Array;
   private len = 0;
@@ -125,9 +128,29 @@ class StringBuffer {
   }
 
   flush(): string {
-    const str = String.fromCharCode.apply(null, this.buf.subarray(0, this.len) as unknown as number[]);
+    // Chunked on purpose. `String.fromCharCode.apply` passes the whole buffer
+    // as call ARGUMENTS, and engines cap argument counts — V8 throws
+    // `RangeError: Maximum call stack size exceeded` somewhere around 65k–125k
+    // (stack-dependent, so it fails flakily rather than deterministically).
+    // This module's stated inputs are LLM streaming completions and large
+    // exports, where a single long string value is the headline case, not the
+    // edge case. 8192 is safely under every engine's cap, and `+=` on ~8k
+    // segments is rope concatenation — cheap.
+    const { buf, len } = this;
+    if (len <= FLUSH_CHUNK) {
+      const str = String.fromCharCode.apply(null, buf.subarray(0, len) as unknown as number[]);
+      this.len = 0;
+      return str;
+    }
+    let out = '';
+    for (let i = 0; i < len; i += FLUSH_CHUNK) {
+      out += String.fromCharCode.apply(
+        null,
+        buf.subarray(i, Math.min(i + FLUSH_CHUNK, len)) as unknown as number[],
+      );
+    }
     this.len = 0;
-    return str;
+    return out;
   }
 
   clear(): void {

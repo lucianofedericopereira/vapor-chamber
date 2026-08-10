@@ -561,4 +561,56 @@ describe('retry plugin', () => {
     expect(result.ok).toBe(false);
     expect(attempts).toBe(3); // unchanged pre-v1.3 behavior for plain errors
   });
+
+  // Every test above installs retry as the ONLY plugin, where re-invoking
+  // `next()` lands on `execute()` and accidentally works. Composition is the
+  // real contract: retry calls `next()` once per attempt, so every plugin
+  // downstream of it must run on every attempt.
+  it('runs downstream plugins on every attempt, not just the first', async () => {
+    const bus = createAsyncCommandBus();
+    const seen: number[] = [];
+    bus.use(retry({ maxAttempts: 3, baseDelay: 0, strategy: 'fixed' }));
+    bus.use(async (_cmd, next) => {
+      seen.push(seen.length + 1);
+      return next();
+    });
+
+    let attempts = 0;
+    bus.register('flaky', async () => {
+      attempts++;
+      if (attempts < 3) throw new Error('not yet');
+      return 'ok';
+    });
+
+    const result = await bus.dispatch('flaky', {});
+    expect(result.ok).toBe(true);
+    expect(attempts).toBe(3);
+    expect(seen).toHaveLength(3); // was 1 — attempts 2+ skipped the whole tail
+  });
+
+  it('reaches a downstream transport on the retried attempt', async () => {
+    // The canonical pairing: retry() outer, createHttpBridge inner. With a
+    // shared cursor, attempt 2 skipped the bridge and resolved against the
+    // local handler instead — the retry reported an outcome the server never
+    // saw. Modelled here with a mock bridge that never calls next().
+    const bus = createAsyncCommandBus();
+    let bridgeCalls = 0;
+    bus.use(retry({ maxAttempts: 3, baseDelay: 0, strategy: 'fixed' }));
+    bus.use(async () => {
+      bridgeCalls++;
+      if (bridgeCalls < 3) return { ok: false, error: new Error('502') };
+      return { ok: true, value: 'from server' };
+    });
+
+    let localHandlerRuns = 0;
+    bus.register('save', async () => {
+      localHandlerRuns++;
+      return 'from local handler';
+    });
+
+    const result = await bus.dispatch('save', {});
+    expect(bridgeCalls).toBe(3);
+    expect(result.value).toBe('from server');
+    expect(localHandlerRuns).toBe(0); // the bridge terminates the chain, always
+  });
 });

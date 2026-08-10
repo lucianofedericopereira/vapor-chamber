@@ -118,6 +118,37 @@ describe('table loaders', () => {
     expect(isRouterError(onError.mock.calls[0][0], 'routes_load_failed')).toBe(true);
   });
 
+  it('loads a remote table with no global `process` (no-bundler delivery)', async () => {
+    // The router's headline delivery — Blade inline payloads, plain ESM +
+    // import map, pattern-1 no-build — has no bundler define and no `process`.
+    // A bare `process.env.NODE_ENV` read inside loadRemoteTable's try threw
+    // ReferenceError there, which the catch rewrapped as `routes_load_failed`
+    // and blamed on the URL. Node always has `process`, so only deleting it
+    // reproduces the shipped environment.
+    const saved = globalThis.process;
+    const onError = vi.fn();
+    const get = vi.fn(async () => ({ data: { routes: ROWS, base: '/admin' } }));
+    const router = createRouter({
+      base: '/admin',
+      history: createMemoryHistory('/admin'),
+      routes: { url: '/api/routes' },
+      components: HOME,
+      http: fakeHttp(get),
+      onError,
+    });
+
+    // @ts-expect-error — deleting a required global on purpose.
+    delete globalThis.process;
+    try {
+      await router.isReady();
+    } finally {
+      globalThis.process = saved;
+    }
+
+    expect(onError).not.toHaveBeenCalled();
+    expect(router.currentRoute.value.location.name).toBe('home');
+  });
+
   it('loads an inline table from a DOM element', async () => {
     const el = document.createElement('script');
     el.id = 'vcr-routes';

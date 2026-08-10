@@ -6,7 +6,7 @@
  * These use only the public BaseBus interface. They are optional and tree-shaken.
  */
 
-import { disposeAll } from './command-bus';
+import { disposeAll, matchesPattern } from './command-bus';
 import type { BaseBus, Command, CommandResult, Handler, RegisterOptions, } from './command-bus';
 
 // ---------------------------------------------------------------------------
@@ -117,7 +117,15 @@ export interface Workflow {
 export function createWorkflow(steps: WorkflowStep[]): Workflow {
   async function run(bus: BaseBus, target: any, payload?: any): Promise<WorkflowResult> {
     const results: CommandResult[] = [];
-    const compensateActions: string[] = [];
+    // The MAPPED target/payload are captured alongside the compensating action,
+    // not just its name. Compensations used to dispatch with the workflow's
+    // original arguments, so a step pairing `mapTarget`/`mapPayload` with
+    // `compensate` — deriving an order id, addressing a sub-entity — was
+    // compensated against something it never acted on: the saga either missed
+    // the entity it had modified or acted on the parent. Silent, and only on
+    // the failure path, which is the last place anyone looks and the one place
+    // a saga must be right.
+    const compensations_: Array<{ action: string; target: any; payload: any }> = [];
 
     for (let i = 0; i < steps.length; i++) {
       const step = steps[i];
@@ -140,9 +148,10 @@ export function createWorkflow(steps: WorkflowStep[]): Workflow {
       if (!result.ok) {
         // Run compensations in reverse order
         const compensations: CommandResult[] = [];
-        for (let j = compensateActions.length - 1; j >= 0; j--) {
+        for (let j = compensations_.length - 1; j >= 0; j--) {
+          const entry = compensations_[j];
           try {
-            const comp = bus.dispatch(compensateActions[j], target, payload);
+            const comp = bus.dispatch(entry.action, entry.target, entry.payload);
             const compResult = comp && typeof comp.then === 'function' ? await comp : comp;
             compensations.push(compResult);
           } catch (e) {
@@ -153,7 +162,7 @@ export function createWorkflow(steps: WorkflowStep[]): Workflow {
       }
 
       if (step.compensate) {
-        compensateActions.push(step.compensate);
+        compensations_.push({ action: step.compensate, target: stepTarget, payload: stepPayload });
       }
     }
 
@@ -174,6 +183,29 @@ export type ReactionOptions = {
   map?: (cmd: Command, result: CommandResult) => any;
   /** Transform the source command into the target command's payload. */
   mapPayload?: (cmd: Command, result: CommandResult) => any;
+  /**
+   * Allow `sourcePattern` to match `targetAction` — i.e. the reaction fires on
+   * its own dispatch. Refused by default, because the loop it creates is
+   * bounded only on a sync bus:
+   *
+   * - **Sync bus:** listeners fire nested inside dispatch, so
+   *   `MAX_DISPATCH_DEPTH` halts each chain — 16 recursive dispatches and a
+   *   logged `VC_CORE_MAX_DEPTH` per matching action. Degraded, bounded.
+   * - **Async bus:** listeners fire post-settle, so each cycle is a fresh
+   *   top-level dispatch with the depth counter unwound. Nothing bounds it —
+   *   a self-sustaining infinite loop running handlers, plugins and (with a
+   *   bridge installed) HTTP requests forever.
+   *
+   * Opt in only alongside a `when` guard that can actually terminate it. The
+   * `maxHops` cap still applies.
+   */
+  allowSelfMatch?: boolean;
+  /**
+   * How many reaction hops a single originating command may trigger before
+   * the chain is refused. Catches INDIRECT cycles (A→B, B→A), which no
+   * install-time check can see. Default: 8.
+   */
+  maxHops?: number;
 };
 
 export interface Reaction {
@@ -196,13 +228,52 @@ export function createReaction(
   targetAction: string,
   options: ReactionOptions = {},
 ): Reaction {
-  const { when, map, mapPayload } = options;
+  const { when, map, mapPayload, allowSelfMatch = false, maxHops = 8 } = options;
+  const selfMatching = matchesPattern(sourcePattern, targetAction);
 
   function install(bus: BaseBus): () => void {
+    // Statically detectable at install, so detect it at install.
+    // `createReaction('cart*', 'cartRecalculate')` is the module's most
+    // natural composition, not a contrived one — and on an async bus it spins
+    // forever (see ReactionOptions.allowSelfMatch).
+    if (selfMatching && !allowSelfMatch) {
+      console.error(
+        `[vapor-chamber] Reaction "${sourcePattern}" → "${targetAction}" matches its own target: ` +
+          'every dispatch would re-trigger the reaction (unbounded on an async bus). ' +
+          'Narrow the pattern, or pass { allowSelfMatch: true } with a `when` guard that terminates it. ' +
+          'Not installed.',
+      );
+      return () => {};
+    }
+
     return bus.on(sourcePattern, (cmd: Command, result: CommandResult) => {
       if (when && !when(cmd, result)) return;
+
+      // Indirect cycles (A→B, B→A) are invisible at install time, so the chain
+      // carries its own hop count. It rides the same `__`-payload convention
+      // as `__causationId`/`__origin` — one dispatch, one marker, no flag that
+      // an await can outrun.
+      const hops = ((cmd.payload as { __reactionHops?: number } | undefined)?.__reactionHops ?? 0) + 1;
+      if (hops > maxHops) {
+        console.error(
+          `[vapor-chamber] Reaction "${sourcePattern}" → "${targetAction}" exceeded maxHops (${maxHops}) — ` +
+            'refusing to continue. This is a reaction cycle; break it with a `when` guard or raise maxHops.',
+        );
+        return;
+      }
+
       const target = map ? map(cmd, result) : cmd.target;
-      const payload = mapPayload ? mapPayload(cmd, result) : undefined;
+      const mapped = mapPayload ? mapPayload(cmd, result) : undefined;
+      // Also propagate causation, which reactions never did — a reaction chain
+      // was untraceable in devtools even when it terminated.
+      const marker = { __reactionHops: hops, __causationId: cmd.meta?.id };
+      const payload =
+        mapped === null || mapped === undefined
+          ? marker
+          : typeof mapped === 'object' && !Array.isArray(mapped)
+            ? { ...mapped, ...marker }
+            : mapped;
+
       try {
         bus.dispatch(targetAction, target, payload);
       } catch (e) {

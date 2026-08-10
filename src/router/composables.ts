@@ -203,7 +203,8 @@ export type Pagination<T> = {
 export function usePagination<T = unknown>(options: PaginationOptions<T> = {}): Pagination<T> {
   const router = useRouter();
   const data = useRouteData<any>(options.recordName);
-  const page = useQueryParam<number>(options.key ?? 'page');
+  const key = options.key ?? 'page';
+  const page = useQueryParam<number>(key);
 
   const pick = <R>(read: ((data: any) => R) | undefined, fallback: (data: any) => R): Ref<R> =>
     computed(() => (read ?? fallback)(data.value ?? {}));
@@ -221,7 +222,24 @@ export function usePagination<T = unknown>(options: PaginationOptions<T> = {}): 
 
   const current = computed(() => Math.max(1, Number(page.value) || 1));
   const go = (next: number) => {
-    page.value = Math.min(Math.max(1, Math.trunc(next)), lastPage.value);
+    const target = Math.min(Math.max(1, Math.trunc(next)), lastPage.value);
+    // "`page` pushes by convention, so Back steps through pages" is a promise
+    // of THIS COMPOSABLE, but the convention it relied on
+    // (`resolveQueryHistory`) is keyed on the literal string 'page'. So
+    // `usePagination({ key: 'p' })` — or two paginated lists on one page with
+    // distinct keys, the realistic reason to pass `key` — silently made every
+    // go()/next() a replaceState, and Back skipped the whole pagination trail.
+    // The composable owns its convention, so it states it explicitly for any
+    // key.
+    //
+    // A route's own `history` declaration still wins: it is more specific than
+    // a composable default, so when the record declares one we write through
+    // the normal ladder (override → def.history → key convention) instead of
+    // overriding it.
+    const matched = router.currentRoute.value.location.matched;
+    const declared = matched[matched.length - 1]?.queryDefs[key]?.history;
+    if (declared) page.value = target;
+    else page.push(target);
   };
 
   return {

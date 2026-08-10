@@ -2,6 +2,372 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.12.0 — cache and general improvements
+
+- **Coverage push + floor ratchet.** 25 new tests over the weakest branch
+  surfaces: `freeze.ts` (the burn-down's own newest file, 78.9 → 94.7%
+  branch — only the production no-op branch remains), `form.ts`'s
+  never-dispatched internal `formValidate` action (lines/functions → 100%),
+  `idempotent`'s `maxKeys` eviction + rejection-not-cached paths,
+  `stream-parser`'s number-format error states and uppercase/chunked
+  exponents. Overall 96.7/90.6/96.7/98.2 (stmt/branch/fn/line), **1409
+  tests / 81 files**. Floors ratcheted per the ~2-under convention:
+  statements 93→94, branches 86→88, lines 95→96 (functions stay 94).
+  `blade.ts`'s `el.value` null-guards stay untested on purpose (see the
+  v1.10.0 note — contriving Vue internals is not coverage).
+- **API reference un-staled.** `typedoc.json` covered 6 of ~18 public
+  subpaths; now all of them (`fast-lane`, `router`, `router/vdom`,
+  `router-fetch`, `mcp`, `outbox`, `stream-parser`, `devtools`,
+  `observable`, `reactive`, `alien-signals`, `standard-schema` added —
+  IIFE bundles excluded as side-effect entries). `IdlePreheatOptions` and
+  `HistoryListener` now exported from the router barrel (they were public
+  API referenced by `preheatIdle`/`RouterHistory` but unreachable in
+  docs); one dead `{@link}` in `mcp.ts` fixed; stale
+  `intentionallyNotExported` entries pruned. `npm run docs` builds with 0
+  errors (remaining warnings are README relative-links to example
+  *directories*, which TypeDoc cannot copy — cosmetic).
+- **README counts refreshed** (current tests / coverage);
+  `docs/COVERAGE.md` + `docs/BUNDLE-SIZES.md` regenerated.
+- **Second coverage pass found and fixed a residual double-record.** The
+  exact-branch map showed `redo()`'s primitive-payload arm untested — and
+  reading it revealed the arm was also *wrong*: a primitive payload
+  (`dispatch('setCount', target, 5)`) cannot carry the `__origin: 'redo'`
+  marker, so the onAfter tracker recorded the redo a second time on both
+  bus types — the same defect the `__origin` family fix closed for object
+  payloads, surviving in the branch coverage never exercised. Fixed with a
+  one-shot identity fallback (`action` + `target` + `payload` reference,
+  consumed on first match; an identical concurrent dispatch inside the
+  settle window could be swallowed instead — narrower than the marker, and
+  documented at the site). Red/green verified. Also covered this pass:
+  KeepAlive-adjacent tracker branches, `formValidate` rule/field
+  mismatches and optional `onSubmit`, `createWebHistory`'s outside-base /
+  foreign-popstate / pre-stamped-`__vr` branches, `resolveBase`'s
+  window-pathname default, `usePagination`'s extractor bottoms and
+  `pageRange` elisions. **1421 tests / 81 files**, branches 90.6 → 91.0.
+
+A full pass over a 30-revision code audit (33 findings, each verified at
+source before filing; the working list itself is now retired — this entry
+is its record). Every item was re-read at
+source before acting, every fix ships with a test that was **verified to fail
+against the pre-fix code**, and three of the write-ups turned out to be wrong
+about their own mechanism — those corrections are recorded below rather than
+quietly fixed, because the whole point of the list is that it is measured.
+
+All of this was found on a codebase whose gate was green: typecheck clean, lint
+clean, 1304/1304 tests, coverage above every floor, size gate green, three
+example builds green, a byte-identical Laravel end-to-end, and all three
+interactive demos verified in a real browser.
+
+### BREAKING
+
+- **The HTTP response cache and in-flight dedupe map are now per client.** They
+  were module-level, so every `createHttpClient()` shared one cache: an
+  isolated-looking instance whose `clearCache()` emptied every other client's,
+  and — because the key is `responseType:fullUrl` with no auth dimension —
+  under concurrent SSR a `cache: true` GET to an authenticated endpoint served
+  user A's payload to user B, with two concurrent requests for different users
+  collapsing into one in-flight promise. A fresh bus per request (§14.2) never
+  gave a fresh cache; a fresh client now does. Breaking only for code relying
+  on cross-client sharing. §14.2 and the `ssr.ts` concurrency warning now
+  document both shared-global hazards in one place, with the same rule: create
+  it per request.
+- **`invalidateCache(string)` matches a literal substring, not a regex.**
+  `new RegExp(pattern)` on a plain string threw on this library's own output
+  (`buildFullUrl` serializes arrays as `ids[0]=`, so a key contains a literal
+  `[` → `SyntaxError: unterminated character class`) and was silently wrong on
+  ordinary URLs (`?` is a quantifier, so `'/api/products?page=1'` matched
+  `/api/product` + anything). The `string | RegExp` signature reads as
+  "substring or pattern"; the implementation now agrees. Regex semantics remain
+  available through the `RegExp` overload, and a string that starts with `^` or
+  ends with `$` dev-warns — those are the unambiguous "I meant this as a
+  regex" signals, while `?` and `[` appear in the URLs the fix makes work.
+
+### Fixed — correctness
+
+- **Plugin runner `next` is re-entrant** (`buildRunner`, `buildAsyncRunner`).
+  Both shared one mutable cursor, and `retry()` calls `next()` once per
+  attempt: attempt 1 exhausted the index, so attempt 2 fell straight through to
+  the handler, **skipping every plugin downstream of retry**. With the
+  canonical `retry()` + `createHttpBridge` pairing, attempt 2 never reached the
+  wire — the retry reported an outcome the server never saw. Every existing
+  retry test installed retry as the *only* plugin, where re-invocation
+  accidentally works. `testing.ts` shares `buildRunner` and inherits the fix.
+- **4xx responses no longer re-enter the retry loop** (`clientRequest`,
+  `postCommand`). A status outside `RETRY_STATUS` was thrown *inside* the try
+  and caught by the retry catch, which exempted only user aborts — so a **422
+  on a POST re-sent the mutation** `maxRetries` times, contradicting
+  `classifyError`'s own transience rule and the reason `Idempotency-Key`
+  forwarding exists. `postCommand` is `createHttpBridge`'s transport, so this
+  reached every bus command with `retry` configured. The tests pinned
+  5xx-retries and timeout-retries; nothing asserted the negative.
+- **`stream-parser` no longer crashes on long string values.**
+  `StringBuffer.flush()` passed the whole buffer as call *arguments* to
+  `String.fromCharCode.apply`, and engines cap argument counts — V8 throws
+  `RangeError` somewhere in the ~65k–125k range, which also makes it flaky
+  rather than deterministic. The module's stated inputs are LLM streaming
+  completions and large exports, i.e. one long string is the headline case.
+  Now converted in 8192-unit chunks; a 1MB value round-trips byte-identically,
+  and a surrogate pair straddling a chunk boundary is pinned.
+- **A throwing `afterEach` hook can no longer un-commit a navigation.** The
+  after-hook loop ran inside the commit `try`, so one throwing analytics hook
+  wrapped a *committed* navigation as `component_load_failed`, fired
+  `ctx.onError`, and ran `revert()` — which on a popstate walks the URL back
+  while the snapshot still shows the new page. Hooks are now contained
+  individually and logged, mirroring the bus's `notifyListeners`.
+- **Self-removing guards/hooks no longer skip their neighbour** (router
+  `beforeGuards` + `afterHooks`, `fast-lane` `emit`). The one-shot pattern
+  (`const off = router.afterEach(() => { off(); … })`) spliced the array under a
+  live `for…of` iterator.
+- **The bus's own listener fan-out had the inverse bug** — found while porting
+  its `lenBefore/i--` pattern to fast-lane, i.e. in the module the TODO holds
+  up as the correct reference. The guard handled self-removal but
+  over-corrected the other way: a listener that removed a *later* peer shrank
+  the array without moving the cursor, so the decrement **re-invoked the
+  listener that had just run**, duplicating its side effects. Both loops (exact
+  and wildcard) now correct by identity — `bucket[i] !== listener` is the exact
+  test for "the cursor moved" — which also handles removing several at once.
+  Not in the original 33; filed and fixed here.
+- **Perf trade recorded (post-burn-down bench):** the identity guard costs
+  fast-lane `emit` its documented fan-out edge over nanoevents — ~1.1×
+  ahead before, ~10–15% behind now. Single-handler `compile()` dispatch is
+  untouched (~2.1× nanoevents, ~12.9× off the direct-call floor — both
+  unchanged). `bus.emit` fan-out is within variance of its baseline after
+  its identity-guard correction.
+- **`createFastLane({ removal: 'snapshot' })` (new opt-in)** — recovers the
+  fan-out position by copy-on-write unsubscription (the design nanoevents
+  itself ships): unsub replaces the bucket array, `emit` iterates the
+  captured reference with no per-listener guards. Contract difference and
+  the reason it's opt-in: a listener removed mid-emit still runs once in
+  that emit; the default (`'live'`) keeps bus parity. Mode chosen at
+  factory time (zero hot-path branching); each mode's mid-emit-unsub
+  contract pinned by its own test; measured at parity with nanoevents
+  (~0.9–1.0×) vs `'live'` ~10–15% behind. Both modes gain a
+  single-listener `emit` fast path. `docs/performance.md`: fan-out tables
+  updated with per-mode rows, and the copy-on-write entry under "What we
+  measured but did not ship" converted to "shipped as an opt-in" with the
+  reasoning preserved.
+- **`form.submit()` validates and submits one snapshot.** `values` is live
+  state and `submit()` read it twice across an await, so a `set()` landing
+  during a slow async validator meant validation passed values that were never
+  submitted and values were submitted that were never validated. Plus a
+  re-entry guard: `isSubmitting` was never checked at entry, so a double-click
+  ran two overlapping submits with their `finally` blocks fighting over the
+  flag.
+- **`createWorkflow` compensates with the values the step acted on.** Steps ran
+  with mapped inputs; compensations dispatched with the *original* workflow
+  arguments — so a step pairing `mapTarget`/`mapPayload` with `compensate` was
+  compensated against the parent entity, or none. Silent, and only on the
+  failure path.
+- **`cache()` plugin: `invalidate()` works with a custom `key` fn.** Entries
+  are stored under `keyFn(cmd)` but invalidation recomputed the *default* key
+  shape, so configuring `key` made every `invalidate()` call delete nothing,
+  silently, until `ttl`. An action→keys index now drives action-wide
+  invalidation for any key shape; the targeted `(action, target)` form
+  dev-warns when a custom `key` makes it unanswerable (the key may depend on
+  the payload, so there is nothing to recompute from).
+- **`schemaValidator` no longer waves through the shapes an LLM gets wrong.**
+  Both guards were `typeof x === 'object'`, so a schema declaring required
+  fields let `target: null` / `42` / `"oops"` bypass validation entirely —
+  required-ness was enforced only for callers who already passed an object. And
+  `'object'` fields were presence-checked only, so `{ filters: 'object' }`
+  accepted `filters: 42`. Both live at the MCP/LLM boundary, where `callTool`
+  forwards `args?.payload` raw. `scripts/generate-laravel.mjs` was re-checked
+  for the same two holes: it inherited the second one (a decoded JSON list and
+  a decoded JSON object are both PHP arrays), and now emits an `array_is_list`
+  check so both sides of one schema agree.
+
+### Fixed — the flag-across-await family
+
+Four bugs, one shape: a module-level flag set before a dispatch and cleared in
+`finally`. On a sync bus the dispatch completes inside the `try`, so the flag
+holds and the tests pass. On an **async** bus the plugin chain runs a microtask
+later, after `finally` already fired. All four now use a marker that travels
+**on** the dispatch — `__origin`, read by `stampMeta` alongside the existing
+`__causationId`/`__correlationId` convention — which is race-free by
+construction.
+
+- **`agentOrigin` is a deprecated no-op**; MCP origin is stamped by the core
+  from the `__origin` the handler puts in its payload. The old module flag
+  stamped `origin: 'agent'` onto any *local* dispatch that entered the chain
+  while an MCP call awaited an async handler. The doc called it "advisory, not
+  a security boundary" — but the first consumer anyone builds on `origin` is an
+  audit trail or a permission gate. **Beyond the filed item:** payload-less
+  tool calls carried no origin at all (nothing to spread into), leaving holes in
+  that same audit trail; they now get `{ __origin: 'agent' }`, which is safe
+  because `actionToMcpTool` only declares `payload` for actions that have one.
+- **`redo()` no longer double-records on an async bus.** The tracker's
+  `onAfter` hook fires when the dispatch *settles*, after `paused` was cleared,
+  so every redo was recorded twice — undo then needed two steps to walk back
+  one redo, and the duplicate wiped the redo stack again.
+- **`createReaction` refuses a self-matching reaction at install**
+  (`createReaction('cart*', 'cartRecalculate')` — the module's most natural
+  composition). On a sync bus `MAX_DISPATCH_DEPTH` bounded it at 16 wasted
+  dispatches; on an async bus listeners fire post-settle with the depth counter
+  unwound, so nothing bounded it — an infinite loop running handlers, plugins
+  and HTTP requests. `allowSelfMatch: true` opts in, and a `maxHops` cap
+  (default 8) riding the causation chain catches indirect A→B→A cycles that no
+  install-time check can see. Reactions now also propagate `__causationId`,
+  which they never did.
+- **TestBus commands carry `meta`.** Every real dispatch site stamps
+  `meta: stampMeta(payload)`; the double did not, and every meta consumer
+  guards defensively — so under test `idempotent` never stamped a key, the
+  outbox never set its replay key, and the HTTP bridge never forwarded
+  `Idempotency-Key`. Nothing crashed, which is the problem: a test wiring those
+  plugins to a TestBus exercised the degraded path and passed.
+
+### Fixed — corrections to the findings themselves
+
+- **`sync()` on an async bus was a silent no-op, not a broadcast loop.** The
+  item predicted a two-tab ping-pong. Measured: `sync()` is typed as a sync
+  `Plugin`, so on an async bus `next()` returns a pending promise and
+  `result.ok` reads `undefined` — it **never broadcast at all**. Cross-tab sync
+  was simply dead for any setup with async handlers, with no warning. The
+  plugin now settles the result before deciding, which is what makes the
+  predicted loop reachable — confirmed by restoring the old `receiving` flag on
+  top of the working broadcast path and watching the suite hang. So the
+  `__origin` marker is a *prerequisite* for that fix, not an independent
+  cleanup.
+- **`afterEach` does not fire on query-only commits.** Item 12 was filed on the
+  premise that it does, making the full-document active-link walk a
+  per-keystroke cost for a `setQuery`-driven search box. Measured: the engine's
+  query fast path returns before the after-hook loop, so stamping runs on path
+  changes only — which is also correct, since the stamps derive from
+  `location.path` alone. The memo that premise called for was written, measured
+  to be dead code, and removed rather than shipped with a comment claiming a
+  benefit it does not have. A bench row now carries the walk's real cost
+  (~1.4ms per commit at 500 anchors) and a test pins the behaviour so the
+  premise cannot silently become true.
+- **`BatchOptions.signal` documented the wrong error type.** It promised
+  `{ ok: false, error: AbortError }`, while `abortedResult` deliberately
+  substitutes a `BusError('VC_CORE_ABORTED')` so the code is queryable — with a
+  comment saying why. The doc had never caught up; it now matches, and the
+  rewritten test asserts the real contract.
+
+### Added
+
+- **Loader caching, in-box** — `fetchLoaders({ cache })` forwards to the HTTP
+  client's existing LRU with its fresh/stale windows, LRU and
+  serve-stale-on-error. v1.9.0 shipped both halves of this and connected
+  neither, so every router loader read missed a cache engine sitting directly
+  underneath it. Off by default. A route row overrides the preset per record
+  via `meta.cache`, so a countries table and a live-inventory row can differ.
+- **`router.isRevalidating`** — the third loader lane. A stale-while-revalidate
+  hit commits real data immediately, so the page is not *loading*; it is showing
+  something while a refresh runs behind it, and the snapshot had no word for
+  that. Deliberately separate from `isLoading`, which stays false. The fresh
+  value patches into `snapshot.data` when it lands (dropped if the location
+  moved, stale data kept if it fails) via the loader SPI's new
+  `ctx.revalidate(promise)` channel — bound per record and location, so it
+  cannot be misattributed when a navigation and a query refetch overlap.
+- **`rehydrateAsync()`** — `rehydrate()` is synchronous but `BaseBus.dispatch`
+  returns `any`, so an `AsyncCommandBus` type-checked and pending promises were
+  pushed into `results` typed as `CommandResult` (`result.ok` → `undefined`),
+  with rejections surfacing as unhandled while `results` reported nothing
+  wrong. The async bus is the common case for anyone whose handlers hit a
+  transport. `rehydrate()` now detects a thenable, refuses it with a real
+  error, and names the function that handles it.
+- **`ssr.dropped()`** — the `maxCommands` cap silently dropped everything past
+  500, so the client rehydrated partial state with zero diagnostics. Now a
+  once-per-render dev warning plus a count.
+- **Cached values are frozen in dev** (both caches: the HTTP response cache and
+  the bus-level `cache()` plugin). Every hit hands back the *stored object*, so
+  a consumer that sorts a list or optimistically deletes a row rewrote the cache
+  for every later hit, silently and at a distance. Mutation now throws at the
+  mutation site — the same discipline the router applies to its snapshot.
+- **`setRouteData` dev-warns on an unknown record name.** A typo created an
+  orphan entry no outlet reads. Off-brand for a router that dev-warns on
+  malformed path segments.
+- **`createMcpHandler` dev-warns when `actions` is omitted**, naming what it
+  exposed. The option's own documentation argues for least privilege — "an MCP
+  client is an LLM-driven caller" — and then defaulted to exposing every schema
+  action, writes included. `['*']` opts into that explicitly and silences the
+  warning: demo convenience should be a deliberate keystroke.
+- **`dispatchBatch` dev-warns when `transactional` and `continueOnError` are
+  both set.** `BatchOptions` documented them as mutually exclusive; nothing
+  enforced it, and code order silently let transactional win.
+- **`scripts/check-env-guards.mjs`**, wired into `lint:check` — no unguarded
+  `process.env` reads in `src/`, with the three documented bundler-only sites
+  allowlisted. Converts a one-time fix into a standing invariant.
+
+### Fixed — environment and delivery
+
+- **A fresh clone passes `npm test`.** `tests/examples/exo-astro-directives.test.ts`
+  imports the example's source directly, and Vite's oxc transform resolves the
+  nearest tsconfig — which was the example's own, whose
+  `"extends": "astro/tsconfigs/base"` only resolves after `npm install` **inside
+  the example**. So the library suite had a hidden install-order dependency on
+  an example's dependencies, and the gate was red on a contributor's first clone
+  or any root-only CI. A self-contained tsconfig now sits next to the imported
+  source; CI's `npm ci --prefix examples/exo-astro` step is gone.
+- **Two bare `process.env.NODE_ENV` reads no longer crash the router in
+  no-bundler contexts** (`router/index.ts`). The router's headline delivery is
+  exactly the environment with no bundler define — Blade inline payloads, plain
+  ESM + import map, pattern-1 no-build — where `process` is undefined and the
+  read throws `ReferenceError`. One sat inside `loadRemoteTable`'s `try`, so
+  `{ url }` route tables were **hard-broken** there and the error was rewrapped
+  as `routes_load_failed` and blamed on the URL. The other replaced v1.9.0's
+  reload-storm diagnostic with an uncaught throw. Invisible to the entire gate
+  by construction: tests run in Node, where `process` exists.
+- **`v-vc:command.delegate` works in a second document and inside shadow DOM.**
+  Both failed as *silent no-dispatch* — the control renders, clicks do nothing,
+  no error — which is the worst shape for an opt-in perf flag, because turning
+  `.delegate` on converted working controls into dead ones. The shared listener
+  is now counted per document, and the handler walks `composedPath()` (at
+  document level the target is retargeted to the shadow *host*, so a
+  `parentElement` walk never found the real element). `router/dom.ts` already
+  documented that exact fix for link interception.
+- **`usePagination({ key })` keeps Back-through-pages.** The push convention
+  lives in `resolveQueryHistory`, keyed on the literal string `'page'`, so a
+  custom key — or two paginated lists on one page, the realistic reason to pass
+  `key` — made every `go()`/`next()` a replaceState and Back skipped the whole
+  trail. The composable now states its own convention for any key; a route's
+  explicit `history` declaration still wins, being the more specific statement.
+- **`vaporChamberHMR` declares `apply: 'serve'`** — Vite's own dev-only
+  mechanism, strictly stronger than the `NODE_ENV` check, which `--mode
+  staging` or a programmatic build can miss (and if it misses, the shim,
+  virtual module and `globalThis` bus-persistence keys ship in the production
+  bundle). Also: the injection now emits the one-line-shift sourcemap it
+  implies, so dev stack traces, breakpoints and error-overlay frames stop being
+  off by one; and the predicate matches an actual `import` rather than the
+  substring `'vapor-chamber'`, which hit comments and string literals while the
+  comment above it claimed "only the app entry".
+
+### Docs
+
+- **Whitepaper §14.2** now covers per-request isolation for the HTTP client as
+  well as the bus, with the auth-dimension hazard spelled out; the `ssr.ts`
+  concurrency warning cross-references it.
+- **§11.2** records where the router's loader cache sits in the
+  TanStack-Query-owns-reads boundary (it does not move the line), and why a
+  `useSWRV`-shaped composable was declined — so it is not re-proposed.
+- **`docs/router.md`** documents the in-box loader cache, `meta.cache` and
+  `isRevalidating`. The **KeepAlive** paragraph no longer says "still genuinely
+  gated upstream": the roadmap box is checked, with two correctness issues
+  (#15228, #15237) open against it. The rule is applied symmetrically — an
+  unchecked box never meant missing (the provide/inject fixture measured it
+  working while the box was unchecked), and a checked box does not mean working.
+  Noted for whoever removes `tryKeepAliveHooks`: it hand-solves what #15237
+  proposes natively, so if that lands the manual pause/resume becomes
+  double-suppression.
+- **`ROADMAP.md`** was the last file reading as if Vue were in beta: it tracked
+  "beta", cited beta.17 as last-reviewed, declared a beta.17 peer dep against a
+  `package.json` saying rc.2, and carried a version table ending at
+  *v1.7.0 (unreleased)* long after v1.11.0 shipped. Per-release detail now
+  points at whitepaper §9 rather than keeping a third copy in sync — the same
+  call v1.10.0 made when it deleted the README's stale size table. The version
+  policy's stated basis ("Vue is in beta") had expired and was doing no work:
+  it now rests on what v1.11.0 actually cited, the experimental status of the
+  surfaces that took the breaking changes.
+- **Coverage-floor labels corrected.** `CHANGELOG`/whitepaper printed the four
+  floors as "95/94/86/93 (stmt/branch/fn/line)", which maps them to the wrong
+  metrics — it would put the branch floor above actual branch coverage. They
+  are `vitest.config.ts` declaration order: lines 95 / functions 94 /
+  branches 86 / statements 93.
+- **`MCP_SERVER_VERSION`** replaces a hardcoded `'1.7.0'` that had advertised a
+  four-releases-old version in every `initialize` handshake, and a test pins it
+  to `package.json` — a failing test at release time is the cheapest possible
+  checklist.
+
 ## v1.11.0 — router: vDOM boundary + two engine fixes
 
 Router work driven by reading the [Vapor roadmap](https://github.com/vuejs/core/issues/13687)
@@ -311,7 +677,7 @@ all genuine previously-untested logic, no padding:
 `tsc` clean (including the new `examples/tsconfig.patterns.json` gate), lint
 clean, **1293/1293** tests pass (75/75 files, up from 1102/1102 at rc.1),
 coverage 96.23/90.39/96.88/97.66 (statements/branches/functions/lines, all
-above the 95/94/86/93 floors — **branches crossed 90%**), size gate green,
+above the floors — **branches crossed 90%**), size gate green,
 IIFE 10.8/7.5/8.0 KB brotli (unchanged from rc.1 within rounding).
 
 Every runnable example actually run, not just built: `laravel-app`'s
@@ -342,7 +708,7 @@ Adds `createBatchingHttpBridge`, declarative per-action authorization, the
   excluded explicitly, `devtools.ts` is measured (40.5% → **97.3%** statements,
   12.5% → **81.3%** branch, 46.9% → **100%** lines, via `@vue/devtools-api`
   added as a devDependency so the plugin body is reachable at all), and the
-  floors moved from 90/90/82/89 to **95/94/86/93** — the old ones sat ~7 points
+  floors moved to **lines 95 / functions 94 / branches 86 / statements 93** (from 89/90/82/90 in the same order) — the old ones sat ~7 points
   below reality, wide enough for a genuine regression to pass unnoticed.
   New tests also close the router's delivery error paths (missing/empty inline
   element, remote-payload base warning, `routes_load_failed`) and the blade

@@ -229,6 +229,165 @@ describe('createCommandBus', () => {
   });
 });
 
+describe('re-entrant plugin chain', () => {
+  // A plugin may call `next()` more than once per dispatch — retry() does it
+  // once per attempt. Each call must replay the SAME tail of the chain, not
+  // fall through to the handler because a shared cursor was already exhausted.
+  it('replays every downstream plugin when an upstream plugin calls next() twice', () => {
+    const bus = createCommandBus();
+    const order: string[] = [];
+
+    bus.use((_cmd, next) => {
+      order.push('outer:1');
+      next();
+      order.push('outer:2');
+      return next();
+    });
+    bus.use((_cmd, next) => {
+      order.push('inner');
+      return next();
+    });
+
+    let handlerRuns = 0;
+    bus.register('act', () => {
+      handlerRuns++;
+      return 'done';
+    });
+
+    const result = bus.dispatch('act', {});
+    expect(result.ok).toBe(true);
+    expect(handlerRuns).toBe(2);
+    // 'inner' ran on both passes — it was skipped on the second before the fix.
+    expect(order).toEqual(['outer:1', 'inner', 'outer:2', 'inner']);
+  });
+
+  // The reason the runner cannot use the cheaper save/restore cursor, which
+  // benchmarks identically to the pre-fix shared cursor: a plugin may call
+  // `next()` long AFTER it returned. debounce/throttle do exactly that from a
+  // timer. With save/restore the deferred call re-enters the same plugin and
+  // the handler never runs; the old shared cursor survived it only by accident
+  // (its exhausted index happened to land on `execute()`).
+  it('a plugin may call next() after it has already returned (deferred continuation)', async () => {
+    const bus = createCommandBus();
+    const order: string[] = [];
+
+    bus.use((_cmd, next) => {
+      setTimeout(() => {
+        order.push('deferred');
+        next();
+      }, 1);
+      return { ok: true, value: 'queued' };
+    });
+    bus.use((_cmd, next) => {
+      order.push('downstream');
+      return next();
+    });
+    bus.register('act', () => {
+      order.push('handler');
+      return 'done';
+    });
+
+    expect(bus.dispatch('act', {}).value).toBe('queued');
+    await new Promise((r) => setTimeout(r, 20));
+
+    // The deferred call resumes at the SAME position it would have, not at
+    // this plugin's own index and not past the rest of the chain.
+    expect(order).toEqual(['deferred', 'downstream', 'handler']);
+  });
+
+  it('keeps concurrent dispatches on the async bus independent', async () => {
+    const bus = createAsyncCommandBus();
+    const seen: string[] = [];
+    bus.use(async (cmd, next) => {
+      seen.push(`p1:${cmd.action}`);
+      return next();
+    });
+    bus.use(async (cmd, next) => {
+      seen.push(`p2:${cmd.action}`);
+      return next();
+    });
+    bus.register('a', async () => 'a');
+    bus.register('b', async () => 'b');
+
+    await Promise.all([bus.dispatch('a', {}), bus.dispatch('b', {})]);
+    expect(seen.filter((s) => s.startsWith('p2:')).sort()).toEqual(['p2:a', 'p2:b']);
+  });
+});
+
+describe('listener fan-out with in-flight unsubscribe', () => {
+  // The self-removal case the lenBefore/i-- guard was written for.
+  it('a listener that removes itself does not skip its neighbour', () => {
+    const bus = createCommandBus();
+    bus.register('act', () => 1);
+    const seen: string[] = [];
+
+    bus.on('act', () => seen.push('first'));
+    const off = bus.on('act', () => {
+      seen.push('second');
+      off();
+    });
+    bus.on('act', () => seen.push('third'));
+
+    bus.dispatch('act', {});
+    expect(seen).toEqual(['first', 'second', 'third']);
+  });
+
+  // The case that guard got WRONG: removing a peer that has not run yet
+  // shrinks the array without moving the cursor, so decrementing re-invoked
+  // the listener that had just finished.
+  it('a listener that removes a LATER peer does not re-run itself', () => {
+    const bus = createCommandBus();
+    bus.register('act', () => 1);
+    const seen: string[] = [];
+
+    let offSecond = () => {};
+    bus.on('act', () => {
+      seen.push('first');
+      offSecond();
+    });
+    offSecond = bus.on('act', () => seen.push('second'));
+    bus.on('act', () => seen.push('third'));
+
+    bus.dispatch('act', {});
+    expect(seen).toEqual(['first', 'third']); // was ['first', 'first', 'third']
+  });
+
+  it('the same holds for wildcard listeners', () => {
+    const bus = createCommandBus();
+    bus.register('cartAdd', () => 1);
+    const seen: string[] = [];
+
+    let offSecond = () => {};
+    bus.on('cart*', () => {
+      seen.push('first');
+      offSecond();
+    });
+    offSecond = bus.on('cart*', () => seen.push('second'));
+    bus.on('cart*', () => seen.push('third'));
+
+    bus.dispatch('cartAdd', {});
+    expect(seen).toEqual(['first', 'third']);
+  });
+
+  it('a listener removing several later peers still advances correctly', () => {
+    const bus = createCommandBus();
+    bus.register('act', () => 1);
+    const seen: string[] = [];
+
+    const offs: Array<() => void> = [];
+    bus.on('act', () => {
+      seen.push('first');
+      for (const off of offs) off();
+    });
+    offs.push(bus.on('act', () => seen.push('second')));
+    offs.push(bus.on('act', () => seen.push('third')));
+    bus.on('act', () => seen.push('fourth'));
+
+    bus.dispatch('act', {});
+    expect(seen).toEqual(['first', 'fourth']);
+  });
+});
+
 describe('createAsyncCommandBus', () => {
   it('should handle async handlers', async () => {
     const bus = createAsyncCommandBus();
@@ -388,18 +547,114 @@ describe('listenerOffAll with wildcard pattern', () => {
 // ---------------------------------------------------------------------------
 
 describe('asyncDispatchBatch mid-flight abort', () => {
-  it('triggers transactional rollback when signal aborts mid-batch', async () => {
+  // Assertions here are derived from the DOCUMENTED BatchOptions contract, not
+  // from what the implementation happens to do:
+  //   transactional — "All-or-nothing semantics: if any command fails,
+  //     automatically run the registered undo handler for every command that
+  //     already succeeded (in reverse order) … Commands without an undo
+  //     handler are skipped during rollback."
+  //   signal — "aborting mid-flight stops further commands from dispatching
+  //     (the in-flight one runs to completion) and the batch result is
+  //     { ok: false, error: BusError('VC_CORE_ABORTED'), results: [...partial] }".
+  //     (That doc line said `AbortError` until this pass — `abortedResult`
+  //     deliberately substitutes a BusError so the code is queryable, and the
+  //     doc had never been corrected to match. Fixed with this rewrite.)
+  //
+  // The previous version of this block passed `transactional: false` and
+  // asserted only that 'c' never ran, so the branch its title named was never
+  // entered; and its 'undoA' was registered as a plain ACTION, while rollback
+  // only ever consults handlers registered with `{ undo }` — so even flipped
+  // to true it would have proved nothing.
+  it('rolls back every succeeded command, in reverse order, when the signal aborts mid-batch', async () => {
     const bus = createAsyncCommandBus();
     const log: string[] = [];
-    bus.register('a', async () => { log.push('a'); return 1; });
+    const ac = new AbortController();
+
+    bus.register('a', async () => { log.push('a'); return 1; }, { undo: () => { log.push('undoA'); } });
     bus.register('b', async () => {
       log.push('b');
-      ac.abort(); // abort mid-flight
+      ac.abort(); // abort mid-flight, after b has committed
       return 2;
-    });
-    bus.register('undoA', async () => { log.push('undoA'); });
+    }, { undo: () => { log.push('undoB'); } });
+    bus.register('c', async () => { log.push('c'); return 3; }, { undo: () => { log.push('undoC'); } });
 
+    const result = await bus.dispatchBatch(
+      [
+        { action: 'a', target: {} },
+        { action: 'b', target: {} },
+        { action: 'c', target: {} },
+      ],
+      { signal: ac.signal, transactional: true },
+    );
+
+    expect(result.ok).toBe(false);
+    expect((result.error as { code?: string })?.code).toBe('VC_CORE_ABORTED');
+    expect(log).toEqual(['a', 'b', 'undoB', 'undoA']); // reverse order; c never dispatched
+    expect(result.results).toHaveLength(2); // partial results kept for inspection
+    expect(result.rollbacks).toHaveLength(2);
+    expect(result.rollbacks?.every((r) => r.ok)).toBe(true);
+    expect(result.successCount).toBe(0); // all-or-nothing: nothing stands
+  });
+
+  it('skips commands with no undo handler, and reports the rollbacks it did run', async () => {
+    // The documented skip behaviour — the honest caveat in BatchOptions.
+    const bus = createAsyncCommandBus();
+    const log: string[] = [];
     const ac = new AbortController();
+
+    bus.register('withUndo', async () => { log.push('withUndo'); return 1; }, { undo: () => { log.push('undoWithUndo'); } });
+    bus.register('noUndo', async () => {
+      log.push('noUndo');
+      ac.abort();
+      return 2;
+    }); // deliberately no { undo }
+
+    const result = await bus.dispatchBatch(
+      [
+        { action: 'withUndo', target: {} },
+        { action: 'noUndo', target: {} },
+        { action: 'withUndo', target: {} },
+      ],
+      { signal: ac.signal, transactional: true },
+    );
+
+    expect(result.ok).toBe(false);
+    // 'noUndo' left its side effect in place — that is the contract, not a bug.
+    expect(log).toEqual(['withUndo', 'noUndo', 'undoWithUndo']);
+    expect(result.rollbacks).toHaveLength(1);
+    expect(result.successCount).toBe(0);
+  });
+
+  it('a mid-flight abort with NO undo handlers at all reports an empty rollback list', async () => {
+    const bus = createAsyncCommandBus();
+    const log: string[] = [];
+    const ac = new AbortController();
+
+    bus.register('a', async () => { log.push('a'); return 1; });
+    bus.register('b', async () => { log.push('b'); ac.abort(); return 2; });
+
+    const result = await bus.dispatchBatch(
+      [
+        { action: 'a', target: {} },
+        { action: 'b', target: {} },
+        { action: 'c', target: {} },
+      ],
+      { signal: ac.signal, transactional: true },
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.rollbacks).toEqual([]);
+    expect(log).toEqual(['a', 'b']); // side effects persist, nothing undone
+  });
+
+  it('without transactional, an abort keeps what succeeded and runs no rollback', async () => {
+    const bus = createAsyncCommandBus();
+    const log: string[] = [];
+    const ac = new AbortController();
+
+    bus.register('a', async () => { log.push('a'); return 1; }, { undo: () => { log.push('undoA'); } });
+    bus.register('b', async () => { log.push('b'); ac.abort(); return 2; }, { undo: () => { log.push('undoB'); } });
+
     const result = await bus.dispatchBatch(
       [
         { action: 'a', target: {} },
@@ -410,8 +665,22 @@ describe('asyncDispatchBatch mid-flight abort', () => {
     );
 
     expect(result.ok).toBe(false);
-    expect(log).toContain('a');
-    expect(log).toContain('b');
-    expect(log).not.toContain('c'); // aborted before reaching c
+    expect(result.rollbacks).toBeUndefined();
+    expect(result.successCount).toBe(2); // both committed and stay committed
+    expect(log).toEqual(['a', 'b']); // no undo ran; 'c' never dispatched
+  });
+
+  it('dev-warns when transactional and continueOnError are both set', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const bus = createAsyncCommandBus();
+    bus.register('a', async () => 1);
+
+    await bus.dispatchBatch([{ action: 'a', target: {} }], {
+      transactional: true,
+      continueOnError: true,
+    });
+
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('mutually exclusive'));
+    warn.mockRestore();
   });
 });

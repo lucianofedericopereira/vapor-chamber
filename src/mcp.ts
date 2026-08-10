@@ -31,6 +31,8 @@ import { BusError, matchesPattern } from './command-bus';
 import type { CommandResult, Plugin } from './command-bus';
 import type { ActionSchema, BusSchema, FieldMap } from './schema';
 
+const DEV = typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
+
 // ---------------------------------------------------------------------------
 // MCP tool mapping
 // ---------------------------------------------------------------------------
@@ -87,7 +89,7 @@ function actionToMcpTool(name: string, def: ActionSchema): McpTool {
 /**
  * Convert a BusSchema into MCP tool definitions (the `tools/list` shape).
  *
- * Mirrors {@link toAnthropicTools}: each action becomes one tool, with
+ * Mirrors `toAnthropicTools` (from the schema module): each action becomes one tool, with
  * `target` and `payload` as nested object properties. Field types map 1:1 to
  * JSON Schema types; `'any'` fields get no type constraint and are excluded
  * from `required` (all other fields are required).
@@ -114,41 +116,24 @@ export function busToMcpTools(schema: BusSchema): McpTool[] {
 // ---------------------------------------------------------------------------
 
 /**
- * Module-level flag raised by the MCP handler around its dispatch call.
- * The {@link agentOrigin} plugin reads it to tell MCP-driven dispatches apart
- * from direct local dispatches on the same bus.
- */
-let _mcpDispatching = false;
-
-/**
- * Plugin factory: stamps `cmd.meta.origin = 'agent'` on commands dispatched
- * through an MCP handler ({@link createMcpHandler} / {@link serveMcpStdio}),
- * and leaves direct `bus.dispatch()` calls untouched.
+ * @deprecated Since v1.12.0 `meta.origin === 'agent'` is stamped by the core,
+ * from the `__origin` key {@link createMcpHandler} puts in the payload it
+ * dispatches — so this plugin has nothing left to do and is a no-op kept for
+ * one release.
  *
- * Install it with a high priority so the stamp is visible to every other
- * plugin, hook, and listener in the chain:
+ * It used to work off a module-level boolean raised around the handler's
+ * dispatch call, which was exact on a sync bus and wrong on an async one: any
+ * LOCAL dispatch entering the plugin chain while an MCP tool call was awaiting
+ * an async handler got stamped `'agent'` too. The doc admitted it ("advisory,
+ * not a security boundary") — but the first thing anyone builds on `origin`
+ * is an audit trail or a permission gate, which is exactly the consumer that
+ * needs it exact, on exactly the bus type where it wasn't. A marker that
+ * travels ON the dispatch cannot be misattributed by interleaving.
  *
- * @example
- * const bus = createSchemaCommandBus(schema);
- * bus.use(agentOrigin(), { priority: 150 });
- * bus.use((cmd, next) => {
- *   if (cmd.meta?.origin === 'agent') auditLog(cmd); // only MCP traffic
- *   return next();
- * });
- *
- * Known limitation — the detection is a module-scoped flag set synchronously
- * around the handler's dispatch call. On a sync bus this is exact. On an
- * async bus with concurrent mixed traffic (an MCP tool call awaiting an async
- * handler while local code dispatches on the same bus), an interleaved local
- * dispatch that enters the plugin chain during that window can be stamped
- * too. It is best-effort for that scenario; treat `origin === 'agent'` as
- * advisory, not a security boundary.
+ * Remove the `bus.use(agentOrigin(), ...)` line; the stamp arrives without it.
  */
 export function agentOrigin(): Plugin {
-  return (cmd, next) => {
-    if (_mcpDispatching && cmd.meta) cmd.meta.origin = 'agent';
-    return next();
-  };
+  return (_cmd, next) => next();
 }
 
 // ---------------------------------------------------------------------------
@@ -167,17 +152,29 @@ export type McpHandlerOptions = {
    * (`'cart*'`, exact names, or `'*'`). Only matching schema actions are
    * listed by `tools/list` and callable via `tools/call`.
    *
-   * Default: ALL schema actions are exposed. That is convenient for demos,
-   * but for anything that mutates state you should pass an explicit
-   * whitelist — an MCP client is an LLM-driven caller, and least privilege
-   * applies: expose reads broadly, writes narrowly.
+   * **Pass this.** Omitting it exposes EVERY schema action — writes included —
+   * to an LLM-driven caller, and dev-warns to say so. An MCP client is the one
+   * caller class this library treats as untrusted by construction, and least
+   * privilege applies: expose reads broadly, writes narrowly. `['*']` opts
+   * into everything explicitly and silences the warning, which is the point:
+   * demo convenience should be a deliberate keystroke, not a default.
    */
   actions?: string[];
   /** Server name reported by `initialize`. Default: `'vapor-chamber'`. */
   serverName?: string;
-  /** Server version reported by `initialize`. Default: `'1.7.0'`. */
+  /** Server version reported by `initialize`. Default: the package version. */
   serverVersion?: string;
 };
+
+/**
+ * Version reported by the MCP `initialize` handshake.
+ *
+ * Kept in sync with package.json by `tests/mcp.test.ts`, not by discipline —
+ * it sat at a hardcoded '1.7.0' for four releases, so every handshake
+ * advertised a version that had not existed for months. A failing test at
+ * release time is the cheapest possible checklist.
+ */
+export const MCP_SERVER_VERSION = '1.12.0';
 
 /** Latest MCP protocol revision this handler speaks. */
 const MCP_PROTOCOL_VERSION = '2025-06-18';
@@ -236,8 +233,17 @@ export function createMcpHandler(
   options: McpHandlerOptions = {},
 ): (message: unknown) => Promise<object | null> {
   const serverName = options.serverName ?? 'vapor-chamber';
-  const serverVersion = options.serverVersion ?? '1.7.0';
+  const serverVersion = options.serverVersion ?? MCP_SERVER_VERSION;
   const whitelist = options.actions;
+  if (whitelist === undefined && DEV) {
+    const exposed = Object.keys(bus.getSchema());
+    console.warn(
+      `[vapor-chamber] createMcpHandler({ actions }) was omitted — all ${exposed.length} schema ` +
+        `action(s) are exposed to the MCP client, writes included: ${exposed.join(', ')}. ` +
+        'An MCP client is an LLM-driven caller; pass an explicit whitelist ' +
+        "(e.g. actions: ['cartRead*']), or actions: ['*'] to accept full exposure deliberately.",
+    );
+  }
   const isAllowed = (name: string): boolean =>
     whitelist === undefined || whitelist.some((pattern) => matchesPattern(pattern, name));
 
@@ -251,16 +257,31 @@ export function createMcpHandler(
       return toolResult(`Tool "${name}" is unknown or not permitted`, true);
     }
     const target = args?.target ?? {};
-    const payload = args?.payload;
+    // `__origin` rides the payload into stampMeta, which is the only
+    // race-free place to put it: it travels with this dispatch instead of
+    // sitting in a module flag that a concurrent local dispatch can read.
+    // Non-object payloads (a bare string an LLM sent where an object belongs)
+    // are passed through untouched — schema validation owns that complaint.
+    const rawPayload = args?.payload;
+    // An absent payload is legitimate — `actionToMcpTool` only declares (and
+    // requires) `payload` for actions whose schema has one, so an action
+    // without a payload schema has no payload checks to fail. Stamping the
+    // marker anyway keeps the audit trail hole-free.
+    // A non-object, non-null payload (a bare string or array where an object
+    // belongs) is passed through untouched: there is nothing to spread into,
+    // and schemaValidator rejects that shape on its own.
+    const payload =
+      rawPayload === null || rawPayload === undefined
+        ? { __origin: 'agent' }
+        : typeof rawPayload === 'object' && !Array.isArray(rawPayload)
+          ? { ...rawPayload, __origin: 'agent' }
+          : rawPayload;
     let result: CommandResult;
-    _mcpDispatching = true;
     try {
       // `await` handles both sync and async buses (thenable or plain result).
       result = await bus.dispatch(name, target, payload);
     } catch (e) {
       result = { ok: false, error: e as Error };
-    } finally {
-      _mcpDispatching = false;
     }
     if (result.ok) return toolResult(JSON.stringify(result.value ?? null));
     const code = result.error instanceof BusError ? ` (${result.error.code})` : '';

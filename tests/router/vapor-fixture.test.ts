@@ -2,11 +2,15 @@
 /**
  * FIXTURE — provide/inject on a real Vapor app, vue@3.6.0-rc.2.
  *
- * The roadmap (vuejs/core#13687) lists "Provide/Inject System" unchecked, which
- * left two open questions for this router:
+ * Two things this router depends on, MEASURED here rather than inferred:
  *   - app.provide → inject   backs every composable (composables.ts useRouter)
  *   - provide() → inject     backs nested outlets (outlet.ts OUTLET_DEPTH_KEY)
- * Both are MEASURED here rather than inferred.
+ *
+ * The roadmap (vuejs/core#13687) listed "Provide/Inject System" unchecked when
+ * this fixture was written, and now lists it checked. The measurements are
+ * what they always were; only the framing changed. Note the rule cuts both
+ * ways and this file is the reason it can be applied honestly: an unchecked
+ * box never meant missing, and a checked one does not mean working.
  *
  * Everything is imported from the single with-vapor browser build on purpose.
  * Vapor ships as a physically separate dist file (see chamber.ts §probeVue and
@@ -57,8 +61,8 @@ describe('provide/inject on a vapor app', () => {
     app.provide(APP_KEY, 'app-level OK');
     app.mount(document.createElement('div'));
 
-    // MEASURED on 3.6.0-rc.2: both resolve. The unchecked roadmap box does not
-    // mean basic provide/inject is missing in Vapor.
+    // MEASURED on 3.6.0-rc.2: both resolve. Upstream now agrees (the roadmap
+    // box is checked), but the assertion — not the box — is why we rely on it.
     expect(appLevel).toBe('app-level OK');
     expect(componentLevel).toBe('component-level OK');
   });
