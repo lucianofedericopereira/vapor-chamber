@@ -17,10 +17,10 @@ from it is ~3.6 KB brotli, not 24.0 KB).
 
 | export | min KB | gzip KB | brotli KB |
 |---|--:|--:|--:|
-| `.` | 82.2 | 27.3 | 24.0 |
+| `.` | 82.2 | 27.4 | 24.0 |
 | `./transports` | 11.6 | 4.7 | 4.2 |
 | `./directives` | 19.0 | 6.8 | 6.0 |
-| `./transitions` | 16.7 | 6.0 | 5.3 |
+| `./transitions` | 16.7 | 5.9 | 5.3 |
 | `./ssr` | 1.6 | 0.8 | 0.7 |
 | `./vite` | 3.0 | 1.3 | 1.2 |
 | `./fast-lane` | 0.9 | 0.5 | 0.4 |
