@@ -37,9 +37,13 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        # Astro 7 (examples/exo-astro) requires Node >=22.12.0, and the root
-        # test suite imports that example's source directly — so Node 20 is
-        # not a supported CI target.
+        # Matches engines.node (>=22.12.0). Node 20 went EOL in April 2026;
+        # it was already absent from this matrix while package.json still
+        # claimed to support it, so the floor was moved to agree with what CI
+        # actually verifies. 22.12 specifically because Vite and
+        # @vitejs/plugin-vue require ^20.19.0 || >=22.12.0, and Astro 7
+        # (examples/exo-astro, whose source the root suite imports directly)
+        # requires >=22.12.0.
         node: ['22', '24']
     steps:
       - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3

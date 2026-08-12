@@ -72,7 +72,27 @@ const BUDGETS = {
   // for the reason already noted above: rolldown does not constant-fold
   // `typeof process < "u" && !1`, so the messages survive minification even
   // though the branch cannot run. Same caveat, same revisit condition.
-  'vapor-chamber.iife.min.js':          { rawMax: 39_600, brotliMax: 11_500 },
+  // rc.3: NO bump needed. Vapor detection gained a library-owned global slot,
+  // `configureVue()`, and a three-way `vueDetectionHint()`. First cut went 35 B
+  // raw / 50 B brotli over the ceiling; tightening the hint to one shared tail
+  // plus three short causes (and dropping a single-use helper) recovered
+  // 190 B raw / 65 B brotli, landing at 39_445 / 11_485 — inside the existing
+  // budgets. The hint is deliberately NOT dev-gated: the audience that hits
+  // this failure is the no-bundler <script>-tag page, which only ever runs a
+  // production IIFE, so stripping it in prod would delete the diagnosis
+  // precisely where it is needed.
+  // v1.13.0 — composable dispatches now suspend reactive tracking, so a
+  // handler's reads stop becoming dependencies of the caller's effect. Only
+  // `full` moves (+71 B raw / +44 B brotli): it is the variant that carries the
+  // composables, which is exactly the audience the fix is for.
+  //
+  // `core` and `elements` did NOT move, and that is the design rather than
+  // luck. Whether a bundle is a <script>-tag build is a BUILD-time fact, so
+  // `scripts/build.mjs` defines `__VC_IIFE__` and the probe for
+  // `@vue/reactivity` const-folds away — verified: the specifier string
+  // appears 0 times in all three IIFE bundles. Nobody pays for a code path
+  // their build can never take.
+  'vapor-chamber.iife.min.js':          { rawMax: 39_800, brotliMax: 11_600 },
   'vapor-chamber-core.iife.min.js':     { rawMax: 27_600, brotliMax: 8_050  },
   'vapor-chamber-elements.iife.min.js': { rawMax: 29_100, brotliMax: 8_450  },
 };

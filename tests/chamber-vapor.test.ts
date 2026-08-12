@@ -21,13 +21,24 @@ describe('createVaporChamberApp', () => {
     );
   });
 
-  it('error message mentions installation instructions', () => {
-    try {
-      createVaporChamberApp({});
-    } catch (e: any) {
-      expect(e.message).toContain('vue@^3.6.0-beta.1');
-      expect(e.message).toContain('createApp()');
-    }
+  it('error message diagnoses WHY detection failed, not just that it did', () => {
+    // The old assertion sat inside a bare try/catch with no `expect.assertions`,
+    // so it also passed when nothing threw at all. Assert on the thrown value
+    // directly instead — the failure mode this test exists to catch is the
+    // message going vague, and it cannot catch that if it can pass vacuously.
+    expect(() => createVaporChamberApp({})).toThrow(/Vue 3\.6\+ with Vapor mode required/);
+
+    let message = '';
+    try { createVaporChamberApp({}); } catch (e) { message = (e as Error).message; }
+
+    // Three different problems used to share one message: Vue absent, Vue
+    // present without the Vapor build, and Vue present but unreachable through
+    // either detection channel. The hint names which one applies.
+    expect(message).toMatch(/configureVue\(/);
+    expect(message).toContain('createApp()');
+    // No stale version literal: the message used to hardcode
+    // `vue@^3.6.0-beta.1`, which was four release lines out of date.
+    expect(message).not.toContain('beta.1');
   });
 });
 

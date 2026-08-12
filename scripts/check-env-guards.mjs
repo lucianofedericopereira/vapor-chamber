@@ -43,8 +43,24 @@ for (const file of walk(SRC)) {
   const rel = relative(ROOT, file);
   if (ALLOWLIST.has(rel)) continue;
   const lines = readFileSync(file, 'utf8').split('\n');
+  // Block-comment state has to be tracked ACROSS lines, not just stripped
+  // per line: a `process.env` mentioned in prose on a continuation line of a
+  // /** … */ block matched neither the `//` nor the single-line `/* … */`
+  // strip, so documenting this very rule tripped it. A guard that fires on
+  // its own explanation is not a guard.
+  let inBlockComment = false;
   lines.forEach((line, i) => {
-    const code = line.replace(/\/\/.*$/, '').replace(/\/\*.*?\*\//g, '');
+    let code = line;
+    if (inBlockComment) {
+      const close = code.indexOf('*/');
+      if (close === -1) return;            // wholly inside a comment
+      code = code.slice(close + 2);
+      inBlockComment = false;
+    }
+    code = code.replace(/\/\*[\s\S]*?\*\//g, '');
+    const open = code.indexOf('/*');
+    if (open !== -1) { inBlockComment = true; code = code.slice(0, open); }
+    code = code.replace(/\/\/.*$/, '');
     if (!READ.test(code)) return;
     // The guard may sit on this line or a few lines above, inside a wrapped
     // `if (…)` condition — scan a small window rather than the line alone.
@@ -57,7 +73,7 @@ if (offenders.length > 0) {
   console.error('Unguarded process.env reads (ReferenceError in no-bundler delivery):\n');
   for (const offender of offenders) console.error(`  ${offender}`);
   console.error(
-    '\nUse: const DEV = typeof process !== \'undefined\' && process.env?.NODE_ENV !== \'production\';',
+    "\nUse the shared `DEV` flag: import { DEV } from './dev' (build-time const-folded).",
   );
   process.exit(1);
 }

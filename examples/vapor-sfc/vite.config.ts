@@ -1,30 +1,21 @@
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import { vaporChamberHMR } from 'vapor-chamber/vite';
+import path from 'node:path';
 
-// `@vitejs/plugin-vue` ≥ 5.x detects `<script setup vapor>` blocks and routes
-// them to `@vue/compiler-vapor` automatically.
-//
-// BUT: Vue's default `vue` entry (vue.runtime.esm-bundler.js) ships NO Vapor
-// runtime — without the alias below the build succeeds while
-// createVaporChamberApp() throws at runtime ("Vue 3.6+ with Vapor mode
-// required"). The compiled vapor SFC helpers AND vapor-chamber's
-// createVaporApp probe both read off `import('vue')`, so `vue` must point at
-// the build that actually contains Vapor.
-//
-// `vaporChamberHMR()` preserves the bus (handlers, plugins, hooks, listeners)
-// across hot module replacement so app state survives component reloads.
-
+// Vue's `vue` entry ships no Vapor runtime, and at rc.3 with-vapor exists ONLY
+// as a pre-bundled esm-browser dist. src/vue-with-vapor.ts synthesizes the
+// missing esm-bundler entry from the two packages that do ship one, which
+// tree-shakes properly. Measured, same app:
+//   esm-browser .prod.js  122.2 KB (br 38.7)
+//   synthesized bundler    74.8 KB (br 24.0)
 export default defineConfig({
-  resolve: {
-    alias: {
-      vue: 'vue/dist/vue.runtime-with-vapor.esm-browser.js',
-    },
+  resolve: { alias: { vue: path.resolve(__dirname, 'src/vue-with-vapor.ts') } },
+  define: {
+    __VUE_OPTIONS_API__: false,
+    __VUE_PROD_DEVTOOLS__: false,
+    __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: false,
   },
-  // Re-bundle the aliased vue so the prebundled dep carries the Vapor runtime.
-  optimizeDeps: { include: ['vue', 'vapor-chamber'] },
-  plugins: [
-    vue(),
-    vaporChamberHMR({ verbose: false }),
-  ],
+  build: { target: 'es2022' },
+  plugins: [vue(), vaporChamberHMR({ verbose: false })],
 });

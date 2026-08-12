@@ -93,8 +93,12 @@ describe('freezeCached', () => {
     // pins the gate itself, not just the walk.
     expect(FREEZE_IN_DEV).toBe(true);
     const value = freezeCached({ items: [1, 2, 3] });
+    // No `'use strict'` directive: this is an ES module, so the body is already
+    // strict and the directive was redundant (biome/noRedundantUseStrict). The
+    // assertion is unchanged — assigning to a frozen property still throws
+    // TypeError, which is precisely what strict mode buys and what is pinned
+    // here.
     expect(() => {
-      'use strict';
       (value as { items: number[] }).items = [];
     }).toThrow(TypeError);
   });

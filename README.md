@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  A command bus built for <a href="https://github.com/vuejs/core">Vue Vapor</a> — a ~3.6 KB brotli dispatch core with opt-in batteries, each 0 KB until imported. Vue 3.6.0-rc.2 aligned. LGPL-2.1.
+  A command bus built for <a href="https://github.com/vuejs/core">Vue Vapor</a> — a ~3.6 KB brotli dispatch core with opt-in batteries, each 0 KB until imported. Vue 3.6.0-rc.3 aligned. LGPL-2.1.
 </p>
 
 ---
@@ -41,10 +41,10 @@ A small core, and batteries you only pay for if you import them.
 | **Transports** (opt-in) | HTTP bridge, batching HTTP, WebSocket, SSE, Laravel Echo/Reverb |
 | **Extras** (opt-in, own subpath each) | SSR dehydrate/rehydrate, form bus, HTTP client, streaming JSON parser, schema validation, transitions, devtools, Vite HMR, testing, MCP server, offline outbox |
 
-- **Vue 3.6.0-rc.2 aligned** — signals, `onScopeDispose`, `getCurrentScope`, alien-signals internals; tracked per release in the [CHANGELOG](CHANGELOG.md)
+- **Vue 3.6.0-rc.3 aligned** — signals, `onScopeDispose`, `getCurrentScope`, alien-signals internals; tracked per release in the [CHANGELOG](CHANGELOG.md)
 - **One runtime dependency** (`alien-signals`); unimported modules tree-shake to zero
 - **ESM-only**, plus three IIFE `<script>` drop-ins for no-bundler pages
-- **1421 tests** across 81 files · 96.7% statements · 98.2% lines ([full table](docs/COVERAGE.md))
+- **1491 tests** across 92 files · 97.1% statements · 98.3% lines ([full table](docs/COVERAGE.md))
 
 ## Contents
 
@@ -60,11 +60,11 @@ npm install vapor-chamber        # npm registry (releases may lag the repo)
 npm install github:lucianofedericopereira/vapor-chamber
 ```
 
-**Requirements:** Node ≥20.19. Vue is an **optional** peer dep — ≥3.5 for composables, ≥3.6.0-rc.2
+**Requirements:** Node ≥22.12. Vue is an **optional** peer dep — ≥3.5 for composables, ≥3.6.0-rc.3
 for the full Vapor surface. The core bus runs without Vue entirely. Vite ≥5 + `@vitejs/plugin-vue`
 ≥5 only for the `vapor-chamber/vite` HMR plugin and Vapor SFC support.
 
-This package is **ESM-only** — no CJS build. Node ≥20 `import`, bundlers, and
+This package is **ESM-only** — no CJS build. Node ≥22 `import`, bundlers, and
 `<script type="module">` all work; for classic `<script>` tags use the [IIFE variants](#iife--cdn-variants).
 
 > **RC tracking.** This lib follows Vue 3.6 through its release candidates. The Vapor wrappers are
@@ -204,14 +204,14 @@ pins Vue's virtual-DOM runtime into your bundle. It therefore lives behind its o
 
 | entry | bindings retained from `vue` | brotli |
 |---|---|--:|
-| `vapor-chamber/router` | `computed customRef getCurrentScope inject onScopeDispose shallowRef` | 11.6 KB |
+| `vapor-chamber/router` | `computed customRef getCurrentScope inject onScopeDispose shallowRef` | 12.3 KB |
 | `vapor-chamber/router/vdom` | `defineComponent h inject provide` | 0.4 KB |
 
 A Vapor app that never renders an outlet pays nothing for the vDOM runtime. Blade rows need no
 import from you — the router pulls `makeBladeComponent` in on demand, as its own chunk, the first
 time it renders one.
 
-**Vapor interop, measured on rc.2** (not inferred from the roadmap): provide/inject works in Vapor
+**Vapor interop, measured on rc.3** (not inferred from the roadmap): provide/inject works in Vapor
 at *both* levels — app-level, which backs every composable, and component-level, which backs nested
 outlet depth. What still ties the outlet to vDOM is its own render path, not an upstream gap.
 
@@ -890,6 +890,35 @@ await parser.stream(await fetch('/api/stream'));
 `useCommand` uses no `getCurrentInstance()`, so it is Vapor-safe: the same API works in
 `<script setup vapor>` and vDOM components alike, with auto-cleanup on scope disposal.
 
+**Dispatching from inside a reactive effect.** A dispatch is an *action*, not a read, so
+nothing the handler touches should make the caller re-run. Every composable here suspends
+reactive tracking around its bus call, so this is handled for you. If you reach for a **raw
+bus** inside an effect, wrap it:
+
+```ts
+import { untracked, getCommandBus } from 'vapor-chamber/vue';
+
+watchEffect(() => {
+  // without untracked(), anything the HANDLER reads becomes a dependency of
+  // this effect — it would re-run on state it never mentions
+  untracked(() => getCommandBus().dispatch('cartSync', cart));
+});
+```
+
+**Import from `vapor-chamber/vue` in a Vue app.** Note the subpath — it is not cosmetic. The
+package root has to work with no Vue in the tree, so it finds Vue's tracking primitives through
+a runtime lookup that resolves under a dev server and **fails in a production bundle**, where a
+bare specifier has nothing to resolve against. `untracked()` then silently becomes a
+pass-through and your effects start re-running on state they never mention. `vapor-chamber/vue`
+imports those primitives statically, so your bundler resolves them at build time and there is
+nothing left to fail — importing it is the whole setup, there is no call to make. The same
+composables (`useCommand`, `useCommandState`, …) are re-exported from there, and they are the
+same functions, not copies.
+
+`untracked()` is a plain pass-through when Vue is absent, so the root import stays safe in code
+shared between Vue and non-Vue targets — it just cannot suspend tracking there. In DEV it warns
+once if it is running as a pass-through on a page that *does* have Vue.
+
 ```vue
 <script setup vapor>
 import { useCommand } from 'vapor-chamber';
@@ -1014,18 +1043,24 @@ on any regression past budget.
 | Entry | brotli |
 |---|--:|
 | dispatch core (`createCommandBus`, tree-shaken) | **~3.6 KB** |
-| `vapor-chamber` (main barrel, import-*everything*) | 21.6 KB |
-| `vapor-chamber/router` | 11.6 KB |
+| `vapor-chamber` (main barrel, import-*everything*) | 24.0 KB |
+| `vapor-chamber/router` | 12.3 KB |
 | `vapor-chamber/router/vdom` | 0.4 KB |
-| `vapor-chamber/router-fetch` | 3.5 KB |
-| `vapor-chamber/transports` | 4.1 KB |
-| `vapor-chamber/reactive` | 4.5 KB |
+| `vapor-chamber/router-fetch` | 3.9 KB |
+| `vapor-chamber/vue` | 7.4 KB |
+| `vapor-chamber/reactive` | 5.2 KB |
+| `vapor-chamber/transports` | 4.2 KB |
 | `vapor-chamber/outbox` | 1.9 KB |
-| `vapor-chamber/mcp` | 1.5 KB |
-| `vapor-chamber/ssr` | 0.3 KB |
+| `vapor-chamber/mcp` | 1.7 KB |
+| `vapor-chamber/ssr` | 0.7 KB |
 
 **Rows are not additive** — the shared core is included in every row and counted once. `.` is the
 barrel measured import-everything; your bundler drops what you don't use.
+
+These are brotli, hand-copied from [docs/BUNDLE-SIZES.md](./docs/BUNDLE-SIZES.md), which is
+generated by `npm run size:doc` and verified fresh in CI. That file is the source of truth —
+this table had drifted low on 7 of 9 rows before it was last reconciled, so trust the generated
+one if the two ever disagree.
 
 ### IIFE / CDN variants
 
@@ -1033,9 +1068,9 @@ Three `<script>`-tag drop-ins. Pick by audience, not feature checklist.
 
 | Variant | Audience | Min | Brotli | Gzip |
 |---|---|--:|--:|--:|
-| **core** | Sprinkled JS on server-rendered pages (Blade, Rails, Django, WordPress). You dispatch user actions to a backend over HTTP. | 26.0 KB | 7.5 KB | 8.4 KB |
-| **elements** | Embeddable widgets (chat bubbles, checkout buttons, third-party drop-ins). You ship a `<vc-widget>` custom element. | 27.5 KB | 8.0 KB | 8.9 KB |
-| **full** | SPAs that grew big enough to want everything (realtime, undo/redo, persistence, full Vapor surface). | 37.3 KB | 10.8 KB | 12.0 KB |
+| **core** | Sprinkled JS on server-rendered pages (Blade, Rails, Django, WordPress). You dispatch user actions to a backend over HTTP. | 26.1 KB | 7.6 KB | 8.4 KB |
+| **elements** | Embeddable widgets (chat bubbles, checkout buttons, third-party drop-ins). You ship a `<vc-widget>` custom element. | 27.7 KB | 8.0 KB | 8.9 KB |
+| **full** | SPAs that grew big enough to want everything (realtime, undo/redo, persistence, full Vapor surface). | 38.1 KB | 11.1 KB | 12.3 KB |
 
 <details>
 <summary><b>What's in each variant</b>, plus drop-in examples</summary>
@@ -1127,8 +1162,8 @@ optional and tree-shaken when unimported.
    form.ts · schema.ts · devtools.ts · directives.ts · vite-hmr.ts
 ```
 
-**Coverage:** 96.7% statements · 91.0% branches · 96.7% functions · 98.2% lines across **1421 tests**
-(79 files). The dispatch core is at 100% line + branch + function. Per-file table:
+**Coverage:** 97.1% statements · 91.9% branches · 96.8% functions · 98.3% lines across **1491 tests**
+(92 files). The dispatch core is at 100% line + branch + function. Per-file table:
 [docs/COVERAGE.md](docs/COVERAGE.md); run `npm run test:coverage` for live numbers.
 
 ## Testing
@@ -1262,6 +1297,7 @@ app.mount('#app');
 | `useCommandGroup(namespace)` | Namespace isolation — prefixes all calls in camelCase |
 | `useCommandError(options?)` | Reactive error boundary for failed dispatches |
 | `useCommandBus()` / `getCommandBus()` | Get the shared bus (composable / plain) |
+| `untracked(fn)` | Run a **raw-bus** dispatch without its handler's reads becoming dependencies of the surrounding effect. The composables above already do this — you only need it when calling `getCommandBus()` directly from inside a `watchEffect` / `computed`. No-op without Vue. **Import from `vapor-chamber/vue`** in a Vue app: from the package root it degrades to a pass-through in a production build |
 | `setCommandBus(bus)` / `resetCommandBus()` | Set / reset the shared bus (useful in tests) |
 | `configureSignal(fn)` | Inject a custom signal factory (auto-detected in Vue 3.6+) |
 | `isVaporAvailable()` | True if Vue 3.6+ Vapor mode is detected |

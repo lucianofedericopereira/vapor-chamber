@@ -4,6 +4,7 @@
  * logger, validator, history, debounce, throttle, authGuard, optimistic, optimisticUndo
  */
 
+import { DEV } from './dev';
 import type { Command, CommandResult, Plugin, CommandBus } from './command-bus';
 import { BusError, commandKey, disposeAll } from './command-bus';
 
@@ -205,7 +206,7 @@ export function history(options: {
   const _triggerUnregisters: Array<() => void> = [];
   if (undoAction || redoAction) {
     if (!bus) {
-      if (typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production') {
+      if (DEV) {
         console.warn("[vapor-chamber] history(): undoAction/redoAction require the `bus` option — triggers not registered.");
       }
     } else {

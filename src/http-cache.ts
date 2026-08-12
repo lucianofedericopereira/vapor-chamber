@@ -22,6 +22,7 @@
  * the same factory-closure shape the bus-level `cache()` plugin already uses.
  */
 
+import { DEV } from './dev';
 import { freezeCached } from './freeze';
 
 // ---------------------------------------------------------------------------
@@ -34,8 +35,6 @@ const CACHE_DEFAULT_TTL = 30_000; // 30 seconds
 type CacheEntry = { data: any; freshUntil: number; staleUntil: number };
 
 export type CacheHit = { data: any; stale: boolean };
-
-const DEV = typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
 
 /** Regex metacharacters — escaped so a string pattern matches literally. */
 const REGEX_METACHARS = /[.*+?^${}()|[\]\\]/g;

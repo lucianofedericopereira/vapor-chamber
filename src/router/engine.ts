@@ -19,6 +19,7 @@
  * returned but NOT dispatched to onError.
  */
 
+import { DEV } from '../dev';
 import { shallowRef } from 'vue';
 import { isRouterError, routerError } from './errors';
 import type { RouterError } from './errors';
@@ -36,10 +37,6 @@ import type {
   TableRecord,
 } from './types';
 import { parseQuery, stringifyQuery } from './url';
-
-// Guarded form, same as ./menu.ts / ./table.ts — the router ships to
-// no-bundler contexts where `process` is undefined (see ./index.ts).
-const DEV = typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
 
 export const START_LOCATION: RouteLocation = Object.freeze({
   name: null,

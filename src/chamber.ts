@@ -26,8 +26,25 @@
  * v0.3.0 — Fixed: signal shim, resetCommandBus, auto-cleanup on Vue unmount.
  */
 
+import { DEV } from './dev';
 import { createCommandBus, disposeAll, type CommandBus, type AsyncCommandBus, type Command, type CommandResult, type CommandMap, type TargetOf, type PayloadOf, type ResultOf, type Handler, type Plugin, type RegisterOptions, type Listener } from './command-bus';
 import { configureSignal, signal } from './signal';
+
+/**
+ * Build-time flag injected by `scripts/build.mjs` via Vite `define`: `true` in
+ * the three IIFE (<script>-tag) bundles, `false` in the ESM build.
+ *
+ * Declared inline rather than in a `.d.ts` so it travels with this module —
+ * `examples/tsconfig.patterns.json` reaches this file through imports and
+ * would not pick up an ambient declaration from `src/`.
+ *
+ * Every call site guards with `typeof __VC_IIFE__ !== 'undefined'`, so the
+ * symbol is safe where no define exists (vitest, plain `tsc`, importing `src/`
+ * directly). Vite substitutes inside `typeof` too, so the IIFE build still
+ * const-folds and drops the dead branch.
+ */
+declare const __VC_IIFE__: boolean | undefined;
+
 import type { Signal } from './signal';
 
 // ---------------------------------------------------------------------------
@@ -138,38 +155,242 @@ function applyVueModule(vue: any): void {
   }
 }
 
+/**
+ * The global slot this library owns for a hand-supplied Vue namespace.
+ *
+ * Distinct from `__VUE__` on purpose. `__VUE__` belongs to Vue, which assigns
+ * the BOOLEAN `true` to it from `prepareApp()` (Vapor) and
+ * `baseCreateRenderer()` (vDOM) — i.e. the moment the first app is created.
+ * A namespace parked on `__VUE__` therefore survives only until something
+ * mounts, after which the sync channel yields a truthy value that cannot be
+ * used for anything. Pinned by `tests/vue-detection-global-clobber.test.ts`.
+ *
+ * This key has exactly one writer.
+ */
+const VUE_GLOBAL_KEY = '__VAPOR_CHAMBER_VUE__';
+
+/** Reads a usable Vue namespace out of a global slot, or null. */
+function readGlobal(key: string): any | null {
+  if (typeof globalThis === 'undefined') return null;
+  try {
+    const vue = (globalThis as any)[key];
+    // `__VUE__` is `true` on any page that has mounted — the `.ref` check is
+    // what separates a namespace from Vue's devtools marker.
+    return vue && typeof vue.ref === 'function' ? vue : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * configureVue — hand the library Vue's module namespace explicitly.
+ *
+ * The reliable channel — recommended for every consumer who wants
+ * deterministic Vapor wiring, bundler or not. It seeds the registry
+ * synchronously (no probe race, wrappers' null path becomes unreachable) and
+ * is the one channel that behaves identically however the page obtains Vapor:
+ * bundler alias, import map, or the `esm-browser` dist. Essential on
+ * no-bundler pages, where it is the only channel that cannot come up empty:
+ * Detection otherwise depends on either a global slot Vue overwrites when the
+ * first app mounts (see {@link VUE_GLOBAL_KEY}) or a bare-specifier
+ * `import('vue')` that cannot resolve in a browser at all — so on a
+ * `<script>`-tag page the two automatic channels can both come up empty while
+ * Vapor is sitting right there, and `createVaporChamberApp()` throws
+ * "Vue 3.6+ with Vapor mode required" on a page that has it.
+ *
+ * Call this before creating signals or apps. Safe to call more than once; the
+ * last usable namespace wins. Mirrors `configureSignal()` — an explicit
+ * escape hatch that removes a guess.
+ *
+ * IMPORTANT: pass the SAME Vue instance the rest of the page uses. Two
+ * separately-imported Vue dist files are two disconnected reactivity engines
+ * (a `ref()` from one is invisible to a `watchEffect` from the other, with no
+ * error) — see the note in `probeVue` below.
+ *
+ * @example
+ * import * as Vue from 'vue/dist/vue.runtime-with-vapor.esm-browser.js';
+ * import { configureVue, createVaporChamberApp } from 'vapor-chamber';
+ * configureVue(Vue);
+ * createVaporChamberApp(App).mount('#app');
+ */
+export function configureVue(vue: object): void {
+  if (!vue) return;
+  applyVueModule(vue);
+}
+
+/**
+ * Reactive dependency collection, suspended for the duration of a callback.
+ *
+ * Null until Vue detection completes; a plain pass-through when Vue is absent.
+ */
+let _untrack: (<T>(fn: () => T) => T) | null = null;
+
+/**
+ * True once `vapor-chamber/vue` has been imported, i.e. the tracking primitives
+ * arrived at BUILD time and this bundle is correct in production.
+ *
+ * The diagnostic below keys off this rather than off "the probe failed", and
+ * the difference matters. Probe failure is only observable in a production
+ * bundle, where `DEV` is false and nothing can be logged — so a warning keyed
+ * to it fires essentially nowhere, which is what the first version of this
+ * diagnostic did. Keying it to "you are on the probe path" instead fires under
+ * the dev server, while the app still looks fine and there is time to change
+ * one import.
+ */
+let _vueSubpathLoaded = false;
+/** One-shot guard for the DEV diagnostic in {@link untracked}. */
+let _untrackWarned = false;
+
+/**
+ * @internal Wire the tracking primitives directly, skipping the probe.
+ *
+ * Called by `vapor-chamber/vue`, which imports them STATICALLY so the
+ * consumer's bundler resolves them at build time.
+ *
+ * `viaSubpath` distinguishes that call from the runtime probe's, which wires
+ * the same primitives but only in environments that can resolve a bare
+ * specifier — never a production bundle. Only the former means "this app is
+ * correct once built".
+ */
+export function _wireUntrack(pause: () => void, reset: () => void, viaSubpath = false): void {
+  if (viaSubpath) _vueSubpathLoaded = true;
+  _untrack = <T>(fn: () => T): T => {
+    pause();
+    try { return fn(); } finally { reset(); }
+  };
+}
+
+/**
+ * untracked — run `fn` without its reactive reads becoming dependencies of
+ * whatever effect is currently running.
+ *
+ * A dispatch is an ACTION, not a read: nothing it touches should make the
+ * caller re-run. Every composable in this module already applies this to its
+ * own dispatches, so you only need it when calling a **raw bus** from inside a
+ * reactive effect:
+ *
+ * @example
+ * import { untracked, getCommandBus } from 'vapor-chamber';
+ * watchEffect(() => {
+ *   // without untracked(), anything the HANDLER reads becomes a dependency
+ *   // of this effect, and it re-runs on state it never mentions
+ *   untracked(() => getCommandBus().dispatch('cartSync', cart));
+ * });
+ *
+ * No-op when Vue is not present, so it is safe to leave in shared code.
+ * Vue fixed the same class of bug twice in 3.6.0-rc.3 (#15203, #15204) by
+ * suspending tracking around callbacks — this is that idea at the bus edge.
+ */
+export function untracked<T>(fn: () => T): T {
+  // In an IIFE the wiring below never runs (no bundler can resolve
+  // `@vue/reactivity` from a <script> tag), so `_untrack` is provably null.
+  // Folding that here lets the minifier reduce this to `fn()` and drop the
+  // slot entirely rather than shipping a branch that can only go one way.
+  if (typeof __VC_IIFE__ !== 'undefined' && __VC_IIFE__) return fn();
+
+  // Deliberately BEFORE the wired-path return: the point is to fire while the
+  // probe is still succeeding. On the probe path this call works under the dev
+  // server and silently stops working once the app is built, so warning only on
+  // observed failure would warn only where nothing can be logged. Conditions:
+  // Vue is here (`_vueDeepRefFn`), and the build-time wiring is not
+  // (`_vueSubpathLoaded`). One-shot — untracked() is on the dispatch path, and
+  // every composable routes through it, so per-call would be a flood. Folds
+  // away entirely in production builds.
+  if (DEV && _vueDeepRefFn !== null && !_vueSubpathLoaded && !_untrackWarned) {
+    _untrackWarned = true;
+    console.warn(
+      '[vapor-chamber] Vue detected at runtime rather than at build time.\n' +
+      'untracked() works right now because the dev server can resolve a bare ' +
+      '`import()`. A production bundle cannot, so it will silently degrade to a ' +
+      "pass-through and dispatches made inside a reactive effect will leak the " +
+      "handler's reads into that effect — components re-rendering on state they " +
+      'never mention, with no error.\n' +
+      "Fix: import the composables from 'vapor-chamber/vue' instead of " +
+      "'vapor-chamber'. Same functions, resolved by your bundler. Nothing to call.",
+    );
+  }
+
+  return _untrack === null ? fn() : _untrack(fn);
+}
+
+/**
+ * Wire {@link untracked} from `@vue/reactivity`, best-effort.
+ *
+ * That package and not `vue`: the primitives are simply not on the `vue` entry
+ * — verified against 3.6.0-rc.3, where `pauseTracking`, `resetTracking` and
+ * `setActiveSub` are absent from both `vue.runtime.esm-bundler.js` and
+ * `vue.runtime-with-vapor.esm-browser.js`, while `@vue/reactivity` exports all
+ * three and resolves to the *same module instance* Vue itself uses (a second
+ * copy would toggle unrelated state and silently do nothing — checked).
+ *
+ * SCOPE, measured: this works under a dev server and in vitest, and fails in
+ * every production bundle — the specifier is bare, and a built bundle has no
+ * import map to resolve it against. It is kept because it is the zero-config
+ * path where it does work; production correctness comes from
+ * `enableVueReactivity()` in the `vapor-chamber/vue` subpath, which resolves
+ * the same primitives at BUILD time. `untracked()` warns once in DEV when this
+ * probe has failed, rather than degrading in silence.
+ *
+ * The specifier is held in a variable so no bundler can fold it into a literal
+ * a literal `import()` of that specifier: that would make the optional peer statically
+ * resolvable from the package root and break consumers who lack it. Guarded by
+ * `tests/dist-optional-peers.test.ts`, which is also why `src/vue.ts` is built
+ * as its own pass in `scripts/build.mjs` — marking the peer external in the
+ * main build is exactly what lets the fold happen.
+ */
+async function wireUntracked(): Promise<void> {
+  // An IIFE is loaded by a <script> tag, where a bare `import()` can never
+  // resolve. `__VC_IIFE__` const-folds, so this whole function and its
+  // specifier string are dropped from those bundles.
+  if (typeof __VC_IIFE__ !== 'undefined' && __VC_IIFE__) return;
+  if (_vueDeepRefFn === null) return; // no Vue — nothing to suspend
+  try {
+    // Assembled, not written. A plain `const pkg = '@vue/reactivity'` is folded
+    // straight back into a literal `import()` of that specifier by Rollup now that the
+    // package is a declared (optional) peer — Vite's lib mode auto-externalises
+    // peers, and an external specifier is exactly what constant propagation is
+    // free to inline. That literal is the leak `tests/dist-optional-peers.test.ts`
+    // guards: statically resolvable from the package root, so every consumer
+    // without the optional peer breaks at dep-optimize. `@vite-ignore` does not
+    // prevent it — the pre-bundled dep is re-analysed.
+    const pkg = ['@vue', 'reactivity'].join('/');
+    const r: any = await import(/* @vite-ignore */ pkg);
+    if (typeof r?.pauseTracking === 'function' && typeof r?.resetTracking === 'function') {
+      _wireUntrack(r.pauseTracking, r.resetTracking);
+    }
+  } catch {
+    // Probe unavailable. Nothing to record: the diagnostic keys off
+    // `_vueSubpathLoaded`, which is already false here.
+  }
+}
+
 function probeVue(): void {
   if (_vueProbed) return;
   _vueProbed = true;
 
-  // 1. Synchronous probe: check globalThis.__VUE__ (set by Vue devtools or bundler)
-  //    This gives immediate availability for signal() calls at module init time.
+  // 1. Synchronous probe. This is the only channel that can ever detect Vapor
+  //    without a bundler (no-build IIFE / sprinkled-JS pages,
+  //    docs/whitepaper.md §11.6): the async probe below resolves a bare
+  //    `import('vue')`, which Vue 3.6 NEVER wires to the Vapor-enabled build
+  //    outside a bundler's alias magic (@vitejs/plugin-vue does this per-app
+  //    when it sees `<script setup vapor>`) — Vapor is a physically separate
+  //    dist file (vue.runtime-with-vapor.esm-*.js).
   //
-  //    ALSO the only reliable way to get Vapor detection without a bundler
-  //    (no-build IIFE / sprinkled-JS pages, docs/whitepaper.md §11.6): the async
-  //    probe below resolves a bare `import('vue')`, which Vue 3.6 NEVER wires to
-  //    the Vapor-enabled build outside a bundler's alias magic (@vitejs/plugin-vue
-  //    does this per-app when it sees `<script setup vapor>`) — Vapor is a
-  //    physically separate dist file (vue.runtime-with-vapor.esm-*.js). A
-  //    no-bundler page that wants Vapor should import that build itself and
-  //    assign it to window.__VUE__ before this module's probe runs, exactly like
-  //    the MPA/devtools-hook case this branch already handles. Do NOT try to
-  //    "fix" this with a second dynamic import of the with-vapor build as a
-  //    fallback here — verified directly that two separately-imported Vue dist
-  //    files are two disconnected reactivity-engine instances (a ref() from one
-  //    is invisible to a watchEffect from the other, silently, no error), so an
-  //    automatic fallback would risk introducing exactly that bug rather than
-  //    fixing anything.
-  if (typeof globalThis !== 'undefined' && (globalThis as any).__VUE__) {
-    try {
-      // If Vue is already loaded as a global (common in MPA / server-rendered
-      // page setups where Vue ships via a `<script>` tag), use it synchronously.
-      const vue = (globalThis as any).__VUE__;
-      if (typeof vue.ref === 'function') {
-        applyVueModule(vue);
-      }
-    } catch { /* not available synchronously */ }
-  }
+  //    Two slots are read, ours first. `__VUE__` is kept for compatibility
+  //    with pages and docs that already use it, but it is Vue's key: Vue
+  //    assigns `true` to it on first app creation, so a namespace left there
+  //    is gone the moment anything mounts. Whichever slot still holds a real
+  //    namespace wins; `configureVue()` bypasses both.
+  //
+  //    Do NOT try to "fix" a miss here with a second dynamic import of the
+  //    with-vapor build as a fallback — verified directly that two
+  //    separately-imported Vue dist files are two disconnected
+  //    reactivity-engine instances (a ref() from one is invisible to a
+  //    watchEffect from the other, silently, no error), so an automatic
+  //    fallback would risk introducing exactly that bug rather than fixing
+  //    anything.
+  const fromGlobal = readGlobal(VUE_GLOBAL_KEY) ?? readGlobal('__VUE__');
+  if (fromGlobal) applyVueModule(fromGlobal);
 
   // 2. Async probe: dynamic import for ESM / Vite / bundler environments.
   //    Resolved by the time user code's first await/tick completes.
@@ -181,7 +402,8 @@ function probeVue(): void {
     })
     .catch(() => {
       // Vue not available — use plain signals, no auto-cleanup
-    });
+    })
+    .then(wireUntracked);
 }
 
 // Kick off Vue detection at module load time so it's resolved
@@ -215,6 +437,36 @@ export async function waitForVueDetection(): Promise<void> {
  */
 export function isVaporAvailable(): boolean {
   return _hasVapor;
+}
+
+/**
+ * @internal — one sentence explaining WHY detection came up empty, appended to
+ * the `createVaporChamberApp` error.
+ *
+ * The failure this exists for is the confusing one: Vue is on the page, Vapor
+ * is in the build, and the library still reports it missing because neither
+ * automatic channel could reach the namespace. Distinguishing "no Vue here at
+ * all" from "Vue is here and I cannot see it" is the difference between a
+ * dependency problem and a one-line fix.
+ */
+export function vueDetectionHint(): string {
+  // Deliberately NOT dev-gated. The audience most likely to hit this is the
+  // no-bundler `<script>`-tag page (whitepaper §11.6), which only ever runs a
+  // production IIFE — stripping the diagnosis in prod would remove it exactly
+  // where it is needed. Kept as small as the three-way distinction allows:
+  // one shared tail, three short causes, no helper function.
+  const cause =
+    // Vue found, no Vapor: a genuine capability gap — the plain `vue` entry
+    // ships no Vapor runtime, which is a separate build.
+    _vueDeepRefFn !== null
+      ? 'Vue lacks the Vapor build (vue/dist/vue.runtime-with-vapor.esm-*)'
+      // The order-dependent case pinned by tests/vue-detection-global-clobber:
+      // `__VUE__` is `true` because an app mounted, so the sync channel is
+      // dead, and a browser cannot resolve the bare-specifier async import.
+      : typeof globalThis !== 'undefined' && (globalThis as any).__VUE__
+        ? 'Vue is on the page but unreachable (__VUE__ is Vue\'s own boolean)'
+        : 'No Vue detected';
+  return `${cause}. Pass it: configureVue(Vue).`;
 }
 
 /** @internal — for chamber-vapor.ts use only */
@@ -347,8 +599,7 @@ export function tryAutoCleanup(disposeFn: () => void): void {
   if (
     !_autoCleanupWarned &&
     _vueOnScopeDispose &&
-    typeof process !== 'undefined' &&
-    process.env?.NODE_ENV !== 'production'
+    DEV
   ) {
     _autoCleanupWarned = true;
     console.warn(
@@ -402,7 +653,12 @@ export function runDispatch(
   lastError.value = null;
   let result: any;
   try {
-    result = busCall();
+    // A dispatch is an action, not a read. Without this, every reactive value
+    // the HANDLER touches becomes a dependency of whatever effect called the
+    // composable, so the component re-runs on state it never mentions. Vue
+    // fixed the same class twice in 3.6.0-rc.3 (#15203/#15204) the same way.
+    // Pass-through when Vue is absent.
+    result = untracked(busCall);
   } catch (e) {
     loading.value = false;
     const error = e as Error;
@@ -481,7 +737,7 @@ export function useCommand() {
 
   /** Fire a domain event — notifies on() listeners, no handler required, no result. */
   function emit(event: string, data?: any): void {
-    bus.emit(event, data);
+    untracked(() => bus.emit(event, data));
   }
 
   function dispose() {
@@ -627,7 +883,7 @@ export function useSharedCommandState(options: UseSharedCommandStateOptions = {}
     increment();
     let result: any;
     try {
-      result = bus.dispatch(action, target, payload, opts);
+      result = untracked(() => bus.dispatch(action, target, payload, opts));
     } catch (e) {
       const error = e as Error;
       recordError(error);
@@ -1024,17 +1280,17 @@ export function useCommandGroup(namespace: string) {
   }
 
   function dispatch(action: string, target: any, payload?: any): CommandResult {
-    return bus.dispatch(prefixed(action), target, payload);
+    return untracked(() => bus.dispatch(prefixed(action), target, payload));
   }
 
   /** Read-only dispatch — skips onBefore hooks, runs handler + plugins, fires afterHooks. */
   function query(action: string, target: any, payload?: any): CommandResult {
-    return bus.query(prefixed(action), target, payload);
+    return untracked(() => bus.query(prefixed(action), target, payload));
   }
 
   /** Fire a namespaced domain event — notifies on() listeners, no handler required. */
   function emit(event: string, data?: any): void {
-    bus.emit(prefixed(event), data);
+    untracked(() => bus.emit(prefixed(event), data));
   }
 
   function register(action: string, handler: Handler, opts?: RegisterOptions): () => void {

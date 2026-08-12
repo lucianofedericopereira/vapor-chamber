@@ -142,5 +142,14 @@ lane.on('userUpdate', (data) => updateUI(data));
 lane.emit('userUpdate', { userId, name });
 ```
 
-The fast lane's `on/emit` is **2.3× faster than mitt** and ties nanoevents
-within 5%. It has the right shape if you're EventEmitter-shaped today.
+On multi-listener fan-out the fast lane's `on`/`emit` is **~1.9–2.0× faster
+than mitt**. Against nanoevents it depends on the removal mode: the default
+(`'live'`, which matches the main bus — a listener removed mid-emit does not
+run) sits **~10–15% behind**, while `createFastLane({ removal: 'snapshot' })`
+is **at parity** (~0.9–1.0×). This paragraph previously claimed a flat "ties
+nanoevents within 5%", which predated the v1.12.0 unsub-during-emit identity
+guard that bought correctness for that margin.
+
+Single-handler `compile()` dispatch is a different and much wider lead —
+**~2.1× nanoevents** — and is untouched by any of the above. Current numbers
+and the mode trade-off: [performance.md](../performance.md).

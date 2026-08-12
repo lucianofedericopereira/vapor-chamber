@@ -27,11 +27,10 @@
  * const stop = serveMcpStdio(bus, { actions: ['cart*'] });
  */
 
+import { DEV } from './dev';
 import { BusError, matchesPattern } from './command-bus';
 import type { CommandResult, Plugin } from './command-bus';
 import type { ActionSchema, BusSchema, FieldMap } from './schema';
-
-const DEV = typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
 
 // ---------------------------------------------------------------------------
 // MCP tool mapping
@@ -174,7 +173,7 @@ export type McpHandlerOptions = {
  * advertised a version that had not existed for months. A failing test at
  * release time is the cheapest possible checklist.
  */
-export const MCP_SERVER_VERSION = '1.12.0';
+export const MCP_SERVER_VERSION = '1.13.0';
 
 /** Latest MCP protocol revision this handler speaks. */
 const MCP_PROTOCOL_VERSION = '2025-06-18';

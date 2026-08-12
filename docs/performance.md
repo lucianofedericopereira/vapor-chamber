@@ -237,10 +237,27 @@ Behavior:
 - **Sync bus** accepts `{ signal }` for type uniformity but ignores it at
   runtime — sync dispatches are atomic.
 
-**Not yet supported** (deferred to v1.3): `bus.request()` / `respond()`,
-`bus.dispatchBatch()`, auto-derived child signals from parent dispatches,
-WebSocket / SSE bridges. Use `cmd.signal` directly in custom handlers /
-plugins as a workaround.
+**Also cancelable** (this paragraph used to say the opposite — it listed these
+as "not yet supported, deferred to v1.3" long after they shipped in v1.2.x):
+`bus.request()` / `respond()` accept `{ signal, timeout }`; `bus.dispatchBatch()`
+accepts `{ signal }` and, with `transactional: true`, rolls back
+already-succeeded commands on a mid-batch abort; the **WebSocket bridge**
+honours `cmd.signal` per dispatch. The **SSE bridge** is receive-only by design,
+so `cmd.signal` does not apply at the bridge level — call `sse.teardown()` to
+stop a subscription.
+
+The one item that genuinely remains manual is **auto-derived child signals**:
+a nested dispatch does not inherit its parent's signal automatically. Thread it
+explicitly, which has worked since v1.2.0:
+
+```ts
+bus.register('parent', async (cmd) =>
+  await bus.dispatch('child', target, payload, { signal: cmd.signal }));
+```
+
+True auto-derivation would need `AsyncLocalStorage` (Node-only) or a
+module-level dispatch stack (race-prone in browsers under concurrent
+dispatches), which is why it stays explicit rather than magic.
 
 ### `vapor-chamber/alien-signals` — push-pull reactivity for non-Vue consumers
 

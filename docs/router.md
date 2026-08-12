@@ -222,16 +222,32 @@ Roadmap items this router does **not** depend on, by design:
 
 Still not usable here, though the reasons differ:
 
-- **KeepAlive** — the roadmap box is now **checked**, and that is not the same
-  as working. Two correctness issues are open against it:
+- **KeepAlive** — the roadmap box is checked and, as of **rc.3**, the two
+  correctness issues this section used to list as open are closed:
   [#15228](https://github.com/vuejs/core/issues/15228) (a cached child renders
-  against a nullish prop) and
-  [#15237](https://github.com/vuejs/core/issues/15237) (KeepAlive scopes are
-  not paused while deactivated). Nothing caches an inactive route's state here
-  yet. Worth knowing if you rely on `tryKeepAliveHooks` in `chamber.ts`: it
-  hand-solves what #15237 proposes doing natively, so if that lands the manual
-  pause/resume becomes double-suppression and should be removed in the same
-  release.
+  against a nullish prop) by
+  [#15251](https://github.com/vuejs/core/pull/15251), which isolates cached
+  component props and dynamic slots behind a commit boundary, and
+  [#15237](https://github.com/vuejs/core/issues/15237) (KeepAlive scopes not
+  paused while deactivated), which now propagates paused state through
+  `EffectScope`/`ReactiveEffect`. Nothing caches an inactive route's state
+  here yet, so neither reaches this router today.
+
+  **A correction to what this section previously told you.** It said that
+  `tryKeepAliveHooks` in `chamber.ts` "hand-solves what #15237 proposes doing
+  natively, so if that lands the manual pause/resume becomes double-suppression
+  and should be removed in the same release." #15237 has landed, and that
+  instruction is wrong — following it would delete a working guard.
+  `tests/keepalive-pause-fixture.test.ts` measures why: Vue's pausing
+  suppresses reactive effects owned by the deactivated scope (verified — a
+  watcher in a paused scope does not run), while `tryKeepAliveHooks` guards a
+  `bus.onAfter` hook, a plain callback the bus invokes synchronously from
+  `dispatch`, owned by no scope and scheduled by no scheduler. It still fires
+  under a paused scope (also verified). The two also answer different
+  questions: Vue's is "should this cached component re-render while
+  off-screen?", ours is "should a command dispatched while this component is
+  deactivated be recorded into its undo history?" — a domain decision upstream
+  has no view on. The guard stays.
 - **Transition** — route transitions; the View Transitions API is the
   DOM-native way around it.
 - **SSR/Hydration** for blade rows — `fetchBlade` is undefined off-browser, so

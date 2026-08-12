@@ -2,6 +2,473 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.13.0 - Vue 3.6.0-rc.3 alignment
+
+All 36 rc.3 commits read at source, not from changelog titles. **The alignment
+itself needs no wrapper change** — the runtime fixes land below
+`createVaporChamberApp` / `getVaporInteropPlugin` / `defineVapor*`, below
+`rehydrate()`'s command replay, or inside hook bodies the transition bridge only
+supplies. Full per-item detail is the new rc.3 row in the whitepaper's Vue 3.6
+alignment log (§9).
+
+What the read *did* surface is two claims this repo had been making that turn
+out to be false, and one detection bug that the entire existing suite was
+structurally unable to see. Each is corrected with a fixture rather than an
+argument, and each fixture was verified to fail against the pre-fix code.
+
+### Added — `vapor-chamber/vue`, and a silent production bug it closes
+
+`untracked()` was a no-op in every production browser bundle. It reached Vue's
+tracking primitives through a bare dynamic `import()` of a specifier held in a
+variable; that resolves under a dev server and in vitest, and resolves to
+nothing in a built bundle, where the rejection landed in an empty `catch`. The
+effect was invisible and wrong in the worst way: a `dispatch()` inside a
+reactive effect leaked the handler's reads into that effect, so components
+re-rendered on state they never mention. Same root cause as the Vapor-detection
+gap fixed above — a specifier resolved at runtime that only a dev server can
+resolve.
+
+- **`vapor-chamber/vue`** (new subpath) — imports Vue's primitives *statically*,
+  so the consumer's bundler resolves them at build time. Importing it is the
+  entire setup; there is no `configure…()` to call and no probe to race. It
+  re-exports the Vue-dependent surface (`useCommand`, `useCommandState`,
+  `untracked`, …) — the same functions the root exports, not copies, so a mixed
+  codebase cannot end up with two buses. 22.7 KB min / 7.4 KB brotli; `vue` and
+  `@vue/reactivity` stay external, so no second reactivity instance.
+- **`untracked()` warns once in DEV** when it is running as a pass-through on a
+  page that *does* have Vue, instead of degrading in silence. Folds away in
+  production builds.
+- **`enableVueReactivity()`** — escape hatch for code that must keep importing
+  from the package root.
+- `@vue/reactivity` is now a declared optional peer dependency.
+
+The root keeps the runtime probe: it is the zero-config path where it works, and
+no-bundler pages have no build step to resolve anything at. Fixtures:
+`tests/untracked-production.test.ts`.
+
+### Fixed — Vapor detection could silently miss Vue that is right there
+
+`globalThis.__VUE__` was the only synchronous detection channel, and it is
+**Vue's key, not ours**. Vue assigns the boolean `true` to it from
+`prepareApp()` (Vapor) and `baseCreateRenderer()` (vDOM) — i.e. when the first
+app is created, in dev and production builds alike. So a namespace parked there
+by the documented no-bundler recipe survives only until something mounts. Any
+arrangement where the library is evaluated *after* the first app — a
+code-split chunk, a second island, an MPA page with different script order —
+then finds a truthy value it cannot use, falls through to the async
+`import('vue')`, and on a no-bundler page that is a bare specifier the browser
+cannot resolve at all. `createVaporChamberApp()` throws "Vue 3.6+ with Vapor
+mode required" on a page that demonstrably has Vapor.
+
+- **A global slot the library owns** — `__VAPOR_CHAMBER_VUE__`, read *before*
+  `__VUE__`, which stays supported as a legacy fallback so existing pages and
+  devtools-hook setups keep working.
+- **`configureVue(vue)`** (new export) — hand the namespace over explicitly,
+  no globals involved, un-raceable. Mirrors the existing `configureSignal()`
+  escape hatch. Recommended for **every** consumer who wants deterministic
+  Vapor wiring, not just no-bundler pages — it is the one channel that works
+  identically for bundler-alias, import-map, and `<script>`-tag consumers,
+  and it retired the planned `__VAPOR_NATIVE__`/`vue36` build-flavor apparatus
+  from the roadmap (identity premise was a silent bug at rc.3 source; no
+  with-vapor bundler dist exists to import; measured prize <0.8 KB brotli —
+  see ROADMAP "What is transitional").
+- **The `vaporChamberHMR()` priming module writes the owned slot** instead of
+  overwriting Vue's own `__VUE__`.
+- **The failure is no longer silent.** The thrown message distinguishes three
+  cases that used to share one string — Vue absent, Vue present without the
+  Vapor build, Vue present but unreachable — and names the one-line fix. The
+  old message also hardcoded `vue@^3.6.0-beta.1`, four release lines stale.
+- **Scope, stated honestly:** under a bundler the async fallback resolves, so
+  the bug is invisible there. That is exactly why every Vite example in this
+  repo and all 1421 pre-existing tests missed it, and why it needed measuring
+  instead of reasoning about. `tests/vue-detection-real-ordering.test.ts` closes
+  the gap end to end — real with-vapor build, real `createVaporApp().mount()`,
+  real freshly-evaluated `chamber.ts`, nothing mocked or stubbed — alongside
+  `tests/vue-detection-global-clobber.test.ts` for Vue's own write behaviour.
+
+### Fixed — docs: custom directives are NOT a VDOM-only Vue feature
+
+Four places asserted that Vapor does not support custom directives and never
+will: ROADMAP's "what is not on the roadmap" list ("the Vue team has
+consistently signaled directives remain a VDOM-only feature"), whitepaper
+§10.3, a whitepaper status line, and a runtime `console.warn` fired at plugin
+install on every Vapor page.
+
+It is false, and was false when written. `withVaporDirectives` is a **public
+export** of the with-vapor build and ships in every Vue version this project
+has tracked — verified by unpacking the published `@vue/runtime-vapor` dist for
+3.6.0-alpha.3, beta.8, beta.10, beta.15, beta.17, rc.1, rc.2 and rc.3. rc.3 did
+not add the feature; it hardened it (#15258 codegen parens, #15167 async
+component roots, #15158 fragment roots).
+
+What genuinely blocks `v-vc:command` is the **shape**, which is a real
+constraint and is now documented as such: a Vapor directive is
+`(el, value, argument, modifiers) => cleanup | void`, run once per root element
+in a detached `EffectScope`, with **no `updated` hook** — the value arrives as
+a getter, so a directive that must react opens its own effect.
+`app.directive('vc', …)` cannot serve both renderers from one registration, so
+a port is real work, not a rename. The warning's practical advice
+(`useCommand()` / `defineVaporCommand()` in Vapor components) is unchanged;
+only its stated reason is now accurate, and the ROADMAP records the port as
+*available but unscheduled* rather than impossible.
+Fixture: `tests/vapor-directives-fixture.test.ts`.
+
+### Fixed — docs: the `tryKeepAliveHooks` removal note was wrong
+
+`docs/router.md` cited [#15228](https://github.com/vuejs/core/issues/15228) and
+[#15237](https://github.com/vuejs/core/issues/15237) as open KeepAlive
+correctness issues, and instructed: "it hand-solves what #15237 proposes doing
+natively, so if that lands the manual pause/resume becomes double-suppression
+and should be removed in the same release."
+
+Both closed in rc.3 (#15228 via #15251's commit boundary for cached props and
+dynamic slots; #15237 via scope pausing propagated through
+`EffectScope`/`ReactiveEffect`). Following the instruction would have deleted a
+working guard. Measured instead: Vue's pausing suppresses reactive effects
+owned by the deactivated scope — a watcher in a paused scope does not run —
+while `tryKeepAliveHooks` guards a `bus.onAfter` hook, a plain callback the bus
+invokes synchronously from `dispatch`, owned by no scope and scheduled by no
+scheduler. It still fires under a paused scope. The two also answer different
+questions: Vue's is "should this cached component re-render while off-screen?",
+ours is "should a command dispatched while this component is deactivated be
+recorded into its undo history?" — a domain decision upstream has no view on.
+**Guard kept, note corrected.** Fixture:
+`tests/keepalive-pause-fixture.test.ts`.
+
+### Measured, not acted on — the bus over-tracks when dispatched from an effect
+
+rc.3 fixed the same class of bug twice (#15203 v-show transition hooks, #15204
+v-show source in fragment effects), both by running callbacks with reactive
+tracking disabled (`setActiveSub`). The bus has the same exposure, and it
+reproduces: a `bus.dispatch()` made from inside a Vue effect captures the
+**handler's** reactive reads into the *caller's* dependency set, so the
+component re-renders when unrelated state changes.
+
+Not fixed this cycle, deliberately. Vue's mechanism (`setActiveSub` /
+`pauseTracking`) is present in the shipped bundle but **not publicly exported**,
+and `command-bus.ts` is Vue-free by the §19 Core Guarantee — so any fix here is
+a design decision about that boundary, not a patch. Recorded as a measured open
+item rather than guessed at. Note that rc.3's own #15203 already removes the
+most realistic exposure for this library: transition hooks invoked via v-show
+now run untracked upstream, which covers `useTransitionCommand` /
+`createTransitionBridge` for free.
+
+### Changed
+
+- **`vue` peer dep** → `">=3.5.0 || >=3.6.0-rc.3"`; dev dep → `3.6.0-rc.3`.
+  Both ranges already admitted rc.3 by prerelease ordering; the floor moves to
+  keep the *tested-version* statement honest.
+- **Examples repinned** — `vapor-sfc` and `vapor-island-cart` `vue ^3.6.0-rc.2
+  → ^3.6.0-rc.3`, lockfiles regenerated. The caret range already admitted rc.3,
+  but their lockfiles pinned rc.2, so an example built on the *previous* RC
+  while the library claimed the new one — the exact drift the repin exists to
+  prevent. Both verified on rc.3 with their real gate (`vue-tsc --noEmit &&
+  vite build`): green. Bundles grew with Vue's own runtime (vapor-sfc
+  95.79 → 97.60 KB), not with anything on our side.
+- **README / ROADMAP** re-pointed at rc.3 (alignment line, requirements, Vapor
+  interop measurement, version-support matrix, "last reviewed").
+
+### Changed — Node floor to 22.12
+
+**`engines.node` `>=20.19.0` → `>=22.12.0`.** Node 20 reached end of life in
+April 2026, and CI had already stopped testing it — the matrix has been
+`['22', '24']` for some time, so the engines field was promising support that
+nothing verified. The floor is not arbitrary: Vite and `@vitejs/plugin-vue`
+both require `^20.19.0 || >=22.12.0`, so dropping 20 lands exactly on 22.12,
+which is also Astro 7's floor for the `exo-astro` example. **22, not 24**,
+deliberately — nothing here uses a Node 24-only API, and a 24 floor would
+exclude the current LTS for no gain. Test both, require 22.
+
+The `vue` peer floor **stays pinned to the mapped RC** (`>=3.6.0-rc.3`) rather
+than being loosened to the oldest RC that would still work. Measured with
+`semver.satisfies`, that gate does reject `3.6.0-rc.1` / `3.6.0-rc.2` — which
+is the intent, not a side effect: this library maps one RC at a time, there is
+no prior userbase to strand, and a floor that names the tested RC is a stronger
+statement than a range that merely tolerates old ones.
+
+### Fixed — a compile-time guard that never compiled
+
+`tests/router/typed-names.test-d.ts` asserts, via `@ts-expect-error`, that a
+typo'd route name must not compile — the regression guard for
+`createRouter<TName>`'s name narrowing. It was matched by **nothing**: not
+vitest (`include: ['tests/**/*.test.ts']` does not match `.test-d.ts`), not
+`tsconfig.typecheck.json` (which listed only `tests/typed-contract.typecheck.ts`),
+not the main project (`rootDir: "src"` excludes `tests/`), and not
+`examples/tsconfig.patterns.json`. So the file had never been compiled by
+anything, and its guard could not have failed.
+
+Added to `tsconfig.typecheck.json`, which is what `npm run typecheck` runs.
+Verified red/green rather than assumed: widening `push`'s parameter from
+`RouteLocationRaw<TName>` to `RouteLocationRaw<string>` — the exact regression
+the file exists to catch — now fails with
+`TS2578: Unused '@ts-expect-error' directive` at that line, and passes again on
+restore.
+
+Worth noting for whoever adds the next type test: the `.test-d.ts` suffix is
+**vitest's** type-testing convention, not tsc's, which is likely how the file
+ended up orphaned between the two mechanisms. Vitest can run these natively via
+`typecheck.enabled` + `expectTypeOf`, reporting type assertions as ordinary test
+cases; this repo currently routes them through `tsc` instead, alongside
+`typed-contract.typecheck.ts`. Either is fine — being in neither is not.
+
+### Build & dev dependencies — back to 0 vulnerabilities
+
+`npm audit` had regressed from the 0 it reached in v1.7.0 to **2 high-severity
+advisories**. Both were dev-only transitives that never reach the published
+runtime (which still has exactly one dependency, `alien-signals`), but the
+whole point of holding the line at 0 is that a real one stays visible:
+
+- `nanoid` (GHSA-2v37-7h3g-55p8, infinite loop on zero size) ← `postcss` ←
+  **vite** — cleared by `vite 8.1.5 → 8.2.1`.
+- `brace-expansion` (GHSA-rgw5-rvv9-x895, DoS via unbounded intermediate
+  arrays) ← `minimatch` ← **typedoc** — cleared by a non-breaking transitive
+  bump to 5.0.9.
+
+Also bumped: `@types/node 25.9.5 → 26.2.0` (a major, taken because the Node
+floor moved to 22.12 — verified across typecheck, tests, lint and build),
+`@biomejs/biome 2.5.5 → 2.5.8`, `esbuild 0.28.1 → 0.28.2`,
+`happy-dom 20.11.1 → 20.11.2`. **`npm audit`: 0 vulnerabilities.** Bundle sizes
+did not move under the Vite minor (full 38.5 KB min / 11.2 KB brotli).
+
+**`typescript 6.0.3 → 7.0.2` — tried, and REVERTED.** Worth recording, because
+it looked safe right up until it wasn't: TS 7 passed `tsc --noEmit` on all
+three projects, the full 1443-test suite, lint, and the build. It breaks
+**typedoc**, whose peer range stops at `6.0.x` — `npm run docs` dies with
+`TypeError: Cannot read properties of undefined (reading 'PropertyDeclaration')`,
+which would have taken the GitHub Pages API-docs workflow down on the next push
+to `main`. Four of five gates green is exactly the shape that gets a bad bump
+merged; the docs build is the one that caught it. Revisit when typedoc declares
+TS 7 support.
+
+Also note the examples pin their **own** `typescript ^5.9.0` (with
+`vue-tsc 3.3.8`), so an example build does not exercise the root compiler at
+all — the `vue-tsc` run that passed during the TS 7 trial was TS 5.9.3, and
+proved nothing about it.
+
+**Removed — `typedoc-plugin-markdown`.** Declared in `devDependencies` since
+v1.2.0 and referenced by nothing: `typedoc.json` has no `plugin` key, no script
+or workflow mentions it, and the pipeline emits HTML (`out: "docs/api"`).
+`npm run docs` builds identically without it — 0 errors, same 8 cosmetic
+warnings about example *directories* TypeDoc cannot copy.
+
+Surfaced while working out whether the TypeScript 7 revert above is permanent.
+It is not: no *released* typedoc supports TS 7 (0.28.20 is the latest published
+version and its peer enumerates `5.0.x … 6.0.x`), but the `typedoc@1.0.0-dev`
+line has already opened its peer to `typescript: >=4.0.0`. The catch was that
+`typedoc-plugin-markdown@4.12.0` pins `typedoc: 0.28.x`, so it would have
+blocked that upgrade the moment typedoc went 1.0 — a blocker contributed
+entirely by a dependency nothing uses. Dropping it now means the eventual
+path is just: typedoc 1.0 stable → TS 6 → 7, verified across all five gates
+(the docs build being the one that caught this in the first place).
+
+**Still not taken:** `nanoevents 9 → 10` — it is a **bench comparison peer**,
+so bumping it silently re-bases every comparative number in
+`docs/performance.md`. That is a measurement change wearing a dependency
+change's clothes, and it should land with a same-host re-run, not on its own.
+`vitest` is already current at **4.1.10** — nothing to adopt there.
+
+### Changed — build-time flags, and production bundles that got SMALLER
+
+Two facts this library kept re-deciding at runtime are settled the moment a
+build runs: **is this a `<script>`-tag bundle** and **is this a development
+build**. `scripts/build.mjs` now supplies both as Vite `define`s.
+
+- **`__VC_IIFE__`** — `true` in the three IIFE builds. `chamber.ts` uses it to
+  drop the `@vue/reactivity` probe, whose dynamic import could never resolve
+  from a `<script>` tag anyway. Verified: the specifier string appears **0
+  times** in all three IIFE bundles.
+- **`__VC_DEV__`** — `false` in the IIFE (production) builds, and in the ESM
+  build the literal text `process.env.NODE_ENV !== "production"`, so the
+  decision is deferred to the **consumer's** bundler, which is the only thing
+  that knows whether *their* build is a dev build. Consumed through the new
+  `src/dev.ts` (`DEV`), replacing the inline
+  `typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production'`
+  at 15 sites across 14 files.
+
+The second one closes a loss `scripts/check-size.mjs` had documented and left
+standing: rolldown does not const-fold `typeof process < "u" && !1`, so
+dev-only warnings were unreachable in production while **every message string
+still shipped** — ~1,140 B of text in `full`, ~509 B in `core`, measured. Now
+the branch folds and the strings go with it.
+
+**Net result, measured against v1.12.0 — all three variants shrank, while this
+release also ADDED the untracked-dispatch fix and the detection rework:**
+
+| variant | v1.12.0 brotli | v1.13.0 brotli |
+|---|--:|--:|
+| `full` | 11,367 B | **11,325 B** |
+| `core` | 7,885 B | **7,716 B** |
+| `elements` | 8,294 B | **8,193 B** |
+
+Notes for whoever touches this next:
+
+- `DEV` is evaluated **once at module load**, like Vue's own `__DEV__`. That is
+  what makes it foldable, and it means flipping `NODE_ENV` *after* import no
+  longer flips the guard. One test relied on that and now sets the env and
+  re-imports instead — a truer model of production either way.
+- `tests/esm-treeshake.test.ts` deliberately builds **without** a NODE_ENV
+  define, so it keeps every dev branch and pays the extra module: its ceiling
+  moved 6,300 → 6,450. That is the one configuration where this change reads as
+  a regression, and the table above is the configuration that ships.
+- `scripts/check-env-guards.mjs` gained cross-line block-comment tracking. It
+  had been matching `process.env` inside prose, so documenting the rule tripped
+  the rule. A guard that fires on its own explanation is not a guard.
+- The always-on `console.warn` in `syncUse` (async plugin on a sync bus) is
+  **not** dev-gated and stays that way: it fires once at install time, not per
+  dispatch, and it is worth saying in production too.
+
+### Fixed — a dispatch no longer makes the caller depend on what the handler read
+
+A dispatch is an **action, not a read**, but one made from inside a Vue effect
+ran the handler with the caller's subscriber still active. Every reactive value
+the HANDLER touched was collected as a dependency of the CALLER's effect, so a
+component dispatching from a `watchEffect` re-ran whenever state it never
+mentions changed — silently, and worse the more state the handler reads. Vue
+hit the same class twice in rc.3 (#15203 v-show transition hooks, #15204
+v-show source in fragment effects) and fixed both by suspending tracking around
+the callback.
+
+**The default now covers every path a component actually uses.**
+`useCommand().dispatch`, `useCommandGroup().dispatch` / `.query` / `.emit`,
+`useSharedCommandState().dispatch` and `useCommandQuery().query` all suspend
+tracking around the bus call. Nothing to opt into, nothing to configure.
+
+**The documented option** is the exported **`untracked(fn)`**, for the one
+remaining case — calling a *raw* bus from inside an effect:
+
+```ts
+import { untracked, getCommandBus } from 'vapor-chamber';
+watchEffect(() => untracked(() => getCommandBus().dispatch('cartSync', cart)));
+```
+
+It is a plain pass-through when Vue is absent, so it is safe in shared code.
+
+**Where it lives, and why not the core.** The first implementation put a seam
+in `command-bus.ts`. `tests/esm-treeshake.test.ts` rejected it in the only
+language it has: a Vue-free Blade consumer bundle grew 35 bytes for a Vue-only
+concern, against a module the whitepaper §19 guarantee calls
+"framework-agnostic — always". Whether Vue is present is settled when a bundle
+is built, so charging a per-dispatch runtime check for it is the wrong trade.
+Moved to `chamber.ts`, where the cost lands only on consumers who already
+imported the Vue layer. Backed by `@vue/reactivity`'s
+`pauseTracking`/`resetTracking` — not `vue`, which does not expose them
+(verified on rc.3) — and that package resolves to the *same module instance*
+Vue uses; a second copy would toggle unrelated state and silently do nothing.
+
+**Nobody pays for a path their build cannot take.** `scripts/build.mjs` now
+defines **`__VC_IIFE__`**, because "is this a `<script>`-tag bundle?" is a
+build-time question. The IIFE builds const-fold it and drop the
+`@vue/reactivity` probe entirely — verified, the specifier string appears **0
+times** in all three IIFE bundles, where a bare dynamic import could never have
+resolved anyway. Result: `core` and `elements` did not grow at all, and the ESM
+tree-shake ceiling for Vue-free consumers is untouched.
+
+Measured cost, interleaved same-process A/B: ~6.4% on a realistic bus (one
+plugin + one listener) and ~10.4% on the bare fast path, i.e. ~4 ns per
+dispatch, paid only by Vue consumers on composable dispatches — the ones the
+fix is for. Size: `full` +71 B raw / +44 B brotli (it carries the composables);
+`core` and `elements` unchanged.
+
+Nine tests in `tests/untracked-dispatch.test.ts`, including a **baseline that
+pins the raw-bus leak** so the documented gap stays honest, a case proving the
+caller keeps its *own* dependencies, and one proving handler **writes** still
+notify — suspending collection must never suspend propagation, or
+reducer-driven state would stop reaching the UI.
+
+### Performance — rc.2 → rc.3 measured, and no delta is claimable
+
+A same-host rc.2 → rc.3 bench A/B was run (install rc.2, `npm run bench`,
+install rc.3, `npm run bench`, same machine, same session). **No regression,
+and no cross-version claim** — because the run itself bounds how much it can
+say:
+
+Rows that Vue's version **cannot** touch moved as much as anything else.
+`persist` (localStorage + `JSON.stringify`), `rehydrate`, `fast-lane`, and
+bare `bus.dispatch` are Vue-free code paths, and their ratios shifted by
+−79% to +21% between the two runs. Since Vue cannot be the cause, that range
+*is* the noise floor for sequential full-suite runs on this host — and it
+swamps any real rc.2 → rc.3 effect. (The outlier, `persist` coalesced-vs-plain
+at 102× on rc.2 and 21× on rc.3, brackets the ~23× that `docs/performance.md`
+documents; the rc.2 reading was the anomaly, not the rc.3 one.)
+
+The one row Vue's version *should* move — `signal()`'s Vue `shallowRef` write
+path — came out **flat (+0.6%)**, which is the only honest signal in the set
+and is consistent with rc.3 being pass-through for this library.
+
+So the interleaved same-process A/B the methodology actually calls for was run
+too — both Vue builds imported by absolute path into one process, arms
+alternated, 15 reps, medians — repeated **four times** to check the directions
+hold. Per-path verdict:
+
+| path | across 4 runs | read |
+|---|---|---|
+| `shallowRef` scalar write ×200k | flat, flat, −10%, flat | **flat** — and this is the primitive `signal()` wires |
+| `bus.dispatch` → array signal ×300 | +21%, flat, −15%, +4% | **noise** — sign flips |
+| `effectScope` + `onScopeDispose` ×5k | −13%, −18%, −8%, +10% | **noise**, leaning faster |
+| `watchEffect` notify ×20k | +7%, +4%, +47%, +31% | slower on rc.3 in **4/4**, magnitude unreliable |
+
+The answer to "better or worse" is therefore **neither, on anything this
+library runs**: the path `signal()` actually uses is flat, and the two paths
+that touch the bus are noise in both directions. The one consistent direction
+— `watchEffect` notification — is a Vue-internal path this library never takes
+(the core writes signals from dispatch callbacks and never reads them inside a
+tracked effect), and its magnitude varies 4× across runs, so it is recorded as
+a direction worth watching at 3.6 stable, not as a number.
+
+`docs/performance.md` has never claimed a cross-beta delta, and still does not.
+
+### Examples — all verified on rc.3, and dependency-current
+
+Every buildable example was installed and built against Vue 3.6.0-rc.3, not
+just typechecked: `vapor-sfc` and `vapor-island-cart` (`vue-tsc --noEmit &&
+vite build`) and `exo-astro` (`astro build`). All green.
+
+Bumps, all minor/patch: `astro 7.1.3 → 7.2.1` (exo-astro), and
+`vite 8.1.5 → 8.2.1` + `vue-tsc 3.3.8 → 3.3.9` (both Vite examples). With
+non-breaking transitive fixes, **all three examples now audit at 0
+vulnerabilities** (exo-astro was 1 high + 1 moderate; vapor-island-cart 2
+high). Their `typescript ^5.9.0` is deliberately left alone — see the TS 7
+note above; `vue-tsc` compatibility is the open question, and the examples are
+the wrong place to find out.
+
+`laravel-app` needs no version maintenance by design: its `setup.sh` runs
+`composer create-project laravel/laravel`, which always pulls the current
+skeleton. `laravel-backend` (drop-in PHP files), `router-demo` and
+`sprinkled-blade` (plain ESM + import map, no build step) have no dependency
+manifest to age. `exo-astro`'s directive contract is additionally pinned by 33
+specs in the root suite (`tests/examples/exo-astro-directives.test.ts`).
+
+### Removed — `.npmignore`, again
+
+v1.9.0 deleted it as dead and self-contradicting; it was back in the working
+tree. Re-verified before removing rather than assumed: `npm pack --dry-run` is
+**byte-identical with and without it — 251 files, 1.0 MB packed, 4.0 MB
+unpacked**, because `package.json#files` (`dist`, `src`, `scripts`,
+`ROADMAP.md`) takes precedence over an ignore file. So the original finding
+holds, and so does the original reason for not keeping an inert file around:
+`.npmignore` lists `src/` as excluded while `files` ships it, so any future
+removal of `files` would silently change the published shape — and `src/` is
+what makes `declarationMap` go-to-definition work for consumers.
+
+### Size — no budget change
+
+The detection work ships inside the existing IIFE ceilings. The first cut went
+35 B raw / 50 B brotli over on the `full` variant; tightening
+`vueDetectionHint()` to one shared tail plus three short causes, and dropping a
+single-use helper, recovered **190 B raw / 65 B brotli** and landed it at
+39,445 raw / 11,485 brotli against unchanged budgets of 39,600 / 11,500.
+`core` and `elements` never moved. No `BUDGETS` entry was touched.
+
+### Verified against rc.3
+
+`tsc --noEmit` clean, lint clean (1 pre-existing warning, untouched file),
+build + `size:check` green, generated docs regenerated. **1443 passing / 85
+files** (from 1421 / 81 on the rc.2 baseline, itself re-confirmed green on this
+host before the bump). The three detection tests and the two doc-correction
+fixtures were each run against the pre-fix code first and confirmed to fail —
+the sync-probe revert failed exactly 3, and the two corrected doc claims are
+pinned by fixtures that exercise the real Vue build rather than a mock.
+
 ## v1.12.0 — cache and general improvements
 
 - **Coverage push + floor ratchet.** 25 new tests over the weakest branch

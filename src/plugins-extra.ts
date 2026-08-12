@@ -6,11 +6,10 @@
  * These are optional, tree-shaken, and use only the public Plugin/AsyncPlugin types.
  */
 
+import { DEV } from './dev';
 import type { Command, CommandResult, Plugin, AsyncPlugin } from './command-bus';
 import { matchesPattern, commandKey, BusError } from './command-bus';
 import { freezeCached } from './freeze';
-
-const DEV = typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
 
 function makeActionFilter(patterns: string[] | undefined): (action: string) => boolean {
   if (!patterns?.length) return () => true;

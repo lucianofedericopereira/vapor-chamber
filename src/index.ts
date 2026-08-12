@@ -209,6 +209,12 @@ export {
   isVaporAvailable,
   // v0.6.0: Await Vue detection for guaranteed signal availability
   waitForVueDetection,
+  // Hand the library Vue's namespace explicitly — the reliable channel when
+  // neither automatic one can reach it (no-bundler pages especially).
+  configureVue,
+  // Run a raw-bus dispatch without its handler's reads becoming dependencies
+  // of the surrounding effect. Composables apply this themselves.
+  untracked,
 } from './chamber';
 
 // Vue 3.6+ Vapor-specific API — optional, requires Vue 3.6

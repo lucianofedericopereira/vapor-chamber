@@ -7,7 +7,7 @@ Thanks for considering a contribution. This document covers what you need to get
 ## Setup
 
 Requirements:
-- Node.js ≥ 20.19.0 (matches `engines.node` in [package.json](./package.json))
+- Node.js ≥ 22.12.0 (matches `engines.node` in [package.json](./package.json))
 - npm 10+ (ships with the Node version above)
 
 ```bash
@@ -75,7 +75,7 @@ npm run build         # produces dist/ + prints sizes
 npm run size:check    # fails if any IIFE variant exceeds its brotli budget
 ```
 
-All five must pass. CI runs the same set on Node 20, 22 and 24, on Linux and macOS.
+All five must pass. CI runs the same set on Node 22 and 24, on Linux and macOS.
 
 The `examples/` workspaces are not part of that gate — they build against the
 working tree on demand. `examples/exo-astro` needs Node ≥ 22.12 (Astro 7's own

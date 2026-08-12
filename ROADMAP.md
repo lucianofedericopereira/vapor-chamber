@@ -1,11 +1,11 @@
 # Roadmap
 
 This project tracks Vue 3.6 through its **release-candidate** phase (rc.1
-landed 2026-07-18; rc.2 on 2026-07-22). That has direct consequences for what's
+landed 2026-07-18; rc.2 on 2026-07-22; rc.3 on 2026-08-11). That has direct consequences for what's
 stable, what's transitional, and what will change once Vue 3.6 ships stable.
 This file is the source of truth for that distinction.
 
-Last reviewed against **Vue 3.6.0-rc.2** (2026-07-22).
+Last reviewed against **Vue 3.6.0-rc.3** (2026-08-11).
 
 ---
 
@@ -30,7 +30,7 @@ observable.
 
 ## Pre-stable specifics
 
-- **Peer dependency:** `vue: ">=3.5.0 || >=3.6.0-rc.2"`. The lib supports
+- **Peer dependency:** `vue: ">=3.5.0 || >=3.6.0-rc.3"`. The lib supports
   Vue 3.5 (composables only) and Vue 3.6 RCs (full Vapor surface).
 - **Vapor APIs are still moving.** `defineVaporCustomElement`, `defineVaporComponent`,
   `defineVaporAsyncComponent` are stable in shape but their underlying behavior
@@ -98,49 +98,98 @@ and `createVaporChamberApp` exist to provide a `null`-returning safety surface
 when Vue's API is not present. After Vue 3.6 stable, that null path is dead
 code for any consumer who has Vue ≥ 3.6 in their dependency tree.
 
-**Plan (v1.3 cutover):** Ship two flavors from one source via Vite build flag
-+ `package.json` conditional exports.
+**Decision (rc.3): the flavor apparatus is retired. `configureVue()` is the
+plan.** The `__VAPOR_NATIVE__` define, the second build, and the `vue36`
+export condition are all withdrawn as roadmap items — not deferred, withdrawn.
+Three verified facts, each fatal on its own:
 
-```
-src/wrapper.ts:
-  const HAS_NATIVE_VAPOR = /* #__PURE__ */ __VAPOR_NATIVE__;
-  export function defineVaporComponent(options) {
-    if (HAS_NATIVE_VAPOR) return options;          // DCE drops this branch
-    const fn = getDefineVaporComponentFn();
-    if (!fn) return null;
-    return fn(options);
-  }
+1. **The "identity wrappers" premise was a silent bug.** Checked in
+   `node_modules/@vue/runtime-vapor/dist/runtime-vapor.esm-bundler.js`:
+   `defineVaporComponent` sets `comp.__vapor = true` before returning `comp`
+   (and for a *function* `comp` builds a fresh `{name, setup, __vapor}`
+   object); `defineVaporAsyncComponent` builds a `VaporAsyncComponentWrapper`;
+   `defineVaporCustomElement` returns a `class … extends VaporElement`.
+   Compiling the wrappers to `return options` drops the `__vapor` marker —
+   no error, no null, just wrong-mode rendering.
 
-scripts/build.mjs:
-  build with __VAPOR_NATIVE__ = false  → dist/index.js          (legacy/beta)
-  build with __VAPOR_NATIVE__ = true   → dist/index.modern.js   (3.6 stable+)
+2. **There is nothing to statically import from.** At rc.3, `vue`'s bundler
+   entry (`vue.runtime.esm-bundler.js`) exports **zero** Vapor APIs and the
+   exports map has no vapor condition; the only with-vapor dist is
+   `esm-browser`. The `vue36`-condition plan assumed bundler consumers alias
+   `vue` to a with-vapor bundler build that does not exist. Importing
+   `@vue/runtime-vapor` directly instead is a phantom-dependency import
+   (it is `vue`'s transitive dep, not ours) that fails under strict pnpm.
 
-package.json#exports:
-  ".": {
-    "vue36": "./dist/index.modern.js",
-    "import": "./dist/index.js",
-    "types": "./dist/index.d.ts"
-  }
-```
+3. **The prize is under a kilobyte.** The entire probe + registry +
+   `configureVue` + detection-hint region of `chamber.ts` (lines ~60–412)
+   measures **2,299 B minified / 885 B brotli** (esbuild `--minify`, brotli
+   q=11) — an *upper bound* on what any flavor could ever delete, since it
+   includes machinery every flavor keeps. Two dist flavors, a build flag, and
+   a resolution condition are not a reasonable trade for <0.9 KB.
 
-Consumers on Vue 3.6 stable add `vue36` to their Vite `resolve.conditions`
-once and the wrapper bodies + entire feature-detection registry in
-`chamber.ts` (`getDefineVaporComponentFn`, `_defineVaporCustomElementFn`, etc.)
-are tree-shaken to zero.
+What replaces it costs nothing, because it already exists:
+[`configureVue(vue)`](../src/chamber.ts) — the consumer hands over the Vue
+namespace they actually use, the registry seeds synchronously, and the
+wrappers' null path becomes unreachable. One channel, every consumer type
+(bundler alias, import map, `esm-browser` dist, custom build), no probe race,
+no new surface, no peer dep. It was documented as the no-bundler escape hatch;
+it is in fact the deterministic Vapor wiring for everyone, and the docs should
+say so.
 
-**No source split, no API breakage.** The wrapper functions still exist by
-name in both flavors — the modern flavor just inlines them as identity calls.
+**The runtime probe stays, permanently.** It is the zero-config path and the
+only channel no-build pages have. `configureVue` bypasses it; nothing deletes
+it. Both paths are maintained past 2.0.
 
-### Runtime feature-detection registry will shrink
+**Reopen condition** (the one future in which a flavor becomes worth revisiting):
+Vue ships a with-vapor *bundler* entry or a `vue`-scoped vapor subpath/condition
+at 3.6 stable. Then a static-import fast path becomes possible — and it still
+has to clear the ~885 B bar, re-measured.
 
-`chamber.ts` currently maintains a registry of probed Vue functions
+### Runtime feature-detection registry — kept, and measured
+
+`chamber.ts` maintains a registry of probed Vue functions
 (`_defineVaporCustomElementFn`, `_vueOnScopeDispose`, `_vueOnUnmounted`,
 `_vueOnActivated`, `_vueOnDeactivated`, etc.). Each entry exists because the
 specific Vue version may or may not have it.
 
-**Plan (post-3.6-stable):** When `vue36` build flavor is active, the registry
-collapses to a direct `import { onScopeDispose, ... } from 'vue'`. No more
-property probing, no more null guards. Still tree-shaken when unused.
+This section used to plan a post-stable collapse to direct `vue` imports under
+the `vue36` flavor. Withdrawn with the flavor (see above): the whole
+registry-and-probe region is ≤900 B brotli, `configureVue()` already seeds it
+synchronously for consumers who want determinism, and the entries stay because
+the peer range keeps 3.5 (no Vapor, partial hooks) supported. Prune individual
+entries only when the peer floor moves past the version that made them
+conditional.
+
+### `v-vc:command` in Vapor — newly possible, not yet scheduled
+
+This file used to list "Directives in Vapor" under **what is not on the
+roadmap**, on the stated grounds that "the Vue team has consistently signaled
+directives remain a VDOM-only feature." That was wrong, and wrong for the whole
+time it was written down. `withVaporDirectives` is a public export of the
+with-vapor build and ships in **every** Vue version this project has tracked —
+verified by unpacking the published `@vue/runtime-vapor` dist from
+3.6.0-alpha.3 through rc.3. rc.3 did not add it; it hardened it (#15258,
+#15167, #15158). Measured in `tests/vapor-directives-fixture.test.ts`.
+
+What is real is that the two renderers want different **shapes**, and one
+`app.directive('vc', …)` registration cannot serve both:
+
+```
+VDOM    { mounted(el, binding), updated(el, binding), beforeUnmount(el) }
+Vapor   (el, value, argument, modifiers) => cleanup | void
+```
+
+The Vapor form runs once per root element in a detached `EffectScope`, returns
+its own cleanup, and has **no `updated` hook** — the value arrives as a getter,
+so a directive that must track a changing binding opens an effect itself. A
+port therefore has to restructure `buildHandler`'s state around a getter rather
+than re-read `binding.value`, and needs a second registration path.
+
+Not scheduled, and deliberately so: the feature set is locked (see Posture),
+and the practical advice for Vapor components — `useCommand()` /
+`defineVaporCommand()` — is unchanged and costs a consumer nothing. This entry
+exists so the option is recorded as *available* rather than *impossible*, which
+is what the old bullet got wrong.
 
 ### `createVaporChamberApp` will become a soft-deprecated convenience
 
@@ -202,10 +251,6 @@ benchmark numbers, and decision tree.
 
 ## What is not on the roadmap
 
-- **Directives in Vapor.** The Vue team has consistently signaled directives
-  remain a VDOM-only feature. The lib's `createDirectivePlugin` will stay as
-  a VDOM helper; no Vapor-port effort planned. Directives are not in the
-  growth path.
 - **Forking Vue internals.** The lib intentionally wraps Vue's public API
   and detects features at runtime. Bundling polyfills or forking compiler
   output is out of scope.
@@ -226,27 +271,31 @@ What this file still owns, because §9 does not:
 | Version | Trigger | What changes about the *contract* |
 |---------|---------|-----------------------------------|
 | current line | Each 3.6 RC | Tracking bumps: peer dep, alignment notes, perf re-measure. No contract change. |
-| v2.0.0 | One minor cycle after 3.6 stable | Stable-landing realignment: `vue36` flavor wrapper elimination + registry collapse; remove wrappers' null path; finalize the identity decision. The `useVaporCommand`→`useCommand` merge already shipped early, in v1.7.0. See the checklist below. |
+| v1.13.0 | rc.3 alignment | Tracking bump + docs: `configureVue()` promoted from no-bundler escape hatch to the recommended deterministic Vapor wiring for all consumers. No API change. |
+| v2.0.0 | One minor cycle after 3.6 stable | Stable-landing realignment: finalize the identity decision (Vapor-first vs bus-first). The `vue36` flavor + registry collapse were withdrawn at rc.3 (superseded by `configureVue()`, <0.9 KB at stake — see "What is transitional"). `useVaporCommand`→`useCommand` shipped early in v1.7.0. See the checklist below. |
 
 **Version policy before 3.6 stable.** Breaking changes ship as **minors**, not
 majors. The original justification was "the peer dep is a moving beta" — Vue is
 no longer in beta, so that basis has expired and is not what the policy now
 rests on. What it rests on: the pre-stable peer dep is still a moving target
-(rc.2 today), and the surfaces that have actually taken breaking changes are the
+(rc.3 today), and the surfaces that have actually taken breaking changes are the
 ones documented experimental — v1.11.0's `RouterOutlet` subpath move cited the
 router's experimental status, not the beta window, and that is the standard
 going forward. A breaking change to a surface documented as stable needs a
 major, beta window or not. **2.0.0 remains reserved for the post-stable identity
-decision** (Vapor-first vs bus-first; the `vue36` flavor + registry collapse),
-keeping the major bump meaningful.
+decision** (Vapor-first vs bus-first), keeping the major bump meaningful. The
+`vue36` flavor + registry collapse were withdrawn from that reservation at rc.3
+(see "What is transitional").
 Corollary — **we deliver first**: any v2.0-roadmapped item that does *not* depend on
 the stable identity call ships early in a minor as soon as it's ready (the
 `useVaporCommand`→`useCommand` merge landed this way in v1.7.0).
 
 Note: the `vue36` build-flag wrapper elimination was once tentatively slated for
-v1.5.0 — it is **blocked on Vue 3.6 RC/stable** (the dead-code branch only pays
-off once consumers have a non-beta Vue in their tree), so it lands at v2.0.0, not
-during beta. `createEchoBridge` (protocol-aware Reverb/Echo realtime — public /
+v1.5.0, then parked as "blocked on Vue 3.6 RC/stable". At rc.3 the blocker
+resolved the other way: the item was **withdrawn, not unblocked** — the identity
+premise was wrong at source, rc.3 ships no with-vapor bundler entry to import
+from, and the measured prize is <0.9 KB brotli. `configureVue()` supersedes it;
+full evidence in "What is transitional" above. `createEchoBridge` (protocol-aware Reverb/Echo realtime — public /
 private / presence channels → bus) **shipped in v1.5.0** (it's a receive-only
 transport adapter, fully decoupled from Vue, so it wasn't blocked); see
 [docs/integrations/laravel.md](./docs/integrations/laravel.md).
@@ -254,15 +303,15 @@ transport adapter, fully decoupled from Vue, so it wasn't blocked); see
 ## Vue version-support matrix
 
 Which Vue versions each released lib line supports. The peer dep is permissive
-(`>=3.5.0 || >=3.6.0-rc.2`, matching `package.json`); this table is the *tested*
+(`>=3.5.0 || >=3.6.0-rc.3`, matching `package.json`); this table is the *tested*
 support statement.
 
 | vapor-chamber | Vue 3.5 (composables only) | Vue 3.6 | Notes |
 |---------------|----------------------------|---------|-------|
 | v1.2.x – v1.5.x | ✅ | beta.11 → beta.14 | the beta-aligned lines; v1.5.x feature-locked |
 | v1.6.x – v1.7.0 | ✅ | beta.15 → beta.17 | tracking-only bumps + the first post-lock delivery |
-| **v1.8.0 →** | ✅ | **rc.1 → rc.2** | current; tested against rc.2 |
-| v2.0.0 | ✅ (composables) | **3.6 stable** | `vue36` flavor adds zero-overhead path |
+| **v1.8.0 →** | ✅ | **rc.1 → rc.3** | current; tested against rc.3 |
+| v2.0.0 | ✅ (composables) | **3.6 stable** | peer range gains stable; wiring unchanged — probe by default, `configureVue()` for determinism |
 
 On Vue 3.5 you get the framework-agnostic surface (bus, plugins, transports,
 composables with `onScopeDispose` cleanup). The full Vapor surface
@@ -273,13 +322,21 @@ returns `null` / throws with a clear message when Vapor is absent.
 
 A single checklist for the stable landing (v2.0.0). Each item is detailed in
 "What is transitional" above; this is the operational summary so the bump is
-mechanical, not archaeological:
+mechanical, not archaeological.
+
+**Read these as deadlines, not gates.** An item here is *owed* by v2.0.0; any of
+them ships earlier, in a minor, the moment it is ready and does not depend on the
+stable identity call — that is the "we deliver first" corollary; `useCommand`
+already landed that way. Delivering early is over-delivery, not a policy
+break. Items that ship early are marked ✅ with the release that carried them;
+items that die are struck with the reason, not deleted:
 
 - [ ] **Peer dep** — add `^3.6.0` (stable) to the supported range.
-- [ ] **`vue36` build flavor** — ship the second build with `__VAPOR_NATIVE__ = true`;
-      wrapper bodies inline to identity, the `chamber.ts` feature-detection
-      registry (`getDefineVaporComponentFn`, `_vueOnScopeDispose`, …) tree-shakes
-      to zero. Add the `vue36` conditional export.
+- ~~**`vue36` build flavor**~~ — **withdrawn at rc.3**, not deferred: the
+      identity premise was a silent bug at source (`__vapor` marker), rc.3
+      ships no with-vapor bundler entry to statically import, and the measured
+      prize was <0.9 KB brotli. Superseded by `configureVue()`; evidence and
+      reopen condition in "What is transitional".
 - [x] **`useVaporCommand` → `useCommand`** — **done** (shipped early in v1.7.0, ahead of v2.0). The
       two composables were folded into a single Vapor-safe `useCommand`
       (`onScopeDispose`-only cleanup, `register`/`on`/`emit`/`dispose`).
@@ -380,7 +437,7 @@ single source of truth for feature status).
 | `bus.dispose()` — clean teardown with timer cancellation | `command-bus` | ✅ v1.0 | ✅ covered |
 | `createCommandPool(size)` — pre-allocated object pool | `command-bus` | ✅ v1.0 | ✅ covered |
 | Transactional batch with undo rollback | `command-bus` | ✅ v1.0 | ✅ covered |
-| Recursion depth guard (max 10) | `command-bus` | ✅ v1.0 | ✅ covered |
+| Recursion depth guard (max 16) | `command-bus` | ✅ v1.0 | ✅ covered |
 | V8 optimizations (monomorphic shapes, index loops, extracted try/catch) | `command-bus` | ✅ v1.0 | ✅ bench |
 | SSR isolation (independent bus instances) | `command-bus` | ✅ v0.5.0 | ✅ covered |
 | `createTestBus` record + assert | `testing` | ✅ v0.2.0 | ✅ harness (excluded) |

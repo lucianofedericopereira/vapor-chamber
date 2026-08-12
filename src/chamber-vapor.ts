@@ -61,6 +61,7 @@ import {
   getDefineVaporCustomElementFn,
   getDefineVaporComponentFn,
   getDefineVaporAsyncComponentFn,
+  vueDetectionHint,
 } from './chamber';
 import type { Handler, RegisterOptions, CommandResult, CommandMap } from './command-bus';
 
@@ -83,9 +84,12 @@ export function createVaporChamberApp<TApp = any>(
 ): TApp {
   const fn = getVaporAppFn();
   if (!fn) {
+    // The bare "Vapor required" message was the same whether Vue was absent,
+    // present-without-Vapor, or present-but-unreachable — three different
+    // problems with three different fixes. vueDetectionHint() names which.
     throw new Error(
-      '[vapor-chamber] Vue 3.6+ with Vapor mode required. ' +
-      'Install vue@^3.6.0-beta.1 or use createApp() for VDOM mode.'
+      `[vapor-chamber] Vue 3.6+ with Vapor mode required. ${vueDetectionHint()} ` +
+      'For VDOM mode, use createApp() from vue instead.'
     );
   }
   return fn(rootComponent, rootProps) as TApp;

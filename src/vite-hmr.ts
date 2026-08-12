@@ -86,6 +86,12 @@ export type VaporChamberHMROptions = {
 
 // The global symbol used to persist the bus across HMR updates in the browser.
 const HMR_GLOBAL_KEY = '__VAPOR_CHAMBER_BUS__';
+// The slot the library reads a hand-supplied Vue namespace from. Duplicated
+// from chamber.ts §VUE_GLOBAL_KEY rather than imported: this plugin runs in
+// Vite's Node process and must not pull the Vue-detection module (and its
+// module-load probe) into a build tool. Kept in sync by
+// tests/vite-hmr.test.ts, which asserts the emitted module names this key.
+const VUE_GLOBAL_KEY = '__VAPOR_CHAMBER_VUE__';
 // Track whether the last active component was Vapor or VDOM — used for mode switch detection.
 const HMR_MODE_KEY = '__VAPOR_CHAMBER_MODE__';
 
@@ -176,11 +182,16 @@ export function vaporChamberHMR(options: VaporChamberHMROptions = {}): any {
       if (id === resolvedPrimeModuleId) {
         const vueResolved = await (this as any).resolve?.('vue');
         if (!vueResolved) return 'export {};';
+        // Writes the library-owned slot, not Vue's `__VUE__`. Vue assigns the
+        // boolean `true` to `__VUE__` when the first app is created, so a
+        // namespace parked there is replaced on mount — and writing Vue's own
+        // key means fighting Vue over the value's type for no gain. The
+        // library reads its own slot first (chamber.ts §VUE_GLOBAL_KEY).
         return `
 // vapor-chamber HMR shim — Vue priming (must evaluate before 'vapor-chamber')
 import * as __VC_VUE__ from 'vue';
-if (!globalThis.__VUE__ || typeof globalThis.__VUE__.ref !== 'function') {
-  globalThis.__VUE__ = __VC_VUE__;
+if (!globalThis.${VUE_GLOBAL_KEY} || typeof globalThis.${VUE_GLOBAL_KEY}.ref !== 'function') {
+  globalThis.${VUE_GLOBAL_KEY} = __VC_VUE__;
 }
 export {};
         `.trim();

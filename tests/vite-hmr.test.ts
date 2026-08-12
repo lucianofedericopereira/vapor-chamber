@@ -38,11 +38,18 @@ describe('vaporChamberHMR', () => {
     expect(primeIdx).toBeLessThan(vcIdx);
   });
 
-  it('prime module sets globalThis.__VUE__ when vue resolves', async () => {
+  it('prime module writes the library-owned slot, not Vue\'s __VUE__', async () => {
     const ctx = { resolve: async () => ({ id: '/node_modules/vue/index.mjs' }) };
     const code: string = await plugin.load.call(ctx, '\0virtual:vapor-chamber-hmr-vue-prime');
     expect(code).toContain("import * as __VC_VUE__ from 'vue'");
-    expect(code).toContain('globalThis.__VUE__ = __VC_VUE__');
+    expect(code).toContain('globalThis.__VAPOR_CHAMBER_VUE__ = __VC_VUE__');
+
+    // It must NOT write `__VUE__`: that key belongs to Vue, which assigns the
+    // boolean `true` to it when the first app is created, so a namespace left
+    // there is replaced on mount (tests/vue-detection-global-clobber.test.ts).
+    // This also keeps the key duplicated in vite-hmr.ts in sync with
+    // chamber.ts §VUE_GLOBAL_KEY — the plugin cannot import it.
+    expect(code).not.toContain('globalThis.__VUE__ =');
   });
 
   it('prime module is a no-op when vue does not resolve (non-Vue consumers)', async () => {

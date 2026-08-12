@@ -14,6 +14,7 @@
  * - `'warn'`: recoverable issue, dispatch may succeed (e.g. naming violation)
  * - `'info'`: informational (e.g. handler overwrite, circuit breaker state change)
  */
+import { DEV } from './dev';
 export type BusSeverity = 'error' | 'warn' | 'info';
 
 /**
@@ -511,6 +512,8 @@ export interface AsyncCommandBus<M extends CommandMap = CommandMap> extends Base
 
 /** Max nested dispatch depth — prevents infinite loops from reactions/listeners re-dispatching. */
 const MAX_DISPATCH_DEPTH = 16;
+
+
 
 /** @internal Symbol used by unsealBus() — not on the public interface. */
 const _UNSEAL = Symbol('vapor-chamber:unseal');
@@ -1028,7 +1031,7 @@ function handleMissing(s: SyncState | AsyncState, cmd: Command, canDefer: boolea
     if (q.length >= limit) {
       const dropped = q.shift()!; // drop oldest
       s.opts.onBufferOverflow?.(cmd.action, { target: dropped.target, payload: dropped.payload });
-      if (typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production') {
+      if (DEV) {
         console.warn(`[vapor-chamber] onMissing:'buffer' queue for "${cmd.action}" hit bufferLimit (${limit}); dropped the oldest pending command. Register a handler, or raise bufferLimit.`);
       }
     }
@@ -1149,18 +1152,21 @@ function _syncDispatchInner(s: SyncState, action: string, target: any, payload?:
 // Dev-only footgun guard: an ASYNC plugin (retry, createHttpBridge, ...) on a
 // SYNC bus makes the runner return the plugin's Promise as the CommandResult —
 // `result.ok` is undefined and every dispatch silently "fails". Warn once per
-// action in dev. The env check is hoisted to module scope: process.env reads
-// go through a slow C++ interceptor, so a per-dispatch read costs ~150ns on
-// this hot path (measured: 3 plugins + 1 listener bench dropped 1,240 → 350
-// ops/s with the read inline). Bundler define-replacement still folds the
-// module-level const to false and DCEs the branch in production builds — the
-// bare process.env.NODE_ENV literal is load-bearing: `process.env?.NODE_ENV`
-// (optional chain) does NOT match the define and the warning ships to prod.
-// The typeof guard short-circuits in browsers, so no ReferenceError either way.
-const _devMode = typeof process !== 'undefined' && process.env.NODE_ENV !== 'production';
+// action in dev.
+//
+// Keeping the check off the per-dispatch path still matters: `process.env`
+// reads go through a slow C++ interceptor, and an inline read measured ~150 ns
+// here (3 plugins + 1 listener bench dropped 1,240 → 350 ops/s). `DEV` is a
+// module-level const for that reason, and now also so the build can fold it —
+// see src/dev.ts. The comment that used to sit here explained that a BARE
+// `process.env.NODE_ENV` literal was load-bearing for define-replacement,
+// which is no longer how this works: the ESM build emits that expression from
+// the `__VC_DEV__` define, and the IIFE builds fold it to `false` outright,
+// which is what finally drops the warning STRINGS from production rather than
+// just the branch.
 const _thenableWarned = new Set<string>();
 function devWarnThenableResult(result: CommandResult, action: string): void {
-  if (_devMode) {
+  if (DEV) {
     if (result && typeof (result as unknown as PromiseLike<unknown>).then === 'function' && !_thenableWarned.has(action)) {
       _thenableWarned.add(action);
       console.warn(
@@ -1174,6 +1180,10 @@ function devWarnThenableResult(result: CommandResult, action: string): void {
 
 /** Read-only query — skips beforeHooks, runs handler + plugins, fires afterHooks. */
 function syncQuery(s: SyncState, action: string, target: any, payload?: any): CommandResult {
+  return _syncQueryInner(s, action, target, payload);
+}
+
+function _syncQueryInner(s: SyncState, action: string, target: any, payload?: any): CommandResult {
   if (s.opts.naming !== undefined) validateNaming(action, s.opts.naming);
   const cmd: Command = { action, target, payload, meta: stampMeta(payload) };
   // Bare-bus fast path — mirrors the one in _syncDispatchInner. Queries skip
@@ -1202,6 +1212,10 @@ function syncQuery(s: SyncState, action: string, target: any, payload?: any): Co
 
 /** Fire a domain event — notifies on() listeners, no handler required, no result. */
 function syncEmit(s: SyncState, event: string, data?: any): void {
+  _syncEmitInner(s, event, data);
+}
+
+function _syncEmitInner(s: SyncState, event: string, data?: any): void {
   // Fast path: no listeners → return without allocating anything. Real apps
   // emit many events with no subscribers (lifecycle, debug, conditional
   // listeners) — this branch turns those into a hash lookup + length check.
@@ -1223,7 +1237,7 @@ function syncEmit(s: SyncState, event: string, data?: any): void {
  * house convention.
  */
 function warnBatchOptionConflict(opts: BatchOptions): void {
-  if (_devMode && opts.transactional && opts.continueOnError) {
+  if (DEV && opts.transactional && opts.continueOnError) {
     console.warn(
       '[vapor-chamber] dispatchBatch({ transactional: true, continueOnError: true }) — these are ' +
         'mutually exclusive. `transactional` wins: the batch stops at the first failure and rolls back. ' +
@@ -1614,6 +1628,10 @@ async function _asyncDispatchInner(s: AsyncState, action: string, target: any, p
 
 /** Async read-only query — skips beforeHooks, runs handler + plugins, fires afterHooks. */
 async function asyncQuery(s: AsyncState, action: string, target: any, payload?: any): Promise<CommandResult> {
+  return await _asyncQueryInner(s, action, target, payload);
+}
+
+async function _asyncQueryInner(s: AsyncState, action: string, target: any, payload?: any): Promise<CommandResult> {
   if (s.opts.naming !== undefined) validateNaming(action, s.opts.naming);
   const cmd: Command = { action, target, payload, meta: stampMeta(payload) };
   const execute = async (): Promise<CommandResult> => {
@@ -1629,6 +1647,10 @@ async function asyncQuery(s: AsyncState, action: string, target: any, payload?: 
 
 /** Async emit — notifies on() listeners, no handler required, no result. */
 function asyncEmit(s: AsyncState, event: string, data?: any): void {
+  _asyncEmitInner(s, event, data);
+}
+
+function _asyncEmitInner(s: AsyncState, event: string, data?: any): void {
   // Same fast path + minimal-allocation strategy as syncEmit. See that
   // function's comment block for the full reasoning.
   if (!s.exactListeners.has(event) && s.wildcardListeners.length === 0) return;

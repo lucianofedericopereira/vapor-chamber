@@ -79,9 +79,8 @@
  * createVaporChamberApp(App).mount('#app');
  */
 
+import { DEV } from './dev';
 import type { Command, CommandResult, Plugin, BaseBus } from './command-bus';
-
-const DEV = typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
 
 // ---------------------------------------------------------------------------
 // Types

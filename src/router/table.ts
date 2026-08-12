@@ -10,6 +10,7 @@
  * valid migration.
  */
 
+import { DEV } from '../dev';
 import { routerError } from './errors';
 import type { ParamType, RouteParams, RouteRecord, Segment, TableRecord } from './types';
 
@@ -21,8 +22,6 @@ export type RouteTable = {
   /** Interpolate params into a record's pattern. */
   buildPath: (record: TableRecord, params?: RouteParams) => string;
 };
-
-const DEV = typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
 
 const PARAM_RE = /^:([A-Za-z_][A-Za-z0-9_]*)(\(([^)]+)\))?(\?)?$/;
 

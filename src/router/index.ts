@@ -18,6 +18,7 @@
  * `createRouter()` is pure — IO and listeners begin at start()/app.use().
  */
 
+import { DEV } from '../dev';
 import { createHttpClient } from '../http';
 import type { HttpClient } from '../http';
 import { computed, getCurrentScope, onScopeDispose, shallowRef } from 'vue';
@@ -78,14 +79,6 @@ export { compilePath, createRouteTable } from './table';
 export type { RouteTable } from './table';
 export type * from './types';
 export { decodeQueryParam, encodeQueryParam, parseQuery, pathActivity, resolveQueryHistory, stringifyQuery } from './url';
-
-// Same guarded form as `./menu.ts` and `./table.ts`. A bare
-// `process.env.NODE_ENV` read is a ReferenceError in the router's headline
-// delivery — Blade inline payloads, `examples/router-demo` (plain ESM + import
-// map), pattern-1 no-build — where there is no bundler define and no `process`.
-// (`command-bus.ts` and `devtools.ts` keep bare literals on purpose: those are
-// bundler-only surfaces where the literal is load-bearing for DCE.)
-const DEV = typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
 
 export type RoutesSource =
   | readonly RouteRecord[]

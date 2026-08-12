@@ -74,6 +74,7 @@
  * </button>
  */
 
+import { DEV } from './dev';
 import { getCommandBus, isVaporAvailable } from './chamber';
 import type { Command, CommandMap } from './command-bus';
 
@@ -331,16 +332,35 @@ function buildHandler(el: Element, state: DirectiveState): (event: Event) => voi
 export function createDirectivePlugin(): { install(app: any): void } {
   return {
     install(app: any) {
-      // Vue 3.6+ Vapor components don't support custom directives (no VDOM
-      // lifecycle hooks). Since beta.10, VDOM/Vapor interop is much improved —
-      // VDOM components can invoke Vapor slots and vice versa — but directives
-      // remain a VDOM-only feature tied to the VDOM patch lifecycle.
+      // THIS DIRECTIVE is VDOM-only. Vapor custom directives are NOT.
+      //
+      // The warning here used to say "directives remain a VDOM-only feature
+      // tied to the VDOM patch lifecycle", which was wrong, and wrong from the
+      // start: `withVaporDirectives` is a public export of the with-vapor
+      // build and ships in every Vue version this project has tracked
+      // (verified by unpacking the published @vue/runtime-vapor dist for
+      // 3.6.0-alpha.3 through rc.3 — present in all of them; rc.3 only
+      // hardened it, #15258/#15167/#15158). Measured in
+      // tests/vapor-directives-fixture.test.ts.
+      //
+      // What is genuinely blocking is the SHAPE this plugin registers. Vue
+      // wants two different things under one name:
+      //   VDOM   { mounted(el, binding), updated(el, binding), beforeUnmount(el) }
+      //   Vapor  (el, value, argument, modifiers) => cleanup | void
+      // and there is no `updated` hook in the Vapor form at all — the value
+      // arrives as a getter and a directive that must react opens its own
+      // effect. So `app.directive('vc', …)` cannot serve both from one
+      // registration, and porting is real work rather than a rename. Until
+      // that lands, the practical advice below is unchanged; only the reason
+      // is now accurate.
       if (isVaporAvailable()) {
         console.warn(
-          '[vapor-chamber] Directives (v-vc:command) are VDOM-only and will not ' +
-          'work inside <script setup vapor> components. Use useCommand() or ' +
+          '[vapor-chamber] v-vc:command is implemented with VDOM directive hooks, ' +
+          'so it will not run inside <script setup vapor> components. (Vapor DOES ' +
+          'support custom directives — via a different, function-shaped API this ' +
+          'directive has not been ported to yet.) Use useCommand() or ' +
           'defineVaporCommand() for Vapor components. For async operations under ' +
-          'Suspense, use useVaporAsyncCommand(). Directives still work in VDOM ' +
+          'Suspense, use useVaporAsyncCommand(). This directive still works in VDOM ' +
           'components within mixed Vapor/VDOM trees (interop plugin required).'
         );
       }
@@ -372,7 +392,7 @@ export function createDirectivePlugin(): { install(app: any): void } {
           // attached directly."
           let delegate = !!mods.delegate;
           if (delegate && (mods.capture || mods.once || mods.passive)) {
-            if (typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production') {
+            if (DEV) {
               console.warn(
                 '[vapor-chamber] v-vc:command.delegate is incompatible with ' +
                 '.capture/.once/.passive (delegation shares one document-level ' +

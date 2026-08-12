@@ -100,8 +100,10 @@ bus.dispatchBatch([
 
 ## Bundle size
 
-mitt is ~200 bytes. vapor-chamber's `core` IIFE variant is ~6.6 KB brotli
-(33× larger). The size difference is the cost of all the extras above.
+mitt is ~200 bytes. vapor-chamber's `core` IIFE variant is **~7.7 KB brotli**
+(~39× larger). The size difference is the cost of all the extras above.
+Always-current per-export numbers: [BUNDLE-SIZES.md](../BUNDLE-SIZES.md)
+(generated, CI-verified fresh) — prefer it over any figure quoted in prose.
 
 If you only need pub/sub and don't want to pay for those features:
 **don't migrate**. Either stay on mitt or use vapor-chamber's fast lane:

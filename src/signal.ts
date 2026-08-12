@@ -21,6 +21,8 @@
  * lifecycle hooks) import from `chamber.ts`, which calls into this module.
  */
 
+import { DEV } from './dev';
+
 export type Signal<T> = { value: T };
 export type CreateSignal = <T>(initial: T) => Signal<T>;
 
@@ -78,8 +80,7 @@ let _signalFn: CreateSignal = fallbackSignal;
 export function configureSignal(fn: CreateSignal): void {
   _signalFn = fn;
   if (
-    _plainCreations > 0 && !_raceWarned &&
-    typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production'
+    _plainCreations > 0 && !_raceWarned && DEV
   ) {
     _raceWarned = true;
     console.warn(

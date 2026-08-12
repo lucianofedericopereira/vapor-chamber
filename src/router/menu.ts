@@ -22,6 +22,7 @@
  * generator.
  */
 
+import { DEV } from '../dev';
 import { routerError } from './errors';
 import type { RouteLocation, RouteParams, TableRecord } from './types';
 import { renderSegments } from './table';
@@ -52,8 +53,6 @@ export type Breadcrumb = {
   current: boolean;
   meta: Record<string, unknown>;
 };
-
-const DEV = typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
 
 /** Rows flagged `meta.menu`, position-sorted, nested by nearest menued
  *  ancestor, active-stamped against `currentPath`. */

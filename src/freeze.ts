@@ -15,7 +15,8 @@
  * a cost, and by then the contract has been tested.
  */
 
-export const FREEZE_IN_DEV = typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production';
+import { DEV } from './dev';
+export const FREEZE_IN_DEV = DEV;
 
 /**
  * Walks plain objects and arrays only. Blobs, FormData, Maps, class instances

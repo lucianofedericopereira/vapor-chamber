@@ -13,10 +13,10 @@
     "preview": "astro preview"
   },
   "dependencies": {
-    "astro": "^7.0.0",
     "vapor-chamber": "file:../.."
   },
   "devDependencies": {
+    "astro": "^7.2.1",
     "typescript": "^5.9.0"
   },
   "engines": {

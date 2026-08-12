@@ -38,6 +38,7 @@ const esm = [
   ['./standard-schema', 'src/plugins-schema.ts'],
   ['./alien-signals', 'src/alien-signals.ts'],
   ['./reactive', 'src/reactive.ts'],
+  ['./vue', 'src/vue.ts'],
   ['./outbox', 'src/outbox.ts'],
   ['./mcp', 'src/mcp.ts'],
   // Router. `./router` is deliberately vDOM-free — the outlet and blade

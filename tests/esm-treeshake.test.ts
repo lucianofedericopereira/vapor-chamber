@@ -81,7 +81,30 @@ describe.skipIf(!haveDist || !esbuild)('ESM tree-shake regression', () => {
       // made the whole registry shakeable — it had been silently pinned into
       // every barrel-import bundle since v1.0 (~1 KB brotli recovered; measured
       // 6_083 after the fix). This LOWER ceiling locks the win.
-      expect(br.length, `brotli bundle size grew unexpectedly (${br.length} bytes)`).toBeLessThan(6_300);
+      // Ceiling 6_300 → 6_450 (v1.13.0): dev guards moved from an inline
+      // `typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production'`
+      // at each site to a shared `DEV` const in src/dev.ts, fed by the
+      // `__VC_DEV__` build define. THIS bundle deliberately omits the define
+      // (see the note above), so it keeps every dev branch AND pays the small
+      // fixed cost of the extra module — the one configuration where the
+      // change reads as a regression.
+      //
+      // The configuration that ships tells the opposite story, measured: all
+      // three production IIFE bundles came out SMALLER than v1.12.0 (full
+      // 11,367 → 11,325 B brotli, core 7,885 → 7,716, elements 8,294 → 8,193)
+      // because the define now folds the branches away and takes ~500-1,100 B
+      // of warning STRINGS with them, which the old inline guard never managed
+      // (rolldown will not fold `typeof process < "u" && !1`).
+      // Ceiling 6_450 → 6_400 (v1.13.0): net WIN from the licence rework, which
+      // pulled in two directions and came out ahead. Cost: the notice is now a
+      // LEGAL comment (`/*!`), which minifiers keep on purpose — the plain
+      // `/* … */` banner it replaced was being stripped, so both .min.js IIFEs
+      // were shipping with no licence reference at all. Saving: that notice is
+      // a 22 B pointer to dist/LICENSE.txt rather than a ~150 B block, and the
+      // build now strips JSDoc from emitted ESM (dist/index.js 56.0 → 45.9 KB;
+      // the prose still reaches editors via the .d.ts). Measured 6_382, below
+      // the old 6_450. This LOWER ceiling locks it.
+      expect(br.length, `brotli bundle size grew unexpectedly (${br.length} bytes)`).toBeLessThan(6_400);
 
       // Symbol budget. These are all chamber.ts-only — should NOT appear in a
       // consumer bundle that doesn't import Vue composables.

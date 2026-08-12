@@ -2709,17 +2709,30 @@ describe('core dispatch — query, rollback, buffer & error defaults', () => {
     expect(() => unA()).not.toThrow(); // bucket still exists, 'a' gone → i === -1, no splice
   });
 
-  it("onMissing:'buffer' overflow skips the dev warning in production", () => {
+  it("onMissing:'buffer' overflow skips the dev warning in production", async () => {
+    // The dev guard is now the module-level `DEV` from src/dev.ts, evaluated
+    // ONCE at import (the same shape as Vue's own `__DEV__`) so that
+    // `scripts/build.mjs` can const-fold it and drop both the branch and the
+    // warning strings from production bundles. That is the point of it — but
+    // it means flipping NODE_ENV after import no longer flips the guard, which
+    // is what the previous version of this test did.
+    //
+    // So set the env FIRST and re-import, which is also a truer model of
+    // production: the value is fixed before any of this code runs.
     vi.stubEnv('NODE_ENV', 'production');
+    vi.resetModules();
+    const { createCommandBus: freshBus } = await import('../src/command-bus');
+
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const bus = createCommandBus({ onMissing: 'buffer', bufferLimit: 1 });
+    const bus = freshBus({ onMissing: 'buffer', bufferLimit: 1 });
 
     bus.dispatch('x', { id: 1 });
-    bus.dispatch('x', { id: 2 }); // overflow, but NODE_ENV==='production' → no warn
+    bus.dispatch('x', { id: 2 }); // overflow, but DEV === false → no warn
 
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
     vi.unstubAllEnvs();
+    vi.resetModules();
   });
 
   it('prefix cache evicts the oldest entry at capacity (bounded LRU)', () => {
