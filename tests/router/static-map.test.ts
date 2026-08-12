@@ -43,6 +43,11 @@ describe('static fast path — correctness', () => {
 });
 
 describe('static fast path — cost', () => {
+  // No assertion here beyond `expect(true)` — this only logs numbers for a
+  // human to read. It runs 200 table builds plus 80,000 resolves (many
+  // against the param/miss linear-scan fallback, ~300 regex tests each), so
+  // it can clear vitest's default 5000ms budget on slower or shared CI
+  // hardware without anything actually being wrong.
   it('measures build and resolve', () => {
     const rows: RouteRecord[] = [{ name: 'shell', path: '/', parent: null }];
     for (let i = 0; i < 300; i++) {
@@ -68,5 +73,5 @@ describe('static fast path — cost', () => {
       `[301 rows] build ${build.toFixed(2)}ms | ${N} resolves — first ${timeIt('/section0/page').toFixed(1)}ms, last ${timeIt('/section299/page').toFixed(1)}ms, param ${timeIt('/thing/9').toFixed(1)}ms, miss ${timeIt('/nope/nope').toFixed(1)}ms`,
     );
     expect(true).toBe(true);
-  });
+  }, 20000);
 });
