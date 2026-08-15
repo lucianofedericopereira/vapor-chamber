@@ -747,7 +747,7 @@ bus.onAfter((cmd, result) => {
 Use `commandKey(action, target)` as a stable TQ query key for command-specific cache entries.
 
 **Where the router's loader cache sits in this boundary.** `fetchLoaders({ cache })`
-(v1.12.0) does not move the line: TanStack Query still owns *app* reads. The
+does not move the line: TanStack Query still owns *app* reads. The
 router owns **URL-addressed** reads — the ones its own `load` column declares,
 which commit atomically with the navigation snapshot — and those now reach the
 HTTP client's existing fresh/stale windows instead of missing a cache engine
@@ -1130,10 +1130,10 @@ export async function handleRequest(req, res) {
 
 **The same rule applies to `createHttpClient()`, and it is the sharper edge of
 the two.** Its response cache and in-flight dedupe map live in the client's own
-closure (v1.12.0 — before that they were module-level, so a fresh bus per
-request did *not* give a fresh cache). The cache key is
-`responseType:fullUrl`, with **no auth, header or cookie dimension**. So a
-client hoisted to module scope and shared across concurrent renders means:
+closure, not module scope — a fresh bus per request needs a fresh cache too.
+The cache key is `responseType:fullUrl`, with **no auth, header or cookie
+dimension**. So a client hoisted to module scope and shared across concurrent
+renders means:
 
 - a `cache: true` GET to an authenticated endpoint stores user A's payload
   under a key user B's identical URL hits, and

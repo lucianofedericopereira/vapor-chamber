@@ -1650,6 +1650,22 @@ describe('bus.query() — read-only dispatch', () => {
     await bus.query('getUser', {});
     expect(beforeCalls).toEqual([]);
   });
+
+  it('async query still awaits after-hooks (mirrors the sync-bus "still fires" test above)', async () => {
+    const bus = createAsyncCommandBus();
+    const afterCalls: string[] = [];
+    bus.onAfter(async (cmd) => {
+      await new Promise((r) => setTimeout(r, 5));
+      afterCalls.push(cmd.action);
+    });
+    bus.register('getUser', async () => 'data');
+    const result = await bus.query('getUser', {});
+    // If _asyncQueryInner didn't await the after-hooks promise, afterCalls
+    // would still be empty here — the setTimeout wouldn't have had a chance
+    // to run before this assertion.
+    expect(result.value).toBe('data');
+    expect(afterCalls).toEqual(['getUser']);
+  });
 });
 
 // ─── bus.emit() ─────────────────────────────────────────────────────────────
@@ -2732,6 +2748,27 @@ describe('core dispatch — query, rollback, buffer & error defaults', () => {
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
     vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it("onMissing:'buffer' overflow also skips the warning via __VC_DEV__=false (IIFE build path)", async () => {
+    // The test above covers the ESM-consumer NODE_ENV fallback. DEV has a
+    // second resolution path — the direct __VC_DEV__ build define used by
+    // scripts/build.mjs for the IIFE bundles — and that path was untested
+    // for this warning site.
+    vi.stubGlobal('__VC_DEV__', false);
+    vi.resetModules();
+    const { createCommandBus: freshBus } = await import('../src/command-bus');
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const bus = freshBus({ onMissing: 'buffer', bufferLimit: 1 });
+
+    bus.dispatch('x', { id: 1 });
+    bus.dispatch('x', { id: 2 }); // overflow, but DEV === false → no warn
+
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+    vi.unstubAllGlobals();
     vi.resetModules();
   });
 

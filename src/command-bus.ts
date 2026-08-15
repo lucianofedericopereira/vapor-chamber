@@ -345,6 +345,17 @@ export type CommandBusOptions = {
 export type Listener = (cmd: Command, result: CommandResult) => void;
 
 /**
+ * Options for `on()`/`once()` subscriptions.
+ * The returned unsubscribe function also carries `Symbol.dispose`, so
+ * `using off = bus.on(...)` works without an explicit `off()` call.
+ */
+export type ListenerOptions = {
+  /** Auto-unsubscribe when the signal aborts. Already-aborted at call time
+   *  means the listener is never added — matches DOM `addEventListener`. */
+  signal?: AbortSignal;
+};
+
+/**
  * Typed command map — define action names, target, payload, and result shapes.
  * Use with createCommandBus<MyMap>() for type-safe dispatch and register.
  *
@@ -385,8 +396,8 @@ export interface BaseBus {
   /** Subscribe before dispatch. Throw to cancel (returns `{ ok: false }`). */
   onBefore(hook: any): () => void;
   onAfter(hook: any): () => void;
-  on(pattern: string, listener: Listener): () => void;
-  once(pattern: string, listener: Listener): () => void;
+  on(pattern: string, listener: Listener, options?: ListenerOptions): () => void;
+  once(pattern: string, listener: Listener, options?: ListenerOptions): () => void;
   /** Remove all `on()` listeners matching the given pattern, or all listeners if omitted. */
   offAll(pattern?: string): void;
   hasHandler(action: string): boolean;
@@ -430,9 +441,9 @@ export interface CommandBus<M extends CommandMap = CommandMap> extends BaseBus {
   /** Subscribe before dispatch. Throw to cancel — dispatch returns `{ ok: false }`. */
   onBefore(hook: BeforeHook): () => void;
   onAfter(hook: Hook): () => void;
-  on(pattern: string, listener: Listener): () => void;
+  on(pattern: string, listener: Listener, options?: ListenerOptions): () => void;
   /** Subscribe to the first matching command only; auto-unsubscribes after it fires. */
-  once(pattern: string, listener: Listener): () => void;
+  once(pattern: string, listener: Listener, options?: ListenerOptions): () => void;
   offAll(pattern?: string): void;
   request<A extends keyof M & string>(action: A, target: TargetOf<M, A>, payload?: PayloadOf<M, A>, options?: { timeout?: number; signal?: AbortSignal }): Promise<CommandResult<ResultOf<M, A>>>;
   respond(action: string, handler: (cmd: Command) => any | Promise<any>): () => void;
@@ -480,9 +491,9 @@ export interface AsyncCommandBus<M extends CommandMap = CommandMap> extends Base
   /** Subscribe before dispatch. Throw or reject to cancel — dispatch returns `{ ok: false }`. */
   onBefore(hook: AsyncBeforeHook): () => void;
   onAfter(hook: AsyncHook): () => void;
-  on(pattern: string, listener: Listener): () => void;
+  on(pattern: string, listener: Listener, options?: ListenerOptions): () => void;
   /** Subscribe to the first matching command only; auto-unsubscribes after it fires. */
-  once(pattern: string, listener: Listener): () => void;
+  once(pattern: string, listener: Listener, options?: ListenerOptions): () => void;
   offAll(pattern?: string): void;
   request<A extends keyof M & string>(action: A, target: TargetOf<M, A>, payload?: PayloadOf<M, A>, options?: { timeout?: number; signal?: AbortSignal }): Promise<CommandResult<ResultOf<M, A>>>;
   respond(action: string, handler: (cmd: Command) => any | Promise<any>): () => void;
@@ -1308,30 +1319,56 @@ type ListenerBucket = {
   wildcardListeners: Array<{ pattern: string; listener: Listener }>;
 };
 
-function on(s: ListenerBucket, pattern: string, listener: Listener): () => void {
+// Self-polyfill: same `??=` idiom TS's own downlevel `using` helper applies,
+// so whichever side runs first, both agree on the same well-known symbol —
+// works whether the runtime has native Explicit Resource Management or not.
+const _SYM_DISPOSE: symbol = ((Symbol as any).dispose ??= Symbol());
+
+/**
+ * Finish an on()/once() unsubscribe fn: bind it to `signal` (self-detaching,
+ * fires at most once — the abort listener doubles as the manual-off path, so
+ * there is only one removeEventListener site) and tag it with Symbol.dispose
+ * so `using off = bus.on(...)` works. An already-aborted signal unsubscribes
+ * synchronously before returning — same observable effect as never
+ * subscribing, matches DOM `addEventListener`, no separate pre-check needed
+ * in `on()`. Cold path — runs once per subscription, never touches dispatch.
+ */
+function finalizeOff(off: () => void, signal?: AbortSignal): () => void {
+  if (signal) {
+    const raw = off;
+    off = () => { signal.removeEventListener('abort', off); raw(); };
+    if (signal.aborted) off();
+    else signal.addEventListener('abort', off);
+  }
+  (off as any)[_SYM_DISPOSE] = off;
+  return off;
+}
+
+function on(s: ListenerBucket, pattern: string, listener: Listener, opts?: ListenerOptions): () => void {
+  const signal = opts?.signal;
   if (isWildcardPattern(pattern)) {
     const entry = { pattern, listener };
     s.wildcardListeners.push(entry);
-    return () => { const i = s.wildcardListeners.indexOf(entry); if (i !== -1) s.wildcardListeners.splice(i, 1); };
+    return finalizeOff(() => { const i = s.wildcardListeners.indexOf(entry); if (i !== -1) s.wildcardListeners.splice(i, 1); }, signal);
   }
   let bucket = s.exactListeners.get(pattern);
   if (bucket === undefined) { bucket = []; s.exactListeners.set(pattern, bucket); }
   bucket.push(listener);
-  return () => {
+  return finalizeOff(() => {
     const b = s.exactListeners.get(pattern);
     if (b === undefined) return;
     const i = b.indexOf(listener);
     if (i !== -1) b.splice(i, 1);
     if (b.length === 0) s.exactListeners.delete(pattern);
-  };
+  }, signal);
 }
 
 /**
  * once() unsubscribes itself *before* calling the listener — matches
  * DOM addEventListener({ once: true }) semantics.
  */
-function once(s: ListenerBucket, pattern: string, listener: Listener): () => void {
-  const unsub = on(s, pattern, (cmd, result) => { unsub(); listener(cmd, result); });
+function once(s: ListenerBucket, pattern: string, listener: Listener, opts?: ListenerOptions): () => void {
+  const unsub = on(s, pattern, (cmd, result) => { unsub(); listener(cmd, result); }, opts);
   return unsub;
 }
 
@@ -1469,8 +1506,8 @@ export function createCommandBus<M extends CommandMap = CommandMap>(options: Com
     use:               (p, o)          => syncUse(s, p, o),
     onBefore:          (h)             => addHook(s.sealed, s.beforeHooks, h, 'onBefore'),
     onAfter:           (h)             => addHook(s.sealed, s.afterHooks, h, 'onAfter'),
-    on:                (pat, l)        => on(s, pat, l),
-    once:              (pat, l)        => once(s, pat, l),
+    on:                (pat, l, o)      => on(s, pat, l, o),
+    once:              (pat, l, o)      => once(s, pat, l, o),
     offAll:            (pat)           => offAll(s, pat),
     request:           (a, t, p, o)   => syncRequest(s, a as string, t, p, o),
     respond:           (a, h)          => syncRespond(s, a, h),
@@ -1848,8 +1885,8 @@ export function createAsyncCommandBus<M extends CommandMap = CommandMap>(options
     use:               (p, o)        => asyncUse(s, p, o),
     onBefore:          (h)           => addHook(s.sealed, s.beforeHooks, h, 'onBefore'),
     onAfter:           (h)           => addHook(s.sealed, s.afterHooks, h, 'onAfter'),
-    on:                (pat, l)      => on(s, pat, l),
-    once:              (pat, l)      => once(s, pat, l),
+    on:                (pat, l, o)    => on(s, pat, l, o),
+    once:              (pat, l, o)    => once(s, pat, l, o),
     offAll:            (pat)         => offAll(s, pat),
     request:           (a, t, p, o)  => asyncRequest(s, a as string, t, p, o),
     respond:           (a, h)        => asyncRespond(s, a, h),

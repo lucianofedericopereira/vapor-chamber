@@ -366,6 +366,14 @@ bus.on('cart*', (cmd, result) => console.log(cmd.action));   // prefix
 bus.once('cartAdd', () => showConfetti());                   // fires once
 bus.offAll('cart*');                                         // remove by pattern
 bus.offAll();                                                // remove all
+
+// Auto-unsubscribe on abort — matches DOM addEventListener semantics
+bus.on('cartAdd', trackAdd, { signal: controller.signal });
+
+// Every unsubscribe fn also carries Symbol.dispose, for `using`
+{
+  using off = bus.once('checkout', showConfetti);
+} // unsubscribed automatically at scope exit
 ```
 
 `query()` is `dispatch()` minus the `onBefore` hooks — reads shouldn't trigger mutation gates

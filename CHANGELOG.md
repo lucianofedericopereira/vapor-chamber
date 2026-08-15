@@ -2,6 +2,54 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.14.0 — listener disposal ergonomics
+
+### Added — `on()`/`once()`: `{ signal }` and `Symbol.dispose`
+
+- `on(pattern, listener, { signal })` / `once(pattern, listener, { signal })` —
+  auto-unsubscribe when the `AbortSignal` fires. An already-aborted signal
+  never subscribes, matching DOM `addEventListener`. Shared implementation, so
+  it works identically on `createCommandBus()` and `createAsyncCommandBus()`.
+- Every `on()`/`once()` unsubscribe fn now carries a self-polyfilled
+  `Symbol.dispose`, so `using off = bus.on(...)` works whether or not the
+  runtime has native Explicit Resource Management — the polyfill uses the same
+  `??=` idiom TS's own downlevel `using` emit applies, so both sides agree on
+  one symbol regardless of import order.
+- `createTestBus()` does **not** get either — it stays the deliberately
+  simplified double it already was.
+- Cost: ~100 B brotli or less per IIFE variant (measured: full +100 B, core
+  +102 B, elements +107 B — all three stayed inside their existing
+  `scripts/check-size.mjs` budgets). The tightest internal ratchet,
+  `tests/esm-treeshake.test.ts`'s minimal-consumer bundle, needed its ceiling
+  moved 6,400 → 6,500 to absorb it (measured 6,456; see that file's comment for
+  the isolated per-feature costs). Zero touch to the dispatch/emit hot path —
+  `on()`/`once()` are cold, per-subscription calls, never in a loop.
+
+### Fixed — coverage gaps and two stale doc lines
+
+- `command-bus.ts` reached genuine 100% line/branch/function/statement
+  coverage. Closed: the async bus's `onAfter` hook-error path, the
+  wildcard-listener error path in `fanOutListeners`, and the interaction
+  between a synchronously-throwing `onBefore` hook and registered `onAfter`
+  hooks on the async bus (proves the documented "after-hooks still fire when
+  a before-hook cancels the dispatch" contract, not just assert it in prose).
+- All three `DEV`-gated warning sites in `command-bus.ts`
+  (`devWarnThenableResult`, the `onMissing:'buffer'` overflow warning,
+  `warnBatchOptionConflict`) are now verified silent on **both** of `DEV`'s
+  resolution paths — the `__VC_DEV__` build define (IIFE builds) and the
+  `NODE_ENV` runtime fallback (ESM consumers) — not just whichever one an
+  earlier test happened to cover.
+- `tests/router/static-map.test.ts`'s pure timing-log test now skips under
+  `npm run test:coverage`, matching the existing
+  `tests/signal-shallow-ab.test.ts` pattern: V8 coverage instrumentation made
+  it both too slow (blew even its 20s override on shared hardware) and its
+  printed numbers meaningless (instrumented code isn't the fast path being
+  measured). Unblocks `npm run coverage:doc` running cleanly end to end.
+  `docs/COVERAGE.md` regenerated.
+- `docs/whitepaper.md` had two stray version-stamped asides describing current
+  architecture as if it were history ("(v1.12.0)"). Removed — that framing is
+  what this changelog is for.
+
 ## v1.13.0 - Vue 3.6.0-rc.3 alignment
 
 All 36 rc.3 commits read at source, not from changelog titles. **The alignment

@@ -28,6 +28,14 @@ continues; new feature work does not. A genuinely new capability request is park
 until after 3.6 stable, when the deployment patterns that would justify it are
 observable.
 
+**Exception, v1.14.0:** `on()`/`once()` gained `{ signal }` (AbortSignal
+auto-unsubscribe) and `Symbol.dispose` on every returned unsubscribe fn
+(`using` support). Both are plain JS-platform ergonomics — nothing here
+depends on or waits for Vue's own API surface, so they don't touch the
+question this freeze exists to wait out. Kept small on purpose: ~100 B
+brotli or less per IIFE variant (see CHANGELOG). The freeze on genuinely new
+*capability* — state or behavior tied to Vue's still-moving API — stands.
+
 ## Pre-stable specifics
 
 - **Peer dependency:** `vue: ">=3.5.0 || >=3.6.0-rc.3"`. The lib supports

@@ -48,7 +48,15 @@ describe('static fast path — cost', () => {
   // against the param/miss linear-scan fallback, ~300 regex tests each), so
   // it can clear vitest's default 5000ms budget on slower or shared CI
   // hardware without anything actually being wrong.
-  it('measures build and resolve', () => {
+  //
+  // Skip under `npm run test:coverage`: same root cause as
+  // tests/signal-shallow-ab.test.ts — V8 coverage instrumentation slows the
+  // resolve loops enough to blow even the generous 20s override below, and
+  // the printed numbers wouldn't be real timings anyway (instrumented code
+  // paths, not the fast path being measured). The timeout, not the
+  // assertion, was the source of the flake — there is no assertion.
+  const underCoverage = process.env.npm_lifecycle_event === 'test:coverage';
+  it.skipIf(underCoverage)('measures build and resolve', () => {
     const rows: RouteRecord[] = [{ name: 'shell', path: '/', parent: null }];
     for (let i = 0; i < 300; i++) {
       rows.push({ name: `r${i}`, path: `/section${i}/page`, parent: 'shell', component: 'C' });

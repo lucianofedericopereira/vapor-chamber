@@ -104,7 +104,17 @@ describe.skipIf(!haveDist || !esbuild)('ESM tree-shake regression', () => {
       // build now strips JSDoc from emitted ESM (dist/index.js 56.0 → 45.9 KB;
       // the prose still reaches editors via the .d.ts). Measured 6_382, below
       // the old 6_450. This LOWER ceiling locks it.
-      expect(br.length, `brotli bundle size grew unexpectedly (${br.length} bytes)`).toBeLessThan(6_400);
+      // Ceiling 6_400 → 6_500: on()/once() gained `{ signal }` (auto-unsubscribe
+      // on AbortSignal, matching DOM addEventListener) and every returned
+      // unsubscribe fn is now tagged with a self-polyfilled Symbol.dispose, so
+      // `using off = bus.on(...)` works with or without native Explicit Resource
+      // Management. Both live in `on()`, which this consumer always reaches
+      // through `createCommandBus()` even though it never calls `.on()` itself —
+      // the cost is unavoidable, not accidental (isolated: signal path alone
+      // ~70 B, Symbol.dispose alone ~45 B; already tightened to one
+      // removeEventListener site shared by the abort and manual-off paths, and
+      // one module-level polyfill instead of a per-call one). Measured 6_456.
+      expect(br.length, `brotli bundle size grew unexpectedly (${br.length} bytes)`).toBeLessThan(6_500);
 
       // Symbol budget. These are all chamber.ts-only — should NOT appear in a
       // consumer bundle that doesn't import Vue composables.

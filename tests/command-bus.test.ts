@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createCommandBus, createAsyncCommandBus, configureUid } from '../src/command-bus';
 
 describe('createCommandBus', () => {
@@ -386,6 +386,98 @@ describe('listener fan-out with in-flight unsubscribe', () => {
     bus.dispatch('act', {});
     expect(seen).toEqual(['first', 'fourth']);
   });
+
+  // The exact-match catch (fanOutListeners' first loop) is covered by
+  // tests/echo-bridge.test.ts; the wildcard loop has its own try/catch and
+  // was never exercised with a throwing listener.
+  it('a throwing wildcard listener is caught and logged, and its neighbour still runs', () => {
+    const bus = createCommandBus();
+    bus.register('cartAdd', () => 1);
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const seen: string[] = [];
+
+    bus.on('cart*', () => { throw new Error('wildcard listener blew up'); });
+    bus.on('cart*', () => seen.push('second'));
+
+    const result = bus.dispatch('cartAdd', {});
+
+    expect(result.ok).toBe(true); // a listener throwing does not fail dispatch
+    expect(seen).toEqual(['second']);
+    expect(consoleError).toHaveBeenCalledWith('[vapor-chamber] Listener error:', expect.any(Error));
+    consoleError.mockRestore();
+  });
+});
+
+describe('on()/once() convenience: AbortSignal + Symbol.dispose', () => {
+  it('unsubscribes when the signal aborts', () => {
+    const bus = createCommandBus();
+    bus.register('act', () => 1);
+    const ac = new AbortController();
+    const seen: string[] = [];
+    bus.on('act', () => seen.push('heard'), { signal: ac.signal });
+
+    bus.dispatch('act', {});
+    ac.abort();
+    bus.dispatch('act', {});
+
+    expect(seen).toEqual(['heard']);
+  });
+
+  it('an already-aborted signal never subscribes', () => {
+    const bus = createCommandBus();
+    bus.register('act', () => 1);
+    const ac = new AbortController();
+    ac.abort();
+    const seen: string[] = [];
+    bus.on('act', () => seen.push('heard'), { signal: ac.signal });
+
+    bus.dispatch('act', {});
+    expect(seen).toEqual([]);
+  });
+
+  it('calling off() manually detaches the abort listener (no leak, no double-call)', () => {
+    const bus = createCommandBus();
+    bus.register('act', () => 1);
+    const ac = new AbortController();
+    const seen: string[] = [];
+    const off = bus.on('act', () => seen.push('heard'), { signal: ac.signal });
+
+    off();
+    off(); // idempotent
+    ac.abort(); // must not throw or double-invoke anything post-unsubscribe
+
+    bus.dispatch('act', {});
+    expect(seen).toEqual([]);
+  });
+
+  it('once() forwards the signal option', () => {
+    const bus = createCommandBus();
+    bus.register('act', () => 1);
+    const ac = new AbortController();
+    const seen: string[] = [];
+    bus.once('act', () => seen.push('heard'), { signal: ac.signal });
+
+    ac.abort();
+    bus.dispatch('act', {});
+    expect(seen).toEqual([]);
+  });
+
+  it('the returned unsubscribe fn is tagged with Symbol.dispose for `using`', () => {
+    const bus = createCommandBus();
+    bus.register('act', () => 1);
+    const seen: string[] = [];
+    const off = bus.on('act', () => seen.push('heard')) as unknown as { [Symbol.dispose]: () => void };
+
+    expect(typeof off[Symbol.dispose]).toBe('function');
+
+    {
+      using _off = off as unknown as Disposable;
+      bus.dispatch('act', {});
+    }
+    bus.dispatch('act', {});
+
+    expect(seen).toEqual(['heard']); // second dispatch: `using` already disposed it
+  });
 });
 
 describe('createAsyncCommandBus', () => {
@@ -453,6 +545,44 @@ describe('createAsyncCommandBus', () => {
     await bus.dispatch('asyncAction', {});
 
     expect(hookCalled).toHaveBeenCalledWith({ ok: true, value: 'result' });
+  });
+
+  it('catches a synchronously-throwing after-hook without failing dispatch', async () => {
+    const bus = createAsyncCommandBus();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    bus.onAfter(() => { throw new Error('sync hook-boom'); });
+    bus.register('asyncAction', async () => 'result');
+
+    const result = await bus.dispatch('asyncAction', {});
+
+    expect(result).toEqual({ ok: true, value: 'result' });
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it('catches a rejecting after-hook without failing dispatch', async () => {
+    const bus = createAsyncCommandBus();
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    bus.onAfter(async () => { throw new Error('async hook-boom'); });
+    bus.register('asyncAction', async () => 'result');
+
+    const result = await bus.dispatch('asyncAction', {});
+
+    expect(result).toEqual({ ok: true, value: 'result' });
+    expect(consoleError).toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it('on()/once() forward the signal option (same shared implementation as the sync bus)', async () => {
+    const bus = createAsyncCommandBus();
+    bus.register('act', async () => 1);
+    const ac = new AbortController();
+    const seen: string[] = [];
+    bus.on('act', () => seen.push('heard'), { signal: ac.signal });
+
+    ac.abort();
+    await bus.dispatch('act', {});
+    expect(seen).toEqual([]);
   });
 });
 
@@ -682,5 +812,153 @@ describe('asyncDispatchBatch mid-flight abort', () => {
 
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('mutually exclusive'));
     warn.mockRestore();
+  });
+
+  // The test above only proves the warning FIRES when DEV is true (the
+  // vitest default). It never proves silence in production, on either of
+  // DEV's two resolution paths — same gap class devWarnThenableResult and
+  // the onMissing:'buffer' overflow warning had. Closing both here.
+
+  it('warnBatchOptionConflict is silent when __VC_DEV__=false (IIFE build path)', async () => {
+    vi.stubGlobal('__VC_DEV__', false);
+    vi.resetModules();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const { createAsyncCommandBus: freshCreateAsyncCommandBus } = await import('../src/command-bus');
+    const bus = freshCreateAsyncCommandBus();
+    bus.register('a', async () => 1);
+
+    await bus.dispatchBatch([{ action: 'a', target: {} }], {
+      transactional: true,
+      continueOnError: true,
+    });
+
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+    vi.unstubAllGlobals();
+    vi.resetModules();
+  });
+
+  it('warnBatchOptionConflict is silent when NODE_ENV=production (ESM consumer path)', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.resetModules();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const { createAsyncCommandBus: freshCreateAsyncCommandBus } = await import('../src/command-bus');
+    const bus = freshCreateAsyncCommandBus();
+    bus.register('a', async () => 1);
+
+    await bus.dispatchBatch([{ action: 'a', target: {} }], {
+      transactional: true,
+      continueOnError: true,
+    });
+
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+});
+
+describe('per-instance throttle timers — async bus', () => {
+  it('dispose clears a pending throttle timer (mirrors the sync-bus test above)', async () => {
+    const bus1 = createAsyncCommandBus();
+    const bus2 = createAsyncCommandBus();
+
+    bus1.register('a', async () => 1, { throttle: 10000 });
+    bus2.register('a', async () => 2, { throttle: 10000 });
+
+    // First dispatch on each — goes through, parks a timer in each bus's own
+    // s.throttleTimers.
+    const r1 = await bus1.dispatch('a', {});
+    const r2 = await bus2.dispatch('a', {});
+    expect(r1.ok).toBe(true);
+    expect(r2.ok).toBe(true);
+
+    // Dispose bus1 while its timer is still pending — asyncDispose() must
+    // clear it, not just clear listeners/handlers.
+    bus1.dispose();
+
+    // Bus2 is untouched — still throttled.
+    const r3 = await bus2.dispatch('a', {});
+    expect(r3.ok).toBe(false);
+    expect(r3.error?.message).toContain('throttled');
+
+    bus2.dispose();
+  });
+});
+
+describe('async before-hook: plain synchronous throw + after-hooks registered', () => {
+  // tests/command-bus-features.test.ts:2521 covers `onBefore(async () => { throw })`
+  // — an async function's synchronous throw is actually a REJECTED PROMISE, so
+  // that test exercises the thenable/await branch, not a plain sync hook. It
+  // also registers no onAfter, so the "await the after-hooks promise from
+  // inside the catch" branch never runs either. This test is the mirror image
+  // of both, and also proves the documented contract that after-hooks still
+  // fire when a before-hook cancels the dispatch (observability is intact).
+  it('a plain (non-async) onBefore hook that throws still runs after-hooks', async () => {
+    const bus = createAsyncCommandBus();
+    let handlerRan = false;
+    const afterCalls: Array<{ action: string; ok: boolean }> = [];
+
+    bus.register('act', async () => { handlerRan = true; return 1; });
+    bus.onBefore((_cmd) => { throw new Error('sync-blocked'); }); // not async — no Promise involved
+    bus.onAfter((cmd, result) => { afterCalls.push({ action: cmd.action, ok: result.ok }); });
+
+    const result = await bus.dispatch('act', {});
+
+    expect(result.ok).toBe(false);
+    expect(result.error?.message).toBe('sync-blocked');
+    expect(handlerRan).toBe(false);
+    expect(afterCalls).toEqual([{ action: 'act', ok: false }]); // after-hook still fired
+  });
+});
+
+describe('devWarnThenableResult — folds away in production, both DEV paths', () => {
+  // DEV is a module-level const captured at import time (see src/dev.ts and
+  // tests/dev-flag.test.ts), so flipping it means stubbing the build-time
+  // global (or the NODE_ENV fallback) and re-importing fresh — vitest
+  // supplies no __VC_DEV__ define, so every other test in this file runs
+  // with the runtime fallback (DEV: true).
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it('a sync bus with a thenable-returning plugin does not warn when __VC_DEV__=false (IIFE build path)', async () => {
+    vi.stubGlobal('__VC_DEV__', false);
+    vi.resetModules(); // command-bus.ts is already cached from this file's top-level import
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const { createCommandBus: freshCreateCommandBus } = await import('../src/command-bus');
+    const bus = freshCreateCommandBus();
+    // A plain (non-`async`) function that returns a thenable — isAsyncFn()
+    // only catches literal `async` functions at use()-time (an unconditional,
+    // non-DEV-gated warning); this shape reaches devWarnThenableResult's
+    // dispatch-time behavioral check instead, which IS the one gated by DEV.
+    bus.use((_cmd, next) => Promise.resolve(next()));
+    bus.register('act', () => 1);
+
+    bus.dispatch('act', {});
+
+    expect(consoleWarn).not.toHaveBeenCalled();
+    consoleWarn.mockRestore();
+  });
+
+  it('the same does not warn when NODE_ENV=production (ESM consumer path, no __VC_DEV__ define)', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.resetModules();
+    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const { createCommandBus: freshCreateCommandBus } = await import('../src/command-bus');
+    const bus = freshCreateCommandBus();
+    bus.use((_cmd, next) => Promise.resolve(next()));
+    bus.register('act', () => 1);
+
+    bus.dispatch('act', {});
+
+    expect(consoleWarn).not.toHaveBeenCalled();
+    consoleWarn.mockRestore();
   });
 });
