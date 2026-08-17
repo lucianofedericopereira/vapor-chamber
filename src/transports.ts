@@ -305,6 +305,8 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
     const batch = queue;
     queue = [];
     scheduled = false;
+    /* v8 ignore next -- defensive: flush is only ever scheduled right after a
+       queue.push, and nothing but flush drains the queue */
     if (batch.length === 0) return;
 
     // A batch containing any non-retryable command (payments, etc.) must not
@@ -616,11 +618,12 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
     return new Promise<CommandResult>((resolve) => {
       const id = genId();
       let abortHandler: (() => void) | null = null;
-      let settled = false;
 
+      // Naturally idempotent — no `settled` flag needed: the first call
+      // detaches every other settle source (timer cleared, `pending` entry
+      // deleted, abort listener removed), and each teardown line plus
+      // `resolve()` itself is a no-op when repeated.
       const settle = (result: CommandResult): void => {
-        if (settled) return;
-        settled = true;
         clearTimeout(timeoutId);
         pending.delete(id);
         if (abortHandler && cmd.signal) {

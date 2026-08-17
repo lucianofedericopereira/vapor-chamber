@@ -515,7 +515,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     ws.disconnect();
   });
 
-  it('a late timeout after the response already settled is a no-op (620)', async () => {
+  it('a late timeout after the response already settled is a no-op', async () => {
     vi.useFakeTimers();
     const bus = createAsyncCommandBus({ onMissing: 'ignore' });
     const ws = createWsBridge({ url: 'ws://localhost', reconnect: false, timeout: 50 });
@@ -530,7 +530,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     expect((await result).ok).toBe(true);
 
     // The timeout firing afterwards must not overwrite the already-settled
-    // result (settle()'s `if (settled) return;` guard).
+    // result — settle() cleared the timer, and resolve() is a no-op repeated.
     await vi.advanceTimersByTimeAsync(100);
     expect((await result).value).toBe(42);
 

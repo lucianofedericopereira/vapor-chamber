@@ -401,8 +401,14 @@ If you're a consumer choosing between APIs in this lib:
 - **Avoid:** anything not listed above is internal. The `_*` prefixed and
   `getXxxFn()` exports in `chamber.ts` are explicitly internal.
 
-If you're contributing: the build-flag wrapper-elimination work is the single
-biggest pending change. It's blocked on Vue 3.6 RC — no need to land it in beta.
+If you're contributing: there is no "biggest pending change" here any more. This
+line used to name the build-flag wrapper-elimination work and call it blocked on
+Vue 3.6 RC. Both halves are dead: that apparatus was **withdrawn at rc.3** — see
+"Thin Vapor wrappers will become opt-in via build flag" above, where
+`configureVue()` replaced it and the `__VAPOR_NATIVE__` define, the second build
+and the `vue36` export condition were withdrawn rather than deferred — and the
+RC gate it waited on has since passed (we align on rc.4). The two statements sat
+in the same file contradicting each other for two cycles.
 
 For performance characteristics, optimization philosophy, and tuning options
 see [docs/performance.md](./docs/performance.md).

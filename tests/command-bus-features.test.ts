@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 import { createCommandBus, createAsyncCommandBus, createCommandPool, commandKey, unsealBus, inspectBus, BusError, matchesPattern, disposeAll } from '../src/command-bus';
 import { optimisticUndo } from '../src/plugins-core';
 import { createTestBus } from '../src/testing';
-import { getCommandBus, setCommandBus, resetCommandBus, useCommandBus } from '../src/chamber';
+import { getCommandBus, setCommandBus, resetCommandBus } from '../src/chamber';
 
 // ─── dispatchBatch ────────────────────────────────────────────────────────────
 
@@ -262,32 +262,6 @@ describe('createTestBus', () => {
 
     expect(bus.wasDispatched('a')).toBe(true);
     expect(bus.wasDispatched('b')).toBe(true);
-  });
-});
-
-// ─── useCommandBus ────────────────────────────────────────────────────────────
-
-describe('useCommandBus', () => {
-  beforeEach(() => {
-    setCommandBus(createCommandBus());
-  });
-
-  afterEach(() => {
-    resetCommandBus();
-  });
-
-  it('returns the shared bus', () => {
-    const bus = useCommandBus();
-    expect(bus).toBe(getCommandBus());
-  });
-
-  it('can dispatch via the returned bus', () => {
-    const bus = useCommandBus();
-    bus.register('test', () => 42);
-
-    const result = bus.dispatch('test', {});
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe(42);
   });
 });
 

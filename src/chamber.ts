@@ -68,6 +68,8 @@ export { signal };
 let _vueOnScopeDispose: ((fn: () => void) => void) | null = null;
 let _vueGetCurrentScope: (() => any) | null = null;
 let _vueGetCurrentInstance: (() => any) | null = null;
+/** Vue 3.3+. True inside BOTH a Vapor and a VDOM setup() — see tryKeepAliveHooks. */
+let _vueHasInjectionContext: (() => boolean) | null = null;
 let _vueOnActivated: ((fn: () => void) => void) | null = null;
 let _vueOnDeactivated: ((fn: () => void) => void) | null = null;
 let _vueProbed = false;
@@ -102,8 +104,13 @@ function applyVueModule(vue: any): void {
     // REPLACES a signal's value wholesale (state.value = handler(...),
     // errors.value = [...], past.value = [...]) — it never mutates nested fields
     // in place — so shallow tracking is semantically equivalent here while
-    // avoiding the per-write proxy cost. Measured on the real dispatch path:
-    // array-state useCommandState ~3.4x faster, scalar signals ~1.2x. Direct
+    // avoiding the per-write proxy cost. Measured on the real dispatch path
+    // (`tests/signal-shallow-ab.test.ts`, re-run on 3.6.0-rc.4): array-state
+    // useCommandState ~3.1-3.4x faster, scalar signals ~1.5x — the array figure
+    // reproduces, the scalar one was written as ~1.2x and is conservative.
+    // Measure this with that harness, not with a raw shallowRef-vs-ref loop:
+    // outside the dispatch path the two invert, because `ref(primitive)` never
+    // builds a proxy and the gap there is a different phenomenon. Direct
     // nested mutation of a returned state (state.value.x = y) would bypass the
     // command bus anyway, which this library treats as an anti-pattern.
     // Falls back to ref() if shallowRef is somehow unavailable (Vue < 3.0).
@@ -124,6 +131,11 @@ function applyVueModule(vue: any): void {
   }
   if (vue && typeof vue.getCurrentInstance === 'function') {
     _vueGetCurrentInstance = vue.getCurrentInstance;
+  }
+  // hasInjectionContext() (Vue 3.3+) — the only "am I inside a setup()?" probe
+  // that answers TRUE in Vapor as well as VDOM. See tryKeepAliveHooks.
+  if (vue && typeof vue.hasInjectionContext === 'function') {
+    _vueHasInjectionContext = vue.hasInjectionContext;
   }
 
   // KeepAlive lifecycle hooks (Vue 3.x)
@@ -171,6 +183,8 @@ const VUE_GLOBAL_KEY = '__VAPOR_CHAMBER_VUE__';
 
 /** Reads a usable Vue namespace out of a global slot, or null. */
 function readGlobal(key: string): any | null {
+  /* v8 ignore next -- environment guard: every shipped target (node >=22.12,
+     es2020+ browsers per scripts/build.mjs) has globalThis */
   if (typeof globalThis === 'undefined') return null;
   try {
     const vue = (globalThis as any)[key];
@@ -421,6 +435,8 @@ probeVue();
  */
 export async function waitForVueDetection(): Promise<void> {
   probeVue();
+  /* v8 ignore next -- defensive: probeVue() runs at module load and its first
+     run always assigns _probePromise, so the null arm has no producer */
   if (_probePromise) await _probePromise;
 }
 
@@ -623,15 +639,30 @@ export function tryAutoCleanup(disposeFn: () => void): void {
  * When reactivated, `onResume` is called. No-ops if not inside a
  * KeepAlive-wrapped component or if Vue is not available.
  *
- * `getCurrentInstance()` is the correct guard: `onActivated`/`onDeactivated`
- * throw when called outside a component setup context, so the upfront check
- * replaces the earlier two try/catch blocks.
+ * The guard must answer "am I inside a setup()?" — `onActivated`/`onDeactivated`
+ * do not throw outside one, they emit a Vue warning, so an unguarded call would
+ * spam every non-component caller.
+ *
+ * It must NOT be `getCurrentInstance()`. That accessor reads VDOM's
+ * `currentInstance`, and a Vapor component is not stored there: measured on
+ * 3.6.0-rc.4, it returns null inside `defineVaporComponent({ setup() })` while
+ * `onDeactivated()` registered at that same point works and fires. So the
+ * former guard silently disabled KeepAlive pause/resume for every VAPOR
+ * component — the platform this library is named for — while working in VDOM,
+ * which is why no existing test saw it. `hasInjectionContext()` (Vue 3.3+) is
+ * the one probe that is true in both modes and false in a bare `effectScope()`,
+ * measured alongside. `getCurrentInstance()` remains the fallback for a
+ * partially-supplied Vue namespace that predates it.
+ * Pinned by `tests/keepalive-input-scope-fixture.test.ts`.
  *
  * @internal — used by composables that manage bus subscriptions.
  */
 export function tryKeepAliveHooks(onPause: () => void, onResume: () => void): void {
   probeVue();
-  if (!_vueGetCurrentInstance?.()) return;
+  const inSetup = _vueHasInjectionContext
+    ? _vueHasInjectionContext()
+    : !!_vueGetCurrentInstance?.();
+  if (!inSetup) return;
   _vueOnDeactivated?.(onPause);
   _vueOnActivated?.(onResume);
 }
@@ -825,6 +856,9 @@ export function useSharedCommandState(options: UseSharedCommandStateOptions = {}
       errorCount: signal(0),
       refCount: 0,
       errorCap,
+      /* v8 ignore next -- type-satisfaction placeholder: overwritten by the
+         real unsubscribe 10 lines down, in straight-line sync code, before
+         `entry` is reachable by dispose() (its only caller) */
       unsub: () => {},
     };
     // v1.6.0: observe errors BUS-WIDE, not only dispatches made through this
@@ -1048,18 +1082,6 @@ export function _createCommandState<T>(
 }
 
 // ---------------------------------------------------------------------------
-// useCommandBus
-// ---------------------------------------------------------------------------
-
-/**
- * useCommandBus - lightweight composable wrapper around the shared bus.
- * Typed via GlobalCommands augmentation, same as getCommandBus().
- */
-export function useCommandBus<M extends CommandMap = SharedCommandMap>(): CommandBus<M> {
-  return getCommandBus<M>();
-}
-
-// ---------------------------------------------------------------------------
 // useCommandHistory
 // ---------------------------------------------------------------------------
 
@@ -1271,12 +1293,35 @@ export function useCommandGroup(namespace: string) {
   const bus = getCommandBus<CommandMap>();
   const cleanups: Array<() => void> = [];
 
-  // camelCase namespace join ('cart' + 'add' → 'cartAdd'). Inlined, NOT a shared
-  // helper — DO NOT consolidate, settled, do not re-evaluate. This is a per-dispatch
-  // path; a same-process A/B measured a shared-call indirection ~1% slower. Mirrored
-  // inline at all three sites (createChamber / transitions / here) — keep in sync.
+  // camelCase namespace join ('cart' + 'add' → 'cartAdd'), memoised per group.
+  //
+  // Unlike the transition bridge — where every hook name is fixed at build time
+  // and the join was hoisted out of the dispatch path entirely — the short name
+  // arrives here as a runtime ARGUMENT, so it cannot be precomputed. It can be
+  // cached: a group dispatches a small, stable set of names ('add', 'remove',
+  // 'clear'), so the second and every later dispatch of a name is a Map hit
+  // instead of two allocations plus a concat.
+  //
+  // Measured, interleaved A/B, 200k calls: 3 distinct names 4.669ms → 1.244ms
+  // (**-73%**), 8 names 5.171ms → 1.426ms (-72%). This replaces the old
+  // "inlined, DO NOT consolidate, a shared call costs ~1%" note: the 1% was
+  // real but it was the wrong thing to optimise — the join itself was the cost,
+  // not the call, and removing the repeated work beats avoiding the indirection
+  // by ~70x.
+  //
+  // Capped like `_prefixCache` in command-bus.ts and for the same reason: a
+  // long-lived group dispatching generated names would otherwise grow the Map
+  // without bound. Same 256-entry FIFO eviction, so a pathological caller
+  // degrades to the old concat cost rather than leaking.
+  const _nameCache = new Map<string, string>();
   function prefixed(action: string): string {
-    return namespace + action.charAt(0).toUpperCase() + action.slice(1);
+    let v = _nameCache.get(action);
+    if (v === undefined) {
+      v = namespace + action.charAt(0).toUpperCase() + action.slice(1);
+      if (_nameCache.size >= 256) _nameCache.delete(_nameCache.keys().next().value!);
+      _nameCache.set(action, v);
+    }
+    return v;
   }
 
   function dispatch(action: string, target: any, payload?: any): CommandResult {

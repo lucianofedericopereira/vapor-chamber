@@ -181,3 +181,34 @@ describe('decodePathPart — malformed percent-encoding', () => {
     expect(hit?.params.id).toBe('%E0%A4%A');
   });
 });
+
+// ---------------------------------------------------------------------------
+// castParam — typed path params (114-124)
+// ---------------------------------------------------------------------------
+
+describe('typed path params', () => {
+  // `component` matters: a row without one compiles as a pure GROUP, and
+  // groups never match a URL (resolve() skips them).
+  const typed = createRouteTable([
+    { name: 'post', path: '/post/:id', component: 'Post', params: { id: 'int' } },
+    { name: 'flag', path: '/flag/:on', component: 'Flag', params: { on: 'bool' } },
+    { name: 'plain', path: '/plain/:slug', component: 'Plain' },
+  ]);
+
+  it('casts an int param and falls back to the raw string when unparsable (117-118)', () => {
+    expect(typed.resolve('/post/42')?.params.id).toBe(42);
+    // Not a number — the raw segment survives rather than becoming NaN.
+    expect(typed.resolve('/post/abc')?.params.id).toBe('abc');
+  });
+
+  it("treats '1' and 'true' as true and everything else as false (121)", () => {
+    expect(typed.resolve('/flag/1')?.params.on).toBe(true);
+    expect(typed.resolve('/flag/true')?.params.on).toBe(true);
+    expect(typed.resolve('/flag/0')?.params.on).toBe(false);
+    expect(typed.resolve('/flag/nope')?.params.on).toBe(false);
+  });
+
+  it('leaves untyped params as strings (123)', () => {
+    expect(typed.resolve('/plain/hello')?.params.slug).toBe('hello');
+  });
+});

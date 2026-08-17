@@ -33,6 +33,17 @@
  * So the guard is not redundant and is not double-suppression. The note is
  * corrected rather than obeyed; this file is the evidence, so the question
  * does not get re-litigated from a changelog line next release.
+ *
+ * LIMIT OF THIS FILE, found in the rc.4 cycle and worth stating here rather
+ * than only in the newer test. What follows is a stand-in: a bare
+ * `effectScope()` standing in for a KeepAlive deactivation. It measures Vue's
+ * side of the boundary correctly and its conclusion holds. But it never calls
+ * `tryKeepAliveHooks`, so it could not detect that the guard was gated on
+ * `getCurrentInstance()` and therefore never armed in a Vapor component at all
+ * — a real bug that a stand-in is structurally unable to see.
+ * `tests/keepalive-input-scope-fixture.test.ts` runs the real VaporKeepAlive
+ * and pins that. Keep both: this one isolates the mechanism, that one proves
+ * the wiring.
  */
 
 import { describe, expect, it } from 'vitest';

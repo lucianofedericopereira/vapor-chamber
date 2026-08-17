@@ -488,7 +488,12 @@ export function serialize(options: SerializeOptions = {}): AsyncPlugin {
     const prev = tails.get(k) ?? Promise.resolve();
     // Run after the previous same-key command settles — success OR failure both
     // release the lane, so one rejection can't deadlock the queue.
-    const run = prev.then(() => next(), () => next());
+    const run = prev.then(
+      () => next(),
+      /* v8 ignore next -- defensive: stored tails are rejection-absorbed two
+         lines down, so `prev` can never actually reject */
+      () => next(),
+    );
     // The stored tail must never reject; the next command chains onto it.
     const tail = run.then(() => {}, () => {});
     tails.set(k, tail);

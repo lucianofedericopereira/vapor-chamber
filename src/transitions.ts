@@ -120,11 +120,23 @@ export type TransitionBridge = TransitionHooks & {
 // Internal: action name prefixing (same convention as useCommandGroup)
 // ---------------------------------------------------------------------------
 
-// camelCase namespace join ('modal' + 'enter' → 'modalEnter'). Inlined, NOT a
-// shared helper — DO NOT consolidate, settled, do not re-evaluate. This is the
-// per-hook dispatch hot path; a same-process A/B (interleaved, 11 trials ×2)
-// measured a shared-call indirection ~0.6–1.3% slower here. The convention is
-// mirrored inline at all three sites (useCommandGroup / createChamber / here).
+// camelCase namespace join ('modal' + 'enter' → 'modalEnter').
+//
+// This carried a "DO NOT consolidate, settled, do not re-evaluate" note, on the
+// grounds that it sat on the per-hook dispatch hot path where a shared call
+// measured ~0.6–1.3% slower. That reasoning was sound but the premise no longer
+// holds, because the premise itself was the bug: the call did not need to be on
+// the dispatch path at all. `buildHooks` now resolves all nine names once at
+// construction (see there), so this runs 9 times per bridge instead of once per
+// hook fired.
+//
+// Consequence worth stating plainly, since the old note forbade exactly this:
+// the ~1% indirection argument no longer applies HERE, because a setup-time
+// call cannot cost a per-dispatch percentage. The right way to retire a
+// "don't merge, it costs 1%" constraint is to remove the hot path, not to pay
+// the 1%. The other two sites (useCommandGroup / createChamber) keep their own
+// copies until each is shown to be off its hot path the same way — createChamber
+// is already setup-only, useCommandGroup is not yet checked.
 function prefixed(namespace: string | undefined, hook: string): string {
   if (!namespace) return hook;
   return namespace + hook.charAt(0).toUpperCase() + hook.slice(1);
@@ -139,9 +151,30 @@ function buildHooks(
   namespace: string | undefined,
   phase: Signal<TransitionPhase>,
 ): TransitionHooks {
+  // Action names are built ONCE per bridge, not once per hook dispatch. Both
+  // inputs are fixed here: `namespace` is captured at construction and every
+  // `hook` below is a string literal, so the concatenation could never produce a
+  // different answer on a later call — it was pure repeated work on the hot
+  // path. Isolating that segment (120k hook calls, interleaved A/B): building
+  // per dispatch 3.668ms vs precomputed 0.237ms, i.e. the string work is gone
+  // (~15x on the segment; far less end-to-end, where bus.dispatch dominates —
+  // see the transition-bridge rows in tests/perf.bench.ts).
+  //
+  // This is also what makes `prefixed` safe to share: it is now a setup-time
+  // call, so the indirection that measured ~1% on the old per-dispatch path
+  // cannot appear here at all.
+  const aBeforeEnter = prefixed(namespace, 'beforeEnter');
+  const aEnter = prefixed(namespace, 'enter');
+  const aAfterEnter = prefixed(namespace, 'afterEnter');
+  const aEnterCancelled = prefixed(namespace, 'enterCancelled');
+  const aBeforeLeave = prefixed(namespace, 'beforeLeave');
+  const aLeave = prefixed(namespace, 'leave');
+  const aAfterLeave = prefixed(namespace, 'afterLeave');
+  const aLeaveCancelled = prefixed(namespace, 'leaveCancelled');
+  const aMove = prefixed(namespace, 'move');
+
   /** Dispatch and ignore missing handlers — transitions should never break the app. */
-  function dispatchSafe(hook: string, el: Element): any {
-    const action = prefixed(namespace, hook);
+  function dispatchSafe(action: string, el: Element): any {
     try {
       return bus.dispatch(action, el);
     } catch {
@@ -151,8 +184,8 @@ function buildHooks(
   }
 
   /** Dispatch with done() callback — awaits async results before calling done(). */
-  function dispatchWithDone(hook: string, el: Element, done: () => void): void {
-    const result = dispatchSafe(hook, el); // dispatchSafe never throws (own try/catch)
+  function dispatchWithDone(action: string, el: Element, done: () => void): void {
+    const result = dispatchSafe(action, el); // dispatchSafe never throws (own try/catch)
     if (result && typeof result.then === 'function') {
       (result as Promise<any>).then(() => done(), () => done());
     } else {
@@ -163,44 +196,44 @@ function buildHooks(
   return {
     onBeforeEnter(el: Element) {
       phase.value = 'entering';
-      dispatchSafe('beforeEnter', el);
+      dispatchSafe(aBeforeEnter, el);
     },
 
     onEnter(el: Element, done: () => void) {
-      dispatchWithDone('enter', el, done);
+      dispatchWithDone(aEnter, el, done);
     },
 
     onAfterEnter(el: Element) {
       phase.value = 'idle';
-      dispatchSafe('afterEnter', el);
+      dispatchSafe(aAfterEnter, el);
     },
 
     onEnterCancelled(el: Element) {
       phase.value = 'idle';
-      dispatchSafe('enterCancelled', el);
+      dispatchSafe(aEnterCancelled, el);
     },
 
     onBeforeLeave(el: Element) {
       phase.value = 'leaving';
-      dispatchSafe('beforeLeave', el);
+      dispatchSafe(aBeforeLeave, el);
     },
 
     onLeave(el: Element, done: () => void) {
-      dispatchWithDone('leave', el, done);
+      dispatchWithDone(aLeave, el, done);
     },
 
     onAfterLeave(el: Element) {
       phase.value = 'idle';
-      dispatchSafe('afterLeave', el);
+      dispatchSafe(aAfterLeave, el);
     },
 
     onLeaveCancelled(el: Element) {
       phase.value = 'idle';
-      dispatchSafe('leaveCancelled', el);
+      dispatchSafe(aLeaveCancelled, el);
     },
 
     onMove(el: Element) {
-      dispatchSafe('move', el);
+      dispatchSafe(aMove, el);
     },
   };
 }

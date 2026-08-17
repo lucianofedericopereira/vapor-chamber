@@ -105,6 +105,8 @@ export function installDomIntegration(options: DomIntegrationOptions): () => voi
 
   let hoverTimer: ReturnType<typeof setTimeout> | null = null;
   function onMouseover(event: MouseEvent): void {
+    /* v8 ignore next -- defensive: this listener is only attached inside
+       `if (preheat)` below, and `preheat` is a const */
     if (!preheat) return;
     const anchor = (event.target as Element | null)?.closest?.('a[href]') as HTMLAnchorElement | null;
     if (!anchor || anchor.hasAttribute('data-native')) return;

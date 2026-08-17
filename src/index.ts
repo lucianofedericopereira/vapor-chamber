@@ -9,7 +9,7 @@
  *   OPTIONAL (tree-shaken when unused):
  *     plugins      — logger, validator, history, debounce, throttle, authGuard, optimistic
  *     plugins-io   — retry, persist, sync
- *     chamber      — Vue composables: useCommand, useCommandBus, useCommandGroup, …
+ *     chamber      — Vue composables: useCommand, useCommandGroup, useCommandState, …
  *     chamber-vapor — Vue 3.6+ Vapor-specific API (requires Vue 3.6)
  *     http         — postCommand, createHttpClient, CSRF token reading
  *     transports   — createHttpBridge, createBatchingHttpBridge, createWsBridge, createSseBridge
@@ -190,7 +190,6 @@ export {
   getCommandBus,
   setCommandBus,
   resetCommandBus,
-  useCommandBus,
   useCommand,
   // v1.8.0: typed command contract — augment GlobalCommands for typed dispatch
   type GlobalCommands,

@@ -89,3 +89,65 @@ describe('defineVaporCustomElement — Vapor available', () => {
     expect(mockVue.defineVaporCustomElement).toHaveBeenCalledWith(options, extra);
   });
 });
+
+// The remaining two wrappers had their "Vapor present" side stubbed in mockVue
+// but never actually called, so only their null-return branch was reached —
+// which is the half that cannot regress silently, since it now DEV-warns. The
+// forwarding half is the half a refactor could quietly break.
+describe('defineVaporComponent / defineVaporAsyncComponent — Vapor available', () => {
+  it('defineVaporComponent forwards options to Vue and returns its result', async () => {
+    const { defineVaporComponent } = await freshChamberVapor();
+    const options = { props: { count: Number }, setup: () => () => null };
+    const Comp = defineVaporComponent(options) as any;
+
+    expect(Comp).not.toBeNull();
+    expect(Comp).toBe(options); // mock is identity — proves pass-through, not re-wrapping
+    expect(mockVue.defineVaporComponent).toHaveBeenCalledWith(options);
+  });
+
+  it('defineVaporAsyncComponent forwards a loader function', async () => {
+    const { defineVaporAsyncComponent } = await freshChamberVapor();
+    const loader = () => Promise.resolve({ default: {} });
+    const Async = defineVaporAsyncComponent(loader) as any;
+
+    expect(Async).not.toBeNull();
+    expect(mockVue.defineVaporAsyncComponent).toHaveBeenCalledWith(loader);
+  });
+
+  it('the three wrappers are silent in production, and still return null', async () => {
+    // The `if (DEV)` guard added around each devWarnNoVapor() has a false side
+    // that vitest never takes on its own — NODE_ENV is not 'production' here,
+    // so DEV is always true and the branch is dead in a normal run. Pin it the
+    // way tests/dev-flag.test.ts pins DEV itself: force the runtime fallback to
+    // false, then assert the warning is gone while the RETURN CONTRACT is not.
+    // Silencing a warning must never change what the function gives back.
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.resetModules();
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      // No __VUE__ stub here, so the Vapor surface is absent and all three take
+      // the null path — the same path that warns in dev.
+      const m = await import('../src/chamber-vapor');
+      expect(m.defineVaporCustomElement({})).toBeNull();
+      expect(m.defineVaporComponent({})).toBeNull();
+      expect(m.defineVaporAsyncComponent(() => Promise.resolve({}))).toBeNull();
+      expect(warn).not.toHaveBeenCalled();
+    } finally {
+      warn.mockRestore();
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
+  });
+
+  it('defineVaporAsyncComponent also accepts the options-object form', async () => {
+    const { defineVaporAsyncComponent } = await freshChamberVapor();
+    // Vue supports both `defineVaporAsyncComponent(loader)` and the
+    // `{ loader, loadingComponent, ... }` object; our signature allows both, so
+    // the object form should reach Vue unchanged rather than be treated as a fn.
+    const opts = { loader: () => Promise.resolve({ default: {} }), delay: 0 };
+    const Async = defineVaporAsyncComponent(opts) as any;
+
+    expect(Async).not.toBeNull();
+    expect(mockVue.defineVaporAsyncComponent).toHaveBeenCalledWith(opts);
+  });
+});

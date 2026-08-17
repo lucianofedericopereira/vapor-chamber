@@ -486,3 +486,143 @@ describe('indexedDbOutbox', () => {
     expect(summary).toEqual({ replayed: 1, failed: 0 });
   });
 });
+
+// ---------------------------------------------------------------------------
+// createOutbox — key derivation and replay failure shapes
+// ---------------------------------------------------------------------------
+
+describe("createOutbox — custom key + non-Error replay failure", () => {
+  it("uses a supplied key() instead of the default commandKey", async () => {
+    const storage = memoryStorage();
+    const outbox = createOutbox({
+      actions: ["cart*"],
+      storage,
+      isOnline: () => false,
+      autoFlush: false,
+      // A caller-supplied idempotency key — e.g. one the backend already knows.
+      key: (cmd) => `custom:${cmd.action}:${(cmd.target as { id: number }).id}`,
+    });
+    const bus = createAsyncCommandBus({ onMissing: "ignore" });
+    outbox.install(bus);
+
+    await bus.dispatch("cartAdd", { id: 7 });
+
+    expect(storage.data?.[0].key).toBe("custom:cartAdd:7");
+    // and specifically NOT the default derivation
+    expect(storage.data?.[0].key).not.toBe(commandKey("cartAdd", { id: 7 }));
+  });
+
+});
+
+/** Fake IDB whose open() fails — private browsing, quota, corrupted profile. */
+function failingOpenIndexedDb() {
+  return {
+    open: () => {
+      const req: any = { onupgradeneeded: null, onsuccess: null, onerror: null, error: new Error("open denied") };
+      queueMicrotask(() => req.onerror?.());
+      return req;
+    },
+  };
+}
+
+/** Fake IDB that opens fine but fails the individual request. */
+function failingRequestIndexedDb() {
+  const db = {
+    createObjectStore: () => ({}),
+    transaction: () => ({
+      objectStore: () => ({
+        get: () => { const r: any = { onsuccess: null, onerror: null, error: null }; queueMicrotask(() => r.onerror?.()); return r; },
+        put: () => { const r: any = { onsuccess: null, onerror: null, error: null }; queueMicrotask(() => r.onerror?.()); return r; },
+        clear: () => { const r: any = { onsuccess: null, onerror: null, error: null }; queueMicrotask(() => r.onerror?.()); return r; },
+      }),
+    }),
+  };
+  return {
+    open: () => {
+      const req: any = { onupgradeneeded: null, onsuccess: null, onerror: null, result: db };
+      queueMicrotask(() => { req.onupgradeneeded?.(); req.onsuccess?.(); });
+      return req;
+    },
+  };
+}
+
+describe("indexedDbOutbox — failure paths", () => {
+  const record: OutboxRecord = { id: "r1", action: "a", target: { n: 1 }, key: "k", queuedAt: 1 };
+
+  it("a failed open() surfaces as a warning, not a throw, and does not poison later attempts", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal("indexedDB", failingOpenIndexedDb());
+
+    const s = indexedDbOutbox();
+    // Storage is a best-effort cache for an offline queue: losing it must
+    // degrade to "nothing persisted", never break the dispatch path.
+    await expect(s.save([record])).resolves.not.toThrow();
+    expect(await s.load()).toBeNull();
+    expect(warn).toHaveBeenCalled();
+
+    // The cached open promise is cleared on failure, so a second call retries
+    // rather than replaying the first rejection forever.
+    await expect(s.save([record])).resolves.not.toThrow();
+  });
+
+  it("a failed request surfaces the same way once the db is open", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal("indexedDB", failingRequestIndexedDb());
+
+    const s = indexedDbOutbox();
+    expect(await s.load()).toBeNull();
+    await expect(s.save([record])).resolves.not.toThrow();
+    await expect(s.clear()).resolves.not.toThrow();
+    expect(warn).toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Storage failures are warnings, never throws — the queue must outlive them
+// ---------------------------------------------------------------------------
+
+describe("storage failure paths", () => {
+  const record: OutboxRecord = { id: "r1", action: "a", target: { n: 1 }, key: "k", queuedAt: 1 };
+
+  it("localStorageOutbox warns instead of throwing when the store rejects writes", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    // Quota exceeded is the real case here: Safari private mode throws on
+    // setItem rather than reporting a full quota, and an offline queue that
+    // cannot persist must still work in memory.
+    vi.stubGlobal("localStorage", {
+      getItem: () => { throw new Error("read denied"); },
+      setItem: () => { throw new Error("QuotaExceededError"); },
+      removeItem: () => { throw new Error("remove denied"); },
+    });
+
+    const s = localStorageOutbox();
+    expect(s.load()).toBeNull();
+    expect(() => s.save([record])).not.toThrow();
+    expect(() => s.clear()).not.toThrow();
+    expect(warn).toHaveBeenCalledTimes(3);
+  });
+
+  it("createOutbox survives a storage that rejects on every call", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const storage: OutboxStorage = {
+      load: async () => { throw new Error("load failed"); },
+      save: async () => { throw new Error("save failed"); },
+      clear: async () => { throw new Error("clear failed"); },
+    };
+    const outbox = createOutbox({ storage, isOnline: () => false, autoFlush: false });
+    const bus = createAsyncCommandBus({ onMissing: "ignore" });
+    outbox.install(bus);
+
+    // hydrate(), saveQueue() and clear() each swallow-and-warn on their own,
+    // so the in-memory queue stays authoritative even with no working storage.
+    await expect(outbox.hydrate()).resolves.not.toThrow();
+
+    const result = await bus.dispatch("cartAdd", { id: 1 });
+    expect(result.ok).toBe(true);
+    expect(outbox.pending.value).toBe(1); // queued in memory despite save() failing
+
+    await expect(outbox.clear()).resolves.not.toThrow();
+    expect(outbox.pending.value).toBe(0);
+    expect(warn).toHaveBeenCalled();
+  });
+});

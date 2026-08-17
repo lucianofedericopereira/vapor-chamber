@@ -248,6 +248,23 @@ Still not usable here, though the reasons differ:
   off-screen?", ours is "should a command dispatched while this component is
   deactivated be recorded into its undo history?" — a domain decision upstream
   has no view on. The guard stays.
+
+  **A second correction, from the rc.4 read.** The paragraph above is right
+  that the guard should stay — but for most of its life it was not running.
+  `tryKeepAliveHooks` gated itself on `getCurrentInstance()`, which reads
+  VDOM's `currentInstance`; a Vapor component is not stored there. Measured on
+  3.6.0-rc.4: inside `defineVaporComponent({ setup() })` that accessor returns
+  null, while an `onDeactivated()` registered at the same point works and
+  fires. So in Vapor — the platform this library is named for — the guard
+  returned early and `useCommandHistory` / `useCommandError` went on recording
+  commands dispatched into a deactivated view. It worked in VDOM, which is why
+  the whole suite stayed green. It is now gated on `hasInjectionContext()`
+  (true in both modes, false in a bare `effectScope()`), with
+  `getCurrentInstance()` kept only as a fallback for a partially-supplied Vue
+  namespace. `tests/keepalive-input-scope-fixture.test.ts` drives a real
+  `VaporKeepAlive` and pins it; the older stand-in fixture could not, which is
+  the transferable lesson — a fixture that substitutes for the integration it
+  is reasoning about can only ever check the half you already understood.
 - **Transition** — route transitions; the View Transitions API is the
   DOM-native way around it.
 - **SSR/Hydration** for blade rows — `fetchBlade` is undefined off-browser, so

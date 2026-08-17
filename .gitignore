@@ -13,6 +13,13 @@ docs/api/
 # Bench-run outputs
 bench.txt
 
+# Test/coverage counts for stamp-docs (scripts/test-counts-reporter.mjs).
+# Deliberately not committed: the counts depend on what else has run (8 files
+# skip without dist/, 2 more tests skip under coverage), so the file would churn
+# — prepublishOnly runs test:run before build. stamp-docs skips markers whose source is missing, so CI is unaffected;
+# stamp locally after `npm run build && npm run test:coverage`.
+docs/metrics.json
+
 # Logs
 *.log
 npm-debug.log*

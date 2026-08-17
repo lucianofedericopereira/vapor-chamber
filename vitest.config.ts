@@ -4,7 +4,12 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    reporters: ['dot'],
+    reporters: [
+      'dot',
+      // Writes docs/metrics.json — the source stamp-docs derives the
+      // README/whitepaper test counts from, so they cannot drift.
+      ['./scripts/test-counts-reporter.mjs', { key: 'default' }],
+    ],
     silent: 'passed-only',
     // tests/router/dom.test.ts has several cases that deliberately let a
     // click fall through to "let the browser handle it" (that's the behavior
@@ -27,6 +32,10 @@ export default defineConfig({
       },
     },
     include: ['tests/**/*.test.ts'],
+    // `tests/vapor/**` needs `vue` aliased to the with-vapor build to run at
+    // all — see vitest.vapor.config.ts. Running them here would fail on the
+    // harness (two disconnected Vue instances), not on the code.
+    exclude: ['**/node_modules/**', '**/dist/**', 'tests/vapor/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'json-summary', 'html'],
@@ -74,13 +83,16 @@ export default defineConfig({
         // These globals span the wider optional surface — http / transports /
         // plugins-io carry environment-bound branches (real HTTP/WS/SSE) that
         // hold the global branch number below 100%.
-        // Ratcheted for v1.9 (measured: 97.06 / 96.66 / 88.11 / 95.43 after the
-        // devtools subpath and router error paths were covered). The previous
-        // floors sat ~7 points low, which let a real regression pass unnoticed.
-        lines: 96,
-        functions: 94,
-        branches: 88,
-        statements: 94,
+        // Ratcheted for v1.15 (measured: 99.76 lines / 99.06 functions /
+        // 95.97 branches / 99.51 statements). The v1.9 floors were left at
+        // 96/94/88/94 while coverage climbed ~4 points past them; branches in
+        // particular carried 8 points of slack, enough for a real regression
+        // to pass the gate unnoticed. The remaining sub-100 branch number is
+        // concentrated in router/engine + router/index async navigation arms.
+        lines: 97.5,
+        functions: 97,
+        branches: 94,
+        statements: 97.5,
       },
     },
   },

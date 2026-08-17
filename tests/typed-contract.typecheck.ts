@@ -10,7 +10,7 @@
  * to getCommandBus<CommandMap>() so they compile under augmentation; if a
  * future internal call site forgets that, THIS file is what breaks the build.
  */
-import { useCommand, getCommandBus, useCommandBus } from '../src/chamber';
+import { useCommand, getCommandBus } from '../src/chamber';
 import type { CommandMap, CommandResult } from '../src/command-bus';
 
 type Product = { id: number; name: string };
@@ -64,9 +64,6 @@ export function _typedSharedBus() {
   // Explicit opt-out returns the loose bus — arbitrary strings allowed again.
   const loose = getCommandBus<CommandMap>();
   loose.dispatch('anythingGoes', { free: true });
-
-  const viaComposable = useCommandBus();
-  viaComposable.dispatch('cartAdd', { id: 1, name: 'x' }, { qty: 1 });
 }
 
 // ── schema-driven contract (defineSchema → CommandsOf → typed schema bus) ────

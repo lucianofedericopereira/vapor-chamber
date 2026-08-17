@@ -68,6 +68,20 @@ Per-file coverage from the vitest v8 run (\`npm run test:coverage\`), regenerate
 Enforcement floors live in \`vitest.config.ts\`; the files that config \`exclude\`s
 (re-export barrels, IIFE builders, \`vite-hmr\`, \`testing\`, …) are omitted here by design.
 
+**These numbers come from the default vitest project only.** \`tests/vapor/**\` runs
+under \`vitest.vapor.config.ts\` (it needs \`vue\` aliased to the with-vapor build) and is
+not included here. That costs nothing, and it was checked rather than assumed: running
+both projects with \`--coverage.include='src/router/**'\` and diffing the per-statement
+and per-branch hit maps, **0 statements and 0 branches are covered only by
+\`tests/vapor\`** — its coverage is a strict subset, so merging the two runs would move
+these figures by zero.
+
+What those fixtures add is not lines but *environment*: proof the code behaves
+correctly inside a real Vapor component, which line coverage cannot express either way.
+So read this table as "which lines ran", never as "everything that is verified". If
+Vapor-only test paths are ever added, that containment stops holding — re-run the diff
+above before trusting these numbers to describe them.
+
 **Overall: ${f1(totalRow.stmts)}% statements · ${f1(totalRow.branch)}% branches · ${f1(totalRow.funcs)}% functions · ${f1(totalRow.lines)}% lines.**
 
 | file | % stmt | % branch | % funcs | % lines |

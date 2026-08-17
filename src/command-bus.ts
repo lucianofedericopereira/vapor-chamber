@@ -598,7 +598,14 @@ type AsyncState = {
  *
  * V8-aligned: monotonic counter + module-load random + module-load timestamp.
  * No `crypto.randomUUID()` syscall, no per-call `Date.now()`, no per-call
- * `Math.random()`. ~30–50ns per call vs ~1–2µs for `crypto.randomUUID()`.
+ * `Math.random()`. Re-measured on Node 24 (2026-08-17, `hrtime` medians over
+ * 21×200k reps): **~12ns per call vs ~104ns for `crypto.randomUUID()`, ~8x**.
+ * The figures this comment carried before ("~30–50ns vs ~1–2µs", implying
+ * 20–60x) no longer describe any current runtime — modern V8/Node batch UUID
+ * entropy, so `randomUUID` got ~10x cheaper while this counter stayed put.
+ * The decision is unchanged and the direction still holds; only the margin is
+ * smaller than it was when first measured. Quote the runtime with the number:
+ * an unqualified ns figure is what let this drift unnoticed.
  *
  * Command IDs are correlation tokens, not security tokens — uniqueness is
  * required across one process; cross-process collision risk is acceptable
@@ -967,7 +974,10 @@ const byPriority = (a: { priority: number }, b: { priority: number }) => b.prior
 function register(s: SyncState | AsyncState, action: string, handler: any, opts: RegisterOptions = {}): () => void {
   assertNotSealed(s.sealed, 'register');
   validateNaming(action, s.opts.naming);
-  if (s.handlers.has(action)) {
+  // DEV-gated: overwriting a handler is a wiring mistake only the developer can
+  // fix, so the message is worth bytes in dev and none in prod. `DEV` folds to
+  // `false` in the IIFE builds, taking the string with it (see src/dev.ts).
+  if (DEV && s.handlers.has(action)) {
     console.warn(`[vapor-chamber] Handler for "${action}" already exists and is being overwritten. Call the unregister function returned by register() first, or use bus.clear() to reset.`);
   }
   let h = handler;
@@ -1299,7 +1309,10 @@ function syncRollback(s: SyncState, commands: BatchCommand[], results: CommandRe
 
 function syncUse(s: SyncState, plugin: Plugin, opts: PluginOptions = {}): () => void {
   assertNotSealed(s.sealed, 'use');
-  if (isAsyncFn(plugin)) {
+  // DEV-gated for the same reason as the register() overwrite warning: a
+  // build-time wiring mistake, not a runtime condition. Gating `DEV` first also
+  // skips the isAsyncFn() probe entirely in production.
+  if (DEV && isAsyncFn(plugin)) {
     console.warn('[vapor-chamber] Async plugin installed on sync bus — use createAsyncCommandBus() instead.');
   }
   const entry = { plugin, priority: opts.priority ?? 0 };

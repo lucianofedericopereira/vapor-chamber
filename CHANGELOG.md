@@ -2,6 +2,610 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.15.0 — Vue 3.6.0-rc.4 alignment
+
+Minor, not major, despite removing a public export. `useCommandBus()` was a
+one-line alias kept for the old exo project, which has since been updated, and
+this is RC-stage software with no dependents — a major bump would spend the
+2.0.0 slot on a rename. **2.0.0 stays reserved for the Vue 3.6.0-stable cycle**
+and the Vapor-first/bus-first identity decision that comes with it.
+
+All 12 rc.4 commits read at source. **The alignment itself needs no wrapper
+change** — the v-for item-scope rework, the prop-source cache re-scoping and the
+KeepAlive input-scope move all land below `tryAutoCleanup()`, which uses only
+the public `getCurrentScope()` / `onScopeDispose()` pair; `createForSlots`'
+new signature is compiler output our examples inherit by recompiling. Three
+items are N/A by verification rather than by assumption: we declare no
+`inheritAttrs`, pass no `style` props, and run no DOM-connectivity check inside
+a cleanup, so #15279, #15286 and the `aac355d` teardown reordering cannot reach
+us. Full per-item detail is the new rc.4 row in the whitepaper's Vue 3.6
+alignment log (§9).
+
+Peer range moves to `>=3.5.0 || >=3.6.0-rc.4` (not widened to keep rc.3 — RC
+users track the latest RC). Both Vapor SFC examples repin to `^3.6.0-rc.4` and
+were rebuilt against it: `vue-tsc` + `vite build` clean on `vapor-sfc` and
+`vapor-island-cart`, `astro build` clean on `exo-astro` — the real check for
+rc.4's compiler-vapor changes, since compiled output is where they land.
+
+What the read surfaced is a bug of ours that 1508 passing tests could not see.
+
+### Fixed — KeepAlive pause/resume was inert in every Vapor component
+
+`tryKeepAliveHooks` gated itself on `getCurrentInstance()`. That accessor reads
+**VDOM's** `currentInstance`, and a Vapor component is not stored there:
+measured on rc.4, it returns null inside `defineVaporComponent({ setup() })`,
+while an `onDeactivated()` registered at that same point works and fires.
+
+So the guard returned early in every Vapor component, and the KeepAlive
+pause/resume in `useCommandHistory` and `useCommandError` never armed. The
+user-visible effect: with a Vapor component cached by `<KeepAlive>`, commands
+dispatched while that component was **deactivated** were still recorded into
+its undo history — an undo stack filling with actions the user never performed
+in that view. It behaved correctly under VDOM, which is why the suite stayed
+green.
+
+- Now gated on **`hasInjectionContext()`** (Vue 3.3+), measured true inside both
+  a Vapor and a VDOM `setup()` and false in a bare `effectScope()` — the only
+  probe of the three that answers the actual question. `getCurrentInstance()`
+  is kept as the fallback for a partially-supplied Vue namespace that predates
+  it (the mocked-Vue path several tests use).
+- The old guard's stated rationale was also wrong on its own terms: it claimed
+  `onActivated`/`onDeactivated` *throw* outside a setup context. Measured — they
+  do not throw, they emit a Vue warning. The guard is there to keep that warning
+  out of non-component callers, not to prevent an exception.
+- Not an rc.4 regression: with the old guard restored the new fixture fails
+  identically on rc.3 and rc.4. Reading rc.4's KeepAlive rewrite is what
+  prompted testing the real integration, which is what found it.
+
+### Added — `tests/keepalive-input-scope-fixture.test.ts`
+
+Drives a **real `VaporKeepAlive`** with a real cached Vapor component and the
+real shipped `useCommandHistory`, and pins two facts: that a command dispatched
+while deactivated stays out of that view's history and recording resumes on
+activation; and that an **unguarded** `bus.onAfter` registered at the same site
+*does* still fire while deactivated. The second is the load-bearing one — it is
+the fact the standing "the guard is not double-suppression" conclusion rests
+on, so it is the assertion that should break first if a future release ever
+begins pausing plain bus callbacks. Verified to fail against the pre-fix code
+on both rc.3 and rc.4.
+
+### Security — an MCP tool `tools/list` never advertised was still callable
+
+`createMcpHandler`'s `tools/call` gate asked `bus.getSchema()[name] === undefined`.
+A schema is a plain object, so that lookup walks `Object.prototype`: **`constructor`,
+`__proto__`, `toString`, `hasOwnProperty` and `valueOf` all read back as defined**,
+passed the gate, and reached `bus.dispatch`. `tools/list` builds from
+`Object.entries` (own keys only), so those names were never advertised — the
+listing and the call gate disagreed about what a tool is. Measured before
+changing anything: all five dispatched, `dispatch` called 4/4 times in the probe.
+
+Scope, stated precisely: it only bites with `actions: ['*']` or an omitted
+whitelist — a narrow glob such as `['cart*']` already rejected these names — and
+downstream the bus normally has no handler registered under them, so the usual
+observable effect is an error result rather than execution. The reason it is
+filed here anyway is that this **is** the boundary: the module's own doc calls an
+MCP client "the one caller class this library treats as untrusted by
+construction", and a gate that admits names the protocol never published is not
+doing the job it exists for.
+
+- Now `Object.hasOwn(bus.getSchema(), name)`.
+- `tests/mcp-gaps.test.ts` pins all five names as rejected-and-never-dispatched,
+  plus a consistency test asserting that what `tools/list` returns and what
+  `tools/call` accepts are the same set. Verified to fail against the pre-fix code.
+
+### Changed — the stdio MCP transport got two input-driven limits
+
+`serveMcpStdio` read from a client with no bound on either axis. Both are
+reachable by a client that is merely broken, not necessarily hostile:
+
+- **`maxLineLength`** (default 1 MiB): input arrived as `buffer += chunk`, so a
+  client that never sends a newline grew the read buffer without limit. The
+  partial line is now dropped with a `-32700`, and input skips to the next
+  newline so the stream **resynchronises** rather than dying. The cap is per
+  line — many short messages in one chunk are unaffected, which is pinned.
+- **`maxInFlight`** (default 32): every line started a dispatch immediately, so
+  a piped backlog opened one concurrent dispatch per line. In-flight work is now
+  counted and `stdin` is paused at the cap, resuming as it drains. Deliberately
+  **not** 1: MCP clients legitimately issue parallel tool calls, and serialising
+  them would let one slow tool block every fast one behind it. The test asserts
+  both halves — that the source was paused *and* that dispatches still overlap.
+
+Two smaller ones fell out of the same read: a rejected handler promise (a bus
+whose `getSchema()` throws, say) sank the transport silently — it now becomes a
+`-32603` and serving continues — and `stop()` now marks the server stopped, so a
+tool still running at teardown cannot write a late reply or touch a `stdin` the
+server no longer owns.
+
+Replies remain in **completion** order, and that is now documented as a decision
+rather than left as an artifact: JSON-RPC permits out-of-order responses and
+`id` correlates them, so ordering the writes would only reintroduce head-of-line
+blocking.
+
+### Added — a coverage pass that found the MCP bug, and floors that now hold it
+
+Overall **98.1 / 92.1 / 97.2 / 98.5 → 99.9 / 97.8 / 99.6 / 99.9** (stmt/branch/fn/line)
+across ~230 new tests, with **32 of 46 measured files now clean at 100 on all
+four metrics**. The number is not the point — two of the things the pass
+turned up are: the MCP gate above, and three guards that were *labelled* dead and
+were not.
+
+- **`defineSchema` had no test calling it at all** — an exported public API,
+  the identity helper every typed-bus consumer starts from. Found by treating an
+  uncovered *function* as a different signal from an uncovered branch.
+- **Files now clean at 100 across all four metrics** include `chamber.ts`,
+  `mcp.ts`, `schema.ts`, `ssr.ts`, `form.ts`, `transitions.ts`,
+  `stream-parser.ts`, `utilities.ts`, `router/dom.ts` and `router/url.ts`, plus
+  100% statements and lines on `http.ts`, `transports.ts`, `plugins-core.ts`,
+  `plugins-extra.ts`.
+- **Enforcement floors ratcheted** in `vitest.config.ts` — `96 / 94 / 88 / 94`
+  → `97.5 / 97 / 94 / 97.5` (lines/functions/branches/statements). They had been
+  set for v1.9 and left while coverage climbed ~4 points past them; branches
+  carried 8 points of slack, which is enough room for a real regression to pass
+  the gate unnoticed. That is the mechanism the config comment already asked for
+  ("ratchet upward as coverage climbs") finally being applied.
+- **Three "unreachable" guards were wrong** and are now tests instead of claims:
+  `wireUntracked`'s `pauseTracking` shape check (a runtime-assembled specifier
+  is still mockable via `vi.doMock`), its `__VC_IIFE__` guard (the flag is read
+  at probe time, so stubbing before a fresh import reaches it), and
+  `idempotent`'s eviction guard (with `maxKeys: 0` the eviction runs against an
+  empty map, so the "no oldest key" arm is live).
+
+### Added — the README's own numbers are now derived, not typed
+
+`stamp-docs.mjs` could only own a value some file already stated, and test
+counts had no such file — so README and the whitepaper carried hand-typed
+totals that went stale every cycle (**1491 tests / 92 files / 97.1%** while the
+suite was actually at 1748 / 113 / 99.9%, in two places each). The whitepaper
+documents deleting a per-file inventory for drifting four times; its own summary
+line then drifted anyway. Typing the corrected number in would just restart the
+clock.
+
+- `scripts/test-counts-reporter.mjs` — a vitest reporter that records nothing
+  but counts, into `docs/metrics.json` (~225 bytes). Vitest's built-in `json`
+  reporter carries the same information but writes ~533 KB of per-test detail.
+  The file is **gitignored on purpose**: the count is not one number, it depends
+  on what else has run (1748/113 with build+coverage, 1750/114 without coverage,
+  1720/107 with no `dist/` — 8 files skip without it). `prepublishOnly` runs
+  `test:run` before `build`, so committing it would flip the numbers every
+  release and fail the next `lint:check` for nothing. Stamped locally instead,
+  from the canonical `build → test:coverage → test:vapor → docs:stamp`, so the
+  counts and the coverage percentages in one sentence come from one run.
+- `stamp-docs.mjs` gains `tests` / `testFiles` / `testsAll` / `testFilesAll`
+  from that file and `covStatements` / `covBranches` / `covFunctions` /
+  `covLines` from `coverage/coverage-summary.json`. A **missing** source skips
+  its markers rather than failing or stamping a placeholder — which is what lets
+  the metrics file stay out of the repo without breaking CI. Verified by moving
+  `coverage/` and the metrics file away and re-running `--check`: still passes.
+- A **filtered** run never writes: `vitest run tests/one.test.ts` or `-t name`
+  is the normal inner-loop command, and recording "1 file, 10 tests" would
+  clobber the totals. That filter check has to know which flags take a value —
+  the first version read `-c vitest.vapor.config.ts` as a positional filter, so
+  the vapor project silently recorded nothing.
+
+`files` counts modules that actually ran, matching vitest's own
+"114 passed | 1 skipped" split — so "N tests across M files" is not silently
+pairing a passed count with a total. That mismatch is not hypothetical: the
+first version of this reporter emitted 115, the gate caught it against the
+hand-written 114, and the definition was fixed rather than the number.
+
+### Changed — two provably-dead branches deleted rather than ignored
+
+- `StringBuffer.pushCodePoint`'s astral arm is gone; `handleString` calls `push`
+  directly. `write()` feeds `charCodeAt`, which cannot exceed 0xFFFF — surrogate
+  pairs arrive pre-split — so the encode branch had no producer.
+- `toProps`' optional-parameter guard is gone: both call sites sit inside
+  `if (def.target)` / `if (def.payload)`, so `fields` was never undefined. The
+  parameter is now required, which makes the compiler enforce what the guard
+  was pretending to check.
+- The WS bridge's `settled` flag is gone. Every teardown line in `settle` is
+  idempotent (`clearTimeout` on a cleared id, `Map.delete` of an absent key,
+  `removeEventListener` of a detached listener) and `resolve()` on a settled
+  promise is a spec no-op, so the flag was redundant even in the case it guarded.
+
+Both were A/B'd rather than assumed, since `pushCodePoint` sat in a per-character
+loop: four payload shapes, dist-flavour bundles, medians over 9 rounds. The one
+apparently-real 2.2% regression did not survive isolation — running each variant
+in its own process put the distributions back on top of each other, i.e. it was
+cross-bundle code-layout interference in the shared harness, not the change.
+
+Six guards that survived that scrutiny — `globalThis` absence, a listener's
+`preheat` re-check, the batch-flush empty guard, a debounce timer's own map
+entry, `serialize`'s rejection-absorbed tail, and a placeholder overwritten ten
+lines later — are marked `/* v8 ignore */` **with the reason inline**, so the
+report stops flagging them without hiding why they cannot run.
+
+### Removed — `useCommandBus()`
+
+A one-line alias for `getCommandBus()` — no lifecycle, no scope binding,
+nothing the `use` prefix implies. It existed for the old exo Astro project,
+which has since been updated. Rename to `getCommandBus()`; identical return
+value and typing. README and docs updated. No size change (the minifier was
+already inlining it).
+
+### Changed — the transition bridge stopped rebuilding action names per dispatch
+
+`buildHooks` resolved `'modal' + 'Enter'` on **every hook fired**, for a value
+that cannot change: `namespace` is captured at construction and every hook name
+is a string literal at its call site. All nine names are now resolved once per
+bridge.
+
+- Isolated segment (120k hook calls, interleaved A/B): **3.668ms → 0.237ms**.
+- End-to-end on a real bus (100k hook dispatches, old builder vs new, same
+  process, interleaved, non-overlapping IQRs): **22.233ms → 12.543ms, −43.6%**
+  (1.77x). Zero size change, all budgets unmoved.
+
+This retires a standing "DO NOT consolidate, settled, do not re-evaluate" note.
+That note was correct that a shared call measured ~1% slower on the old
+per-dispatch path — but the per-dispatch path was itself the defect. The way to
+retire a "merging costs 1%" constraint is to delete the hot path, not to pay
+the 1%: `prefixed()` is now a setup-time call where indirection cannot cost a
+per-dispatch percentage, so it is free to share.
+
+### Changed — `useCommandGroup` memoises its namespaced action names
+
+Unlike the bridge, this one takes the short name as a runtime **argument**, so
+it cannot be hoisted — but a group dispatches a small, stable set of names, so
+it can be cached. Interleaved A/B, 200k calls: 3 distinct names **4.669ms →
+1.244ms (−73%)**, 8 names 5.171ms → 1.426ms (−72%).
+
+Capped at 256 entries with FIFO eviction, matching `_prefixCache` in
+`command-bus.ts` and for the same reason — a long-lived group dispatching
+generated names would otherwise grow the Map without bound. A pathological
+caller degrades to the old concat cost rather than leaking.
+
+`createChamber`'s copy is untouched: it is setup-only, so there was never a
+per-dispatch cost there to remove.
+
+### Changed — three developer-mistake warnings are now DEV-only
+
+The prod IIFE bundles shipped message text for mistakes only a developer can
+fix at build time. Gated behind `DEV`, so the strings fold out entirely
+(verified absent from the built files):
+
+- `register()` handler-overwrite warning
+- async-plugin-on-sync-bus warning
+- `sync()` called without `busRef`
+
+Brotli headroom went from **36 B → 202 B** (full) and 254 B → 392 B (core) —
+which then paid for the `useCommandGroup` cache, leaving headroom at 202 B with
+all budgets unmoved.
+
+Deliberately **not** gated, having checked each: `validateNaming` supports a
+documented `onViolation: 'throw'` production mode, and the `persist` validation
+warning fires on a real production condition (stale state after a deploy).
+Gating either would be a behavior regression wearing a size win's clothes.
+
+### Changed — `defineVapor*` no longer fails silently
+
+`defineVaporComponent` / `defineVaporCustomElement` / `defineVaporAsyncComponent`
+still return `null` when the Vapor runtime is absent — the documented contract,
+asserted by existing tests — but they now DEV-warn, naming the API and routing
+through `vueDetectionHint()`. A bare `null` is the same silent-negative shape
+that let the `tryKeepAliveHooks` bug survive. The warning is DEV-gated, so no
+bytes reach production.
+
+### Added — `npm run ab:vue`, so "no regressions" is measured
+
+`scripts/ab-vue.mjs <version>` packs a baseline Vue, loads it **alongside** the
+installed one in a single process, and interleaves AB/BA rounds over the
+reactivity primitives this library sits on, reporting medians and IQRs.
+
+Comparing a fresh bench run against numbers recorded in a previous release is
+not a measurement — single-host output swings 20-30%. That gap is how the
+`crypto.randomUUID` figure drifted ~10x unnoticed.
+
+Two methodology traps are baked into the harness because both were hit while
+building it, and both produce confident nonsense:
+- Workloads are scaled so every round exceeds 1ms. At ~15µs the timer quantises
+  and results go bimodal — the first version reported a 0.361x "speedup" on a
+  workload that is actually 1.013x.
+- Both sides load the **same dist flavour**. A bare `import('vue')` resolves to
+  the DEV bundler build, whose instrumentation made rc.4 look **2.8x slower**
+  on the watcher path against a prod baseline. Corrected: 1.054x, within noise.
+
+rc.3 → rc.4 result, all four workloads within noise (worst 1.054x), `computed`
+faster at 0.677x. No regressions.
+
+### Added — the router composables now run under real Vapor
+
+`tests/router/composables.test.ts` covers all eight through
+`app.runWithContext()` on a **VDOM** app — no component, no mount.
+`tests/router/vapor-fixture.test.ts` uses a real Vapor app but only measures
+provide/inject as a primitive. The shipped combination — a router composable
+executing inside `defineVaporComponent({ setup() })` — had no coverage at all,
+on the largest surface still exposed to the bug class found this cycle.
+
+`tests/vapor/router-composables.test.ts` closes it: `useRouter`, `useRoute`
+(including reactivity across a navigation), `useQueryParam` (read *and* URL
+write), `useMenu`, `useBreadcrumbs`, `useRouteData`, `useRouteError`,
+`usePagination`, and — the load-bearing one — that unmounting a Vapor component
+disposes the subscription `useQueryParam` registers via
+`if (getCurrentScope()) onScopeDispose(off)`. Had `getCurrentScope()` answered
+in Vapor the way `getCurrentInstance()` does, every mounted route component
+would have leaked a router subscription.
+
+This needed a second config. The router imports `vue` as a **bare specifier**,
+and a bare `vue` in vitest resolves to a build with no Vapor in it (measured:
+`createVaporApp`, `defineVaporComponent`, `template` all absent). Mounting a
+Vapor app from the with-vapor dist while the router injects through bare `vue`
+means two disconnected reactivity instances, so `inject(ROUTER_KEY)` misses for
+harness reasons that say nothing about the router. `vitest.vapor.config.ts`
+aliases `vue` to the with-vapor build — the same aliasing every real Vapor app
+does, including both SFC examples here — and the default config excludes
+`tests/vapor/**` so these never run unaliased. `npm test` runs both; the Vapor
+project is also available on its own as `npm run test:vapor`.
+
+Red-checked: pointing the alias at the non-Vapor build fails all 7.
+
+### Added — coverage for router behaviours that only exist in a browser
+
+`tests/router/scroll-and-degradation.test.ts`. `src/router/index.ts` went
+**92.3 / 83.3 / 94.6 / 94.7 → 96.4 / 86.5 / 96.4 / 98.8** (stmt/branch/fn/line),
+and none of it is filler:
+
+- **Scroll on commit.** A hash link landing on its anchor instead of the page
+  top, and the early `return` that stops it from doing both. Its `catch` is
+  load-bearing for a reason worth writing down: a location hash is
+  user-controlled text and is *not* guaranteed to be a valid CSS selector —
+  `#2024` throws inside `querySelector`, and without the catch that would break
+  navigation itself rather than merely fail to scroll.
+- **`resolve()` before the table exists.** The fallback that keeps
+  `<RouterLink :to>` rendering an href during the window before `start()` has
+  loaded a remote table — precisely when a server-rendered page is hydrating.
+- **Inline routes.** The `{ inline: '#sel' }` payload `examples/router-demo`
+  ships, plus where its absence reports. Two readers touch that selector and
+  only one throws: the constructor's `readInlinePayload` swallows and returns
+  null (it runs only to learn `base` before the history is built), while
+  `loadInlineTable` at `start()` is where the absence actually matters. The test
+  asserts the failure at `start()`, not at construction, because that is the
+  real contract.
+- **Idle preheat** arming for `meta.preheat` records and tearing down cleanly.
+  Deliberately no assertion on *when* the idle callback fires — that is the
+  browser's call and racing it would buy a flaky test.
+
+`tests/router/engine-edges.test.ts` covers the engine paths an ordinary
+navigation never reaches — `src/router/engine.ts` **93.1 / 83.9 / 93.3 / 95.4 →
+96.6 / 89.5 / 93.3 / 98.8**. Each exists because the alternative is worse than
+the edge case:
+
+- **A guard that unregisters itself mid-walk.** The engine corrects its cursor
+  when the guard array shrinks under it; without that, the shrinking list slides
+  the *next* guard past the index and it silently never runs.
+- **A post-commit hook that throws.** The route stays committed and the error is
+  logged rather than propagated — reverting after the URL has already changed
+  would leave the address bar and the rendered tree disagreeing.
+- Plus `resolve()` shapes (object `to` with no path falling back to the current
+  path, string `to` carrying both query and hash), query-patch cleaning (arrays
+  stringified, null keys dropped rather than serialised as `"null"`), navigating
+  with no table at all, and `setRouteData()` for an unknown record name.
+
+`src/outbox.ts` **94.6 / 86.6 / 95.1 / 95.5 → 96.4 / 91.5 / 100 / 95.5**: a
+caller-supplied `key()` overriding the default derivation, plus the IndexedDB
+failure paths — a rejected `open()` (private browsing, quota, corrupted profile)
+and a rejected request once the database is open. Both assert the same contract:
+persistence is a best-effort cache for an offline queue, so losing it degrades to
+"nothing persisted" and must never break the dispatch path. The failed-open case
+also pins that the cached open promise is cleared, so a later call retries
+instead of replaying the first rejection forever.
+
+Two notes from getting this wrong first, both worth recording:
+
+- An added test claimed to cover the `catch` that wraps a non-`Error` throw
+  during replay. On an async bus a throwing handler does **not** reject
+  `dispatch()` — it returns `{ ok: false }` — so that catch was never reached,
+  and the test's final assertion (`toBeGreaterThanOrEqual(0)`) was vacuously
+  true. Coverage staying red on that line is what exposed it.
+- Its replacement then turned out to duplicate an existing test that was
+  strictly stronger (it also verifies the retry succeeds), so it was deleted
+  rather than kept. Padding the suite to move a number is the same failure as
+  the vacuous assertion, one step later.
+
+`src/outbox.ts` finished at **99.4 / 91.5 / 100 / 99.2** once the storage
+failure paths were covered too: `localStorage` throwing on read/write/remove
+(Safari private mode throws on `setItem` rather than reporting a full quota),
+and an async storage rejecting `load()` / `save()` / `clear()`. Each asserts the
+same contract — persistence is best-effort for an offline queue, so the
+in-memory queue stays authoritative and a dead store degrades to "nothing
+persisted" rather than breaking dispatch.
+
+`src/chamber.ts` **94.8 / 91.5 / 93.9 / 97.6 → 95.4 / 92.5 / 93.9 / 98.2** via
+`useCommandHistory` edges the existing tests skipped: `undo()`/`redo()` on empty
+stacks (UI wires these to buttons that exist before any command runs), a fresh
+dispatch dropping the redo stack, and — the interesting one — redo with a
+**primitive payload**, which has nowhere to stamp `__origin: 'redo'` and so
+relies on the one-shot `expectedRedo` identity fallback to avoid recording the
+replay as a brand-new command.
+
+`src/plugins-extra.ts` **93.1 / 87.9 / 91.1 / 93.5 → 96.3 / 92.6 / 93.3 / 96.5**
+via the `cache()` paths the existing tests skipped: a custom `key()` collapsing
+two targets onto one entry, the DEV warning that `invalidate(action, target)`
+**cannot** address custom-key entries (the key may depend on the payload, so
+saying so beats deleting nothing quietly) while action-wide invalidation still
+works for any key shape, dropping the action index once its last key goes, and
+the async-bus path — a resolved promise must be awaited before storing, or the
+cache holds a pending thenable and every later hit returns something unresolved.
+A rejected result is deliberately not cached; caching a failure would pin an
+outage for the whole ttl.
+
+Overall coverage: 97.30 → **98.1** statements, 92.12 → **93.2** branches,
+97.17 → **97.6** functions, 98.45 → **99.2** lines.
+
+### Added — a gate for the plain-HTML examples
+
+`examples/` had three tiers of enforcement and the third was empty: the
+top-level `.ts` snippets are typechecked via `tsconfig.patterns.json`, the three
+`package.json` projects get real builds, and the runnable HTML pages had
+nothing. Those pages `import { … } from '/dist/index.js'` — the files npm
+publishes — so a removed export breaks them exactly as it breaks a consumer,
+silently. `useCommandBus` was removed this cycle and no example broke, but only
+by luck, and confirming that by hand does not scale.
+
+`tests/examples/html-example-imports.test.ts` walks every HTML example,
+extracts each `/dist/` named import, and asserts the built module exports it.
+Skipped when `dist/` is absent, matching the other `dist-*` tests. Red-checked
+against the removed export.
+
+`tests/examples/html-example-globals.test.ts` covers the other shape: the
+`<script>`-tag pages that call `VaporChamber.*` off an IIFE bundle. That is a
+distinct risk — a missing named import is a load-time module error, but a
+missing global is just `undefined`, so the page loads fine and dies later at
+`VaporChamber.persist is not a function`, in a browser nobody runs during CI.
+The risk is live: `persist` ships in **full** and is absent from **core** and
+**elements** (measured by executing the real bundles, not by regex). The gate
+executes each bundle and checks the names the page actually references, and
+strips HTML comments first so documented CDN alternatives are not counted as
+real loads.
+
+### Fixed — `pattern-1-blade-cdn.html` loaded a path that pointed above the repo
+
+It sits at the top of `examples/` but loaded `../../dist/…`, which from there
+resolves *outside* the repository. It only worked because browsers clamp excess
+`..` to the origin root; every sibling page uses root-absolute `/dist/…`. Now
+`/dist/…`, verified live under `examples/static-server.mjs`: `VaporChamber`
+present with `createApp`/`connect`/`http`/`persist`, and the persisted cart
+count restored from localStorage. Found by the gate above, which is the point
+of having it.
+
+### Added — `scripts/stamp-docs.mjs`, so derived values in docs cannot drift
+
+The CDN snippets carried `vapor-chamber@1.9` in five places and `@1.12` in two
+while `package.json` said 1.14.0 — and nothing noticed, because a stale doc is
+invisible to a test suite; it only misleads the person copying it. All seven are
+now the placeholder `vapor-chamber@<version>`, which is the honest form before a
+release: a literal number would 404 for a reader, since 1.14.0 is not published.
+
+The pins are also gated two ways now. `tests/examples/no-stale-version-pins.test.ts`
+allows a literal pin *only* when it equals `package.json` — not "no pins
+allowed", which would just be worked around; the rule that holds is that a
+version written down must be THE version.
+
+And `scripts/stamp-docs.mjs` generalises it: begin/end HTML-comment markers whose
+contents this script owns and rewrites from the source of truth.
+
+    <!-- vc:vueAligned -->3.6.0-rc.4<!-- /vc:vueAligned -->
+
+Comment-shaped, so the same marker works in Markdown and in the plain-HTML
+examples and renders as nothing on GitHub. Three README sites that had gone
+stale before now read their value from the `vue` devDependency — i.e. the
+version the suite actually ran against, which is the only thing a doc can
+honestly claim. `--check` is chained into `lint:check` beside
+`check-env-guards.mjs`, so it is enforced rather than optional; `npm run
+docs:stamp` rewrites, `npm run docs:check` verifies.
+
+This is a port of the marker idea from `sigilmd` (same author as this project),
+owned in-repo and changed in one respect that matters: sigilmd takes its values
+from a hand-written table inside the document, which makes the document the
+source of truth — the exact failure mode above. Here the values are read from
+`package.json`, so the only way to change what a doc says is to change the thing
+it describes. Ported rather than depended on because this repo is not a git
+checkout (the GitHub Action form cannot run here), and Perl is an odd dependency
+for a TypeScript library's toolchain.
+
+Round-tripped: seeding a stale marker makes `--check` exit 1 naming every site,
+`docs:stamp` fixes them, and the file returns byte-identical.
+
+### Added — `tests/vapor-composables-fixture.test.ts`
+
+Eight public composables had never executed inside a real Vapor component; the
+suite reached them under VDOM, a bare `effectScope()`, or no scope at all. Each
+now runs inside a real `createVaporApp`, pinning that it works there and — the
+load-bearing part — that `tryAutoCleanup()` genuinely disposes its bus
+subscription when the Vapor component unmounts. That property was assumed for
+several releases and is now verified.
+
+### Fixed — two drifted perf numbers in source comments
+
+Audited the speed/pattern claims in `src/` against rc.4 rather than trusting
+them. Most hold; two had drifted, and both are comments that justify a design
+decision, so a stale magnitude there is load-bearing.
+
+- **`command-bus.ts` `uid()`** claimed "~30–50ns per call vs ~1–2µs for
+  `crypto.randomUUID()`". Re-measured on Node 24 (`hrtime` medians, 21×200k
+  reps): **~12ns vs ~104ns, a ~8x gap, not the 20–60x implied.** Modern V8/Node
+  batch UUID entropy, so `randomUUID` got roughly 10x cheaper while the counter
+  stayed where it was. The default is unchanged and still correct — 8x cheaper
+  and no syscall — but the comment now states the measured figures *and the
+  runtime they came from*, since an unqualified ns number is exactly what let
+  this go unnoticed.
+- **`chamber.ts` shallowRef-over-`ref`** claimed "array-state
+  `useCommandState` ~3.4x faster, scalar signals ~1.2x". Re-run of the repo's
+  own `tests/signal-shallow-ab.test.ts` on rc.4: array **+238% (3.38x)** and
+  **+210% (3.10x)**, scalar **+54% (1.54x)**. The headline array figure
+  reproduces exactly; the scalar one was conservative. The comment now also
+  records which harness to use — a raw `shallowRef`-vs-`ref` loop measures a
+  *different* phenomenon and inverts the result, because `ref(primitive)` never
+  builds a proxy.
+
+Verified and left alone: the `process.env` interceptor cost in
+`command-bus.ts` (claimed ~150ns, measured **139ns**) and `directives.ts`'
+`.delegate` trade (claimed ~1.3x slower, this cycle's bench: **1.39x**).
+Not re-verified, and flagged rather than restated: the several "shared-call
+indirection ~1% slower" notes sit below this host's noise floor (~1.5–4% on
+tight loops), so a single-host run can neither confirm nor refute them; and
+`vue.ts`' "namespace import = 3× bundle size on the vapor-sfc example", which
+needs a second example build to re-check.
+
+### Fixed — corrections to the findings themselves
+
+- `tests/keepalive-pause-fixture.test.ts` (the rc.3 fixture) keeps its
+  conclusion but gains a stated limit: it is a bare-`effectScope()` stand-in for
+  a KeepAlive deactivation, so it never calls `tryKeepAliveHooks` and was
+  structurally unable to see that the guard it defended was never armed under
+  Vapor. Both files stay — one isolates the mechanism, the other proves the
+  wiring.
+- `docs/router.md`'s `tryKeepAliveHooks` section gets a second correction on top
+  of the rc.3 one: the guard should indeed stay, but the claim that it was doing
+  its job was only true under VDOM.
+- The rc.3 alignment row's "KeepAlive scopes are now paused while deactivated"
+  describes a mechanism rc.4 replaced — #15293 moves raw prop/slot commit
+  effects into a per-instance `inputScope` that `activate()`/`deactivate()`
+  resume/pause, leaving the branch-scope pause to branch-owned effects. Recorded
+  in the rc.4 row rather than by editing the rc.3 one.
+- **The bus over-tracking item was mis-classified, and is now re-classified.** It
+  has been carried as *blocked* on `setActiveSub` not being exported. Both halves
+  of that were wrong. Availability was never the constraint —
+  `pauseTracking`/`resetTracking` are the same mechanism `setActiveSub`
+  implements and are typed public API in rc.4, which is exactly what
+  `untracked()` already uses. (`setActiveSub` itself is still JS-only, absent
+  from the `.d.ts` of both packages in rc.3 and rc.4 — checked against the
+  published rc.3 tarball — but it no longer decides anything.) And the real
+  reason it is not the default is **cost**: measured on rc.4, interleaved,
+  20k dispatches, a bare `bus.dispatch()` is **35.9 ns** and the same dispatch
+  wrapped in `pauseTracking`/`resetTracking` is **111 ns — 3.1x, +75.4 ns each**.
+  So it is declined on measurement, and would be declined identically if
+  `setActiveSub` shipped typed tomorrow. What ships stays: composables route
+  through `untracked()`, where the guard rides on work already doing signal
+  writes; the bare bus pays nothing. A *direct* `bus.dispatch()` from inside a
+  reactive effect remains a documented boundary, not a bug awaiting an API.
+- **The whitepaper's §9.3 contradicted the whitepaper's own §9 alignment log.**
+  §9.3 stated that `onUnmounted()` "will silently fail in a `<script setup
+  vapor>` block". Measured on rc.4 in a real `defineVaporComponent`, all of
+  `onMounted`, `onBeforeUnmount`, `onScopeDispose` and `onUnmounted` fire, in
+  exactly that order — which is the vDOM-aligned sequence rc.3's #15262 landed
+  and which the rc.3 row of the alignment log **already recorded**. Two sections
+  of one document disagreeing, one of them measurably wrong.
+  The `getCurrentInstance()` half of the claim is correct and stays; only the
+  `onUnmounted()` half was false. `onScopeDispose` remains the right choice, now
+  justified by what it does (works in `setup()`, a bare `effectScope()`, Vapor
+  and SSR alike) rather than by a broken alternative.
+- **§9.3 also described a fallback that does not exist.** It claimed
+  `tryAutoCleanup()` "tries `onScopeDispose` first, then `onUnmounted` as
+  fallback". There is no `onUnmounted` fallback — it was removed once
+  `getCurrentScope()` made the try/catch unnecessary, since inside any `setup()`
+  a scope is always present. The doc had outlived the code by several releases.
+- Worth stating plainly, since it is the shape of this whole cycle: §9.3
+  documented the `getCurrentInstance()` hazard **correctly, and before the code
+  obeyed it** — `tryKeepAliveHooks` violated the project's own written invariant
+  until this release. A documented invariant is not an enforced one, which is
+  why the fix ships with a fixture rather than a note.
+- **`ROADMAP.md` contradicted itself for two cycles.** Its contributing section
+  named the build-flag wrapper-elimination work "the single biggest pending
+  change… blocked on Vue 3.6 RC", while the body of the same file recorded that
+  apparatus as **withdrawn at rc.3** (`configureVue()` replaced it; the
+  `__VAPOR_NATIVE__` define, second build and `vue36` condition withdrawn, not
+  deferred). Both halves were dead — the plan and the RC gate it waited on.
+  Corrected to point at the rc.3 decision.
+
 ## v1.14.0 — listener disposal ergonomics
 
 ### Added — `on()`/`once()`: `{ signal }` and `Symbol.dispose`

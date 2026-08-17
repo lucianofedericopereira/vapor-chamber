@@ -90,7 +90,6 @@ export {
   signal,
   untracked,
   useCommand,
-  useCommandBus,
   useCommandState,
   useSharedCommandState,
   useCommandHistory,

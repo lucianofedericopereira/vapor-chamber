@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  A command bus built for <a href="https://github.com/vuejs/core">Vue Vapor</a> — a ~3.6 KB brotli dispatch core with opt-in batteries, each 0 KB until imported. Vue 3.6.0-rc.3 aligned. LGPL-2.1.
+  A command bus built for <a href="https://github.com/vuejs/core">Vue Vapor</a> — a ~3.6 KB brotli dispatch core with opt-in batteries, each 0 KB until imported. Vue <!-- vc:vueAligned -->3.6.0-rc.4<!-- /vc:vueAligned --> aligned. LGPL-2.1.
 </p>
 
 ---
@@ -41,10 +41,10 @@ A small core, and batteries you only pay for if you import them.
 | **Transports** (opt-in) | HTTP bridge, batching HTTP, WebSocket, SSE, Laravel Echo/Reverb |
 | **Extras** (opt-in, own subpath each) | SSR dehydrate/rehydrate, form bus, HTTP client, streaming JSON parser, schema validation, transitions, devtools, Vite HMR, testing, MCP server, offline outbox |
 
-- **Vue 3.6.0-rc.3 aligned** — signals, `onScopeDispose`, `getCurrentScope`, alien-signals internals; tracked per release in the [CHANGELOG](CHANGELOG.md)
+- **Vue <!-- vc:vueAligned -->3.6.0-rc.4<!-- /vc:vueAligned --> aligned** — signals, `onScopeDispose`, `getCurrentScope`, alien-signals internals; tracked per release in the [CHANGELOG](CHANGELOG.md)
 - **One runtime dependency** (`alien-signals`); unimported modules tree-shake to zero
 - **ESM-only**, plus three IIFE `<script>` drop-ins for no-bundler pages
-- **1491 tests** across 92 files · 97.1% statements · 98.3% lines ([full table](docs/COVERAGE.md))
+- **<!-- vc:tests -->1748<!-- /vc:tests --> tests** across <!-- vc:testFiles -->113<!-- /vc:testFiles --> files · <!-- vc:covStatements -->99.9<!-- /vc:covStatements -->% statements · <!-- vc:covLines -->99.9<!-- /vc:covLines -->% lines ([full table](docs/COVERAGE.md))
 
 ## Contents
 
@@ -60,7 +60,7 @@ npm install vapor-chamber        # npm registry (releases may lag the repo)
 npm install github:lucianofedericopereira/vapor-chamber
 ```
 
-**Requirements:** Node ≥22.12. Vue is an **optional** peer dep — ≥3.5 for composables, ≥3.6.0-rc.3
+**Requirements:** Node ≥22.12. Vue is an **optional** peer dep — ≥3.5 for composables, ≥<!-- vc:vueAligned -->3.6.0-rc.4<!-- /vc:vueAligned -->
 for the full Vapor surface. The core bus runs without Vue entirely. Vite ≥5 + `@vitejs/plugin-vue`
 ≥5 only for the `vapor-chamber/vite` HMR plugin and Vapor SFC support.
 
@@ -211,7 +211,7 @@ A Vapor app that never renders an outlet pays nothing for the vDOM runtime. Blad
 import from you — the router pulls `makeBladeComponent` in on demand, as its own chunk, the first
 time it renders one.
 
-**Vapor interop, measured on rc.3** (not inferred from the roadmap): provide/inject works in Vapor
+**Vapor interop, measured on rc.4** (not inferred from the roadmap): provide/inject works in Vapor
 at *both* levels — app-level, which backs every composable, and component-level, which backs nested
 outlet depth. What still ties the outlet to vDOM is its own render path, not an upstream gap.
 
@@ -888,7 +888,6 @@ await parser.stream(await fetch('/api/stream'));
 |---|---|
 | `useCommand()` | You need reactive `loading` / `lastError` |
 | `defineVaporCommand()` | Hot path — zero reactive overhead |
-| `useCommandBus()` | You just need to dispatch |
 | `useCommandState()` | State reduced by commands |
 | `useCommandHistory()` | Reactive undo/redo |
 | `useCommandGroup()` | Namespace isolation across feature modules |
@@ -1170,8 +1169,8 @@ optional and tree-shaken when unimported.
    form.ts · schema.ts · devtools.ts · directives.ts · vite-hmr.ts
 ```
 
-**Coverage:** 97.1% statements · 91.9% branches · 96.8% functions · 98.3% lines across **1491 tests**
-(92 files). The dispatch core is at 100% line + branch + function. Per-file table:
+**Coverage:** <!-- vc:covStatements -->99.9<!-- /vc:covStatements -->% statements · <!-- vc:covBranches -->97.8<!-- /vc:covBranches -->% branches · <!-- vc:covFunctions -->99.6<!-- /vc:covFunctions -->% functions · <!-- vc:covLines -->99.9<!-- /vc:covLines -->% lines across **<!-- vc:tests -->1748<!-- /vc:tests --> tests**
+(<!-- vc:testFiles -->113<!-- /vc:testFiles --> files). The dispatch core is at 100% line + branch + function. Per-file table:
 [docs/COVERAGE.md](docs/COVERAGE.md); run `npm run test:coverage` for live numbers.
 
 ## Testing
@@ -1304,7 +1303,7 @@ app.mount('#app');
 | `useCommandHistory(options?)` | Reactive undo/redo |
 | `useCommandGroup(namespace)` | Namespace isolation — prefixes all calls in camelCase |
 | `useCommandError(options?)` | Reactive error boundary for failed dispatches |
-| `useCommandBus()` / `getCommandBus()` | Get the shared bus (composable / plain) |
+| `getCommandBus()` | Get the shared bus |
 | `untracked(fn)` | Run a **raw-bus** dispatch without its handler's reads becoming dependencies of the surrounding effect. The composables above already do this — you only need it when calling `getCommandBus()` directly from inside a `watchEffect` / `computed`. No-op without Vue. **Import from `vapor-chamber/vue`** in a Vue app: from the package root it degrades to a pass-through in a production build |
 | `setCommandBus(bus)` / `resetCommandBus()` | Set / reset the shared bus (useful in tests) |
 | `configureSignal(fn)` | Inject a custom signal factory (auto-detected in Vue 3.6+) |

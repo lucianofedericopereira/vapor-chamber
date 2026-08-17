@@ -490,6 +490,7 @@ version-agnostic, and each new beta is one added row.
 | **rc.2** (Jul) | **compiler-vapor: event delegation flips opt-OUT → opt-IN (#15127, BREAKING).** Compiled `@click` in Vapor SFCs now attaches a direct per-element listener unless the template writes `.delegate` explicitly; `compilerOptions.eventDelegation` is removed entirely (the beta.15 opt-out, #14924, is gone — there's nothing left to opt out of). One internal compiler-vapor codegen fix (#15124 — v-for loop variables no longer collide with runtime-helper names, e.g. `v-for="child in items"` clashing with the `child()` DOM helper). The other 12 fixes are runtime-vapor internals surfaced by testing Vapor against Nuxt: effect-scope not restored to "no scope" after `setCurrentInstance`, freezing a vapor page's watchers on its first vdom→vapor `<Suspense>` navigation (#15141); a vapor block's transition hooks dropped across interop mount/unmount/move, deadlocking a vdom `<Transition mode="out-in">` wrapped around a vapor page (#15133, #15140); prod-only crash when a vapor `setup()` throws under `onErrorCaptured` (#15130); slot anchor missing for interop slot content without SSR fragment markers, e.g. `RouterLink` (#15131); vapor mount/activated hooks and post-render effects not deferred to an owning `<Suspense>` boundary (#15139, #15144); vapor components never hydrating when deferred past the root hydration pass via interop, e.g. `hydrateOnVisible()` (#15132); pending-async-component placeholder position lost across Suspense/KeepAlive (#15147); async setup's re-entry losing instance context, warning `renderEffect called without active EffectScope` (#15129); the "logical child" hydration cache left stale after mismatch-recovery node replacement (#15145); vdom-interop bypassing prop validation entirely (#15111). | **Pass-through for all 13 runtime-vapor/compiler-vapor fixes — no lib code change** (every diff read at source, not just titles). `createVaporChamberApp` / `getVaporInteropPlugin` / `defineVapor*` forward Vue's own functions untouched; `rehydrate()` replays commands *above* Vue's DOM hydration; `createTransitionBridge`/`useTransitionCommand` only supply hook bodies Vue calls into; `tryAutoCleanup()` calls the public `getCurrentScope()`/`onScopeDispose()` pair, never the internal restore path #15141 fixed. Confirmed no example's `v-for` variable collides with a compiler-vapor helper name (#15124 N/A here). Two real, non-theoretical unblocks worth knowing even though no code changed: a vdom `<Transition mode="out-in">` around a vapor page no longer deadlocks (#15133/#15140 — relevant to anyone pairing `useTransitionCommand` with page-level transitions, Nuxt-style), and a first vdom→vapor `<Suspense>` navigation no longer kills that page's watchers (#15141 — any composable here called from such a page's `setup()` was swept into that teardown with no userland workaround possible). **LIB-SIDE, inspired by studying #15127 rather than required by it:** `v-vc:command` gains its own opt-in `.delegate` modifier (`src/directives.ts`) — one shared document-level listener instead of one per element, mirroring Vue's exact opt-in trade-off (an ancestor's `.stop` can pre-empt a delegated descendant) and its incompatibility with `.capture`/`.once`/`.passive` (dev-warns, falls back to direct). **Measured, not assumed** (`tests/perf.bench.ts`, 5k elements): delegate mode is **~1.3x slower to mount+unmount**, not faster — correcting an initial assumption. Its real payoff is standing listener count (1 vs N) for large, mostly-static lists, so it's documented as a memory trade, not a speed one; `examples/vapor-island-cart`'s 3-item product list is left as plain `@click` (nothing to win at that size) with a comment explaining when to reach for `.delegate` instead. Verified against rc.2: `tsc` clean, **1259/1259** tests pass (71/71 files, coverage 95.86/88.92/96.88/97.36 stmt/branch/fn/line, all above the floors — which are lines 95 / functions 94 / branches 86 / statements 93, i.e. `vitest.config.ts` declaration order, NOT the stmt/branch/fn/line order these four numbers are printed in), lint clean, IIFE 10.8/7.5/8.0 KB brotli (unchanged from rc.1 within rounding). |
 
 | **rc.3** (Aug) | 36 commits, all read at source. **KeepAlive is the theme** (6): cached component props and dynamic slots isolated behind a commit boundary so a cached child stops observing transient parent values (#15251, closing #15228); branch removal deferred until cache pruning (#15189); leaving cache entries unmounted from their real parent (#15190); updates deferred while async setup is pending (#15172); interop entries fully pruned at `max` (#15181); and KeepAlive scopes now **paused** while deactivated (closing #15237). **Custom directives** hardened in three places: compiler wraps the value in parens (#15258), async component roots treated as pending rather than warned about (#15167), fragment roots re-applied via a detached scope (#15158). **v-show stops over-tracking** twice — transition hooks (#15203) and the source inside fragment effects (#15204) — both by running callbacks with tracking disabled. **App unmount lifecycle aligned with vDOM** (#15262): `onBeforeUnmount` → `onScopeDispose` → `onUnmounted`, children before parents. Plus vDOM slot content in `<Transition>` (#15159), teleport target cleanup on scope disposal (#15236), interop prop normalization (#15254), class-prop normalization (#15227), functional-component root bindings, 4 async-hydration fixes, 6 slot-fallback/hydration fixes, and 2 type-only fixes. | **Pass-through for the runtime fixes** — no wrapper change. But the read surfaced two things the lib had wrong, both now corrected with fixtures rather than argument. (1) **Custom directives are NOT VDOM-only.** `withVaporDirectives` is a public export shipping since **3.6.0-alpha.3** (verified by unpacking published dists alpha.3 → rc.3); rc.3 only hardened it. Four places in this repo asserted the opposite, including a runtime `console.warn`. What genuinely blocks `v-vc:command` is the *shape* — Vapor directives are `(el, value, arg, mods) => cleanup` with **no `updated` hook** — not upstream policy. Fixture: `tests/vapor-directives-fixture.test.ts`. (2) **The `tryKeepAliveHooks` removal note was wrong.** `docs/router.md` said #15237 landing would make it double-suppression; measured, Vue pauses *effects*, while that guard protects a `bus.onAfter` callback the bus invokes directly, which still fires under a paused scope. Guard kept, note corrected. Fixture: `tests/keepalive-pause-fixture.test.ts`. **Technique logged, then applied:** #15203/#15204 run callbacks with tracking disabled (`setActiveSub`) — the bus has the same exposure (a `dispatch()` from inside an effect leaks the *handler's* reads into the caller's dependency set, reproduced). `setActiveSub` is not on the `vue` entry, but `pauseTracking`/`resetTracking` are exported by `@vue/reactivity`, which resolves to the same module instance; `untracked()` is built on those and every composable routes its dispatch through it. Getting them at BUILD time rather than through a runtime probe is what `vapor-chamber/vue` exists for — see §11.6. **Lib-side this cycle:** Vapor detection gains an owned global slot + `configureVue()` — see §11.6. Verified against rc.3: `tsc` clean, **1491/1491** tests (92 files). |
+| **rc.4** (Aug 14) | 12 commits, all read at source. **v-for item scopes reworked** (3): every item — component-shaped included — gets its own `EffectScope` again and is stopped on unmount (`7db1454`, reversing the beta.14-era "the component already has a scope, skip the outer one" rationale); component items are structurally **removed before** their scope stops, so item cleanups such as template refs observe a detached node (`aac355d`); and the `IS_COMPONENT` flag is re-documented upstream as "requires component teardown ordering", not "owns its own scope". **Prop-source caches re-scoped** (2): a `computed` cache created by a parent-owned prop source is collected in the *consuming* scope (`22b9b41`), then narrowed again to the active consumer via `getCurrentScope()` (`e8a09b3`), so a v-for fallback that renders a plain DOM node stops accumulating caches on the owner. **KeepAlive input isolation moved off the branch scope** (#15293): raw prop/slot commit effects now live in a per-instance `inputScope` that `activate()`/`deactivate()` resume/pause, leaving the branch-scope pause to branch-owned effects only — a **refinement of the rc.3 row's "KeepAlive scopes are paused while deactivated"**, which described a mechanism Vue no longer uses on this path. Plus: nested-fragment child keys no longer overwritten by an outer wrapper key (#15292, `setBlockKey` gains `overwrite`); declared `style` props normalized like vdom (#15286); `inheritAttrs: false` ownership read from the *parent* type (#15279); dynamic v-for slot state preserved across re-resolution (#15280, `createForSlots` becomes a keyed, ref-reusing factory — a compile-time signature change); merged event handlers keep their modifiers (#15265); component root propagated through `<Transition>` so fallthrough class/style merge at the root (#15275); redundant transition block resolution skipped when no v-shows are pending (#15272). | **Pass-through for all 12 — no wrapper change**, and three verified N/A rather than assumed: we declare no `inheritAttrs`, pass no `style` props, and run no DOM-connectivity check in a cleanup, so #15279 / #15286 / `aac355d`'s reordering cannot reach us. The v-for scope rework sits below `tryAutoCleanup()`, which calls the public `getCurrentScope()`/`onScopeDispose()` pair and is indifferent to how many scopes are nested above it. `createForSlots` is compiler output; the Vapor SFC examples inherit it by recompiling. **But reading #15293 found a real bug of ours, and it is the only reason this cycle has code in it.** `tryKeepAliveHooks` gated itself on `getCurrentInstance()`, which reads *VDOM's* `currentInstance` — measured on rc.4, that returns null inside `defineVaporComponent({ setup() })` while an `onDeactivated()` registered at the same point works and fires. So the KeepAlive pause/resume in `useCommandHistory` / `useCommandError` was **inert in every Vapor component** — silently recording commands dispatched into a deactivated view — while working in VDOM, which is why 1508 passing tests never saw it. The rc.3 fixture could not have: a bare `effectScope()` stand-in never calls our guard. Fixed by probing `hasInjectionContext()` (Vue 3.3+ — measured true in Vapor *and* VDOM setup, false in a bare scope), `getCurrentInstance()` kept as the fallback for a partial Vue namespace. Fixture: `tests/keepalive-input-scope-fixture.test.ts`, which drives a real `VaporKeepAlive` and pins both halves — that our guard suppresses recording while deactivated, and that an unguarded `bus.onAfter` at the same site still fires (the fact the whole "not double-suppression" argument rests on). **The bus over-tracking item is re-classified, and this corrects how it was recorded.** It has been carried as *blocked* on `setActiveSub` not being exported. That framing was wrong on both counts. First, availability was never the constraint: `pauseTracking`/`resetTracking` are the same mechanism `setActiveSub` implements, they are **typed public API** in rc.4 (`enableTracking` too), and `untracked()` is already built on them — re-verified that `setActiveSub` itself remains JS-only, absent from the `.d.ts` of both `vue` and `@vue/reactivity` in rc.3 and rc.4, but that no longer decides anything. Second, and decisively: making untracking the default costs too much. Measured on rc.4, interleaved A/B, 20k dispatches — a bare `bus.dispatch()` is **35.9 ns**, and the same dispatch wrapped in `pauseTracking`/`resetTracking` is **111 ns: 3.1x, +75.4 ns each**. So the item is not waiting on upstream; it is **declined on cost**, and would be declined identically if `setActiveSub` were exported tomorrow. The design that survives is the one already shipped: composables route their dispatch through `untracked()`, where the guard rides on work that is already doing signal writes and the relative cost disappears, while the bare bus stays free. The residual exposure — a *direct* `bus.dispatch()` from user code inside a reactive effect — is a documented boundary, not a bug awaiting an API. Verified against rc.4: `tsc` clean, **<!-- vc:testsAll -->1748 + 7<!-- /vc:testsAll -->** tests (<!-- vc:testFilesAll -->114<!-- /vc:testFilesAll --> files across both projects). |
 
 Vapor Chamber auto-detects Vue at module load and wires `signal()` to **`shallowRef()`**, not
 `ref()`. The distinction matters and is easy to get wrong: the alien-signals rewrite changed the
@@ -544,19 +545,39 @@ if (plugin) app.use(plugin)
 
 ### 9.3 Lifecycle cleanup
 
-Composables prefer `onScopeDispose` (Vue 3.5+) over `onUnmounted`. This is critical because
-in Vapor mode, **`getCurrentInstance()` returns `null`** — Vapor components do not have the
-same internal instance structure as VDOM components. Any composable that calls
-`getCurrentInstance()` or `onUnmounted()` will silently fail in a `<script setup vapor>` block.
+Composables use `onScopeDispose` (Vue 3.5+), never `onUnmounted`. The reason is
+`getCurrentInstance()`, and only that:
 
-`onScopeDispose` is the universal hook that works in component `setup()`, `effectScope()`,
-Vapor components, and SSR — it's what Vue's own composables use internally.
+**`getCurrentInstance()` returns `null` inside a Vapor `setup()`** — it reads VDOM's
+`currentInstance`, and a Vapor component is not stored there. Any composable that gates on
+it silently does nothing in a `<script setup vapor>` block. Re-measured on 3.6.0-rc.4 and
+still true; `hasInjectionContext()` is the probe that answers correctly in **both** modes,
+with `getCurrentScope()` for cleanup.
 
-Vapor Chamber v0.6.0 handles this gracefully:
-- `tryAutoCleanup()` tries `onScopeDispose` first, then `onUnmounted` as fallback
-- In development mode, a console warning is emitted when neither scope nor instance is found
-- `useCommand()` is fully Vapor-safe — uses no `getCurrentInstance()` at all
-- `defineVaporCommand()` was already Vapor-safe since v0.4.0
+This section previously extended that to `onUnmounted()`, claiming it "will silently fail"
+in Vapor too. **That is false, measured on rc.4.** In a real `defineVaporComponent`, all of
+`onMounted`, `onBeforeUnmount`, `onScopeDispose` and `onUnmounted` fire, in exactly that
+order — the vDOM-aligned sequence rc.3's #15262 landed, which the rc.3 row of the alignment
+log (§9) already records. The two statements had been contradicting each other in this
+document. `onScopeDispose` is still the right choice, but for a better reason than a broken
+alternative: it is the one hook that works in component `setup()`, a bare `effectScope()`,
+Vapor, and SSR alike, which is why Vue's own composables use it.
+
+How this is actually handled:
+- `tryAutoCleanup()` uses `onScopeDispose` **only** — there is no `onUnmounted` fallback,
+  and this section used to claim there was. It was removed once `getCurrentScope()` made the
+  try/catch unnecessary: inside any `setup()` a scope is always present, so the fallback was
+  unreachable code describing a hazard that no longer existed.
+- In development a console warning fires when no scope is found at all — the composable ran
+  outside `setup()`/`effectScope()`, so its cleanup will not run automatically.
+- `useCommand()` and `defineVaporCommand()` use no `getCurrentInstance()`, and every public
+  composable is now pinned running inside a real mounted Vapor app by
+  `tests/vapor-composables-fixture.test.ts`, including that unmount really disposes.
+
+The rule above was documented here **before** it was followed everywhere: `tryKeepAliveHooks`
+gated on `getCurrentInstance()` until the rc.4 cycle, so KeepAlive pause/resume was inert in
+every Vapor component while this page described the hazard correctly. A documented invariant
+is not an enforced one — that is what the fixture is for.
 
 ### 9.4 Memory: useCommand vs defineVaporCommand
 
@@ -634,7 +655,7 @@ const { latestError, errors, clearErrors } = useCommandError({
 })
 
 // Direct bus access
-const bus = useCommandBus()
+const bus = getCommandBus()
 ```
 
 ### 10.2 When to use which
@@ -643,7 +664,7 @@ const bus = useCommandBus()
 |------------|-----------------|----------|
 | `useCommand()` | `loading`, `lastError` | UI-bound dispatch + register/on/emit — Vapor-safe |
 | `defineVaporCommand()` | None | Fire-and-forget (analytics, scroll, search) |
-| `useCommandBus()` | None | Direct bus access, no state tracking |
+| `getCommandBus()` | None | Direct bus access, no state tracking |
 | `useCommandGroup()` | None | Feature namespace isolation |
 | `useCommandError()` | `errors`, `latestError` | Component-scoped error display |
 | `useCommandState()` | `state` | Reducer-based reactive state |
@@ -822,7 +843,7 @@ The Blade example below uses **core** with the `connect()` one-liner — the
 audience-specific helper that wires HTTP + CSRF in a single call:
 
 ```html
-<script src="https://cdn.jsdelivr.net/npm/vapor-chamber@1.9/dist/vapor-chamber-core.iife.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vapor-chamber@<version>/dist/vapor-chamber-core.iife.min.js"></script>
 <script>
 const { dispatch } = VaporChamber.connect({ endpoint: '/api/vc' });
 
@@ -867,7 +888,7 @@ globals, and cannot be raced:
 ```html
 <script type="module">
   import * as Vue from 'https://cdn.jsdelivr.net/npm/vue@3.6/dist/vue.runtime-with-vapor.esm-browser.prod.js';
-  import { configureVue } from 'https://cdn.jsdelivr.net/npm/vapor-chamber@1.12/dist/index.js';
+  import { configureVue } from 'https://cdn.jsdelivr.net/npm/vapor-chamber@<version>/dist/index.js';
   configureVue(Vue);
 </script>
 ```
@@ -880,7 +901,7 @@ For the `<script>`-tag/IIFE shape, assign the namespace to
   import * as Vue from 'https://cdn.jsdelivr.net/npm/vue@3.6/dist/vue.runtime-with-vapor.esm-browser.prod.js';
   window.__VAPOR_CHAMBER_VUE__ = Vue;
 </script>
-<script src="https://cdn.jsdelivr.net/npm/vapor-chamber@1.12/dist/vapor-chamber-core.iife.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vapor-chamber@<version>/dist/vapor-chamber-core.iife.min.js"></script>
 ```
 
 **Why not `window.__VUE__`, which earlier versions of this section recommended.**
@@ -1337,7 +1358,7 @@ src/
   command-bus.ts    — core sync/async bus, plugin pipeline, BusError, inspectBus, types
   chamber.ts        — signal probe, shared bus, tryAutoCleanup, useCommand,
                       useCommandState, useCommandHistory, useCommandGroup,
-                      useCommandError, useCommandBus
+                      useCommandError
   chamber-vapor.ts  — createVaporChamberApp, getVaporInteropPlugin,
                       defineVaporCommand, useVaporAsyncCommand
   fast-lane.ts      — createFastLane (minimal-allocation single-handler hot dispatcher)
@@ -1368,7 +1389,7 @@ src/
   iife-elements.ts  — CDN entry, elements variant
   index.ts          — public ESM barrel
 
-tests/                           (92 files, 1,491 tests)
+tests/                           (<!-- vc:testFiles -->113<!-- /vc:testFiles --> files, <!-- vc:tests -->1748<!-- /vc:tests --> tests)
 ```
 
 The per-file test inventory that used to sit here has been removed rather than

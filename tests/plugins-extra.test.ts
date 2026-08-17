@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, } from 'vitest';
-import { createCommandBus } from '../src/command-bus';
+import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { cache, circuitBreaker, rateLimit, metrics } from '../src/plugins-extra';
 
 // ---------------------------------------------------------------------------
@@ -371,5 +371,108 @@ describe('metrics', () => {
 
     expect(m.entries()).toHaveLength(1);
     expect(m.entries()[0].action).toBe('tracked');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// cache — custom key, async results, and invalidation edges
+// ---------------------------------------------------------------------------
+
+describe('cache — key derivation and invalidation', () => {
+  it('uses a supplied key() instead of commandKey', () => {
+    const bus = createCommandBus();
+    const handler = vi.fn((cmd: any) => cmd.target.id);
+    bus.register('getUser', handler);
+    // Keyed by id ONLY, so two different targets that share an id are one entry.
+    bus.use(cache({ ttl: 60_000, key: (cmd: any) => `u:${cmd.target.id}` }));
+
+    bus.query('getUser', { id: 1, extra: 'a' });
+    bus.query('getUser', { id: 1, extra: 'b' });
+
+    expect(handler).toHaveBeenCalledTimes(1); // second call hit the custom key
+  });
+
+  it('warns that invalidate(action, target) cannot address custom-key entries', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const bus = createCommandBus();
+    bus.register('getUser', (cmd: any) => cmd.target.id);
+    const c = cache({ ttl: 60_000, key: (cmd: any) => `u:${cmd.target.id}` });
+    bus.use(c);
+
+    bus.query('getUser', { id: 1 });
+    expect(c.size()).toBe(1);
+
+    // A custom key may depend on the payload, so (action, target) is not enough
+    // to recompute it. Saying so beats deleting nothing quietly.
+    c.invalidate('getUser', { id: 1 });
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('cannot address entries stored'));
+
+    // Action-wide invalidation is index-driven and still works for any key shape.
+    c.invalidate('getUser');
+    expect(c.size()).toBe(0);
+    warn.mockRestore();
+  });
+
+  it('invalidating an action with nothing cached is a no-op', () => {
+    const c = cache({ ttl: 60_000 });
+    expect(() => c.invalidate('neverCached')).not.toThrow();
+    expect(c.size()).toBe(0);
+  });
+
+  it('drops the action index once its last key is invalidated', () => {
+    const bus = createCommandBus();
+    bus.register('getUser', (cmd: any) => cmd.target.id);
+    const c = cache({ ttl: 60_000 });
+    bus.use(c);
+
+    bus.query('getUser', { id: 1 });
+    bus.query('getUser', { id: 2 });
+    expect(c.size()).toBe(2);
+
+    c.invalidate('getUser', { id: 1 });
+    expect(c.size()).toBe(1);
+    // Removing the last one must also drop the empty action bucket, or the
+    // index grows forever with sets nobody reads.
+    c.invalidate('getUser', { id: 2 });
+    expect(c.size()).toBe(0);
+  });
+});
+
+describe('cache — async bus', () => {
+  it('caches a resolved async result and serves the next call from it', async () => {
+    const bus = createAsyncCommandBus();
+    const handler = vi.fn(async (cmd: any) => cmd.target.id * 2);
+    bus.register('getUser', handler);
+    bus.use(cache({ ttl: 60_000 }));
+
+    const first = await bus.query('getUser', { id: 21 });
+    expect(first.value).toBe(42);
+
+    const second = await bus.query('getUser', { id: 21 });
+    expect(second.value).toBe(42);
+    // The plugin has to await the promise before storing, or the cache holds a
+    // pending thenable and every later hit returns something unresolved.
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not cache a rejected async result', async () => {
+    const bus = createAsyncCommandBus();
+    let fail = true;
+    const handler = vi.fn(async () => {
+      if (fail) throw new Error('upstream down');
+      return 'recovered';
+    });
+    bus.register('getUser', handler);
+    bus.use(cache({ ttl: 60_000 }));
+
+    const bad = await bus.query('getUser', { id: 1 });
+    expect(bad.ok).toBe(false);
+
+    // Caching a failure would pin the outage for the whole ttl.
+    fail = false;
+    const good = await bus.query('getUser', { id: 1 });
+    expect(good.ok).toBe(true);
+    expect(good.value).toBe('recovered');
+    expect(handler).toHaveBeenCalledTimes(2);
   });
 });

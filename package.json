@@ -1,6 +1,6 @@
 {
   "name": "vapor-chamber",
-  "version": "1.14.0",
+  "version": "1.15.0",
   "description": "Lightweight command bus for Vue Vapor - plugins, hooks, undo/redo, Vue 3.6 Vapor aligned",
   "type": "module",
   "main": "./dist/index.js",
@@ -142,12 +142,16 @@
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.typecheck.json && tsc -p examples/tsconfig.patterns.json",
     "lint": "biome check --write src tests scripts",
-    "lint:check": "biome check src tests scripts && node scripts/check-env-guards.mjs",
-    "test": "vitest run",
+    "lint:check": "biome check src tests scripts && node scripts/check-env-guards.mjs && node scripts/stamp-docs.mjs --check",
+    "docs:stamp": "node scripts/stamp-docs.mjs",
+    "docs:check": "node scripts/stamp-docs.mjs --check",
+    "test": "vitest run && vitest run -c vitest.vapor.config.ts",
+    "test:vapor": "vitest run -c vitest.vapor.config.ts",
     "test:run": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "bench": "vitest bench --run tests/perf.bench.ts",
+    "ab:vue": "node scripts/ab-vue.mjs",
     "size:check": "node scripts/check-size.mjs",
     "size": "node scripts/measure-size.mjs",
     "size:doc": "node scripts/measure-size.mjs --md > docs/BUNDLE-SIZES.md",
@@ -191,9 +195,9 @@
   "peerDependencies": {
     "@vitejs/plugin-vue": ">=5.0.0",
     "@vue/devtools-api": ">=6.0.0",
+    "@vue/reactivity": ">=3.5.0 || >=3.6.0-rc.4",
     "vite": ">=5.0.0",
-    "vue": ">=3.5.0 || >=3.6.0-rc.3",
-    "@vue/reactivity": ">=3.5.0 || >=3.6.0-rc.3"
+    "vue": ">=3.5.0 || >=3.6.0-rc.4"
   },
   "peerDependenciesMeta": {
     "vue": {
@@ -220,7 +224,7 @@
     "@types/node": "^26.2.0",
     "@vitest/coverage-v8": "^4.1.9",
     "@vue/devtools-api": "^8.1.5",
-    "@vue/reactivity": "^3.6.0-rc.3",
+    "@vue/reactivity": "^3.6.0-rc.4",
     "esbuild": "^0.28.2",
     "eventemitter3": "^5.0.4",
     "happy-dom": "^20.11.2",
@@ -232,7 +236,7 @@
     "typescript": "^6.0.3",
     "vite": "^8.2.1",
     "vitest": "^4.1.9",
-    "vue": "^3.6.0-rc.3"
+    "vue": "^3.6.0-rc.4"
   },
   "engines": {
     "node": ">=22.12.0"

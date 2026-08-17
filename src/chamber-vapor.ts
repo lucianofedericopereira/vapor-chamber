@@ -64,6 +64,30 @@ import {
   vueDetectionHint,
 } from './chamber';
 import type { Handler, RegisterOptions, CommandResult, CommandMap } from './command-bus';
+import { DEV } from './dev';
+
+/**
+ * Why the `defineVapor*` wrappers warn instead of just returning null.
+ *
+ * Each returns `null` when the Vapor runtime is absent, and callers are
+ * documented to check. But a bare `null` is the same failure shape that hid a
+ * real bug for several releases: `tryKeepAliveHooks` guarded on an accessor
+ * that silently answers "no" under Vapor, so a feature was inert with nothing
+ * to see (rc.4 cycle — see tests/keepalive-input-scope-fixture.test.ts). Silent
+ * negatives are how detection bugs survive.
+ *
+ * So the null stays — throwing would break the documented contract and the
+ * tests that assert it — but it is no longer quiet. The call sites gate on
+ * `DEV`, so the whole call (and every byte of message text) folds out of the
+ * production IIFE builds; this helper is then unreferenced and tree-shaken.
+ */
+function devWarnNoVapor(api: string): void {
+  console.warn(
+    `[vapor-chamber] ${api}() returned null — Vue 3.6+ with Vapor mode was not detected, ` +
+      `so the component was NOT created. ${vueDetectionHint()} ` +
+      'For VDOM mode use the matching define* helper from vue instead.',
+  );
+}
 
 /**
  * Create a Vapor app instance with vapor-chamber ready.
@@ -140,7 +164,10 @@ export function getVaporInteropPlugin(): any | null {
  */
 export function defineVaporCustomElement<T = any>(options: object, extraOptions?: object): T | null {
   const fn = getDefineVaporCustomElementFn();
-  if (!fn) return null;
+  if (!fn) {
+    if (DEV) devWarnNoVapor("defineVaporCustomElement");
+    return null;
+  }
   return (extraOptions !== undefined ? fn(options, extraOptions) : fn(options)) as T;
 }
 
@@ -165,7 +192,10 @@ export function defineVaporCustomElement<T = any>(options: object, extraOptions?
  */
 export function defineVaporComponent<T = any>(options: object): T | null {
   const fn = getDefineVaporComponentFn();
-  if (!fn) return null;
+  if (!fn) {
+    if (DEV) devWarnNoVapor("defineVaporComponent");
+    return null;
+  }
   return fn(options) as T;
 }
 
@@ -188,7 +218,10 @@ export function defineVaporAsyncComponent<T = any>(
   loader: (() => Promise<unknown>) | object,
 ): T | null {
   const fn = getDefineVaporAsyncComponentFn();
-  if (!fn) return null;
+  if (!fn) {
+    if (DEV) devWarnNoVapor("defineVaporAsyncComponent");
+    return null;
+  }
   return fn(loader) as T;
 }
 

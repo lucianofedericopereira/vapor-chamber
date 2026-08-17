@@ -6,7 +6,7 @@ Security fixes are backported to:
 
 | Version | Supported          |
 |---------|--------------------|
-| 1.6.x (latest minor) | ✅ active |
+| 1.15.x (latest minor) | ✅ active |
 | earlier 1.x minors   | ✅ critical fixes only |
 | < 1.1   | ❌ no longer maintained |
 

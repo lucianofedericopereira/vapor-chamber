@@ -28,7 +28,7 @@
         copies the IIFE into public/js/. Best default for Blade: no third-party
         origin in your CSP, no CDN outage in your checkout path.
      2. CDN, VERSION-PINNED:
-        <script src="https://cdn.jsdelivr.net/npm/vapor-chamber@1.9/dist/vapor-chamber.iife.min.js"></script>
+        <script src="https://cdn.jsdelivr.net/npm/vapor-chamber@<version>/dist/vapor-chamber.iife.min.js"></script>
      3. CDN, unpinned — `npm/vapor-chamber/...` with no @version. Avoid: it
         resolves to whatever is published *now* and is edge-cached, so the page
         silently changes under you on every release, and it can never be run
@@ -39,7 +39,7 @@
      Local path so this file is runnable today:
        node examples/static-server.mjs
        open http://localhost:3000/examples/pattern-1-blade-cdn.html -->
-<script src="../../dist/vapor-chamber.iife.min.js"></script>
+<script src="/dist/vapor-chamber.iife.min.js"></script>
 <script>
   const { bus, dispatch } = VaporChamber.createApp({
     transport: VaporChamber.http({

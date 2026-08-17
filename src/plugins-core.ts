@@ -246,6 +246,9 @@ export function debounce(
       timers.delete(key);
       const currentNext = latestNext.get(key);
       latestNext.delete(key);
+      /* v8 ignore next -- defensive: latestNext and this timer are set
+         back-to-back and only cleared together (here or in dispose(), which
+         also clears the timer), so a live timer always finds its entry */
       if (currentNext) {
         try { currentNext(); }
         catch (e) { console.error('[vapor-chamber] Debounced execution error:', e); }

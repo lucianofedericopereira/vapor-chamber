@@ -117,16 +117,6 @@ class StringBuffer {
     this.buf[this.len++] = cp;
   }
 
-  pushCodePoint(cp: number): void {
-    if (cp <= 0xffff) {
-      this.push(cp);
-      return;
-    }
-    const adjusted = cp - 0x10000;
-    this.push(0xd800 + (adjusted >> 10));
-    this.push(0xdc00 + (adjusted & 0x3ff));
-  }
-
   flush(): string {
     // Chunked on purpose. `String.fromCharCode.apply` passes the whole buffer
     // as call ARGUMENTS, and engines cap argument counts — V8 throws
@@ -337,7 +327,10 @@ export class StreamParser {
       return;
     }
     if (cp === BACKSLASH) { this.state = S_ESCAPE; return; }
-    this.strBuf.pushCodePoint(cp);
+    // `cp` is a UTF-16 code unit straight from write()'s charCodeAt loop —
+    // never an astral codepoint. Surrogate pairs arrive pre-split as two
+    // units and pass through verbatim; flush() reassembles them.
+    this.strBuf.push(cp);
   }
 
   private handleEscape(cp: number): void {

@@ -164,8 +164,11 @@ function normalizeSchema(schema: BusSchema): BusSchema {
 // Helpers
 // ---------------------------------------------------------------------------
 
-function toProps(fields?: FieldMap): Record<string, { type: string }> {
-  if (!fields) return {};
+// Required, not optional: both call sites below are inside `if (def.target)` /
+// `if (def.payload)`, so the old `fields?` signature carried a `!fields` guard
+// nothing could reach. Typechecked, not assumed — an unguarded caller fails to
+// compile rather than silently returning {}.
+function toProps(fields: FieldMap): Record<string, { type: string }> {
   return Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, { type: v }]));
 }
 

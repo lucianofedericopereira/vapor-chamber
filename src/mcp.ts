@@ -173,7 +173,7 @@ export type McpHandlerOptions = {
  * advertised a version that had not existed for months. A failing test at
  * release time is the cheapest possible checklist.
  */
-export const MCP_SERVER_VERSION = '1.14.0';
+export const MCP_SERVER_VERSION = '1.15.0';
 
 /** Latest MCP protocol revision this handler speaks. */
 const MCP_PROTOCOL_VERSION = '2025-06-18';
@@ -252,7 +252,13 @@ export function createMcpHandler(
     if (typeof name !== 'string' || name.length === 0) {
       return toolResult('tools/call: missing tool name', true);
     }
-    if (!isAllowed(name) || bus.getSchema()[name] === undefined) {
+    // Object.hasOwn, not `schema[name] === undefined`: a plain-object schema
+    // inherits Object.prototype, so `constructor` / `toString` / `__proto__` /
+    // `hasOwnProperty` all read back as defined and passed this gate — names
+    // `tools/list` never advertises (busToMcpTools uses Object.entries) yet
+    // reached bus.dispatch. An MCP client is untrusted by construction; a tool
+    // that is not listed must not be callable.
+    if (!isAllowed(name) || !Object.hasOwn(bus.getSchema(), name)) {
       return toolResult(`Tool "${name}" is unknown or not permitted`, true);
     }
     const target = args?.target ?? {};
@@ -330,6 +336,26 @@ export function createMcpHandler(
 // serveMcpStdio — Node-only newline-delimited stdio transport
 // ---------------------------------------------------------------------------
 
+export type McpStdioOptions = McpHandlerOptions & {
+  /**
+   * Cap on a single line's length (UTF-16 code units) before it is abandoned.
+   * A client that never sends a newline would otherwise grow the read buffer
+   * without bound — same class of input-driven memory guard as the stream
+   * parser's `maxDepth`. On overflow the partial line is dropped, a `-32700`
+   * is written, and input is skipped to the next newline so the stream
+   * resynchronises instead of dying. Default: 1 MiB.
+   */
+  maxLineLength?: number;
+  /**
+   * Cap on concurrently-dispatched messages. Reaching it pauses `stdin` until
+   * in-flight work drains, so a client that pipes thousands of lines cannot
+   * open thousands of simultaneous dispatches. Deliberately NOT 1: MCP clients
+   * legitimately issue parallel tool calls, and serialising them would make
+   * every slow tool block every fast one. Default: 32.
+   */
+  maxInFlight?: number;
+};
+
 /**
  * Serve the bus as an MCP server over stdio (Node only): newline-delimited
  * JSON-RPC 2.0 on `process.stdin` in, `process.stdout` out. This is the
@@ -338,6 +364,16 @@ export function createMcpHandler(
  * Unparseable lines get a JSON-RPC `-32700` parse error; everything else is
  * routed through {@link createMcpHandler}. Returns a `stop()` function that
  * detaches from stdin.
+ *
+ * Two input-driven limits keep a hostile or broken client from growing memory
+ * without bound — see {@link McpStdioOptions.maxLineLength} and
+ * {@link McpStdioOptions.maxInFlight}.
+ *
+ * Replies are written in COMPLETION order, not arrival order: messages are
+ * dispatched concurrently, so a fast tool answers before a slow one issued
+ * earlier. That is deliberate and JSON-RPC-legal — responses may arrive in any
+ * order and `id` correlates them — and it is what keeps one slow tool call from
+ * blocking every reply queued behind it.
  *
  * IMPORTANT: while serving, do not `console.log` to stdout — it would corrupt
  * the protocol stream. Log to stderr instead.
@@ -350,15 +386,51 @@ export function createMcpHandler(
  * const stop = serveMcpStdio(bus, { actions: ['cart*', 'productGet'] });
  * process.on('SIGTERM', stop);
  */
-export function serveMcpStdio(bus: McpBus, options?: McpHandlerOptions): () => void {
+export function serveMcpStdio(bus: McpBus, options?: McpStdioOptions): () => void {
   if (typeof process === 'undefined' || !process.stdin || !process.stdout) {
     throw new Error('[vapor-chamber] serveMcpStdio requires a Node.js environment (process.stdin/stdout)');
   }
+  const { maxLineLength = 1_048_576, maxInFlight = 32 } = options ?? {};
   const handle = createMcpHandler(bus, options);
   const write = (reply: object): void => {
     process.stdout.write(`${JSON.stringify(reply)}\n`);
   };
+
+  let stopped = false;
+  let inFlight = 0;
+  let paused = false;
+
+  /** Pause the source while saturated; resume once the backlog clears. */
+  const applyBackpressure = (): void => {
+    if (stopped) return;
+    if (!paused && inFlight >= maxInFlight) {
+      paused = true;
+      process.stdin.pause();
+    } else if (paused && inFlight < maxInFlight) {
+      paused = false;
+      process.stdin.resume();
+    }
+  };
+
+  const dispatchLine = (parsed: unknown): void => {
+    inFlight++;
+    applyBackpressure();
+    void handle(parsed)
+      // A handler rejection (a bus whose getSchema() throws, say) must not
+      // sink the transport: report it and keep serving.
+      .catch((): object => rpcError(null, -32603, 'Internal error'))
+      .then((reply) => {
+        if (reply !== null && !stopped) write(reply);
+        inFlight--;
+        applyBackpressure();
+      });
+  };
+
   let buffer = '';
+  // True after an over-long line was abandoned: everything up to the next
+  // newline belongs to that line and must be discarded with it.
+  let resyncing = false;
+
   const onData = (chunk: Buffer | string): void => {
     buffer += chunk.toString();
     let newline = buffer.indexOf('\n');
@@ -366,6 +438,10 @@ export function serveMcpStdio(bus: McpBus, options?: McpHandlerOptions): () => v
       const line = buffer.slice(0, newline).trim();
       buffer = buffer.slice(newline + 1);
       newline = buffer.indexOf('\n');
+      if (resyncing) {
+        resyncing = false; // tail of the abandoned line — dropped, stream resynced
+        continue;
+      }
       if (!line) continue;
       let parsed: unknown;
       try {
@@ -374,14 +450,21 @@ export function serveMcpStdio(bus: McpBus, options?: McpHandlerOptions): () => v
         write(rpcError(null, -32700, 'Parse error'));
         continue;
       }
-      void handle(parsed).then((reply) => {
-        if (reply !== null) write(reply);
-      });
+      dispatchLine(parsed);
+    }
+    // No newline in what remains, and it is already over the cap: drop it
+    // rather than buffering an unbounded "line" the client may never end.
+    if (buffer.length > maxLineLength) {
+      buffer = '';
+      resyncing = true;
+      write(rpcError(null, -32700, `Parse error: line exceeds ${maxLineLength} characters`));
     }
   };
+
   process.stdin.on('data', onData);
   process.stdin.resume();
   return () => {
+    stopped = true;
     process.stdin.off('data', onData);
     process.stdin.pause();
   };

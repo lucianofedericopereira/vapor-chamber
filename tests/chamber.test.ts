@@ -307,6 +307,63 @@ describe('useCommandHistory', () => {
     expect(future.value.length).toBe(0);
   });
 
+  it('undo() and redo() are no-ops on empty stacks', () => {
+    const bus = getCommandBus();
+    bus.register('testAction', () => 'done');
+    const { past, future, canUndo, canRedo, undo, redo } = useCommandHistory();
+
+    // Nothing recorded yet — both ends must be safe to call, since UI usually
+    // wires them straight to buttons that exist before any command runs.
+    expect(undo()).toBeUndefined();
+    expect(redo()).toBeUndefined();
+    expect(past.value).toHaveLength(0);
+    expect(future.value).toHaveLength(0);
+    expect(canUndo.value).toBe(false);
+    expect(canRedo.value).toBe(false);
+
+    // With history but nothing undone, redo is still a no-op.
+    bus.dispatch('testAction', { id: 1 });
+    expect(redo()).toBeUndefined();
+    expect(past.value).toHaveLength(1);
+  });
+
+  it('a fresh dispatch after an undo drops the redo stack', () => {
+    const bus = getCommandBus();
+    bus.register('testAction', () => 'done');
+    const { past, future, canRedo, undo } = useCommandHistory();
+
+    bus.dispatch('testAction', { id: 1 });
+    undo();
+    expect(future.value).toHaveLength(1);
+    expect(canRedo.value).toBe(true);
+
+    // Branching away from an undone timeline invalidates the redo path —
+    // the same rule every editor uses.
+    bus.dispatch('testAction', { id: 2 });
+    expect(future.value).toHaveLength(0);
+    expect(canRedo.value).toBe(false);
+    expect(past.value).toHaveLength(1);
+  });
+
+  it('redo does not double-record when the payload cannot carry a marker', () => {
+    const bus = getCommandBus();
+    bus.register('testAction', () => 'done');
+    const { past, future, undo, redo } = useCommandHistory();
+
+    // A PRIMITIVE payload has nowhere to stamp `__origin: 'redo'`, so the
+    // one-shot `expectedRedo` identity fallback is what stops the replayed
+    // dispatch from being recorded as a brand-new command.
+    bus.dispatch('testAction', { id: 1 }, 'primitive-payload' as never);
+    expect(past.value).toHaveLength(1);
+
+    undo();
+    expect(future.value).toHaveLength(1);
+
+    redo();
+    expect(past.value).toHaveLength(1); // not 2
+    expect(future.value).toHaveLength(0);
+  });
+
   it('should clear history', () => {
     const bus = getCommandBus();
     bus.register('testAction', () => 'done');

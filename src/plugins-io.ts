@@ -5,6 +5,7 @@
  */
 
 import { matchesPattern, RETRYABLE_CODES, type Command, type CommandResult, type AsyncPlugin, type Plugin } from './command-bus';
+import { DEV } from './dev';
 
 // ---------------------------------------------------------------------------
 // Retry plugin
@@ -273,7 +274,11 @@ export function sync(
 } {
   const { channel, filter, onReceive } = options;
 
-  if (!busRef?.dispatch) {
+  // DEV-gated: a missing busRef is a call-site mistake fixed at build time, not
+  // a runtime condition the deployed app can recover from. Unlike the persist
+  // validation warning below — which fires on real production state (a stale
+  // payload after a deploy) and therefore stays unconditional.
+  if (DEV && !busRef?.dispatch) {
     console.warn('[vapor-chamber] sync() called without busRef — received messages will not be re-dispatched locally. Pass { dispatch: bus.dispatch } as the second argument.');
   }
 
