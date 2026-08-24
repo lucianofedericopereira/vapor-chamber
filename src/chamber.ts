@@ -27,7 +27,7 @@
  */
 
 import { DEV } from './dev';
-import { createCommandBus, disposeAll, type CommandBus, type AsyncCommandBus, type Command, type CommandResult, type CommandMap, type TargetOf, type PayloadOf, type ResultOf, type Handler, type Plugin, type RegisterOptions, type Listener } from './command-bus';
+import { createCommandBus, disposeAll, _withOrigin, type CommandBus, type AsyncCommandBus, type Command, type CommandResult, type CommandMap, type TargetOf, type PayloadOf, type ResultOf, type Handler, type Plugin, type RegisterOptions, type Listener } from './command-bus';
 import { configureSignal, signal } from './signal';
 
 /**
@@ -105,9 +105,17 @@ function applyVueModule(vue: any): void {
     // errors.value = [...], past.value = [...]) — it never mutates nested fields
     // in place — so shallow tracking is semantically equivalent here while
     // avoiding the per-write proxy cost. Measured on the real dispatch path
-    // (`tests/signal-shallow-ab.test.ts`, re-run on 3.6.0-rc.4): array-state
-    // useCommandState ~3.1-3.4x faster, scalar signals ~1.5x — the array figure
-    // reproduces, the scalar one was written as ~1.2x and is conservative.
+    // (`tests/signal-shallow-ab.test.ts`): array-state useCommandState
+    // ~2.9-3.0x faster, scalar signals ~1.2x. Re-measured on 3.6.0-rc.5, median
+    // of 3 full runs (each itself a median of 5 interleaved reps): array/100
+    // +196%, array/10 +179%, scalar +23%.
+    //
+    // This comment previously claimed "scalar signals ~1.5x", adding that the
+    // ~1.2x in docs/performance.md and the whitepaper "is conservative". That
+    // was backwards: ~1.2x is what reproduces (1.18x / 1.24x / 1.23x across the
+    // three runs) and ~1.5x did not appear once. Quote the runtime with the
+    // number, and prefer the harness's printed table over any figure copied
+    // into prose — including this one.
     // Measure this with that harness, not with a raw shallowRef-vs-ref loop:
     // outside the dispatch path the two invert, because `ref(primitive)` never
     // builds a proxy and the gap there is a different phenomenon. Direct
@@ -655,6 +663,16 @@ export function tryAutoCleanup(disposeFn: () => void): void {
  * partially-supplied Vue namespace that predates it.
  * Pinned by `tests/keepalive-input-scope-fixture.test.ts`.
  *
+ * rc.5 cycle — this is now known to be PERMANENT, not a gap awaiting a fix.
+ * The rc.4 change was made from measurement alone, which left open whether a
+ * later Vue release would make `getCurrentInstance()` answer in Vapor and turn
+ * this gate back into dead weight. It will not: on the Vapor roadmap
+ * (vuejs/core#13687, Jul 20) a Vue core maintainer confirmed the null is
+ * INTENTIONAL, with an internal `useInstanceOption` API kept deliberately
+ * non-public, and reaffirmed in August that Vapor exposes no general-purpose
+ * component instance tree to userland by design. So do not "restore"
+ * an instance-accessor probe here on the theory that it will start working.
+ *
  * @internal — used by composables that manage bus subscriptions.
  */
 export function tryKeepAliveHooks(onPause: () => void, onResume: () => void): void {
@@ -1106,18 +1124,12 @@ export function useCommandHistory(options: {
   let paused = false;
   /** One-shot identity fallback for redos whose primitive payload cannot
    *  carry the `__origin` marker — see redo(). */
-  let expectedRedo: Command | null = null;
 
   const unsubscribe = bus.onAfter((cmd, result) => {
     // `paused` brackets TIME (a KeepAlive deactivation), not one dispatch —
     // that distinction is why it is still a flag here and why redo() no longer
     // uses one. A redo is identified by the marker it dispatched with.
     if (paused || cmd.meta?.origin === 'redo') return;
-    const exp = expectedRedo;
-    if (exp && cmd.action === exp.action && cmd.target === exp.target && cmd.payload === exp.payload) {
-      expectedRedo = null; // one-shot — consumed by the first match
-      return;
-    }
     if (result.ok && (!filter || filter(cmd))) {
       // One allocation: slice drops the oldest only when at cap, push appends.
       const newPast = past.value.slice(past.value.length >= maxSize ? 1 : 0);
@@ -1177,24 +1189,14 @@ export function useCommandHistory(options: {
       // With `__origin: 'redo'` the hook recognises it and skips, so the
       // manual push below is the single write path on both bus types.
       //
-      // A PRIMITIVE payload (string/number/array) cannot carry the marker —
-      // wrapping it would change what the handler receives. For those the
-      // hook falls back to a one-shot identity match (`expectedRedo` below):
-      // same action + same target + same payload reference, consumed on
-      // first hit. Narrower than the marker (an identical concurrent
-      // dispatch settling inside the window could be swallowed instead),
-      // but strictly better than the double-record it replaces.
-      const markable =
-        cmd.payload === null || cmd.payload === undefined ||
-        (typeof cmd.payload === 'object' && !Array.isArray(cmd.payload));
-      const payload = !markable
-        ? cmd.payload
-        : cmd.payload === null || cmd.payload === undefined
-          ? { __origin: 'redo' }
-          : { ...(cmd.payload as object), __origin: 'redo' };
-      if (!markable) expectedRedo = cmd;
+      // `_withOrigin` marks EVERY payload shape, so the primitive case no
+      // longer needs the one-shot identity fallback it used to (`expectedRedo`
+      // — same action/target/payload reference, consumed on first hit), which
+      // could swallow an identical concurrent dispatch. The replay now carries
+      // the caller's original payload by reference: no spread, no allocation,
+      // and the redone command is identical to the one recorded.
       try {
-        bus.dispatch(cmd.action, cmd.target, payload);
+        _withOrigin('redo', () => bus.dispatch(cmd.action, cmd.target, cmd.payload));
       } catch (e) {
         console.error(`[vapor-chamber] Redo dispatch error for "${cmd.action}":`, e);
       }

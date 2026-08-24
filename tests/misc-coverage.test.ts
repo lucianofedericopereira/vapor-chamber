@@ -1,6 +1,6 @@
 /**
- * Focused coverage tests for previously-uncovered branches across several
- * modules. Each block drives one specific uncovered line/branch:
+ * Focused tests for narrow arms across several modules. Each block drives one
+ * specific condition the module's main suite does not reach:
  *
  *   - observable.ts:88            — double unsubscribe early-return
  *   - plugins-schema.ts:185-186   — validateSchemasAsync "warn" mode passthrough

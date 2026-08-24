@@ -2,40 +2,18 @@
  * vapor-chamber — Transition integration
  *
  * Vue alignment history (one line per version — full per-item detail lives in
- * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table, the single
- * source of per-beta detail; this header only records changes to THIS file):
- *   vNext / rc.2 — pass-through, but unblocks a real prior failure mode. #15133 and
- *            #15140 fix the vdom-interop layer losing a vapor block's `vnode.transition`
- *            across mount/unmount/move — concretely, a vdom `<Transition mode="out-in">`
- *            wrapped around a vapor page (the Nuxt `NuxtPage` + page-transition shape)
- *            could deadlock entirely: the leaving page never resolved and the incoming
- *            one never mounted, because `afterLeave` — the hook this bridge's onLeave
- *            forwards to your handler — was never invoked. This module only supplies the
- *            hook bodies Vue calls into; it never reads or writes `vnode.transition`
- *            itself, so there was no workaround available at this layer and none needed
- *            now. If `useTransitionCommand`'s onLeave previously seemed to "hang" around
- *            a vapor page under an out-in transition, that was this bug, not a dispatch
- *            issue — no code change here, but worth knowing the class of report is closed
- *            upstream, not something to keep working around in app code.
- *   vNext / beta.17 — pass-through. No <Transition>/<TransitionGroup> change in beta.17 (its
- *            fixes are slot compilation, interop slot ownership, and hydration); the bridge forwards
- *            whatever hooks Vue fires, unchanged. No code change.
- *   vNext / beta.16 — pass-through. Inherited correctness: onLeave now fires for a
- *            non-v-show root removed after a v-show branch (Vue stopped `persisted`
- *            leaking onto non-v-show roots — the *Leave dispatch was being dropped).
- *            onLeave() JSDoc updated below. Five other transition fixes (re-resolve
- *            hooks on prop change, type-bucketed leaving cache, raw-key compare,
- *            out-in branch-key sync) are internal DOM correctness — hooks unchanged.
- *   v1.6.0 / beta.15 — pass-through (transition-group hook restore after skipped
- *            move, key inheritance/stability, v-if comments, v-show timing).
- *            onMove() JSDoc updated below — behavior notes live on the API.
- *   v1.5.0 / beta.14 — pass-through (onMove suppressed for v-show-hidden children;
- *            see onMove() JSDoc).
- *   v1.4.0 / beta.13 — pass-through (onMove fires for Vapor+VDOM component moves,
- *            deferred until child updates flush; see onMove() JSDoc).
+ * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table):
+ *   rc.5 — pass-through; the only module rc.5 reaches at all (TransitionGroup
+ *          internals). Idempotent here by construction — see `buildHooks`.
+ *   rc.2 — pass-through; unblocks a prior failure mode (#15133).
+ *   beta.17 / beta.16 — pass-through; beta.16 brings inherited onLeave correctness.
+ *   v1.6.0 / beta.15 — pass-through (transition-group hook restore, key stability).
+ *   v1.5.0 / beta.14 — pass-through (onMove suppressed for v-show-hidden children).
+ *   v1.4.0 / beta.13 — pass-through (onMove for Vapor+VDOM component moves).
+ *          Behaviour notes for all three live on the onMove() JSDoc, not here.
  *   v1.1.0 — module added: dispatches bus commands from <Transition> /
- *            <TransitionGroup> lifecycle hooks, enabling animation coordination
- *            through the command bus without direct DOM coupling.
+ *          <TransitionGroup> lifecycle hooks, enabling animation coordination
+ *          through the command bus without direct DOM coupling.
  *
  * Two entry points:
  *   createTransitionBridge — framework-agnostic factory (accepts BaseBus)
@@ -239,6 +217,59 @@ function buildHooks(
 }
 
 // ---------------------------------------------------------------------------
+// Internal: assemble the returned bridge
+// ---------------------------------------------------------------------------
+
+/**
+ * Return the nine hooks as ENUMERABLE own keys, and `phase` / `dispose` as
+ * NON-ENUMERABLE ones.
+ *
+ * This exists because of the usage this module documents and the README
+ * repeats: `<Transition v-bind="t">`. `v-bind="obj"` spreads an object's own
+ * ENUMERABLE keys into the component's props. Vue matches the nine `on*` hooks
+ * to `<Transition>`'s declared props and passes the rest through as
+ * fallthrough ATTRIBUTES, which are stringified onto the transitioned element.
+ * `phase` (a signal object) and `dispose` (a function) match no declared prop,
+ * so both landed in the DOM. Measured before this change, on a real mounted
+ * `<Transition v-bind="bridge">`:
+ *
+ *     <div class="panel" phase="[object Object]" dispose="() => {}">hi</div>
+ *
+ * Shipped that way since v1.1.0. Every existing test called the hooks directly
+ * on a mock element, so nothing ever rendered the bridge and nothing saw it —
+ * the same shape of blind spot as the rc.4 KeepAlive bug, where a stand-in
+ * fixture could only check the half already understood. The regression test is
+ * therefore a REAL mount, not another direct call.
+ *
+ * Non-enumerability is the minimal fix: it changes what SPREADING the bridge
+ * yields, and nothing else. `t.phase.value`, `t.dispose()` and
+ * `const { phase } = t` all read the property directly and are unaffected —
+ * destructuring does not require enumerability. The one intentional casualty is
+ * `{ ...bridge }`, which no longer carries `phase`/`dispose`; that is precisely
+ * the operation that was putting them in the DOM.
+ *
+ * Not solved by renaming or by a `hooks` sub-object: both would break the
+ * documented `v-bind="t"` call site, and the point is to make the documented
+ * call site correct rather than to document around it.
+ */
+function assembleBridge(
+  hooks: TransitionHooks,
+  phase: Signal<TransitionPhase>,
+  dispose: () => void,
+): TransitionBridge {
+  const bridge = { ...hooks } as TransitionBridge;
+  // writable/configurable stay true: this hides them from spreads, it does not
+  // freeze the object. Callers that reassign or re-define keep working.
+  Object.defineProperty(bridge, 'phase', {
+    value: phase, enumerable: false, writable: true, configurable: true,
+  });
+  Object.defineProperty(bridge, 'dispose', {
+    value: dispose, enumerable: false, writable: true, configurable: true,
+  });
+  return bridge;
+}
+
+// ---------------------------------------------------------------------------
 // createTransitionBridge — framework-agnostic factory
 // ---------------------------------------------------------------------------
 
@@ -271,7 +302,7 @@ export function createTransitionBridge(
 
   const hooks = buildHooks(bus, namespace, phase);
 
-  return { ...hooks, phase, dispose: () => {} };
+  return assembleBridge(hooks, phase, () => {});
 }
 
 // ---------------------------------------------------------------------------
@@ -310,5 +341,5 @@ export function useTransitionCommand(
 
   tryAutoCleanup(dispose);
 
-  return { ...hooks, phase, dispose };
+  return assembleBridge(hooks, phase, dispose);
 }

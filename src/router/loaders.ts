@@ -142,7 +142,12 @@ export async function runLoaders(
 export function defaultAffects(record: TableRecord, keys: readonly string[], handlers: LoaderHandlers): boolean {
   const template = record.load as string;
   if (matchPrefix(template, handlers)) {
-    return keys.some((key) => key in record.queryDefs || key === 'page' || key === 'per_page' || key === 'sort');
+    // `Object.hasOwn`, not `in`: query keys come from the URL, and `in` walks
+    // the prototype chain — `?toString=` / `?valueOf=` reported as DECLARED and
+    // refetched this record's loader for a key it never declared. See `../dict`.
+    return keys.some(
+      (key) => Object.hasOwn(record.queryDefs, key) || key === 'page' || key === 'per_page' || key === 'sort',
+    );
   }
   return keys.some((key) => template.includes(`{${key}}`));
 }

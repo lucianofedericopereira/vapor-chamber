@@ -1,7 +1,7 @@
 /**
  * Coverage-focused tests for I/O plugins (retry, persist, sync).
  *
- * Targets previously-uncovered lines in src/plugins-io.ts:
+ * Drives the arms the main plugins-io suite does not reach:
  *   159        — getStorage() falling back to globalThis.localStorage
  *   168        — save() catch branch (storage.setItem throws)
  *   185-186    — load() catch branch (storage.getItem / deserialize throws)

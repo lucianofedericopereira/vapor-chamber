@@ -2011,7 +2011,7 @@ describe('recursion depth guard', () => {
       return bus.dispatch('loop', cmd.target);
     });
     const result = bus.dispatch('loop', {});
-    // The handler ran exactly MAX_DISPATCH_DEPTH times (16)
+    // The handler ran exactly MAX_DISPATCH_DEPTH times
     expect(count).toBe(16);
     // Top-level dispatch returns ok:true (handler itself succeeded)
     // but the deepest dispatch returns the depth error

@@ -16,7 +16,7 @@
  * from(observe(bus, 'cart*'))
  *   .pipe(
  *     filter(({ cmd, result }) => result.ok),
- *     debounceTime(200),
+ *     debounceTime,
  *   )
  *   .subscribe(({ cmd }) => console.log('debounced cart event:', cmd.action));
  */
@@ -109,7 +109,7 @@ export function observe(bus: BaseBus, pattern: string): Observable<BusObservatio
  * import { interval } from 'rxjs';
  * import { dispatchFrom } from 'vapor-chamber/observable';
  *
- * dispatchFrom(bus, 'tick', interval(1000));   // tick every 1s
+ * dispatchFrom(bus, 'tick', interval);   // tick every 1s
  */
 export function dispatchFrom<T>(
   bus: BaseBus,

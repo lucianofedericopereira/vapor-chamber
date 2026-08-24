@@ -71,8 +71,24 @@ Scales with listener count: silent for <5 listeners, larger beyond ~50.
 ### Counter-based `meta.id`
 
 The default unique-ID generator is a per-process random prefix + monotonic
-counter (~30–50 ns per call). Was `crypto.randomUUID()` (~1–2 µs). Measured
-~2.5× speedup on the 10k-dispatch hot path (counter ~1,850 vs `randomUUID` ~750 ops/sec).
+counter. **Re-measured on Node 24 (2026-08-17, `hrtime` medians over 21×200k
+reps): ~12 ns per call vs ~104 ns for `crypto.randomUUID()` — ~8×.**
+
+This paragraph previously read "~30–50 ns per call … was `crypto.randomUUID()`
+(~1–2 µs)", implying 20–60×. Those figures no longer describe any current
+runtime: modern V8/Node batch UUID entropy, so `randomUUID` got ~10× cheaper
+while the counter stayed put. The decision is unchanged and the direction still
+holds — only the margin is smaller. `src/command-bus.ts` was corrected when this
+was re-measured; this page and the bench comment were not, which is the drift
+this doc exists to prevent. **Always quote the runtime with the number** — an
+unqualified ns figure is exactly what let it drift unnoticed.
+
+The **ratio at the dispatch level is bench-backed and unaffected**: ~2.5× on the
+10k-dispatch hot path (counter ~1,850 vs `randomUUID` ~750 ops/sec), which is the
+`meta overhead — uid generator comparison` bench in `tests/perf.bench.ts`. Note
+the gap between ~8× per call and ~2.5× per dispatch — the rest of the dispatch
+dilutes it, which is why per-call absolutes should never be quoted as if they
+were end-to-end wins.
 
 If you need cryptographically unique IDs (distributed tracing, cross-process
 auditing), opt in:
@@ -98,9 +114,17 @@ bundle (`createCommandBus` + `createHttpBridge` + `logger`):
 
 | | Bundle |
 |--|--|
-| Raw (minified) | 16.7 KB |
-| Brotli | **5.5 KB** |
+| Brotli | **<!-- vc:sizeConsumer -->6.4<!-- /vc:sizeConsumer --> KB** |
 | Vapor probing references | 0 |
+
+That number is measured, not retyped: `scripts/measure-size.mjs` builds this
+exact consumer entry from `dist/` and publishes it as a row in
+[BUNDLE-SIZES.md](./BUNDLE-SIZES.md), and `npm run docs:stamp` republishes it
+here, with `lint:check` failing on a stale one. It previously read "16.7 KB raw
+/ 5.5 KB brotli" — roughly 18% under reality by the time anyone re-measured,
+which is what any hand-copied measurement eventually becomes.
+`tests/esm-treeshake.test.ts` gates the same artifact against a ceiling and logs
+every move with what bought the bytes.
 
 Composables (`useCommand`, etc.) only land in your
 bundle if you explicitly import them.
@@ -150,6 +174,71 @@ configureUid(() => crypto.randomUUID());
 ```
 
 Call once at app setup, before any dispatches.
+
+### `meta.ts` is cached per microtask turn (default behaviour, no option)
+
+`stampMeta` reads the clock **once per microtask turn** and every command
+dispatched inside that turn shares the value. The first command of each turn
+carries an exact stamp; the 2nd..nth of the same synchronous run repeat it.
+`Date.now()` is millisecond-resolution and a typical burst is sub-millisecond,
+so those commands would almost always have received the same number anyway.
+
+There is deliberately **no runtime option** for this — an option only earns its
+place when both settings are right for different people, and this one is right
+for essentially everyone. The rare consumer who needs exact per-command wall
+clock has two escapes, neither of which costs anyone else a byte:
+
+```ts
+// 1. stamp your own, in a plugin — works with the published package
+bus.use((cmd, next) => { if (cmd.meta) cmd.meta.exactTs = Date.now(); return next(); },
+        { priority: 100 });
+```
+
+Note what an exact clock would *not* buy: two commands dispatched in the same
+millisecond share a `Date.now()` value whether the clock is cached or not, so it
+never provides **ordering**. Order comes from `meta.id`, whose default generator
+is a monotonic counter.
+
+**Measured** (`tests/clock-source-ab.test.ts`, real dispatch path, interleaved
+A/B, median of 5 reps, macOS / Node 24.19 where `Date.now()` is ~33 ns isolated):
+
+| Path | cached vs default |
+|---|---|
+| `bus.dispatch` / `bus.query` — bare bus | 1.42–1.67× |
+| `dispatchBatch` | 1.42–1.57× |
+| dispatch with an ordinary handler | 1.38–1.50× |
+| dispatch — 3 plugins + 1 listener | 1.18–1.24× |
+| dispatch — 50 listeners + 5 wildcards | 1.04–1.07× — **no gain** |
+| `emit` (control: never stamps) | 1.02–1.06× — the noise floor |
+
+Roughly **15–25 ns per command**, fixed — so its share shrinks as the dispatch
+does more, and vanishes entirely once listener fan-out dominates. The control row
+is why that last line is stated as "no gain" rather than a small one.
+
+Confirmed end to end on the bench: `bus.dispatch` moved from **197.7×** slower
+than a direct function call to **140.0×**, and from 7.10× to **5.30×** slower
+than `nanoevents` emit. `bus.emit` is unchanged, which is the control — it never
+stamped meta.
+
+**The trade, stated plainly.** Every command in one synchronous burst shares a
+`ts`. Ordering is unaffected — `meta.id` is monotonic and unique, and it is what
+you should sequence by — but the wall-clock field goes coarse by up to the
+burst's duration, so a thousand-command `rehydrate` reads as instantaneous.
+Commands after the first in a turn also stop tracking `vi.setSystemTime`.
+
+Note this was never a duration instrument: `Date.now()` is millisecond-resolution
+and **not monotonic**, so an NTP correction or a clock change can move it
+backwards. For real timing read `performance.now()` in a plugin; on a hot loop
+use `createFastLane()`, which stamps no meta at all.
+
+**Nothing internal is affected.** No code in this library reads `meta.ts`, and
+every TTL/expiry decision (`cache`, `idempotent`, `circuitBreaker`, `rateLimit`,
+`throttle`, transport queues, CSRF cache, outbox) calls `Date.now()` directly —
+pinned by `tests/clock-source-contained.test.ts`, which drives a deliberately
+frozen clock and asserts those still expire on real time.
+
+Numbers are host-specific: the gain *is* the price of `Date.now()` on your
+platform — the test is self-contained and prints its table, so re-run it there.
 
 ### `useSharedCommandState()` — one set of signals shared across many components
 
@@ -345,9 +434,9 @@ audience, not by feature checklist.
 
 | Variant     | Audience                                                      | Brotli |
 |-------------|---------------------------------------------------------------|--------|
-| `core`      | Sprinkled JS on server-rendered pages (Blade / Rails / Django)| 7.0 KB |
-| `elements`  | Embeddable widgets via custom elements                        | 7.4 KB |
-| `full`      | SPAs that grew big enough to want everything                  | 10.2 KB |
+| `core`      | Sprinkled JS on server-rendered pages (Blade / Rails / Django)| <!-- vc:sizeIifeCore -->7.6<!-- /vc:sizeIifeCore --> KB |
+| `elements`  | Embeddable widgets via custom elements                        | <!-- vc:sizeIifeElements -->8.1<!-- /vc:sizeIifeElements --> KB |
+| `full`      | SPAs that grew big enough to want everything                  | <!-- vc:sizeIifeFull -->11.1<!-- /vc:sizeIifeFull --> KB |
 
 _(Always-current measured sizes for every export: [BUNDLE-SIZES.md](./BUNDLE-SIZES.md), generated by `npm run size:doc` and CI-verified fresh.)_
 

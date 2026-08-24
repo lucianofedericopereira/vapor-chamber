@@ -3,12 +3,12 @@
  * http-errors.test.ts leave open:
  *
  *  - postCommand: `silent` stamped on a PERMANENT failure re-thrown from the
- *    catch (368) — the 4xx path, distinct from the already-covered `throw
+ *    catch — the 4xx path, distinct from the already-covered `throw
  *    failed` stamp at 348.
- *  - clientRequest: pre-attempt user abort (565), 401 session expiry (578),
- *    and a mid-flight user abort surfacing as AbortError (613).
+ *  - clientRequest: pre-attempt user abort, 401 session expiry,
+ *    and a mid-flight user abort surfacing as AbortError.
  *  - createHttpClient: response-interceptor `onRejected` on a failed request
- *    (759), which only runs on the rejection branch.
+ *, which only runs on the rejection branch.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { postCommand, createHttpClient, invalidateCsrfCache } from '../src/http';
@@ -44,11 +44,11 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// postCommand — silent on the permanent-failure re-throw (367-369)
+// postCommand — silent on the permanent-failure re-throw
 // ---------------------------------------------------------------------------
 
 describe('postCommand — silent on permanent failures', () => {
-  it('stamps silent on a 422 re-thrown from the catch and does not retry it (368)', async () => {
+  it('stamps silent on a 422 re-thrown from the catch and does not retry it', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(422, { error: 'invalid' }));
 
     await expect(
@@ -59,7 +59,7 @@ describe('postCommand — silent on permanent failures', () => {
     expect((globalThis.fetch as any).mock.calls).toHaveLength(1);
   });
 
-  it('leaves silent unset by default on the same failure (367)', async () => {
+  it('leaves silent unset by default on the same failure', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(422, { error: 'invalid' }));
 
     const err = await postCommand('/api/vc', { command: 'save' }, { retry: 1 }).catch(e => e);
@@ -73,7 +73,7 @@ describe('postCommand — silent on permanent failures', () => {
 // ---------------------------------------------------------------------------
 
 describe('createHttpClient — abort and session expiry', () => {
-  it('throws AbortError before issuing a request when the signal is already aborted (565)', async () => {
+  it('throws AbortError before issuing a request when the signal is already aborted', async () => {
     const ac = new AbortController();
     ac.abort();
     const http = createHttpClient();
@@ -82,7 +82,7 @@ describe('createHttpClient — abort and session expiry', () => {
     expect((globalThis.fetch as any)).not.toHaveBeenCalled();
   });
 
-  it('checks the signal again before each retry attempt (565)', async () => {
+  it('checks the signal again before each retry attempt', async () => {
     const ac = new AbortController();
     (globalThis.fetch as any).mockImplementation(async () => {
       ac.abort(); // trip the signal while attempt 0 is in flight
@@ -98,7 +98,7 @@ describe('createHttpClient — abort and session expiry', () => {
     expect((globalThis.fetch as any).mock.calls).toHaveLength(1);
   });
 
-  it('fires onSessionExpired on a 401 (578)', async () => {
+  it('fires onSessionExpired on a 401', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(401, { message: 'Unauthenticated' }));
     const onSessionExpired = vi.fn();
     const http = createHttpClient();
@@ -107,7 +107,7 @@ describe('createHttpClient — abort and session expiry', () => {
     expect(onSessionExpired).toHaveBeenCalledTimes(1);
   });
 
-  it('rethrows a mid-flight user abort as AbortError without retrying (613)', async () => {
+  it('rethrows a mid-flight user abort as AbortError without retrying', async () => {
     const ac = new AbortController();
     (globalThis.fetch as any).mockImplementation(async () => {
       ac.abort();
@@ -121,11 +121,11 @@ describe('createHttpClient — abort and session expiry', () => {
 });
 
 // ---------------------------------------------------------------------------
-// createHttpClient — response interceptor onRejected (759)
+// createHttpClient — response interceptor onRejected
 // ---------------------------------------------------------------------------
 
 describe('createHttpClient — response interceptor onRejected', () => {
-  it('runs onRejected with the error and still rejects (759-761)', async () => {
+  it('runs onRejected with the error and still rejects', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(500, { error: 'boom' }));
     const onRejected = vi.fn();
     const onFulfilled = vi.fn(r => r);
@@ -139,7 +139,7 @@ describe('createHttpClient — response interceptor onRejected', () => {
     expect(onFulfilled).not.toHaveBeenCalled();
   });
 
-  it('stamps silent on the rejected error when config.silent is set (760)', async () => {
+  it('stamps silent on the rejected error when config.silent is set', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(500, { error: 'boom' }));
     const http = createHttpClient();
 

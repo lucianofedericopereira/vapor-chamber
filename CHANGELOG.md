@@ -2,6 +2,297 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.16.0 — Vue 3.6.0-rc.5 alignment
+
+Peer range narrows to `>=3.5.0 || >=3.6.0-rc.5`, so an rc.4 install now warns.
+
+**The alignment itself is fully pass-through — all 15 rc.5 commits, no wrapper
+change.** But studying rc.5's attrs-fallthrough cluster prompted a question about
+this library's own documented usage, and the answer was a bug: the transition
+bridge has been writing two junk attributes into the DOM of every consumer who
+followed the README since v1.1.0. That fix is the only `src/` behavior change
+here, and it is the reason this is a minor rather than a patch.
+
+All 15 rc.5 commits read at source. **Attrs fallthrough is the theme** (5 of
+them) and it is a rendering concern — this library renders nothing, it forwards
+Vue's `defineVapor*` functions. **TransitionGroup is the second theme** (7,
+counting the four perf commits). Full per-item detail is the new rc.5 row in the
+whitepaper's Vue 3.6 alignment log (§9).
+
+**Four items are N/A by verification rather than assumption**, each grepped
+across `src` and `examples`: we declare no `inheritAttrs`, define no functional
+components, render no SVG/MathML/`foreignObject`, and use no template refs — so
+`293ca1c`/`5073eb5`'s inheritAttrs gating, `ef83790`, #15321 and `5073eb5`'s
+post-render-effect queueing cannot reach us. `be7157e` newly creates
+`EffectScope`s inside branches carrying fallthrough attrs, but that sits below
+`tryAutoCleanup()`, which registers on whatever `getCurrentScope()` returns from
+a `setup()` and is indifferent to nesting above it.
+
+**The one module rc.5 conceptually reaches is `src/transitions.ts`, and it is
+idempotent by construction.** `d3fde91` makes a `<TransitionGroup>` re-apply its
+group hooks onto already-mounted children when the group's props change.
+`buildHooks` resolves all nine hook identities **once per bridge** and never
+rebuilds the object, so the re-application re-registers the same nine functions —
+and re-registration is not invocation, so a prop change dispatches no extra
+`*Move`/`*Enter` command. `f2fa54d` is a straight unblock in our favour: `onMove`
+dispatches per move, and an interop child whose pending enter/move callbacks were
+flushed against the block instead of the resolved element is exactly the shape
+that strands one.
+
+**Two upstream commits converge on decisions this repo already reached
+independently**, recorded because corroboration is worth as much as a diff.
+`36dd186` passes `forceReflow` the group's own first child so it reflows *that*
+document, "so this works inside iframes / foreign documents" — the same
+own-document rule `src/directives.ts` enforces with its per-`Document`
+`delegatedDocs` map, added in the rc.2 cycle after a single global count stranded
+the shared listener on the wrong document and turned delegated controls into dead
+ones. And `8d83bb2` (#15329) switches `dom/event.ts` to a direct
+`el.addEventListener()` to kill the disposer-closure allocation, which is what
+`v-vc:command` has always done.
+
+### Fixed — `<Transition v-bind="t">` wrote bridge internals into the DOM
+
+The documented way to use this module — in its own JSDoc, in the README, and in
+`docs/` — is:
+
+```vue
+<Transition v-bind="modal">
+```
+
+`v-bind="obj"` spreads an object's own **enumerable** keys as props. Vue matches
+the nine `on*` hooks to `<Transition>`'s declared props and passes everything
+else through as fallthrough **attributes**, which are stringified onto the
+transitioned element. `phase` (a signal object) and `dispose` (a function)
+matched no declared prop. Measured on a real mount, before the fix:
+
+```html
+<div class="panel" phase="[object Object]" dispose="() => {}">hi</div>
+```
+
+Two invalid attributes on the transitioned element of every consumer following
+the documented usage, re-serialized on each render, since **v1.1.0**.
+
+- Fixed by defining `phase` and `dispose` as **non-enumerable** on the returned
+  bridge (`assembleBridge` in `src/transitions.ts`). This changes what
+  *spreading* the bridge yields and nothing else: `t.phase.value`, `t.dispose()`
+  and `const { phase } = t` all read the property directly and are unaffected —
+  destructuring does not require enumerability. The one intentional casualty is
+  `{ ...bridge }` no longer carrying them, which is precisely the operation that
+  was putting them in the DOM. Rejected alternatives: renaming the keys, or
+  moving the hooks under a `t.hooks` sub-object — both fix the leak by breaking
+  the documented call site, when the point is to make the documented call site
+  correct.
+- **Why 1750 passing tests never saw it.** Every test in
+  `tests/transitions.test.ts` calls the hooks directly on a mock element
+  (`{ tagName: 'DIV' }`). Nothing in the suite ever handed the bridge to Vue, so
+  the single line the docs tell you to write had no coverage. This is the rc.4
+  KeepAlive lesson exactly — a fixture that substitutes a mock for the
+  integration it reasons about can only check the half you already understood.
+
+### Added — `tests/transition-bind-fixture.test.ts`
+
+**Mounts a real `<Transition>`** with a real bridge bound via `v-bind`, and pins
+four things: that no bridge internals reach the element's attributes; that the
+hooks still reach Vue and dispatch (hiding them from *spreads* must not hide
+them from the props they exist for); that `phase`/`dispose` remain reachable by
+direct access and destructuring; and that the same holds for
+`useTransitionCommand`, not just the factory. Verified to fail 3-of-4 against the
+pre-fix code and pass 4-of-4 after.
+
+### Changed — `meta.ts` is now read once per microtask turn (~1.4× on dispatch)
+
+`stampMeta` reads the clock once per command. On a platform where `Date.now()` is
+expensive that read is a large share of a dispatch which does little else, and
+nothing in this library reads `meta.ts` at all — so the source was worth
+questioning even though the allocation around it is not.
+
+**There is no runtime option.** An option only earns its place when both
+settings are right for different people; this one is right for essentially
+everyone, and a knob nobody turns is surface without a payer. The rare need for
+exact per-command wall clock is served by stamping your own in a plugin
+(`cmd.meta.exactTs = Date.now()`), which costs other consumers nothing.
+
+Note that `ts` is a wall clock, not an ordering key: two commands dispatched in
+the same millisecond share a value whether the clock is cached or not. For order
+use `meta.id`, whose default generator is a monotonic counter.
+
+**Measured on the real dispatch path** (`tests/clock-source-ab.test.ts`,
+interleaved A/B, median of 5 reps, macOS / Node 24.19): a per-microtask cached
+clock is worth **1.42–1.67×** on a bare bus, **1.42–1.57×** on `dispatchBatch`,
+**1.38–1.50×** with an ordinary handler, **1.18–1.24×** with three plugins, and
+**nothing** (1.04–1.07× against a 1.02–1.06× control) once 50 listeners dominate.
+Roughly 15–25 ns per command, fixed.
+
+**The default pays nothing for the option:** swappable vs calling the intrinsic
+directly measures **0.974–1.008×**, inside the same noise band as the control row,
+and IIFE sizes are byte-identical.
+
+Three things worth recording, because none of them came from the measurement:
+
+- **The trade is real and stated at the knob.** A cached clock gives every command
+  in one synchronous burst the same `ts`. Ordering is unaffected (`meta.id` stays
+  monotonic and unique); only the wall-clock field coarsens. It also stops
+  tracking `vi.setSystemTime`, so faking time and asserting on `meta.ts` sees real
+  time. That is why this is opt-in rather than the default.
+- **Containment is pinned, not assumed.** Every TTL/expiry decision — `cache`,
+  `idempotent`, `circuitBreaker`, `rateLimit`, `throttle`, transport queues, the
+  CSRF cache, `outbox` — calls `Date.now()` directly, never through `stampMeta`,
+  so a frozen clock cannot extend a cache entry or hold a breaker open.
+  `tests/clock-source-contained.test.ts` proves it with a deliberately frozen
+  clock and would fail if a refactor ever routed one of them through the knob.
+- **The tests caught two bugs in the implementation itself.** `_clockFn = Date.now`
+  captured the intrinsic at module load, so `vi.setSystemTime` could never reach
+  it — the indirection added to keep the default safe had broken exactly the
+  behaviour it was protecting. Then restoring with `configureClock(Date.now)`
+  re-armed the same trap, which is how the test's own teardown failed. Hence the
+  no-argument reset: the footgun is removed rather than documented.
+
+Numbers are host-specific — the gain *is* the price of `Date.now()` on your
+platform. Both tests are self-contained and print their tables; re-run them
+before assuming the ratios transfer.
+
+### Fixed — one bug class, four sites: external strings as keys on `{}`
+
+v1.15.0 fixed an MCP gate that admitted `constructor`, `__proto__`, `toString`,
+`hasOwnProperty` and `valueOf` as tool names, because `schema[name] !== undefined`
+walks the prototype chain. That fix was correct and local — and the same class was
+sitting in three other places, each written as if it were the first. Reading
+vue-router v5's own query-parsing hardening (it protects query objects with
+`Object.create(null)`) is what prompted looking; the bugs are ours, the prompt was
+theirs.
+
+The rule now lives in **one** place, `src/dict.ts`, with the evidence:
+**a string that came from outside must never be used as a key on, or looked up in,
+an object inheriting from `Object.prototype`.** Two distinct failures follow, and
+both had shipped.
+
+**Reads answer for keys that were never set.**
+
+- **`router/url.ts` `parseQuery`** — the repeated-key check read `query[key]` on a
+  `{}`, so any key sharing a name with an `Object.prototype` member came back
+  "already set" and took the array branch. Measured: `?constructor=1` produced
+  `[Object, '1']` instead of `'1'`; `?valueOf=z&valueOf=w` produced
+  `[valueOf, 'z', 'w']`. Callers expecting a scalar got an array, from a plain
+  link.
+- **`router/loaders.ts` `defaultAffects`** — `key in record.queryDefs` reported
+  `?toString=` / `?valueOf=` / `?constructor=` as **declared** query params, so a
+  URL carrying one refetched that record's loader for a key it never declared.
+- **`form.ts`** — `key in values` meant a rule for an absent field named after an
+  inherited member ran against the inherited function instead of being skipped.
+
+**Writes to `__proto__` are swallowed by the inherited setter.**
+
+- **`command-bus.ts` `commandKey`** — the canonical serializer copied sorted keys
+  into a `{}`, so an own `__proto__` key never became an own property and vanished
+  from the output. Measured: `{"__proto__":"A","id":1}` and
+  `{"__proto__":"B","id":1}` — two different targets — both keyed to
+  `act:{"id":1}`. That key backs `idempotent`, `cache`, `serialize` and
+  `supersede`, so **distinct commands collapsed into one**: a deduped command that
+  should have run, a cache hit that should have missed. An own `__proto__` key is
+  exactly what `JSON.parse` of a server response produces, which is the shape an
+  HTTP bridge hands to dispatch.
+- **`router/url.ts` `parseQuery`** — `?__proto__=a` assigned an array through that
+  setter, so the key never became an own property and the parsed object's
+  prototype was replaced outright.
+
+Cost of the whole class of fix: **0.0 KB brotli** on every IIFE variant (+0.1 KB
+raw), all still under budget.
+
+### Added — `tests/prototype-keys.test.ts`, `tests/router/query-prototype.test.ts`
+
+27 assertions pinning the invariant at each site: null prototypes on both query
+construction paths, polluting keys treated as ordinary scalars, genuine repeats
+still collecting into arrays, `?__proto__=` neither replacing a prototype nor
+polluting `Object.prototype`, `commandKey` keeping distinct targets distinct while
+staying order-independent, and `defaultAffects` still refetching for genuinely
+declared keys and the `page`/`per_page`/`sort` trio. Verified to fail against the
+pre-fix code.
+
+### Changed — the rc.4 KeepAlive gate is now known to be permanent, not scaffolding
+
+The rc.4 cycle moved `tryKeepAliveHooks` off `getCurrentInstance()` onto
+`hasInjectionContext()` because the former answers `null` inside a Vapor
+`setup()`. That was justified by **measurement alone**, which left a real
+question open: if the null were a Vapor gap Vue intended to close, the new gate
+would be temporary scaffolding and someone would eventually be right to revert
+it.
+
+Reading the Vapor roadmap ([vuejs/core#13687]) closes that question. A Vue core
+maintainer confirmed (Jul 20) that `getCurrentInstance()` returning `null` inside
+Vapor components **is intentional**, noting an internal `useInstanceOption` API
+exists but is deliberately not public; and reaffirmed (Aug) that Vapor "does not
+expose a general-purpose component instance tree to userland" by design, because
+user code should not depend on internal instances. So the gate is permanent, and
+`src/chamber.ts` now says so at the guard — no future release should reintroduce
+an instance-accessor probe expecting it to start answering.
+
+The same statement settles two unchecked roadmap boxes for this project, both
+now documented in `docs/router.md`:
+
+- **Vue Test Utils** — `findComponent`-style instance traversal is precisely what
+  upstream has ruled out, so `createTestBus` (asserting at the bus boundary)
+  needs no revision whichever way VTU's Vapor support lands.
+- **DevTools Integration** — `src/devtools.ts` builds its inspector tree from
+  buffered `bus.onAfter` entries, never from Vue's component tree, so the
+  Commands timeline and inspector panel do not wait on the Vapor component-tree
+  bookkeeping upstream has not built.
+
+### Fixed — a blank line was breaking the whitepaper's alignment table
+
+`docs/whitepaper.md` had an empty line between the **rc.2** and **rc.3** rows of
+the §9 alignment log. A blank line terminates a GitHub-flavored markdown table,
+so every row from rc.3 onward — rc.3, rc.4, and the rc.5 row added here — was
+rendering as raw pipe-delimited text below a closed table instead of as table
+rows. Found by reading the file end to end rather than by any check: no linter
+covers this, and `stamp-docs --check` only validates marker freshness.
+
+### Fixed — the rc.4 log row was left holding the live count markers
+
+The §9 alignment log records each cycle's verified counts as plain numbers —
+rc.1 `1102/1102`, rc.2 `1259/1259`, rc.3 `1491/1491` — because a dated row states
+what was true *on that date*. The rc.4 row instead ended with
+`<!-- vc:testsAll -->1748 + 7<!-- /vc:testsAll -->` and a matching
+`vc:testFilesAll`, which `stamp-docs` rewrites from `docs/metrics.json` on every
+coverage-bearing run.
+
+That is correct while a row is the current one, and wrong the moment a newer row
+lands: the next `npm run coverage:doc` would have restamped rc.4's row with
+rc.5-era counts, asserting rc.4 was verified against numbers that did not exist
+yet. It had not fired only because `stamp-docs` skips these markers unless the
+run carried both `dist/` and coverage.
+
+So the markers are **rolled forward, not removed** — the mechanism is right, it
+was just parked one row behind. rc.4 is frozen at the values it was verified
+with (**1748 + 7**, 114 files), matching rc.1–rc.3, and the rc.5 row is likewise
+plain. The genuinely live claims — README's version, Vue alignment, test and
+coverage totals, and the whitepaper's prose counts — keep their markers, which is
+what they were built for.
+
+### Docs — the router's Vapor-interop measurement was three RCs stale
+
+`docs/router.md` opened its "Vapor interop" section with "Measured against
+`vue@3.6.0-rc.2`". Re-verified on rc.5 and restamped. The same paragraph now
+names **both** fixtures and the distinction between them, which was previously
+implicit: `tests/router/vapor-fixture.test.ts` mounts a real Vapor app and
+measures provide/inject as a *primitive*, while
+`tests/vapor/router-composables.test.ts` — under `vitest.vapor.config.ts`, which
+aliases `vue` to the with-vapor dist — runs the *composables themselves* inside
+`defineVaporComponent({ setup() })`, which is the actually-shipped combination.
+
+### Verified against rc.5
+
+- `tsc` clean, lint clean, **1786 + 7** tests across both projects (120 files).
+- IIFE **11.0 / 7.5 / 8.0 KB** brotli — all under budget, unchanged from rc.4.
+- **No performance regression, measured rather than asserted.**
+  `npm run ab:vue -- 3.6.0-rc.4`, 51 interleaved AB/BA rounds, both sides the
+  prod with-vapor dist: scope create/dispose **1.026x**, shallowRef writes
+  **0.999x**, watcher notify **1.042x**, computed read-after-write **0.926x**.
+  Worst ratio **1.042x**, inside the harness's noise band.
+- Peer range `>=3.5.0 || >=3.6.0-rc.5` (not widened to keep rc.4 — RC users track
+  the latest RC). Both Vapor SFC examples repin to `^3.6.0-rc.5`.
+
+[vuejs/core#13687]: https://github.com/vuejs/core/issues/13687
+
 ## v1.15.0 — Vue 3.6.0-rc.4 alignment
 
 Minor, not major, despite removing a public export. `useCommandBus()` was a

@@ -1,11 +1,12 @@
 # Roadmap
 
 This project tracks Vue 3.6 through its **release-candidate** phase (rc.1
-landed 2026-07-18; rc.2 on 2026-07-22; rc.3 on 2026-08-11). That has direct consequences for what's
+landed 2026-07-18; rc.2 on 2026-07-22; rc.3 on 2026-08-11; rc.4 on 2026-08-14;
+rc.5 on 2026-08-21). That has direct consequences for what's
 stable, what's transitional, and what will change once Vue 3.6 ships stable.
 This file is the source of truth for that distinction.
 
-Last reviewed against **Vue 3.6.0-rc.3** (2026-08-11).
+Last reviewed against **Vue 3.6.0-rc.5** (2026-08-21).
 
 ---
 
@@ -36,9 +37,23 @@ question this freeze exists to wait out. Kept small on purpose: ~100 B
 brotli or less per IIFE variant (see CHANGELOG). The freeze on genuinely new
 *capability* — state or behavior tied to Vue's still-moving API — stands.
 
+**Not an exception, v1.16.0 — no API was added.** `meta.ts` now reads the clock
+once per microtask turn instead of once per command. That is a behaviour change
+inside an existing field, not new capability, so the freeze is untouched: no
+export, no option, no config. Worth **1.18–1.67× on dispatch-shaped work**
+(15–25 ns/command, fixed; nothing once listener fan-out dominates), confirmed on
+the bench — `bus.dispatch` moved from 197.7× to 140.0× slower than a direct call.
+A runtime knob was built, measured and then **deleted**: an option only earns its
+place when both settings are right for different people, and this one is right
+for essentially everyone. The rare need for exact per-command wall clock is met
+by a user plugin; note that `ts` is a wall clock rather than an ordering key, so
+order comes from `meta.id`'s monotonic counter either way. Evidence: `tests/clock-source-ab.test.ts` (gain, with a control row that
+never stamps) and `tests/clock-source-contained.test.ts` (no TTL/expiry path can
+be affected).
+
 ## Pre-stable specifics
 
-- **Peer dependency:** `vue: ">=3.5.0 || >=3.6.0-rc.3"`. The lib supports
+- **Peer dependency:** `vue: ">=3.5.0 || >=3.6.0-rc.5"`. The lib supports
   Vue 3.5 (composables only) and Vue 3.6 RCs (full Vapor surface).
 - **Vapor APIs are still moving.** `defineVaporCustomElement`, `defineVaporComponent`,
   `defineVaporAsyncComponent` are stable in shape but their underlying behavior
@@ -55,6 +70,49 @@ brotli or less per IIFE variant (see CHANGELOG). The freeze on genuinely new
 - **The lib's value during beta** is graceful degradation (`null` returns when
   Vue's API is absent or not yet present), version probing (`isVaporAvailable`),
   and a stable surface for consumers to code against while Vue itself iterates.
+
+## Upstream's Vapor roadmap: what we depend on, and what we don't
+
+Vue tracks Vapor's own progress in [vuejs/core#13687][vapor-roadmap]. Read it for
+**stated design intent**, not just for checkboxes — it is where upstream says
+things no commit diff shows, and two of those statements are load-bearing here.
+
+**The rule this project applies, symmetrically:** an unchecked box does not mean
+missing, and a checked box does not mean working. Both halves have bitten us, so
+each is settled by a fixture rather than by reading the list — provide/inject was
+unchecked while measurably working, and KeepAlive was checked while our own
+integration with it was inert.
+
+**Design intent that is now settled upstream (not a gap awaiting a fix):**
+
+- **`getCurrentInstance()` returns `null` inside Vapor components, intentionally**
+  (maintainer, 2026-07-20; an internal `useInstanceOption` exists but is
+  deliberately not public). This is why `tryKeepAliveHooks` gates on
+  `hasInjectionContext()` — see the rc.4/rc.5 rows in whitepaper §9. The gate is
+  **permanent**; do not reintroduce an instance-accessor probe expecting it to
+  start answering.
+- **Vapor exposes no general-purpose component instance tree to userland, by
+  design** (maintainer, 2026-08), so user code cannot depend on internal
+  instances. Two consequences for this repo, both favourable and neither
+  requiring work:
+  - **Vue Test Utils** (unchecked): `findComponent`-style traversal is precisely
+    what upstream ruled out, so `createTestBus` — which asserts at the bus
+    boundary — is the aligned testing story regardless of how VTU lands.
+  - **DevTools Integration** (unchecked): `src/devtools.ts` builds its inspector
+    tree from buffered `bus.onAfter` entries, never from Vue's component tree, so
+    the Commands timeline and inspector panel do not wait on Vapor
+    component-tree bookkeeping.
+
+**Unchecked items this project does not depend on:**
+
+| Upstream item | Why it doesn't block us |
+| --- | --- |
+| VaporSuspense | `useVaporAsyncCommand` awaits a bus promise and creates no boundary of its own; VDOM `<Suspense>` ↔ Vapor interop already works |
+| Vue Router | this repo ships its own router (`vapor-chamber/router`), URL-addressed and vDOM-free by design |
+| Pinia / Nuxt / VitePress | no dependency in either direction |
+| Provide/Inject System | measured working at **both** levels on a real `createVaporApp` — `tests/router/vapor-fixture.test.ts` (primitive) and `tests/vapor/router-composables.test.ts` (composables inside a real `defineVaporComponent`) |
+
+[vapor-roadmap]: https://github.com/vuejs/core/issues/13687
 
 ## What is stable, regardless of Vue's beta cycle
 
@@ -120,13 +178,42 @@ Three verified facts, each fatal on its own:
    Compiling the wrappers to `return options` drops the `__vapor` marker —
    no error, no null, just wrong-mode rendering.
 
-2. **There is nothing to statically import from.** At rc.3, `vue`'s bundler
-   entry (`vue.runtime.esm-bundler.js`) exports **zero** Vapor APIs and the
-   exports map has no vapor condition; the only with-vapor dist is
-   `esm-browser`. The `vue36`-condition plan assumed bundler consumers alias
-   `vue` to a with-vapor bundler build that does not exist. Importing
-   `@vue/runtime-vapor` directly instead is a phantom-dependency import
-   (it is `vue`'s transitive dep, not ours) that fails under strict pnpm.
+2. **There is (almost) nothing to statically import from — re-verified at rc.5,
+   and this is the one fact that has started to move.** At rc.3, `vue`'s bundler
+   entry (`vue.runtime.esm-bundler.js`) exported **zero** Vapor APIs. **At rc.5
+   that is no longer literally true:** the bundler entry now statically imports
+   from `@vue/runtime-vapor` and re-exports one of them —
+
+   ```js
+   import { defineVaporAsyncComponent, withAsyncContext } from "@vue/runtime-vapor";
+   export { compile, defineVaporAsyncComponent, withAsyncContext };
+   ```
+
+   So exactly one of this lib's four wrapped APIs — `defineVaporAsyncComponent` —
+   *is* statically importable from `vue` in a bundler today. The other three
+   (`createVaporApp`, `defineVaporComponent`, `defineVaporCustomElement`) and
+   `vaporInteropPlugin` remain absent, the exports map still has **no vapor
+   condition or subpath**, and the only with-vapor dist is still `esm-browser`.
+   Verified by enumerating the module's real exports, not by grepping for the
+   name: a substring hit in that file is not an export.
+
+   Two caveats worth recording, because both were checked rather than assumed.
+   `@vue/runtime-vapor` is now a **declared dependency of `vue`** (not merely
+   transitive-by-accident), which is what makes Vue's own re-export legitimate —
+   but it is still not a dependency of *ours*, so importing it directly from this
+   package would remain a phantom import under strict pnpm. And deep-importing
+   that dist in **raw Node ESM** currently fails (`@vue/runtime-dom` does not
+   provide `TransitionPropsValidators` under Node's resolved condition) — an
+   artifact of raw-ESM condition resolution, not a packaging bug for the
+   audience that file targets: bundler consumers are fine, which this repo's own
+   suite proves by importing bare `vue` unaliased under the default vitest
+   config.
+
+   None of this revives the flavor — fact 1 (the `__vapor` marker) and fact 3
+   (<0.9 KB at stake) are each independently fatal, and one API out of four
+   cannot carry a build flavor. It is recorded because the reopen condition below
+   is now partially satisfied, and a roadmap that only notes evidence confirming
+   its existing decision is not being re-verified.
 
 3. **The prize is under a kilobyte.** The entire probe + registry +
    `configureVue` + detection-hint region of `chamber.ts` (lines ~60–412)
@@ -153,12 +240,29 @@ Vue ships a with-vapor *bundler* entry or a `vue`-scoped vapor subpath/condition
 at 3.6 stable. Then a static-import fast path becomes possible — and it still
 has to clear the ~885 B bar, re-measured.
 
+**Status at rc.5: partially moving, not met.** Vue began re-exporting
+`defineVaporAsyncComponent` from the bundler entry (see fact 2 above), which is
+the first Vapor API ever statically importable from `vue`. That is one of four,
+with no vapor condition and no with-vapor bundler dist, so the condition is not
+satisfied — but the direction is now non-zero, and it should be re-checked every
+cycle rather than treated as settled. The check is cheap and worth keeping in the
+alignment ritual: enumerate the bundler entry's real exports and the exports map,
+and record the count.
+
 ### Runtime feature-detection registry — kept, and measured
 
 `chamber.ts` maintains a registry of probed Vue functions
-(`_defineVaporCustomElementFn`, `_vueOnScopeDispose`, `_vueOnUnmounted`,
-`_vueOnActivated`, `_vueOnDeactivated`, etc.). Each entry exists because the
-specific Vue version may or may not have it.
+(`_defineVaporCustomElementFn`, `_vueOnScopeDispose`, `_vueGetCurrentScope`,
+`_vueHasInjectionContext`, `_vueOnActivated`, `_vueOnDeactivated`, etc.). Each
+entry exists because the specific Vue version may or may not have it.
+
+This list previously named `_vueOnUnmounted`, which **no longer exists** — the
+`onUnmounted` cleanup fallback was removed once `getCurrentScope()` was
+established as always non-null inside a Vue 3.5+ `setup()`, making it
+unreachable. Audited at rc.5: every remaining slot has live call sites, so there
+is no dead probe to prune. The pruning rule is unchanged — an entry goes only
+when the peer floor moves past the version that made it conditional, which
+Vue 3.5 support still prevents for all of them.
 
 This section used to plan a post-stable collapse to direct `vue` imports under
 the `vue36` flavor. Withdrawn with the flavor (see above): the whole
@@ -280,13 +384,14 @@ What this file still owns, because §9 does not:
 |---------|---------|-----------------------------------|
 | current line | Each 3.6 RC | Tracking bumps: peer dep, alignment notes, perf re-measure. No contract change. |
 | v1.13.0 | rc.3 alignment | Tracking bump + docs: `configureVue()` promoted from no-bundler escape hatch to the recommended deterministic Vapor wiring for all consumers. No API change. |
+| v1.16.0 | rc.5 alignment | Tracking bump, plus one real contract change: the transition bridge's `phase` / `dispose` became **non-enumerable**, so `{ ...bridge }` no longer carries them. Direct access and destructuring are unaffected; the change exists because `v-bind="t"` — the documented binding — was spreading both into the DOM as attributes. |
 | v2.0.0 | One minor cycle after 3.6 stable | Stable-landing realignment: finalize the identity decision (Vapor-first vs bus-first). The `vue36` flavor + registry collapse were withdrawn at rc.3 (superseded by `configureVue()`, <0.9 KB at stake — see "What is transitional"). `useVaporCommand`→`useCommand` shipped early in v1.7.0. See the checklist below. |
 
 **Version policy before 3.6 stable.** Breaking changes ship as **minors**, not
 majors. The original justification was "the peer dep is a moving beta" — Vue is
 no longer in beta, so that basis has expired and is not what the policy now
 rests on. What it rests on: the pre-stable peer dep is still a moving target
-(rc.3 today), and the surfaces that have actually taken breaking changes are the
+(rc.5 today), and the surfaces that have actually taken breaking changes are the
 ones documented experimental — v1.11.0's `RouterOutlet` subpath move cited the
 router's experimental status, not the beta window, and that is the standard
 going forward. A breaking change to a surface documented as stable needs a
@@ -311,14 +416,14 @@ transport adapter, fully decoupled from Vue, so it wasn't blocked); see
 ## Vue version-support matrix
 
 Which Vue versions each released lib line supports. The peer dep is permissive
-(`>=3.5.0 || >=3.6.0-rc.3`, matching `package.json`); this table is the *tested*
+(`>=3.5.0 || >=3.6.0-rc.5`, matching `package.json`); this table is the *tested*
 support statement.
 
 | vapor-chamber | Vue 3.5 (composables only) | Vue 3.6 | Notes |
 |---------------|----------------------------|---------|-------|
 | v1.2.x – v1.5.x | ✅ | beta.11 → beta.14 | the beta-aligned lines; v1.5.x feature-locked |
 | v1.6.x – v1.7.0 | ✅ | beta.15 → beta.17 | tracking-only bumps + the first post-lock delivery |
-| **v1.8.0 →** | ✅ | **rc.1 → rc.3** | current; tested against rc.3 |
+| **v1.8.0 →** | ✅ | **rc.1 → rc.5** | current; tested against rc.5 |
 | v2.0.0 | ✅ (composables) | **3.6 stable** | peer range gains stable; wiring unchanged — probe by default, `configureVue()` for determinism |
 
 On Vue 3.5 you get the framework-agnostic surface (bus, plugins, transports,
@@ -407,7 +512,7 @@ Vue 3.6 RC. Both halves are dead: that apparatus was **withdrawn at rc.3** — s
 "Thin Vapor wrappers will become opt-in via build flag" above, where
 `configureVue()` replaced it and the `__VAPOR_NATIVE__` define, the second build
 and the `vue36` export condition were withdrawn rather than deferred — and the
-RC gate it waited on has since passed (we align on rc.4). The two statements sat
+RC gate it waited on has since passed (we align on rc.5). The two statements sat
 in the same file contradicting each other for two cycles.
 
 For performance characteristics, optimization philosophy, and tuning options

@@ -3,15 +3,15 @@
  * One-line fallback arms across http / transports / form that no existing test
  * happens to take. Each is a normal production condition, not an exotic one:
  *
- *  - http: a page with NO CSRF token (300, 561) — the common case
- *    for a read-only app; an empty JSON body (534); an unparsable
- *    content-disposition (825); a Retry-After beyond the sanity ceiling (181);
- *    interceptors registered with onRejected only (685, 748); eject() of an
- *    already-ejected id (480).
+ *  - http: a page with NO CSRF token — the common case
+ *    for a read-only app; an empty JSON body; an unparsable
+ *    content-disposition; a Retry-After beyond the sanity ceiling;
+ *    interceptors registered with onRejected only; eject() of an
+ *    already-ejected id.
  *  - transports: backend failure bodies carrying `error` but no `message`, or
- *    neither (202, 207, 344, 354); an error with no `status` (222); a batch
- *    containing a noRetry action (314).
- *  - form: a rules object with a falsy entry (112, 132).
+ *    neither; an error with no `status`; a batch
+ *    containing a noRetry action.
+ *  - form: a rules object with a falsy entry.
  *
  * NOT here: http 327/585 (`if (fresh)` after a CSRF refresh). refreshCsrfOnce
  * throws when the refresh finds no token, so the re-read immediately after it
@@ -54,11 +54,11 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// http — no CSRF token on the page (300, 327, 561, 585)
+// http — no CSRF token on the page
 // ---------------------------------------------------------------------------
 
 describe('http without a CSRF token', () => {
-  it('postCommand omits the header when no token exists (300)', async () => {
+  it('postCommand omits the header when no token exists', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, { ok: true }));
 
     await postCommand('/api/vc', { command: 'save' }, { csrf: true });
@@ -68,7 +68,7 @@ describe('http without a CSRF token', () => {
     expect(init.headers['X-XSRF-TOKEN']).toBeUndefined();
   });
 
-  it('clientRequest omits the header when no token exists (561)', async () => {
+  it('clientRequest omits the header when no token exists', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, { ok: true }));
     const http = createHttpClient();
 
@@ -85,7 +85,7 @@ describe('http without a CSRF token', () => {
 // ---------------------------------------------------------------------------
 
 describe('http response fallbacks', () => {
-  it('treats an empty JSON body as null data (534)', async () => {
+  it('treats an empty JSON body as null data', async () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(204, null, { 'content-type': 'application/json' }));
     const http = createHttpClient();
 
@@ -104,7 +104,7 @@ describe('http response fallbacks', () => {
     expect(result.filename).toBe('download');
   });
 
-  it('ignores a Retry-After beyond the sanity ceiling (181)', async () => {
+  it('ignores a Retry-After beyond the sanity ceiling', async () => {
     const fetchMock = globalThis.fetch as any;
     // 7 days in seconds — must NOT be honoured as a wait; backoff applies.
     fetchMock
@@ -120,11 +120,11 @@ describe('http response fallbacks', () => {
 });
 
 // ---------------------------------------------------------------------------
-// http — interceptor registry arms (480, 685, 748)
+// http — interceptor registry arms
 // ---------------------------------------------------------------------------
 
 describe('http interceptor registry', () => {
-  it('skips a request interceptor registered with onRejected only (685)', async () => {
+  it('skips a request interceptor registered with onRejected only', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, { ok: 1 }));
     const onRejected = vi.fn();
     const http = createHttpClient();
@@ -135,7 +135,7 @@ describe('http interceptor registry', () => {
     expect(onRejected).not.toHaveBeenCalled();
   });
 
-  it('skips a response interceptor registered with onRejected only (748)', async () => {
+  it('skips a response interceptor registered with onRejected only', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, { ok: 1 }));
     const http = createHttpClient();
     http.interceptors.response.use(undefined, vi.fn());
@@ -144,7 +144,7 @@ describe('http interceptor registry', () => {
     expect(res.data).toEqual({ ok: 1 });
   });
 
-  it('eject() is idempotent for an already-ejected id (480)', async () => {
+  it('eject() is idempotent for an already-ejected id', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, { ok: 1 }));
     const http = createHttpClient();
     const onFulfilled = vi.fn((c: any) => c);
@@ -159,11 +159,11 @@ describe('http interceptor registry', () => {
 });
 
 // ---------------------------------------------------------------------------
-// transports — error-body fallbacks (202, 207, 222, 314, 344, 354)
+// transports — error-body fallbacks
 // ---------------------------------------------------------------------------
 
 describe('transport error-body fallbacks', () => {
-  it('falls back to the HTTP status when the body has neither message nor error (202)', async () => {
+  it('falls back to the HTTP status when the body has neither message nor error', async () => {
     const httpClient = { post: vi.fn().mockResolvedValue({ ok: false, status: 503, headers: {}, data: {} }) } as any;
     const bus = createAsyncCommandBus();
     bus.use(createHttpBridge({ endpoint: '/api/vc', httpClient }));
@@ -181,7 +181,7 @@ describe('transport error-body fallbacks', () => {
     expect(result.error?.message).toBe('Backend error');
   });
 
-  it('rewraps an error that carries no status (222)', async () => {
+  it('rewraps an error that carries no status', async () => {
     const thrown = Object.assign(new Error('nope'), { response: { data: { error: 'bad input' } } });
     const httpClient = { post: vi.fn().mockRejectedValue(thrown) } as any;
     const bus = createAsyncCommandBus();
@@ -207,7 +207,7 @@ describe('transport error-body fallbacks', () => {
     expect(result.error?.message).toBe('Backend error');
   });
 
-  it('batch: surfaces the raw error when the body has no message (354)', async () => {
+  it('batch: surfaces the raw error when the body has no message', async () => {
     const thrown = Object.assign(new Error('transport died'), { response: { data: {} } });
     const httpClient = { post: vi.fn().mockRejectedValue(thrown) } as any;
     const bus = createAsyncCommandBus();
@@ -217,7 +217,7 @@ describe('transport error-body fallbacks', () => {
     expect(result.error).toBe(thrown);
   });
 
-  it('batch: a noRetry action forces retry 0 for the whole batch (314)', async () => {
+  it('batch: a noRetry action forces retry 0 for the whole batch', async () => {
     const httpClient = {
       post: vi.fn().mockImplementation((_u, body: any) => Promise.resolve({
         ok: true, status: 200, headers: {},
@@ -232,7 +232,7 @@ describe('transport error-body fallbacks', () => {
     expect(httpClient.post.mock.calls[0]![2].retry).toBe(0);
   });
 
-  it('keeps the configured retry when no batched action is on the noRetry list (314)', async () => {
+  it('keeps the configured retry when no batched action is on the noRetry list', async () => {
     const httpClient = {
       post: vi.fn().mockImplementation((_u, body: any) => Promise.resolve({
         ok: true, status: 200, headers: {},
@@ -248,11 +248,11 @@ describe('transport error-body fallbacks', () => {
 });
 
 // ---------------------------------------------------------------------------
-// form — falsy rule entries (112, 132)
+// form — falsy rule entries
 // ---------------------------------------------------------------------------
 
 describe('form rules with a falsy entry', () => {
-  it('skips a falsy rule during live per-field validation (112)', () => {
+  it('skips a falsy rule during live per-field validation', () => {
     const form = createFormBus({
       fields: { email: 'a@b.com', name: 'Ada' },
       rules: { email: null as any, name: (v: string) => (v ? null : 'required') },
@@ -266,7 +266,7 @@ describe('form rules with a falsy entry', () => {
     expect(form.errors.value.name).toBe('required');
   });
 
-  it('skips a falsy rule during full submit validation (132)', async () => {
+  it('skips a falsy rule during full submit validation', async () => {
     const onSubmit = vi.fn(async () => {});
     const form = createFormBus({
       fields: { email: 'a@b.com', name: '' },

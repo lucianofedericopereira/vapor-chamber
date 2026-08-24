@@ -3,51 +3,16 @@
  *
  * Vue alignment history (one line per version — full per-item detail lives in
  * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table):
- *   vNext / rc.2 — Vue's compiler-vapor event delegation flips from opt-OUT to
- *            opt-IN (#15127, BREAKING): compiled `@click` in .vue Vapor SFCs now
- *            attaches direct per-element listeners unless the template writes
- *            `.delegate` explicitly; `compilerOptions.eventDelegation` is removed
- *            entirely. Pass-through for THIS file — v-vc:command has always
- *            attached a DIRECT addEventListener (it's a runtime directive, never
- *            routed through compiler-vapor's delegated-events codegen), so Vue's
- *            flip doesn't change this directive's existing behavior at all. The
- *            other 12 rc.2 fixes are runtime-vapor suspense/hydration/transition/
- *            interop internals below this VDOM-only directive; no code change.
- *            LIB-SIDE, inspired by studying the .delegate design (not required
- *            by it): v-vc:command gains its OWN opt-in `.delegate` modifier —
- *            one shared document-level click listener instead of one per
- *            element, for large v-for'd action lists (tables, cart rows). Same
- *            trade-off Vue just made opt-in for the same reason (an ancestor's
- *            `.stop` can pre-empt a delegated descendant), so it defaults OFF
- *            here too. Incompatible with `.capture`/`.once`/`.passive` (no
- *            per-element listener to hang them on) — falls back to a direct
- *            listener with a dev warning, mirroring Vue's own
- *            `.delegate modifier is not supported...` compiler warning.
- *            MEASURED (tests/perf.bench.ts, 5k elements): mount+unmount is
- *            ~1.3x SLOWER in delegate mode, not faster — the payoff is
- *            standing LISTENER COUNT while mounted (1 vs N), not attach/
- *            detach speed. Don't reach for `.delegate` as a mount-cost
- *            optimization; it's a memory/retained-listener trade for large,
- *            mostly-static lists, same as Vue's own default reasoning.
- *   vNext / beta.17 — pass-through. No event/delegation change in beta.17 — its fixes are
- *            compiler-vapor slot/expression handling plus runtime slot/interop/hydration, none of
- *            which reach the DIRECT addEventListener this directive attaches. No code change.
- *   vNext / beta.16 — Vue alignment is pass-through (Vue's "parse dynamic v-bind
- *            event options like VDOM" — Once/Passive/Capture — touches the COMPILED
- *            dynamic-event path only; v-vc:command attaches a DIRECT addEventListener,
- *            so the beta.15 disabled/in-flight mirror below is unaffected). LIB-SIDE
- *            this cycle (surfaced by the beta.9–16 retrospective): v-vc:command now
- *            honors event modifiers .stop/.prevent/.self/.left/.middle/.right/.capture/
- *            .once/.passive — the direct listener never received Vue's compiled
- *            withModifiers, so every modifier except the numeric .timeout was being
- *            silently dropped.
- *   v1.6.0 / beta.15 — code change: buildHandler() skips dispatch on disabled /
- *            aria-disabled / in-flight elements, mirroring Vue's "skip disabled
- *            delegated handlers" (#14948) for the DIRECT listener this directive
- *            attaches (the runtime fix only covers delegated handlers; the
- *            platform only guards disabled <button>/<input>, not <a>/<div>).
- *            Delegation opt-out (#14924) and click-modifier normalization are
- *            pass-through.
+ *   rc.5 — pass-through. Two upstream commits independently reached rules this
+ *          file already applied (direct listeners, per-Document delegation).
+ *   rc.2 — pass-through; Vue's compiled `@click` delegation flips to opt-in
+ *          (#15127). LIB-SIDE: v-vc:command gains its own `.delegate` opt-in.
+ *   beta.17 / beta.16 — pass-through. LIB-SIDE in beta.16: v-vc:command honors
+ *          event modifiers (.stop/.prevent/.self/.left/.middle/.right/.capture/
+ *          .once/.passive), which the direct listener had been dropping.
+ *   v1.6.0 / beta.15 — buildHandler() skips dispatch on disabled /
+ *          aria-disabled / in-flight elements, mirroring #14948 for the DIRECT
+ *          listener this directive attaches.
  *   v1.4.0 / beta.13 — pass-through (shared event invoker wrapping).
  *   v0.4.4 — Added: v-vc:command, v-vc:optimistic directives.
  *
@@ -121,6 +86,13 @@ const stateMap = new WeakMap<Element, DirectiveState>();
 // ---------------------------------------------------------------------------
 // Opt-in delegation (.delegate modifier) — lib-side, not required by Vue
 // ---------------------------------------------------------------------------
+//
+// MEASURED (tests/perf.bench.ts, 5k elements), because the intuitive reading
+// is wrong: mount+unmount is ~1.3x SLOWER in delegate mode, not faster. The
+// payoff is the standing LISTENER COUNT while mounted (1 vs N), not attach or
+// detach speed. Do not reach for `.delegate` as a mount-cost optimization — it
+// is a memory / retained-listener trade for large, mostly-static lists, which
+// is Vue's own reasoning for the same default.
 //
 // Mirrors the trade-off Vue 3.6.0-rc.2 made opt-in for compiled `@click`
 // (#15127): one shared listener instead of one per element, at the cost that

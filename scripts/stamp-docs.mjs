@@ -95,6 +95,60 @@ if (main) {
   }
 }
 
+/**
+ * Bundle sizes, read from the GENERATED `docs/BUNDLE-SIZES.md`.
+ *
+ * README and docs/performance.md both carried hand-copied size tables. The
+ * README's own footnote admitted what that costs — "this table had drifted low
+ * on 7 of 9 rows before it was last reconciled" — and it had drifted again by
+ * v1.16.0 (barrel 24.0 vs 24.4, router 12.3 vs 12.4, vue 7.4 vs 7.5, reactive
+ * 5.2 vs 5.4, mcp 1.7 vs 1.9, and the performance.md IIFE table a whole release
+ * behind at 7.0/7.4/10.2 vs 7.6/8.0/11.0).
+ *
+ * A number a human retypes is a number that drifts, so these stop being
+ * retyped. The source of truth stays `npm run size:doc`; this only republishes
+ * its rows into the prose that quotes them.
+ */
+const sizes = (() => {
+  try {
+    const md = readFileSync(join(root, 'docs/BUNDLE-SIZES.md'), 'utf8');
+    const map = {};
+    // `| `./router` | 35.2 | 13.6 | 12.4 |` → export → { min, gzip, brotli }
+    for (const m of md.matchAll(/^\|\s*`([^`]+)`\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|/gm)) {
+      map[m[1]] = { min: m[2], gzip: m[3], brotli: m[4] };
+    }
+    return Object.keys(map).length ? map : null;
+  } catch {
+    return null;
+  }
+})();
+if (sizes) {
+  const put = (name, key) => { if (sizes[key]) VALUES[name] = sizes[key].brotli; };
+  // Variants are quoted with all three columns in README's chooser table, so
+  // those get raw/gzip too — same rule: if prose repeats a measured number, the
+  // number comes from the generator, not from a human.
+  const putAll = (name, key) => {
+    if (!sizes[key]) return;
+    VALUES[name] = sizes[key].brotli;
+    VALUES[`${name}Raw`] = sizes[key].min;
+    VALUES[`${name}Gzip`] = sizes[key].gzip;
+  };
+  put('sizeBarrel', '.');
+  put('sizeConsumer', 'consumer: createCommandBus + logger + createHttpBridge');
+  put('sizeTransports', './transports');
+  put('sizeSsr', './ssr');
+  put('sizeReactive', './reactive');
+  put('sizeVue', './vue');
+  put('sizeOutbox', './outbox');
+  put('sizeMcp', './mcp');
+  put('sizeRouter', './router');
+  put('sizeRouterVdom', './router/vdom');
+  put('sizeRouterFetch', './router-fetch');
+  putAll('sizeIifeFull', 'vapor-chamber (full)');
+  putAll('sizeIifeCore', 'vapor-chamber-core');
+  putAll('sizeIifeElements', 'vapor-chamber-elements');
+}
+
 // Gated on the same provenance: a coverage summary written by a run without
 // `dist/` reports lower numbers for the same reason the counts do.
 const coverage = main ? readJson('coverage/coverage-summary.json')?.total : null;

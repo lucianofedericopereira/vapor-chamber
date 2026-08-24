@@ -10,7 +10,7 @@
  *   - production: freezeCached is a pass-through no-op
  */
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FREEZE_IN_DEV, freezeCached, freezeDeep } from '../src/freeze';
 
 describe('freezeDeep', () => {
@@ -107,5 +107,37 @@ describe('freezeCached', () => {
     expect(freezeCached(7)).toBe(7);
     expect(freezeCached('x')).toBe('x');
     expect(freezeCached(null)).toBe(null);
+  });
+});
+
+describe('freezeCached in production', () => {
+  // The `if (FREEZE_IN_DEV)` FALSE arm. The module header and this file's own
+  // header both state "production: freezeCached is a pass-through no-op", but
+  // nothing exercised it: FREEZE_IN_DEV is `DEV`, which is module-scope and
+  // true under vitest, so the whole suite only ever took the freezing arm.
+  // Re-import after stubbing NODE_ENV, the same way tests/dev-flag.test.ts
+  // reaches DEV's other resolutions.
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it('leaves the value unfrozen and still mutable when NODE_ENV=production', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.resetModules();
+    const prod = await import('../src/freeze');
+
+    expect(prod.FREEZE_IN_DEV).toBe(false);
+
+    const value = { items: [1, 2, 3] };
+    // Chaining contract holds identically on both arms.
+    expect(prod.freezeCached(value)).toBe(value);
+    // ...but nothing was frozen: production does not pay the walk's cost.
+    expect(Object.isFrozen(value)).toBe(false);
+    expect(Object.isFrozen(value.items)).toBe(false);
+
+    // The dev arm makes this exact assignment throw TypeError (see above).
+    value.items = [];
+    expect(value.items).toEqual([]);
   });
 });

@@ -4,16 +4,16 @@
  * The malformed-input suite covers the handlers' error arms; what it never
  * exercises are the *structural* limits that sit outside any single handler:
  *
- *  - StringBuffer.push growth (115) — every existing test string fits the
+ *  - StringBuffer.push growth — every existing test string fits the
  *    initial 256-unit buffer, so the doubling path never ran.
- *  - openObject/openArray maxDepth guards (437, 446) — the parser's only
+ *  - openObject/openArray maxDepth guards — the parser's only
  *    protection against a hostile stream nesting until the process dies.
- *  - closeObject/closeArray parent mismatch (456, 465) — `[1}` / `{"a":1]`
+ *  - closeObject/closeArray parent mismatch — `[1}` / `{"a":1]`
  *    reach the closers with the *wrong* parent on the stack, which is a
  *    different path from the handler-level "unexpected character" rejects.
- *  - handleNumber's default arm (430) — reachable only after end(), when the
+ *  - handleNumber's default arm — reachable only after end(), when the
  *    state is S_DONE and dispatch falls through to the number handler.
- *  - S_NUM_EXP_DIGIT digit accumulation (425) — a multi-digit exponent.
+ *  - S_NUM_EXP_DIGIT digit accumulation — a multi-digit exponent.
  */
 import { describe, expect, it } from 'vitest';
 import { createStreamParser } from '../src/stream-parser';
@@ -43,7 +43,7 @@ describe('StreamParser — string buffer growth', () => {
   });
 
   it('grows past the chunked-flush size', () => {
-    // > FLUSH_CHUNK (8192): flush() must stitch the segments back together in
+    // > FLUSH_CHUNK: flush() must stitch the segments back together in
     // order, not just survive the growth.
     const long = `${'a'.repeat(9000)}TAIL`;
     const { parser, values, errors } = collect();

@@ -20,6 +20,7 @@
  */
 
 import { DEV } from '../dev';
+import { dict } from '../dict';
 import { shallowRef } from 'vue';
 import { isRouterError, routerError } from './errors';
 import type { RouterError } from './errors';
@@ -168,7 +169,9 @@ export function createEngine(ctx: EngineContext) {
       const beforeHash = hashIndex >= 0 ? raw.slice(0, hashIndex) : raw;
       const queryIndex = beforeHash.indexOf('?');
       const path = (queryIndex >= 0 ? beforeHash.slice(0, queryIndex) : beforeHash) || '/';
-      const query = queryIndex >= 0 ? parseQuery(beforeHash.slice(queryIndex)) : {};
+      // Prototype-free on BOTH arms — a consumer must not have to know which
+      // branch built the query to know whether `query.constructor` is theirs.
+      const query = queryIndex >= 0 ? parseQuery(beforeHash.slice(queryIndex)) : dict<string | string[]>();
       return buildLocation(path, query, hash, table.resolve(path));
     }
 
@@ -188,7 +191,10 @@ export function createEngine(ctx: EngineContext) {
   }
 
   function cleanQueryPatch(patch: QueryPatch | undefined): QueryValues {
-    const query: QueryValues = {};
+    // This path reads only own keys off `patch`, so it never had the lookup bug
+    // — but the object it RETURNS becomes `location.query`, which must be
+    // uniform with parseQuery's. See `../dict`.
+    const query: QueryValues = dict<string | string[]>();
     if (!patch) return query;
     for (const key of Object.keys(patch)) {
       const value = patch[key];

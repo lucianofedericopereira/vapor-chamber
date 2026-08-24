@@ -3,8 +3,7 @@
  *
  * The existing suite parses well-formed JSON thoroughly; what it never does is
  * hand the parser something broken. That left the error arms of nearly every
- * state handler untested — 21 uncovered branch sites, and the single largest
- * gap in the package (84.2% branches).
+ * state handler untested.
  *
  * These are the branches that matter most in a streaming parser: it consumes
  * bytes off a network, so malformed input is an expected condition, not an

@@ -30,7 +30,7 @@ export function makeBladeComponent(html: string, hooks: BladeHooks) {
       // lifecycle: the render function returns the ref'd div unconditionally,
       // Vue binds template refs before `onMounted`, and nulls them only after
       // `onBeforeUnmount`. Measured — both took the false path 4/4 times and
-      // the true path 0, which is what held this file at 50% branch coverage.
+      // the true path 0, which is why they are ignored rather than tested.
       // They stay because `el.value` is `HTMLElement | null` and dropping them
       // would mean a non-null assertion, which is worse. Ignored rather than
       // faked with a test that reaches in and nulls the ref.

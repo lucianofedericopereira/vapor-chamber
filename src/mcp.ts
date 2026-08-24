@@ -28,7 +28,7 @@
  */
 
 import { DEV } from './dev';
-import { BusError, matchesPattern } from './command-bus';
+import { BusError, matchesPattern, _withOrigin } from './command-bus';
 import type { CommandResult, Plugin } from './command-bus';
 import type { ActionSchema, BusSchema, FieldMap } from './schema';
 
@@ -173,7 +173,7 @@ export type McpHandlerOptions = {
  * advertised a version that had not existed for months. A failing test at
  * release time is the cheapest possible checklist.
  */
-export const MCP_SERVER_VERSION = '1.15.0';
+export const MCP_SERVER_VERSION = '1.16.0';
 
 /** Latest MCP protocol revision this handler speaks. */
 const MCP_PROTOCOL_VERSION = '2025-06-18';
@@ -272,19 +272,46 @@ export function createMcpHandler(
     // requires) `payload` for actions whose schema has one, so an action
     // without a payload schema has no payload checks to fail. Stamping the
     // marker anyway keeps the audit trail hole-free.
-    // A non-object, non-null payload (a bare string or array where an object
-    // belongs) is passed through untouched: there is nothing to spread into,
-    // and schemaValidator rejects that shape on its own.
-    const payload =
-      rawPayload === null || rawPayload === undefined
-        ? { __origin: 'agent' }
-        : typeof rawPayload === 'object' && !Array.isArray(rawPayload)
-          ? { ...rawPayload, __origin: 'agent' }
-          : rawPayload;
+    //
+    // A non-object payload is REFUSED rather than passed through. This used to
+    // forward it untouched, on the reasoning that "schemaValidator rejects that
+    // shape on its own" — which holds only for actions that DECLARE payload
+    // fields. `schema.ts` guards with `c.payload && c.payload.length > 0`, so
+    // an action with no payload schema (`cartClear`-shaped) has no such check,
+    // and a bare string sailed through. The marker cannot ride on a primitive
+    // or an array, so those dispatches reached handlers with
+    // `meta.origin === undefined` — indistinguishable from a local, non-agent
+    // command. MEASURED: `cartClear` + `{a:1}` stamped 'agent', `cartClear` +
+    // `'bare-string'` stamped nothing and still dispatched. An audit trail
+    // filtering on `origin === 'agent'` silently missed it, which is the
+    // "misattributed audit origins" failure stampMeta's docblock names — on a
+    // boundary that is untrusted by construction (see above).
+    //
+    // Refusing costs nothing legitimate: `actionToMcpTool` only ever advertises
+    // `payload` as `{ type: 'object' }`, so a non-object payload is already off
+    // -contract for every tool this server exposes. A counter or module flag
+    // (the `_mcpDispatching` shape) is NOT an option here — this handler awaits
+    // its dispatch, so a flag would span the await and reintroduce the original
+    // race the marker was built to kill.
+    if (
+      rawPayload !== null &&
+      rawPayload !== undefined &&
+      (typeof rawPayload !== 'object' || Array.isArray(rawPayload))
+    ) {
+      return toolResult(
+        `Tool "${name}": payload must be an object (got ${Array.isArray(rawPayload) ? 'array' : typeof rawPayload})`,
+        true,
+      );
+    }
     let result: CommandResult;
     try {
       // `await` handles both sync and async buses (thenable or plain result).
-      result = await bus.dispatch(name, target, payload);
+      // `_withOrigin` stamps `meta.origin = 'agent'` from the core rather than
+      // by spreading a key into the caller's payload: no allocation, and the
+      // handler receives exactly the object the client sent. Awaiting is safe —
+      // the slot is consumed in dispatch's synchronous prologue, long before
+      // this promise settles.
+      result = await _withOrigin('agent', () => bus.dispatch(name, target, rawPayload));
     } catch (e) {
       result = { ok: false, error: e as Error };
     }

@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { compilePath, createRouteTable } from '../../src/router/table';
 import type { RouteRecord } from '../../src/router/types';
 
@@ -183,7 +183,7 @@ describe('decodePathPart — malformed percent-encoding', () => {
 });
 
 // ---------------------------------------------------------------------------
-// castParam — typed path params (114-124)
+// castParam — typed path params
 // ---------------------------------------------------------------------------
 
 describe('typed path params', () => {
@@ -195,7 +195,7 @@ describe('typed path params', () => {
     { name: 'plain', path: '/plain/:slug', component: 'Plain' },
   ]);
 
-  it('casts an int param and falls back to the raw string when unparsable (117-118)', () => {
+  it('casts an int param and falls back to the raw string when unparsable', () => {
     expect(typed.resolve('/post/42')?.params.id).toBe(42);
     // Not a number — the raw segment survives rather than becoming NaN.
     expect(typed.resolve('/post/abc')?.params.id).toBe('abc');
@@ -208,7 +208,68 @@ describe('typed path params', () => {
     expect(typed.resolve('/flag/nope')?.params.on).toBe(false);
   });
 
-  it('leaves untyped params as strings (123)', () => {
+  it('leaves untyped params as strings', () => {
     expect(typed.resolve('/plain/hello')?.params.slug).toBe('hello');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The static fast-path map keys on a CASE-FOLDED, trailing-slash-stripped path
+// (staticKey), so two distinct rows can collide on one key. `if
+// (!staticByPath.has(key))` keeps the first — nothing exercised that false arm,
+// because no existing table declares two colliding static rows.
+// ---------------------------------------------------------------------------
+
+describe('colliding static rows — first one wins, like the scan', () => {
+  it('keeps the earlier row when two static paths fold to the same key', () => {
+    const table = createRouteTable([
+      { name: 'about', path: '/about', component: 'A' },
+      { name: 'aboutCased', path: '/About', component: 'B' }, // same key: case-folded
+      { name: 'help', path: '/help', component: 'H' },
+      { name: 'helpSlash', path: '/help/', component: 'H2' }, // same key: trailing slash stripped
+    ]);
+
+    // The map must agree with server priority — the FIRST declared row wins,
+    // whichever spelling the URL arrives in.
+    expect(table.resolve('/about')?.record.name).toBe('about');
+    expect(table.resolve('/About')?.record.name).toBe('about');
+    expect(table.resolve('/ABOUT')?.record.name).toBe('about');
+
+    expect(table.resolve('/help')?.record.name).toBe('help');
+    expect(table.resolve('/help/')?.record.name).toBe('help');
+
+    // The shadowed rows still exist as records — they are just unreachable by URL.
+    expect(table.getRecord('aboutCased')?.name).toBe('aboutCased');
+    expect(table.getRecord('helpSlash')?.name).toBe('helpSlash');
+  });
+});
+
+describe('unknown parent in production (DEV=false)', () => {
+  // The FALSE arm of `if (DEV)` in pass 2. The dev arm throws unknown_parent
+  // (asserted above); production instead `return`s and leaves the record
+  // unlinked, so a bad table degrades to a flat one rather than taking the app
+  // down at import time.
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it('skips the link and leaves the row parentless instead of throwing', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.resetModules();
+    const prod = await import('../../src/router/table');
+
+    const rows: RouteRecord[] = [
+      { name: 'real', path: '/real', component: 'R' },
+      { name: 'orphan', path: '/orphan', parent: 'ghost', component: 'O' },
+    ];
+
+    const table = prod.createRouteTable(rows);
+    expect(table.resolve('/orphan')?.record.name).toBe('orphan');
+    // Unlinked: the chain is the row itself, with no phantom ancestor.
+    expect(table.getRecord('orphan')?.chain.map((r) => r.name)).toEqual(['orphan']);
+    expect(table.getRecord('orphan')?.parent ?? null).toBeNull();
+    // The well-formed sibling is unaffected.
+    expect(table.resolve('/real')?.record.name).toBe('real');
   });
 });

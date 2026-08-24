@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  A command bus built for <a href="https://github.com/vuejs/core">Vue Vapor</a> — a ~3.6 KB brotli dispatch core with opt-in batteries, each 0 KB until imported. Vue <!-- vc:vueAligned -->3.6.0-rc.4<!-- /vc:vueAligned --> aligned. LGPL-2.1.
+  A command bus built for <a href="https://github.com/vuejs/core">Vue Vapor</a> — a ~3.6 KB brotli dispatch core with opt-in batteries, each 0 KB until imported. Vue <!-- vc:vueAligned -->3.6.0-rc.5<!-- /vc:vueAligned --> aligned. LGPL-2.1.
 </p>
 
 ---
@@ -41,10 +41,10 @@ A small core, and batteries you only pay for if you import them.
 | **Transports** (opt-in) | HTTP bridge, batching HTTP, WebSocket, SSE, Laravel Echo/Reverb |
 | **Extras** (opt-in, own subpath each) | SSR dehydrate/rehydrate, form bus, HTTP client, streaming JSON parser, schema validation, transitions, devtools, Vite HMR, testing, MCP server, offline outbox |
 
-- **Vue <!-- vc:vueAligned -->3.6.0-rc.4<!-- /vc:vueAligned --> aligned** — signals, `onScopeDispose`, `getCurrentScope`, alien-signals internals; tracked per release in the [CHANGELOG](CHANGELOG.md)
+- **Vue <!-- vc:vueAligned -->3.6.0-rc.5<!-- /vc:vueAligned --> aligned** — signals, `onScopeDispose`, `getCurrentScope`, alien-signals internals; tracked per release in the [CHANGELOG](CHANGELOG.md)
 - **One runtime dependency** (`alien-signals`); unimported modules tree-shake to zero
 - **ESM-only**, plus three IIFE `<script>` drop-ins for no-bundler pages
-- **<!-- vc:tests -->1748<!-- /vc:tests --> tests** across <!-- vc:testFiles -->113<!-- /vc:testFiles --> files · <!-- vc:covStatements -->99.9<!-- /vc:covStatements -->% statements · <!-- vc:covLines -->99.9<!-- /vc:covLines -->% lines ([full table](docs/COVERAGE.md))
+- **<!-- vc:tests -->1859<!-- /vc:tests --> tests** across <!-- vc:testFiles -->119<!-- /vc:testFiles --> files · <!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% statements · <!-- vc:covLines -->100.0<!-- /vc:covLines -->% lines ([full table](docs/COVERAGE.md))
 
 ## Contents
 
@@ -60,7 +60,7 @@ npm install vapor-chamber        # npm registry (releases may lag the repo)
 npm install github:lucianofedericopereira/vapor-chamber
 ```
 
-**Requirements:** Node ≥22.12. Vue is an **optional** peer dep — ≥3.5 for composables, ≥<!-- vc:vueAligned -->3.6.0-rc.4<!-- /vc:vueAligned -->
+**Requirements:** Node ≥22.12. Vue is an **optional** peer dep — ≥3.5 for composables, ≥<!-- vc:vueAligned -->3.6.0-rc.5<!-- /vc:vueAligned -->
 for the full Vapor surface. The core bus runs without Vue entirely. Vite ≥5 + `@vitejs/plugin-vue`
 ≥5 only for the `vapor-chamber/vite` HMR plugin and Vapor SFC support.
 
@@ -204,8 +204,8 @@ pins Vue's virtual-DOM runtime into your bundle. It therefore lives behind its o
 
 | entry | bindings retained from `vue` | brotli |
 |---|---|--:|
-| `vapor-chamber/router` | `computed customRef getCurrentScope inject onScopeDispose shallowRef` | 12.3 KB |
-| `vapor-chamber/router/vdom` | `defineComponent h inject provide` | 0.4 KB |
+| `vapor-chamber/router` | `computed customRef getCurrentScope inject onScopeDispose shallowRef` | <!-- vc:sizeRouter -->12.3<!-- /vc:sizeRouter --> KB |
+| `vapor-chamber/router/vdom` | `defineComponent h inject provide` | <!-- vc:sizeRouterVdom -->0.4<!-- /vc:sizeRouterVdom --> KB |
 
 A Vapor app that never renders an outlet pays nothing for the vDOM runtime. Blade rows need no
 import from you — the router pulls `makeBladeComponent` in on demand, as its own chunk, the first
@@ -1050,24 +1050,26 @@ on any regression past budget.
 | Entry | brotli |
 |---|--:|
 | dispatch core (`createCommandBus`, tree-shaken) | **~3.6 KB** |
-| `vapor-chamber` (main barrel, import-*everything*) | 24.0 KB |
-| `vapor-chamber/router` | 12.3 KB |
-| `vapor-chamber/router/vdom` | 0.4 KB |
-| `vapor-chamber/router-fetch` | 3.9 KB |
-| `vapor-chamber/vue` | 7.4 KB |
-| `vapor-chamber/reactive` | 5.2 KB |
-| `vapor-chamber/transports` | 4.2 KB |
-| `vapor-chamber/outbox` | 1.9 KB |
-| `vapor-chamber/mcp` | 1.7 KB |
-| `vapor-chamber/ssr` | 0.7 KB |
+| `vapor-chamber` (main barrel, import-*everything*) | <!-- vc:sizeBarrel -->24.4<!-- /vc:sizeBarrel --> KB |
+| `vapor-chamber/router` | <!-- vc:sizeRouter -->12.3<!-- /vc:sizeRouter --> KB |
+| `vapor-chamber/router/vdom` | <!-- vc:sizeRouterVdom -->0.4<!-- /vc:sizeRouterVdom --> KB |
+| `vapor-chamber/router-fetch` | <!-- vc:sizeRouterFetch -->3.9<!-- /vc:sizeRouterFetch --> KB |
+| `vapor-chamber/vue` | <!-- vc:sizeVue -->7.4<!-- /vc:sizeVue --> KB |
+| `vapor-chamber/reactive` | <!-- vc:sizeReactive -->5.4<!-- /vc:sizeReactive --> KB |
+| `vapor-chamber/transports` | <!-- vc:sizeTransports -->4.2<!-- /vc:sizeTransports --> KB |
+| `vapor-chamber/outbox` | <!-- vc:sizeOutbox -->1.9<!-- /vc:sizeOutbox --> KB |
+| `vapor-chamber/mcp` | <!-- vc:sizeMcp -->1.9<!-- /vc:sizeMcp --> KB |
+| `vapor-chamber/ssr` | <!-- vc:sizeSsr -->0.7<!-- /vc:sizeSsr --> KB |
 
 **Rows are not additive** — the shared core is included in every row and counted once. `.` is the
 barrel measured import-everything; your bundler drops what you don't use.
 
-These are brotli, hand-copied from [docs/BUNDLE-SIZES.md](./docs/BUNDLE-SIZES.md), which is
-generated by `npm run size:doc` and verified fresh in CI. That file is the source of truth —
-this table had drifted low on 7 of 9 rows before it was last reconciled, so trust the generated
-one if the two ever disagree.
+These are brotli, **machine-stamped** from [docs/BUNDLE-SIZES.md](./docs/BUNDLE-SIZES.md) — the
+generated file (`npm run size:doc`) is the source of truth, and `npm run docs:stamp` republishes
+its rows here, with `lint:check` failing on a stale one. They used to be hand-copied, which cost
+exactly what you would expect: this table had drifted low on 7 of 9 rows before it was last
+reconciled by hand, and had drifted again by v1.16.0. A number a human retypes is a number that
+drifts, so it is no longer retyped.
 
 ### IIFE / CDN variants
 
@@ -1075,9 +1077,9 @@ Three `<script>`-tag drop-ins. Pick by audience, not feature checklist.
 
 | Variant | Audience | Min | Brotli | Gzip |
 |---|---|--:|--:|--:|
-| **core** | Sprinkled JS on server-rendered pages (Blade, Rails, Django, WordPress). You dispatch user actions to a backend over HTTP. | 26.1 KB | 7.6 KB | 8.4 KB |
-| **elements** | Embeddable widgets (chat bubbles, checkout buttons, third-party drop-ins). You ship a `<vc-widget>` custom element. | 27.7 KB | 8.0 KB | 8.9 KB |
-| **full** | SPAs that grew big enough to want everything (realtime, undo/redo, persistence, full Vapor surface). | 38.1 KB | 11.1 KB | 12.3 KB |
+| **core** | Sprinkled JS on server-rendered pages (Blade, Rails, Django, WordPress). You dispatch user actions to a backend over HTTP. | <!-- vc:sizeIifeCoreRaw -->26.2<!-- /vc:sizeIifeCoreRaw --> KB | <!-- vc:sizeIifeCore -->7.6<!-- /vc:sizeIifeCore --> KB | <!-- vc:sizeIifeCoreGzip -->8.5<!-- /vc:sizeIifeCoreGzip --> KB |
+| **elements** | Embeddable widgets (chat bubbles, checkout buttons, third-party drop-ins). You ship a `<vc-widget>` custom element. | <!-- vc:sizeIifeElementsRaw -->27.8<!-- /vc:sizeIifeElementsRaw --> KB | <!-- vc:sizeIifeElements -->8.1<!-- /vc:sizeIifeElements --> KB | <!-- vc:sizeIifeElementsGzip -->9.0<!-- /vc:sizeIifeElementsGzip --> KB |
+| **full** | SPAs that grew big enough to want everything (realtime, undo/redo, persistence, full Vapor surface). | <!-- vc:sizeIifeFullRaw -->38.0<!-- /vc:sizeIifeFullRaw --> KB | <!-- vc:sizeIifeFull -->11.1<!-- /vc:sizeIifeFull --> KB | <!-- vc:sizeIifeFullGzip -->12.3<!-- /vc:sizeIifeFullGzip --> KB |
 
 <details>
 <summary><b>What's in each variant</b>, plus drop-in examples</summary>
@@ -1169,8 +1171,8 @@ optional and tree-shaken when unimported.
    form.ts · schema.ts · devtools.ts · directives.ts · vite-hmr.ts
 ```
 
-**Coverage:** <!-- vc:covStatements -->99.9<!-- /vc:covStatements -->% statements · <!-- vc:covBranches -->97.8<!-- /vc:covBranches -->% branches · <!-- vc:covFunctions -->99.6<!-- /vc:covFunctions -->% functions · <!-- vc:covLines -->99.9<!-- /vc:covLines -->% lines across **<!-- vc:tests -->1748<!-- /vc:tests --> tests**
-(<!-- vc:testFiles -->113<!-- /vc:testFiles --> files). The dispatch core is at 100% line + branch + function. Per-file table:
+**Coverage:** <!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% statements · <!-- vc:covBranches -->100.0<!-- /vc:covBranches -->% branches · <!-- vc:covFunctions -->100.0<!-- /vc:covFunctions -->% functions · <!-- vc:covLines -->100.0<!-- /vc:covLines -->% lines across **<!-- vc:tests -->1859<!-- /vc:tests --> tests**
+(<!-- vc:testFiles -->119<!-- /vc:testFiles --> files). The dispatch core is at 100% line + branch + function. Per-file table:
 [docs/COVERAGE.md](docs/COVERAGE.md); run `npm run test:coverage` for live numbers.
 
 ## Testing

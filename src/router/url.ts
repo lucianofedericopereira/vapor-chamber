@@ -5,12 +5,18 @@
  * codec here backs the engine's query fast path and useQueryParam.
  */
 
+import { dict } from '../dict';
 import type { QueryParamDef, QueryValues } from './types';
 
 /** Parse a search string ('?a=1&b=2', leading '?' optional) into QueryValues.
  *  Repeated keys collect into arrays. '+' decodes to space. */
 export function parseQuery(search: string): QueryValues {
-  const query: QueryValues = {};
+  // Prototype-free: the read below (`const existing = query[key]`) walks the
+  // chain on a `{}`, so `?constructor=1` came back "already set" and produced
+  // `[Object, '1']` instead of `'1'`. Rule and full evidence in `../dict`.
+  // (vue-router v5 hardened its own query parsing the same way — different
+  // codebase, same lesson, one call to take it.)
+  const query: QueryValues = dict<string | string[]>();
   const raw = search.startsWith('?') ? search.slice(1) : search;
   if (!raw) return query;
   for (const pair of raw.split('&')) {

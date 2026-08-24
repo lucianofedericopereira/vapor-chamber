@@ -336,7 +336,17 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
     await saveQueue();
     // Stamp the key now so anything inspecting the result's command (listeners,
     // devtools) sees the same key the eventual replay will carry.
-    if (cmd.meta) cmd.meta.idempotencyKey = record.key;
+    //
+    // `meta!` rather than `if (cmd.meta)`: `Command.meta` is optional on the
+    // shared type because the FAST LANE omits it — but the fast lane drops the
+    // plugin chain entirely and never allocates a Command, and `enqueue` is
+    // private to this closure, reachable only from the plugin below. So every
+    // command arriving here came through a normal dispatch, where stampMeta
+    // runs unconditionally in the synchronous prologue. The old runtime guard
+    // could not fire; if that invariant ever breaks, this throws loudly rather
+    // than silently dropping the idempotency key — which is the one thing that
+    // must not happen quietly on a queued write.
+    cmd.meta!.idempotencyKey = record.key;
     busRef?.emit('outboxQueued', record);
     return { ok: true, value: { queued: true, id: record.id } };
   }
@@ -349,12 +359,14 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
     const replay = currentReplay;
     if (replay !== null && !replay.claimed && cmd.action === replay.record.action && cmd.target === replay.record.target) {
       replay.claimed = true;
-      if (cmd.meta) {
-        cmd.meta.idempotencyKey = replay.record.key;
-        // CommandMeta gains an optional `origin` field in a parallel workstream;
-        // cast until the type lands so replays are distinguishable in handlers.
-        (cmd.meta as any).origin = 'replay';
-      }
+      // Same invariant as enqueue() above — the replay is issued by runFlush as
+      // an ordinary `bus.dispatch(...)`, so meta is always stamped. Losing the
+      // key here would send a replay with no Idempotency-Key, i.e. exactly the
+      // duplicate-execution the outbox exists to prevent.
+      cmd.meta!.idempotencyKey = replay.record.key;
+      // CommandMeta gains an optional `origin` field in a parallel workstream;
+      // cast until the type lands so replays are distinguishable in handlers.
+      (cmd.meta as any).origin = 'replay';
       return next();
     }
 

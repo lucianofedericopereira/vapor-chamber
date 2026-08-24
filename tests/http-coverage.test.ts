@@ -1,18 +1,18 @@
 /**
  * Supplemental coverage for src/http.ts.
  *
- * Targets the previously-uncovered regions:
- *  - readCsrfFromDom hidden-input fallback (116-121)
- *  - refreshCsrfOnce coalescing + failure paths (134-143, 158)
- *  - parseRetryAfter HTTP-date branch (177-182)
- *  - combineSignals AbortSignal.any fallback (197-201)
- *  - sleepMs abort path (208-209)
- *  - doClientFetch json content-type fallback (475)
- *  - clientRequest 419 CSRF retry + session-expiry-after-retry (519-524, 529)
- *  - clientRequest network-error retry (550)
- *  - request interceptor onRejected when onFulfilled throws (609)
- *  - String() body for primitive data (650)
- *  - safe.put / safe.patch / safe.delete wrappers (743-745)
+ * Drives the arms the main http suite does not reach:
+ *  - readCsrfFromDom hidden-input fallback
+ *  - refreshCsrfOnce coalescing + failure paths
+ *  - parseRetryAfter HTTP-date branch
+ *  - combineSignals AbortSignal.any fallback
+ *  - sleepMs abort path
+ *  - doClientFetch json content-type fallback
+ *  - clientRequest 419 CSRF retry + session-expiry-after-retry
+ *  - clientRequest network-error retry
+ *  - request interceptor onRejected when onFulfilled throws
+ *  - String() body for primitive data
+ *  - safe.put / safe.patch / safe.delete wrappers
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
@@ -64,7 +64,7 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('readCsrfToken — DOM sources', () => {
-  it('falls back to hidden input[name="_token"] when meta and cookie are absent (116-121)', () => {
+  it('falls back to hidden input[name="_token"] when meta and cookie are absent', () => {
     vi.stubGlobal('document', {
       querySelector: (sel: string) => {
         if (sel === 'input[name="_token"]') return { value: 'hidden-input-token' };
@@ -109,7 +109,7 @@ describe('readCsrfToken — DOM sources', () => {
 // refreshCsrfOnce — coalescing + failure paths (driven via the 419 flow)
 // ---------------------------------------------------------------------------
 
-describe('refreshCsrfOnce — failure path (158)', () => {
+describe('refreshCsrfOnce — failure path', () => {
   it('throws when no token is found in the DOM after refresh', async () => {
     // No DOM token at all -> readCsrfToken() returns null post-refresh -> throw.
     vi.stubGlobal('document', {
@@ -127,7 +127,7 @@ describe('refreshCsrfOnce — failure path (158)', () => {
   });
 });
 
-describe('refreshCsrfOnce — coalescing (134-143)', () => {
+describe('refreshCsrfOnce — coalescing', () => {
   it('coalesces a concurrent 419 refresh: second waiter reuses the in-flight refresh and succeeds', async () => {
     // Both requests get 419 first. The csrf-cookie endpoint is slow so the two
     // refreshes overlap; the second caller must enter the coalescing wait loop
@@ -164,7 +164,7 @@ describe('refreshCsrfOnce — coalescing (134-143)', () => {
     expect(csrfCookieCalls).toBe(1);
   });
 
-  it('coalesced waiter throws when the in-flight refresh failed (140-142)', async () => {
+  it('coalesced waiter throws when the in-flight refresh failed', async () => {
     // First refresh fails (no DOM token), so _csrfRefreshResult stays false.
     // The coalesced second waiter must observe that failure and throw.
     vi.stubGlobal('document', {
@@ -201,10 +201,10 @@ describe('refreshCsrfOnce — coalescing (134-143)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// parseRetryAfter — HTTP-date branch (177-182) via retry timing
+// parseRetryAfter — HTTP-date branch via retry timing
 // ---------------------------------------------------------------------------
 
-describe('parseRetryAfter — HTTP-date Retry-After (177-182)', () => {
+describe('parseRetryAfter — HTTP-date Retry-After', () => {
   it('honors a Retry-After HTTP date in the future and retries', async () => {
     const future = new Date(Date.now() + 2000).toUTCString();
     (globalThis.fetch as any)
@@ -220,7 +220,7 @@ describe('parseRetryAfter — HTTP-date Retry-After (177-182)', () => {
     expect((globalThis.fetch as any).mock.calls).toHaveLength(2);
   });
 
-  it('returns null for an unparseable Retry-After and falls back to backoff (182)', async () => {
+  it('returns null for an unparseable Retry-After and falls back to backoff', async () => {
     (globalThis.fetch as any)
       .mockResolvedValueOnce(mockResponse(503, null, { 'retry-after': 'not-a-date-or-number' }))
       .mockResolvedValueOnce(mockResponse(200, { ok: true }));
@@ -250,10 +250,10 @@ describe('parseRetryAfter — HTTP-date Retry-After (177-182)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// combineSignals — AbortSignal.any fallback (197-201)
+// combineSignals — AbortSignal.any fallback
 // ---------------------------------------------------------------------------
 
-describe('combineSignals — fallback without AbortSignal.any (197-201)', () => {
+describe('combineSignals — fallback without AbortSignal.any', () => {
   it('uses the manual fallback and still propagates a user abort', async () => {
     const realAny = (AbortSignal as any).any;
     // Force the fallback branch by removing AbortSignal.any.
@@ -280,10 +280,10 @@ describe('combineSignals — fallback without AbortSignal.any (197-201)', () => 
 });
 
 // ---------------------------------------------------------------------------
-// sleepMs — abort path (208-209) via user abort during retry backoff
+// sleepMs — abort path via user abort during retry backoff
 // ---------------------------------------------------------------------------
 
-describe('sleepMs — abort during retry backoff (208-209)', () => {
+describe('sleepMs — abort during retry backoff', () => {
   it('rejects the backoff sleep with AbortError when the user signal fires mid-wait', async () => {
     const ctrl = new AbortController();
     // Network error so the catch path schedules sleepMs(backoff, userSignal),
@@ -303,10 +303,10 @@ describe('sleepMs — abort during retry backoff (208-209)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// doClientFetch — json content-type fallback to text (475)
+// doClientFetch — json content-type fallback to text
 // ---------------------------------------------------------------------------
 
-describe('doClientFetch — non-JSON content-type falls back to text (475)', () => {
+describe('doClientFetch — non-JSON content-type falls back to text', () => {
   it('returns text when responseType is json but content-type is not application/json', async () => {
     // content-type omitted -> not "application/json" -> data = await raw.text()
     (globalThis.fetch as any).mockResolvedValue(mockResponse(200, 'raw-body-text'));
@@ -320,10 +320,10 @@ describe('doClientFetch — non-JSON content-type falls back to text (475)', () 
 });
 
 // ---------------------------------------------------------------------------
-// clientRequest — 419 CSRF retry + session expiry after retry (519-524, 529)
+// clientRequest — 419 CSRF retry + session expiry after retry
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — 419 CSRF retry (519-524)', () => {
+describe('createHttpClient — 419 CSRF retry', () => {
   beforeEach(() => {
     vi.stubGlobal('document', {
       querySelector: (sel: string) =>
@@ -350,7 +350,7 @@ describe('createHttpClient — 419 CSRF retry (519-524)', () => {
     expect(retryInit.headers['X-CSRF-TOKEN']).toBe('client-csrf-token');
   });
 
-  it('after CSRF retry exhausted, a second 419 routes through session-expiry handling (529)', async () => {
+  it('after CSRF retry exhausted, a second 419 routes through session-expiry handling', async () => {
     const onSessionExpired = vi.fn();
     // 419 -> refresh -> 419 again. Second time csrfRetried is true, so the
     // `res.status === 419 && csrfRetried` branch fires handleSessionExpiry,
@@ -371,10 +371,10 @@ describe('createHttpClient — 419 CSRF retry (519-524)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// clientRequest — network-error retry backoff (550)
+// clientRequest — network-error retry backoff
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — network error retry (550)', () => {
+describe('createHttpClient — network error retry', () => {
   it('GET retries after a network error via backoff sleep, then succeeds', async () => {
     (globalThis.fetch as any)
       .mockRejectedValueOnce(new Error('network glitch'))
@@ -393,10 +393,10 @@ describe('createHttpClient — network error retry (550)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// request interceptor — onRejected when onFulfilled throws (609)
+// request interceptor — onRejected when onFulfilled throws
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — request interceptor error path (609)', () => {
+describe('createHttpClient — request interceptor error path', () => {
   it('invokes onRejected when the request onFulfilled interceptor throws', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, { ok: true }));
     const http = createHttpClient();
@@ -417,10 +417,10 @@ describe('createHttpClient — request interceptor error path (609)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// request body — String(rawData) for primitive data (650)
+// request body — String(rawData) for primitive data
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — primitive body serialization (650)', () => {
+describe('createHttpClient — primitive body serialization', () => {
   it('stringifies a primitive (number) body via String() with no JSON Content-Type', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, {}));
     const http = createHttpClient();
@@ -445,10 +445,10 @@ describe('createHttpClient — primitive body serialization (650)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// safe.put / safe.patch / safe.delete wrappers (743-745)
+// safe.put / safe.patch / safe.delete wrappers
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — safe.put/patch/delete (743-745)', () => {
+describe('createHttpClient — safe.put/patch/delete', () => {
   it('safe.put returns a success SafeResult', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, { updated: true }));
     const http = createHttpClient();
@@ -625,5 +625,231 @@ describe('cached responses are immutable in dev (item 8)', () => {
       (hit as { status: number }).status = 500;
     }).toThrow();
     expect(hit.data.items).toHaveLength(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The remaining http.ts arms: a document with no querySelector, a 419 refresh
+// that yields no fresh token, and a fetch Response with no `headers`.
+// ---------------------------------------------------------------------------
+
+describe('readCsrfToken — the TTL cache hit', () => {
+  it('serves a second read from cache without touching the DOM again', () => {
+    // The 5-minute cache. This used to be covered incidentally by the 419 path,
+    // which called readCsrfToken() a second time right after refreshCsrfOnce();
+    // that re-read has been removed (the refresh now returns the token), so the
+    // cache needs asserting on its own terms. It still matters for the ordinary
+    // case: every csrf-enabled request inside the TTL reads from here.
+    let domReads = 0;
+    vi.stubGlobal('document', {
+      querySelector: (sel: string) => {
+        if (sel === 'meta[name="csrf-token"]') { domReads++; return { content: 'cached-token' }; }
+        return null;
+      },
+      cookie: '',
+    });
+    invalidateCsrfCache();
+
+    const first = readCsrfToken();
+    const second = readCsrfToken();
+
+    expect(first).toEqual({ token: 'cached-token', headerName: 'X-CSRF-TOKEN' });
+    expect(second).toEqual(first);
+    expect(domReads).toBe(1); // second call never reached the DOM
+
+    // ...and invalidating forces a fresh read.
+    invalidateCsrfCache();
+    expect(readCsrfToken()).toEqual(first);
+    expect(domReads).toBe(2);
+  });
+});
+
+describe('readCsrfToken — a document without querySelector', () => {
+  it('skips both DOM probes and still reads the cookie', () => {
+    // `typeof document.querySelector === 'function' ? … : null` — the null arm,
+    // which then short-circuits BOTH `if (q)` blocks. This is the shape a
+    // non-DOM `document` shim has (some SSR/test harnesses expose only
+    // `cookie`), and a bare property read on it would throw.
+    vi.stubGlobal('document', { cookie: 'XSRF-TOKEN=from-cookie-only' });
+
+    invalidateCsrfCache();
+    expect(readCsrfToken()).toEqual({ token: 'from-cookie-only', headerName: 'X-XSRF-TOKEN' });
+  });
+
+  it('returns null when there is neither a querySelector nor a cookie', () => {
+    vi.stubGlobal('document', { cookie: '' });
+    invalidateCsrfCache();
+    expect(readCsrfToken()).toBeNull();
+  });
+});
+
+describe('clientRequest — 419 CSRF refresh returns the token it proved readable', () => {
+  it('retries with the token handed back by the refresh, not a re-read', async () => {
+    // refreshCsrfOnce() now RESOLVES WITH the token instead of leaving the
+    // caller to call readCsrfToken() again. That removed a real window: the
+    // two statements were separated by a microtask boundary that coalesced
+    // waiters resume across, so a waiter running first could invalidate the
+    // cache or clear the DOM and leave a later waiter re-reading null — then
+    // silently retrying with no CSRF header.
+    let token = 'token-after-refresh';
+    vi.stubGlobal('document', {
+      querySelector: (sel: string) =>
+        sel === 'meta[name="csrf-token"]' ? { content: token } : null,
+      cookie: '',
+    });
+    invalidateCsrfCache();
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(419, { message: 'csrf expired' })) // trips the refresh
+      .mockImplementationOnce(async () => {
+        // The refresh round-trip: the backend rotates the token.
+        token = 'rotated-token';
+        return mockResponse(200, null);
+      })
+      .mockResolvedValueOnce(jsonResponse(200, { ok: true })); // the retry
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = createHttpClient({ csrfCookieUrl: '/sanctum/csrf-cookie' });
+    const res = await client.get('/api/thing');
+
+    expect(res.data).toEqual({ ok: true });
+    const lastInit = fetchMock.mock.calls.at(-1)![1];
+    expect(lastInit.headers['X-CSRF-TOKEN']).toBe('rotated-token');
+  });
+
+  it('gives every coalesced waiter the SAME token', async () => {
+    // The coalescing promise is shared, so all waiters now resolve with one
+    // agreed value rather than each re-reading whatever the DOM held at the
+    // moment they happened to resume.
+    let token = 'initial';
+    vi.stubGlobal('document', {
+      querySelector: (sel: string) =>
+        sel === 'meta[name="csrf-token"]' ? { content: token } : null,
+      cookie: '',
+    });
+    invalidateCsrfCache();
+
+    const seen: (string | undefined)[] = [];
+    const fetchMock = vi.fn(async (_url: string, init: any) => {
+      if (String(_url).includes('csrf-cookie')) {
+        token = 'rotated';
+        return mockResponse(200, null);
+      }
+      const header = init?.headers?.['X-CSRF-TOKEN'];
+      if (header !== undefined) seen.push(header);
+      // First attempt for each request 419s; the retry (with a header) succeeds.
+      return header ? jsonResponse(200, { ok: true }) : jsonResponse(419, { message: 'csrf expired' });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const client = createHttpClient({ csrfCookieUrl: '/sanctum/csrf-cookie' });
+    const [a, b, c] = await Promise.all([
+      client.get('/api/a'),
+      client.get('/api/b'),
+      client.get('/api/c'),
+    ]);
+
+    expect([a.data, b.data, c.data]).toEqual([{ ok: true }, { ok: true }, { ok: true }]);
+    expect(seen).toHaveLength(3);
+    expect(new Set(seen).size).toBe(1); // one agreed token across all waiters
+  });
+});
+
+describe('doClientFetch — a Response with no headers', () => {
+  // `headersToObject(raw.headers)` — the absent-headers arm. Some fetch
+  // polyfills and hand-rolled doubles omit `headers` entirely.
+  //
+  // This used to be split in two, with the second case PINNING a defect: the
+  // guard tolerated a missing `headers` while the json path immediately did an
+  // unguarded `raw.headers.get('content-type')`, so the default path still
+  // threw. Both paths are tolerant now, and both are asserted here.
+  const headerless = (body: string) => ({
+    ok: true,
+    status: 200,
+    statusText: 'OK',
+    // no `headers` key at all
+    text: async () => body,
+  });
+
+  it('returns empty headers on the text path', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(headerless('plain body')));
+    const client = createHttpClient();
+    const res = await client.get('/api/thing', { responseType: 'text' });
+    expect(res.data).toBe('plain body');
+    expect(res.headers).toEqual({});
+  });
+
+  it('no longer throws on the DEFAULT json path', async () => {
+    // Regression: this threw `TypeError: Cannot read properties of undefined
+    // (reading 'get')`. With no content-type to read, the response falls
+    // through to the non-JSON branch and yields the raw text — the same
+    // graceful degradation any content-type-less response already gets.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(headerless('{"fine":true}')));
+    const client = createHttpClient();
+    const res = await client.get('/api/thing');
+    expect(res.headers).toEqual({});
+    expect(res.data).toBe('{"fine":true}');
+  });
+
+  it('still parses JSON case-insensitively when headers ARE present', async () => {
+    // The reason the content-type read delegates to `Headers.get()` instead of
+    // the normalized snapshot: `get()` is case-insensitive by spec, so an
+    // implementation yielding `Content-Type` still parses. Reading the plain
+    // object would miss and silently hand back a STRING.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      headers: {
+        entries: () => [['Content-Type', 'application/json']].values(),
+        get: (k: string) => (k.toLowerCase() === 'content-type' ? 'application/json' : null),
+      },
+      text: async () => '{"parsed":true}',
+    }));
+    const client = createHttpClient();
+    const res = await client.get('/api/thing');
+    expect(res.data).toEqual({ parsed: true }); // object, not a string
+  });
+});
+
+// ---------------------------------------------------------------------------
+// headersToObject — what it does and does NOT normalize.
+// ---------------------------------------------------------------------------
+
+describe('response header snapshot', () => {
+  it('lower-cases keys so the case-sensitive consumer lookups cannot silently miss', async () => {
+    // `res.headers` is read case-sensitively everywhere downstream:
+    // ['retry-after'] and ['x-ratelimit-reset'] in both retry loops,
+    // ['content-disposition'] in the download path. A Headers whose entries()
+    // yields canonical casing would make every one of them miss with NO error
+    // — backoff not honoured, filename lost. Normalizing once in
+    // headersToObject is what rules that out.
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      headers: {
+        entries: () =>
+          [
+            ['Content-Type', 'application/json'],
+            ['Retry-After', '5'],
+            ['Content-Disposition', 'attachment; filename="r.csv"'],
+          ].values(),
+        get: (k: string) => (k.toLowerCase() === 'content-type' ? 'application/json' : null),
+      },
+      text: async () => '{"parsed":true}',
+    }));
+
+    const client = createHttpClient();
+    const res = await client.get('/api/thing');
+
+    expect(res.headers['retry-after']).toBe('5');
+    expect(res.headers['content-disposition']).toBe('attachment; filename="r.csv"');
+    expect(res.headers['content-type']).toBe('application/json');
+    expect(res.headers['Retry-After']).toBeUndefined(); // normalized, not duplicated
+
+    // And the content-type decision still delegates to Headers.get(), so JSON
+    // parses regardless of casing — belt and braces, from both directions.
+    expect(res.data).toEqual({ parsed: true });
   });
 });

@@ -4,13 +4,13 @@
  * runtime condition rather than an exotic one.
  *
  *  - transitions: an async transition command that REJECTS must still call
- *    Vue's `done()`, or the element is stuck mid-transition forever (190).
+ *    Vue's `done()`, or the element is stuck mid-transition forever.
  *  - utilities: createReaction's refusal returns a working no-op unsubscribe
- *    (246), and a non-object mapPayload value rides through unwrapped (273).
- *  - router/url: encodeQueryParam wrapping a scalar for an `array` param (93).
- *  - router/history: resolveBase with no window and no pathname (74).
- *  - router/menu: a table with no menu-flagged rows at all (96).
- *  - ssr: the rehydrate() thenable guard's own `.catch` (249).
+ *, and a non-object mapPayload value rides through unwrapped.
+ *  - router/url: encodeQueryParam wrapping a scalar for an `array` param.
+ *  - router/history: resolveBase with no window and no pathname.
+ *  - router/menu: a table with no menu-flagged rows at all.
+ *  - ssr: the rehydrate() thenable guard's own `.catch`.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createTransitionBridge } from '../src/transitions';
@@ -25,7 +25,7 @@ import { createRouteTable } from '../src/router/table';
 afterEach(() => vi.restoreAllMocks());
 
 // ---------------------------------------------------------------------------
-// transitions — done() on a rejected dispatch (190)
+// transitions — done() on a rejected dispatch
 // ---------------------------------------------------------------------------
 
 describe('transition bridge done() callback', () => {
@@ -41,7 +41,7 @@ describe('transition bridge done() callback', () => {
     await vi.waitFor(() => expect(done).toHaveBeenCalledTimes(1));
   });
 
-  it('calls done() when the dispatch promise itself REJECTS (190)', async () => {
+  it('calls done() when the dispatch promise itself REJECTS', async () => {
     // The chamber bus never rejects — failures come back as errResult — so this
     // arm exists for the other BaseBus implementations the bridge accepts. A
     // bus that breaks that contract must still not strand the element.
@@ -65,11 +65,11 @@ describe('transition bridge done() callback', () => {
 });
 
 // ---------------------------------------------------------------------------
-// utilities — createReaction (226-285)
+// utilities — createReaction
 // ---------------------------------------------------------------------------
 
 describe('createReaction', () => {
-  it('returns a callable no-op unsubscribe when it refuses to install (246)', () => {
+  it('returns a callable no-op unsubscribe when it refuses to install', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const bus = createCommandBus({ onMissing: 'ignore' });
 
@@ -81,7 +81,7 @@ describe('createReaction', () => {
     expect(() => off()).not.toThrow(); // the no-op must still be safe to call
   });
 
-  it('passes a non-object mapPayload value through unwrapped (273)', () => {
+  it('passes a non-object mapPayload value through unwrapped', () => {
     const bus = createCommandBus({ onMissing: 'ignore' });
     const seen: unknown[] = [];
     bus.register('source', () => 1);
@@ -111,11 +111,11 @@ describe('createReaction', () => {
 });
 
 // ---------------------------------------------------------------------------
-// router/url — encodeQueryParam array coercion (93)
+// router/url — encodeQueryParam array coercion
 // ---------------------------------------------------------------------------
 
 describe('encodeQueryParam', () => {
-  it('wraps a scalar for a declared array param (93)', () => {
+  it('wraps a scalar for a declared array param', () => {
     expect(encodeQueryParam('red', { type: 'array' })).toEqual(['red']);
     expect(encodeQueryParam(7, { type: 'array' })).toEqual(['7']);
   });
@@ -131,11 +131,11 @@ describe('encodeQueryParam', () => {
 });
 
 // ---------------------------------------------------------------------------
-// router/history — resolveBase + position (71-121)
+// router/history — resolveBase + position
 // ---------------------------------------------------------------------------
 
 describe('resolveBase', () => {
-  it('falls back to an empty pathname with no window and no option (74)', () => {
+  it('falls back to an empty pathname with no window and no option', () => {
     // Node environment: no window, no options.pathname → '' is the pathname.
     expect(resolveBase({})).toBe('');
     expect(resolveBase({ prefix: '/admin' })).toBe('/admin');
@@ -147,11 +147,11 @@ describe('resolveBase', () => {
 });
 
 // ---------------------------------------------------------------------------
-// router/menu — nothing flagged for the menu (96)
+// router/menu — nothing flagged for the menu
 // ---------------------------------------------------------------------------
 
 describe('buildMenu', () => {
-  it('returns an empty menu when no row carries meta.menu (96)', () => {
+  it('returns an empty menu when no row carries meta.menu', () => {
     const table = createRouteTable([
       { name: 'home', path: '/', component: 'Home' },
       { name: 'list', path: '/list', component: 'List' },
@@ -172,11 +172,11 @@ describe('buildMenu', () => {
 });
 
 // ---------------------------------------------------------------------------
-// ssr — the thenable guard's own catch (249)
+// ssr — the thenable guard's own catch
 // ---------------------------------------------------------------------------
 
 describe('rehydrate on an async bus', () => {
-  it('absorbs the pending dispatch rejection it reports (249)', async () => {
+  it('absorbs the pending dispatch rejection it reports', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = {
       hasHandler: () => true,

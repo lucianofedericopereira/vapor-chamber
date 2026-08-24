@@ -107,7 +107,10 @@ function runRulesSync<T extends Record<string, any>>(
 ): Partial<Record<keyof T, string>> {
   const errs: Partial<Record<keyof T, string>> = {};
   for (const key in rules) {
-    if (!(key in values)) continue;
+    // Object.hasOwn, not `in` — see ../dict. A field literally named `toString`
+    // or `constructor` would otherwise validate against an inherited function
+    // rather than be skipped as absent.
+    if (!Object.hasOwn(values, key)) continue;
     const rule = rules[key as keyof T];
     if (!rule) continue;
     const msg = rule(values[key as keyof T], values);
@@ -127,7 +130,7 @@ async function runRulesAsync<T extends Record<string, any>>(
   const keys: Array<keyof T> = [];
   const results: Array<string | null | undefined | Promise<string | null | undefined>> = [];
   for (const key in rules) {
-    if (!(key in values)) continue;
+    if (!Object.hasOwn(values, key)) continue; // see ../dict
     const rule = rules[key as keyof T];
     if (!rule) continue;
     keys.push(key as keyof T);

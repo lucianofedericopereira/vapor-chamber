@@ -3,12 +3,12 @@
  * rehydrateAsync in full (it had no direct tests: statements 299-305 were all
  * red).
  *
- *  - rehydrate() handed an async bus: the thenable guard (248-266) must warn
- *    once (252-258), absorb the pending promise (249, so no unhandled
+ *  - rehydrate() handed an async bus: the thenable guard must warn
+ *    once, absorb the pending promise (249, so no unhandled
  *    rejection), and report a per-command failure pointing at rehydrateAsync.
- *  - rehydrate() over a bus whose dispatch throws synchronously (269-270).
- *  - rehydrateAsync(): ordered replay, filter skip (299), unhandled skip
- *    (300), and a rejecting dispatch becoming { ok:false } (304-305).
+ *  - rehydrate() over a bus whose dispatch throws synchronously.
+ *  - rehydrateAsync(): ordered replay, filter skip, unhandled skip
+ *, and a rejecting dispatch becoming { ok:false }.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createAsyncCommandBus } from '../src/index';
@@ -19,7 +19,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('rehydrate — async bus misuse (248-266)', () => {
+describe('rehydrate — async bus misuse', () => {
   it('reports each pending dispatch as a failure and warns once', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createAsyncCommandBus();
@@ -40,7 +40,7 @@ describe('rehydrate — async bus misuse (248-266)', () => {
     expect(warn.mock.calls[0]![0]).toContain('rehydrateAsync');
   });
 
-  it('captures a synchronously-throwing dispatch as { ok:false } (269-270)', () => {
+  it('captures a synchronously-throwing dispatch as { ok:false }', () => {
     const bus = {
       hasHandler: () => true,
       dispatch: () => { throw new Error('sync boom'); },
@@ -51,7 +51,7 @@ describe('rehydrate — async bus misuse (248-266)', () => {
   });
 });
 
-describe('rehydrateAsync (290-309)', () => {
+describe('rehydrateAsync', () => {
   it('replays commands in order and returns their results', async () => {
     const bus = createAsyncCommandBus();
     const seen: number[] = [];
@@ -67,7 +67,7 @@ describe('rehydrateAsync (290-309)', () => {
     expect(results.map(r => r.value)).toEqual([1, 2]);
   });
 
-  it('skips commands rejected by the filter (299)', async () => {
+  it('skips commands rejected by the filter', async () => {
     const bus = createAsyncCommandBus();
     const seen: string[] = [];
     bus.register('a', async () => { seen.push('a'); });
@@ -83,7 +83,7 @@ describe('rehydrateAsync (290-309)', () => {
     expect(results).toHaveLength(1);
   });
 
-  it('skips unhandled commands by default and replays them with ignoreUnhandled:false (300)', async () => {
+  it('skips unhandled commands by default and replays them with ignoreUnhandled:false', async () => {
     const bus = createAsyncCommandBus({ onMissing: 'ignore' });
     bus.register('known', async () => 1);
 
@@ -94,7 +94,7 @@ describe('rehydrateAsync (290-309)', () => {
     expect(forced).toHaveLength(1);
   });
 
-  it('turns a rejecting dispatch into { ok:false } instead of throwing (304-305)', async () => {
+  it('turns a rejecting dispatch into { ok:false } instead of throwing', async () => {
     const bus = {
       hasHandler: () => true,
       dispatch: () => Promise.reject(new Error('async boom')),

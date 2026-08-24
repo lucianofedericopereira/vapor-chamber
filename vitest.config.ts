@@ -79,20 +79,29 @@ export default defineConfig({
         // test churn doesn't. Ratchet upward as coverage climbs; only lower
         // with an explicit CHANGELOG note explaining the regression.
         //
-        // The command-bus.ts dispatch core is at 100% line + branch coverage.
-        // These globals span the wider optional surface — http / transports /
-        // plugins-io carry environment-bound branches (real HTTP/WS/SSE) that
-        // hold the global branch number below 100%.
-        // Ratcheted for v1.15 (measured: 99.76 lines / 99.06 functions /
-        // 95.97 branches / 99.51 statements). The v1.9 floors were left at
-        // 96/94/88/94 while coverage climbed ~4 points past them; branches in
-        // particular carried 8 points of slack, enough for a real regression
-        // to pass the gate unnoticed. The remaining sub-100 branch number is
-        // concentrated in router/engine + router/index async navigation arms.
-        lines: 97.5,
-        functions: 97,
-        branches: 94,
-        statements: 97.5,
+        // v1.16 reaches 100% ON ALL FOUR AXES — statements, branches,
+        // functions and lines. Every branch in the measured surface is taken by
+        // a test in both directions.
+        //
+        // Getting the last few was as much deletion as testing, and that is the
+        // preferred order: where a branch was unreachable because it guarded an
+        // invariant the code already enforces (`if (keys)` in plugins-extra's
+        // dropKey, the `pending.get(...)` lookups in transports, `if (cmd.meta)`
+        // in outbox), the guard was removed and the invariant named in a
+        // comment, so a violation throws loudly instead of no-opping silently.
+        // The `__VC_PRECISE_TS__` build flag went the same way — it was
+        // unreachable from any configuration, so it was removed rather than
+        // classified as permanently uncoverable.
+        //
+        // The floors stay ~2 points below rather than at 100 deliberately: a
+        // 100% floor turns any refactor that adds an honest defensive branch
+        // into a red build, which pressures people to delete guards that should
+        // stay or write tests that assert nothing. Ratchet the floor when the
+        // measured number moves; do not pin it to the ceiling.
+        lines: 98,
+        functions: 98,
+        branches: 98,
+        statements: 98,
       },
     },
   },

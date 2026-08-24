@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isRouterError } from '../../src/router/errors';
 import { createMemoryHistory } from '../../src/router/history';
 import { createRouter } from '../../src/router/index';
@@ -111,6 +111,39 @@ describe('buildMenu', () => {
     ];
     const menu = buildMenu(createRouteTable(rows).records, '/');
     expect(menu.map((item) => item.href)).toEqual(['/report', '/docs']);
+  });
+
+  // The FALSE arm of `if (DEV)`. The loud-validation test above only ever ran
+  // the dev arm, because DEV is module-scope and true under vitest — so the
+  // production contract ("diagnostics are worth no bytes in production") was
+  // asserted nowhere. Re-import after stubbing NODE_ENV, as dev-flag.test.ts does.
+  describe('in production (DEV=false)', () => {
+    afterEach(() => {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    });
+
+    it('skips the row validation entirely rather than throwing, and still projects the menu', async () => {
+      // Built with the dev-mode table (these rows are structurally fine — it is
+      // buildMenu's own meta checks that reject them).
+      const badPosition = createRouteTable([
+        { name: 'x', path: '/x', component: 'X', meta: { menu: 'first', title: 't' } },
+      ]).records;
+      const noTitle = createRouteTable([{ name: 'y', path: '/y', component: 'Y', meta: { menu: 1 } }]).records;
+
+      vi.stubEnv('NODE_ENV', 'production');
+      vi.resetModules();
+      const prod = await import('../../src/router/menu');
+
+      // Both of these throw bad_menu_row in dev — see the test above.
+      expect(() => prod.buildMenu(badPosition, '/')).not.toThrow();
+      expect(prod.buildMenu(badPosition, '/').map((item) => item.name)).toEqual(['x']);
+
+      const built = prod.buildMenu(noTitle, '/');
+      expect(built.map((item) => item.name)).toEqual(['y']);
+      // `String(undefined)` — the garbage the dev guard exists to catch first.
+      expect(built[0]?.title).toBe('undefined');
+    });
   });
 });
 

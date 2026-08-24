@@ -110,6 +110,39 @@ describe('setupDevtools — the @vue/devtools-api integration', () => {
     vi.resetModules();
   });
 
+  it('degrades silently when @vue/devtools-api is not installed', async () => {
+    // The `.catch` on the dynamic import — the only part of this module the
+    // suite never reached, because the optional peer IS installed here. It is
+    // the shape every consumer who imports `vapor-chamber/devtools` without
+    // the peer gets, and without the catch it surfaces as an unhandled
+    // rejection in their console.
+    vi.doMock('@vue/devtools-api', () => {
+      throw new Error("Failed to resolve import '@vue/devtools-api'");
+    });
+    vi.resetModules();
+    const { setupDevtools: fresh } = await import('../src/devtools');
+
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const bus = createCommandBus({ onMissing: 'ignore' });
+      const stop = fresh(bus, {});
+
+      // Let the rejected import settle before judging.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+
+      expect(unhandled).toEqual([]);
+      // Devtools degrade; the bus itself is untouched.
+      expect(() => bus.dispatch('anything', {})).not.toThrow();
+      expect(typeof stop).toBe('function');
+      expect(() => { stop(); }).not.toThrow();
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
   it('registers the Commands timeline layer and the inspector panel', async () => {
     const { api, stop } = await withDevtools();
     expect(api.addTimelineLayer).toHaveBeenCalledWith(expect.objectContaining({ label: 'Commands' }));

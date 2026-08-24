@@ -1,14 +1,14 @@
 /**
  * Supplemental coverage for src/plugins-core.ts.
  *
- *  - logger badges outside a browser (48-49): the node arm of the %c styling
+ *  - logger badges outside a browser: the node arm of the %c styling
  *    split.
- *  - history(): undo/redo on empty stacks (166, 183), self-registered trigger
- *    actions with a bus (213-214), and the DEV warning without one (208-210).
- *  - optimistic(): action with no configured handler (340), and an async
- *    failure whose apply() returned no rollback (346-348).
+ *  - history(): undo/redo on empty stacks, self-registered trigger
+ *    actions with a bus, and the DEV warning without one.
+ *  - optimistic(): action with no configured handler, and an async
+ *    failure whose apply() returned no rollback.
  *  - optimisticUndo(): async rollback where the undo handler itself throws —
- *    the onRollbackError arm (440) — plus onRollback notification (443).
+ *    the onRollbackError arm — plus onRollback notification.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createCommandBus, createAsyncCommandBus } from '../src/index';
@@ -19,11 +19,11 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// logger — badges in a non-browser environment (47-49)
+// logger — badges in a non-browser environment
 // ---------------------------------------------------------------------------
 
 describe('logger badges (node arm)', () => {
-  it('prints plain-text badges when window is absent (49)', () => {
+  it('prints plain-text badges when window is absent', () => {
     const group = vi.spyOn(console, 'groupCollapsed').mockImplementation(() => {});
     vi.spyOn(console, 'groupEnd').mockImplementation(() => {});
     vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -47,11 +47,11 @@ describe('logger badges (node arm)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// history — empty stacks + trigger actions (164-216)
+// history — empty stacks + trigger actions
 // ---------------------------------------------------------------------------
 
 describe('history', () => {
-  it('undo/redo on empty stacks return undefined without side effects (166, 183)', () => {
+  it('undo/redo on empty stacks return undefined without side effects', () => {
     const h = history();
     expect(h.undo()).toBeUndefined();
     expect(h.redo()).toBeUndefined();
@@ -59,7 +59,7 @@ describe('history', () => {
     expect(h.getState().canRedo).toBe(false);
   });
 
-  it('registers undo/redo trigger actions on the bus (213-214)', () => {
+  it('registers undo/redo trigger actions on the bus', () => {
     const bus = createCommandBus();
     const calls: string[] = [];
     bus.register('act', () => { calls.push('do'); return 1; }, { undo: () => { calls.push('undo'); } });
@@ -79,7 +79,7 @@ describe('history', () => {
     expect(calls).toEqual(['do', 'undo', 'do']);
   });
 
-  it('warns in dev when trigger actions are configured without a bus (208-210)', () => {
+  it('warns in dev when trigger actions are configured without a bus', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     history({ undoAction: 'historyUndo' });
     expect(warn).toHaveBeenCalledTimes(1);
@@ -88,11 +88,11 @@ describe('history', () => {
 });
 
 // ---------------------------------------------------------------------------
-// optimistic — passthrough + async no-rollback failure (338-352)
+// optimistic — passthrough + async no-rollback failure
 // ---------------------------------------------------------------------------
 
 describe('optimistic', () => {
-  it('passes unconfigured actions straight through (340)', () => {
+  it('passes unconfigured actions straight through', () => {
     const bus = createCommandBus();
     bus.use(optimistic({ save: { apply: () => null } }));
     bus.register('other', () => 42);
@@ -100,7 +100,7 @@ describe('optimistic', () => {
     expect(bus.dispatch('other', {})).toEqual({ ok: true, value: 42 });
   });
 
-  it('tolerates an async failure when apply() returned no rollback (346-348)', async () => {
+  it('tolerates an async failure when apply() returned no rollback', async () => {
     const bus = createAsyncCommandBus();
     const apply = vi.fn(() => null); // nothing to roll back
     bus.use(optimistic({ save: { apply } }));
@@ -113,11 +113,11 @@ describe('optimistic', () => {
 });
 
 // ---------------------------------------------------------------------------
-// optimisticUndo — rollback error arms (436-447)
+// optimisticUndo — rollback error arms
 // ---------------------------------------------------------------------------
 
 describe('optimisticUndo async rollback', () => {
-  it('reports a throwing undo handler via onRollbackError and still notifies onRollback (440, 443)', async () => {
+  it('reports a throwing undo handler via onRollbackError and still notifies onRollback', async () => {
     const bus = createAsyncCommandBus();
     const onRollback = vi.fn();
     const onRollbackError = vi.fn();
@@ -141,5 +141,151 @@ describe('optimisticUndo async rollback', () => {
     expect(cmd.action).toBe('pay');
     expect((undoErr as Error).message).toBe('undo also failed');
     expect((origErr as Error).message).toBe('declined');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The optional-shape arms: one trigger without the other, a rollback with no
+// observer, and the production half of the missing-bus warning.
+// ---------------------------------------------------------------------------
+
+describe('history/optimistic — optional-shape arms', () => {
+  it('registers only the trigger that was configured', () => {
+    // The wiring test above supplies BOTH undoAction and redoAction, so each
+    // `if` only ever ran its true arm. Configuring one alone is the ordinary
+    // case for an app that exposes undo but not redo.
+    const bus = createCommandBus();
+    const calls: string[] = [];
+    bus.register('act', () => { calls.push('do'); return 1; }, { undo: () => { calls.push('undo'); } });
+
+    const h = history({ bus, undoAction: 'historyUndo' }); // no redoAction
+    bus.use(h);
+
+    bus.dispatch('act', {});
+    bus.dispatch('historyUndo', {});
+    expect(calls).toEqual(['do', 'undo']);
+    // The trigger that was never configured is not a registered command.
+    expect(bus.getHandler?.('historyRedo') ?? null).toBeNull();
+
+    // ...and the mirror: redo only.
+    const bus2 = createCommandBus();
+    const calls2: string[] = [];
+    bus2.register('act', () => { calls2.push('do'); return 1; }, { undo: () => { calls2.push('undo'); } });
+    const h2 = history({ bus: bus2, redoAction: 'historyRedo' }); // no undoAction
+    bus2.use(h2);
+    bus2.dispatch('act', {});
+    h2.undo();
+    bus2.dispatch('historyRedo', {});
+    expect(calls2).toEqual(['do', 'undo', 'do']);
+  });
+
+  it('rolls back without an onRollback observer configured', () => {
+    // `if (onRollback)` — the false arm. Every rollback test supplies the
+    // callback; the default configuration has none and must still roll back.
+    const bus = createCommandBus();
+    const applied: string[] = [];
+    bus.register('save', () => { throw new Error('server said no'); });
+    bus.use(
+      optimistic({
+        save: {
+          apply: () => {
+            applied.push('apply');
+            return () => { applied.push('rollback'); };
+          },
+        },
+      }),
+    );
+
+    const result = bus.dispatch('save', { id: 1 });
+    expect(result.ok).toBe(false);
+    expect(applied).toEqual(['apply', 'rollback']); // rolled back, no observer needed
+  });
+
+  it('does not warn about a missing bus in production', async () => {
+    // The `if (DEV)` false arm of the trigger-without-bus warning.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.resetModules();
+    const { history: prodHistory } = await import('../src/plugins-core');
+
+    const h = prodHistory({ undoAction: 'historyUndo' }); // no bus
+    expect(warn).not.toHaveBeenCalled();
+    // Still a usable history object — just without the triggers.
+    expect(h.getState().canUndo).toBe(false);
+
+    warn.mockRestore();
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Cheap remaining arms: browser badge colour, the async rollback without an
+// observer, and the sync optimistic SUCCESS path.
+// ---------------------------------------------------------------------------
+
+describe('logger badges in a browser-ish environment', () => {
+  it('uses the FAIL colour for a failed command', () => {
+    // The `ok ? '#2a6' : '#c33'` ternary. The browser branch is only taken when
+    // `window` exists, and the file's other logger tests run without one — so
+    // the failure colour had never been produced. logger() writes through
+    // console.groupCollapsed, so that is what gets spied.
+    vi.stubGlobal('window', {});
+    const calls: unknown[][] = [];
+    vi.spyOn(console, 'groupCollapsed').mockImplementation((...args: unknown[]) => { calls.push(args); });
+    vi.spyOn(console, 'groupEnd').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const bus = createCommandBus();
+    bus.register('fine', () => 'ok');
+    bus.register('boom', () => { throw new Error('nope'); });
+    bus.use(logger({ badges: true }));
+
+    bus.dispatch('fine', {});
+    bus.dispatch('boom', {});
+
+    const styles = calls.map((c) => String(c[1] ?? ''));
+    expect(styles.some((s) => s.includes('#2a6'))).toBe(true); // OK green
+    expect(styles.some((s) => s.includes('#c33'))).toBe(true); // FAIL red
+    vi.unstubAllGlobals();
+  });
+});
+
+describe('optimisticUndo — arms the rollback tests skip', () => {
+  it('rolls back on an ASYNC bus with no onRollback observer', async () => {
+    // `if (onRollback)` in the ASYNC arm. These paths belong to
+    // optimisticUndo (which reads the UNDO handler off the bus), not
+    // optimistic — and every existing test supplies the callback, so the
+    // default no-observer configuration never ran.
+    const bus = createAsyncCommandBus();
+    const undone: string[] = [];
+    bus.register('save', async () => { throw new Error('server said no'); }, {
+      undo: () => { undone.push('undo'); },
+    });
+    bus.use(optimisticUndo(bus, ['save'], { predict: () => ({ optimistic: true }) })); // no onRollback
+
+    const result: any = await bus.dispatch('save', { id: 1 });
+    expect(result.ok).toBe(true); // predicted value returned immediately
+    expect(result.value).toEqual({ optimistic: true });
+
+    await new Promise((r) => setTimeout(r, 0)); // background rollback settles
+    expect(undone).toEqual(['undo']);
+  });
+
+  it('does not roll back when the SYNC handler succeeds', () => {
+    // `if (!result.ok)` — the else. Every optimisticUndo test drives a
+    // failure, so the ordinary happy path (handler succeeds, undo never
+    // called) was asserted nowhere.
+    const bus = createCommandBus();
+    const undone: string[] = [];
+    bus.register('save', () => 'server-value', { undo: () => { undone.push('undo'); } });
+    bus.use(optimisticUndo(bus, ['save']));
+
+    const result = bus.dispatch('save', { id: 1 });
+
+    expect(result.ok).toBe(true);
+    expect(result.value).toBe('server-value'); // real value, not a prediction
+    expect(undone).toEqual([]); // undo never ran
   });
 });

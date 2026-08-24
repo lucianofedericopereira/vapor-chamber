@@ -110,6 +110,23 @@ describe('router composables', () => {
     expect(withRouter(router, () => useRouteData('list')).value).toBeUndefined();
   });
 
+  it('useRouteData is undefined before the first navigation resolves', async () => {
+    // `name ? data.get(name) : undefined` — the else arm. Until isReady()
+    // settles, `location.matched` is EMPTY, so there is no leaf record to name
+    // and the lookup must be skipped rather than called with undefined. This
+    // is the real shape for any component whose setup() runs during the very
+    // first navigation.
+    const router = makeRouter();
+    expect(router.currentRoute.value.location.matched).toEqual([]);
+
+    expect(withRouter(router, () => useRouteData()).value).toBeUndefined();
+
+    // Once a route is matched the same composable starts resolving a name.
+    await router.isReady();
+    expect(router.currentRoute.value.location.matched.length).toBeGreaterThan(0);
+    router.destroy();
+  });
+
   it('useRouteError exposes latestError and clears it', async () => {
     const router = makeRouter();
     await router.isReady();
@@ -513,6 +530,123 @@ describe('usePagination — extractor fallbacks and pageRange elisions', () => {
       expect(range[0]).toBe(1);
       expect(range.filter((n) => n === 0)).toHaveLength(1); // elision on the right only
     });
+    router.destroy();
+  });
+
+  it('pageRange elides only the near side when current sits near the END', async () => {
+    // The mirror of the test above, and the `if (end < last - 1)` FALSE arm:
+    // with the window butting against the last page there is no right-hand
+    // elision to add. Only the near-start case was covered, so the symmetry
+    // this function is built around was asserted on one side only.
+    const router = pagedRouter({ items: [], total: 500, per_page: 10, last_page: 50 });
+    await router.isReady();
+    await router.push('/items?page=49');
+    withRouter(router, () => {
+      const range = usePagination().pageRange.value;
+      expect(range[0]).toBe(1);
+      expect(range[range.length - 1]).toBe(50);
+      expect(range.filter((n) => n === 0)).toHaveLength(1); // left side only
+      expect(range).toContain(49);
+      // Nothing elided between the window and the last page.
+      expect(range.at(-2)).toBe(49);
+    });
+    router.destroy();
+  });
+
+  it('treats page=0 as page 1 rather than falling off the bottom', async () => {
+    // `Number(page.value) || 1` — the `|| 1` arm. `?page=abc` does NOT reach
+    // it (the int caster substitutes the declared default 1, which is truthy);
+    // a declared-but-zero value does, and 0 is exactly what an off-by-one
+    // caller or a 0-indexed backend sends.
+    const router = pagedRouter({ items: [], total: 30, per_page: 10, last_page: 3 });
+    await router.isReady();
+    await router.push('/items?page=0');
+    withRouter(router, () => {
+      const p = usePagination();
+      // `page` is the raw query ref and reports what the URL said...
+      expect(p.page.value).toBe(0);
+      // ...but every DERIVED bound runs off the clamped `current`, so a 0 in
+      // the URL behaves as page 1 instead of producing an empty pager.
+      expect(p.hasPrev.value).toBe(false);
+      expect(p.hasNext.value).toBe(true);
+      expect(p.pageRange.value).toEqual([1, 2, 3]);
+      p.next();
+    });
+    await new Promise((r) => setTimeout(r, 20));
+    // next() from a 0 page advances to 2 (current 1 + 1), not to 1.
+    expect(router.currentRoute.value.location.query.page).toBe('2');
+    router.destroy();
+  });
+
+  it('treats an uncastable page value as page 1 rather than NaN', async () => {
+    // `Number(page.value) || 1`. The `page` query is declared `type: 'int'`,
+    // but castParam falls back to the RAW STRING when a segment will not
+    // parse — so `?page=abc` reaches the composable as 'abc'. Without the
+    // `|| 1`, `current` becomes NaN and every derived bound goes with it.
+    const router = pagedRouter({ items: [], total: 30, per_page: 10, last_page: 3 });
+    await router.isReady();
+    await router.push('/items?page=abc');
+    withRouter(router, () => {
+      const p = usePagination();
+      expect(p.page.value).toBe(1);
+      expect(p.hasPrev.value).toBe(false);
+      expect(p.pageRange.value).toEqual([1, 2, 3]);
+    });
+    router.destroy();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// onBeforeLeave / useRouteData — the arms the happy-path tests skip
+// ---------------------------------------------------------------------------
+
+describe('onBeforeLeave — allowing arms', () => {
+  it('lets navigation through when the guard returns anything but false', async () => {
+    // The existing guard test always refuses, so `verdict === false ? false :
+    // undefined` only ever produced `false`. A guard that returns nothing (the
+    // common "just observe" shape) must NOT be read as a refusal.
+    const router = makeRouter();
+    await router.isReady();
+
+    const seen: string[] = [];
+    const scope = effectScope();
+    scope.run(() => {
+      withRouter(router, () =>
+        onBeforeLeave((to) => {
+          seen.push(to.name as string);
+          // returns undefined
+        }),
+      );
+    });
+
+    await router.push('/list');
+    expect(seen).toEqual(['list']);
+    expect(router.currentRoute.value.location.name).toBe('list'); // allowed through
+
+    scope.stop();
+    router.destroy();
+  });
+
+  it('returns a working off() when called outside any effect scope', async () => {
+    // `if (getCurrentScope())` FALSE arm. Every existing caller runs inside
+    // effectScope().run(), so the no-scope path — a guard registered from
+    // plain module or setup-less code — had no coverage. There is nothing to
+    // auto-dispose it, so the returned off() is the only way back.
+    const router = makeRouter();
+    await router.isReady();
+
+    const guard = vi.fn(() => false as const);
+    const off = withRouter(router, () => onBeforeLeave(guard));
+    expect(typeof off).toBe('function');
+
+    await router.push('/list');
+    expect(guard).toHaveBeenCalled();
+    expect(router.currentRoute.value.location.name).toBe('home'); // refused
+
+    off(); // no scope disposed it for us
+    await router.push('/list');
+    expect(router.currentRoute.value.location.name).toBe('list');
+
     router.destroy();
   });
 });

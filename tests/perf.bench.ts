@@ -9,10 +9,11 @@
 
 import { describe, it, expect, bench, beforeAll } from 'vitest';
 import { effectScope, version as VUE_VERSION } from 'vue';
-import { createCommandBus, createAsyncCommandBus, configureUid } from '../src/command-bus';
+import { createCommandBus, createAsyncCommandBus, configureUid, _withOrigin } from '../src/command-bus';
 import { rehydrate, type DehydratedCommand } from '../src/ssr';
 import { persist } from '../src/plugins-io';
 import { createFastLane } from '../src/fast-lane';
+import { useCommandHistory } from '../src/chamber';
 import { createTransitionBridge } from '../src/transitions';
 import { createDirectivePlugin } from '../src/directives';
 import { stampActiveLinks } from '../src/router/dom';
@@ -21,6 +22,46 @@ import { alienSignalAdapter } from '../src/alien-signals';
 import { signal as _alienSignal } from 'alien-signals';
 
 const _alienFactory = alienSignalAdapter(_alienSignal as any);
+
+// ---------------------------------------------------------------------------
+// Origin-marker paths — where the `_withOrigin` slot replaced per-site work.
+//
+// The core benches above install no chamber and no sync plugin, so they never
+// exercised the code the slot deleted:
+//   - chamber's onAfter hook ran a 4-field `expectedRedo` identity compare on
+//     EVERY dispatch while a history was installed;
+//   - the three marker sites each allocated `{ ...payload, __origin }` per
+//     marked dispatch (every cross-tab receive, MCP call, and redo).
+// ---------------------------------------------------------------------------
+
+describe('origin-marker paths', () => {
+  bench('dispatch with useCommandHistory installed — 10k (onAfter hook cost)', () => {
+    const bus = createCommandBus();
+    bus.register('act', (cmd) => cmd.target);
+    const history = useCommandHistory({}, bus);
+    for (let i = 0; i < 10_000; i++) bus.dispatch('act', i, { qty: i });
+    history.clear();
+  });
+
+  bench('undo+redo cycle × 2k (marked-dispatch path)', () => {
+    const bus = createCommandBus();
+    bus.register('act', (cmd) => cmd.target);
+    const history = useCommandHistory({}, bus);
+    for (let i = 0; i < 2_000; i++) {
+      bus.dispatch('act', i, { qty: i });
+      history.undo();
+      history.redo();
+    }
+  });
+
+  bench('_withOrigin-wrapped dispatch — 10k', () => {
+    const bus = createCommandBus();
+    bus.register('act', (cmd) => cmd.target);
+    for (let i = 0; i < 10_000; i++) {
+      _withOrigin('sync', () => bus.dispatch('act', i, { qty: i }));
+    }
+  });
+});
 
 describe('core dispatch throughput', () => {
   bench('syncDispatch — bare handler, no plugins', () => {
@@ -91,7 +132,14 @@ describe('core dispatch throughput', () => {
 });
 
 describe('meta overhead — uid generator comparison', () => {
-  // Default: counter + per-process random prefix (~30–50ns per uid).
+  // Default: counter + per-process random prefix. ~12ns per call vs ~104ns for
+  // crypto.randomUUID (Node 24, 2026-08-17, hrtime medians over 21×200k reps —
+  // quote the runtime with the number). This comment previously said "~30–50ns
+  // per uid", a figure src/command-bus.ts retired when it was re-measured; the
+  // correction had not reached here or docs/performance.md. What this bench
+  // measures is the DISPATCH-level ratio (~2.5×), not the per-call one (~8×) —
+  // the rest of the dispatch dilutes it, and conflating the two is how the
+  // per-call absolute drifted unnoticed in the first place.
   bench('dispatch — default counter-based uid', () => {
     const bus = createCommandBus();
     bus.register('test', () => {});

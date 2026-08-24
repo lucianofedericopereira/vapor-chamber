@@ -187,9 +187,13 @@ const crumbs = useBreadcrumbs(); // the matched parent chain, titled rows only,
 
 ## Vapor interop
 
-Measured against `vue@3.6.0-rc.2`, not inferred from the
-[Vapor roadmap](https://github.com/vuejs/core/issues/13687). Fixture:
-`tests/router/vapor-fixture.test.ts`.
+Measured against `vue@3.6.0-rc.5`, not inferred from the
+[Vapor roadmap](https://github.com/vuejs/core/issues/13687). Two fixtures, and the
+split matters: `tests/router/vapor-fixture.test.ts` mounts a real Vapor app and
+measures provide/inject as a *primitive*, while
+`tests/vapor/router-composables.test.ts` (under `vitest.vapor.config.ts`, which
+aliases `vue` to the with-vapor dist) runs the *composables themselves* inside
+`defineVaporComponent({ setup() })` — the actual shipped combination.
 
 **provide/inject works in Vapor, at both levels.** The roadmap lists
 "Provide/Inject System" unchecked, but on a real `createVaporApp` app both
@@ -265,6 +269,29 @@ Still not usable here, though the reasons differ:
   `VaporKeepAlive` and pins it; the older stand-in fixture could not, which is
   the transferable lesson — a fixture that substitutes for the integration it
   is reasoning about can only ever check the half you already understood.
+
+  **A third pass, from the rc.5 cycle: upstream has now stated this is by
+  design.** The rc.4 note above rested on measurement alone, which left open
+  whether the null was a Vapor gap that would eventually be "fixed" — in which
+  case the new gate would be temporary scaffolding. It is not. On the Vapor
+  roadmap ([#13687](https://github.com/vuejs/core/issues/13687), Jul 20) a Vue
+  core maintainer confirmed that `getCurrentInstance()` returning `null` inside
+  Vapor components **is intentional**, noting an internal `useInstanceOption`
+  API exists but is deliberately not public; and again in August, that Vapor
+  "does not expose a general-purpose component instance tree to userland"
+  because user code should not depend on internal instances. So
+  `hasInjectionContext()` is the permanent gate, not a workaround pending an
+  upstream change, and no future release should reintroduce an
+  instance-accessor probe expecting it to start answering.
+
+  The same statement settles two roadmap boxes people will ask about. **Vue
+  Test Utils** (unchecked): `findComponent`-style instance traversal is the
+  thing upstream has ruled out, so this library's testing story —
+  `createTestBus`, asserting at the bus boundary — needs no revision whichever
+  way VTU lands. **DevTools Integration** (unchecked): `src/devtools.ts` builds
+  its inspector tree from buffered `bus.onAfter` entries, never from Vue's
+  component tree, so the Commands timeline and inspector panel do not depend on
+  the Vapor component-tree bookkeeping upstream has not built yet.
 - **Transition** — route transitions; the View Transitions API is the
   DOM-native way around it.
 - **SSR/Hydration** for blade rows — `fetchBlade` is undefined off-browser, so

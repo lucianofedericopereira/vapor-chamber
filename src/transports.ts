@@ -461,12 +461,17 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
     } else {
       if (queue.length >= maxQueueSize) {
         const dropped = queue.shift()!;
-        const req = pending.get(dropped.id);
-        if (req) {
-          clearTimeout(req.timeoutId);
-          pending.delete(dropped.id);
-          req.resolve({ ok: false, error: new Error(`WS queue overflow: "${dropped.envelope.command}" dropped`) });
-        }
+        // `!` on the pending lookup, not a guard: `settle()` removes an entry
+        // from BOTH `pending` and `queue`, and `failAllPending()` clears both
+        // together — so a queued id always has a pending record. This was a
+        // runtime `if (req)` while settle() left dead entries in the queue; now
+        // that the two can no longer diverge, a miss here would mean the
+        // invariant broke, and throwing says so instead of silently dropping a
+        // caller's promise on the floor (it would hang until its own timeout).
+        const req = pending.get(dropped.id)!;
+        clearTimeout(req.timeoutId);
+        pending.delete(dropped.id);
+        req.resolve({ ok: false, error: new Error(`WS queue overflow: "${dropped.envelope.command}" dropped`) });
       }
       queue.push({ id, envelope, timeout, queuedAt: Date.now() });
     }
@@ -479,13 +484,13 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
       const { id, envelope, timeout, queuedAt } = items[i];
       const elapsed = now - queuedAt;
       if (elapsed >= timeout) {
-        // Message expired while queued — reject it instead of sending stale commands
-        const req = pending.get(id);
-        if (req) {
-          clearTimeout(req.timeoutId);
-          pending.delete(id);
-          req.resolve({ ok: false, error: new Error(`WS queued message "${envelope.command}" expired after ${elapsed}ms (timeout: ${timeout}ms)`) });
-        }
+        // Message expired while queued — reject it instead of sending stale
+        // commands. Same invariant as the overflow path above: a queued id
+        // always has a pending record, so this is `!` rather than a guard.
+        const req = pending.get(id)!;
+        clearTimeout(req.timeoutId);
+        pending.delete(id);
+        req.resolve({ ok: false, error: new Error(`WS queued message "${envelope.command}" expired after ${elapsed}ms (timeout: ${timeout}ms)`) });
         continue;
       }
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -626,6 +631,16 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
       const settle = (result: CommandResult): void => {
         clearTimeout(timeoutId);
         pending.delete(id);
+        // Drop any queued copy too. The per-request timer is armed BEFORE
+        // send(), so a request can settle (timeout, abort, disconnect) while
+        // still sitting in `queue` waiting for a socket. Leaving it there meant
+        // a dead entry occupied a maxQueueSize slot and had to be recognised
+        // again later — once by the overflow path's `pending.get(...)` miss,
+        // once by flushQueue's elapsed check. Two mechanisms responsible for
+        // one fact. Removing it here makes settle() the single source of truth
+        // for "this request is over", so maxQueueSize counts LIVE requests only.
+        const queuedIndex = queue.findIndex((q) => q.id === id);
+        if (queuedIndex !== -1) queue.splice(queuedIndex, 1);
         if (abortHandler && cmd.signal) {
           cmd.signal.removeEventListener('abort', abortHandler);
         }

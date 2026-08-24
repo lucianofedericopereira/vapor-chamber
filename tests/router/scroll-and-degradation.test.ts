@@ -15,7 +15,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createMemoryHistory } from '../../src/router/history';
+import { createMemoryHistory, createWebHistory } from '../../src/router/history';
 import { createRouter } from '../../src/router/index';
 import type { RouteRecord } from '../../src/router/types';
 
@@ -195,5 +195,41 @@ describe('resolve() before the table is ready', () => {
     expect(router.resolve({ path: '/raw-object' } as never)).toContain('/raw-object');
     expect(router.resolve({ name: 'nope' } as never)).toContain('/');
     router.destroy();
+  });
+});
+
+describe('scroll restoration on back/forward', () => {
+  it('does NOT scroll to top on a popstate navigation', () => {
+    // `if (!info.popstate)` — the else. On back/forward the browser restores
+    // the previous scroll position itself; scrolling to top would fight it.
+    // Every other navigation test drives push(), so only the scroll-to-top arm
+    // ran and this deliberate no-op was asserted nowhere.
+    window.history.replaceState({ __vr: 0 }, '', '/');
+    const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
+
+    const router = createRouter({
+      history: createWebHistory(''),
+      routes: [
+        { name: 'home', path: '/', component: 'Home' },
+        { name: 'list', path: '/list', component: 'List' },
+      ],
+      components: { Home: { name: 'Home' }, List: { name: 'List' } },
+    });
+
+    return router.isReady().then(async () => {
+      await router.push('/list');
+      expect(scrollTo).toHaveBeenCalled(); // ordinary navigation scrolls
+      scrollTo.mockClear();
+
+      // Drive a real popstate through the router's own history listener.
+      window.history.replaceState({ __vr: 0 }, '', '/');
+      window.dispatchEvent(new PopStateEvent('popstate', { state: { __vr: 0 } }));
+      await new Promise((r) => setTimeout(r, 0));
+
+      expect(router.currentRoute.value.location.path).toBe('/');
+      expect(scrollTo).not.toHaveBeenCalled(); // back/forward leaves scroll alone
+      scrollTo.mockRestore();
+      router.destroy();
+    });
   });
 });

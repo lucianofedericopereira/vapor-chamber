@@ -27,7 +27,7 @@ describe('plugins-core coverage — logger', () => {
   });
 });
 
-// ── history: undo handler throws (136) + redo dispatch throws (151) ────────────
+// ── history: undo handler throws + redo dispatch throws ────────────
 describe('plugins-core coverage — history undo/redo errors', () => {
   it('catches a throwing undo handler', () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -58,7 +58,7 @@ describe('plugins-core coverage — history undo/redo errors', () => {
   });
 });
 
-// ── debounce: debounced execution throws (214) ────────────────────────────────
+// ── debounce: debounced execution throws ────────────────────────────────
 describe('plugins-core coverage — debounce', () => {
   it('catches a throwing debounced execution', () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -75,7 +75,7 @@ describe('plugins-core coverage — debounce', () => {
   });
 });
 
-// ── optimistic: rollback throws — sync (321) + async (310-315) ─────────────────
+// ── optimistic: rollback throws — sync + async ─────────────────
 describe('plugins-core coverage — optimistic rollback errors', () => {
   it('catches a throwing sync rollback', () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -100,7 +100,7 @@ describe('plugins-core coverage — optimistic rollback errors', () => {
   });
 });
 
-// ── optimisticUndo: undo throws — sync (418) + async + onRollback (401-406) ────
+// ── optimisticUndo: undo throws — sync + async + onRollback ────
 describe('plugins-core coverage — optimisticUndo rollback errors', () => {
   it('sync: catches a throwing undo and console.errors with no onRollbackError', () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});

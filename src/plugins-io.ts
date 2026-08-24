@@ -4,7 +4,7 @@
  * retry, persist, sync
  */
 
-import { matchesPattern, RETRYABLE_CODES, type Command, type CommandResult, type AsyncPlugin, type Plugin } from './command-bus';
+import { matchesPattern, RETRYABLE_CODES, _withOrigin, type Command, type CommandResult, type AsyncPlugin, type Plugin } from './command-bus';
 import { DEV } from './dev';
 
 // ---------------------------------------------------------------------------
@@ -286,6 +286,7 @@ export function sync(
   const localDispatch: ((action: string, target: any, payload?: any) => any) | null =
     busRef?.dispatch ?? null;
 
+
   function open(): void {
     if (typeof BroadcastChannel === 'undefined') return;
     bc = new BroadcastChannel(channel);
@@ -317,15 +318,12 @@ export function sync(
         // plugins and transports. So the marker is a PREREQUISITE for the
         // no-op fix, not an independent cleanup.
         //
-        // `__origin` is read by stampMeta, so `meta.origin === 'sync'` is set
-        // before any plugin sees the command, on both bus types.
-        const payload =
-          msg.payload === null || msg.payload === undefined
-            ? { __origin: 'sync' }
-            : typeof msg.payload === 'object' && !Array.isArray(msg.payload)
-              ? { ...msg.payload, __origin: 'sync' }
-              : msg.payload;
-        localDispatch(msg.action, msg.target, payload);
+        // `_withOrigin` sets `meta.origin = 'sync'` for EVERY payload shape,
+        // including the primitives and arrays a `__origin` key cannot ride on
+        // — those used to arrive unmarked and get re-broadcast, ping-ponging
+        // between tabs forever. The payload now reaches handlers exactly as
+        // the sending tab wrote it: no spread, no allocation, no injected key.
+        _withOrigin('sync', () => localDispatch(msg.action, msg.target, msg.payload));
       }
     };
   }
@@ -334,9 +332,9 @@ export function sync(
 
   function broadcast(cmd: Command): void {
     // A command that arrived FROM another tab must not be sent back out.
-    // `meta.origin` is stamped by the core from the `__origin` key the receive
-    // path dispatches with, so it is already set by the time any plugin runs —
-    // on a sync bus and an async one alike.
+    // `meta.origin` is stamped by the core via `_withOrigin` on the receive
+    // path, so it is already set by the time any plugin runs — on a sync bus
+    // and an async one alike, and for every payload shape.
     if (cmd.meta?.origin === 'sync') return;
     if (filter && !filter(cmd)) return;
     bc?.postMessage({ __vc: true, action: cmd.action, target: cmd.target, payload: cmd.payload } satisfies SyncMessage);

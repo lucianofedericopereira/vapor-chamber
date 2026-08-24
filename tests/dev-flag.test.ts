@@ -2,10 +2,10 @@
  * src/dev.ts — the DEV constant's four resolution paths.
  *
  * DEV is a build-time answer with a runtime fallback, and the fallback is the
- * only path the rest of the suite ever exercises (vitest supplies no
- * `__VC_DEV__` define), which is what held the file at 83.3% branch coverage
- * with 100% statements — the statement is one expression, so line coverage
- * could never see the gap.
+ * only path the rest of the suite ever exercises, because vitest supplies no
+ * `__VC_DEV__` define. The whole thing is ONE expression, so a line- or
+ * statement-based reading of this file can never distinguish its four
+ * resolutions — only exercising them can.
  *
  * Each case re-imports the module after arranging globals, because DEV is
  * evaluated once at module scope.

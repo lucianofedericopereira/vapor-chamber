@@ -106,6 +106,83 @@ describe('createOutbox — queueing', () => {
     expect(outbox.pending.value).toBe(1);
   });
 
+  it('ignores an "online" event when no bus has been installed yet', async () => {
+    // `if (busRef) void flush()` inside the online handler — the false arm.
+    // The listener is attached at CREATION, but install() is a separate call,
+    // so a reconnect between the two arrives with nothing to flush into. It
+    // must no-op rather than throw.
+    const listeners: Record<string, Array<() => void>> = {};
+    vi.stubGlobal('window', {
+      addEventListener: (ev: string, fn: () => void) => { (listeners[ev] ??= []).push(fn); },
+      removeEventListener: () => {},
+    });
+
+    const storage = memoryStorage([
+      { id: 'r1', action: 'a', target: { n: 1 }, key: 'a:1', queuedAt: 1 },
+    ]);
+    const outbox = createOutbox({ storage, isOnline: () => true }); // autoFlush on, NOT installed
+    expect(listeners.online).toHaveLength(1);
+
+    expect(() => listeners.online![0]!()).not.toThrow();
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Nothing was replayed — there is no bus to replay into.
+    expect(storage.data).toHaveLength(1);
+  });
+
+  it('flushes on the window "online" event when autoFlush is on', async () => {
+    // The `autoFlush && typeof window !== 'undefined' && addEventListener`
+    // chain. Every other outbox test passes `autoFlush: false` and runs under
+    // `node`, so the listener was never attached — meaning the feature that
+    // makes the outbox self-healing had no coverage at all.
+    const listeners: Record<string, Array<() => void>> = {};
+    vi.stubGlobal('window', {
+      addEventListener: (ev: string, fn: () => void) => { (listeners[ev] ??= []).push(fn); },
+      removeEventListener: (ev: string, fn: () => void) => {
+        listeners[ev] = (listeners[ev] ?? []).filter((f) => f !== fn);
+      },
+    });
+
+    const storage = memoryStorage();
+    let online = false;
+    const outbox = createOutbox({ storage, isOnline: () => online }); // autoFlush defaults true
+    const bus = createAsyncCommandBus();
+    outbox.install(bus);
+    bus.register('a', async () => 'ra');
+
+    await bus.dispatch('a', { n: 1 });
+    expect(outbox.pending.value).toBe(1); // queued while offline
+    expect(listeners.online).toHaveLength(1);
+
+    online = true;
+    listeners.online![0]!(); // the browser fires this on reconnect
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(outbox.pending.value).toBe(0); // drained without anyone calling flush()
+
+    // ...and dispose() detaches it, so a torn-down outbox cannot be revived.
+    outbox.dispose();
+    expect(listeners.online).toHaveLength(0);
+  });
+
+  it('assumes online when there is no navigator at all', async () => {
+    // `typeof navigator !== 'undefined' ? navigator.onLine : true` — the `true`
+    // arm. The default probe has to work under SSR/Node, where assuming OFFLINE
+    // would queue every command on the server and never flush them.
+    vi.stubGlobal('navigator', undefined);
+    const storage = memoryStorage();
+    const outbox = createOutbox({ storage, autoFlush: false }); // default isOnline
+    const bus = createAsyncCommandBus();
+    outbox.install(bus);
+    bus.register('cartAdd', async () => 'handled');
+
+    const result = await bus.dispatch('cartAdd', { id: 1 });
+
+    expect(result.ok).toBe(true);
+    expect(result.value).toBe('handled'); // passed through, not queued
+    expect(outbox.pending.value).toBe(0);
+  });
+
   it('maxQueue drops the oldest record with a warning', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const storage = memoryStorage();
@@ -215,6 +292,79 @@ describe('createOutbox — flush', () => {
     expect(second).toEqual({ replayed: 2, failed: 0 });
     expect(runs).toEqual(['a', 'b']);
     expect(outbox.pending.value).toBe(0);
+  });
+
+  // The test above fails a replay by throwing inside the HANDLER, which the
+  // async bus converts into a resolved `{ ok: false }` — so runFlush's
+  // `try/catch` around `bus.dispatch` never ran. A throwing PLUGIN is
+  // different: it makes the dispatch promise REJECT, which is the only way
+  // that catch is reachable. It is not hypothetical — any plugin installed
+  // downstream of the outbox (transport, auth, serializer) can throw on a
+  // replay that happens minutes after the command was queued.
+  it('survives a replay whose dispatch REJECTS, treating it as a failed record', async () => {
+    const storage = memoryStorage();
+    let online = false;
+    const outbox = createOutbox({ storage, isOnline: () => online, autoFlush: false });
+    const bus = createAsyncCommandBus();
+    outbox.install(bus);
+
+    let explode = true;
+    // priority 100 => downstream of the outbox plugin, so this runs on
+    // replays only, never on the original queueing dispatch.
+    bus.use((_cmd, next) => {
+      if (explode) throw new Error('transport exploded mid-replay');
+      return next();
+    }, { priority: 100 });
+
+    const runs: string[] = [];
+    bus.register('a', async () => { runs.push('a'); return 'ok-a'; });
+    bus.register('b', async () => { runs.push('b'); return 'ok-b'; });
+
+    await bus.dispatch('a', { n: 1 });
+    await bus.dispatch('b', { n: 2 });
+    expect(outbox.pending.value).toBe(2);
+
+    online = true;
+    const first = await outbox.flush();
+
+    // The rejection was caught and turned into a failed record — the flush
+    // returned a summary instead of rejecting, and nothing was lost.
+    expect(first).toEqual({ replayed: 0, failed: 1 });
+    expect(runs).toEqual([]); // the handler never ran; the plugin threw first
+    expect(outbox.pending.value).toBe(2);
+    expect(storage.data!.map((r) => r.action)).toEqual(['a', 'b']); // order preserved
+
+    // And the queue is still replayable once the downstream plugin recovers.
+    explode = false;
+    const second = await outbox.flush();
+    expect(second).toEqual({ replayed: 2, failed: 0 });
+    expect(runs).toEqual(['a', 'b']);
+    expect(outbox.pending.value).toBe(0);
+  });
+
+  it('wraps a non-Error rejection value in an Error rather than storing it raw', async () => {
+    // `e instanceof Error ? e : new Error(String(e))` — the else arm. A plugin
+    // that rejects with a string (or a framework that throws a plain object)
+    // must not put a non-Error into the failure path.
+    const storage = memoryStorage();
+    let online = false;
+    const outbox = createOutbox({ storage, isOnline: () => online, autoFlush: false });
+    const bus = createAsyncCommandBus();
+    outbox.install(bus);
+
+    // Rejecting (rather than throwing) with a bare string: same non-Error
+    // rejection value, no throw-a-literal lint suppression needed.
+    bus.use(() => Promise.reject('a bare string, not an Error') as any, { priority: 100 });
+    bus.register('a', async () => 'ok-a');
+
+    await bus.dispatch('a', { n: 1 });
+    online = true;
+
+    const summary = await outbox.flush();
+    expect(summary).toEqual({ replayed: 0, failed: 1 });
+    // Record survives the non-Error rejection intact.
+    expect(outbox.pending.value).toBe(1);
+    expect(storage.data!.map((r) => r.action)).toEqual(['a']);
   });
 
   it('queue-behind semantics: a dispatch during an in-progress flush lands behind the queued records', async () => {
@@ -449,6 +599,29 @@ describe('indexedDbOutbox', () => {
 
     await s.clear();
     expect(await s.load()).toBeNull();
+  });
+
+  it('surfaces a generic Error when open() fails with no req.error', async () => {
+    // `reject(req.error ?? new Error('indexedDB open failed'))` — the `??`
+    // fallback. A failed open normally carries a DOMException, but private
+    // browsing / quota refusals can fire onerror with `error` still null, and
+    // rejecting with `null` would surface as an unreadable failure downstream.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubGlobal('indexedDB', {
+      open: () => {
+        const req: any = { onupgradeneeded: null, onsuccess: null, onerror: null, error: null };
+        queueMicrotask(() => req.onerror?.());
+        return req;
+      },
+    });
+
+    const s = indexedDbOutbox();
+    expect(await s.load()).toBeNull(); // load swallows and reports null
+    await s.save([record]);
+    expect(warn).toHaveBeenCalled();
+    const reported = warn.mock.calls.flat().find((a) => a instanceof Error) as Error | undefined;
+    expect(reported?.message).toBe('indexedDB open failed');
+    warn.mockRestore();
   });
 
   it('is SSR-safe: no indexedDB → load() resolves null, save/clear warn but do not throw', async () => {

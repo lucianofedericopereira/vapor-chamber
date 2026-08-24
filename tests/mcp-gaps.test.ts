@@ -6,12 +6,12 @@
  *    chain, so `constructor` / `toString` / `__proto__` / `hasOwnProperty`
  *    passed as "known tools" and reached bus.dispatch — names tools/list never
  *    advertises. Now Object.hasOwn.
- *  - callTool's dispatch-throws arm (283).
+ *  - callTool's dispatch-throws arm.
  *  - a malformed envelope with NO id — a notification, which must never be
- *    answered even when invalid (300).
- *  - a non-object payload passing through untouched (275).
- *  - tool mapping without required fields (67) and without a description (83).
- *  - serveMcpStdio: the no-Node guard (354-355), blank-line skip (369),
+ *    answered even when invalid.
+ *  - a non-object payload passing through untouched.
+ *  - tool mapping without required fields and without a description.
+ *  - serveMcpStdio: the no-Node guard, blank-line skip,
  *    parse errors, notification silence, and stop().
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -85,7 +85,7 @@ describe('tools/call rejects inherited Object.prototype keys', () => {
 // ---------------------------------------------------------------------------
 
 describe('callTool', () => {
-  it('turns a throwing dispatch into an error result, not a protocol error (283)', async () => {
+  it('turns a throwing dispatch into an error result, not a protocol error', async () => {
     const dispatch = vi.fn(() => { throw new Error('handler exploded'); });
     const { handle } = makeHandler({ dispatch });
 
@@ -96,26 +96,49 @@ describe('callTool', () => {
     expect(reply.result.content[0].text).toContain('handler exploded');
   });
 
-  it('passes a non-object payload through untouched (275)', async () => {
+  it('refuses a non-object payload instead of dispatching it unattributed', async () => {
+    // BEHAVIOR CHANGE. This used to assert the payload was forwarded
+    // untouched, on the reasoning that schema validation would reject it
+    // downstream. With a MOCKED dispatch that looked fine — but the mock is
+    // exactly what hid the problem: schema.ts only checks payload shape when
+    // the action declares payload fields, so against a REAL bus an action
+    // without a payload schema dispatched the bare value successfully, with
+    // `meta.origin === undefined`. The marker cannot ride on a primitive or
+    // array, so those agent commands were indistinguishable from local ones.
+    // See the end-to-end assertion in tests/mcp.test.ts.
     const dispatch = vi.fn(async () => ({ ok: true, value: 1 }));
     const { handle } = makeHandler({ dispatch });
 
-    await handle(call('cartAdd', { target: { id: 1 }, payload: 'a bare string' }));
-    expect(dispatch.mock.calls[0]![2]).toBe('a bare string'); // no __origin spread
-
-    await handle(call('cartAdd', { target: { id: 1 }, payload: [1, 2] }));
-    expect(dispatch.mock.calls[1]![2]).toEqual([1, 2]);
+    for (const bad of ['a bare string', [1, 2], 42, true]) {
+      const reply: any = await handle(call('cartAdd', { target: { id: 1 }, payload: bad }));
+      expect(reply.result.isError).toBe(true);
+      expect(reply.result.content[0].text).toMatch(/payload must be an object/);
+    }
+    // Refused at the boundary — the bus is never reached at all.
+    expect(dispatch).not.toHaveBeenCalled();
   });
 
-  it('stamps __origin on object and absent payloads', async () => {
+  it('forwards the payload to the bus untouched', async () => {
+    // Was: asserted the payload arrived spread with `__origin: 'agent'`. The
+    // marker now travels out-of-band via `_withOrigin`, so the bus receives
+    // exactly what the client sent — by reference, with no allocation and no
+    // key injected into user data.
+    //
+    // NOTE: `dispatch` is MOCKED here, so `meta.origin` does not exist to
+    // assert — a mock cannot show attribution, which is precisely how the
+    // original attribution hole hid. The end-to-end guarantee is pinned
+    // against a REAL bus in tests/mcp.test.ts ("never lets an MCP dispatch
+    // reach a handler unattributed").
     const dispatch = vi.fn(async () => ({ ok: true, value: 1 }));
     const { handle } = makeHandler({ dispatch });
 
-    await handle(call('cartAdd', { target: { id: 1 }, payload: { qty: 2 } }));
-    expect(dispatch.mock.calls[0]![2]).toEqual({ qty: 2, __origin: 'agent' });
+    const sent = { qty: 2 };
+    await handle(call('cartAdd', { target: { id: 1 }, payload: sent }));
+    expect(dispatch.mock.calls[0]![2]).toBe(sent); // same object, not a copy
+    expect(dispatch.mock.calls[0]![2]).toEqual({ qty: 2 }); // no marker key
 
     await handle(call('cartAdd', { target: { id: 1 } }));
-    expect(dispatch.mock.calls[1]![2]).toEqual({ __origin: 'agent' });
+    expect(dispatch.mock.calls[1]![2]).toBeUndefined(); // absent stays absent
   });
 
   it('rejects a missing tool name', async () => {
@@ -127,11 +150,11 @@ describe('callTool', () => {
 });
 
 // ---------------------------------------------------------------------------
-// envelope handling (300)
+// envelope handling
 // ---------------------------------------------------------------------------
 
 describe('JSON-RPC envelope', () => {
-  it('never answers a malformed NOTIFICATION (300)', async () => {
+  it('never answers a malformed NOTIFICATION', async () => {
     const { handle } = makeHandler();
     // Bad jsonrpc version, no id → a notification: MUST NOT be replied to.
     expect(await handle({ jsonrpc: '1.0', method: 'tools/list' })).toBeNull();
@@ -153,7 +176,7 @@ describe('JSON-RPC envelope', () => {
 });
 
 // ---------------------------------------------------------------------------
-// tool mapping arms (67, 83)
+// tool mapping arms
 // ---------------------------------------------------------------------------
 
 describe('busToMcpTools', () => {
@@ -163,7 +186,7 @@ describe('busToMcpTools', () => {
     expect(tool!.inputSchema.properties.target.properties.anything).toEqual({});
   });
 
-  it('omits `description` when the action declares none (83)', () => {
+  it('omits `description` when the action declares none', () => {
     const [tool] = busToMcpTools({ ping: { target: { id: 'number' } } } as unknown as BusSchema);
     expect(tool!.description).toBeUndefined();
     expect(tool!.inputSchema.required).toEqual(['target']);
@@ -179,18 +202,18 @@ describe('agentOrigin', () => {
 });
 
 // ---------------------------------------------------------------------------
-// serveMcpStdio (353-388)
+// serveMcpStdio
 // ---------------------------------------------------------------------------
 
 describe('serveMcpStdio', () => {
-  it('throws outside Node (354-355)', () => {
+  it('throws outside Node', () => {
     vi.stubGlobal('process', undefined);
     expect(() => serveMcpStdio({ dispatch: vi.fn(), getSchema: () => SCHEMA })).toThrow(
       /requires a Node\.js environment/,
     );
   });
 
-  it('answers requests, skips blank lines, and reports parse errors (369)', async () => {
+  it('answers requests, skips blank lines, and reports parse errors', async () => {
     const written: string[] = [];
     vi.spyOn(process.stdout, 'write').mockImplementation(((s: string) => { written.push(s); return true; }) as any);
     stops.push(serveMcpStdio({ dispatch: vi.fn(async () => ({ ok: true, value: 'ok' })), getSchema: () => SCHEMA }, { actions: ['*'] }));
@@ -317,7 +340,7 @@ describe('serveMcpStdio limits', () => {
     expect(resume).toHaveBeenCalled();
   });
 
-  it('drops a reply whose dispatch settles after stop() (405)', async () => {
+  it('drops a reply whose dispatch settles after stop()', async () => {
     const written = capture();
     let release!: () => void;
     const dispatch = vi.fn(() => new Promise<any>((resolve) => {

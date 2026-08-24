@@ -5,7 +5,7 @@
  * are the arms that only fire when something is wrong or unusual: no bus, a
  * re-entrant flush, going offline mid-flush, a handler that throws rather than
  * returning `{ ok: false }`, and the `window`-less (SSR / worker) branch of
- * autoFlush. Those were most of outbox.ts's 10 uncovered branch sites.
+ * autoFlush.
  *
  * Each of these is a real operating condition for an offline queue, not a
  * synthetic edge: an outbox exists precisely because the network is unreliable.

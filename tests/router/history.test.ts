@@ -47,6 +47,29 @@ describe('createWebHistory (happy-dom)', () => {
     h.destroy();
   });
 
+  it('treats a non-numeric __vr already in history state as position 0', () => {
+    // The `: 0` arm of position(). The boot stamp on line 124 only fires when
+    // `__vr` is UNDEFINED, so a foreign or corrupted value (another router, a
+    // server-rendered state blob) survives it and reaches position() as-is —
+    // where it must degrade to 0 rather than poison every later delta with NaN.
+    window.history.replaceState({ __vr: 'corrupt' }, '', '/admin/');
+
+    const h = createWebHistory('/admin');
+    // Not stamped over, precisely because it was not undefined.
+    expect(window.history.state.__vr).toBe('corrupt');
+
+    // lastPosition resolved to 0, so the next push is 1 — not NaN.
+    h.push('/a');
+    expect(window.history.state.__vr).toBe(1);
+
+    const cb = vi.fn();
+    h.listen(cb);
+    window.dispatchEvent(new PopStateEvent('popstate', { state: { __vr: 0 } }));
+    expect(cb.mock.calls[0][1].delta).toBe(-1);
+
+    h.destroy();
+  });
+
   it('go delegates to window.history.go', () => {
     const h = createWebHistory('/admin');
     const spy = vi.spyOn(window.history, 'go').mockImplementation(() => {});

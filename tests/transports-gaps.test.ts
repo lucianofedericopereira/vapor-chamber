@@ -3,13 +3,13 @@
  *
  * Targets what transports.test.ts / transports-coverage.test.ts leave untouched:
  *
- *  - HTTP bridge error re-wrap keeping `status` AND `code` (222-223)
- *  - `csrf: 'inertia'` → csrfFlag false on both HTTP bridges (150, 288)
+ *  - HTTP bridge error re-wrap keeping `status` AND `code`
+ *  - `csrf: 'inertia'` → csrfFlag false on both HTTP bridges
  *  - signal + scopeController merge via AbortSignal.any, and the per-dispatch
- *    `cmd.signal` merge (152-156, 174-178, 289-291)
- *  - batching bridge: idempotency key forwarding (316), a response with no
- *    `results` array (336), pre-flight abort (360)
- *  - WS bridge: connect() with no WebSocket global (531), pre-flight abort (614)
+ *    `cmd.signal` merge
+ *  - batching bridge: idempotency key forwarding, a response with no
+ *    `results` array, pre-flight abort
+ *  - WS bridge: connect() with no WebSocket global, pre-flight abort
  *
  * The two pre-flight abort guards are only reachable by invoking the plugin
  * directly: `bus.dispatch` short-circuits an already-aborted signal before the
@@ -37,7 +37,7 @@ function callPlugin(plugin: any, cmd: Partial<Command>): Promise<CommandResult> 
 // ---------------------------------------------------------------------------
 
 describe('createHttpBridge error re-wrap', () => {
-  it('carries status, code and response through the rewrapped error (220-225)', async () => {
+  it('carries status, code and response through the rewrapped error', async () => {
     const thrown = Object.assign(new Error('HTTP 422'), {
       name: 'HttpError',
       status: 422,
@@ -60,7 +60,7 @@ describe('createHttpBridge error re-wrap', () => {
     expect((err as any).cause).toBe(thrown);
   });
 
-  it('passes the raw error through when the body has no error/message (227)', async () => {
+  it('passes the raw error through when the body has no error/message', async () => {
     const thrown = Object.assign(new Error('network down'), { response: { data: {} } });
     const httpClient = { post: vi.fn().mockRejectedValue(thrown) } as any;
 
@@ -77,7 +77,7 @@ describe('createHttpBridge error re-wrap', () => {
 // ---------------------------------------------------------------------------
 
 describe('csrf: inertia and signal merging', () => {
-  it('sends csrf:false for csrf:"inertia" on the HTTP bridge (150)', async () => {
+  it('sends csrf:false for csrf:"inertia" on the HTTP bridge', async () => {
     const httpClient = { post: vi.fn().mockResolvedValue({ ok: true, status: 200, headers: {}, data: { ok: true, state: 1 } }) } as any;
     const bus = createAsyncCommandBus();
     bus.use(createHttpBridge({ endpoint: '/api/vc', csrf: 'inertia', httpClient }));
@@ -86,7 +86,7 @@ describe('csrf: inertia and signal merging', () => {
     expect(httpClient.post.mock.calls[0]![2].csrf).toBe(false);
   });
 
-  it('sends csrf:false for csrf:"inertia" on the batching bridge (288)', async () => {
+  it('sends csrf:false for csrf:"inertia" on the batching bridge', async () => {
     const httpClient = { post: vi.fn().mockResolvedValue({ ok: true, status: 200, headers: {}, data: { results: [] } }) } as any;
     const bus = createAsyncCommandBus();
     bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', csrf: 'inertia', httpClient }));
@@ -95,7 +95,7 @@ describe('csrf: inertia and signal merging', () => {
     expect(httpClient.post.mock.calls[0]![2].csrf).toBe(false);
   });
 
-  it('merges scopeController with the bridge signal (152-156)', async () => {
+  it('merges scopeController with the bridge signal', async () => {
     const httpClient = { post: vi.fn().mockResolvedValue({ ok: true, status: 200, headers: {}, data: { ok: true } }) } as any;
     const user = new AbortController();
     const scope = new AbortController();
@@ -110,7 +110,7 @@ describe('csrf: inertia and signal merging', () => {
     expect(sent.aborted).toBe(true);
   });
 
-  it('merges the per-dispatch signal with the bridge signal (174-178)', async () => {
+  it('merges the per-dispatch signal with the bridge signal', async () => {
     const httpClient = { post: vi.fn().mockResolvedValue({ ok: true, status: 200, headers: {}, data: { ok: true } }) } as any;
     const bridgeAc = new AbortController();
     const callAc = new AbortController();
@@ -124,7 +124,7 @@ describe('csrf: inertia and signal merging', () => {
     expect(sent.aborted).toBe(true);
   });
 
-  it('merges scopeController with the bridge signal on the batching bridge (289-291)', async () => {
+  it('merges scopeController with the bridge signal on the batching bridge', async () => {
     const httpClient = { post: vi.fn().mockResolvedValue({ ok: true, status: 200, headers: {}, data: { results: [] } }) } as any;
     const user = new AbortController();
     const scope = new AbortController();
@@ -144,7 +144,7 @@ describe('csrf: inertia and signal merging', () => {
 // ---------------------------------------------------------------------------
 
 describe('createBatchingHttpBridge', () => {
-  it('forwards a stamped idempotency key per batched command (316)', async () => {
+  it('forwards a stamped idempotency key per batched command', async () => {
     const httpClient = {
       post: vi.fn().mockImplementation((_url, body: any) => Promise.resolve({
         ok: true,
@@ -172,7 +172,7 @@ describe('createBatchingHttpBridge', () => {
     expect(commands.find((c: any) => c.command === 'look').idempotencyKey).toBeUndefined();
   });
 
-  it('fails every entry when the response carries no results array (336, 339-340)', async () => {
+  it('fails every entry when the response carries no results array', async () => {
     const httpClient = { post: vi.fn().mockResolvedValue({ ok: true, status: 200, headers: {}, data: {} }) } as any;
     const bus = createAsyncCommandBus();
     bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', httpClient }));
@@ -183,7 +183,7 @@ describe('createBatchingHttpBridge', () => {
     expect(result.error?.message).toContain('save');
   });
 
-  it('returns an aborted result without queueing when cmd.signal is already tripped (360)', async () => {
+  it('returns an aborted result without queueing when cmd.signal is already tripped', async () => {
     const httpClient = { post: vi.fn() } as any;
     const ac = new AbortController();
     ac.abort();
@@ -195,7 +195,7 @@ describe('createBatchingHttpBridge', () => {
     expect(httpClient.post).not.toHaveBeenCalled();
   });
 
-  it('passes non-matching actions straight to next() (359)', async () => {
+  it('passes non-matching actions straight to next()', async () => {
     const httpClient = { post: vi.fn() } as any;
     const plugin = createBatchingHttpBridge({ endpoint: '/api/vc/batch', actions: ['cart*'], httpClient });
 
@@ -210,7 +210,7 @@ describe('createBatchingHttpBridge', () => {
 // ---------------------------------------------------------------------------
 
 describe('createWsBridge guards', () => {
-  it('connect() is a no-op when WebSocket is undefined (531)', () => {
+  it('connect() is a no-op when WebSocket is undefined', () => {
     vi.stubGlobal('WebSocket', undefined);
     const ws = createWsBridge({ url: 'ws://localhost' });
     expect(() => ws.connect()).not.toThrow();
@@ -218,7 +218,7 @@ describe('createWsBridge guards', () => {
     expect(ws.connected.value).toBe(false);
   });
 
-  it('returns an aborted result without opening a socket when cmd.signal is tripped (614)', async () => {
+  it('returns an aborted result without opening a socket when cmd.signal is tripped', async () => {
     const ctor = vi.fn();
     vi.stubGlobal('WebSocket', ctor);
     const ac = new AbortController();

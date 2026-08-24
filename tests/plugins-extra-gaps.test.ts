@@ -1,13 +1,13 @@
 /**
  * Supplemental coverage for src/plugins-extra.ts.
  *
- *  - rateLimit: window-expiry head advance + array compaction (298, 301-303).
- *  - metrics: head-based eviction + compaction (361-363, 383).
+ *  - rateLimit: window-expiry head advance + array compaction.
+ *  - metrics: head-based eviction + compaction.
  *  - serialize: a same-key lane survives a throwing command — the stored tail
- *    absorbs the rejection (493) and the next command still runs.
- *  - idempotent: stampMeta:false (585), TTL expiry drop (593-594), and the
- *    rejection arm clearing inflight without caching (610-613).
- *  - supersede: merging a caller-supplied signal via AbortSignal.any (687-688)
+ *    absorbs the rejection and the next command still runs.
+ *  - idempotent: stampMeta:false, TTL expiry drop, and the
+ *    rejection arm clearing inflight without caching.
+ *  - supersede: merging a caller-supplied signal via AbortSignal.any
  *    and the ctrl-signal fallback when AbortSignal.any is unavailable.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
@@ -25,11 +25,11 @@ function cmd(action: string, extra: Partial<Command> = {}): Command {
 }
 
 // ---------------------------------------------------------------------------
-// rateLimit — window compaction (296-304)
+// rateLimit — window compaction
 // ---------------------------------------------------------------------------
 
 describe('rateLimit window compaction', () => {
-  it('advances past expired timestamps and compacts the backing array (298, 301-303)', () => {
+  it('advances past expired timestamps and compacts the backing array', () => {
     vi.useFakeTimers();
     vi.setSystemTime(1_000_000);
 
@@ -52,11 +52,11 @@ describe('rateLimit window compaction', () => {
 });
 
 // ---------------------------------------------------------------------------
-// metrics — eviction + compaction (361-363, 383)
+// metrics — eviction + compaction
 // ---------------------------------------------------------------------------
 
 describe('metrics eviction', () => {
-  it('drops oldest entries past maxEntries and compacts (361-363, 383)', () => {
+  it('drops oldest entries past maxEntries and compacts', () => {
     const bus = createCommandBus();
     const m = metrics({ maxEntries: 2 });
     bus.use(m);
@@ -72,11 +72,11 @@ describe('metrics eviction', () => {
 });
 
 // ---------------------------------------------------------------------------
-// serialize — lane survives a rejection (487-497)
+// serialize — lane survives a rejection
 // ---------------------------------------------------------------------------
 
 describe('serialize lane resilience', () => {
-  it('absorbs a throwing command and still runs the next same-key command (491-496)', async () => {
+  it('absorbs a throwing command and still runs the next same-key command', async () => {
     const plugin = serialize();
     const c = cmd('save');
 
@@ -95,14 +95,14 @@ describe('serialize lane resilience', () => {
 // ---------------------------------------------------------------------------
 
 describe('idempotent', () => {
-  it('leaves cmd.meta untouched with stampMeta:false (585)', async () => {
+  it('leaves cmd.meta untouched with stampMeta:false', async () => {
     const plugin = idempotent({ stampMeta: false });
     const c = cmd('orderCreate');
     await plugin(c, () => ({ ok: true, value: 1 }) as any);
     expect((c.meta as any).idempotencyKey).toBeUndefined();
   });
 
-  it('drops an expired completed key so the handler runs again (593-594)', async () => {
+  it('drops an expired completed key so the handler runs again', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(2_000_000);
 
@@ -123,7 +123,7 @@ describe('idempotent', () => {
     expect(runs).toBe(2);
   });
 
-  it('maxKeys: 0 hits the empty-map eviction arm without evicting (603-605)', async () => {
+  it('maxKeys: 0 hits the empty-map eviction arm without evicting', async () => {
     // Not a dead guard: with maxKeys 0 the eviction runs on an EMPTY map, so
     // `done.keys().next().value` is undefined and the guard's false arm fires.
     const plugin = idempotent({ maxKeys: 0 });
@@ -134,7 +134,7 @@ describe('idempotent', () => {
     expect(repeat.value).toBe(1);
   });
 
-  it('clears inflight on rejection and does not cache the failure (610-613)', async () => {
+  it('clears inflight on rejection and does not cache the failure', async () => {
     const plugin = idempotent();
     await expect(
       Promise.resolve(plugin(cmd('orderCreate'), () => Promise.reject(new Error('backend down')))),
@@ -147,11 +147,11 @@ describe('idempotent', () => {
 });
 
 // ---------------------------------------------------------------------------
-// supersede — signal merging (685-689)
+// supersede — signal merging
 // ---------------------------------------------------------------------------
 
 describe('supersede signal merging', () => {
-  it('merges a caller-supplied signal with the per-key controller (687-688)', async () => {
+  it('merges a caller-supplied signal with the per-key controller', async () => {
     const bus = createAsyncCommandBus();
     bus.use(supersede({ actions: ['search'] }));
     let observed: AbortSignal | undefined;
@@ -167,7 +167,7 @@ describe('supersede signal merging', () => {
     expect(observed!.aborted).toBe(true);
   });
 
-  it('falls back to the controller signal when AbortSignal.any is unavailable (688)', async () => {
+  it('falls back to the controller signal when AbortSignal.any is unavailable', async () => {
     const origAny = AbortSignal.any;
     // @ts-expect-error deliberate removal to drive the fallback arm
     AbortSignal.any = undefined;

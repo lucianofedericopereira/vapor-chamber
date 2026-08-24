@@ -5,15 +5,15 @@
  *  - download(): content-disposition filename parsing (quoted / unquoted /
  *    absent → 'download'), the explicit-filename bypass, and the SSR guard
  *    (831 — node env has no document, so the anchor-click trigger is skipped).
- *  - safeRequest fallbacks: non-object error body → { message, code } (810),
- *    and the status chain down to 0 on a network error (811).
- *  - interceptor arms: request onFulfilled returning undefined (685), an
- *    onFulfilled throw with NO onRejected registered (686), response
- *    interceptor returning undefined (748), and a failing request with a
+ *  - safeRequest fallbacks: non-object error body → { message, code },
+ *    and the status chain down to 0 on a network error.
+ *  - interceptor arms: request onFulfilled returning undefined, an
+ *    onFulfilled throw with NO onRejected registered, response
+ *    interceptor returning undefined, and a failing request with a
  *    fulfilled-only response interceptor (759 skip arm).
- *  - request() with no method → GET default (689).
- *  - stale-while-revalidate: background refresh failure absorbed (773), and
- *    serveStaleOnError with no retained entry → the error surfaces (787-791).
+ *  - request() with no method → GET default.
+ *  - stale-while-revalidate: background refresh failure absorbed, and
+ *    serveStaleOnError with no retained entry → the error surfaces.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createHttpClient, invalidateCsrfCache } from '../src/http';
@@ -49,11 +49,11 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// download (817-842)
+// download
 // ---------------------------------------------------------------------------
 
 describe('createHttpClient — download', () => {
-  it('parses a quoted content-disposition filename (822-825)', async () => {
+  it('parses a quoted content-disposition filename', async () => {
     (globalThis.fetch as any).mockResolvedValue(
       mockResponse(200, 'file-bytes', { 'content-disposition': 'attachment; filename="report Q3.pdf"' }),
     );
@@ -82,7 +82,7 @@ describe('createHttpClient — download', () => {
     expect(result.filename).toBe('download');
   });
 
-  it('prefers an explicit filename over the header (821)', async () => {
+  it('prefers an explicit filename over the header', async () => {
     (globalThis.fetch as any).mockResolvedValue(
       mockResponse(200, 'file-bytes', { 'content-disposition': 'attachment; filename=server-name.bin' }),
     );
@@ -94,11 +94,11 @@ describe('createHttpClient — download', () => {
 });
 
 // ---------------------------------------------------------------------------
-// safeRequest fallbacks (805-813)
+// safeRequest fallbacks
 // ---------------------------------------------------------------------------
 
 describe('createHttpClient — safe fallbacks', () => {
-  it('wraps a non-object error body as { message, code } (810)', async () => {
+  it('wraps a non-object error body as { message, code }', async () => {
     (globalThis.fetch as any).mockResolvedValue(
       mockResponse(500, 'plain text failure', { 'content-type': 'text/plain' }),
     );
@@ -110,7 +110,7 @@ describe('createHttpClient — safe fallbacks', () => {
     expect(result.status).toBe(500);
   });
 
-  it('reports status 0 on a network error with no response (811)', async () => {
+  it('reports status 0 on a network error with no response', async () => {
     (globalThis.fetch as any).mockRejectedValue(Object.assign(new TypeError('fetch failed'), { name: 'TypeError' }));
     const http = createHttpClient();
 
@@ -122,11 +122,11 @@ describe('createHttpClient — safe fallbacks', () => {
 });
 
 // ---------------------------------------------------------------------------
-// interceptor arms (683-687, 745-761)
+// interceptor arms
 // ---------------------------------------------------------------------------
 
 describe('createHttpClient — interceptor arms', () => {
-  it('keeps the original config when a request interceptor returns undefined (685)', async () => {
+  it('keeps the original config when a request interceptor returns undefined', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, { ok: 1 }));
     const http = createHttpClient();
     http.interceptors.request.use(() => undefined as any);
@@ -135,7 +135,7 @@ describe('createHttpClient — interceptor arms', () => {
     expect(res.status).toBe(200);
   });
 
-  it('swallows a request-interceptor throw when no onRejected is registered (686)', async () => {
+  it('swallows a request-interceptor throw when no onRejected is registered', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, { ok: 1 }));
     const http = createHttpClient();
     http.interceptors.request.use(() => { throw new Error('interceptor bug'); });
@@ -144,7 +144,7 @@ describe('createHttpClient — interceptor arms', () => {
     expect(res.status).toBe(200);
   });
 
-  it('keeps the original response when a response interceptor returns undefined (748)', async () => {
+  it('keeps the original response when a response interceptor returns undefined', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, { ok: 1 }));
     const http = createHttpClient();
     http.interceptors.response.use(() => undefined as any);
@@ -153,7 +153,7 @@ describe('createHttpClient — interceptor arms', () => {
     expect(res.data).toEqual({ ok: 1 });
   });
 
-  it('skips absent onRejected handlers on failure (759)', async () => {
+  it('skips absent onRejected handlers on failure', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(500, { error: 'x' }));
     const http = createHttpClient();
     http.interceptors.response.use((r) => r); // fulfilled-only — no onRejected
@@ -161,7 +161,7 @@ describe('createHttpClient — interceptor arms', () => {
     await expect(http.get('/api/data', { retry: 0 })).rejects.toMatchObject({ status: 500 });
   });
 
-  it('request() without a method defaults to GET (689)', async () => {
+  it('request() without a method defaults to GET', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, { ok: 1 }));
     const http = createHttpClient();
 
@@ -171,11 +171,11 @@ describe('createHttpClient — interceptor arms', () => {
 });
 
 // ---------------------------------------------------------------------------
-// stale-while-revalidate + serveStaleOnError (772-793)
+// stale-while-revalidate + serveStaleOnError
 // ---------------------------------------------------------------------------
 
 describe('createHttpClient — stale cache arms', () => {
-  it('serves stale data and absorbs the failing background refresh (772-774)', async () => {
+  it('serves stale data and absorbs the failing background refresh', async () => {
     vi.setSystemTime(5_000_000);
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, { v: 1 }));
     const http = createHttpClient();
@@ -190,12 +190,12 @@ describe('createHttpClient — stale cache arms', () => {
     const second = await http.get('/api/data', { retry: 0, cache: { ttl: 1000, staleTtl: 60_000 } });
     expect(second.stale).toBe(true);
     expect(second.data).toEqual({ v: 1 });
-    // The background failure must not become an unhandled rejection (773);
+    // The background failure must not become an unhandled rejection;
     // the revalidation promise itself still reports it to interested callers.
     await expect(second.revalidation).rejects.toThrow();
   });
 
-  it('surfaces the error when serveStaleOnError finds nothing retained (787-791)', async () => {
+  it('surfaces the error when serveStaleOnError finds nothing retained', async () => {
     (globalThis.fetch as any).mockRejectedValue(new TypeError('network down'));
     const http = createHttpClient();
 

@@ -5,12 +5,12 @@
  * it at all — the identity helper every typed-bus consumer starts from.
  *
  * Also here:
- *  - toProps' absent-FieldMap guard (168) — an action with only a target, or
+ *  - toProps' absent-FieldMap guard — an action with only a target, or
  *    only a payload.
- *  - schemaLogger's validated-payload arm and its result line (330, 335).
- *  - synthesize with a tool_use block carrying no `input` (397).
+ *  - schemaLogger's validated-payload arm and its result line.
+ *  - synthesize with a tool_use block carrying no `input`.
  *  - describeSchema for a bare action (no target/payload/description) and for
- *    a fully-specified one (409, 417-418).
+ *    a fully-specified one.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import {
@@ -26,11 +26,11 @@ import type { BusSchema } from '../src/schema';
 afterEach(() => vi.restoreAllMocks());
 
 // ---------------------------------------------------------------------------
-// defineSchema (105-107)
+// defineSchema
 // ---------------------------------------------------------------------------
 
 describe('defineSchema', () => {
-  it('returns the schema object it was given, by identity (106)', () => {
+  it('returns the schema object it was given, by identity', () => {
     const schema = {
       cartAdd: { description: 'Add an item', target: { id: 'number' }, payload: { qty: 'number' } },
     } as const;
@@ -47,11 +47,11 @@ describe('defineSchema', () => {
 });
 
 // ---------------------------------------------------------------------------
-// toProps — absent FieldMap (168)
+// toProps — absent FieldMap
 // ---------------------------------------------------------------------------
 
 describe('tool mapping with a partial action', () => {
-  it('gives an empty properties object for an action with no target (168)', () => {
+  it('gives an empty properties object for an action with no target', () => {
     const [tool] = toAnthropicTools({ save: { payload: { qty: 'number' } } } as unknown as BusSchema);
     expect(tool!.input_schema.properties.target).toBeUndefined();
     expect(tool!.input_schema.properties.payload).toEqual({
@@ -68,11 +68,11 @@ describe('tool mapping with a partial action', () => {
 });
 
 // ---------------------------------------------------------------------------
-// schemaLogger (313-338)
+// schemaLogger
 // ---------------------------------------------------------------------------
 
 describe('schemaLogger', () => {
-  it('validates and logs a schema-declared payload, then the result (330, 335)', () => {
+  it('validates and logs a schema-declared payload, then the result', () => {
     const group = vi.spyOn(console, 'groupCollapsed').mockImplementation(() => {});
     vi.spyOn(console, 'groupEnd').mockImplementation(() => {});
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -90,7 +90,7 @@ describe('schemaLogger', () => {
     expect(lines.some(l => l.startsWith('result:'))).toBe(true);
   });
 
-  it('flags a payload that violates the declared field types (330)', () => {
+  it('flags a payload that violates the declared field types', () => {
     vi.spyOn(console, 'groupCollapsed').mockImplementation(() => {});
     vi.spyOn(console, 'groupEnd').mockImplementation(() => {});
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -107,7 +107,7 @@ describe('schemaLogger', () => {
     expect(String(payloadLine?.[2])).toContain('⚠');
   });
 
-  it('logs the error branch of the result line (335)', () => {
+  it('logs the error branch of the result line', () => {
     vi.spyOn(console, 'groupCollapsed').mockImplementation(() => {});
     vi.spyOn(console, 'groupEnd').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -126,13 +126,13 @@ describe('schemaLogger', () => {
 });
 
 // ---------------------------------------------------------------------------
-// synthesize — tool_use with no input (397)
+// synthesize — tool_use with no input
 // ---------------------------------------------------------------------------
 
 describe('synthesize', () => {
   const schema = { cartAdd: { target: { id: 'number' }, payload: { qty: 'number' } } } as unknown as BusSchema;
 
-  it('defaults target to {} when the tool_use block carries no input (397)', async () => {
+  it('defaults target to {} when the tool_use block carries no input', async () => {
     const bus = { dispatch: vi.fn(() => ({ ok: true, value: 'dispatched' })) } as any;
     const adapter = vi.fn(async () => ({ name: 'cartAdd' })) as any; // no `input` key
 
@@ -158,11 +158,11 @@ describe('synthesize', () => {
 });
 
 // ---------------------------------------------------------------------------
-// describeSchema (405-421)
+// describeSchema
 // ---------------------------------------------------------------------------
 
 describe('describeSchema', () => {
-  it('omits the signature and description for a bare action (409, 417-418)', () => {
+  it('omits the signature and description for a bare action', () => {
     const text = describeSchema({ ping: {} } as unknown as BusSchema);
     expect(text).toBe('Available commands:\n- ping');
   });

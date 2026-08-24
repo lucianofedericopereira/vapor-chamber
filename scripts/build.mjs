@@ -97,14 +97,22 @@ function writeLicenseManifest() {
 await build({
   configFile: false,
   logLevel: 'warn',
+  // TOP-LEVEL, because that is the only place Vite reads `define`.
+  //
+  // A `define` block used to sit inside `build:` here, carrying
+  // `__VC_IIFE__: 'false'` and `__VC_DEV__: 'process.env.NODE_ENV !== "production"'`.
+  // Vite ignores that position, so it had never applied to the ESM output —
+  // verified in `dist/dev.js`, where even the bare `__VC_DEV__` sat
+  // unsubstituted. It was DELETED rather than hoisted, because hoisting it
+  // would change behaviour and that is a call to make deliberately: rolldown
+  // does substitute inside `typeof`, so a correctly-placed `__VC_DEV__` would
+  // fold `src/dev.ts` to a constant and discard its `typeof process` fallback —
+  // and that fallback is exactly what the ESM build wants to keep, since only
+  // the CONSUMER's bundler knows whether their build is a dev build. Deleting
+  // the dead block preserves today's behaviour and stops the config from
+  // describing something that never happened.
+  define: { __VC_IIFE__: 'false' },
   build: {
-    // __VC_DEV__ is deliberately NOT a literal here: the ESM build does not
-    // know whether the CONSUMER is building for development, so it defers to
-    // their bundler by emitting the expression itself.
-    define: {
-      __VC_IIFE__: 'false',
-      __VC_DEV__: 'process.env.NODE_ENV !== "production"',
-    },
     lib: {
       entry: {
         'index':      'src/index.ts',
@@ -173,6 +181,10 @@ for (const v of iifeVariants) {
       define: {
         'process.env.NODE_ENV': '"production"',
         __VC_IIFE__: 'true',
+        // A <script>-tag page has no bundler to set this, so the choice is
+        // settled here: the cached clock folds in, the exact one folds out.
+        // ESM deliberately omits it (see the ESM define block) so the consumer's
+        // bundler can opt out instead.
         // These are production artifacts, so dev diagnostics fold away
         // entirely — branch AND message strings.
         __VC_DEV__: 'false',

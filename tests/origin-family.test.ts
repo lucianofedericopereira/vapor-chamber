@@ -1,6 +1,6 @@
 /**
  * The flag-across-await family (TODO items 18, 24, 28, 33) and the TestBus meta
- * gap (19) — five consumers of one fix: a marker that travels ON the dispatch
+ * gap — five consumers of one fix: a marker that travels ON the dispatch
  * (`__origin` read by stampMeta) instead of a module-level flag set before an
  * await and cleared in `finally`.
  *
@@ -18,6 +18,7 @@ import {
   setCommandBus,
 } from '../src/index';
 import { sync } from '../src/plugins';
+import { _withOrigin } from '../src/command-bus';
 import { createTestBus } from '../src/testing';
 import { idempotent } from '../src/plugins-extra';
 import { useCommandHistory } from '../src/chamber';
@@ -298,5 +299,66 @@ describe('item 19 — TestBus commands carry meta', () => {
     });
     bus.query('read', {});
     expect(seen).toMatchObject({ id: expect.any(String) });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// _withOrigin — the one-shot slot the three marker sites share
+// ---------------------------------------------------------------------------
+
+describe('_withOrigin — slot discipline', () => {
+  it('is one-shot: only the FIRST dispatch inside the callback is marked', () => {
+    const bus = createCommandBus();
+    const origins: unknown[] = [];
+    bus.register('a', (cmd: any) => { origins.push(cmd.meta?.origin); return 1; });
+
+    _withOrigin('sync', () => {
+      bus.dispatch('a', {});
+      bus.dispatch('a', {}); // slot already consumed
+    });
+    bus.dispatch('a', {}); // well after the callback
+
+    expect(origins).toEqual(['sync', undefined, undefined]);
+  });
+
+  it('does not leak when the callback throws BEFORE any dispatch stamps meta', () => {
+    // Leak protection, not a settlement guard. `validateNaming` throws inside
+    // dispatch before stampMeta runs, so without the `finally` the slot would
+    // survive and mis-attribute whatever dispatched next.
+    const strict = createCommandBus({
+      naming: { pattern: /^[a-z][a-zA-Z0-9]*$/, onViolation: 'throw' },
+    });
+    const origins: unknown[] = [];
+    strict.register('goodName', (cmd: any) => { origins.push(cmd.meta?.origin); return 1; });
+
+    expect(() => _withOrigin('agent', () => strict.dispatch('Bad Name!', {}))).toThrow();
+
+    // The next, unrelated dispatch must be unattributed.
+    strict.dispatch('goodName', {});
+    expect(origins).toEqual([undefined]);
+  });
+
+  it('survives an await: the slot is consumed in the synchronous prologue', async () => {
+    const bus = createAsyncCommandBus();
+    const origins: unknown[] = [];
+    bus.register('a', async (cmd: any) => { origins.push(cmd.meta?.origin); return 1; });
+
+    // The mcp.ts shape — await the result of the wrapped dispatch.
+    await _withOrigin('agent', () => bus.dispatch('a', {}));
+    await bus.dispatch('a', {});
+
+    expect(origins).toEqual(['agent', undefined]);
+  });
+
+  it('an explicit __origin payload key still works (public convention)', () => {
+    const bus = createCommandBus();
+    const origins: unknown[] = [];
+    bus.register('a', (cmd: any) => { origins.push(cmd.meta?.origin); return 1; });
+
+    bus.dispatch('a', {}, { __origin: 'custom' });
+    // ...and the slot wins when both are present.
+    _withOrigin('sync', () => bus.dispatch('a', {}, { __origin: 'custom' }));
+
+    expect(origins).toEqual(['custom', 'sync']);
   });
 });

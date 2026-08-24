@@ -1,21 +1,21 @@
 /**
  * Supplemental coverage for src/chamber.ts.
  *
- *  - runDispatch: async rejection (703), async and sync `{ ok:false }` with no
- *    error attached (700, 708).
- *  - untracked: the `__VC_IIFE__` const-fold guard (301) — at runtime in tests
+ *  - runDispatch: async rejection, async and sync `{ ok:false }` with no
+ *    error attached.
+ *  - untracked: the `__VC_IIFE__` const-fold guard — at runtime in tests
  *    the identifier resolves via globalThis, so both arms are drivable.
- *  - useSharedCommandState: errorCap tightening (877-880), ring-buffer trim
- *    (888), rejected dispatch promise recording (928).
- *  - useCommandGroup: the 256-entry `_nameCache` FIFO eviction (1314).
+ *  - useSharedCommandState: errorCap tightening, ring-buffer trim
+ *, rejected dispatch promise recording.
+ *  - useCommandGroup: the 256-entry `_nameCache` FIFO eviction.
  *  - useCommandHistory redo payloads: object payload → `__origin` spread
- *    (1185-1187), array payload → non-markable identity fallback (1181, 1188).
+ *, array payload → non-markable identity fallback.
  *  - KeepAlive wiring via a fake Vue namespace handed to configureVue():
  *    tryKeepAliveHooks' hasInjectionContext arm and getCurrentInstance
- *    fallback (658-663), and useCommandError's pause/resume closures
- *    (1393, 1407-1408) — reachable without a component tree because the fake
+ *    fallback, and useCommandError's pause/resume closures
+ * — reachable without a component tree because the fake
  *    namespace's onDeactivated/onActivated just hand the callbacks back.
- *  - readGlobal's catch (192-193) via a throwing global getter.
+ *  - readGlobal's catch via a throwing global getter.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { runDispatch } from '../src/chamber';
@@ -36,11 +36,11 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// runDispatch (673-710)
+// runDispatch
 // ---------------------------------------------------------------------------
 
 describe('runDispatch error arms', () => {
-  it('records a rejected dispatch promise (703)', async () => {
+  it('records a rejected dispatch promise', async () => {
     const loading = signal(false);
     const lastError = signal<Error | null>(null);
     const boom = new Error('rejected');
@@ -52,7 +52,7 @@ describe('runDispatch error arms', () => {
     expect(lastError.value).toBe(boom);
   });
 
-  it('stores null when an async failure carries no error (700)', async () => {
+  it('stores null when an async failure carries no error', async () => {
     const loading = signal(false);
     const lastError = signal<Error | null>(new Error('stale'));
 
@@ -60,7 +60,7 @@ describe('runDispatch error arms', () => {
     expect(lastError.value).toBeNull();
   });
 
-  it('stores null when a sync failure carries no error (708)', () => {
+  it('stores null when a sync failure carries no error', () => {
     const loading = signal(false);
     const lastError = signal<Error | null>(new Error('stale'));
 
@@ -71,7 +71,7 @@ describe('runDispatch error arms', () => {
 });
 
 // ---------------------------------------------------------------------------
-// untracked — __VC_IIFE__ guard (301)
+// untracked — __VC_IIFE__ guard
 // ---------------------------------------------------------------------------
 
 describe('untracked IIFE guard', () => {
@@ -79,18 +79,18 @@ describe('untracked IIFE guard', () => {
     expect(untracked(() => 7)).toBe(7);
   });
 
-  it('returns fn() directly when __VC_IIFE__ is set (301)', () => {
+  it('returns fn() directly when __VC_IIFE__ is set', () => {
     vi.stubGlobal('__VC_IIFE__', true);
     expect(untracked(() => 11)).toBe(11);
   });
 });
 
 // ---------------------------------------------------------------------------
-// useSharedCommandState (841-972)
+// useSharedCommandState
 // ---------------------------------------------------------------------------
 
 describe('useSharedCommandState', () => {
-  it('tightens errorCap when a later caller asks for a smaller buffer (877-880)', async () => {
+  it('tightens errorCap when a later caller asks for a smaller buffer', async () => {
     const rejecting = {
       on: () => () => {},
       dispatch: () => Promise.reject(new Error('r')),
@@ -99,7 +99,7 @@ describe('useSharedCommandState', () => {
     const first = useSharedCommandState({ bus: rejecting, errorCap: 10 });
     const second = useSharedCommandState({ bus: rejecting, errorCap: 2 });
 
-    // Three rejections against a cap of 2 → ring buffer trims to 2 (888).
+    // Three rejections against a cap of 2 → ring buffer trims to 2.
     await second.dispatch('a', {});
     await second.dispatch('b', {});
     await second.dispatch('c', {});
@@ -113,7 +113,7 @@ describe('useSharedCommandState', () => {
     second.dispose();
   });
 
-  it('records a rejected dispatch promise that bypassed the bus fan-out (928)', async () => {
+  it('records a rejected dispatch promise that bypassed the bus fan-out', async () => {
     const boom = new Error('reject');
     const rejecting = {
       on: () => () => {},
@@ -132,11 +132,11 @@ describe('useSharedCommandState', () => {
 });
 
 // ---------------------------------------------------------------------------
-// useCommandGroup — name cache eviction (1310-1317)
+// useCommandGroup — name cache eviction
 // ---------------------------------------------------------------------------
 
 describe('useCommandGroup name cache', () => {
-  it('evicts the oldest cached name past 256 distinct actions (1314)', () => {
+  it('evicts the oldest cached name past 256 distinct actions', () => {
     const bus = createCommandBus({ onMissing: 'ignore' });
     setCommandBus(bus);
     const seen: string[] = [];
@@ -155,26 +155,43 @@ describe('useCommandGroup name cache', () => {
 });
 
 // ---------------------------------------------------------------------------
-// useCommandHistory — redo payload variants (1180-1190)
+// useCommandHistory — redo payload variants
 // ---------------------------------------------------------------------------
 
 describe('useCommandHistory redo payload marking', () => {
-  it('marks an object payload with __origin (1185-1187)', () => {
+  it('marks a redo via meta.origin, leaving the payload untouched', () => {
+    // Was: asserted the redo payload came through as
+    // `{ qty: 2, __origin: 'redo' }`. That pinned the MECHANISM (spreading a
+    // marker key into the caller's payload), not the contract. The marker now
+    // travels out-of-band via `_withOrigin`, so the replayed payload is the
+    // caller's original object — same identity, no injected key — and
+    // `meta.origin` carries the attribution the hook actually reads.
     const bus = createCommandBus();
     setCommandBus(bus);
     const payloads: any[] = [];
-    bus.register('act', (cmd: any) => { payloads.push(cmd.payload); return 1; });
+    const origins: unknown[] = [];
+    bus.register('act', (cmd: any) => {
+      payloads.push(cmd.payload);
+      origins.push(cmd.meta?.origin);
+      return 1;
+    });
 
     const history = useCommandHistory({});
-    bus.dispatch('act', {}, { qty: 2 });
+    const original = { qty: 2 };
+    bus.dispatch('act', {}, original);
     history.undo();
     history.redo();
 
     expect(payloads).toHaveLength(2);
-    expect(payloads[1]).toEqual({ qty: 2, __origin: 'redo' });
+    // No marker key smuggled into user data...
+    expect(payloads[1]).toEqual({ qty: 2 });
+    // ...and the very same object, not a copy of it.
+    expect(payloads[1]).toBe(original);
+    // The attribution lives on meta, where the history hook reads it.
+    expect(origins).toEqual([undefined, 'redo']);
   });
 
-  it('redispatches a non-markable array payload as-is (1181, 1188)', () => {
+  it('redispatches a non-markable array payload as-is', () => {
     const bus = createCommandBus();
     setCommandBus(bus);
     const payloads: any[] = [];
@@ -199,7 +216,7 @@ describe('useCommandHistory redo payload marking', () => {
 // ---------------------------------------------------------------------------
 
 describe('KeepAlive wiring through configureVue', () => {
-  it('registers hooks via hasInjectionContext and pauses/resumes error capture (658, 1393, 1407-1408)', async () => {
+  it('registers hooks via hasInjectionContext and pauses/resumes error capture', async () => {
     vi.resetModules();
     const chamber = await import('../src/chamber');
     const { createCommandBus: freshCreateBus } = await import('../src/command-bus');
@@ -224,12 +241,12 @@ describe('KeepAlive wiring through configureVue', () => {
     bus.dispatch('fail', {});
     expect(capture.errors.value).toHaveLength(1);
 
-    // Deactivated — errors are not captured (1393).
+    // Deactivated — errors are not captured.
     pause!();
     bus.dispatch('fail', {});
     expect(capture.errors.value).toHaveLength(1);
 
-    // Reactivated — capture resumes; overflow trims to errorCap (1399).
+    // Reactivated — capture resumes; overflow trims to errorCap.
     resume!();
     bus.dispatch('fail', {});
     bus.dispatch('fail', {});
@@ -239,7 +256,7 @@ describe('KeepAlive wiring through configureVue', () => {
     chamber.resetCommandBus();
   });
 
-  it('falls back to getCurrentInstance when hasInjectionContext is absent (658-660)', async () => {
+  it('falls back to getCurrentInstance when hasInjectionContext is absent', async () => {
     vi.resetModules();
     const chamber = await import('../src/chamber');
 
@@ -257,10 +274,10 @@ describe('KeepAlive wiring through configureVue', () => {
 });
 
 // ---------------------------------------------------------------------------
-// readGlobal — throwing global getter (192-193)
+// readGlobal — throwing global getter
 // ---------------------------------------------------------------------------
 
-describe('IIFE flag at module load (357)', () => {
+describe('IIFE flag at module load', () => {
   it('wireUntracked returns early when __VC_IIFE__ is set before import', async () => {
     vi.stubGlobal('__VC_IIFE__', true);
     vi.resetModules();
@@ -272,7 +289,7 @@ describe('IIFE flag at module load (357)', () => {
   });
 });
 
-describe('wireUntracked peer-shape guard (370)', () => {
+describe('wireUntracked peer-shape guard', () => {
   it('skips wiring when @vue/reactivity lacks pauseTracking', async () => {
     vi.doMock('@vue/reactivity', () => ({ pauseTracking: undefined, resetTracking: undefined }));
     vi.resetModules();
@@ -288,7 +305,7 @@ describe('wireUntracked peer-shape guard (370)', () => {
 });
 
 describe('readGlobal hardening', () => {
-  it('survives a throwing getter on the Vue global slot (193)', async () => {
+  it('survives a throwing getter on the Vue global slot', async () => {
     vi.resetModules();
     Object.defineProperty(globalThis, '__VAPOR_CHAMBER_VUE__', {
       get() { throw new Error('hostile getter'); },

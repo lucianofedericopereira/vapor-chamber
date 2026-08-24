@@ -105,6 +105,40 @@ describe('cache', () => {
     expect(c.size()).toBe(2);
   });
 
+  it('does not hang on a negative maxSize, and caches nothing', () => {
+    // Regression: `maxSize` was unvalidated. `evictIfNeeded` looped
+    // `while (store.size > maxSize)` and only deleted when
+    // `store.keys().next().value !== undefined` — so with a negative bound the
+    // condition stayed true against an EMPTY store and the guard deleted
+    // nothing: an infinite loop on the first eviction, from one bad option.
+    // Measured before the fix: 500k iterations with store.size 0, no progress.
+    const bus = createCommandBus();
+    let calls = 0;
+    bus.register('getUser', (cmd: any) => { calls++; return cmd.target.id; });
+    const c = cache({ ttl: 60_000, maxSize: -1 });
+    bus.use(c);
+
+    // If this hangs, the suite times out rather than failing — which is the
+    // point: the old form could not fail fast.
+    bus.query('getUser', { id: 1 });
+    bus.query('getUser', { id: 2 });
+
+    expect(c.size()).toBe(0); // clamped to 0 — a cache that stores nothing
+    expect(calls).toBe(2); // ...so every query really ran
+  });
+
+  it('evicts oldest-first and honours the bound exactly', () => {
+    const bus = createCommandBus();
+    bus.register('getUser', (cmd: any) => cmd.target.id);
+    const c = cache({ ttl: 60_000, maxSize: 2 });
+    bus.use(c);
+
+    bus.query('getUser', { id: 1 });
+    bus.query('getUser', { id: 2 });
+    bus.query('getUser', { id: 3 }); // pushes past the bound
+    expect(c.size()).toBe(2);
+  });
+
   it('filters actions when actions option is set', () => {
     const bus = createCommandBus();
     const handler = vi.fn(() => 1);
@@ -206,6 +240,27 @@ describe('circuitBreaker', () => {
     bus.dispatch('op', {}); // half-open → success → closed
 
     expect(onClose).toHaveBeenCalledWith('op');
+    expect(cb.getState('op')).toBe('closed');
+  });
+
+  it('recovers from half-open with no onClose callback configured', () => {
+    // `if (onClose)` — the false arm. The test above always supplies the
+    // callback, so the optional-callback path (the default configuration) was
+    // never exercised: a breaker with no observer must still close.
+    const bus = createCommandBus();
+    let shouldFail = true;
+    bus.register('op', () => { if (shouldFail) throw new Error('fail'); return 'ok'; });
+    const cb = circuitBreaker({ threshold: 2, resetTimeout: 0 }); // no onClose
+    bus.use(cb);
+
+    bus.dispatch('op', {});
+    bus.dispatch('op', {}); // opens
+    expect(cb.getState('op')).toBe('open');
+
+    shouldFail = false;
+    const result = bus.dispatch('op', {}); // half-open → success → closed
+
+    expect(result.ok).toBe(true);
     expect(cb.getState('op')).toBe('closed');
   });
 
@@ -411,6 +466,36 @@ describe('cache — key derivation and invalidation', () => {
     c.invalidate('getUser');
     expect(c.size()).toBe(0);
     warn.mockRestore();
+  });
+
+  it('stays silent about custom-key invalidation in production (DEV=false)', async () => {
+    // The `if (DEV)` FALSE arm of the warning above. The diagnostic is a
+    // build-time aid; in production the call must be a quiet no-op for the
+    // targeted form while action-wide invalidation keeps working.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.resetModules();
+    const { cache: prodCache } = await import('../src/plugins-extra');
+    const { createCommandBus: prodBus } = await import('../src/command-bus');
+
+    const bus = prodBus();
+    bus.register('getUser', (cmd: any) => cmd.target.id);
+    const c = prodCache({ ttl: 60_000, key: (cmd: any) => `u:${cmd.target.id}` });
+    bus.use(c);
+
+    bus.query('getUser', { id: 1 });
+    expect(c.size()).toBe(1);
+
+    c.invalidate('getUser', { id: 1 });
+    expect(warn).not.toHaveBeenCalled(); // no diagnostic...
+    expect(c.size()).toBe(1); // ...and, as in dev, nothing was removed
+
+    c.invalidate('getUser'); // action-wide still works
+    expect(c.size()).toBe(0);
+
+    warn.mockRestore();
+    vi.unstubAllEnvs();
+    vi.resetModules();
   });
 
   it('invalidating an action with nothing cached is a no-op', () => {

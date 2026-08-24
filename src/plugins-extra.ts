@@ -49,7 +49,13 @@ export function cache(options: CacheOptions = {}): Plugin & {
   /** Current cache size. */
   size(): number;
 } {
-  const { ttl = 30_000, maxSize = 100, actions, key: keyFn } = options;
+  const { ttl = 30_000, maxSize: rawMaxSize = 100, actions, key: keyFn } = options;
+  // Clamped, because it was not: a negative `maxSize` made `evictIfNeeded`'s
+  // old `while (store.size > maxSize)` loop true against an EMPTY store, and
+  // its `firstKey !== undefined` guard then made no progress — so
+  // `cache({ maxSize: -1 })` hung the process on the first eviction instead of
+  // throwing. Reachable from the public API with one bad option.
+  const maxSize = Math.max(0, Math.trunc(rawMaxSize));
   const matchesActions = makeActionFilter(actions);
 
   // LRU-style cache: Map preserves insertion order, we move accessed entries to end
@@ -83,18 +89,27 @@ export function cache(options: CacheOptions = {}): Plugin & {
     const entry = store.get(key);
     if (entry === undefined) return;
     store.delete(key);
-    const keys = byAction.get(entry.action);
-    if (keys) {
-      keys.delete(key);
-      if (keys.size === 0) byAction.delete(entry.action);
-    }
+    // `!` not a guard: the index is written on every insert into `store` and
+    // this is the single removal path, so an entry in `store` always has its
+    // action in `byAction` — the docstring above is that invariant. A miss
+    // would mean the index outlived the entry, which is worth throwing over
+    // rather than silently leaking a stale key set.
+    const keys = byAction.get(entry.action)!;
+    keys.delete(key);
+    if (keys.size === 0) byAction.delete(entry.action);
   }
 
   function evictIfNeeded(): void {
-    while (store.size > maxSize) {
-      // Delete oldest (first inserted)
-      const firstKey = store.keys().next().value;
-      if (firstKey !== undefined) dropKey(firstKey);
+    // Walk insertion order and stop at the bound. Structurally cannot spin,
+    // which the old `while (store.size > maxSize)` form could: once the store
+    // emptied, the condition stayed true under a negative bound while the
+    // `firstKey !== undefined` guard deleted nothing. Bounding the ITERATION
+    // rather than guarding the value removes that failure mode entirely —
+    // and removes the unreachable-by-design branch the guard created.
+    // (Deleting the current key mid-iteration is well-defined for a Map.)
+    for (const key of store.keys()) {
+      if (store.size <= maxSize) break;
+      dropKey(key); // oldest first
     }
   }
 

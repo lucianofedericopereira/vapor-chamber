@@ -3,51 +3,19 @@
  *
  * Vue alignment history (one line per version — full per-item detail lives in
  * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table, the single
- * source of per-beta detail; this header only records changes to THIS file):
- *   vNext / rc.2 — pass-through. All 12 runtime-vapor fixes (effect-scope restore on
- *            setCurrentInstance #15141, transition/suspense/async-setup/interop-hydration
- *            timing #15129/#15130/#15132/#15133/#15139/#15140/#15144/#15145/#15147, slot
- *            anchor #15131, interop prop validation #15111) land below the define*
- *            wrappers, createVaporChamberApp, and getVaporInteropPlugin — this file holds
- *            no effect scopes, instances, or interop state of its own, only forwards Vue's.
- *            Verified directly: this module creates no renderEffect/Suspense boundary and
- *            calls setCurrentInstance nowhere, so #15141/#15129 (both about instance-context
- *            restoration around those calls) have no analog here. No wrapper change.
- *   vNext / rc.1 — pass-through. All 13 runtime-vapor/hydration fixes land below the define
- *            wrappers, createVaporChamberApp, and getVaporInteropPlugin. No wrapper change.
- *   vNext / beta.17 — pass-through. Two runtime-vapor interop fixes land below the
- *            getVaporInteropPlugin() pass-through: VDOM↔Vapor slot updates now fire paired
- *            beforeUpdate/updated hooks (bcaa753) and the interop slot owner root re-syncs after
- *            child updates (975dd4d) — mixed Vapor/VDOM trees built on the forwarded plugin inherit
- *            both with no wrapper change. The renderer-internal slot-validity (b46322a) and
- *            function-ref tracking (#14986) fixes sit below the define* wrappers. No code change.
- *   vNext / beta.16 — pass-through. createVaporChamberApp returns Vue's app
- *            untouched, so it inherits two hardening fixes directly: .mount() on a
- *            missing selector now no-ops + dev-warns (was throwing) and can return
- *            undefined; .unmount() no longer throws in PRODUCTION builds (app._instance
- *            is dev-only — prod now resolves the root from a WeakMap). Plus pass-through
- *            prop/emit/attr fixes (nullish dynamic props → empty, nullish emit sources
- *            skipped, symbol attr values stringified). No wrapper code change.
+ * source of per-beta detail; this header records only changes to THIS file):
+ *   rc.5 / rc.2 / rc.1 / beta.17 / beta.16 — pass-through. This file renders
+ *          nothing; it forwards Vue's own define* functions, so rendering-side
+ *          work (attrs fallthrough, interop, hydration) lands below it.
  *   v1.6.0 / beta.15 — lib-side: the define* wrappers and createVaporChamberApp
- *            gained an opt-in return generic (`<T = any>`) and `object`-typed
- *            options instead of `any`. Vue 3.6 exports proper Vapor types now,
- *            but importing them here would put a hard `vue` type dependency on
- *            the main barrel and break Vue-less command-bus consumers — callers
- *            opt in: `defineVaporComponent<MyComp>(opts)`. Vue-side (interop
- *            vnode guard, keyed template refs, the teleport group, fragment-class
- *            tree-shaking) is all pass-through.
- *   v1.5.0 / beta.14 — pass-through (custom-element hooks/props, interop bridge
- *            stability + slot-wrapper memoisation, async loadingComponent props,
- *            scope IDs, scheduler flush, v-for lifecycle ordering).
- *   v1.4.0 / beta.13 — pass-through (interop scope IDs on Vapor roots, v-once in
- *            VDOM slot interop, v-once slot/prop snapshots).
- *   v1.3.0 / beta.12 — pass-through (Vapor setup() error recovery, VDOM slot
- *            interop normalization).
+ *          gained an opt-in return generic (`<T = any>`) and `object`-typed
+ *          options. Importing Vue's Vapor types here would put a hard `vue`
+ *          type dependency on the main barrel and break Vue-less command-bus
+ *          consumers, so callers opt in: `defineVaporComponent<MyComp>(opts)`.
+ *   v1.5.0 / v1.4.0 / v1.3.0 — pass-through.
  *   v1.1.0 — Added: defineVaporCustomElement, defineVaporComponent,
- *            defineVaporAsyncComponent wrappers (Vue APIs introduced across
- *            3.6.0-alpha.3–5: #13059 / #14017 / #13831); useVaporAsyncCommand.
- *   v0.6.0 — Added: useVaporCommand. v0.4.0 — Added: createVaporChamberApp,
- *            getVaporInteropPlugin, defineVaporCommand.
+ *          defineVaporAsyncComponent wrappers; useVaporAsyncCommand.
+ *   v0.6.0 — Added: useVaporCommand. v0.4.0 — Added: createVaporChamberApp.
  *
  * Separated from chamber.ts to keep the core composable module CDCC-compliant.
  */

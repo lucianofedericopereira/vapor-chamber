@@ -66,7 +66,41 @@ async function esmRow(name, entry) {
   return { name, min: buf.length, gz: gzip(buf), br: brot(buf) };
 }
 
+/**
+ * The "typical Blade consumer" bundle — the shape docs/performance.md quotes.
+ *
+ * Measured from `dist/`, not `src/`, deliberately: that is what a consumer
+ * actually installs, and it makes this row describe the SAME artifact
+ * `tests/esm-treeshake.test.ts` builds and gates. The doc used to carry a
+ * hand-typed "5.5 KB brotli" here, which had drifted ~18% low by the time
+ * anyone re-measured. A number that appears in prose comes from this script.
+ */
+async function consumerRow() {
+  const entry = 'dist/index.js';
+  if (!existsSync(entry) || !existsSync('dist/transports.js')) return null;
+  const r = await build({
+    stdin: {
+      contents: [
+        `import { createCommandBus, logger } from './dist/index.js';`,
+        `import { createHttpBridge } from './dist/transports.js';`,
+        `const bus = createCommandBus();`,
+        `bus.use(logger());`,
+        `bus.use(createHttpBridge({ endpoint: '/api' }));`,
+        `globalThis.__vc_size_probe = bus;`,
+      ].join('\n'),
+      resolveDir: process.cwd(),
+      loader: 'js',
+    },
+    bundle: true, minify: true, format: 'esm', target: 'es2022', platform: 'browser',
+    external: ['vue', '@vue/devtools-api'], write: false, logLevel: 'silent', legalComments: 'none',
+  });
+  const buf = Buffer.from(r.outputFiles[0].contents);
+  return { name: 'consumer: createCommandBus + logger + createHttpBridge', min: buf.length, gz: gzip(buf), br: brot(buf) };
+}
+
 const esmRows = await Promise.all(esm.filter(([, e]) => existsSync(e)).map(([n, e]) => esmRow(n, e)));
+const consumer = await consumerRow();
+if (consumer) esmRows.push(consumer);
 const iifeRows = iife.filter(([, f]) => existsSync(f)).map(([name, f]) => {
   const buf = readFileSync(f);
   return { name, min: statSync(f).size, gz: gzip(buf), br: brot(buf) };

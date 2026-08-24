@@ -181,6 +181,50 @@ describe('createMcpHandler — tools/call', () => {
     expect(reply.result.content).toEqual([{ type: 'text', text: JSON.stringify({ count: 2, id: 5 }) }]);
   });
 
+  it('never lets an MCP dispatch reach a handler unattributed', async () => {
+    // Regression. `meta.origin` is derived by stampMeta from a `__origin` key
+    // in the PAYLOAD, so it can only mark objects and the absent case. A
+    // non-object payload used to be forwarded untouched on the reasoning that
+    // schema validation would reject it — but schema.ts only checks payload
+    // shape when the action DECLARES payload fields. `cartClear` declares
+    // none, so a bare string dispatched successfully with
+    // `meta.origin === undefined`: an agent-driven command that an audit
+    // filter on `origin === 'agent'` cannot see. MCP clients are untrusted by
+    // construction, so that gap is the security-relevant one.
+    const seen: Array<{ action: string; origin: unknown }> = [];
+    const bus = createSchemaCommandBus(cartSchema);
+    bus.register('cartClear', (cmd: any) => {
+      seen.push({ action: cmd.action, origin: cmd.meta?.origin });
+      return { cleared: true };
+    });
+    const handle = createMcpHandler(bus);
+
+    const call = (payloadArgs: object) =>
+      handle({
+        jsonrpc: '2.0',
+        id: 12,
+        method: 'tools/call',
+        params: { name: 'cartClear', arguments: { target: { force: true }, ...payloadArgs } },
+      } as any) as Promise<any>;
+
+    // Markable shapes still dispatch, and carry the marker.
+    expect((await call({ payload: { a: 1 } })).result.isError).toBeUndefined();
+    expect((await call({})).result.isError).toBeUndefined();
+
+    // Unmarkable shapes are refused at the boundary rather than dispatched
+    // without attribution. `payload` is only ever advertised as
+    // `{ type: 'object' }`, so none of these were ever on-contract.
+    for (const bad of ['bare-string', 42, true, ['a', 'b']]) {
+      const reply = await call({ payload: bad });
+      expect(reply.result.isError).toBe(true);
+      expect(reply.result.content[0].text).toMatch(/payload must be an object/);
+    }
+
+    // The invariant: every command that DID reach a handler is attributed.
+    expect(seen).toHaveLength(2);
+    expect(seen.every((s) => s.origin === 'agent')).toBe(true);
+  });
+
   it('works with an async bus (awaits thenable dispatch results)', async () => {
     const bus = createAsyncSchemaCommandBus(cartSchema);
     bus.register('cartClear', async () => ({ cleared: true }));

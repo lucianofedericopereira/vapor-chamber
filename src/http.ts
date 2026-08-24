@@ -142,11 +142,23 @@ export function invalidateCsrfCache(): void {
   _csrfCache = null;
 }
 
-let _csrfRefreshPromise: Promise<void> | null = null;
+let _csrfRefreshPromise: Promise<CsrfResult> | null = null;
 
-function refreshCsrfOnce(cookieUrl: string): Promise<void> {
+function refreshCsrfOnce(cookieUrl: string): Promise<CsrfResult> {
   // Coalesce: concurrent 419s share the single in-flight refresh promise —
   // waiters resolve/reject the instant it settles, no polling.
+  //
+  // RETURNS the token rather than leaving callers to re-read it. Both call
+  // sites used to do `await refreshCsrfOnce(...); const fresh =
+  // readCsrfToken();` — and between those two statements sits a microtask
+  // boundary that several coalesced waiters resume across. A waiter that ran
+  // first could invalidate the cache (the exported `invalidateCsrfCache()`) or
+  // clear the DOM before a later waiter re-read, so the later one saw null and
+  // silently retried with no CSRF header. Handing back the value this function
+  // has already proven readable closes that window, makes the coalescing
+  // semantics exact (every waiter gets the SAME token), and removes the
+  // `if (fresh)` guard at both call sites — which was unreachable in ordinary
+  // flow anyway, because this function throws when no token is found.
   if (_csrfRefreshPromise) return _csrfRefreshPromise;
   _csrfRefreshPromise = (async () => {
     try {
@@ -162,6 +174,7 @@ function refreshCsrfOnce(cookieUrl: string): Promise<void> {
       if (!freshToken) {
         throw new Error('[vapor-chamber] CSRF refresh failed: no token found in DOM after refresh');
       }
+      return freshToken;
     } finally {
       _csrfRefreshPromise = null;
     }
@@ -274,9 +287,52 @@ function handleSessionExpiry(status: number, url: string, onSessionExpired?: (s:
 // Used by createHttpBridge — not intended as a general-purpose HTTP client.
 // ---------------------------------------------------------------------------
 
+/**
+ * A Response's headers as a plain object, tolerating a double or polyfill that
+ * has no `headers` at all.
+ *
+ * Extracted because this line existed TWICE, written out longhand — once in
+ * `doFetch` and once in `doClientFetch`. That duplication is what let the two
+ * drift: `doFetch` never touched `raw.headers` again and stayed correct, while
+ * `doClientFetch` grew responseType handling whose content-type read went back
+ * to the raw object and reintroduced the crash this guard exists to prevent.
+ * One owner for "normalize a Response's headers" removes that channel.
+ *
+ * Keys are lower-cased here, and this is the only place that should do it.
+ * Every consumer reads this snapshot case-sensitively —
+ * `res.headers['retry-after']` and `['x-ratelimit-reset']` in both retry
+ * loops, `['content-disposition']` in the download path — so a `Headers` whose
+ * `entries()` yields `Retry-After` makes all of them miss with NO error:
+ * backoff silently not honoured, filename silently lost.
+ *
+ * The Fetch spec does store header names lower-cased, so against a compliant
+ * implementation this is a no-op, and it costs +6 bytes brotli in the minimal
+ * consumer bundle (measured: 6_539 → 6_545). Taken deliberately: the argument
+ * for skipping it assumes every Headers implementation in every consumer's
+ * environment is compliant, and the price of being wrong is a SILENT
+ * mis-behaviour rather than a crash. Six bytes to make a silent failure
+ * impossible is the trade this library wants — correctness over the byte.
+ * Normalizing at the four call sites instead would re-create exactly the
+ * duplication this helper exists to remove.
+ *
+ * The content-type read in `doClientFetch` goes through `Headers.get()` rather
+ * than this snapshot for the same reason from the other direction: `get()` is
+ * case-insensitive BY SPEC and joins repeated headers, so delegating keeps
+ * both guarantees the platform's problem rather than ours. Reading
+ * `resHeaders['content-type']` instead would miss on odd casing — and a miss
+ * there does not throw, it silently hands the caller a STRING where they asked
+ * for JSON.
+ */
+function headersToObject(headers: Headers | undefined): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!headers) return out;
+  for (const [key, value] of headers.entries()) out[key.toLowerCase()] = value;
+  return out;
+}
+
 async function doFetch<T>(url: string, serialized: string, headers: Record<string, string>, signal: AbortSignal): Promise<HttpResponse<T>> {
   const raw = await fetch(url, { method: 'POST', headers, body: serialized, credentials: 'same-origin', signal });
-  const resHeaders = raw.headers ? Object.fromEntries(raw.headers.entries()) : {};
+  const resHeaders = headersToObject(raw.headers);
   let data: T = null as T;
   try { data = await raw.json() as T; } catch { /* non-JSON */ }
   return { data, status: raw.status, headers: resHeaders, ok: raw.ok };
@@ -322,9 +378,8 @@ export async function postCommand<T = unknown>(
         // 419: CSRF expired — fetch fresh cookie, refresh once, doesn't count against retry budget
         if (res.status === 419 && !csrfRetried) {
           csrfRetried = true;
-          await refreshCsrfOnce(csrfCookieUrl);
-          const fresh = readCsrfToken();
-          if (fresh) headers[fresh.headerName] = fresh.token;
+          const fresh = await refreshCsrfOnce(csrfCookieUrl);
+          headers[fresh.headerName] = fresh.token;
           attempt--;
           continue;
         }
@@ -519,7 +574,7 @@ async function doClientFetch<T>(
   if (body !== undefined) init.body = body;
 
   const raw = await fetch(fullUrl, init);
-  const resHeaders = raw.headers ? Object.fromEntries(raw.headers.entries()) : {};
+  const resHeaders = headersToObject(raw.headers);
 
   let data: any = null;
   if (responseType === 'blob') {
@@ -527,8 +582,16 @@ async function doClientFetch<T>(
   } else if (responseType === 'text') {
     data = await raw.text();
   } else {
-    // json (default) — graceful fallback for non-JSON responses
-    const contentType = raw.headers.get('content-type') || '';
+    // json (default) — graceful fallback for non-JSON responses.
+    //
+    // `?.` rather than the `resHeaders` snapshot above, deliberately.
+    // `Headers.get()` is case-INSENSITIVE by spec; a plain object lookup is
+    // not, so reading `resHeaders['content-type']` would silently miss against
+    // any implementation whose `entries()` yields `Content-Type` — and a miss
+    // here does not throw, it falls through to `raw.text()` and hands the
+    // caller a STRING where they asked for JSON. Loud crash traded for silent
+    // wrong data. Delegating to the platform keeps that impossible.
+    const contentType = raw.headers?.get('content-type') || '';
     if (contentType.includes('application/json')) {
       const text = await raw.text();
       data = text ? JSON.parse(text) : null;
@@ -580,9 +643,8 @@ async function clientRequest<T>(
         // 419 CSRF refresh — once, doesn't count against retry budget
         if (res.status === 419 && !csrfRetried) {
           csrfRetried = true;
-          await refreshCsrfOnce(csrfCookieUrl);
-          const fresh = readCsrfToken();
-          if (fresh) headersObj[fresh.headerName] = fresh.token;
+          const fresh = await refreshCsrfOnce(csrfCookieUrl);
+          headersObj[fresh.headerName] = fresh.token;
           attempt--;
           continue;
         }

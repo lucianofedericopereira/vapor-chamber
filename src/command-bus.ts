@@ -15,6 +15,7 @@
  * - `'info'`: informational (e.g. handler overwrite, circuit breaker state change)
  */
 import { DEV } from './dev';
+import { dict } from './dict';
 export type BusSeverity = 'error' | 'warn' | 'info';
 
 /**
@@ -149,7 +150,35 @@ export const RETRYABLE_CODES: ReadonlySet<string> = new Set([
 
 /** Automatic metadata stamped on every command. */
 export type CommandMeta = {
-  /** Monotonic timestamp (Date.now()) at dispatch time. */
+  /**
+   * Wall-clock stamp for correlation and audit — NOT a timing instrument.
+   *
+   * Read from `Date.now()` **once per microtask turn** and shared by every
+   * command dispatched inside that turn. The first command of each turn carries
+   * an exact stamp; the 2nd..nth of the same synchronous run repeat it. Since
+   * `Date.now()` is millisecond-resolution and a typical burst is
+   * sub-millisecond, those commands would almost always have received the same
+   * number anyway — what is actually given up is intra-burst resolution in
+   * bursts long enough to cross a millisecond (a thousand-command `rehydrate`
+   * reads as instantaneous). Bought ~15-25ns per dispatch; measured in
+   * `tests/clock-source-ab.test.ts`.
+   *
+   * **Ordering does not depend on this field.** `meta.id` is a monotonic
+   * counter and stays unique and ordered — use it, not `ts`, to sequence
+   * commands.
+   *
+   * **Do not measure durations with it, cached or not.** `Date.now()` is wall
+   * clock: millisecond-resolution and *not monotonic*, so an NTP correction or
+   * a clock change can move it, backwards included. That was true before this
+   * cache and is not a consequence of it. For real timing use
+   * `performance.now()` in a plugin; on a hot loop use `createFastLane()`,
+   * which stamps no meta at all.
+   *
+   * Note this is a wall clock, not an ordering key: two commands in the same
+   * millisecond share a `ts`. For order use `meta.id`, whose default generator
+   * is a monotonic counter. To stamp an exact time, do it in a plugin — see the
+   * note above `_configureClock`.
+   */
   ts: number;
   /** Unique command ID (crypto.randomUUID or fallback). */
   id: string;
@@ -619,6 +648,73 @@ const _uidPrefix = (
 );
 let _uidCounter = 0;
 let _uidFn: () => string = () => _uidPrefix + '-' + (++_uidCounter).toString(36);
+
+// Held as a binding, not called literally, so `configureClock` can swap it.
+//
+// The default is `() => Date.now()` — a wrapper that reads the GLOBAL on every
+// call — and NOT `Date.now` itself. Assigning the function reference captures
+// the intrinsic at module load, so test doubles that replace the global
+// (`vi.useFakeTimers`, `vi.setSystemTime`) never reach it, and `meta.ts` silently
+// keeps reporting real time. That was the first version of this code and
+// `tests/clock-source-contained.test.ts` caught it: the indirection added to
+// make the clock swappable had itself broken the fake-timer behaviour the
+// default exists to preserve. The wrapper costs one call; correctness of the
+// default is not negotiable against that.
+//
+// It is a named constant, and `configureClock()` restores it, because the
+// obvious way to "put it back" — `configureClock(Date.now)` — is the same trap
+// wearing a different hat. That footgun was hit twice while writing this, once
+// in the implementation and once in the test's own teardown, which is two more
+// times than a comment would have prevented.
+// The DEFAULT: one real clock read per microtask turn, reused by every command
+// dispatched inside that turn.
+//
+// Note the refresh is EAGER — the clock is read on the first call of each turn,
+// not scheduled for later. A lazy version (return the old value, queue a
+// refresh) would hand the first dispatch after an idle period a timestamp from
+// whenever the module loaded, which is arbitrarily stale. Reading first and
+// only then arming the reset means the first command of every turn carries an
+// EXACT timestamp, and only the 2nd..nth command of the same synchronous run
+// shares it. Since a `Date.now()` is millisecond-resolution and a typical burst
+// is sub-millisecond, those commands would overwhelmingly have received the
+// same number anyway.
+//
+// What is genuinely lost: intra-burst duration in bursts long enough to cross a
+// millisecond (a thousand-command rehydrate reads as instantaneous), and
+// tracking of `vi.setSystemTime` for the 2nd..nth command in a turn. Ordering is
+// NOT lost — `meta.id` is a monotonic counter and remains unique and ordered.
+// Consumers who need exact per-command wall clock stamp it themselves — see the
+// note on `CommandMeta.ts`.
+//
+// `ts` is a WALL CLOCK, not an ordering key. Two commands dispatched in the
+// same millisecond share a value, and `Date.now()` is not monotonic — an NTP
+// correction or an operator setting the clock moves it, backwards included — so
+// a `ts` delta was never a sound duration measurement, cache or no cache.
+//
+// For ORDER use `meta.id`: the default generator is a monotonic counter
+// (`(++_uidCounter).toString`). For real durations read `performance.now()`
+// in a plugin. On a hot loop use `createFastLane()`, which stamps no meta at
+// all. If an exact wall clock is ever genuinely needed, the cheap door is a
+// `clock?: () => number` bus option — one branch, no build step, and addable
+// later without breaking anyone.
+
+// A boolean rather than a `0` sentinel. `_clockNow === 0` meaning "re-read me"
+// reads as safe — `Date.now()` cannot return 0, that is 1970 — but it is only
+// true in production: under a test clock pinned to the epoch
+// (`vi.useFakeTimers({ now: 0 })`) the cache silently never engages, and a
+// benchmark would measure the uncached path while believing otherwise.
+let _clockNow = 0;
+let _clockStale = true;
+const CACHED_CLOCK = (): number => {
+  if (_clockStale) {
+    _clockNow = Date.now();
+    _clockStale = false;
+    queueMicrotask(() => { _clockStale = true; });
+  }
+  return _clockNow;
+};
+
+let _clockFn: () => number = CACHED_CLOCK;
 function uid(): string { return _uidFn(); }
 
 /**
@@ -630,6 +726,25 @@ function uid(): string { return _uidFn(); }
  * configureUid(() => crypto.randomUUID());
  */
 export function configureUid(fn: () => string): void { _uidFn = fn; }
+
+/**
+ * Swap the clock `stampMeta` reads. `_configureClock()` with no argument
+ * restores the cached default.
+ *
+ * @internal — NOT public API, not exported from the barrel, no semver promise.
+ * It exists so `tests/clock-source-ab.test.ts` can A/B the two clock sources
+ * through the real dispatch path, and so
+ * `tests/clock-source-contained.test.ts` can drive a deliberately frozen clock
+ * to prove no TTL depends on this. Underscored for the same reason
+ * `_stampMeta` is.
+ *
+ * There is deliberately no consumer-facing option. An option only earns its
+ * place when both settings are right for different people; here the cached
+ * clock is what essentially everyone wants, and the rare need for exact
+ * per-command wall-clock is served by reading the clock yourself — see the
+ * note on `CommandMeta.ts`.
+ */
+export function _configureClock(fn?: () => number): void { _clockFn = fn ?? CACHED_CLOCK; }
 
 // V8 optimization: monomorphic result factories — always same hidden class
 function okResult(value: any): CommandResult { return { ok: true, value, error: undefined }; }
@@ -672,6 +787,46 @@ async function tryCatchAsyncHandler(handler: AsyncHandler, cmd: Command): Promis
  * origins to an infinite cross-tab broadcast loop. A marker on the dispatch is
  * race-free by construction, and one fix site serves all of them.
  */
+/**
+ * One-shot origin slot — consumed by the NEXT `stampMeta` call.
+ *
+ * Why a module slot is safe here when it was the original bug everywhere else:
+ * the four flags this file's docblock indicts (`_mcpDispatching`, `receiving`,
+ * `paused`, the reaction guard) all had to survive until a dispatch SETTLED,
+ * which on an async bus means past a microtask — so `finally` cleared them
+ * early. This slot only has to survive into `stampMeta`, which every dispatch
+ * variant calls in its SYNCHRONOUS prologue while building `cmd`, before any
+ * await exists. It cannot span a microtask by construction.
+ *
+ * It exists because `__origin`-in-the-payload can only mark payloads that hold
+ * keys. A number, string, boolean or array cannot carry it, so those dispatches
+ * reached handlers unattributed — an infinite cross-tab broadcast loop in
+ * sync(), a double-recorded redo in chamber(), and an MCP command invisible to
+ * an `origin === 'agent'` audit filter. Each site had grown its own workaround
+ * (a depth counter, a one-shot identity match, a boundary refusal); this
+ * replaces all three with one mechanism that works for every payload shape and
+ * leaves the payload itself untouched.
+ */
+let _nextOrigin: string | undefined;
+
+/**
+ * Internal — stamp `origin` on the meta of the FIRST dispatch `fn` makes
+ * synchronously. Not public API; underscored like `_stampMeta`.
+ *
+ * The `finally` is leak protection, not a settlement guard: `validateNaming`
+ * can throw before `stampMeta` runs, and an unconsumed slot must not bleed into
+ * whatever dispatches next. Awaiting the result of `fn()` is fine — the slot is
+ * already consumed by then.
+ */
+export function _withOrigin<T>(origin: string, fn: () => T): T {
+  _nextOrigin = origin;
+  try {
+    return fn();
+  } finally {
+    _nextOrigin = undefined;
+  }
+}
+
 function stampMeta(payload: any): CommandMeta {
   // Read __causationId once — it is both `causationId` and `correlationId`'s fallback.
   // V8 does not CSE the repeated optional-chain read (measured ~5–9% on an isolated A/B with
@@ -681,7 +836,14 @@ function stampMeta(payload: any): CommandMeta {
   // added — one field set, one hidden class, monomorphic dispatch preserved.
   const causationId = payload?.__causationId;
   const correlationId = payload?.__correlationId ?? causationId;
-  return { ts: Date.now(), id: uid(), correlationId, causationId, origin: payload?.__origin };
+  // Read-and-clear, branchless: the slot is consumed unconditionally (a store
+  // of undefined over undefined in the common case) and `??` falls back to the
+  // documented public `__origin` payload key. The obvious `if (_nextOrigin !==
+  // undefined)` form costs more bytes for no measurable speed — and this
+  // bundle's budget is a ratchet that gets argued down before it gets raised.
+  const slot = _nextOrigin;
+  _nextOrigin = undefined; // one-shot
+  return { ts: _clockFn(), id: uid(), correlationId, causationId, origin: slot ?? payload?.__origin };
 }
 
 /**
@@ -803,7 +965,16 @@ export function commandKey(action: string, target: any): string {
   try {
     tkey = JSON.stringify(target, (_k, v) => {
       if (v && typeof v === 'object' && !Array.isArray(v)) {
-        const sorted: Record<string, unknown> = {};
+        // Prototype-free, and this one is load-bearing rather than defensive.
+        // On a `{}`, `sorted['__proto__'] = value` goes through the inherited
+        // setter and the key never becomes an own property, so it vanished from
+        // the serialization — and an own `__proto__` key is exactly what
+        // `JSON.parse` of a server response produces. Measured: targets
+        // `{"__proto__":"A","id":1}` and `{"__proto__":"B","id":1}` both keyed
+        // to `act:{"id":1}`. This key backs `idempotent`, `cache`, `serialize`
+        // and `supersede`, so that collision collapsed distinct commands into
+        // one. Rule and full evidence in ./dict.
+        const sorted: Record<string, unknown> = dict();
         for (const k of Object.keys(v).sort()) sorted[k] = v[k];
         return sorted;
       }
@@ -831,7 +1002,7 @@ export function commandKey(action: string, target: any): string {
  * Thread-safety note: single-threaded JS means no locking required.
  *
  * @example
- * const pool = createCommandPool(64);
+ * const pool = createCommandPool;
  * const cmd = pool.acquire('cartAdd', cart, { id: 1 });
  * bus.dispatch(cmd.action, cmd.target, cmd.payload); // bus stamps its own meta
  *

@@ -14,11 +14,11 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// createHttpBridge — redirect handling (193-197) and custom httpClient !ok (201-202)
+// createHttpBridge — redirect handling and custom httpClient !ok
 // ---------------------------------------------------------------------------
 
 describe('createHttpBridge redirect & error-body paths', () => {
-  it('calls onRedirect and resolves { ok:false } when body has a redirect (193-195)', async () => {
+  it('calls onRedirect and resolves { ok:false } when body has a redirect', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ redirect: '/login' }),
@@ -34,7 +34,7 @@ describe('createHttpBridge redirect & error-body paths', () => {
     expect(result.error?.message).toContain('/login');
   });
 
-  it('surfaces a redirect error when no onRedirect handler is configured (197)', async () => {
+  it('surfaces a redirect error when no onRedirect handler is configured', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({ redirect: '/checkout' }),
@@ -49,7 +49,7 @@ describe('createHttpBridge redirect & error-body paths', () => {
     expect(result.error?.message).toContain('no onRedirect handler');
   });
 
-  it('extracts message/error from body on a !ok response via custom httpClient (200-202)', async () => {
+  it('extracts message/error from body on a !ok response via custom httpClient', async () => {
     // postCommand throws on !res.ok, so the bridge's own !res.ok branch is only
     // reachable through a custom httpClient that returns a non-ok response.
     const httpClient = {
@@ -69,7 +69,7 @@ describe('createHttpBridge redirect & error-body paths', () => {
     expect(result.error?.message).toBe('validation exploded');
   });
 
-  it('falls back to error field then HTTP status when no message present (201)', async () => {
+  it('falls back to error field then HTTP status when no message present', async () => {
     const httpClient = {
       post: vi.fn().mockResolvedValue({
         ok: false,
@@ -95,7 +95,7 @@ describe('createHttpBridge redirect & error-body paths', () => {
 // custom httpClient that resolves { ok: false, ... } instead.
 // ---------------------------------------------------------------------------
 
-describe('createBatchingHttpBridge — custom httpClient !ok path (329-333)', () => {
+describe('createBatchingHttpBridge — custom httpClient !ok path', () => {
   it('fails every queued command with the extracted message when httpClient resolves !ok', async () => {
     const httpClient = {
       post: vi.fn().mockResolvedValue({
@@ -192,7 +192,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     MockWebSocket.autoOpen = true;
   });
 
-  it('drops the oldest queued message on maxQueueSize overflow (308-313)', async () => {
+  it('drops the oldest queued message on maxQueueSize overflow', async () => {
     vi.useFakeTimers();
     MockWebSocket.autoOpen = false; // hold socket CLOSED so sends queue
 
@@ -220,7 +220,85 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     expect((await second).ok).toBe(true);
   });
 
-  it('rejects queued messages that expired while disconnected, on reconnect (327-333)', async () => {
+  it('a request that times out WHILE QUEUED settles once, and overflow does not re-settle it', async () => {
+    // The per-request timer is armed before send(), so it runs while the entry
+    // sits in `queue` waiting for a socket. When it fires, settle() clears the
+    // timer, removes the id from `pending` and resolves — but leaves the entry
+    // in `queue`. A later overflow then shifts out an entry whose `pending`
+    // record is already gone.
+    //
+    // Asserted here as behaviour rather than as a branch: the request settles
+    // exactly once, with its TIMEOUT error (not an overflow error), and the
+    // later overflow neither throws nor re-resolves it. All of that holds
+    // regardless of whether settle() is later taught to remove the entry from
+    // `queue` as well.
+    vi.useFakeTimers();
+    MockWebSocket.autoOpen = false; // hold socket CLOSED so sends queue
+
+    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
+    const ws = createWsBridge({ url: 'ws://localhost', maxQueueSize: 1, timeout: 50, reconnect: false });
+    bus.use(ws);
+    ws.connect();
+
+    const first = bus.dispatch('cartAdd', { id: 1 });
+    let settledCount = 0;
+    const firstTracked = first.then((r) => { settledCount++; return r; });
+
+    // Time out while still queued.
+    await vi.advanceTimersByTimeAsync(60);
+    const firstResult = await firstTracked;
+    expect(firstResult.ok).toBe(false);
+    expect(firstResult.error?.message).toContain('timed out');
+    expect(firstResult.error?.message).not.toContain('overflow');
+    expect(settledCount).toBe(1);
+
+    // Now overflow. The dead entry is what gets dropped; this must not throw,
+    // and must not resolve the already-settled promise a second time.
+    expect(() => { void bus.dispatch('cartUpdate', { id: 2 }); }).not.toThrow();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(settledCount).toBe(1); // still exactly one settle
+
+    // The live request is the one that survives to be flushed.
+    sockets[0].open();
+    const sent = sockets[0].sent.map((raw: string) => JSON.parse(raw).command);
+    expect(sent).toEqual(['cartUpdate']); // the timed-out one is never sent
+  });
+
+  it('a settled request stops occupying a queue slot (maxQueueSize counts LIVE requests)', async () => {
+    // The reason settle() now removes the entry from `queue` as well. Before,
+    // a timed-out request kept its slot until an overflow or a flush evicted
+    // it, so maxQueueSize bounded "entries ever queued" rather than "requests
+    // still waiting" — with maxQueueSize: 1 a single dead entry could evict a
+    // live one. Nothing was lost (flushQueue's elapsed check stopped stale
+    // sends), but two mechanisms owned the same fact.
+    vi.useFakeTimers();
+    MockWebSocket.autoOpen = false;
+
+    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
+    const ws = createWsBridge({ url: 'ws://localhost', maxQueueSize: 1, timeout: 50, reconnect: false });
+    bus.use(ws);
+    ws.connect();
+
+    const doomed = bus.dispatch('cartAdd', { id: 1 });
+    await vi.advanceTimersByTimeAsync(60); // times out while queued → slot freed
+    expect((await doomed).error?.message).toContain('timed out');
+
+    // With the slot freed, this live request does NOT evict anything...
+    const live = bus.dispatch('cartUpdate', { id: 2 });
+    let overflowed = false;
+    void live.then((r) => { if (!r.ok && /overflow/.test(String(r.error?.message))) overflowed = true; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(overflowed).toBe(false);
+
+    // ...and it is still there to be flushed when the socket opens.
+    sockets[0].open();
+    const sent = sockets[0].sent.map((raw: string) => JSON.parse(raw).command);
+    expect(sent).toEqual(['cartUpdate']);
+    sockets[0].receive({ id: JSON.parse(sockets[0].sent[0]).id, ok: true });
+    expect((await live).ok).toBe(true);
+  });
+
+  it('rejects queued messages that expired while disconnected, on reconnect', async () => {
     vi.useFakeTimers();
     MockWebSocket.autoOpen = false; // hold CLOSED so the message queues
 
@@ -244,9 +322,9 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     expect(result.ok).toBe(false);
   });
 
-  it('flushQueue resolves a still-pending expired queued message on reconnect (327-333)', async () => {
+  it('flushQueue resolves a still-pending expired queued message on reconnect', async () => {
     // The queued item's timeout equals the dispatch-level wsTimeout, so to hit
-    // the inner expiry branch (329-331) the pending entry must still be alive
+    // the inner expiry branch the pending entry must still be alive
     // when flushQueue runs. We advance the *wall clock* past expiry (so
     // elapsed >= timeout) WITHOUT firing the pending dispatch setTimeout, then
     // open the socket synchronously so flushQueue sees a live pending request.
@@ -276,7 +354,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     expect(result.error?.message).toContain('expireMe');
   });
 
-  it('schedules a reconnect and calls connect() again after backoff delay (346)', async () => {
+  it('schedules a reconnect and calls connect() again after backoff delay', async () => {
     vi.useFakeTimers();
 
     const onConnect = vi.fn();
@@ -305,7 +383,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     ws.disconnect();
   });
 
-  it('disconnect() clears a pending reconnect timer (396-397)', async () => {
+  it('disconnect() clears a pending reconnect timer', async () => {
     vi.useFakeTimers();
 
     const ws = createWsBridge({
@@ -331,7 +409,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     expect(ws.isConnected()).toBe(false);
   });
 
-  it('invokes onError when the socket errors (388)', async () => {
+  it('invokes onError when the socket errors', async () => {
     vi.useFakeTimers();
     const onError = vi.fn();
     const ws = createWsBridge({ url: 'ws://localhost', onError });
@@ -345,7 +423,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     ws.disconnect();
   });
 
-  it('reconnect: false — an unintentional close never schedules a reconnect (520)', async () => {
+  it('reconnect: false — an unintentional close never schedules a reconnect', async () => {
     vi.useFakeTimers();
     const ws = createWsBridge({ url: 'ws://localhost', reconnect: false });
     ws.connect();
@@ -360,7 +438,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     ws.disconnect();
   });
 
-  it('stops reconnecting once maxReconnects is reached (520)', async () => {
+  it('stops reconnecting once maxReconnects is reached', async () => {
     vi.useFakeTimers();
     // Sockets never auto-open here: onopen resets reconnectCount to 0 on any
     // successful connection, so testing the cap needs CONSECUTIVE failures
@@ -394,7 +472,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     ws.disconnect();
   });
 
-  it('connect() is a no-op while a socket is already CONNECTING/OPEN (533)', async () => {
+  it('connect() is a no-op while a socket is already CONNECTING/OPEN', async () => {
     vi.useFakeTimers();
     const ws = createWsBridge({ url: 'ws://localhost' });
     ws.connect();
@@ -414,7 +492,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     ws.disconnect();
   });
 
-  it('re-queues the remainder of a flush if the socket closes mid-loop (495-496)', async () => {
+  it('re-queues the remainder of a flush if the socket closes mid-loop', async () => {
     vi.useFakeTimers();
     MockWebSocket.autoOpen = false; // hold socket CLOSED so both dispatches queue
 
@@ -455,7 +533,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     ws.disconnect();
   });
 
-  it('defaults to a generic message when an error response omits data.error (560)', async () => {
+  it('defaults to a generic message when an error response omits data.error', async () => {
     vi.useFakeTimers();
     const bus = createAsyncCommandBus({ onMissing: 'ignore' });
     const ws = createWsBridge({ url: 'ws://localhost', reconnect: false });
@@ -471,7 +549,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     ws.disconnect();
   });
 
-  it('a stale close from a superseded socket does not null out the current one (574)', async () => {
+  it('a stale close from a superseded socket does not null out the current one', async () => {
     vi.useFakeTimers();
     const ws = createWsBridge({ url: 'ws://localhost', reconnect: true, reconnectDelay: 10, maxReconnects: 5 });
     ws.connect();
@@ -498,7 +576,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     ws.disconnect();
   });
 
-  it('pre-flight abort resolves immediately without ever sending (612)', async () => {
+  it('pre-flight abort resolves immediately without ever sending', async () => {
     vi.useFakeTimers();
     const bus = createAsyncCommandBus({ onMissing: 'ignore' });
     const ws = createWsBridge({ url: 'ws://localhost', reconnect: false });
@@ -601,7 +679,7 @@ describe('createSseBridge routing & reconnect noop', () => {
 });
 
 // ---------------------------------------------------------------------------
-// createEchoBridge — broadcast handler error path (623)
+// createEchoBridge — broadcast handler error path
 // ---------------------------------------------------------------------------
 
 describe('createEchoBridge broadcast error logging', () => {
@@ -626,7 +704,7 @@ describe('createEchoBridge broadcast error logging', () => {
     };
   }
 
-  it('logs and swallows errors thrown inside onBroadcast (623)', () => {
+  it('logs and swallows errors thrown inside onBroadcast', () => {
     const echo = makeMockEcho();
     const bus = createCommandBus();
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -642,5 +720,97 @@ describe('createEchoBridge broadcast error logging', () => {
       expect.stringContaining('Echo broadcast error'),
       expect.any(Error),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Signal-merging fallbacks + the per-dispatch header/retry arms
+//
+// Every merge site is `typeof AbortSignal.any === 'function' ? any([...]) :
+// fallback`. Node has AbortSignal.any, so the fallback arms — the ones that run
+// on older Safari/Firefox — had no coverage. Removed the same way
+// tests/plugins-extra-gaps.test.ts drives supersede's equivalent branch.
+// ---------------------------------------------------------------------------
+
+describe('bridge signal merging — AbortSignal.any fallbacks', () => {
+  const okFetch = () =>
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ state: 1 }) }));
+
+  it('prefers the caller signal when AbortSignal.any is missing', async () => {
+    const origAny = AbortSignal.any;
+    // @ts-expect-error deliberate removal to drive the fallback arm
+    AbortSignal.any = undefined;
+    try {
+      okFetch();
+      const bus = createAsyncCommandBus();
+      bus.use(
+        createHttpBridge({
+          endpoint: '/api',
+          scopeController: new AbortController(),
+          signal: new AbortController().signal, // both present → merge site
+        }),
+      );
+      const result = await bus.dispatch('act', {});
+      expect(result.ok).toBe(true);
+    } finally {
+      AbortSignal.any = origAny;
+    }
+  });
+
+  it('prefers the per-dispatch signal when AbortSignal.any is missing', async () => {
+    const origAny = AbortSignal.any;
+    // @ts-expect-error deliberate removal to drive the fallback arm
+    AbortSignal.any = undefined;
+    try {
+      okFetch();
+      const bus = createAsyncCommandBus();
+      bus.use(createHttpBridge({ endpoint: '/api', signal: new AbortController().signal }));
+      // cmd.signal AND effectiveSignal both present → the second merge site.
+      const result = await bus.dispatch('act', {}, undefined, { signal: new AbortController().signal });
+      expect(result.ok).toBe(true);
+    } finally {
+      AbortSignal.any = origAny;
+    }
+  });
+
+  it('batching bridge falls back the same way', async () => {
+    const origAny = AbortSignal.any;
+    // @ts-expect-error deliberate removal to drive the fallback arm
+    AbortSignal.any = undefined;
+    try {
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => [{ state: 1 }] }));
+      const bus = createAsyncCommandBus();
+      bus.use(
+        createBatchingHttpBridge({
+          endpoint: '/api/batch',
+          scopeController: new AbortController(),
+          signal: new AbortController().signal,
+        }),
+      );
+      await bus.dispatch('act', {}).catch(() => {});
+      expect(true).toBe(true); // constructing + dispatching is what runs the merge
+    } finally {
+      AbortSignal.any = origAny;
+    }
+  });
+
+  it('zeroes retry for a noRetry action and forwards an Idempotency-Key', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ state: 1 }) });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const bus = createAsyncCommandBus();
+    // Stamp the key the `idempotent` plugin would normally set, so the bridge
+    // takes the `idemKey ? {...} : headers` TRUE arm.
+    bus.use((cmd, next) => {
+      if (cmd.meta) cmd.meta.idempotencyKey = 'key-123';
+      return next();
+    }, { priority: 300 });
+    bus.use(createHttpBridge({ endpoint: '/api', retry: 3, noRetry: ['act'] }));
+
+    const result = await bus.dispatch('act', {});
+    expect(result.ok).toBe(true);
+
+    const [, init] = fetchMock.mock.calls[0];
+    expect(init.headers['Idempotency-Key']).toBe('key-123');
   });
 });

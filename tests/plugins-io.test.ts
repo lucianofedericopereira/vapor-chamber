@@ -291,6 +291,60 @@ describe('sync plugin', () => {
     vi.unstubAllGlobals();
   });
 
+  it('does not broadcast when an ASYNC dispatch rejects', async () => {
+    // The async arm settles the promise before deciding to broadcast. Its
+    // `.catch` had no coverage: a handler that throws resolves to
+    // `{ ok: false }` (covered above), so only a REJECTED dispatch — a
+    // downstream plugin or transport failing outright — reaches it. Without
+    // the catch this would also surface as an unhandled rejection.
+    const mockBc = makeMockBroadcastChannel();
+    vi.stubGlobal('BroadcastChannel', makeBcConstructor(mockBc));
+
+    const bus = createAsyncCommandBus();
+    bus.register('cartAdd', async () => 'added');
+
+    const tabSync = sync({ channel: 'test' }, { dispatch: bus.dispatch.bind(bus) });
+    bus.use(tabSync, { priority: 100 });
+    // Lower priority = INSIDE sync, so this is what sync's `next()` returns.
+    bus.use(() => Promise.reject(new Error('transport down')) as any, { priority: 50 });
+
+    await expect(bus.dispatch('cartAdd', { id: 1 }, { qty: 2 })).rejects.toThrow('transport down');
+    await Promise.resolve(); // let the plugin's own .then/.catch settle
+
+    expect(mockBc.postMessage).not.toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
+  });
+
+  it('does not broadcast an ASYNC dispatch that settles ok:false', async () => {
+    // The other half of `if (settled?.ok)`. On an async bus a throwing handler
+    // RESOLVES to `{ ok: false }` rather than rejecting, so this is a distinct
+    // path from the rejection test above — and the async counterpart of the
+    // sync "does not broadcast failed dispatches" case.
+    const mockBc = makeMockBroadcastChannel();
+    vi.stubGlobal('BroadcastChannel', makeBcConstructor(mockBc));
+
+    const bus = createAsyncCommandBus();
+    bus.register('fail', async () => { throw new Error('nope'); });
+    bus.register('work', async () => 'done');
+
+    const tabSync = sync({ channel: 'test' }, { dispatch: bus.dispatch.bind(bus) });
+    bus.use(tabSync);
+
+    const failed = await bus.dispatch('fail', {});
+    expect(failed.ok).toBe(false);
+    await Promise.resolve();
+    expect(mockBc.postMessage).not.toHaveBeenCalled();
+
+    // ...and the same bus still broadcasts a successful async dispatch, so the
+    // silence above is the failure, not a dead plugin.
+    await bus.dispatch('work', { id: 1 });
+    await Promise.resolve();
+    expect(mockBc.postMessage).toHaveBeenCalledOnce();
+
+    vi.unstubAllGlobals();
+  });
+
   it('re-dispatches received messages locally', () => {
     const mockBc = makeMockBroadcastChannel();
     vi.stubGlobal('BroadcastChannel', makeBcConstructor(mockBc));
@@ -306,6 +360,120 @@ describe('sync plugin', () => {
     mockBc.simulateMessage({ __vc: true, action: 'remoteAction', target: { data: 'from-tab-b' } });
 
     expect(received).toContain('from-tab-b');
+
+    vi.unstubAllGlobals();
+  });
+
+  it('delivers a received payload untouched and attributes it via meta.origin', () => {
+    // Was: asserted a shape-dependent normalization — objects spread with
+    // `__origin: 'sync'`, primitives and arrays passed through bare. That
+    // asymmetry WAS the echo bug: the shapes that could not carry the key
+    // arrived unattributed and got re-broadcast. With `_withOrigin` the
+    // marker is out-of-band, so every shape is attributed identically and the
+    // payload reaches the handler exactly as the sending tab wrote it.
+    const mockBc = makeMockBroadcastChannel();
+    vi.stubGlobal('BroadcastChannel', makeBcConstructor(mockBc));
+
+    const bus = createCommandBus();
+    const seen: any[] = [];
+    const origins: unknown[] = [];
+    bus.register('remote', (cmd) => {
+      seen.push(cmd.payload);
+      origins.push(cmd.meta?.origin);
+      return 1;
+    });
+
+    const tabSync = sync({ channel: 'test' }, { dispatch: bus.dispatch.bind(bus) });
+    bus.use(tabSync);
+
+    mockBc.simulateMessage({ __vc: true, action: 'remote', target: {}, payload: { qty: 2 } });
+    mockBc.simulateMessage({ __vc: true, action: 'remote', target: {}, payload: 42 });
+    mockBc.simulateMessage({ __vc: true, action: 'remote', target: {}, payload: ['a', 'b'] });
+    mockBc.simulateMessage({ __vc: true, action: 'remote', target: {} });
+
+    // No marker key injected into user data, whatever the shape.
+    expect(seen[0]).toEqual({ qty: 2 });
+    expect(seen[1]).toBe(42);
+    expect(seen[2]).toEqual(['a', 'b']);
+    expect(seen[3]).toBeUndefined(); // absent stays absent — no synthetic object
+
+    // ...and every one of them is attributed, which is what suppresses the echo.
+    expect(origins).toEqual(['sync', 'sync', 'sync', 'sync']);
+
+    vi.unstubAllGlobals();
+  });
+
+  it('suppresses the echo for EVERY payload shape, not just markable ones', () => {
+    // Regression. `meta.origin` is derived by stampMeta from a `__origin` key
+    // in the PAYLOAD, so it can only mark plain objects and the absent case.
+    // Primitives and arrays reached the plugin unmarked and were re-broadcast:
+    // two tabs ping-ponging forever, each hop a real dispatch through
+    // handlers, plugins and transports. Measured before the fix — object and
+    // absent were suppressed; number, string, boolean and array all echoed.
+    const mockBc = makeMockBroadcastChannel();
+    vi.stubGlobal('BroadcastChannel', makeBcConstructor(mockBc));
+
+    const bus = createCommandBus();
+    bus.register('remote', () => 1);
+
+    const tabSync = sync({ channel: 'test' }, { dispatch: bus.dispatch.bind(bus) });
+    bus.use(tabSync);
+
+    const receive = (payload: unknown, omit = false) => {
+      mockBc.posted.length = 0;
+      (mockBc.postMessage as any).mockClear?.();
+      mockBc.simulateMessage({
+        __vc: true,
+        action: 'remote',
+        target: {},
+        ...(omit ? {} : { payload }),
+      } as any);
+      return mockBc.posted.length;
+    };
+
+    expect(receive({ qty: 2 })).toBe(0); // markable — was already suppressed
+    expect(receive(undefined, true)).toBe(0); // markable
+    expect(receive(42)).toBe(0); // was 1 (echo)
+    expect(receive('hello')).toBe(0); // was 1 (echo)
+    expect(receive(false)).toBe(0); // was 1 (echo)
+    expect(receive(['a', 'b'])).toBe(0); // was 1 (echo)
+
+    // The suppression must be scoped to received commands only — a genuine
+    // LOCAL dispatch with a primitive payload still has to go out, or the fix
+    // would have traded an echo loop for silent cross-tab breakage.
+    mockBc.posted.length = 0;
+    bus.dispatch('remote', { id: 1 }, 99);
+    expect(mockBc.posted).toHaveLength(1);
+    expect(mockBc.posted[0]).toMatchObject({ action: 'remote', payload: 99 });
+
+    vi.unstubAllGlobals();
+  });
+
+  it('suppresses the echo for unmarkable payloads on an ASYNC bus too', async () => {
+    // The async arm decides a microtask after next() settles, so the echo flag
+    // must be captured synchronously at plugin entry — this is the case the
+    // old `receiving = true` flag got wrong.
+    const mockBc = makeMockBroadcastChannel();
+    vi.stubGlobal('BroadcastChannel', makeBcConstructor(mockBc));
+
+    const bus = createAsyncCommandBus();
+    bus.register('remote', async () => 1);
+
+    const tabSync = sync({ channel: 'test' }, { dispatch: bus.dispatch.bind(bus) });
+    bus.use(tabSync);
+
+    mockBc.simulateMessage({ __vc: true, action: 'remote', target: {}, payload: 42 });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mockBc.posted).toHaveLength(0);
+
+    mockBc.simulateMessage({ __vc: true, action: 'remote', target: {}, payload: ['a', 'b'] });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mockBc.posted).toHaveLength(0);
+
+    // ...and a local async dispatch still broadcasts.
+    await bus.dispatch('remote', { id: 1 }, 7);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(mockBc.posted).toHaveLength(1);
 
     vi.unstubAllGlobals();
   });
