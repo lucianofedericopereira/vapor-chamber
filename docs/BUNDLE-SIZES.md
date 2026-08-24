@@ -19,7 +19,7 @@ from it is ~3.6 KB brotli, not 24.4 KB).
 |---|--:|--:|--:|
 | `.` | 83.0 | 27.7 | 24.4 |
 | `./transports` | 11.8 | 4.7 | 4.2 |
-| `./directives` | 19.4 | 7.0 | 6.2 |
+| `./directives` | 19.4 | 6.9 | 6.2 |
 | `./transitions` | 17.4 | 6.2 | 5.6 |
 | `./ssr` | 1.6 | 0.8 | 0.7 |
 | `./vite` | 3.0 | 1.3 | 1.2 |
@@ -28,9 +28,9 @@ from it is ~3.6 KB brotli, not 24.4 KB).
 | `./standard-schema` | 1.7 | 0.8 | 0.7 |
 | `./alien-signals` | 1.0 | 0.6 | 0.5 |
 | `./reactive` | 16.7 | 6.0 | 5.4 |
-| `./vue` | 22.9 | 8.4 | 7.4 |
+| `./vue` | 22.9 | 8.3 | 7.4 |
 | `./outbox` | 5.1 | 2.2 | 1.9 |
-| `./mcp` | 4.4 | 2.2 | 1.9 |
+| `./mcp` | 4.4 | 2.1 | 1.9 |
 | `./router` | 35.2 | 13.6 | 12.3 |
 | `./router/vdom` | 0.8 | 0.4 | 0.4 |
 | `./router-fetch` | 9.9 | 4.3 | 3.9 |
@@ -44,5 +44,5 @@ from it is ~3.6 KB brotli, not 24.4 KB).
 | variant | min KB | gzip KB | brotli KB |
 |---|--:|--:|--:|
 | `vapor-chamber (full)` | 38.0 | 12.3 | 11.1 |
-| `vapor-chamber-core` | 26.2 | 8.5 | 7.6 |
+| `vapor-chamber-core` | 26.2 | 8.4 | 7.6 |
 | `vapor-chamber-elements` | 27.8 | 9.0 | 8.1 |
