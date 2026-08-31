@@ -1,18 +1,18 @@
 /**
- * Fast lane — correctness tests.
+ * Fast lane - correctness tests.
  *
  * Locks the v1.2.x behavior: minimal-allocation dispatch with NO
  * envelope, NO result wrapper, NO plugin/hook/listener machinery. The
- * point of the fast lane is to be deliberately narrow — these tests
+ * point of the fast lane is to be deliberately narrow - these tests
  * verify the narrow shape stays correct.
  *
  * Performance is verified separately in tests/perf.bench.ts under
- * `describe('fast lane — single-handler hot dispatch')`.
+ * `describe('fast lane - single-handler hot dispatch')`.
  */
 import { describe, it, expect, vi } from 'vitest';
 import { createFastLane } from '../src/fast-lane';
 
-describe('createFastLane — compile / dispatch', () => {
+describe('createFastLane - compile / dispatch', () => {
   it('compile returns a function that calls the handler with raw data', () => {
     const lane = createFastLane();
     const handler = vi.fn((n: number) => n * 2);
@@ -25,7 +25,7 @@ describe('createFastLane — compile / dispatch', () => {
     expect(handler).toHaveBeenCalledOnce();
   });
 
-  it('handler receives data directly — no Command envelope, no Result wrapping', () => {
+  it('handler receives data directly - no Command envelope, no Result wrapping', () => {
     const lane = createFastLane();
     let captured: unknown ;
     const dispatch = lane.compile('any', (data: any) => { captured = data; return 'done'; });
@@ -33,7 +33,7 @@ describe('createFastLane — compile / dispatch', () => {
     dispatch({ deeply: { nested: 'object' } });
     expect(captured).toEqual({ deeply: { nested: 'object' } });
 
-    // Return value is whatever the handler returned — no { ok, value } envelope.
+    // Return value is whatever the handler returned - no { ok, value } envelope.
     expect(dispatch('plain string')).toBe('done');
   });
 
@@ -57,7 +57,7 @@ describe('createFastLane — compile / dispatch', () => {
     expect(dispatch(5)).toBeUndefined();
   });
 
-  it('handler errors propagate — no try/catch wrapping', () => {
+  it('handler errors propagate - no try/catch wrapping', () => {
     const lane = createFastLane();
     const dispatch = lane.compile('boom', () => { throw new Error('uncaught'); });
 
@@ -65,7 +65,7 @@ describe('createFastLane — compile / dispatch', () => {
   });
 });
 
-describe('createFastLane — on / emit / off', () => {
+describe('createFastLane - on / emit / off', () => {
   it('emit fans out to all subscribers in registration order', () => {
     const lane = createFastLane();
     const calls: string[] = [];
@@ -100,7 +100,7 @@ describe('createFastLane — on / emit / off', () => {
     expect(fn2).toHaveBeenCalledTimes(2);
   });
 
-  it('compile and on are independent — same action key, different dispatch paths', () => {
+  it('compile and on are independent - same action key, different dispatch paths', () => {
     const lane = createFastLane();
     const handlerCalls: number[] = [];
     const listenerCalls: number[] = [];
@@ -120,12 +120,12 @@ describe('createFastLane — on / emit / off', () => {
   });
 });
 
-describe('createFastLane — diagnostics', () => {
+describe('createFastLane - diagnostics', () => {
   it('registeredActions returns compiled action names', () => {
     const lane = createFastLane();
     lane.compile('a', () => {});
     lane.compile('b', () => {});
-    lane.on('c', () => {});  // on() doesn't add to registeredActions — only compile does
+    lane.on('c', () => {});  // on() doesn't add to registeredActions - only compile does
 
     expect(lane.registeredActions().sort()).toEqual(['a', 'b']);
   });
@@ -145,7 +145,7 @@ describe('createFastLane — diagnostics', () => {
   });
 });
 
-describe('createFastLane — isolation between instances', () => {
+describe('createFastLane - isolation between instances', () => {
   it('two lanes do not share handlers or listeners', () => {
     const a = createFastLane();
     const b = createFastLane();
@@ -177,7 +177,7 @@ describe('fast-lane unsubscribe edge cases', () => {
     lane.emit('tick', 1);
     off();
     lane.emit('tick', 2); // no listeners left
-    expect(() => off()).not.toThrow(); // bucket already deleted → early return
+    expect(() => off()).not.toThrow(); // bucket already deleted -> early return
     lane.emit('tick', 3);
 
     expect(seen).toEqual([1]);
@@ -223,7 +223,7 @@ describe('fast-lane unsubscribe edge cases', () => {
 
   it('unsubscribing a listener that is no longer in a live bucket is a no-op', () => {
     // The bucket still exists (another listener holds it open) but this
-    // listener is already gone — indexOf returns -1 and nothing is spliced.
+    // listener is already gone - indexOf returns -1 and nothing is spliced.
     const lane = createFastLane();
     const kept: number[] = [];
     const off = lane.on<number>('tick', () => {});
@@ -252,12 +252,12 @@ describe('fast-lane unsubscribe edge cases', () => {
 });
 
 // ---------------------------------------------------------------------------
-// removal: 'snapshot' vs 'live' — the mid-emit unsubscribe CONTRACT per mode.
+// removal: 'snapshot' vs 'live' - the mid-emit unsubscribe CONTRACT per mode.
 // These two suites assert DIFFERENT outcomes for the same scenario on
 // purpose: the divergence IS the documented difference between the modes.
 // ---------------------------------------------------------------------------
 
-describe("removal: 'live' (default) — bus-parity semantics", () => {
+describe("removal: 'live' (default) - bus-parity semantics", () => {
   it('a peer removed mid-emit does NOT run in that emit', () => {
     const lane = createFastLane(); // default = live
     const seen: string[] = [];
@@ -275,12 +275,12 @@ describe("removal: 'live' (default) — bus-parity semantics", () => {
     const seen: number[] = [];
     const off = lane.on<number>('tick', (n) => { seen.push(n); off(); });
     lane.emit('tick', 1);
-    lane.emit('tick', 2); // listener gone — bucket dropped, no-op
+    lane.emit('tick', 2); // listener gone - bucket dropped, no-op
     expect(seen).toEqual([1]);
   });
 });
 
-describe("removal: 'snapshot' — copy-on-write semantics", () => {
+describe("removal: 'snapshot' - copy-on-write semantics", () => {
   it('a peer removed mid-emit STILL runs once in that emit (the documented divergence)', () => {
     const lane = createFastLane({ removal: 'snapshot' });
     const seen: string[] = [];

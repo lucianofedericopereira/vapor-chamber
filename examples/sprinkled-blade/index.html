@@ -1,20 +1,20 @@
 <!--
-  vapor-chamber — sprinkled-JS demo for server-rendered pages.
+  vapor-chamber - sprinkled-JS demo for server-rendered pages.
 
   Drop-in pattern: Blade / Rails / Django / WordPress emits HTML with a
   CSRF meta tag, then loads the IIFE bundle and wires interactive bits
   via `VaporChamber.connect()`.
 
-  Runnable with ONE process — the mock backend also serves this page, with the
+  Runnable with ONE process - the mock backend also serves this page, with the
   cart already rendered into it (the Blade half of the pattern):
 
     cd examples/sprinkled-blade
-    node mock-server.mjs        # → http://localhost:3001
+    node mock-server.mjs        # -> http://localhost:3001
 
   Serving it as a plain static file still works and is the cross-origin case
   (CORS preflight, absolute endpoint, one startup fetch to hydrate the count):
 
-    node ../static-server.mjs   # → http://localhost:3000/examples/sprinkled-blade/index.html
+    node ../static-server.mjs   # -> http://localhost:3000/examples/sprinkled-blade/index.html
     node mock-server.mjs        # backend on :3001
 
   In a real Laravel deploy, replace the meta tag with `{{ csrf_token() }}`
@@ -27,7 +27,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="csrf-token" content="demo-csrf-token-replace-with-blade-csrf_token" />
-  <title>vapor-chamber — sprinkled-JS / Blade demo</title>
+  <title>vapor-chamber - sprinkled-JS / Blade demo</title>
   <style>
     body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
     button { padding: 0.5rem 1rem; cursor: pointer; }
@@ -37,7 +37,7 @@
     /* Nothing below may move when state changes. The status line always
        occupies its line even while empty, and the counter reserves room for
        the digits it will grow into (tabular figures keep them from jittering
-       as values change). Reflow is the flicker people actually notice —
+       as values change). Reflow is the flicker people actually notice -
        fetch latency is only the half you can see coming. */
     #status { min-height: 1.4em; margin: 0.75rem 0 0; }
     #count { font-variant-numeric: tabular-nums; min-width: 18ch; }
@@ -62,7 +62,7 @@
       <button id="add">Add to cart</button>
       <button id="clear">Clear</button>
       <!-- Served from the backend (http://localhost:3001), this span arrives
-           already filled in and stamped `data-hydrated` — the Blade
+           already filled in and stamped `data-hydrated` - the Blade
            `{{ $cart->count }}` moment: first paint is correct, no flicker,
            no startup request. Served as a static file it arrives empty and
            the script fetches `cartState` once, which is the flicker that
@@ -75,8 +75,8 @@
 
   <div class="panel">
     <h2>Telemetry log</h2>
-    <p>Every dispatch is logged here client-side via <code>bus.on('*', …)</code>.</p>
-    <pre id="log">(waiting…)</pre>
+    <p>Every dispatch is logged here client-side via <code>bus.on('*', ...)</code>.</p>
+    <pre id="log">(waiting...)</pre>
   </div>
 
   <!-- In production: load from CDN
@@ -87,7 +87,7 @@
   <script>
     // One-line bus + HTTP transport setup. csrf:true reads the meta tag
     // automatically and attaches X-CSRF-TOKEN to every request.
-    // Same origin when the backend served this page (no CORS at all — the
+    // Same origin when the backend served this page (no CORS at all - the
     // real Blade shape); absolute when it was opened from a static host.
     const { bus, dispatch } = VaporChamber.connect({
       endpoint: document.getElementById('count').hasAttribute('data-hydrated')
@@ -100,7 +100,7 @@
     const lines = [];
     bus.on('*', (cmd, result) => {
       const ts = new Date().toTimeString().slice(0, 8);
-      lines.unshift(`[${ts}] ${cmd.action} → ${result.ok ? 'ok' : 'fail: ' + result.error?.message}`);
+      lines.unshift(`[${ts}] ${cmd.action} -> ${result.ok ? 'ok' : 'fail: ' + result.error?.message}`);
       logEl.textContent = lines.slice(0, 8).join('\n');
     });
 
@@ -115,7 +115,7 @@
 
     const run = async (action, target, payload, okMessage) => {
       // Do NOT blank the status here. Clearing it on click and refilling it a
-      // few ms later is a visible blink on a local round trip — the message is
+      // few ms later is a visible blink on a local round trip - the message is
       // replaced when the result lands, never emptied in between.
       //
       // Same reasoning for the disabled state: a busy affordance that shows
@@ -142,7 +142,7 @@
 
     // Hydrate the counter ONLY if the server didn't already render it. The
     // cart is server state: it survives reloads and is shared by every tab
-    // pointed at this backend, so the page must never assume a number — it
+    // pointed at this backend, so the page must never assume a number - it
     // either receives one in the HTML or asks for one.
     if (!countEl.hasAttribute('data-hydrated')) {
       dispatch('cartState', {}, null).then((result) => {

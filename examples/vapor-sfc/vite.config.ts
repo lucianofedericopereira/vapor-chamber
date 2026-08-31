@@ -1,16 +1,23 @@
 import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import { vaporChamberHMR } from 'vapor-chamber/vite';
-import path from 'node:path';
 
-// Vue's `vue` entry ships no Vapor runtime, and at rc.3 with-vapor exists ONLY
-// as a pre-bundled esm-browser dist. src/vue-with-vapor.ts synthesizes the
-// missing esm-bundler entry from the two packages that do ship one, which
-// tree-shakes properly. Measured, same app:
-//   esm-browser .prod.js  122.2 KB (br 38.7)
-//   synthesized bundler    74.8 KB (br 24.0)
+// No `vue` alias, and no synthesized with-vapor entry. Both used to be here,
+// and both were justified by a fact that has since expired: "Vue's `vue` entry
+// ships no Vapor runtime, and at rc.3 with-vapor exists ONLY as a pre-bundled
+// esm-browser dist." True at rc.3. False since rc.5, where Vue's own
+// `vue.runtime.esm-bundler.js` became exactly what the shim was:
+//
+//   export * from "@vue/runtime-dom";
+//   export * from "@vue/runtime-vapor";
+//
+// Verified rather than assumed - building this example with the alias and
+// without it produced byte-identical output, same size and same content hash,
+// so the shim was reproducing what bare `vue` already resolves to. The
+// enumeration behind that claim is pinned by
+// tests/vue-bundler-vapor-exports.test.ts, so this can be re-checked each RC
+// instead of re-derived.
 export default defineConfig({
-  resolve: { alias: { vue: path.resolve(__dirname, 'src/vue-with-vapor.ts') } },
   define: {
     __VUE_OPTIONS_API__: false,
     __VUE_PROD_DEVTOOLS__: false,

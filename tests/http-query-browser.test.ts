@@ -3,15 +3,15 @@
  * Covers src/http-query.ts's browser-path branches (lines 28-29). Every other
  * caller of buildFullUrl runs in the plain 'node' vitest environment (no
  * `window`), so both ternaries there only ever took their SSR-fallback side:
- *   - `typeof window !== 'undefined' ? window.location.origin : ...` — the
+ *   - `typeof window !== 'undefined' ? window.location.origin : ...` - the
  *     `window` global was never actually defined anywhere else.
- *   - `url.startsWith('http') ? undefined : origin` — every existing call
+ *   - `url.startsWith('http') ? undefined : origin` - every existing call
  *     passes a relative path, never an already-absolute URL.
  */
 import { describe, it, expect } from 'vitest';
 import { buildFullUrl } from '../src/http-query';
 
-describe('buildFullUrl — browser environment (window defined)', () => {
+describe('buildFullUrl - browser environment (window defined)', () => {
   it('resolves relative URLs against window.location.origin', () => {
     const url = buildFullUrl('/api/search', undefined, { q: 'coffee' });
     expect(url.startsWith(window.location.origin)).toBe(true);

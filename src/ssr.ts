@@ -1,53 +1,53 @@
 /**
- * vapor-chamber — SSR hydration plugin
+ * vapor-chamber - SSR hydration plugin
  *
- * Vue alignment history (one line per version — full per-item detail lives in
+ * Vue alignment history (one line per version - full per-item detail lives in
  * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table):
- *   vNext / rc.2 — pass-through. Four hydration fixes land below rehydrate()'s command
+ *   vNext / rc.2 - pass-through. Four hydration fixes land below rehydrate()'s command
  *            replay, which sits ABOVE Vue's DOM hydration and only ever hands it a
  *            more-correct DOM: slot anchor created for unwrapped interop slot content
- *            missing SSR `<!--[-->` markers (#15131 — e.g. a vapor component's slot
+ *            missing SSR `<!--[-->` markers (#15131 - e.g. a vapor component's slot
  *            invoked directly by a render function, as `RouterLink` does); vapor
  *            components now hydrate correctly when their hydration is DEFERRED past the
  *            root pass via `defineAsyncComponent`/`hydrateOnVisible()` through interop
- *            (#15132 — previously silently inert, no error); pending-async-component
+ *            (#15132 - previously silently inert, no error); pending-async-component
  *            placeholder position preserved across Suspense/KeepAlive (#15147); the
  *            "logical child" cache resynced after mismatch-recovery node replacement
- *            (#15145). None of these are reachable from this module — it holds no DOM
+ *            (#15145). None of these are reachable from this module - it holds no DOM
  *            references, hydration anchors, or interop state, only replays bus commands
  *            after Vue's own hydration completes. No code change.
- *   vNext / beta.17 — pass-through. beta.17's lone hydration fix (#14972 — dynamic native
+ *   vNext / beta.17 - pass-through. beta.17's lone hydration fix (#14972 - dynamic native
  *            element slots hydrated correctly, cf5eefa) sits in Vue's DOM hydration, below
  *            rehydrate()'s command replay; it only hands replay a more-correct DOM. No code change.
- *   vNext / beta.16 — pass-through. rehydrate() command replay sits ABOVE Vue's DOM
+ *   vNext / beta.16 - pass-through. rehydrate() command replay sits ABOVE Vue's DOM
  *            hydration, so beta.16's 7 hydration fixes (dynamic props on mismatch-
  *            recreated nodes, static-text patching, exact tag-mismatch detection,
  *            clone-cache reuse, v-if empty-branch hydration, fragment warning text,
- *            empty-container full mount on createVaporSSRApp — which we do not wrap)
+ *            empty-container full mount on createVaporSSRApp - which we do not wrap)
  *            are all below us; they only hand replay a more-correct DOM. They also
- *            reduce "Hydration text mismatch" dev-warnings — the lib keys off nothing
+ *            reduce "Hydration text mismatch" dev-warnings - the lib keys off nothing
  *            there.
- *   v1.6.0 / beta.15 — pass-through (teleport mount-location tracking + disabled-
+ *   v1.6.0 / beta.15 - pass-through (teleport mount-location tracking + disabled-
  *            target order keep rehydrate() command replay in document order).
- *   v1.4.0 / beta.13 — pass-through (5 hydration fixes: mismatch recovery,
+ *   v1.4.0 / beta.13 - pass-through (5 hydration fixes: mismatch recovery,
  *            namespace preservation, allowed prop mismatches, teleport-range
  *            sibling walks, dev target validation).
- *   v1.1.0 — module added: dehydrate bus state on the server, rehydrate on client.
+ *   v1.1.0 - module added: dehydrate bus state on the server, rehydrate on client.
  *
  * Per the whitepaper (§14): commands that ran on the server to populate initial
  * state need to replay on the client so reactive signals reflect the same values.
  * This plugin automates the dehydrate/rehydrate pattern as a first-class plugin.
  *
  * CONCURRENCY WARNING: the setCommandBus/resetCommandBus pattern below relies on
- * a module-global shared bus — safe only when the server renders one request at
+ * a module-global shared bus - safe only when the server renders one request at
  * a time. Under concurrent SSR renders, interleaved requests overwrite each
  * other's bus (handler/state leakage across requests). For concurrent servers,
  * create the bus per request and pass it explicitly to your handlers and to
- * rehydrate()/dehydrate() — skip the shared-bus globals on the server entirely.
+ * rehydrate()/dehydrate() - skip the shared-bus globals on the server entirely.
  *
  * The HTTP cache used to be this warning's undocumented sibling: it was a
  * module-level singleton, so a fresh bus per request did NOT give a fresh
- * cache, and the key (`responseType:fullUrl`) has no auth dimension — user A's
+ * cache, and the key (`responseType:fullUrl`) has no auth dimension - user A's
  * authenticated GET answered user B's identical URL. As of v1.12.0 the cache
  * and the in-flight dedupe map live in `createHttpClient()`'s closure, so the
  * rule for both hazards is now the same one: **create it per request**. A
@@ -110,7 +110,7 @@ export type SSRPluginOptions = {
 };
 
 export type SSRPlugin = {
-  /** Sync plugin — install on the server bus via bus.use(ssr.plugin). */
+  /** Sync plugin - install on the server bus via bus.use(ssr.plugin). */
   plugin: Plugin;
   /**
    * Extract the recorded commands as a serializable array.
@@ -123,7 +123,7 @@ export type SSRPlugin = {
   size(): number;
   /**
    * How many commands were dropped at the `maxCommands` cap. Non-zero means
-   * the client will rehydrate PARTIAL state — server/client divergence. Check
+   * the client will rehydrate PARTIAL state - server/client divergence. Check
    * it after `dehydrate()` rather than trusting the render silently: a cap
    * that reads as "recorded everything" when it didn't is the failure mode
    * this accessor exists to make visible.
@@ -146,11 +146,11 @@ export type RehydrateOptions = {
 };
 
 // ---------------------------------------------------------------------------
-// createSSRPlugin — server-side recording
+// createSSRPlugin - server-side recording
 // ---------------------------------------------------------------------------
 
 /**
- * createSSRPlugin — records dispatched commands on the server for dehydration.
+ * createSSRPlugin - records dispatched commands on the server for dehydration.
  *
  * Install the `.plugin` on the server bus. After rendering, call `.dehydrate()`
  * to get a serializable command list for embedding in the HTML payload.
@@ -173,7 +173,7 @@ export function createSSRPlugin(options: SSRPluginOptions = {}): SSRPlugin {
       } else {
         // Dropping past the cap used to be completely silent: the client
         // rehydrated partial state and nothing anywhere said so. Warn once
-        // (not per command — a blown cap means thousands) and keep a count.
+        // (not per command - a blown cap means thousands) and keep a count.
         droppedCount++;
         if (!capWarned && DEV) {
           capWarned = true;
@@ -210,11 +210,11 @@ export function createSSRPlugin(options: SSRPluginOptions = {}): SSRPlugin {
 }
 
 // ---------------------------------------------------------------------------
-// rehydrate — client-side replay
+// rehydrate - client-side replay
 // ---------------------------------------------------------------------------
 
 /**
- * rehydrate — replay server-recorded commands on the client bus.
+ * rehydrate - replay server-recorded commands on the client bus.
  *
  * Dispatches each dehydrated command in order so reactive signals reach the
  * same state as the server render. Commands without registered handlers are
@@ -240,19 +240,19 @@ export function rehydrate(
     try {
       const result = bus.dispatch(cmd.action, cmd.target, cmd.payload);
       // `BaseBus.dispatch` returns `any`, so an AsyncCommandBus type-checks
-      // here — and this loop is sync. A pending promise pushed as a
+      // here - and this loop is sync. A pending promise pushed as a
       // CommandResult is a lie: `result.ok` reads `undefined`, the try/catch
       // above catches nothing that rejects later, and a failed replay surfaces
       // as an unhandled rejection while `results` reports nothing wrong. Say
       // so instead, and point at the function that actually handles this.
       if (isThenable(result)) {
         (result as Promise<CommandResult>).catch(() => {
-          /* already reported below — never an unhandled rejection */
+          /* already reported below - never an unhandled rejection */
         });
         if (!asyncWarned && DEV) {
           asyncWarned = true;
           console.warn(
-            `[vapor-chamber] rehydrate() received a pending dispatch for "${cmd.action}" — ` +
+            `[vapor-chamber] rehydrate() received a pending dispatch for "${cmd.action}" - ` +
               'this bus is asynchronous and rehydrate() is synchronous. ' +
               'Use `await rehydrateAsync(bus, commands)` instead.',
           );
@@ -260,7 +260,7 @@ export function rehydrate(
         results.push({
           ok: false,
           error: new Error(
-            `[vapor-chamber] rehydrate() cannot replay "${cmd.action}" on an async bus — use rehydrateAsync()`,
+            `[vapor-chamber] rehydrate() cannot replay "${cmd.action}" on an async bus - use rehydrateAsync()`,
           ),
         });
         continue;
@@ -279,13 +279,13 @@ function isThenable(value: unknown): boolean {
 }
 
 /**
- * rehydrate for an `AsyncCommandBus` — the common case as soon as any handler
+ * rehydrate for an `AsyncCommandBus` - the common case as soon as any handler
  * hits an HTTP transport.
  *
  * Awaits each dispatch **in order**, preserving the module's design intent
  * (deterministic replay before the app goes interactive). A rejected dispatch
  * becomes `{ ok: false, error }` in the results, exactly as a thrown one does
- * on the sync path — never an unhandled rejection.
+ * on the sync path - never an unhandled rejection.
  */
 export async function rehydrateAsync(
   bus: BaseBus,

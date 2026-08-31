@@ -1,5 +1,5 @@
 /**
- * vapor-chamber — Utility layer
+ * vapor-chamber - Utility layer
  *
  * createChamber, createWorkflow, createReaction
  *
@@ -10,7 +10,7 @@ import { disposeAll, matchesPattern } from './command-bus';
 import type { BaseBus, Command, CommandResult, Handler, RegisterOptions, } from './command-bus';
 
 // ---------------------------------------------------------------------------
-// createChamber — declarative namespace grouping
+// createChamber - declarative namespace grouping
 // ---------------------------------------------------------------------------
 
 export type ChamberHandlers = Record<string, Handler>;
@@ -24,12 +24,12 @@ export interface Chamber {
   readonly namespace: string;
   /** Install all handlers on a bus. Returns uninstall function. */
   install(bus: BaseBus): () => void;
-  /** Get the prefixed action name (e.g. 'add' → 'cartAdd'). */
+  /** Get the prefixed action name (e.g. 'add' -> 'cartAdd'). */
   actionName(shortName: string): string;
 }
 
 /**
- * createChamber — groups related handlers under a namespace.
+ * createChamber - groups related handlers under a namespace.
  * The declarative counterpart to `useCommandGroup`.
  *
  * @example
@@ -46,8 +46,8 @@ export function createChamber(
   handlers: ChamberHandlers,
   opts: ChamberOptions = {},
 ): Chamber {
-  // camelCase namespace join ('cart' + 'add' → 'cartAdd'). Inlined, NOT a shared
-  // helper — DO NOT consolidate, settled, do not re-evaluate. The per-dispatch sites
+  // camelCase namespace join ('cart' + 'add' -> 'cartAdd'). Inlined, NOT a shared
+  // helper - DO NOT consolidate, settled, do not re-evaluate. The per-dispatch sites
   // (useCommandGroup / transitions) measured ~1% slower with a shared call; this site
   // is setup-only but stays inline for one consistent shape. Keep in sync.
   function actionName(shortName: string): string {
@@ -68,7 +68,7 @@ export function createChamber(
 }
 
 // ---------------------------------------------------------------------------
-// createWorkflow — sequential commands with compensation (saga pattern)
+// createWorkflow - sequential commands with compensation (saga pattern)
 // ---------------------------------------------------------------------------
 
 export type WorkflowStep = {
@@ -102,7 +102,7 @@ export interface Workflow {
 }
 
 /**
- * createWorkflow — sequential commands with automatic compensation on failure.
+ * createWorkflow - sequential commands with automatic compensation on failure.
  *
  * @example
  * const checkout = createWorkflow([
@@ -112,7 +112,7 @@ export interface Workflow {
  *   { action: 'cartClear' },
  * ]);
  * const result = await checkout.run(bus, { cartId, paymentInfo });
- * // If orderCreate fails → paymentRelease runs automatically
+ * // If orderCreate fails -> paymentRelease runs automatically
  */
 export function createWorkflow(steps: WorkflowStep[]): Workflow {
   async function run(bus: BaseBus, target: any, payload?: any): Promise<WorkflowResult> {
@@ -120,7 +120,7 @@ export function createWorkflow(steps: WorkflowStep[]): Workflow {
     // The MAPPED target/payload are captured alongside the compensating action,
     // not just its name. Compensations used to dispatch with the workflow's
     // original arguments, so a step pairing `mapTarget`/`mapPayload` with
-    // `compensate` — deriving an order id, addressing a sub-entity — was
+    // `compensate` - deriving an order id, addressing a sub-entity - was
     // compensated against something it never acted on: the saga either missed
     // the entity it had modified or acted on the parent. Silent, and only on
     // the failure path, which is the last place anyone looks and the one place
@@ -173,7 +173,7 @@ export function createWorkflow(steps: WorkflowStep[]): Workflow {
 }
 
 // ---------------------------------------------------------------------------
-// createReaction — declarative cross-domain dispatch rules
+// createReaction - declarative cross-domain dispatch rules
 // ---------------------------------------------------------------------------
 
 export type ReactionOptions = {
@@ -184,15 +184,15 @@ export type ReactionOptions = {
   /** Transform the source command into the target command's payload. */
   mapPayload?: (cmd: Command, result: CommandResult) => any;
   /**
-   * Allow `sourcePattern` to match `targetAction` — i.e. the reaction fires on
+   * Allow `sourcePattern` to match `targetAction` - i.e. the reaction fires on
    * its own dispatch. Refused by default, because the loop it creates is
    * bounded only on a sync bus:
    *
    * - **Sync bus:** listeners fire nested inside dispatch, so
-   *   `MAX_DISPATCH_DEPTH` halts each chain — 16 recursive dispatches and a
+   *   `MAX_DISPATCH_DEPTH` halts each chain - 16 recursive dispatches and a
    *   logged `VC_CORE_MAX_DEPTH` per matching action. Degraded, bounded.
    * - **Async bus:** listeners fire post-settle, so each cycle is a fresh
-   *   top-level dispatch with the depth counter unwound. Nothing bounds it —
+   *   top-level dispatch with the depth counter unwound. Nothing bounds it -
    *   a self-sustaining infinite loop running handlers, plugins and (with a
    *   bridge installed) HTTP requests forever.
    *
@@ -202,7 +202,7 @@ export type ReactionOptions = {
   allowSelfMatch?: boolean;
   /**
    * How many reaction hops a single originating command may trigger before
-   * the chain is refused. Catches INDIRECT cycles (A→B, B→A), which no
+   * the chain is refused. Catches INDIRECT cycles (A->B, B->A), which no
    * install-time check can see. Default: 8.
    */
   maxHops?: number;
@@ -214,7 +214,7 @@ export interface Reaction {
 }
 
 /**
- * createReaction — declarative cross-chamber dispatch rules.
+ * createReaction - declarative cross-chamber dispatch rules.
  * Explicit edges between domain modules.
  *
  * @example
@@ -234,11 +234,11 @@ export function createReaction(
   function install(bus: BaseBus): () => void {
     // Statically detectable at install, so detect it at install.
     // `createReaction('cart*', 'cartRecalculate')` is the module's most
-    // natural composition, not a contrived one — and on an async bus it spins
+    // natural composition, not a contrived one - and on an async bus it spins
     // forever (see ReactionOptions.allowSelfMatch).
     if (selfMatching && !allowSelfMatch) {
       console.error(
-        `[vapor-chamber] Reaction "${sourcePattern}" → "${targetAction}" matches its own target: ` +
+        `[vapor-chamber] Reaction "${sourcePattern}" -> "${targetAction}" matches its own target: ` +
           'every dispatch would re-trigger the reaction (unbounded on an async bus). ' +
           'Narrow the pattern, or pass { allowSelfMatch: true } with a `when` guard that terminates it. ' +
           'Not installed.',
@@ -249,14 +249,14 @@ export function createReaction(
     return bus.on(sourcePattern, (cmd: Command, result: CommandResult) => {
       if (when && !when(cmd, result)) return;
 
-      // Indirect cycles (A→B, B→A) are invisible at install time, so the chain
+      // Indirect cycles (A->B, B->A) are invisible at install time, so the chain
       // carries its own hop count. It rides the same `__`-payload convention
-      // as `__causationId`/`__origin` — one dispatch, one marker, no flag that
+      // as `__causationId`/`__origin` - one dispatch, one marker, no flag that
       // an await can outrun.
       const hops = ((cmd.payload as { __reactionHops?: number } | undefined)?.__reactionHops ?? 0) + 1;
       if (hops > maxHops) {
         console.error(
-          `[vapor-chamber] Reaction "${sourcePattern}" → "${targetAction}" exceeded maxHops (${maxHops}) — ` +
+          `[vapor-chamber] Reaction "${sourcePattern}" -> "${targetAction}" exceeded maxHops (${maxHops}) - ` +
             'refusing to continue. This is a reaction cycle; break it with a `when` guard or raise maxHops.',
         );
         return;
@@ -264,7 +264,7 @@ export function createReaction(
 
       const target = map ? map(cmd, result) : cmd.target;
       const mapped = mapPayload ? mapPayload(cmd, result) : undefined;
-      // Also propagate causation, which reactions never did — a reaction chain
+      // Also propagate causation, which reactions never did - a reaction chain
       // was untraceable in devtools even when it terminated.
       const marker = { __reactionHops: hops, __causationId: cmd.meta?.id };
       const payload =
@@ -277,7 +277,7 @@ export function createReaction(
       try {
         bus.dispatch(targetAction, target, payload);
       } catch (e) {
-        console.error(`[vapor-chamber] Reaction ${sourcePattern} → ${targetAction} error:`, e);
+        console.error(`[vapor-chamber] Reaction ${sourcePattern} -> ${targetAction} error:`, e);
       }
     });
   }

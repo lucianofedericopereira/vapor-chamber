@@ -117,8 +117,8 @@ describe('malformed param segments are a dev-time error, not a dead route', () =
   it('rejects vue-router style /:name* instead of compiling it to a literal', () => {
     // Regression: PARAM_RE does not match ":pathMatch*", so the segment fell
     // through to `static` and compiled to the LITERAL "/:pathMatch*". The row
-    // matched nothing, every unknown URL became `unmatched`, and — behind a
-    // catch-all server — the hard-navigation fallback reloaded forever.
+    // matched nothing, every unknown URL became `unmatched`, and - behind a
+    // catch-all server - the hard-navigation fallback reloaded forever.
     expect(() => compilePath('/:pathMatch*')).toThrow(/not a valid param/);
     expect(() => compilePath('/products/:id(\\d+')).toThrow(/not a valid param/);
   });
@@ -142,7 +142,7 @@ describe('malformed param segments are a dev-time error, not a dead route', () =
   });
 });
 
-describe('renderSegments — the one path builder both callers share', () => {
+describe('renderSegments - the one path builder both callers share', () => {
   const table = createRouteTable([
     { name: 'files', path: '/files/*', component: 'F' },
     { name: 'user', path: '/users/:id', component: 'U' },
@@ -172,7 +172,7 @@ describe('renderSegments — the one path builder both callers share', () => {
   });
 });
 
-describe('decodePathPart — malformed percent-encoding', () => {
+describe('decodePathPart - malformed percent-encoding', () => {
   it('returns the raw segment rather than throwing on a bad escape', () => {
     // decodeURIComponent('%E0%A4%A') throws URIError; a bad URL must not take
     // the router down, it just does not decode.
@@ -183,7 +183,7 @@ describe('decodePathPart — malformed percent-encoding', () => {
 });
 
 // ---------------------------------------------------------------------------
-// castParam — typed path params
+// castParam - typed path params
 // ---------------------------------------------------------------------------
 
 describe('typed path params', () => {
@@ -197,11 +197,11 @@ describe('typed path params', () => {
 
   it('casts an int param and falls back to the raw string when unparsable', () => {
     expect(typed.resolve('/post/42')?.params.id).toBe(42);
-    // Not a number — the raw segment survives rather than becoming NaN.
+    // Not a number - the raw segment survives rather than becoming NaN.
     expect(typed.resolve('/post/abc')?.params.id).toBe('abc');
   });
 
-  it("treats '1' and 'true' as true and everything else as false (121)", () => {
+  it("treats '1' and 'true' as true and everything else as false", () => {
     expect(typed.resolve('/flag/1')?.params.on).toBe(true);
     expect(typed.resolve('/flag/true')?.params.on).toBe(true);
     expect(typed.resolve('/flag/0')?.params.on).toBe(false);
@@ -216,11 +216,11 @@ describe('typed path params', () => {
 // ---------------------------------------------------------------------------
 // The static fast-path map keys on a CASE-FOLDED, trailing-slash-stripped path
 // (staticKey), so two distinct rows can collide on one key. `if
-// (!staticByPath.has(key))` keeps the first — nothing exercised that false arm,
+// (!staticByPath.has(key))` keeps the first - nothing exercised that false arm,
 // because no existing table declares two colliding static rows.
 // ---------------------------------------------------------------------------
 
-describe('colliding static rows — first one wins, like the scan', () => {
+describe('colliding static rows - first one wins, like the scan', () => {
   it('keeps the earlier row when two static paths fold to the same key', () => {
     const table = createRouteTable([
       { name: 'about', path: '/about', component: 'A' },
@@ -229,7 +229,7 @@ describe('colliding static rows — first one wins, like the scan', () => {
       { name: 'helpSlash', path: '/help/', component: 'H2' }, // same key: trailing slash stripped
     ]);
 
-    // The map must agree with server priority — the FIRST declared row wins,
+    // The map must agree with server priority - the FIRST declared row wins,
     // whichever spelling the URL arrives in.
     expect(table.resolve('/about')?.record.name).toBe('about');
     expect(table.resolve('/About')?.record.name).toBe('about');
@@ -238,7 +238,7 @@ describe('colliding static rows — first one wins, like the scan', () => {
     expect(table.resolve('/help')?.record.name).toBe('help');
     expect(table.resolve('/help/')?.record.name).toBe('help');
 
-    // The shadowed rows still exist as records — they are just unreachable by URL.
+    // The shadowed rows still exist as records - they are just unreachable by URL.
     expect(table.getRecord('aboutCased')?.name).toBe('aboutCased');
     expect(table.getRecord('helpSlash')?.name).toBe('helpSlash');
   });

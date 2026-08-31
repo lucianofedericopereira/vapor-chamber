@@ -1,9 +1,9 @@
 /**
- * alien-signals connector — proves the adapter actually works against the
+ * alien-signals connector - proves the adapter actually works against the
  * real published alien-signals package, not a hand-rolled stub.
  *
  * What we verify:
- *   1. signal() wraps an alien-signal — value reads/writes go through it
+ *   1. signal() wraps an alien-signal - value reads/writes go through it
  *   2. configureAlienSignals() flips vapor-chamber's signal factory
  *   3. computed/effect built on top of the same alien-signals instance
  *      observe vapor-chamber-created signals (real reactive integration,
@@ -16,7 +16,7 @@ import { signal as alienSignal, computed, effect } from 'alien-signals';
 import { signal, configureSignal } from '../src/signal';
 import { alienSignalAdapter, configureAlienSignals } from '../src/alien-signals';
 
-// Reset between tests — restore the lib's default getter/setter signal so
+// Reset between tests - restore the lib's default getter/setter signal so
 // other test files (which don't expect alien-signals) aren't affected.
 beforeEach(() => {
   configureSignal(<T>(initial: T) => {
@@ -62,7 +62,7 @@ describe('configureAlienSignals', () => {
     expect(s.value).toBe(2);
   });
 
-  it('integrates with alien-signals computed — derives from vapor-chamber signals', () => {
+  it('integrates with alien-signals computed - derives from vapor-chamber signals', () => {
     configureAlienSignals(alienSignal as any);
 
     // Build a computed using alien-signals' own primitive that reads from a
@@ -73,7 +73,7 @@ describe('configureAlienSignals', () => {
       ? null
       : (() => {
           // The Signal returned by configureAlienSignals has alien-signal
-          // semantics — but we access it through the .value getter/setter.
+          // semantics - but we access it through the .value getter/setter.
           // To prove computed correctness we need an alien-signal handle.
           // Easiest: create the alien-signal directly and verify the
           // adapter's get/set wrap THAT.

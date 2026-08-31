@@ -3,7 +3,7 @@
  *
  *  - rateLimit: window-expiry head advance + array compaction.
  *  - metrics: head-based eviction + compaction.
- *  - serialize: a same-key lane survives a throwing command — the stored tail
+ *  - serialize: a same-key lane survives a throwing command - the stored tail
  *    absorbs the rejection and the next command still runs.
  *  - idempotent: stampMeta:false, TTL expiry drop, and the
  *    rejection arm clearing inflight without caching.
@@ -25,7 +25,7 @@ function cmd(action: string, extra: Partial<Command> = {}): Command {
 }
 
 // ---------------------------------------------------------------------------
-// rateLimit — window compaction
+// rateLimit - window compaction
 // ---------------------------------------------------------------------------
 
 describe('rateLimit window compaction', () => {
@@ -52,7 +52,7 @@ describe('rateLimit window compaction', () => {
 });
 
 // ---------------------------------------------------------------------------
-// metrics — eviction + compaction
+// metrics - eviction + compaction
 // ---------------------------------------------------------------------------
 
 describe('metrics eviction', () => {
@@ -72,7 +72,7 @@ describe('metrics eviction', () => {
 });
 
 // ---------------------------------------------------------------------------
-// serialize — lane survives a rejection
+// serialize - lane survives a rejection
 // ---------------------------------------------------------------------------
 
 describe('serialize lane resilience', () => {
@@ -84,14 +84,14 @@ describe('serialize lane resilience', () => {
       Promise.resolve(plugin(c, () => { throw new Error('lane poison'); })),
     ).rejects.toThrow('lane poison');
 
-    // The stored tail swallowed the rejection — the lane is not deadlocked.
+    // The stored tail swallowed the rejection - the lane is not deadlocked.
     const result = await plugin(cmd('save'), () => ({ ok: true, value: 'after' }) as any);
     expect(result).toEqual({ ok: true, value: 'after' });
   });
 });
 
 // ---------------------------------------------------------------------------
-// idempotent — stampMeta, TTL expiry, rejection arm
+// idempotent - stampMeta, TTL expiry, rejection arm
 // ---------------------------------------------------------------------------
 
 describe('idempotent', () => {
@@ -111,12 +111,12 @@ describe('idempotent', () => {
     const next = () => ({ ok: true, value: ++runs }) as any;
 
     await plugin(cmd('orderCreate'), next);
-    // Within TTL → cached result, no second run.
+    // Within TTL -> cached result, no second run.
     const cached = await plugin(cmd('orderCreate'), next);
     expect(cached.value).toBe(1);
     expect(runs).toBe(1);
 
-    // Past TTL → the stale entry is deleted and the handler runs again.
+    // Past TTL -> the stale entry is deleted and the handler runs again.
     vi.setSystemTime(2_002_000);
     const fresh = await plugin(cmd('orderCreate'), next);
     expect(fresh.value).toBe(2);
@@ -140,14 +140,14 @@ describe('idempotent', () => {
       Promise.resolve(plugin(cmd('orderCreate'), () => Promise.reject(new Error('backend down')))),
     ).rejects.toThrow('backend down');
 
-    // A genuine retry after the failure must run — nothing was cached.
+    // A genuine retry after the failure must run - nothing was cached.
     const retry = await plugin(cmd('orderCreate'), () => ({ ok: true, value: 'recovered' }) as any);
     expect(retry).toEqual({ ok: true, value: 'recovered' });
   });
 });
 
 // ---------------------------------------------------------------------------
-// supersede — signal merging
+// supersede - signal merging
 // ---------------------------------------------------------------------------
 
 describe('supersede signal merging', () => {

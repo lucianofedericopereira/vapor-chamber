@@ -1,5 +1,5 @@
 /**
- * Tests for ssr.ts — createSSRPlugin + rehydrate
+ * Tests for ssr.ts - createSSRPlugin + rehydrate
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -159,7 +159,7 @@ describe('rehydrate', () => {
     const results = rehydrate(bus, commands, { ignoreUnhandled: false });
     expect(results).toHaveLength(2);
     expect(results[0].ok).toBe(true);
-    expect(results[1].ok).toBe(false); // no handler → error
+    expect(results[1].ok).toBe(false); // no handler -> error
   });
 
   it('filter option skips matching commands', () => {
@@ -194,10 +194,10 @@ describe('rehydrate', () => {
 });
 
 // ---------------------------------------------------------------------------
-// The async bus — the common case as soon as a handler hits a transport, and
+// The async bus - the common case as soon as a handler hits a transport, and
 // the one `rehydrate()` silently mishandled: `BaseBus.dispatch` returns `any`,
 // so an AsyncCommandBus type-checks, and pending promises were pushed into
-// `results` typed as CommandResult (`result.ok` → undefined).
+// `results` typed as CommandResult (`result.ok` -> undefined).
 // ---------------------------------------------------------------------------
 
 describe('rehydrate on an async bus', () => {
@@ -213,7 +213,7 @@ describe('rehydrate on an async bus', () => {
     const results = rehydrate(bus, [{ action: 'setUser', target: { id: 1 } }]);
 
     expect(results).toHaveLength(1);
-    expect(results[0].ok).toBe(false); // was `undefined` — neither true nor false
+    expect(results[0].ok).toBe(false); // was `undefined` - neither true nor false
     expect(results[0].error?.message).toContain('rehydrateAsync');
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('rehydrateAsync'));
     warn.mockRestore();
@@ -259,10 +259,10 @@ describe('rehydrate on an async bus', () => {
 
 // ---------------------------------------------------------------------------
 // maxCommands: the cap dropped everything past it with no warning and no
-// signal — the client rehydrated partial state and nothing said so.
+// signal - the client rehydrated partial state and nothing said so.
 // ---------------------------------------------------------------------------
 
-describe('createSSRPlugin — maxCommands truncation', () => {
+describe('createSSRPlugin - maxCommands truncation', () => {
   it('warns once and counts what it dropped', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createCommandBus();

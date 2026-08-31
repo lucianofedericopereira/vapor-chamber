@@ -1,5 +1,5 @@
 /**
- * vapor-chamber-router — history layer.
+ * vapor-chamber-router - history layer.
  *
  * Base-aware wrapper over the History API: all router-facing paths are
  * RELATIVE to the base ('/admin' stays a server concern); `createHref`
@@ -40,13 +40,13 @@ export function stripBase(pathname: string, base: string): string | null {
 }
 
 export type ResolveBaseOptions = {
-  /** Explicit base — wins outright, everything else ignored. */
+  /** Explicit base - wins outright, everything else ignored. */
   url?: string;
-  /** Mount prefix, e.g. '/admin' (or '/backend', anything — never assumed).
+  /** Mount prefix, e.g. '/admin' (or '/backend', anything - never assumed).
    *  Omit for locale-first URLs where the pathname starts with the locale. */
   prefix?: string;
   /** Locale segments to detect after the prefix (or at the pathname start
-   *  when there is no prefix). The segment is OPTIONAL — absent locale just
+   *  when there is no prefix). The segment is OPTIONAL - absent locale just
    *  yields the prefix alone. */
   locales?: readonly string[];
   /** Pathname to inspect. Default: window.location.pathname. */
@@ -56,15 +56,15 @@ export type ResolveBaseOptions = {
 /**
  * Derive the router base from the current URL at boot.
  *
- *   resolveBase({ url: '/whatever' })                       → '/whatever'
+ *   resolveBase({ url: '/whatever' })                       -> '/whatever'
  *   resolveBase({ prefix: '/admin', locales: ['it','en'] })
- *     on /admin/it/catalog                                  → '/admin/it'
- *     on /admin/catalog        (locale optional)            → '/admin'
+ *     on /admin/it/catalog                                  -> '/admin/it'
+ *     on /admin/catalog        (locale optional)            -> '/admin'
  *   resolveBase({ locales: ['it','en'] })   (no prefix)
- *     on /en/checkout                                       → '/en'
- *     on /checkout                                          → ''
+ *     on /en/checkout                                       -> '/en'
+ *     on /checkout                                          -> ''
  *
- * The locale segment lives in the BASE, not in route paths — the table stays
+ * The locale segment lives in the BASE, not in route paths - the table stays
  * locale-free, one generated module serves every locale, and Blade-inlined
  * payloads can localize titles per request.
  */
@@ -76,7 +76,7 @@ export function resolveBase(options: ResolveBaseOptions = {}): string {
   let rest = pathname;
   if (prefix) {
     const stripped = stripBase(pathname, prefix);
-    if (stripped === null) return prefix; // outside the prefix — mount at prefix anyway
+    if (stripped === null) return prefix; // outside the prefix - mount at prefix anyway
     rest = stripped;
   }
   const first = rest.split('/').find(Boolean);
@@ -89,7 +89,7 @@ export function resolveBase(options: ResolveBaseOptions = {}): string {
 /**
  * Can this context actually use the History API? A probe, not a heuristic:
  * pushState/replaceState throw SecurityError whenever the document URL and
- * origin mismatch — sandboxed/srcdoc iframes (opaque origin), data:
+ * origin mismatch - sandboxed/srcdoc iframes (opaque origin), data:
  * documents, and even non-sandboxed freshly-created contexts (see
  * whatwg/html#6836). Attribute sniffing can't cover all of those; calling
  * replaceState with the CURRENT state is side-effect-free and authoritative.
@@ -143,7 +143,7 @@ export function createWebHistory(rawBase?: string): RouterHistory {
       window.history[replace ? 'replaceState' : 'pushState'](nextState, '', base + fullPath);
       lastPosition = nextPosition;
     } catch {
-      // Safari "100 pushState per 30s" throttle — fall back to a full load.
+      // Safari "100 pushState per 30s" throttle - fall back to a full load.
       window.location[replace ? 'replace' : 'assign'](base + fullPath);
     }
   }
@@ -167,7 +167,7 @@ export function createWebHistory(rawBase?: string): RouterHistory {
   };
 }
 
-/** In-memory history — tests and SSR. Same contract as createWebHistory. */
+/** In-memory history - tests and SSR. Same contract as createWebHistory. */
 export function createMemoryHistory(rawBase?: string, initialFullPath = '/'): RouterHistory {
   const base = normalizeBase(rawBase);
   const listeners = new Set<HistoryListener>();

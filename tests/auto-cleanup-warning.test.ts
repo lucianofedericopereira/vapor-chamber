@@ -13,7 +13,7 @@ import {
 } from '../src/chamber';
 import { createCommandBus } from '../src/command-bus';
 
-describe('tryAutoCleanup — dev warning dedup', () => {
+describe('tryAutoCleanup - dev warning dedup', () => {
   beforeEach(() => setCommandBus(createCommandBus()));
   afterEach(() => resetCommandBus());
 
@@ -21,7 +21,7 @@ describe('tryAutoCleanup — dev warning dedup', () => {
     await waitForVueDetection(); // ensure onScopeDispose is detected (warning path active)
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    // Three composable calls outside any effectScope — each hits the no-scope path.
+    // Three composable calls outside any effectScope - each hits the no-scope path.
     for (let i = 0; i < 3; i++) {
       useCommandState(0, { noop: (s) => s }).dispose();
     }

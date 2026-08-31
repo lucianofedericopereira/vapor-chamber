@@ -53,7 +53,7 @@ describe('buildMenu', () => {
     // catalog's children sort by meta.menu (brands 21 < products 22), not table order.
     const catalog = menu[1];
     expect(catalog?.children.map((item) => item.name)).toEqual(['brands', 'products']);
-    // product.edit has a title but no meta.menu — never in the menu.
+    // product.edit has a title but no meta.menu - never in the menu.
     expect(JSON.stringify(menu)).not.toContain('product.edit');
   });
 
@@ -76,7 +76,7 @@ describe('buildMenu', () => {
     const products = catalog?.children[1];
     expect(products?.active).toBe(true); // prefix match, same rule as stamping
     expect(products?.exactActive).toBe(false);
-    // the group has no path of its own — active flows up from products
+    // the group has no path of its own - active flows up from products
     expect(catalog?.active).toBe(true);
     expect(catalog?.exactActive).toBe(false);
 
@@ -114,7 +114,7 @@ describe('buildMenu', () => {
   });
 
   // The FALSE arm of `if (DEV)`. The loud-validation test above only ever ran
-  // the dev arm, because DEV is module-scope and true under vitest — so the
+  // the dev arm, because DEV is module-scope and true under vitest - so the
   // production contract ("diagnostics are worth no bytes in production") was
   // asserted nowhere. Re-import after stubbing NODE_ENV, as dev-flag.test.ts does.
   describe('in production (DEV=false)', () => {
@@ -124,7 +124,7 @@ describe('buildMenu', () => {
     });
 
     it('skips the row validation entirely rather than throwing, and still projects the menu', async () => {
-      // Built with the dev-mode table (these rows are structurally fine — it is
+      // Built with the dev-mode table (these rows are structurally fine - it is
       // buildMenu's own meta checks that reject them).
       const badPosition = createRouteTable([
         { name: 'x', path: '/x', component: 'X', meta: { menu: 'first', title: 't' } },
@@ -135,13 +135,13 @@ describe('buildMenu', () => {
       vi.resetModules();
       const prod = await import('../../src/router/menu');
 
-      // Both of these throw bad_menu_row in dev — see the test above.
+      // Both of these throw bad_menu_row in dev - see the test above.
       expect(() => prod.buildMenu(badPosition, '/')).not.toThrow();
       expect(prod.buildMenu(badPosition, '/').map((item) => item.name)).toEqual(['x']);
 
       const built = prod.buildMenu(noTitle, '/');
       expect(built.map((item) => item.name)).toEqual(['y']);
-      // `String(undefined)` — the garbage the dev guard exists to catch first.
+      // `String(undefined)` - the garbage the dev guard exists to catch first.
       expect(built[0]?.title).toBe('undefined');
     });
   });
@@ -177,7 +177,7 @@ describe('buildBreadcrumbs', () => {
   it('links crumbs with the location params interpolated; groups stay href-less', () => {
     const crumbs = buildBreadcrumbs(locationFor('/catalog/products/7/edit'), '/admin');
 
-    expect(crumbs[0]?.href).toBeNull(); // catalog is a group — never a URL
+    expect(crumbs[0]?.href).toBeNull(); // catalog is a group - never a URL
     expect(crumbs[1]?.href).toBe('/admin/catalog/products');
     expect(crumbs[2]?.href).toBe('/admin/catalog/products/7/edit');
   });
@@ -206,7 +206,7 @@ describe('buildBreadcrumbs', () => {
 });
 
 describe('router surface', () => {
-  it('exposes base and reactive routes — setRoutes swaps what useMenu would see', async () => {
+  it('exposes base and reactive routes - setRoutes swaps what useMenu would see', async () => {
     const router = createRouter({
       base: '/admin',
       history: createMemoryHistory('/admin'),

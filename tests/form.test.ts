@@ -50,7 +50,7 @@ describe('createFormBus', () => {
 // Validation
 // ---------------------------------------------------------------------------
 
-describe('createFormBus — validation', () => {
+describe('createFormBus - validation', () => {
   const rules = {
     email:    (v: string) => v.includes('@') ? null : 'Invalid email',
     password: (v: string) => v.length >= 8   ? null : 'Too short',
@@ -124,7 +124,7 @@ describe('createFormBus — validation', () => {
 // Plugin integration
 // ---------------------------------------------------------------------------
 
-describe('createFormBus — plugin integration', () => {
+describe('createFormBus - plugin integration', () => {
   it('plugins receive formSet commands', () => {
     const intercepted: string[] = [];
     const spy = (cmd: any, next: any) => {
@@ -203,10 +203,10 @@ describe('createFormBus — plugin integration', () => {
 });
 
 // ---------------------------------------------------------------------------
-// createFormBus — bus injection
+// createFormBus - bus injection
 // ---------------------------------------------------------------------------
 
-describe('createFormBus — bus injection', () => {
+describe('createFormBus - bus injection', () => {
   it('uses injected bus instead of creating an isolated one', () => {
     const sharedBus = createCommandBus();
     const seen: string[] = [];
@@ -241,20 +241,20 @@ describe('createFormBus — bus injection', () => {
     const form = createFormBus({ fields: { y: '' } });
     form.set('y', 'test');
 
-    // sharedBus should NOT see form commands — isolated by default
+    // sharedBus should NOT see form commands - isolated by default
     expect(seen).toHaveLength(0);
   });
 });
 
 // ---------------------------------------------------------------------------
-// submit() races — `values` is live state, and submit() used to read it twice
+// submit() races - `values` is live state, and submit() used to read it twice
 // across an await.
 // ---------------------------------------------------------------------------
 
-describe('createFormBus — submit() races', () => {
+describe('createFormBus - submit() races', () => {
   it('validates and submits the SAME values when a set() lands mid-validation', async () => {
     // set() also runs the rules (live per-field feedback), so every invocation
-    // parks — collect all the resolvers and release them together.
+    // parks - collect all the resolvers and release them together.
     const releases: Array<() => void> = [];
     const validated: string[] = [];
     const submitted: string[] = [];
@@ -318,7 +318,7 @@ describe('createFormBus — submit() races', () => {
 });
 
 // ---------------------------------------------------------------------------
-// formValidate — the internal sync-validation command (dispatchable directly,
+// formValidate - the internal sync-validation command (dispatchable directly,
 // e.g. from a plugin or a toolbar's "check form" affordance)
 // ---------------------------------------------------------------------------
 
@@ -363,7 +363,7 @@ describe('rule/values mismatch and optional onSubmit', () => {
   it('a rule for a key not present in fields is skipped by sync and async validation', async () => {
     const form = createFormBus({
       fields: { email: 'a@b.com' },
-      // `ghost` has a rule but no field — must be ignored, not crash or error
+      // `ghost` has a rule but no field - must be ignored, not crash or error
       rules: { email: (v) => (v.includes('@') ? null : 'bad'), ghost: () => 'never' } as never,
     });
     form.set('email', 'x@y.z'); // live sync validation path

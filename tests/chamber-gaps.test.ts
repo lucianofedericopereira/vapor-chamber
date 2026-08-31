@@ -3,17 +3,17 @@
  *
  *  - runDispatch: async rejection, async and sync `{ ok:false }` with no
  *    error attached.
- *  - untracked: the `__VC_IIFE__` const-fold guard — at runtime in tests
+ *  - untracked: the `__VC_IIFE__` const-fold guard - at runtime in tests
  *    the identifier resolves via globalThis, so both arms are drivable.
  *  - useSharedCommandState: errorCap tightening, ring-buffer trim
  *, rejected dispatch promise recording.
  *  - useCommandGroup: the 256-entry `_nameCache` FIFO eviction.
- *  - useCommandHistory redo payloads: object payload → `__origin` spread
- *, array payload → non-markable identity fallback.
+ *  - useCommandHistory redo payloads: object payload -> `__origin` spread
+ *, array payload -> non-markable identity fallback.
  *  - KeepAlive wiring via a fake Vue namespace handed to configureVue():
  *    tryKeepAliveHooks' hasInjectionContext arm and getCurrentInstance
  *    fallback, and useCommandError's pause/resume closures
- * — reachable without a component tree because the fake
+ * - reachable without a component tree because the fake
  *    namespace's onDeactivated/onActivated just hand the callbacks back.
  *  - readGlobal's catch via a throwing global getter.
  */
@@ -71,7 +71,7 @@ describe('runDispatch error arms', () => {
 });
 
 // ---------------------------------------------------------------------------
-// untracked — __VC_IIFE__ guard
+// untracked - __VC_IIFE__ guard
 // ---------------------------------------------------------------------------
 
 describe('untracked IIFE guard', () => {
@@ -99,14 +99,14 @@ describe('useSharedCommandState', () => {
     const first = useSharedCommandState({ bus: rejecting, errorCap: 10 });
     const second = useSharedCommandState({ bus: rejecting, errorCap: 2 });
 
-    // Three rejections against a cap of 2 → ring buffer trims to 2.
+    // Three rejections against a cap of 2 -> ring buffer trims to 2.
     await second.dispatch('a', {});
     await second.dispatch('b', {});
     await second.dispatch('c', {});
 
     expect(second.errors.value).toHaveLength(2);
     expect(second.errorCount.value).toBe(2);
-    // Same shared entry — the first caller observes the same trimmed buffer.
+    // Same shared entry - the first caller observes the same trimmed buffer.
     expect(first.errors.value).toHaveLength(2);
 
     first.dispose();
@@ -132,7 +132,7 @@ describe('useSharedCommandState', () => {
 });
 
 // ---------------------------------------------------------------------------
-// useCommandGroup — name cache eviction
+// useCommandGroup - name cache eviction
 // ---------------------------------------------------------------------------
 
 describe('useCommandGroup name cache', () => {
@@ -144,7 +144,7 @@ describe('useCommandGroup name cache', () => {
 
     const group = useCommandGroup('shop');
     for (let i = 0; i < 260; i++) group.dispatch(`act${i}`, {});
-    // Re-dispatch the first action — evicted from the cache, so this re-derives
+    // Re-dispatch the first action - evicted from the cache, so this re-derives
     // (and re-caches) the prefixed name rather than hitting a stale entry.
     group.dispatch('act0', {});
 
@@ -155,7 +155,7 @@ describe('useCommandGroup name cache', () => {
 });
 
 // ---------------------------------------------------------------------------
-// useCommandHistory — redo payload variants
+// useCommandHistory - redo payload variants
 // ---------------------------------------------------------------------------
 
 describe('useCommandHistory redo payload marking', () => {
@@ -164,7 +164,7 @@ describe('useCommandHistory redo payload marking', () => {
     // `{ qty: 2, __origin: 'redo' }`. That pinned the MECHANISM (spreading a
     // marker key into the caller's payload), not the contract. The marker now
     // travels out-of-band via `_withOrigin`, so the replayed payload is the
-    // caller's original object — same identity, no injected key — and
+    // caller's original object - same identity, no injected key - and
     // `meta.origin` carries the attribution the hook actually reads.
     const bus = createCommandBus();
     setCommandBus(bus);
@@ -204,7 +204,7 @@ describe('useCommandHistory redo payload marking', () => {
     history.redo();
 
     expect(payloads).toHaveLength(2);
-    // Cannot carry the marker — the handler must see the original array.
+    // Cannot carry the marker - the handler must see the original array.
     expect(payloads[1]).toBe(arr);
     // The one-shot identity match consumed the redo: undo still walks back one step.
     expect(history.canUndo.value).toBe(true);
@@ -241,12 +241,12 @@ describe('KeepAlive wiring through configureVue', () => {
     bus.dispatch('fail', {});
     expect(capture.errors.value).toHaveLength(1);
 
-    // Deactivated — errors are not captured.
+    // Deactivated - errors are not captured.
     pause!();
     bus.dispatch('fail', {});
     expect(capture.errors.value).toHaveLength(1);
 
-    // Reactivated — capture resumes; overflow trims to errorCap.
+    // Reactivated - capture resumes; overflow trims to errorCap.
     resume!();
     bus.dispatch('fail', {});
     bus.dispatch('fail', {});
@@ -274,7 +274,7 @@ describe('KeepAlive wiring through configureVue', () => {
 });
 
 // ---------------------------------------------------------------------------
-// readGlobal — throwing global getter
+// readGlobal - throwing global getter
 // ---------------------------------------------------------------------------
 
 describe('IIFE flag at module load', () => {
@@ -296,7 +296,7 @@ describe('wireUntracked peer-shape guard', () => {
     try {
       const chamber = await import('../src/chamber');
       await chamber.waitForVueDetection();
-      // Not wired — untracked stays a pass-through instead of pausing tracking.
+      // Not wired - untracked stays a pass-through instead of pausing tracking.
       expect(chamber.untracked(() => 5)).toBe(5);
     } finally {
       vi.doUnmock('@vue/reactivity');

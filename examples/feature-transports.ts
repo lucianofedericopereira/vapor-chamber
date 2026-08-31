@@ -1,9 +1,9 @@
 /**
  * Feature example: Transport plugins
  * ====================================
- * createHttpBridge — fetch-based HTTP transport
- * createWsBridge   — WebSocket transport with reconnect
- * createSseBridge  — Server-sent events for server push
+ * createHttpBridge - fetch-based HTTP transport
+ * createWsBridge   - WebSocket transport with reconnect
+ * createSseBridge  - Server-sent events for server push
  */
 
 import { createAsyncCommandBus, createCommandBus } from 'vapor-chamber'
@@ -27,16 +27,16 @@ httpBus.use(createHttpBridge({
   actions: ['cart*', 'order*'],      // only these are forwarded to the server
 }))
 
-// The bridge handles every command matching `actions` itself — it does NOT
+// The bridge handles every command matching `actions` itself - it does NOT
 // fall through to local handlers. Anything that must stay local needs a name
 // outside the forwarded globs.
 httpBus.register('uiCartApply', async (cmd) => {
-  // 'uiCartApply' matches neither 'cart*' nor 'order*' → runs locally
+  // 'uiCartApply' matches neither 'cart*' nor 'order*' -> runs locally
   return { applied: true, item: cmd.target }
 })
 
-await httpBus.dispatch('cartAdd', { id: 1 }, { qty: 2 })    // → POST /api/vc
-await httpBus.dispatch('uiCartApply', { id: 99 })            // → local only
+await httpBus.dispatch('cartAdd', { id: 1 }, { qty: 2 })    // -> POST /api/vc
+await httpBus.dispatch('uiCartApply', { id: 99 })            // -> local only
 
 // ─── WebSocket Bridge ─────────────────────────────────────────────────────────
 
@@ -52,7 +52,7 @@ const wsBridge = createWsBridge({
 })
 
 wsBus.use(wsBridge)
-wsBridge.connect()                // explicit connect — allows deferring connection
+wsBridge.connect()                // explicit connect - allows deferring connection
 
 // Commands are queued during disconnect and flushed on reconnect
 await wsBus.dispatch('chatSend', { roomId: 'general' }, { text: 'Hello!' })
@@ -106,7 +106,7 @@ const productionSse = createSseBridge({
     bus.dispatch(command, target)
   },
 })
-productionSse.install(productionBus) // accepts BaseBus — no cast needed
+productionSse.install(productionBus) // accepts BaseBus - no cast needed
 
 // Commands flow out via HTTP; server events flow in via SSE
 // Full bidirectional without WebSocket complexity

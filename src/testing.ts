@@ -47,19 +47,19 @@ export interface TestBus extends CommandBus<any> {
   getDispatched(action: string): RecordedDispatch[];
   /** Clear the recorded list and listeners */
   clear(): void;
-  /** Read-only dispatch — skips beforeHooks, runs handler + plugins, fires afterHooks. */
+  /** Read-only dispatch - skips beforeHooks, runs handler + plugins, fires afterHooks. */
   query(action: string, target: any, payload?: any): CommandResult;
-  /** Fire a domain event — notifies on() listeners, no handler required, no result. */
+  /** Fire a domain event - notifies on() listeners, no handler required, no result. */
   emit(event: string, data?: any): void;
   /** Returns all registered action names. */
   registeredActions(): string[];
   /**
-   * Snapshot — returns a deep-cloned, serializable copy of the recorded list.
+   * Snapshot - returns a deep-cloned, serializable copy of the recorded list.
    * Safe to compare with `toEqual` in any test framework.
    */
   snapshot(): RecordedDispatch[];
   /**
-   * travelTo — returns the ordered list of commands from dispatch index 0
+   * travelTo - returns the ordered list of commands from dispatch index 0
    * through `index` (inclusive). Useful for asserting the sequence of events
    * that led to a particular state.
    *
@@ -67,11 +67,11 @@ export interface TestBus extends CommandBus<any> {
    */
   travelTo(index: number): Command[];
   /**
-   * travelToAction — returns all commands dispatched up to and including
+   * travelToAction - returns all commands dispatched up to and including
    * the last occurrence of `action`. Useful for "what happened before this action".
    */
   travelToAction(action: string): Command[];
-  /** Full topology snapshot — actions, plugins, hooks, listeners, seal state. */
+  /** Full topology snapshot - actions, plugins, hooks, listeners, seal state. */
   inspect(): BusInspection;
 }
 
@@ -106,7 +106,7 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
         console.error('[vapor-chamber/test] Hook error:', e);
       }
     }
-    // once() splices itself out mid-iteration — adjust index when array shrinks
+    // once() splices itself out mid-iteration - adjust index when array shrinks
     const pl = patternListeners;
     for (let i = 0; i < pl.length; i++) {
       const entry = pl[i];
@@ -131,14 +131,14 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
 
   function _dispatchInner(action: string, target: any, payload?: any): CommandResult {
     // Stamped exactly like the real buses. Without meta, every meta consumer
-    // takes its defensive no-op branch under test and NOTHING FAILS — the
+    // takes its defensive no-op branch under test and NOTHING FAILS - the
     // `idempotent` plugin never stamps a key, the outbox never sets its replay
     // key, the HTTP bridge never forwards `Idempotency-Key`. A test wiring
     // those plugins to a TestBus exercised the degraded path and passed,
     // verifying nothing about the behaviour it named.
     const cmd: Command = { action, target, payload, meta: _stampMeta(payload) };
 
-    // Run beforeHooks — throw cancels dispatch
+    // Run beforeHooks - throw cancels dispatch
     const bh = beforeHooks;
     for (let i = 0, len = bh.length; i < len; i++) {
       try { bh[i](cmd); }
@@ -171,7 +171,7 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
 
   function query(action: string, target: any, payload?: any): CommandResult {
     const cmd: Command = { action, target, payload, meta: _stampMeta(payload) };
-    // Skip beforeHooks — reads don't trigger mutation gates
+    // Skip beforeHooks - reads don't trigger mutation gates
     const handler = handlers.get(action);
     const execute = (): CommandResult => {
       if (handler && opts.passthroughHandlers) {

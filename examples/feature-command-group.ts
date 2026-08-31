@@ -1,5 +1,5 @@
 /**
- * Feature example: useCommandGroup — namespace isolation
+ * Feature example: useCommandGroup - namespace isolation
  * =======================================================
  * Prevents action name collisions across teams and feature modules.
  * Each group operates on the same shared bus but with a namespace prefix.
@@ -52,27 +52,27 @@ telemetry.register('event', (cmd) => {
   console.log('[telemetry]', cmd.target.name, cmd.target.params)
 })
 
-// ─── Dispatch — no prefix needed inside the group ─────────────────────────────
+// ─── Dispatch - no prefix needed inside the group ─────────────────────────────
 
 cart.dispatch('add', { id: 1, name: 'T-Shirt' }, { qty: 2 })
-// → dispatches 'cartAdd' on the shared bus
+// -> dispatches 'cartAdd' on the shared bus
 
 orders.dispatch('cancel', { id: 42 })
-// → dispatches 'ordersCancel'
+// -> dispatches 'ordersCancel'
 
 telemetry.dispatch('event', { name: 'page_view', params: { page: '/shop' } })
-// → dispatches 'telemetryEvent'
+// -> dispatches 'telemetryEvent'
 
 // Cross-namespace dispatch does NOT trigger handlers (isolated):
 orders.dispatch('add', { id: 99 })
-// → dispatches 'ordersAdd' — no handler registered, dead-letter
+// -> dispatches 'ordersAdd' - no handler registered, dead-letter
 
 // ─── Subscribe to a namespace with on() ───────────────────────────────────────
 
 cart.on('*', (cmd, result) => {
   console.log('[audit] cart command:', cmd.action, result.ok ? '✓' : '✗')
 })
-// Listens to 'cart*' — only cart commands
+// Listens to 'cart*' - only cart commands
 
 // ─── Cleanup on component unmount ─────────────────────────────────────────────
 // useCommandGroup registers cleanup via onScopeDispose automatically.

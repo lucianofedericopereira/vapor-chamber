@@ -1,5 +1,5 @@
 /**
- * vapor-chamber — Offline outbox
+ * vapor-chamber - Offline outbox
  *
  * Queue commands durably while offline, replay them in order on reconnect,
  * and deduplicate server-side via the Idempotency-Key header.
@@ -25,7 +25,7 @@ function makeActionFilter(patterns: string[] | undefined): (action: string) => b
   return (action: string) => patterns.some(p => matchesPattern(p, action));
 }
 
-/** Lightweight unique record ID — timestamp + random suffix (same style as the WS bridge). */
+/** Lightweight unique record ID - timestamp + random suffix (same style as the WS bridge). */
 function genId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
 }
@@ -35,7 +35,7 @@ function genId(): string {
 // ---------------------------------------------------------------------------
 
 /**
- * A queued command awaiting replay. JSON-serializable by design — `target` and
+ * A queued command awaiting replay. JSON-serializable by design - `target` and
  * `payload` round-trip through the storage adapter, so keep them plain data
  * (no functions, no DOM nodes) for actions routed through the outbox.
  */
@@ -59,7 +59,7 @@ export type OutboxRecord = {
 };
 
 /**
- * Durable storage for the outbox queue. All methods may be sync or async —
+ * Durable storage for the outbox queue. All methods may be sync or async -
  * the outbox awaits them either way. `load()` returns `null` when nothing is
  * persisted (or the backing store is unavailable, e.g. SSR).
  */
@@ -70,7 +70,7 @@ export type OutboxStorage = {
 };
 
 /**
- * localStorageOutbox — default storage adapter: the whole queue as one JSON
+ * localStorageOutbox - default storage adapter: the whole queue as one JSON
  * value in `localStorage`. SSR-safe: when `localStorage` is unavailable,
  * `load()` returns null and `save()`/`clear()` are no-ops (with a console
  * warning on save failure, e.g. quota exceeded).
@@ -118,7 +118,7 @@ export function localStorageOutbox(storageKey: string = 'vc:outbox'): OutboxStor
 }
 
 /**
- * indexedDbOutbox — zero-dependency IndexedDB adapter. Stores the whole queue
+ * indexedDbOutbox - zero-dependency IndexedDB adapter. Stores the whole queue
  * as one value under a fixed key, so reads and writes are single-transaction
  * and atomic. Prefer this over `localStorageOutbox` when queued payloads are
  * large (localStorage has a ~5 MB origin quota and synchronous I/O).
@@ -142,7 +142,7 @@ export function indexedDbOutbox(dbName: string = 'vc-outbox', storeName: string 
       dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
         const idb: IDBFactory | undefined = (globalThis as any).indexedDB;
         if (!idb) {
-          dbPromise = null; // don't cache the failure — a later call may run where IDB exists
+          dbPromise = null; // don't cache the failure - a later call may run where IDB exists
           reject(new Error('indexedDB is not available in this environment'));
           return;
         }
@@ -202,19 +202,19 @@ export type OutboxOptions = {
   isOnline?: () => boolean;
   /**
    * Listen for the window `'online'` event and `flush()` automatically once a
-   * bus ref exists (via `install()`). Default: true. No timers, no polling —
+   * bus ref exists (via `install()`). Default: true. No timers, no polling -
    * the listener is removed by `dispose()`.
    */
   autoFlush?: boolean;
   /**
    * Derive the idempotency key stored on each record and replayed to the
-   * backend. Default: `commandKey(action, target)` — the same convention the
+   * backend. Default: `commandKey(action, target)` - the same convention the
    * `idempotent()` plugin uses, so both layers agree on what "the same
    * logical command" means.
    */
   key?: (cmd: Command) => string;
   /**
-   * Max queued records — bounded memory. When exceeded, the OLDEST record is
+   * Max queued records - bounded memory. When exceeded, the OLDEST record is
    * dropped with a console warning. Default: 200.
    */
   maxQueue?: number;
@@ -223,8 +223,8 @@ export type OutboxOptions = {
 /** The object returned by {@link createOutbox}. */
 export type Outbox = {
   /**
-   * The outbox plugin. Install OUTERMOST — before `idempotent()` and the
-   * transport — so offline commands are captured before any wire work:
+   * The outbox plugin. Install OUTERMOST - before `idempotent()` and the
+   * transport - so offline commands are captured before any wire work:
    * `bus.use(outbox.plugin, { priority: 200 })`.
    */
   plugin: AsyncPlugin;
@@ -235,11 +235,11 @@ export type Outbox = {
    * through the full pipeline with its ORIGINAL idempotency key stamped on
    * `cmd.meta.idempotencyKey`, so the HTTP bridge sends the same
    * `Idempotency-Key` the backend may have already seen. The first failed
-   * replay stops the flush — that record and everything after it stay queued.
+   * replay stops the flush - that record and everything after it stay queued.
    * Re-entrant calls join the in-progress flush.
    */
   flush(bus?: AsyncCommandBus): Promise<{ replayed: number; failed: number }>;
-  /** Reactive queue depth — bindable in templates ("3 changes pending sync"). */
+  /** Reactive queue depth - bindable in templates ("3 changes pending sync"). */
   pending: Signal<number>;
   /** Load the persisted queue from storage. Call once at startup, before the first flush. */
   hydrate(): Promise<void>;
@@ -250,10 +250,10 @@ export type Outbox = {
 };
 
 /**
- * createOutbox — offline outbox: queue commands durably while offline, replay
+ * createOutbox - offline outbox: queue commands durably while offline, replay
  * them in order on reconnect, deduplicate server-side via Idempotency-Key.
  *
- * While offline (or while queued records exist — later commands must not
+ * While offline (or while queued records exist - later commands must not
  * overtake earlier ones), matching dispatches are intercepted before the
  * transport: the command is recorded, persisted, stamped with an idempotency
  * key, and resolved as `{ ok: true, value: { queued: true, id } }`. The
@@ -264,7 +264,7 @@ export type Outbox = {
  * applied. `'outboxFlushed'` fires with the `{ replayed, failed }` summary.
  *
  * Failure-safe: the first failed replay (an `ok: false` result or a throw)
- * stops the flush and keeps that record plus everything behind it queued —
+ * stops the flush and keeps that record plus everything behind it queued -
  * order is never reshuffled, and the next flush retries from the same spot.
  *
  * SSR-safe: no window/navigator access at module load; the `'online'`
@@ -280,7 +280,7 @@ export type Outbox = {
  * await outbox.hydrate();                                // restore a previous session's queue
  * const result = await bus.dispatch('cartAdd', { id: 1 }, { qty: 2 });
  * if (result.ok && result.value?.queued) {
- *   toast(`Saved offline — ${outbox.pending.value} pending`);
+ *   toast(`Saved offline - ${outbox.pending.value} pending`);
  * }
  * // back online: the 'online' event flushes automatically (autoFlush: true)
  */
@@ -303,7 +303,7 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
   /**
    * The record currently being re-dispatched by `flush()`. The plugin lets
    * exactly one matching command through per replay (claim-once), identified
-   * by action + target identity — flush passes `record.target` by reference,
+   * by action + target identity - flush passes `record.target` by reference,
    * so a concurrent user dispatch of the same action can't steal the claim
    * (it queues behind instead, preserving order).
    */
@@ -338,13 +338,13 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
     // devtools) sees the same key the eventual replay will carry.
     //
     // `meta!` rather than `if (cmd.meta)`: `Command.meta` is optional on the
-    // shared type because the FAST LANE omits it — but the fast lane drops the
+    // shared type because the FAST LANE omits it - but the fast lane drops the
     // plugin chain entirely and never allocates a Command, and `enqueue` is
     // private to this closure, reachable only from the plugin below. So every
     // command arriving here came through a normal dispatch, where stampMeta
     // runs unconditionally in the synchronous prologue. The old runtime guard
     // could not fire; if that invariant ever breaks, this throws loudly rather
-    // than silently dropping the idempotency key — which is the one thing that
+    // than silently dropping the idempotency key - which is the one thing that
     // must not happen quietly on a queued write.
     cmd.meta!.idempotencyKey = record.key;
     busRef?.emit('outboxQueued', record);
@@ -354,12 +354,12 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
   const plugin: AsyncPlugin = (cmd, next) => {
     if (!matchesActions(cmd.action)) return next();
 
-    // Replay path — let the flush's own re-dispatch through, stamped with the
+    // Replay path - let the flush's own re-dispatch through, stamped with the
     // record's ORIGINAL key so the backend sees the same Idempotency-Key.
     const replay = currentReplay;
     if (replay !== null && !replay.claimed && cmd.action === replay.record.action && cmd.target === replay.record.target) {
       replay.claimed = true;
-      // Same invariant as enqueue() above — the replay is issued by runFlush as
+      // Same invariant as enqueue() above - the replay is issued by runFlush as
       // an ordinary `bus.dispatch(...)`, so meta is always stamped. Losing the
       // key here would send a replay with no Idempotency-Key, i.e. exactly the
       // duplicate-execution the outbox exists to prevent.
@@ -370,7 +370,7 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
       return next();
     }
 
-    // Online with an empty queue: normal dispatch, untouched. Otherwise queue —
+    // Online with an empty queue: normal dispatch, untouched. Otherwise queue -
     // either we're offline, or earlier records exist (possibly mid-flush) and a
     // new command must not overtake them.
     if (isOnline() && queue.length === 0) return next();
@@ -384,7 +384,7 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
     // stays queued until its replay succeeds, so commands dispatched DURING the
     // flush land behind it (the plugin sees a non-empty queue).
     while (queue.length > 0) {
-      if (!isOnline()) break; // went offline mid-flush — leave the rest queued
+      if (!isOnline()) break; // went offline mid-flush - leave the rest queued
       const record = queue[0];
       currentReplay = { record, claimed: false };
       let result: CommandResult;
@@ -432,7 +432,7 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
     try { loaded = await storage.load(); }
     catch (e) { console.warn('[vapor-chamber] outbox: failed to hydrate queue:', e); }
     if (Array.isArray(loaded) && loaded.length > 0) {
-      // Persisted records predate anything queued this session — they go first.
+      // Persisted records predate anything queued this session - they go first.
       queue = loaded.concat(queue);
       enforceBound();
       pending.value = queue.length;
@@ -446,7 +446,7 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
     catch (e) { console.warn('[vapor-chamber] outbox: failed to clear storage:', e); }
   }
 
-  // Window 'online' listener — attached once at creation (SSR-safe: only when a
+  // Window 'online' listener - attached once at creation (SSR-safe: only when a
   // window exists), removed by dispose(). No timers, no polling.
   let onlineHandler: (() => void) | null = null;
   if (autoFlush && typeof window !== 'undefined' && typeof window.addEventListener === 'function') {

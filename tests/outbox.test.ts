@@ -24,10 +24,10 @@ function memoryStorage(initial: OutboxRecord[] | null = null) {
 }
 
 // ---------------------------------------------------------------------------
-// createOutbox — queueing
+// createOutbox - queueing
 // ---------------------------------------------------------------------------
 
-describe('createOutbox — queueing', () => {
+describe('createOutbox - queueing', () => {
   it('queues matching commands while offline, returns { queued: true }, bumps pending, persists', async () => {
     const storage = memoryStorage();
     const outbox = createOutbox({ actions: ['cart*'], storage, isOnline: () => false, autoFlush: false });
@@ -107,7 +107,7 @@ describe('createOutbox — queueing', () => {
   });
 
   it('ignores an "online" event when no bus has been installed yet', async () => {
-    // `if (busRef) void flush()` inside the online handler — the false arm.
+    // `if (busRef) void flush()` inside the online handler - the false arm.
     // The listener is attached at CREATION, but install() is a separate call,
     // so a reconnect between the two arrives with nothing to flush into. It
     // must no-op rather than throw.
@@ -126,14 +126,14 @@ describe('createOutbox — queueing', () => {
     expect(() => listeners.online![0]!()).not.toThrow();
     await new Promise((r) => setTimeout(r, 0));
 
-    // Nothing was replayed — there is no bus to replay into.
+    // Nothing was replayed - there is no bus to replay into.
     expect(storage.data).toHaveLength(1);
   });
 
   it('flushes on the window "online" event when autoFlush is on', async () => {
     // The `autoFlush && typeof window !== 'undefined' && addEventListener`
     // chain. Every other outbox test passes `autoFlush: false` and runs under
-    // `node`, so the listener was never attached — meaning the feature that
+    // `node`, so the listener was never attached - meaning the feature that
     // makes the outbox self-healing had no coverage at all.
     const listeners: Record<string, Array<() => void>> = {};
     vi.stubGlobal('window', {
@@ -166,7 +166,7 @@ describe('createOutbox — queueing', () => {
   });
 
   it('assumes online when there is no navigator at all', async () => {
-    // `typeof navigator !== 'undefined' ? navigator.onLine : true` — the `true`
+    // `typeof navigator !== 'undefined' ? navigator.onLine : true` - the `true`
     // arm. The default probe has to work under SSR/Node, where assuming OFFLINE
     // would queue every command on the server and never flush them.
     vi.stubGlobal('navigator', undefined);
@@ -216,10 +216,10 @@ describe('createOutbox — queueing', () => {
 });
 
 // ---------------------------------------------------------------------------
-// createOutbox — flush / replay
+// createOutbox - flush / replay
 // ---------------------------------------------------------------------------
 
-describe('createOutbox — flush', () => {
+describe('createOutbox - flush', () => {
   it('replays in FIFO order with the original idempotency keys visible downstream', async () => {
     const storage = memoryStorage();
     let online = false;
@@ -295,10 +295,10 @@ describe('createOutbox — flush', () => {
   });
 
   // The test above fails a replay by throwing inside the HANDLER, which the
-  // async bus converts into a resolved `{ ok: false }` — so runFlush's
+  // async bus converts into a resolved `{ ok: false }` - so runFlush's
   // `try/catch` around `bus.dispatch` never ran. A throwing PLUGIN is
   // different: it makes the dispatch promise REJECT, which is the only way
-  // that catch is reachable. It is not hypothetical — any plugin installed
+  // that catch is reachable. It is not hypothetical - any plugin installed
   // downstream of the outbox (transport, auth, serializer) can throw on a
   // replay that happens minutes after the command was queued.
   it('survives a replay whose dispatch REJECTS, treating it as a failed record', async () => {
@@ -327,7 +327,7 @@ describe('createOutbox — flush', () => {
     online = true;
     const first = await outbox.flush();
 
-    // The rejection was caught and turned into a failed record — the flush
+    // The rejection was caught and turned into a failed record - the flush
     // returned a summary instead of rejecting, and nothing was lost.
     expect(first).toEqual({ replayed: 0, failed: 1 });
     expect(runs).toEqual([]); // the handler never ran; the plugin threw first
@@ -343,7 +343,7 @@ describe('createOutbox — flush', () => {
   });
 
   it('wraps a non-Error rejection value in an Error rather than storing it raw', async () => {
-    // `e instanceof Error ? e : new Error(String(e))` — the else arm. A plugin
+    // `e instanceof Error ? e : new Error(String(e))` - the else arm. A plugin
     // that rejects with a string (or a framework that throws a plain object)
     // must not put a non-Error into the failure path.
     const storage = memoryStorage();
@@ -377,7 +377,7 @@ describe('createOutbox — flush', () => {
     const runs: string[] = [];
     bus.register('a', async () => {
       runs.push('a');
-      // New dispatch DURING the flush — must queue behind 'b', not run now.
+      // New dispatch DURING the flush - must queue behind 'b', not run now.
       const r = await bus.dispatch('c', { n: 3 });
       expect(r.ok).toBe(true);
       expect(r.value).toMatchObject({ queued: true });
@@ -410,10 +410,10 @@ describe('createOutbox — flush', () => {
 });
 
 // ---------------------------------------------------------------------------
-// createOutbox — hydrate / dispose / autoFlush
+// createOutbox - hydrate / dispose / autoFlush
 // ---------------------------------------------------------------------------
 
-describe('createOutbox — hydrate and lifecycle', () => {
+describe('createOutbox - hydrate and lifecycle', () => {
   it('hydrate() restores a persisted queue and flush replays it with the original key', async () => {
     const record: OutboxRecord = {
       id: 'r1',
@@ -473,7 +473,7 @@ describe('createOutbox — hydrate and lifecycle', () => {
     outbox.dispose();
     expect(remove).toHaveBeenCalledWith('online', add.mock.calls[0][1]);
 
-    outbox.dispose(); // idempotent — no second removal
+    outbox.dispose(); // idempotent - no second removal
     expect(remove).toHaveBeenCalledOnce();
   });
 
@@ -523,7 +523,7 @@ describe('localStorageOutbox', () => {
     expect(await s.load()).toBeNull();
   });
 
-  it('is SSR-safe: no localStorage → load() returns null, save/clear are no-ops', async () => {
+  it('is SSR-safe: no localStorage -> load() returns null, save/clear are no-ops', async () => {
     const s = localStorageOutbox();
     expect(await s.load()).toBeNull();
     await expect(Promise.resolve(s.save([record]))).resolves.toBeUndefined();
@@ -554,7 +554,7 @@ describe('localStorageOutbox', () => {
 });
 
 // ---------------------------------------------------------------------------
-// indexedDbOutbox — smoke test with a minimal in-memory fake (no deps)
+// indexedDbOutbox - smoke test with a minimal in-memory fake (no deps)
 // ---------------------------------------------------------------------------
 
 /** Minimal fake IDB: enough surface for open/upgrade + get/put/clear requests. */
@@ -602,7 +602,7 @@ describe('indexedDbOutbox', () => {
   });
 
   it('surfaces a generic Error when open() fails with no req.error', async () => {
-    // `reject(req.error ?? new Error('indexedDB open failed'))` — the `??`
+    // `reject(req.error ?? new Error('indexedDB open failed'))` - the `??`
     // fallback. A failed open normally carries a DOMException, but private
     // browsing / quota refusals can fire onerror with `error` still null, and
     // rejecting with `null` would surface as an unreadable failure downstream.
@@ -624,7 +624,7 @@ describe('indexedDbOutbox', () => {
     warn.mockRestore();
   });
 
-  it('is SSR-safe: no indexedDB → load() resolves null, save/clear warn but do not throw', async () => {
+  it('is SSR-safe: no indexedDB -> load() resolves null, save/clear warn but do not throw', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const s = indexedDbOutbox();
     expect(await s.load()).toBeNull();
@@ -661,10 +661,10 @@ describe('indexedDbOutbox', () => {
 });
 
 // ---------------------------------------------------------------------------
-// createOutbox — key derivation and replay failure shapes
+// createOutbox - key derivation and replay failure shapes
 // ---------------------------------------------------------------------------
 
-describe("createOutbox — custom key + non-Error replay failure", () => {
+describe("createOutbox - custom key + non-Error replay failure", () => {
   it("uses a supplied key() instead of the default commandKey", async () => {
     const storage = memoryStorage();
     const outbox = createOutbox({
@@ -672,7 +672,7 @@ describe("createOutbox — custom key + non-Error replay failure", () => {
       storage,
       isOnline: () => false,
       autoFlush: false,
-      // A caller-supplied idempotency key — e.g. one the backend already knows.
+      // A caller-supplied idempotency key - e.g. one the backend already knows.
       key: (cmd) => `custom:${cmd.action}:${(cmd.target as { id: number }).id}`,
     });
     const bus = createAsyncCommandBus({ onMissing: "ignore" });
@@ -687,7 +687,7 @@ describe("createOutbox — custom key + non-Error replay failure", () => {
 
 });
 
-/** Fake IDB whose open() fails — private browsing, quota, corrupted profile. */
+/** Fake IDB whose open() fails - private browsing, quota, corrupted profile. */
 function failingOpenIndexedDb() {
   return {
     open: () => {
@@ -719,7 +719,7 @@ function failingRequestIndexedDb() {
   };
 }
 
-describe("indexedDbOutbox — failure paths", () => {
+describe("indexedDbOutbox - failure paths", () => {
   const record: OutboxRecord = { id: "r1", action: "a", target: { n: 1 }, key: "k", queuedAt: 1 };
 
   it("a failed open() surfaces as a warning, not a throw, and does not poison later attempts", async () => {
@@ -751,7 +751,7 @@ describe("indexedDbOutbox — failure paths", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Storage failures are warnings, never throws — the queue must outlive them
+// Storage failures are warnings, never throws - the queue must outlive them
 // ---------------------------------------------------------------------------
 
 describe("storage failure paths", () => {

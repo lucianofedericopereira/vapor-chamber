@@ -1,22 +1,22 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE — the transition bridge bound to a REAL mounted `<Transition>`.
+ * FIXTURE - the transition bridge bound to a REAL mounted `<Transition>`.
  *
  * WHY THIS FILE EXISTS. `tests/transitions.test.ts` covers all nine hooks, the
- * phase signal and the done() paths — but every one of those tests calls the
+ * phase signal and the done() paths - but every one of those tests calls the
  * hooks directly on a mock element (`{ tagName: 'DIV' }`). Nothing in the suite
  * ever handed the bridge to Vue. So the one thing this module's own docs tell
- * you to write — `<Transition v-bind="t">` — had no coverage at all, and a
+ * you to write - `<Transition v-bind="t">` - had no coverage at all, and a
  * defect living exactly there survived 1750 passing tests.
  *
  * The defect: `v-bind="obj"` spreads an object's own ENUMERABLE keys as props.
  * The nine `on*` hooks match `<Transition>`'s declared props; `phase` and
  * `dispose` match nothing, so they fell through as ATTRIBUTES and were
- * stringified into the DOM —
+ * stringified into the DOM -
  *
  *     <div class="panel" phase="[object Object]" dispose="() => {}">hi</div>
  *
- * — on every consumer following the documented usage since v1.1.0. Fixed by
+ * - on every consumer following the documented usage since v1.1.0. Fixed by
  * defining both as non-enumerable (see `assembleBridge` in src/transitions.ts).
  *
  * This is the same lesson the rc.4 KeepAlive bug taught, applied preemptively:
@@ -60,7 +60,7 @@ describe('transition bridge bound to a real <Transition>', () => {
     app.unmount();
   });
 
-  it('still delivers the hooks to Vue — the binding must keep working', async () => {
+  it('still delivers the hooks to Vue - the binding must keep working', async () => {
     const bus = createCommandBus({ onMissing: 'ignore' });
     const dispatched: string[] = [];
     bus.onAfter((cmd) => dispatched.push(cmd.action));
@@ -85,7 +85,7 @@ describe('transition bridge bound to a real <Transition>', () => {
     const bus = createCommandBus({ onMissing: 'ignore' });
     const bridge = createTransitionBridge({ bus, namespace: 'modal' });
 
-    // Direct access — the documented `modal.phase.value` template read.
+    // Direct access - the documented `modal.phase.value` template read.
     expect(bridge.phase.value).toBe('idle');
     expect(typeof bridge.dispose).toBe('function');
 
@@ -95,7 +95,7 @@ describe('transition bridge bound to a real <Transition>', () => {
     expect(() => dispose()).not.toThrow();
 
     // The intentional casualty, pinned so it is a decision and not a surprise:
-    // spreading no longer carries them — which is the whole fix.
+    // spreading no longer carries them - which is the whole fix.
     expect(Object.keys({ ...bridge })).not.toContain('phase');
     expect(Object.keys(bridge)).toEqual([
       'onBeforeEnter', 'onEnter', 'onAfterEnter', 'onEnterCancelled',

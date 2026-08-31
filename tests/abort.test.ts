@@ -1,10 +1,10 @@
 /**
- * AbortController integration — async bus + HTTP bridge propagation.
+ * AbortController integration - async bus + HTTP bridge propagation.
  *
  * Locks v1.2.x behavior:
- *   • Pre-aborted signal → resolves immediately with VC_CORE_ABORTED, handler not invoked.
- *   • Mid-flight abort → handler observes `cmd.signal.aborted === true`.
- *   • HTTP bridge auto-propagates `cmd.signal` to fetch — no manual wiring required.
+ *   • Pre-aborted signal -> resolves immediately with VC_CORE_ABORTED, handler not invoked.
+ *   • Mid-flight abort -> handler observes `cmd.signal.aborted === true`.
+ *   • HTTP bridge auto-propagates `cmd.signal` to fetch - no manual wiring required.
  *   • After-hooks fire even for aborted dispatches (observability stays intact).
  *
  * Out of scope (deferred to v1.3):
@@ -17,7 +17,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createAsyncCommandBus, createCommandBus, BusError, type Command } from '../src/command-bus';
 import { createHttpBridge, createWsBridge } from '../src/transports';
 
-describe('AbortController — async dispatch', () => {
+describe('AbortController - async dispatch', () => {
   it('pre-aborted signal short-circuits with VC_CORE_ABORTED, handler is NOT called', async () => {
     const bus = createAsyncCommandBus();
     const handler = vi.fn(async () => 'never');
@@ -64,7 +64,7 @@ describe('AbortController — async dispatch', () => {
             resolve();
           }
         }, 1);
-        // Safety net — never hang the test if abort never fires.
+        // Safety net - never hang the test if abort never fires.
         setTimeout(() => { clearInterval(t); resolve(); }, 200);
       });
       return 'completed';
@@ -108,7 +108,7 @@ describe('AbortController — async dispatch', () => {
     await bus.dispatch('plain', null);
     expect(captured?.signal).toBeUndefined();
 
-    // Now dispatch with a signal — make sure subsequent plain dispatch doesn't see it.
+    // Now dispatch with a signal - make sure subsequent plain dispatch doesn't see it.
     const ac = new AbortController();
     await bus.dispatch('plain', null, undefined, { signal: ac.signal });
     expect(captured?.signal).toBe(ac.signal);
@@ -129,7 +129,7 @@ describe('AbortController — async dispatch', () => {
   });
 });
 
-describe('AbortController — HTTP bridge auto-propagation', () => {
+describe('AbortController - HTTP bridge auto-propagation', () => {
   let originalFetch: typeof globalThis.fetch;
   beforeEach(() => { originalFetch = globalThis.fetch; });
   afterEach(() => { globalThis.fetch = originalFetch; });
@@ -149,7 +149,7 @@ describe('AbortController — HTTP bridge auto-propagation', () => {
 
     expect(capturedInit?.signal).toBeDefined();
     // The forwarded signal may be the original signal or an AbortSignal.any
-    // composition — both must be triggerable by aborting `ac`.
+    // composition - both must be triggerable by aborting `ac`.
     const forwarded = capturedInit!.signal as AbortSignal;
     expect(forwarded.aborted).toBe(false);
     ac.abort();
@@ -157,7 +157,7 @@ describe('AbortController — HTTP bridge auto-propagation', () => {
   });
 });
 
-describe('AbortController — sync bus accepts but ignores signal', () => {
+describe('AbortController - sync bus accepts but ignores signal', () => {
   it('sync dispatch with { signal } runs the handler regardless (signal is ignored)', () => {
     const bus = createCommandBus();
     const handler = vi.fn(() => 'ok');
@@ -166,7 +166,7 @@ describe('AbortController — sync bus accepts but ignores signal', () => {
     const ac = new AbortController();
     ac.abort();
 
-    // Cast through `any` only because TS infers the strict generic — at runtime
+    // Cast through `any` only because TS infers the strict generic - at runtime
     // the BaseBus signature accepts the 4th arg; sync just discards the signal.
     const result = bus.dispatch('hot', null, undefined, { signal: ac.signal });
 
@@ -175,7 +175,7 @@ describe('AbortController — sync bus accepts but ignores signal', () => {
   });
 });
 
-describe('AbortController — bus.request() with signal', () => {
+describe('AbortController - bus.request() with signal', () => {
   it('pre-aborted signal short-circuits with VC_CORE_ABORTED, responder NOT called', async () => {
     const bus = createAsyncCommandBus();
     const responder = vi.fn(async () => 'never');
@@ -221,7 +221,7 @@ describe('AbortController — bus.request() with signal', () => {
   });
 });
 
-describe('AbortController — bus.dispatchBatch() with signal', () => {
+describe('AbortController - bus.dispatchBatch() with signal', () => {
   it('pre-aborted batch returns immediately with empty results', async () => {
     const bus = createAsyncCommandBus();
     const handler = vi.fn(async () => 'ok');
@@ -248,7 +248,7 @@ describe('AbortController — bus.dispatchBatch() with signal', () => {
     let calls = 0;
     bus.register('step', async (cmd) => {
       calls++;
-      // Simulate work — abort triggers between commands
+      // Simulate work - abort triggers between commands
       await new Promise(r => setTimeout(r, 5));
       return cmd.target;
     });
@@ -289,9 +289,9 @@ describe('AbortController — bus.dispatchBatch() with signal', () => {
   });
 });
 
-describe('AbortController — WS bridge propagation', () => {
+describe('AbortController - WS bridge propagation', () => {
   // Minimal fake WebSocket that the bridge can drive. We don't actually send
-  // anything — the test is about whether cmd.signal cancels the *waiting*.
+  // anything - the test is about whether cmd.signal cancels the *waiting*.
   class FakeWebSocket {
     static OPEN = 1;
     readyState = 1;
@@ -312,7 +312,7 @@ describe('AbortController — WS bridge propagation', () => {
   beforeEach(() => { originalWS = (globalThis as any).WebSocket; (globalThis as any).WebSocket = FakeWebSocket; });
   afterEach(() => { (globalThis as any).WebSocket = originalWS; });
 
-  it('pre-aborted signal short-circuits — message is NOT sent', async () => {
+  it('pre-aborted signal short-circuits - message is NOT sent', async () => {
     const bus = createAsyncCommandBus();
     const ws = createWsBridge({ url: 'ws://test' });
     ws.connect();
@@ -339,7 +339,7 @@ describe('AbortController — WS bridge propagation', () => {
     const ac = new AbortController();
     const dispatchPromise = bus.dispatch('cartAdd', { id: 1 }, undefined, { signal: ac.signal });
 
-    // No server → without abort, this would wait the full 10s timeout.
+    // No server -> without abort, this would wait the full 10s timeout.
     setTimeout(() => ac.abort(), 5);
 
     const start = Date.now();
@@ -353,7 +353,7 @@ describe('AbortController — WS bridge propagation', () => {
   });
 });
 
-describe('AbortController — child signal propagation pattern', () => {
+describe('AbortController - child signal propagation pattern', () => {
   it('handler can pass cmd.signal to nested dispatches for explicit propagation', async () => {
     const bus = createAsyncCommandBus();
     let childSawAbort = false;

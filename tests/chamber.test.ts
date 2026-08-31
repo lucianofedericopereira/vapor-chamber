@@ -199,7 +199,7 @@ describe('useCommandState', () => {
   });
 });
 
-describe('signal() factory — shallow reactivity', () => {
+describe('signal() factory - shallow reactivity', () => {
   beforeEach(() => {
     setCommandBus(createCommandBus());
   });
@@ -216,7 +216,7 @@ describe('signal() factory — shallow reactivity', () => {
     await waitForVueDetection();
     const s = signal({ nested: { n: 1 } });
     expect(isShallow(s)).toBe(true);
-    // shallow ⇒ nested value is the raw object, not a reactive proxy
+    // shallow => nested value is the raw object, not a reactive proxy
     expect(isReactive(s.value.nested)).toBe(false);
   });
 
@@ -312,7 +312,7 @@ describe('useCommandHistory', () => {
     bus.register('testAction', () => 'done');
     const { past, future, canUndo, canRedo, undo, redo } = useCommandHistory();
 
-    // Nothing recorded yet — both ends must be safe to call, since UI usually
+    // Nothing recorded yet - both ends must be safe to call, since UI usually
     // wires them straight to buttons that exist before any command runs.
     expect(undo()).toBeUndefined();
     expect(redo()).toBeUndefined();
@@ -337,7 +337,7 @@ describe('useCommandHistory', () => {
     expect(future.value).toHaveLength(1);
     expect(canRedo.value).toBe(true);
 
-    // Branching away from an undone timeline invalidates the redo path —
+    // Branching away from an undone timeline invalidates the redo path -
     // the same rule every editor uses.
     bus.dispatch('testAction', { id: 2 });
     expect(future.value).toHaveLength(0);
@@ -407,7 +407,7 @@ describe('useCommandHistory', () => {
     expect(count).toBe(1);
 
     undo();
-    // undo runs inverse handler if registered, but inc has no undo — count stays 1
+    // undo runs inverse handler if registered, but inc has no undo - count stays 1
     expect(count).toBe(1);
 
     redo();
@@ -491,7 +491,7 @@ describe('useCommandGroup', () => {
     expect(result.value).toEqual({ orderId: 7, status: 'pending' });
   });
 
-  it('isolates namespaces — cart handlers do not respond to order dispatches', () => {
+  it('isolates namespaces - cart handlers do not respond to order dispatches', () => {
     const bus = createCommandBus({ onMissing: 'ignore' });
     setCommandBus(bus);
 
@@ -555,7 +555,7 @@ describe('useCommandGroup', () => {
 
     expect(result.ok).toBe(true);
     expect(result.value).toBe(99);
-    // query skips onBefore — CQRS
+    // query skips onBefore - CQRS
     expect(beforeCalls).toHaveLength(0);
   });
 
@@ -749,16 +749,16 @@ describe('useCommandQuery', () => {
     const { query } = useCommandQuery();
     query('getUser', { id: 1 });
 
-    // query() skips onBefore — this is the CQRS distinction
+    // query() skips onBefore - this is the CQRS distinction
     expect(beforeCalls).toHaveLength(0);
   });
 });
 
 // ---------------------------------------------------------------------------
-// useCommandState — coalesce mode
+// useCommandState - coalesce mode
 // ---------------------------------------------------------------------------
 
-describe('useCommandState — coalesce', () => {
+describe('useCommandState - coalesce', () => {
   beforeEach(() => { setCommandBus(createCommandBus()); });
   afterEach(() => { resetCommandBus(); });
 
@@ -799,10 +799,10 @@ describe('useCommandState — coalesce', () => {
 });
 
 // ---------------------------------------------------------------------------
-// useCommandHistory — undo/redo with registered undo handler
+// useCommandHistory - undo/redo with registered undo handler
 // ---------------------------------------------------------------------------
 
-describe('useCommandHistory — undo handler execution', () => {
+describe('useCommandHistory - undo handler execution', () => {
   beforeEach(() => { setCommandBus(createCommandBus()); });
   afterEach(() => { resetCommandBus(); });
 

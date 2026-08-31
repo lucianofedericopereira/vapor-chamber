@@ -26,7 +26,7 @@ import { createCommandBus } from '../src/command-bus';
 afterEach(() => vi.restoreAllMocks());
 
 // ---------------------------------------------------------------------------
-// toCamel — leading-uppercase branch (line 90), reached via normalizeSchema
+// toCamel - leading-uppercase branch (line 90), reached via normalizeSchema
 // ---------------------------------------------------------------------------
 
 describe('toCamel leading-uppercase normalization', () => {
@@ -54,7 +54,7 @@ describe('toCamel leading-uppercase normalization', () => {
 });
 
 // ---------------------------------------------------------------------------
-// schemaLogger — else branches (lines 201, 208)
+// schemaLogger - else branches (lines 201, 208)
 // ---------------------------------------------------------------------------
 
 describe('schemaLogger else branches', () => {
@@ -64,7 +64,7 @@ describe('schemaLogger else branches', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'groupEnd').mockImplementation(() => {});
 
-    // Logger schema knows nothing about 'ping' → def is undefined → else branch.
+    // Logger schema knows nothing about 'ping' -> def is undefined -> else branch.
     bus.use(schemaLogger({ cartAdd: { target: { id: 'number' } } }));
     bus.register('ping', () => 'pong');
     bus.dispatch('ping', { anything: true });
@@ -82,7 +82,7 @@ describe('schemaLogger else branches', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'groupEnd').mockImplementation(() => {});
 
-    // def for 'cartClear' has a target but NO payload → payload else branch fires
+    // def for 'cartClear' has a target but NO payload -> payload else branch fires
     // when a payload is actually supplied on dispatch.
     bus.use(schemaLogger({ cartClear: { target: { force: 'boolean' } } }));
     bus.register('cartClear', () => 'cleared');
@@ -96,7 +96,7 @@ describe('schemaLogger else branches', () => {
 });
 
 // ---------------------------------------------------------------------------
-// createAsyncSchemaCommandBus.describe() — line 383
+// createAsyncSchemaCommandBus.describe() - line 383
 // ---------------------------------------------------------------------------
 
 describe('createAsyncSchemaCommandBus describe()', () => {
@@ -121,7 +121,7 @@ describe('createAsyncSchemaCommandBus describe()', () => {
 });
 
 // ---------------------------------------------------------------------------
-// getErrorEntry — lines 471-473
+// getErrorEntry - lines 471-473
 // ---------------------------------------------------------------------------
 
 describe('getErrorEntry', () => {
@@ -144,14 +144,14 @@ describe('getErrorEntry', () => {
   });
 
   it('returns undefined for an unknown code', () => {
-    // Cast — intentionally probing a code that is not in the registry.
+    // Cast - intentionally probing a code that is not in the registry.
     const entry = getErrorEntry('VC_NOT_A_REAL_CODE' as any);
     expect(entry).toBeUndefined();
   });
 });
 
 // ---------------------------------------------------------------------------
-// describeErrorCodes — lines 481-487
+// describeErrorCodes - lines 481-487
 // ---------------------------------------------------------------------------
 
 describe('describeErrorCodes', () => {
@@ -179,7 +179,7 @@ describe('describeErrorCodes', () => {
 });
 
 // ---------------------------------------------------------------------------
-// busApiSchema — lines 502-579
+// busApiSchema - lines 502-579
 // ---------------------------------------------------------------------------
 
 describe('busApiSchema', () => {

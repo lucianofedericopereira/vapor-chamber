@@ -1,9 +1,10 @@
 /**
- * vapor-chamber-router — composables. Vue 3.6-native: cleanup via
+ * vapor-chamber-router - composables. Vue 3.6-native: cleanup via
  * onScopeDispose directly, reads through the router's shallowRefs.
  */
 
 import { type Ref, computed, customRef, getCurrentScope, inject, onScopeDispose } from 'vue';
+import { routerError } from './errors';
 import { ROUTER_KEY } from './keys';
 import { type Breadcrumb, type MenuItem, buildBreadcrumbs, buildMenu } from './menu';
 import type { Router } from './router-type';
@@ -12,11 +13,14 @@ import { decodeQueryParam, encodeQueryParam, resolveQueryHistory } from './url';
 
 export function useRouter(): Router {
   const router = inject<Router>(ROUTER_KEY);
-  if (!router) throw new Error('[vapor-chamber-router] no router provided — did you app.use(router)?');
+  // Coded, like every other failure here: this was the one throw a handler
+  // could not switch on. routerError prepends the same prefix, so the message
+  // is byte-identical to the bare Error it replaces.
+  if (!router) throw routerError('no_router', 'no router provided - did you app.use(router)?');
   return router;
 }
 
-/** Reactive current location (URL state — outlets read snapshot.render). */
+/** Reactive current location (URL state - outlets read snapshot.render). */
 export function useRoute(): { readonly value: RouteLocation } {
   const router = useRouter();
   return computed(() => router.currentRoute.value.location);
@@ -27,7 +31,7 @@ export function useRoute(): { readonly value: RouteLocation } {
  * controls.
  *
  * Being an actual ref matters: refs returned from `setup()` are AUTO-UNWRAPPED
- * in templates, so `{{ page }}` works and `.value` is script-only — exactly
+ * in templates, so `{{ page }}` works and `.value` is script-only - exactly
  * like `useRoute()`, `useRouteData()` and every sibling composable. A
  * lookalike object with a `value` accessor does NOT unwrap, which made this
  * the one composable whose templates needed `.value`.
@@ -42,7 +46,7 @@ export type QueryParamHandle<T> = Ref<T> & {
 };
 
 /**
- * Typed, writable access to one query param through the query fast path —
+ * Typed, writable access to one query param through the query fast path -
  * never triggers matching, guards or remounts. Loaders whose template
  * depends on the key refetch automatically.
  */
@@ -63,7 +67,7 @@ export function useQueryParam<T = unknown>(key: string, def?: QueryParamDef): Qu
   // customRef, not a hand-rolled { get value() } object: this produces a
   // genuine ref (isRef() true), so templates unwrap it like every other
   // composable here. Dependency tracking still flows through
-  // `router.currentRoute` — read inside get(), so any effect reading this ref
+  // `router.currentRoute` - read inside get(), so any effect reading this ref
   // re-runs when a navigation commits; track()/trigger() are not the source of
   // truth, the URL is.
   const handle = customRef<T>((track, trigger) => ({
@@ -84,7 +88,7 @@ export function useQueryParam<T = unknown>(key: string, def?: QueryParamDef): Qu
 }
 
 /**
- * Loader data of the current route (two-phase committed — never the previous
+ * Loader data of the current route (two-phase committed - never the previous
  * page's data). By default the LEAF record's data; pass a record name when a
  * layout ancestor also loads.
  */
@@ -167,7 +171,7 @@ export type PaginationOptions<T> = {
 };
 
 export type Pagination<T> = {
-  /** Rows of the current page — the loader's, committed with the snapshot. */
+  /** Rows of the current page - the loader's, committed with the snapshot. */
   items: Readonly<Ref<readonly T[]>>;
   /** The page number, backed by the URL. Writable: `page.value = 3`. */
   page: QueryParamHandle<number>;
@@ -176,7 +180,7 @@ export type Pagination<T> = {
   lastPage: Readonly<Ref<number>>;
   hasNext: Readonly<Ref<boolean>>;
   hasPrev: Readonly<Ref<boolean>>;
-  /** Windowed page numbers for a pager UI; 0 marks an elision ("…"). */
+  /** Windowed page numbers for a pager UI; 0 marks an elision ("..."). */
   pageRange: Readonly<Ref<readonly number[]>>;
   /** True while a loader for the current navigation is in flight. */
   loading: Readonly<Ref<boolean>>;
@@ -189,7 +193,7 @@ export type Pagination<T> = {
  * Pagination over a loader-backed list, driven entirely by the URL.
  *
  * `page` is a query param, so a page change is STATE, not navigation: no
- * matching, no guards, no remount — only the loaders whose template depends
+ * matching, no guards, no remount - only the loaders whose template depends
  * on the key refetch, with the previous request aborted. `page` pushes by
  * convention, so Back steps through pages, and the URL is shareable.
  *
@@ -226,15 +230,15 @@ export function usePagination<T = unknown>(options: PaginationOptions<T> = {}): 
     // "`page` pushes by convention, so Back steps through pages" is a promise
     // of THIS COMPOSABLE, but the convention it relied on
     // (`resolveQueryHistory`) is keyed on the literal string 'page'. So
-    // `usePagination({ key: 'p' })` — or two paginated lists on one page with
-    // distinct keys, the realistic reason to pass `key` — silently made every
+    // `usePagination({ key: 'p' })` - or two paginated lists on one page with
+    // distinct keys, the realistic reason to pass `key` - silently made every
     // go()/next() a replaceState, and Back skipped the whole pagination trail.
     // The composable owns its convention, so it states it explicitly for any
     // key.
     //
     // A route's own `history` declaration still wins: it is more specific than
     // a composable default, so when the record declares one we write through
-    // the normal ladder (override → def.history → key convention) instead of
+    // the normal ladder (override -> def.history -> key convention) instead of
     // overriding it.
     const matched = router.currentRoute.value.location.matched;
     const declared = matched[matched.length - 1]?.queryDefs[key]?.history;
@@ -261,7 +265,7 @@ export function usePagination<T = unknown>(options: PaginationOptions<T> = {}): 
 /**
  * Page numbers for a pager, capped at `window` entries: always the first and
  * last page, a run around the current one, and `0` where numbers were elided
- * (render it as "…"). 0 is used rather than null so the array stays
+ * (render it as "..."). 0 is used rather than null so the array stays
  * `number[]` for `v-for` keys.
  */
 function buildPageRange(current: number, last: number, window: number): readonly number[] {

@@ -16,11 +16,11 @@ import { createHttpBridge } from 'vapor-chamber/transports'
 import { ref } from 'vue'
 
 // Each island creates its own isolated bus.
-// Livewire and Vapor Chamber manage separate DOM scopes — no conflict.
+// Livewire and Vapor Chamber manage separate DOM scopes - no conflict.
 //
 // NOTE: register and dispatch directly on the LOCAL bus. useCommandGroup()
 // always attaches to the shared getCommandBus() instance, which would defeat
-// the per-island isolation this pattern is about — namespace by naming the
+// the per-island isolation this pattern is about - namespace by naming the
 // actions instead ('analytics*').
 function mountAnalyticsIsland(el: HTMLElement, endpoint: string) {
   const bus = createAsyncCommandBus()
@@ -43,7 +43,7 @@ function mountAnalyticsIsland(el: HTMLElement, endpoint: string) {
   // Register local command handlers
   bus.register('analyticsSetPeriod', (cmd) => {
     period.value = cmd.target.period
-    // Trigger data reload — forwarded to the backend by the HTTP bridge
+    // Trigger data reload - forwarded to the backend by the HTTP bridge
     return bus.dispatch('analyticsLoadMetrics', { period: period.value })
   })
 
@@ -52,7 +52,7 @@ function mountAnalyticsIsland(el: HTMLElement, endpoint: string) {
 
 /*
  * PHP: app/Filament/Widgets/AnalyticsWidget.php
- * ——————————————————————————————————————————————
+ * ----------------------------------------------
  * class AnalyticsWidget extends Widget
  * {
  *     protected static string $view = 'filament.widgets.analytics-island';
@@ -66,7 +66,7 @@ function mountAnalyticsIsland(el: HTMLElement, endpoint: string) {
 
 /*
  * Blade: resources/views/filament/widgets/analytics-island.blade.php
- * ——————————————————————————————————————————————————————————————————
+ * ------------------------------------------------------------------
  * <x-filament-widgets::widget>
  *   <x-filament::section>
  *     <div id="analytics-island" data-endpoint="{{ $endpoint }}">
@@ -96,8 +96,8 @@ function mountAnalyticsIsland(el: HTMLElement, endpoint: string) {
  * They never touch each other's DOM nodes.
  *
  * This pattern scales:
- * - Single chart widget → one island, one bus
- * - Full dashboard section → multiple islands, each with its own bus
- * - Cross-island coordination → use sync() plugin with a shared channel
+ * - Single chart widget -> one island, one bus
+ * - Full dashboard section -> multiple islands, each with its own bus
+ * - Cross-island coordination -> use sync() plugin with a shared channel
  */
 export {}

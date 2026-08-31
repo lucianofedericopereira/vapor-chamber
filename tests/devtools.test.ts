@@ -1,5 +1,5 @@
 /**
- * Tests for src/devtools.ts — Vue DevTools integration
+ * Tests for src/devtools.ts - Vue DevTools integration
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { setupDevtools } from '../src/devtools';
@@ -35,7 +35,7 @@ describe('setupDevtools', () => {
     const bus = createCommandBus({ onMissing: 'ignore' });
     const unsub = setupDevtools(bus, {});
 
-    // Dispatch something — should not throw even without devtools API
+    // Dispatch something - should not throw even without devtools API
     bus.dispatch('testAction', { id: 1 }, { qty: 2 });
     bus.dispatch('testAction2', { id: 2 });
 
@@ -65,13 +65,13 @@ describe('setupDevtools', () => {
 /**
  * The devtools-api half: everything above only exercises the bus-side buffer,
  * because the `import('@vue/devtools-api')` callback never ran without the
- * optional peer installed. It is a devDependency now, so the plugin body —
- * timeline layer, inspector, and the two inspector callbacks — is reachable.
+ * optional peer installed. It is a devDependency now, so the plugin body -
+ * timeline layer, inspector, and the two inspector callbacks - is reachable.
  *
  * v1.9 promotes this module to the public `vapor-chamber/devtools` subpath, and
  * a published entry point should be measured, not assumed.
  */
-describe('setupDevtools — the @vue/devtools-api integration', () => {
+describe('setupDevtools - the @vue/devtools-api integration', () => {
   /** Capture the api object the plugin registers, plus its callbacks. */
   async function withDevtools(): Promise<{
     bus: ReturnType<typeof createCommandBus>;
@@ -97,7 +97,7 @@ describe('setupDevtools — the @vue/devtools-api integration', () => {
     const bus = createCommandBus({ onMissing: 'ignore' });
     const stop = fresh(bus, {});
     // Poll for the actual side effect instead of racing a fixed setTimeout(0)
-    // against the dynamic import — a fixed tick is flaky under load (the
+    // against the dynamic import - a fixed tick is flaky under load (the
     // import + module transform can take longer than one macrotask).
     await vi.waitFor(() => {
       if (api.addTimelineLayer.mock.calls.length === 0) throw new Error('devtools plugin not ready yet');
@@ -111,7 +111,7 @@ describe('setupDevtools — the @vue/devtools-api integration', () => {
   });
 
   it('degrades silently when @vue/devtools-api is not installed', async () => {
-    // The `.catch` on the dynamic import — the only part of this module the
+    // The `.catch` on the dynamic import - the only part of this module the
     // suite never reached, because the optional peer IS installed here. It is
     // the shape every consumer who imports `vapor-chamber/devtools` without
     // the peer gets, and without the catch it surfaces as an unhandled
@@ -241,7 +241,7 @@ describe('setupDevtools — the @vue/devtools-api integration', () => {
     expect(state.state.result).toEqual(
       expect.arrayContaining([{ key: 'ok', value: false }, { key: 'error', value: 'nope' }]),
     );
-    // No payload was dispatched — the `payload` key must be entirely absent, not undefined.
+    // No payload was dispatched - the `payload` key must be entirely absent, not undefined.
     expect(state.state.command.map((e: any) => e.key)).not.toContain('payload');
     stop();
   });

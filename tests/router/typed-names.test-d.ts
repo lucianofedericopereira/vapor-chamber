@@ -11,5 +11,5 @@ const router = createRouter<AdminRouteName>({
 
 void router.push({ name: 'home' });
 void router.push({ name: 'products' });
-// @ts-expect-error — typo'd route name must not compile
+// @ts-expect-error - typo'd route name must not compile
 void router.push({ name: 'prodcts' });

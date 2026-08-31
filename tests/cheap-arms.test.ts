@@ -3,7 +3,7 @@
  * One-line fallback arms across http / transports / form that no existing test
  * happens to take. Each is a normal production condition, not an exotic one:
  *
- *  - http: a page with NO CSRF token — the common case
+ *  - http: a page with NO CSRF token - the common case
  *    for a read-only app; an empty JSON body; an unparsable
  *    content-disposition; a Retry-After beyond the sanity ceiling;
  *    interceptors registered with onRejected only; eject() of an
@@ -15,7 +15,7 @@
  *
  * NOT here: http 327/585 (`if (fresh)` after a CSRF refresh). refreshCsrfOnce
  * throws when the refresh finds no token, so the re-read immediately after it
- * can never be empty — unreachable by construction, not untested.
+ * can never be empty - unreachable by construction, not untested.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { postCommand, createHttpClient, invalidateCsrfCache } from '../src/http';
@@ -54,7 +54,7 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// http — no CSRF token on the page
+// http - no CSRF token on the page
 // ---------------------------------------------------------------------------
 
 describe('http without a CSRF token', () => {
@@ -81,7 +81,7 @@ describe('http without a CSRF token', () => {
 });
 
 // ---------------------------------------------------------------------------
-// http — response-shape fallbacks
+// http - response-shape fallbacks
 // ---------------------------------------------------------------------------
 
 describe('http response fallbacks', () => {
@@ -94,7 +94,7 @@ describe('http response fallbacks', () => {
     expect(res.data).toBeNull();
   });
 
-  it("falls back to 'download' when content-disposition has no filename= (825)", async () => {
+  it("falls back to 'download' when content-disposition has no filename=", async () => {
     (globalThis.fetch as any).mockResolvedValue(
       mockResponse(200, 'bytes', { 'content-disposition': 'attachment' }),
     );
@@ -106,7 +106,7 @@ describe('http response fallbacks', () => {
 
   it('ignores a Retry-After beyond the sanity ceiling', async () => {
     const fetchMock = globalThis.fetch as any;
-    // 7 days in seconds — must NOT be honoured as a wait; backoff applies.
+    // 7 days in seconds - must NOT be honoured as a wait; backoff applies.
     fetchMock
       .mockResolvedValueOnce(mockResponse(429, { e: 1 }, { 'content-type': 'application/json', 'retry-after': '604800' }))
       .mockResolvedValueOnce(jsonResponse(200, { ok: true }));
@@ -120,7 +120,7 @@ describe('http response fallbacks', () => {
 });
 
 // ---------------------------------------------------------------------------
-// http — interceptor registry arms
+// http - interceptor registry arms
 // ---------------------------------------------------------------------------
 
 describe('http interceptor registry', () => {
@@ -159,7 +159,7 @@ describe('http interceptor registry', () => {
 });
 
 // ---------------------------------------------------------------------------
-// transports — error-body fallbacks
+// transports - error-body fallbacks
 // ---------------------------------------------------------------------------
 
 describe('transport error-body fallbacks', () => {
@@ -172,7 +172,7 @@ describe('transport error-body fallbacks', () => {
     expect(result.error?.message).toBe('HTTP 503');
   });
 
-  it("falls back to 'Backend error' when ok:false carries no error string (207)", async () => {
+  it("falls back to 'Backend error' when ok:false carries no error string", async () => {
     const httpClient = { post: vi.fn().mockResolvedValue({ ok: true, status: 200, headers: {}, data: { ok: false } }) } as any;
     const bus = createAsyncCommandBus();
     bus.use(createHttpBridge({ endpoint: '/api/vc', httpClient }));
@@ -193,7 +193,7 @@ describe('transport error-body fallbacks', () => {
     expect(err.status).toBeUndefined();
   });
 
-  it("batch: falls back to 'Backend error' for a result with no error string (344)", async () => {
+  it("batch: falls back to 'Backend error' for a result with no error string", async () => {
     const httpClient = {
       post: vi.fn().mockImplementation((_u, body: any) => Promise.resolve({
         ok: true, status: 200, headers: {},
@@ -228,7 +228,7 @@ describe('transport error-body fallbacks', () => {
     bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', httpClient, retry: 3, noRetry: ['pay'] }));
 
     await Promise.all([bus.dispatch('pay', {}), bus.dispatch('look', {})]);
-    // One batch containing a non-retryable command → retry budget 0 for all.
+    // One batch containing a non-retryable command -> retry budget 0 for all.
     expect(httpClient.post.mock.calls[0]![2].retry).toBe(0);
   });
 
@@ -248,7 +248,7 @@ describe('transport error-body fallbacks', () => {
 });
 
 // ---------------------------------------------------------------------------
-// form — falsy rule entries
+// form - falsy rule entries
 // ---------------------------------------------------------------------------
 
 describe('form rules with a falsy entry', () => {

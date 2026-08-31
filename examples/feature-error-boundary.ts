@@ -1,5 +1,5 @@
 /**
- * Feature example: useCommandError — component-scoped error boundary
+ * Feature example: useCommandError - component-scoped error boundary
  * ==================================================================
  * Captures failed command results reactively at the component level.
  * Replaces ad-hoc try/catch blocks scattered across components.
@@ -33,12 +33,12 @@ bus.register('userLogin', (cmd) => {
 
 const { errors, latestError, clearErrors } = useCommandError()
 
-bus.dispatch('cartAdd', {})         // missing id → error
+bus.dispatch('cartAdd', {})         // missing id -> error
 bus.dispatch('orderSubmit', {})     // payment error
 
 console.log('All errors:', errors.value.length)
 console.log('Latest:', latestError.value?.message)
-// → 'Payment gateway timeout'
+// -> 'Payment gateway timeout'
 
 clearErrors()
 
@@ -56,8 +56,8 @@ bus.dispatch('cartAdd', {})           // ignored by both
 bus.dispatch('orderSubmit', {})       // captured by orderErrors
 bus.dispatch('userLogin', { password: 'short' })  // captured by authErrors
 
-console.log('Order errors:', orderErrors.errors.value.length)  // → 1
-console.log('Auth errors:', authErrors.errors.value.length)    // → 1
+console.log('Order errors:', orderErrors.errors.value.length)  // -> 1
+console.log('Auth errors:', authErrors.errors.value.length)    // -> 1
 
 // ─── In a Vue component ───────────────────────────────────────────────────────
 
@@ -65,7 +65,7 @@ console.log('Auth errors:', authErrors.errors.value.length)    // → 1
  * <script setup lang="ts">
  * import { useCommand, useCommandError } from 'vapor-chamber'
  *
- * // Per-component error state — cleared on unmount automatically
+ * // Per-component error state - cleared on unmount automatically
  * const { dispatch, loading } = useCommand()
  * const { latestError, clearErrors } = useCommandError({
  *   filter: (cmd) => cmd.action === 'checkoutSubmit',
@@ -75,7 +75,7 @@ console.log('Auth errors:', authErrors.errors.value.length)    // → 1
  * <template>
  *   <div>
  *     <button @click="dispatch('checkoutSubmit', formData)" :disabled="loading.value">
- *       {{ loading.value ? 'Processing…' : 'Pay now' }}
+ *       {{ loading.value ? 'Processing...' : 'Pay now' }}
  *     </button>
  *
  *     <div v-if="latestError.value" class="error-banner">

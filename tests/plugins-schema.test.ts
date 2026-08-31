@@ -1,6 +1,6 @@
 /**
- * Standard Schema validator plugin — works with any schema lib that
- * implements [Standard Schema v1](https://standardschema.dev/) — Zod,
+ * Standard Schema validator plugin - works with any schema lib that
+ * implements [Standard Schema v1](https://standardschema.dev/) - Zod,
  * Valibot, ArkType, Effect Schema. We test with hand-rolled fakes so the
  * lib stays schema-lib-agnostic and the test doesn't depend on any of
  * those packages being installed.
@@ -9,7 +9,7 @@ import { describe, it, expect } from 'vitest';
 import { createCommandBus, createAsyncCommandBus, BusError } from '../src/command-bus';
 import { validateSchemas, validateSchemasAsync, type StandardSchemaV1 } from '../src/plugins-schema';
 
-// Minimal Standard-Schema-shaped fake. Real schemas (Zod, Valibot, …)
+// Minimal Standard-Schema-shaped fake. Real schemas (Zod, Valibot, ...)
 // expose the same `'~standard'` interop surface.
 function fakeSync<T>(predicate: (v: unknown) => v is T, message: string): StandardSchemaV1<T> {
   return {
@@ -35,7 +35,7 @@ const isPositiveNumber = (v: unknown): v is number => typeof v === 'number' && v
 const isObjectWithId = (v: unknown): v is { id: number } =>
   typeof v === 'object' && v !== null && typeof (v as any).id === 'number';
 
-describe('validateSchemas — sync', () => {
+describe('validateSchemas - sync', () => {
   it('rejects dispatches whose target fails the schema', () => {
     const bus = createCommandBus();
     bus.register('inc', () => 'ok');
@@ -117,7 +117,7 @@ describe('validateSchemas — sync', () => {
   });
 });
 
-describe('validateSchemasAsync — async bus', () => {
+describe('validateSchemasAsync - async bus', () => {
   it('awaits async schemas and rejects on failure', async () => {
     const bus = createAsyncCommandBus();
     bus.register('act', async (cmd) => cmd.target);

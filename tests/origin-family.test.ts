@@ -1,6 +1,6 @@
 /**
  * The flag-across-await family (TODO items 18, 24, 28, 33) and the TestBus meta
- * gap — five consumers of one fix: a marker that travels ON the dispatch
+ * gap - five consumers of one fix: a marker that travels ON the dispatch
  * (`__origin` read by stampMeta) instead of a module-level flag set before an
  * await and cleared in `finally`.
  *
@@ -25,10 +25,10 @@ import { useCommandHistory } from '../src/chamber';
 import { createMcpHandler } from '../src/mcp';
 
 // ---------------------------------------------------------------------------
-// 18 — agentOrigin across an await
+// 18 - agentOrigin across an await
 // ---------------------------------------------------------------------------
 
-describe('item 18 — MCP origin attribution on an async bus', () => {
+describe('item 18 - MCP origin attribution on an async bus', () => {
   it('stamps the MCP dispatch and only the MCP dispatch', async () => {
     const bus = createAsyncCommandBus();
     const origins: Array<{ action: string; origin: unknown }> = [];
@@ -66,13 +66,13 @@ describe('item 18 — MCP origin attribution on an async bus', () => {
 
     expect(origins).toEqual([
       { action: 'agentWrite', origin: 'agent' },
-      { action: 'localWrite', origin: undefined }, // was 'agent' — misattributed
+      { action: 'localWrite', origin: undefined }, // was 'agent' - misattributed
     ]);
   });
 });
 
 // ---------------------------------------------------------------------------
-// 24 — sync() echo suppression across an await
+// 24 - sync() echo suppression across an await
 // ---------------------------------------------------------------------------
 
 class FakeChannel {
@@ -85,7 +85,7 @@ class FakeChannel {
     FakeChannel.channels.set(name, peers);
   }
   postMessage(data: unknown): void {
-    // Real BroadcastChannel never echoes to the sender — that is precisely why
+    // Real BroadcastChannel never echoes to the sender - that is precisely why
     // one tab looked fine and two tabs ping-ponged.
     for (const peer of FakeChannel.channels.get(this.name) ?? []) {
       if (peer !== this && !peer.closed) peer.onmessage?.({ data: structuredClone(data) });
@@ -96,7 +96,7 @@ class FakeChannel {
   }
 }
 
-describe('item 24 — sync() on an async bus does not loop', () => {
+describe('item 24 - sync() on an async bus does not loop', () => {
   beforeEach(() => {
     FakeChannel.channels.clear();
     vi.stubGlobal('BroadcastChannel', FakeChannel);
@@ -135,10 +135,10 @@ describe('item 24 — sync() on an async bus does not loop', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 28 — redo() double-record across an await
+// 28 - redo() double-record across an await
 // ---------------------------------------------------------------------------
 
-describe('item 28 — redo() on an async bus records once', () => {
+describe('item 28 - redo() on an async bus records once', () => {
   afterEach(() => resetCommandBus());
 
   it('past contains the redone command exactly once', async () => {
@@ -160,7 +160,7 @@ describe('item 28 — redo() on an async bus records once', () => {
     expect(history.canRedo.value).toBe(false);
   });
 
-  it('a PRIMITIVE payload (which cannot carry __origin) still records once — identity fallback', async () => {
+  it('a PRIMITIVE payload (which cannot carry __origin) still records once - identity fallback', async () => {
     // The marker rides the payload object; a primitive payload has nowhere
     // to put it. redo() arms a one-shot identity match instead. Without it,
     // the hook records the redo a second time on BOTH bus types.
@@ -182,7 +182,7 @@ describe('item 28 — redo() on an async bus records once', () => {
     expect(history.canRedo.value).toBe(false);
   });
 
-  it('the identity fallback is one-shot — a later identical dispatch records normally', async () => {
+  it('the identity fallback is one-shot - a later identical dispatch records normally', async () => {
     const bus = createAsyncCommandBus();
     setCommandBus(bus as never);
     const target = { id: 1 };
@@ -197,7 +197,7 @@ describe('item 28 — redo() on an async bus records once', () => {
     await new Promise((r) => setTimeout(r, 20));
     expect(history.past.value).toHaveLength(1);
 
-    // Same action/target/payload dispatched AGAIN, outside any redo — the
+    // Same action/target/payload dispatched AGAIN, outside any redo - the
     // consumed fallback must not swallow it.
     await bus.dispatch('setCount', target, 5);
     await vi.waitFor(() => expect(history.past.value).toHaveLength(2));
@@ -205,10 +205,10 @@ describe('item 28 — redo() on an async bus records once', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 33 — self-matching reactions
+// 33 - self-matching reactions
 // ---------------------------------------------------------------------------
 
-describe('item 33 — createReaction cycles', () => {
+describe('item 33 - createReaction cycles', () => {
   it('refuses a directly self-matching reaction at install', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const bus = createCommandBus();
@@ -258,10 +258,10 @@ describe('item 33 — createReaction cycles', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 19 — TestBus meta
+// 19 - TestBus meta
 // ---------------------------------------------------------------------------
 
-describe('item 19 — TestBus commands carry meta', () => {
+describe('item 19 - TestBus commands carry meta', () => {
   it('stamps the same meta the real bus does', () => {
     const bus = createTestBus();
     let seen: unknown;
@@ -285,7 +285,7 @@ describe('item 19 — TestBus commands carry meta', () => {
 
     bus.dispatch('save', { id: 1 });
 
-    // `idempotent` guards on `cmd.meta` and silently took its no-op branch —
+    // `idempotent` guards on `cmd.meta` and silently took its no-op branch -
     // a test wiring it to the TestBus passed while verifying nothing.
     expect(seen[0]).toBeTypeOf('string');
   });
@@ -303,10 +303,10 @@ describe('item 19 — TestBus commands carry meta', () => {
 });
 
 // ---------------------------------------------------------------------------
-// _withOrigin — the one-shot slot the three marker sites share
+// _withOrigin - the one-shot slot the three marker sites share
 // ---------------------------------------------------------------------------
 
-describe('_withOrigin — slot discipline', () => {
+describe('_withOrigin - slot discipline', () => {
   it('is one-shot: only the FIRST dispatch inside the callback is marked', () => {
     const bus = createCommandBus();
     const origins: unknown[] = [];
@@ -343,7 +343,7 @@ describe('_withOrigin — slot discipline', () => {
     const origins: unknown[] = [];
     bus.register('a', async (cmd: any) => { origins.push(cmd.meta?.origin); return 1; });
 
-    // The mcp.ts shape — await the result of the wrapped dispatch.
+    // The mcp.ts shape - await the result of the wrapped dispatch.
     await _withOrigin('agent', () => bus.dispatch('a', {}));
     await bus.dispatch('a', {});
 

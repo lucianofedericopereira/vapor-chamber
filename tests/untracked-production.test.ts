@@ -1,5 +1,5 @@
 /**
- * FIXTURE — untracked() in a production bundle.
+ * FIXTURE - untracked() in a production bundle.
  *
  * `untracked()` reaches Vue's tracking primitives through a bare
  * `import('@vue/reactivity')`. That resolves under a dev server and resolves in
@@ -7,14 +7,14 @@
  * bundle there is no import map, the specifier has nothing to resolve against,
  * and the rejection lands in an empty catch. `untracked()` then quietly becomes
  * a pass-through, so a `dispatch()` inside a reactive effect leaks the
- * handler's reads into that effect — a component re-rendering on state it never
+ * handler's reads into that effect - a component re-rendering on state it never
  * mentions, with no error anywhere.
  *
  * Same root cause as the Vapor-detection gap in
  * `tests/vapor-sfc-prod-detection.test.ts`: a specifier resolved at runtime
  * that only a dev server can resolve.
  *
- * The fix is to resolve it at BUILD time instead — `vapor-chamber/vue`
+ * The fix is to resolve it at BUILD time instead - `vapor-chamber/vue`
  * statically imports the primitives and hands them to the core.
  */
 
@@ -35,17 +35,23 @@ function makeBareSpecifierUnresolvable(): void {
  * assignment, leaving `_vueDeepRefFn` null so the probe's `wireUntracked()`
  * returns before its dynamic import. Net effect: the probe cannot wire
  * `untracked()`, while the subpath's real `@vue/reactivity` import still can.
+ *
+ * THE KEY SET IS DERIVED, NOT TRANSCRIBED. This used to be a hand-written list
+ * of eight names mirroring `src/vue.ts`'s imports, which made it a staleness
+ * trap: adding a name there and not here fails with vitest's "No X export is
+ * defined on the vue mock" - a mock-maintenance error wearing the costume of a
+ * product bug. v1.17.0's `hasInjectionContext` addition tripped exactly that.
+ *
+ * Taking the keys from the real module removes the duplication at the source.
+ * Every name `src/vue.ts` can legally import must exist on real `vue` anyway, so
+ * a derived key set is complete by construction and cannot drift. The VALUES are
+ * all `undefined`, which is what makes `applyVueModule()` skip every assignment.
  */
 function makeVueYieldNothing(): void {
-  vi.doMock('vue', () => ({
-    ref: undefined,
-    shallowRef: undefined,
-    getCurrentScope: undefined,
-    getCurrentInstance: undefined,
-    onScopeDispose: undefined,
-    onActivated: undefined,
-    onDeactivated: undefined,
-  }));
+  vi.doMock('vue', async (importOriginal) => {
+    const actual = (await importOriginal()) as Record<string, unknown>;
+    return Object.fromEntries(Object.keys(actual).map((k) => [k, undefined]));
+  });
 }
 
 describe('untracked() under production-bundle conditions', () => {
@@ -57,18 +63,18 @@ describe('untracked() under production-bundle conditions', () => {
     vi.resetModules();
   });
 
-  it('REGRESSION: probe fails → pass-through, silently', async () => {
+  it('REGRESSION: probe fails -> pass-through, silently', async () => {
     makeBareSpecifierUnresolvable();
     vi.resetModules();
 
     const chamber = await import('../src/chamber');
-    // Vue itself resolves (vitest), so the library believes Vue is present —
+    // Vue itself resolves (vitest), so the library believes Vue is present -
     // this is the "Vue is here but untracked is dead" state, not "no Vue".
     await chamber.waitForVueDetection();
 
     let ran = 0;
     expect(chamber.untracked(() => { ran++; return 'value'; })).toBe('value');
-    expect(ran).toBe(1); // still runs the callback — degradation, not breakage
+    expect(ran).toBe(1); // still runs the callback - degradation, not breakage
   });
 
   it('DEV diagnostic fires on the PROBE PATH, while the probe is still working', async () => {
@@ -76,7 +82,7 @@ describe('untracked() under production-bundle conditions', () => {
     // observed failure, which made it near-dead code: probe failure is only
     // reachable in a production bundle, where DEV is false and nothing can be
     // logged. Keying it to "Vue arrived at runtime rather than at build time"
-    // makes it fire under the dev server — the one place a developer can still
+    // makes it fire under the dev server - the one place a developer can still
     // see it and change one import.
     //
     // No mocking: `vue` resolves, the probe SUCCEEDS, untracked() genuinely
@@ -100,7 +106,7 @@ describe('untracked() under production-bundle conditions', () => {
     expect(warn).toHaveBeenCalledTimes(1);
   });
 
-  it('importing the subpath silences it — that is the whole signal', async () => {
+  it('importing the subpath silences it - that is the whole signal', async () => {
     vi.resetModules();
     const chamber = await import('../src/chamber');
     await import('../src/vue'); // build-time wiring present
@@ -114,7 +120,7 @@ describe('untracked() under production-bundle conditions', () => {
   it('FIXED by enableVueReactivity(): real suspend/resume with the probe dead', async () => {
     // Mocking `@vue/reactivity` is not an option here: it would break the
     // STATIC import in src/vue.ts too, and that is not what a production bundle
-    // does — there the static import was resolved at build time and only the
+    // does - there the static import was resolved at build time and only the
     // runtime specifier fails. Module mocks cannot tell the two apart.
     //
     // So the probe is disabled from the other end. `vue` resolves to an EMPTY
@@ -145,14 +151,14 @@ describe('untracked() under production-bundle conditions', () => {
     });
     expect(runs).toBe(1);
 
-    untrackedRef.value++;      // read inside untracked() — must not re-run
+    untrackedRef.value++;      // read inside untracked() - must not re-run
     expect(runs).toBe(1);
 
-    tracked.value++;           // ordinary dependency — must re-run
+    tracked.value++;           // ordinary dependency - must re-run
     expect(runs).toBe(2);
   });
 
-  it('IMPORT ALONE wires it — no enableVueReactivity() call, probe dead', async () => {
+  it('IMPORT ALONE wires it - no enableVueReactivity() call, probe dead', async () => {
     // The point of the subpath: there is nothing to forget. Importing a
     // composable from `vapor-chamber/vue` evaluates the module, and the module
     // body IS the wiring. Probe disabled the same way as above (unresolvable
@@ -179,17 +185,17 @@ describe('untracked() under production-bundle conditions', () => {
     expect(runs).toBe(1);
 
     hidden.value++;
-    expect(runs).toBe(1); // suspended — the import did the wiring
+    expect(runs).toBe(1); // suspended - the import did the wiring
 
     tracked.value++;
     expect(runs).toBe(2);
 
-    // And it is the SAME function the root exports, not a second copy — a mixed
+    // And it is the SAME function the root exports, not a second copy - a mixed
     // codebase must not end up with two of anything.
     expect(untracked).toBe(chamber.untracked);
   });
 
-  it('no warning when Vue is simply absent — that pass-through is correct', async () => {
+  it('no warning when Vue is simply absent - that pass-through is correct', async () => {
     makeBareSpecifierUnresolvable();
     vi.doMock('vue', () => { throw new Error("Failed to resolve module specifier 'vue'."); });
     vi.resetModules();

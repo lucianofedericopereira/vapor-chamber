@@ -1,11 +1,11 @@
 /**
- * Tests for freeze.ts — the dev-only deep freeze both caches share
+ * Tests for freeze.ts - the dev-only deep freeze both caches share
  * (http-cache.ts response entries, plugins-extra cache() results).
  *
  * The walk rules under test, per the module header:
  *   - plain objects and arrays: frozen and descended into
  *   - class instances / Maps / anything with its own prototype: frozen
- *     SHALLOWLY, not descended — foreign object graphs are not our business
+ *     SHALLOWLY, not descended - foreign object graphs are not our business
  *   - cycles terminate (WeakSet)
  *   - production: freezeCached is a pass-through no-op
  */
@@ -48,7 +48,7 @@ describe('freezeDeep', () => {
     freezeDeep(value);
     expect(Object.isFrozen(value)).toBe(true);
     expect(Object.isFrozen(row)).toBe(true); // shallow freeze applied
-    // NOT descended: the instance's own nested state stays mutable —
+    // NOT descended: the instance's own nested state stays mutable -
     // deep-freezing a foreign graph could break types that rely on
     // internal mutation.
     expect(Object.isFrozen(row.cells)).toBe(false);
@@ -61,8 +61,8 @@ describe('freezeDeep', () => {
     const m = new Map([['k', inner]]);
     freezeDeep({ m });
     expect(Object.isFrozen(m)).toBe(true);
-    expect(Object.isFrozen(inner)).toBe(false); // reachable only through the Map — not walked
-    m.set('k2', { n: 2 }); // Object.freeze does not seal Map internals — internal mutation still works
+    expect(Object.isFrozen(inner)).toBe(false); // reachable only through the Map - not walked
+    m.set('k2', { n: 2 }); // Object.freeze does not seal Map internals - internal mutation still works
     expect(m.size).toBe(2);
   });
 
@@ -88,14 +88,14 @@ describe('freezeCached', () => {
     expect(freezeCached(value)).toBe(value);
   });
 
-  it('freezes in this (dev) test environment — mutation of a cached value throws in strict mode', () => {
-    // The test env is not production, so FREEZE_IN_DEV must be on — this
+  it('freezes in this (dev) test environment - mutation of a cached value throws in strict mode', () => {
+    // The test env is not production, so FREEZE_IN_DEV must be on - this
     // pins the gate itself, not just the walk.
     expect(FREEZE_IN_DEV).toBe(true);
     const value = freezeCached({ items: [1, 2, 3] });
     // No `'use strict'` directive: this is an ES module, so the body is already
     // strict and the directive was redundant (biome/noRedundantUseStrict). The
-    // assertion is unchanged — assigning to a frozen property still throws
+    // assertion is unchanged - assigning to a frozen property still throws
     // TypeError, which is precisely what strict mode buys and what is pinned
     // here.
     expect(() => {

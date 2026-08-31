@@ -1,10 +1,10 @@
 /**
- * vapor-chamber — Performance benchmarks
+ * vapor-chamber - Performance benchmarks
  *
  * Run with: npx vitest bench tests/perf.bench.ts
  * Or:       npm run test -- --bench tests/perf.bench.ts
  *
- * These are not CI tests — they measure throughput on the developer's machine.
+ * These are not CI tests - they measure throughput on the developer's machine.
  */
 
 import { describe, it, expect, bench, beforeAll } from 'vitest';
@@ -24,7 +24,7 @@ import { signal as _alienSignal } from 'alien-signals';
 const _alienFactory = alienSignalAdapter(_alienSignal as any);
 
 // ---------------------------------------------------------------------------
-// Origin-marker paths — where the `_withOrigin` slot replaced per-site work.
+// Origin-marker paths - where the `_withOrigin` slot replaced per-site work.
 //
 // The core benches above install no chamber and no sync plugin, so they never
 // exercised the code the slot deleted:
@@ -35,7 +35,7 @@ const _alienFactory = alienSignalAdapter(_alienSignal as any);
 // ---------------------------------------------------------------------------
 
 describe('origin-marker paths', () => {
-  bench('dispatch with useCommandHistory installed — 10k (onAfter hook cost)', () => {
+  bench('dispatch with useCommandHistory installed - 10k (onAfter hook cost)', () => {
     const bus = createCommandBus();
     bus.register('act', (cmd) => cmd.target);
     const history = useCommandHistory({}, bus);
@@ -43,7 +43,7 @@ describe('origin-marker paths', () => {
     history.clear();
   });
 
-  bench('undo+redo cycle × 2k (marked-dispatch path)', () => {
+  bench('undo+redo cycle x 2k (marked-dispatch path)', () => {
     const bus = createCommandBus();
     bus.register('act', (cmd) => cmd.target);
     const history = useCommandHistory({}, bus);
@@ -54,7 +54,7 @@ describe('origin-marker paths', () => {
     }
   });
 
-  bench('_withOrigin-wrapped dispatch — 10k', () => {
+  bench('_withOrigin-wrapped dispatch - 10k', () => {
     const bus = createCommandBus();
     bus.register('act', (cmd) => cmd.target);
     for (let i = 0; i < 10_000; i++) {
@@ -64,7 +64,7 @@ describe('origin-marker paths', () => {
 });
 
 describe('core dispatch throughput', () => {
-  bench('syncDispatch — bare handler, no plugins', () => {
+  bench('syncDispatch - bare handler, no plugins', () => {
     const bus = createCommandBus();
     bus.register('test', (cmd) => cmd.target);
     for (let i = 0; i < 10_000; i++) {
@@ -72,7 +72,7 @@ describe('core dispatch throughput', () => {
     }
   });
 
-  bench('syncDispatch — 3 plugins + 1 listener', () => {
+  bench('syncDispatch - 3 plugins + 1 listener', () => {
     const bus = createCommandBus();
     bus.use((_cmd, next) => next());
     bus.use((_cmd, next) => next());
@@ -84,7 +84,7 @@ describe('core dispatch throughput', () => {
     }
   });
 
-  bench('syncQuery — bare handler, no plugins', () => {
+  bench('syncQuery - bare handler, no plugins', () => {
     const bus = createCommandBus();
     bus.register('getUser', (cmd) => ({ id: cmd.target }));
     for (let i = 0; i < 10_000; i++) {
@@ -92,7 +92,7 @@ describe('core dispatch throughput', () => {
     }
   });
 
-  bench('syncQuery — 1 plugin + 1 after-hook (full runner path)', () => {
+  bench('syncQuery - 1 plugin + 1 after-hook (full runner path)', () => {
     const bus = createCommandBus();
     bus.register('getUser', (cmd) => ({ id: cmd.target }));
     bus.use((_cmd, next) => next());
@@ -102,7 +102,7 @@ describe('core dispatch throughput', () => {
     }
   });
 
-  bench('emit — 3 listeners, no handler', () => {
+  bench('emit - 3 listeners, no handler', () => {
     const bus = createCommandBus();
     bus.on('test', () => {});
     bus.on('test', () => {});
@@ -112,7 +112,7 @@ describe('core dispatch throughput', () => {
     }
   });
 
-  bench('matchesPattern — wildcard prefix*', () => {
+  bench('matchesPattern - wildcard prefix*', () => {
     const bus = createCommandBus();
     bus.on('cart*', () => {});
     bus.register('cartAdd', () => {});
@@ -121,7 +121,7 @@ describe('core dispatch throughput', () => {
     }
   });
 
-  bench('dispatchBatch — 100 commands', () => {
+  bench('dispatchBatch - 100 commands', () => {
     const bus = createCommandBus();
     bus.register('test', () => 'ok');
     const cmds = Array.from({ length: 100 }, (_, i) => ({ action: 'test', target: i }));
@@ -131,16 +131,16 @@ describe('core dispatch throughput', () => {
   });
 });
 
-describe('meta overhead — uid generator comparison', () => {
+describe('meta overhead - uid generator comparison', () => {
   // Default: counter + per-process random prefix. ~12ns per call vs ~104ns for
-  // crypto.randomUUID (Node 24, 2026-08-17, hrtime medians over 21×200k reps —
-  // quote the runtime with the number). This comment previously said "~30–50ns
+  // crypto.randomUUID (Node 24, 2026-08-17, hrtime medians over 21x200k reps -
+  // quote the runtime with the number). This comment previously said "~30-50ns
   // per uid", a figure src/command-bus.ts retired when it was re-measured; the
   // correction had not reached here or docs/performance.md. What this bench
-  // measures is the DISPATCH-level ratio (~2.5×), not the per-call one (~8×) —
+  // measures is the DISPATCH-level ratio (~2.5x), not the per-call one (~8x) -
   // the rest of the dispatch dilutes it, and conflating the two is how the
   // per-call absolute drifted unnoticed in the first place.
-  bench('dispatch — default counter-based uid', () => {
+  bench('dispatch - default counter-based uid', () => {
     const bus = createCommandBus();
     bus.register('test', () => {});
     // Reset to the default fast path in case a prior bench swapped it.
@@ -154,8 +154,8 @@ describe('meta overhead — uid generator comparison', () => {
     }
   });
 
-  // Opt-in via configureUid — for distributed tracing / cross-process IDs.
-  bench('dispatch — crypto.randomUUID via configureUid', () => {
+  // Opt-in via configureUid - for distributed tracing / cross-process IDs.
+  bench('dispatch - crypto.randomUUID via configureUid', () => {
     const bus = createCommandBus();
     bus.register('test', () => {});
     configureUid(() => crypto.randomUUID());
@@ -172,7 +172,7 @@ describe('meta overhead — uid generator comparison', () => {
 });
 
 describe('async dispatch throughput', () => {
-  bench('asyncDispatch — bare handler', async () => {
+  bench('asyncDispatch - bare handler', async () => {
     const bus = createAsyncCommandBus();
     bus.register('test', async (cmd) => cmd.target);
     for (let i = 0; i < 1_000; i++) {
@@ -225,8 +225,8 @@ describe('performance sanity', () => {
 // Comparative throughput vs other small event/dispatch libraries.
 //
 // vapor-chamber is a command bus (dispatch with plugins, hooks, listeners,
-// results). The closest "small lib" peers are pure event emitters — mitt and
-// nanoevents — plus a hand-rolled `Map<string, Set<fn>>` baseline. The point
+// results). The closest "small lib" peers are pure event emitters - mitt and
+// nanoevents - plus a hand-rolled `Map<string, Set<fn>>` baseline. The point
 // of these benches is to show that the lib's emit-fan-out (the closest apple
 // to apple) is competitive with hand-rolled, with all the extra machinery
 // (results, plugins, hooks, before/after, batch, request) on top.
@@ -234,7 +234,7 @@ describe('performance sanity', () => {
 // Reading these numbers:
 //   - vapor-chamber `emit` should be in the same order as mitt / nanoevents.
 //   - vapor-chamber `dispatch` does meaningfully more (plugin chain, meta
-//     stamping, results) — expect it to be slower than raw emit, but still
+//     stamping, results) - expect it to be slower than raw emit, but still
 //     competitive with hand-rolled middleware patterns.
 // ---------------------------------------------------------------------------
 
@@ -244,7 +244,7 @@ import EventEmitter3 from 'eventemitter3';
 import TinyEmitter from 'tiny-emitter';
 import { Subject } from 'rxjs';
 
-describe('emit fast path — no listeners', () => {
+describe('emit fast path - no listeners', () => {
   bench('vapor-chamber bus.emit with NO listeners (10k)', () => {
     const bus = createCommandBus();
     for (let i = 0; i < 10_000; i++) bus.emit('nobody-listening', i);
@@ -261,8 +261,8 @@ describe('emit fast path — no listeners', () => {
   });
 });
 
-describe('comparative emit fan-out (10k events × 3 listeners)', () => {
-  bench('vapor-chamber bus.emit — 3 listeners', () => {
+describe('comparative emit fan-out (10k events x 3 listeners)', () => {
+  bench('vapor-chamber bus.emit - 3 listeners', () => {
     const bus = createCommandBus();
     bus.on('evt', () => {});
     bus.on('evt', () => {});
@@ -270,7 +270,7 @@ describe('comparative emit fan-out (10k events × 3 listeners)', () => {
     for (let i = 0; i < 10_000; i++) bus.emit('evt', i);
   });
 
-  bench('mitt — 3 listeners', () => {
+  bench('mitt - 3 listeners', () => {
     const m = mitt<{ evt: number }>();
     m.on('evt', () => {});
     m.on('evt', () => {});
@@ -278,7 +278,7 @@ describe('comparative emit fan-out (10k events × 3 listeners)', () => {
     for (let i = 0; i < 10_000; i++) m.emit('evt', i);
   });
 
-  bench('nanoevents — 3 listeners', () => {
+  bench('nanoevents - 3 listeners', () => {
     const n = createNanoEvents<{ evt: (i: number) => void }>();
     n.on('evt', () => {});
     n.on('evt', () => {});
@@ -286,7 +286,7 @@ describe('comparative emit fan-out (10k events × 3 listeners)', () => {
     for (let i = 0; i < 10_000; i++) n.emit('evt', i);
   });
 
-  bench('eventemitter3 — 3 listeners', () => {
+  bench('eventemitter3 - 3 listeners', () => {
     const e = new EventEmitter3();
     e.on('evt', () => {});
     e.on('evt', () => {});
@@ -294,7 +294,7 @@ describe('comparative emit fan-out (10k events × 3 listeners)', () => {
     for (let i = 0; i < 10_000; i++) e.emit('evt', i);
   });
 
-  bench('tiny-emitter — 3 listeners', () => {
+  bench('tiny-emitter - 3 listeners', () => {
     const t = new (TinyEmitter as any)();
     t.on('evt', () => {});
     t.on('evt', () => {});
@@ -302,7 +302,7 @@ describe('comparative emit fan-out (10k events × 3 listeners)', () => {
     for (let i = 0; i < 10_000; i++) t.emit('evt', i);
   });
 
-  bench('rxjs Subject — 3 subscribers', () => {
+  bench('rxjs Subject - 3 subscribers', () => {
     const s = new Subject<number>();
     s.subscribe(() => {});
     s.subscribe(() => {});
@@ -310,7 +310,7 @@ describe('comparative emit fan-out (10k events × 3 listeners)', () => {
     for (let i = 0; i < 10_000; i++) s.next(i);
   });
 
-  bench('raw Map<string, Set<fn>> — 3 listeners (hand-rolled baseline)', () => {
+  bench('raw Map<string, Set<fn>> - 3 listeners (hand-rolled baseline)', () => {
     const handlers = new Map<string, Set<(i: number) => void>>();
     function on(evt: string, fn: (i: number) => void): void {
       let s = handlers.get(evt);
@@ -329,7 +329,7 @@ describe('comparative emit fan-out (10k events × 3 listeners)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Fast lane — vapor-chamber's real-real-hot-path dispatcher.
+// Fast lane - vapor-chamber's real-real-hot-path dispatcher.
 //
 // Trades the bus's ergonomics (Command envelope, results, plugins, hooks,
 // listeners, schema, batch, request/response, AbortController) for raw
@@ -337,7 +337,7 @@ describe('comparative emit fan-out (10k events × 3 listeners)', () => {
 // physics steps. NOT for general app dispatch.
 // ---------------------------------------------------------------------------
 
-describe('fast lane — single-handler hot dispatch (10k)', () => {
+describe('fast lane - single-handler hot dispatch (10k)', () => {
   bench('vapor-chamber fast-lane compile + dispatch', () => {
     const lane = createFastLane();
     const onTick = lane.compile<number, number>('tick', (n) => n * 2);
@@ -353,13 +353,13 @@ describe('fast lane — single-handler hot dispatch (10k)', () => {
     if (acc < 0) console.log(acc);
   });
 
-  bench('mitt (closest peer — emit fires listeners, no return)', () => {
+  bench('mitt (closest peer - emit fires listeners, no return)', () => {
     const m = mitt<{ tick: number }>();
     m.on('tick', () => {});
     for (let i = 0; i < 10_000; i++) m.emit('tick', i);
   });
 
-  bench('nanoevents (closest peer — emit fires listeners, no return)', () => {
+  bench('nanoevents (closest peer - emit fires listeners, no return)', () => {
     const n = createNanoEvents<{ tick: (n: number) => void }>();
     n.on('tick', () => {});
     for (let i = 0; i < 10_000; i++) n.emit('tick', i);
@@ -372,7 +372,7 @@ describe('fast lane — single-handler hot dispatch (10k)', () => {
   });
 });
 
-describe('fast lane — multi-subscriber emit fan-out (10k events × 3 listeners)', () => {
+describe('fast lane - multi-subscriber emit fan-out (10k events x 3 listeners)', () => {
   bench('vapor-chamber fast-lane emit (live, default)', () => {
     const lane = createFastLane();
     lane.on('evt', () => {});
@@ -397,7 +397,7 @@ describe('fast lane — multi-subscriber emit fan-out (10k events × 3 listeners
     for (let i = 0; i < 10_000; i++) bus.emit('evt', i);
   });
 
-  bench('mitt — 3 listeners (peer)', () => {
+  bench('mitt - 3 listeners (peer)', () => {
     const m = mitt<{ evt: number }>();
     m.on('evt', () => {});
     m.on('evt', () => {});
@@ -405,7 +405,7 @@ describe('fast lane — multi-subscriber emit fan-out (10k events × 3 listeners
     for (let i = 0; i < 10_000; i++) m.emit('evt', i);
   });
 
-  bench('nanoevents — 3 listeners (peer)', () => {
+  bench('nanoevents - 3 listeners (peer)', () => {
     const n = createNanoEvents<{ evt: (i: number) => void }>();
     n.on('evt', () => {});
     n.on('evt', () => {});
@@ -420,19 +420,19 @@ describe('comparative dispatch (10k dispatches, single handler)', () => {
   // measure the full path for a fair "is the lib competitive?" comparison
   // against minimal-feature peers.
 
-  bench('vapor-chamber bus.dispatch — bare handler, no plugins', () => {
+  bench('vapor-chamber bus.dispatch - bare handler, no plugins', () => {
     const bus = createCommandBus();
     bus.register('act', (cmd) => cmd.target);
     for (let i = 0; i < 10_000; i++) bus.dispatch('act', i);
   });
 
-  bench('mitt — emit (bus.emit equivalent, no result)', () => {
+  bench('mitt - emit (bus.emit equivalent, no result)', () => {
     const m = mitt<{ act: number }>();
-    m.on('act', () => {});  // can't capture a return — emit is fire-only
+    m.on('act', () => {});  // can't capture a return - emit is fire-only
     for (let i = 0; i < 10_000; i++) m.emit('act', i);
   });
 
-  bench('nanoevents — emit', () => {
+  bench('nanoevents - emit', () => {
     const n = createNanoEvents<{ act: (i: number) => void }>();
     n.on('act', () => {});
     for (let i = 0; i < 10_000; i++) n.emit('act', i);
@@ -443,14 +443,14 @@ describe('comparative dispatch (10k dispatches, single handler)', () => {
 // SSR rehydration throughput
 //
 // The lib's `rehydrate()` replays serialized commands through the bus. It is
-// orthogonal to Vue's own hydration — Vue 3.6.0-beta.11's static-template
+// orthogonal to Vue's own hydration - Vue 3.6.0-beta.11's static-template
 // hydration fast path speeds up VDOM/Vapor hydration but does NOT speed up
 // command replay. These benches lock the lib's replay cost so any regression
 // is visible regardless of Vue version.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// Listener fan-out — tests the cost of the on() / emit() listener walk.
+// Listener fan-out - tests the cost of the on() / emit() listener walk.
 // The benefit of bucketing exact-match listeners is supposed to scale with
 // listener count: silent at 3 listeners, real at 50+.
 // ---------------------------------------------------------------------------
@@ -473,7 +473,7 @@ describe('listener fan-out', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Persist plugin — every dispatch triggers getState() + JSON.stringify() +
+// Persist plugin - every dispatch triggers getState() + JSON.stringify() +
 // storage.setItem(). Coalescing should batch back-to-back saves into one.
 // ---------------------------------------------------------------------------
 
@@ -512,7 +512,7 @@ describe('persist plugin throughput', () => {
     for (let i = 0; i < 100; i++) bus.dispatch('touch', null);
   });
 
-  // Same workload, but with coalesce: true — saves collapse to one per
+  // Same workload, but with coalesce: true - saves collapse to one per
   // microtask burst. Measures the win when many rapid dispatches touch the
   // same state.
   bench('100 rapid dispatches with persist enabled + coalesce (50-item array state)', () => {
@@ -539,27 +539,27 @@ describe('SSR rehydrate throughput', () => {
     return out;
   }
 
-  bench('rehydrate — 10 commands, single handler', () => {
+  bench('rehydrate - 10 commands, single handler', () => {
     const bus = createCommandBus();
     bus.register('replay', (cmd) => cmd.target);
     rehydrate(bus, makeCommands(10));
   });
 
-  bench('rehydrate — 100 commands, single handler', () => {
+  bench('rehydrate - 100 commands, single handler', () => {
     const bus = createCommandBus();
     bus.register('replay', (cmd) => cmd.target);
     rehydrate(bus, makeCommands(100));
   });
 
-  bench('rehydrate — 1000 commands, single handler', () => {
+  bench('rehydrate - 1000 commands, single handler', () => {
     const bus = createCommandBus();
     bus.register('replay', (cmd) => cmd.target);
     rehydrate(bus, makeCommands(1000));
   });
 
-  bench('rehydrate — 1000 commands, ignoreUnhandled skip path', () => {
+  bench('rehydrate - 1000 commands, ignoreUnhandled skip path', () => {
     const bus = createCommandBus();
-    // No handler registered — every command is skipped via hasHandler check.
+    // No handler registered - every command is skipped via hasHandler check.
     // Measures the cheap-path cost (relevant when the page replays a mix
     // of commands and only a subset is bound on the client).
     rehydrate(bus, makeCommands(1000), { ignoreUnhandled: true });
@@ -567,7 +567,7 @@ describe('SSR rehydrate throughput', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Transition bridge throughput — current-Vue baseline (running version is shown
+// Transition bridge throughput - current-Vue baseline (running version is shown
 // in each bench label via VUE_VERSION; recorded baseline blocks below stay literal)
 //
 // Beta.13 fixed two silent-skip bugs: onMove was never called for Vapor or
@@ -577,30 +577,30 @@ describe('SSR rehydrate throughput', () => {
 //
 // Reading these numbers:
 //   - "all 9 hooks" covers the full enter+leave lifecycle in one sequence.
-//   - "onMove × 10k" is the new baseline for the previously-broken move path.
+//   - "onMove x 10k" is the new baseline for the previously-broken move path.
 //   - "onMove vs bus.dispatch" confirms the bridge adds only dispatch overhead.
 //
 // Baselines (v1.4.0, beta.13, 2026-05-28):
-//   all 9 hooks × 1k        713 hz   (1.40ms / 1k sequences)   runs: 709 / 717
-//   onMove only × 10k     1,018 hz   (0.98ms / 10k calls)      runs: 1,067 / 969
-//   onEnter + onLeave × 5k  984 hz   (1.02ms / 5k pairs)       runs: 1,000 / 969
-//   raw bus.dispatch × 10k 1,757 hz  (0.57ms / 10k calls)      runs: 1,750 / 1,764
+//   all 9 hooks x 1k        713 hz   (1.40ms / 1k sequences)   runs: 709 / 717
+//   onMove only x 10k     1,018 hz   (0.98ms / 10k calls)      runs: 1,067 / 969
+//   onEnter + onLeave x 5k  984 hz   (1.02ms / 5k pairs)       runs: 1,000 / 969
+//   raw bus.dispatch x 10k 1,757 hz  (0.57ms / 10k calls)      runs: 1,750 / 1,764
 //
 // Baselines (v1.5.0, beta.14, 2026-06-05):
-//   all 9 hooks × 1k        776 hz   (+9% vs beta.13)
-//   onMove only × 10k     1,096 hz   (+8% vs beta.13)
-//   onEnter + onLeave × 5k 1,022 hz  (+4% vs beta.13)
-//   raw bus.dispatch × 10k 1,904 hz  (+8% vs beta.13)
-//   → scheduler flush improvements in beta.14 account for the uplift
-//   → bridge overhead ~37ns/call (dispatchSafe try/catch vs bare dispatch)
-//   → onMove has higher run-to-run variance (try/catch inhibits V8 inlining under GC)
+//   all 9 hooks x 1k        776 hz   (+9% vs beta.13)
+//   onMove only x 10k     1,096 hz   (+8% vs beta.13)
+//   onEnter + onLeave x 5k 1,022 hz  (+4% vs beta.13)
+//   raw bus.dispatch x 10k 1,904 hz  (+8% vs beta.13)
+//   -> scheduler flush improvements in beta.14 account for the uplift
+//   -> bridge overhead ~37ns/call (dispatchSafe try/catch vs bare dispatch)
+//   -> onMove has higher run-to-run variance (try/catch inhibits V8 inlining under GC)
 //
 // Baselines (v1.6.0, beta.15, 2026-06-11, dev host, median of 3 runs):
-//   all 9 hooks × 1k        707 hz   runs: 684 / 724
-//   onMove only × 10k     1,042 hz   runs: 1,024 / 1,053
-//   onEnter + onLeave × 5k  981 hz   runs: 962 / 992
-//   raw bus.dispatch × 10k 1,815 hz  runs: 1,805 / 1,834
-//   → ~3-8% under the beta.14 reference UNIFORMLY — including raw bus.dispatch,
+//   all 9 hooks x 1k        707 hz   runs: 684 / 724
+//   onMove only x 10k     1,042 hz   runs: 1,024 / 1,053
+//   onEnter + onLeave x 5k  981 hz   runs: 962 / 992
+//   raw bus.dispatch x 10k 1,815 hz  runs: 1,805 / 1,834
+//   -> ~3-8% under the beta.14 reference UNIFORMLY - including raw bus.dispatch,
 //     which has NO Vue dependency, so Vue's version cannot have moved it. The
 //     shift is host/load variance, not a beta.15 regression; numbers land on the
 //     beta.13 reference. beta.15 changed no code on these paths (docs + one guard
@@ -613,7 +613,7 @@ describe('transition bridge throughput', () => {
     return { tagName: 'DIV' } as unknown as Element;
   }
 
-  bench('createTransitionBridge — all 9 hooks (1k sequences)', () => {
+  bench('createTransitionBridge - all 9 hooks (1k sequences)', () => {
     const bus = createCommandBus({ onMissing: 'ignore' });
     const t = createTransitionBridge({ bus, namespace: 'modal' });
     const el = mockEl();
@@ -631,7 +631,7 @@ describe('transition bridge throughput', () => {
     }
   });
 
-  bench(`createTransitionBridge — onMove only × 10k (vue ${VUE_VERSION})`, () => {
+  bench(`createTransitionBridge - onMove only x 10k (vue ${VUE_VERSION})`, () => {
     const bus = createCommandBus({ onMissing: 'ignore' });
     const t = createTransitionBridge({ bus, namespace: 'list' });
     const el = mockEl();
@@ -640,7 +640,7 @@ describe('transition bridge throughput', () => {
     }
   });
 
-  bench('createTransitionBridge — onEnter + onLeave × 5k (enter/leave cycle)', () => {
+  bench('createTransitionBridge - onEnter + onLeave x 5k (enter/leave cycle)', () => {
     const bus = createCommandBus({ onMissing: 'ignore' });
     const t = createTransitionBridge({ bus, namespace: 'drawer' });
     const el = mockEl();
@@ -651,7 +651,7 @@ describe('transition bridge throughput', () => {
     }
   });
 
-  bench('createTransitionBridge — onMove vs raw bus.dispatch (overhead delta)', () => {
+  bench('createTransitionBridge - onMove vs raw bus.dispatch (overhead delta)', () => {
     const bus = createCommandBus({ onMissing: 'ignore' });
     for (let i = 0; i < 10_000; i++) {
       bus.dispatch('listMove', { tagName: 'DIV' });
@@ -660,22 +660,22 @@ describe('transition bridge throughput', () => {
 });
 
 // Vue 3.6.0-rc.2 (#15127) flipped compiler-vapor event delegation from
-// opt-out to opt-in — direct per-element listeners are now the default for
+// opt-out to opt-in - direct per-element listeners are now the default for
 // compiled `@click`. v-vc:command mirrors that same trade-off with its own
 // opt-in `.delegate` modifier (src/directives.ts): one shared document
 // listener instead of N per-element ones for large v-for'd action lists.
 //
 // MEASURED (5k elements, this machine): delegate mode is ~1.3x SLOWER to
-// mount+unmount than direct mode, not faster — the shared-counter branch
+// mount+unmount than direct mode, not faster - the shared-counter branch
 // costs slightly more per element than a bare (mocked) addEventListener
 // call. That is the honest number; do not read `.delegate` as a mount-speed
 // optimization. Its actual payoff is standing LISTENER COUNT while mounted
-// (1 vs N — real memory/retained-object pressure for thousands of rows,
+// (1 vs N - real memory/retained-object pressure for thousands of rows,
 // invisible to a mount/unmount-cost bench), which is why it stays opt-in
 // exactly like Vue's own default: worth it for large, mostly-static lists,
 // not a blanket win.
 // ---------------------------------------------------------------------------
-// Active-link stamping — the piece that scales with PAGE SIZE rather than
+// Active-link stamping - the piece that scales with PAGE SIZE rather than
 // route count. `afterEach` fires on query-only commits too (usePagination, a
 // sort toggle, a search box calling setQuery per keystroke), and on those the
 // path is unchanged so every stamp recomputes to the value already in the DOM.
@@ -683,7 +683,7 @@ describe('transition bridge throughput', () => {
 // what that memo is worth on a page with a mega-menu and a footer.
 // ---------------------------------------------------------------------------
 
-describe('active-link stamping — N anchors × M commits', () => {
+describe('active-link stamping - N anchors x M commits', () => {
   const ANCHORS = 500;
   const COMMITS = 50;
 
@@ -709,14 +709,14 @@ describe('active-link stamping — N anchors × M commits', () => {
 
   const root = buildRoot(ANCHORS);
 
-  bench(`${COMMITS} PATH commits × ${ANCHORS} anchors (full walk, unavoidable)`, () => {
+  bench(`${COMMITS} PATH commits x ${ANCHORS} anchors (full walk, unavoidable)`, () => {
     for (let i = 0; i < COMMITS; i++) {
       stampActiveLinks('/admin', `/section-${i % 25}/item-${i}`, root);
     }
   });
 
-  bench(`${COMMITS} QUERY-ONLY commits × ${ANCHORS} anchors (what the memo skips)`, () => {
-    // Same path every time — this is the per-keystroke case, and every one of
+  bench(`${COMMITS} QUERY-ONLY commits x ${ANCHORS} anchors (what the memo skips)`, () => {
+    // Same path every time - this is the per-keystroke case, and every one of
     // these walks produced stamps identical to the ones already there.
     for (let i = 0; i < COMMITS; i++) {
       stampActiveLinks('/admin', '/section-3/item-3', root);
@@ -724,10 +724,10 @@ describe('active-link stamping — N anchors × M commits', () => {
   });
 });
 
-describe('directive delegation (.delegate) — mount/unmount cost at scale', () => {
+describe('directive delegation (.delegate) - mount/unmount cost at scale', () => {
   const N = 5_000;
 
-  // Minimal Element mock — same shape as tests/directives.test.ts's, trimmed
+  // Minimal Element mock - same shape as tests/directives.test.ts's, trimmed
   // to what mounted()/beforeUnmount() touch. No real DOM needed: delegate
   // mode's cost is dominated by (de)registration, not event dispatch.
   function mockDoc() {
@@ -791,7 +791,7 @@ describe('directive delegation (.delegate) — mount/unmount cost at scale', () 
 });
 
 // ---------------------------------------------------------------------------
-// useCommandState — immediate vs coalesced (current-Vue v-for/v-if baseline;
+// useCommandState - immediate vs coalesced (current-Vue v-for/v-if baseline;
 // running version shown in bench labels via VUE_VERSION)
 //
 // Beta.13 introduces specialized v-for block operations and reduced v-if branch
@@ -801,46 +801,46 @@ describe('directive delegation (.delegate) — mount/unmount cost at scale', () 
 // the overall update cost separately from Vue's runtime improvements.
 //
 // Reading these numbers:
-//   - "immediate" fires a signal write per dispatch — each write would trigger
+//   - "immediate" fires a signal write per dispatch - each write would trigger
 //     a Vue re-render if consumed in a template.
-//   - "coalesced" batches all writes via queueMicrotask — one signal write for
+//   - "coalesced" batches all writes via queueMicrotask - one signal write for
 //     the whole burst. The bench measures synchronous cost only; the deferred
 //     write is not awaited.
 //   - "100 dispatches vs 10" shows how coalescing scales with burst size.
 //
 // Baselines (v1.4.0, beta.13, 2026-05-28):
 //   immediate  10 array appends    20,347 hz   runs: 20,188 / 20,507
-//   coalesced  10 array appends    19,741 hz   runs: 19,767 / 19,715  — parity at small bursts
+//   coalesced  10 array appends    19,741 hz   runs: 19,767 / 19,715  - parity at small bursts
 //   immediate 100 array appends     2,012 hz   runs:  1,934 /  2,090
-//   coalesced 100 array appends     2,052 hz   runs:  2,015 /  2,090  — within noise
+//   coalesced 100 array appends     2,052 hz   runs:  2,015 /  2,090  - within noise
 //   immediate 100 counter            2,044 hz  runs:  2,015 /  2,073
-//   coalesced 100 counter            1,986 hz  runs:  1,875 /  2,098  — within noise
+//   coalesced 100 counter            1,986 hz  runs:  1,875 /  2,098  - within noise
 //
 // Baselines (v1.5.0, beta.14, 2026-06-05):
 //   immediate  10 array appends    20,679 hz   (+2% vs beta.13)
-//   coalesced  10 array appends    20,493 hz   (+4% vs beta.13) — parity holds
+//   coalesced  10 array appends    20,493 hz   (+4% vs beta.13) - parity holds
 //   immediate 100 array appends     2,093 hz   (+4% vs beta.13)
-//   coalesced 100 array appends     2,086 hz   (+2% vs beta.13) — within noise
+//   coalesced 100 array appends     2,086 hz   (+2% vs beta.13) - within noise
 //   immediate 100 counter            2,067 hz  (+1% vs beta.13)
-//   coalesced 100 counter            2,105 hz  (+6% vs beta.13) — within noise
-//   → coalesce is throughput-neutral across both array and scalar types (confirmed beta.14)
-//   → use coalesce for correctness (≤1 signal write per burst), not for throughput
+//   coalesced 100 counter            2,105 hz  (+6% vs beta.13) - within noise
+//   -> coalesce is throughput-neutral across both array and scalar types (confirmed beta.14)
+//   -> use coalesce for correctness (≤1 signal write per burst), not for throughput
 //
 // Baselines (v1.6.0, beta.15, 2026-06-11, dev host, median of 3 runs):
 //   immediate  10 array  19,100 hz    coalesced  10 array  19,100 hz
 //   immediate 100 array   1,934 hz    coalesced 100 array   1,942 hz
 //   immediate 100 counter 1,945 hz    coalesced 100 counter 1,937 hz
-//   → ~3-7% under the beta.14 reference box, uniform across every row → host
+//   -> ~3-7% under the beta.14 reference box, uniform across every row -> host
 //     variance, not a beta.15 change. Coalesce stays throughput-neutral.
 // ---------------------------------------------------------------------------
 
-describe('useCommandState — immediate vs coalesced dispatch cost', () => {
+describe('useCommandState - immediate vs coalesced dispatch cost', () => {
   // Each iteration creates a fresh effectScope so tryAutoCleanup finds a live
-  // Vue scope. We call dispose() inside run() and do NOT call scope.stop() —
+  // Vue scope. We call dispose() inside run() and do NOT call scope.stop() -
   // stopping would fire onScopeDispose and double-call dispose() on
   // already-cleaned-up state, producing 0ns measurements and NaN hz.
 
-  bench('immediate — 10 dispatches, array append (simulates v-for source)', () => {
+  bench('immediate - 10 dispatches, array append (simulates v-for source)', () => {
     effectScope().run(() => {
       const bus = createCommandBus();
       const { state, dispose } = useCommandState<number[]>(
@@ -853,7 +853,7 @@ describe('useCommandState — immediate vs coalesced dispatch cost', () => {
     });
   });
 
-  bench('coalesced — 10 dispatches, array append (simulates v-for source)', () => {
+  bench('coalesced - 10 dispatches, array append (simulates v-for source)', () => {
     effectScope().run(() => {
       const bus = createCommandBus();
       const { state, dispose } = useCommandState<number[]>(
@@ -867,7 +867,7 @@ describe('useCommandState — immediate vs coalesced dispatch cost', () => {
     });
   });
 
-  bench('immediate — 100 dispatches, array append', () => {
+  bench('immediate - 100 dispatches, array append', () => {
     effectScope().run(() => {
       const bus = createCommandBus();
       const { state, dispose } = useCommandState<number[]>(
@@ -880,7 +880,7 @@ describe('useCommandState — immediate vs coalesced dispatch cost', () => {
     });
   });
 
-  bench('coalesced — 100 dispatches, array append', () => {
+  bench('coalesced - 100 dispatches, array append', () => {
     effectScope().run(() => {
       const bus = createCommandBus();
       const { state, dispose } = useCommandState<number[]>(
@@ -894,7 +894,7 @@ describe('useCommandState — immediate vs coalesced dispatch cost', () => {
     });
   });
 
-  bench('immediate — 100 dispatches, counter (simulates v-if condition)', () => {
+  bench('immediate - 100 dispatches, counter (simulates v-if condition)', () => {
     effectScope().run(() => {
       const bus = createCommandBus();
       const { state, dispose } = useCommandState<number>(
@@ -907,7 +907,7 @@ describe('useCommandState — immediate vs coalesced dispatch cost', () => {
     });
   });
 
-  bench('coalesced — 100 dispatches, counter (simulates v-if condition)', () => {
+  bench('coalesced - 100 dispatches, counter (simulates v-if condition)', () => {
     effectScope().run(() => {
       const bus = createCommandBus();
       const { state, dispose } = useCommandState<number>(
@@ -923,14 +923,14 @@ describe('useCommandState — immediate vs coalesced dispatch cost', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Signal path comparison — fallback vs alien-signals add-on vs Vue ref
+// Signal path comparison - fallback vs alien-signals add-on vs Vue ref
 //
 // Three signal backends available in vapor-chamber:
-//   1. Plain { value } object — default fallback when Vue is absent and
+//   1. Plain { value } object - default fallback when Vue is absent and
 //      configureAlienSignals has not been called. Zero overhead, not reactive.
-//   2. alien-signals via configureAlienSignals — opt-in push-pull reactivity
+//   2. alien-signals via configureAlienSignals - opt-in push-pull reactivity
 //      for non-Vue contexts. Backed by the same algorithm Vue 3.6 uses.
-//   3. Vue ref (auto-detected) — signal() returns vue.ref() when Vue is present.
+//   3. Vue ref (auto-detected) - signal() returns vue.ref() when Vue is present.
 //      Identical algorithm to (2) since Vue 3.6's ref() is alien-signals.
 //
 // These benches measure raw write throughput for each path so the cost of
@@ -938,50 +938,50 @@ describe('useCommandState — immediate vs coalesced dispatch cost', () => {
 // to see the auto-detection path vs the explicit fallback.
 //
 // Baselines (v1.4.0, beta.13, 2026-05-28):
-//   plain { value } object 10k writes    ~368,000 hz  ← V8 DCE upper bound; real cost ≈ zero overhead
-//   closure getter/setter (OLD, v1.3)      ~2,400 hz  ← real cost; setter is a fn call V8 cannot elide
-//   alien-signals via alienSignalAdapter  ~10,500 hz  ← opt-in reactive; ~4× faster than old closure
-//   Vue ref via signal() auto-detected     ~9,500 hz  ← same algorithm, slight Vue wrapper overhead
-//   Vue ref + watchEffect subscriber      ~50,000 hz  (notify path — different iteration scale)
-//   effectScope + onScopeDispose only ×1k ~158,000 hz ← beta.13 lazy job: no update job allocated
-//   effectScope + signal + onScopeDispose  ~21,000 hz ← full reactive scope path
+//   plain { value } object 10k writes    ~368,000 hz  <- V8 DCE upper bound; real cost ≈ zero overhead
+//   closure getter/setter (OLD, v1.3)      ~2,400 hz  <- real cost; setter is a fn call V8 cannot elide
+//   alien-signals via alienSignalAdapter  ~10,500 hz  <- opt-in reactive; ~4x faster than old closure
+//   Vue ref via signal() auto-detected     ~9,500 hz  <- same algorithm, slight Vue wrapper overhead
+//   Vue ref + watchEffect subscriber      ~50,000 hz  (notify path - different iteration scale)
+//   effectScope + onScopeDispose only x1k ~158,000 hz <- beta.13 lazy job: no update job allocated
+//   effectScope + signal + onScopeDispose  ~21,000 hz <- full reactive scope path
 //   useCommandState 100 dispatches          ~1,700 hz
-//   useCommandState coalesced 100           ~1,900 hz ← throughput-neutral (within noise)
+//   useCommandState coalesced 100           ~1,900 hz <- throughput-neutral (within noise)
 //
 // Baselines (v1.5.0, beta.14, 2026-06-05):
-//   plain { value } object 10k writes    ~372,000 hz  ← stable (V8 DCE)
+//   plain { value } object 10k writes    ~372,000 hz  <- stable (V8 DCE)
 //   closure getter/setter (OLD, v1.3)      ~2,208 hz
 //   alien-signals via alienSignalAdapter  ~10,400 hz
-//   Vue shallowRef via signal() (v1.5.0)  ~40-62k hz  ← ~4-7× the old deep-ref() ~9k path (run-dependent)
+//   Vue shallowRef via signal() (v1.5.0)  ~40-62k hz  <- ~4-7x the old deep-ref() ~9k path (run-dependent)
 //   Vue ref + watchEffect subscriber      ~53,866 hz  (+8% vs beta.13)
-//   effectScope + onScopeDispose only ×1k ~173,462 hz ← beta.14: +9% vs beta.13
-//   effectScope + signal + onScopeDispose  ~21,287 hz ← stable
+//   effectScope + onScopeDispose only x1k ~173,462 hz <- beta.14: +9% vs beta.13
+//   effectScope + signal + onScopeDispose  ~21,287 hz <- stable
 //   useCommandState 100 dispatches          ~2,100 hz  (+24% vs beta.13)
-//   useCommandState coalesced 100           ~2,115 hz  ← throughput-neutral (within noise)
+//   useCommandState coalesced 100           ~2,115 hz  <- throughput-neutral (within noise)
 //
 // Baselines (v1.6.0, beta.15, 2026-06-11, dev host, 3 runs):
-//   plain { value } object               ~362,000 hz       ← stable (V8 DCE)
+//   plain { value } object               ~362,000 hz       <- stable (V8 DCE)
 //   alien-signals via alienSignalAdapter  ~8,500-10,700 hz
-//   Vue shallowRef via signal() (v1.5.0)  ~31,000-42,000 hz ← machine-state sensitive
-//        (busy vs idle); the ~4-7× ratio over the old deep ref() is the robust claim
-//   Vue ref + watchEffect subscriber      ~35,000-55,000 hz (±4.5% rme — noisiest row)
-//   effectScope + onScopeDispose only ×1k ~156,000 hz
+//   Vue shallowRef via signal() (v1.5.0)  ~31,000-42,000 hz <- machine-state sensitive
+//        (busy vs idle); the ~4-7x ratio over the old deep ref() is the robust claim
+//   Vue ref + watchEffect subscriber      ~35,000-55,000 hz (±4.5% rme - noisiest row)
+//   effectScope + onScopeDispose only x1k ~156,000 hz
 //   effectScope + signal + onScopeDispose  ~21,000-25,000 hz
 //   useCommandState 100 dispatches          ~1,650-2,015 hz
-//   → Reactive rows swing 20-30% run-to-run on a shared machine; fallback and
+//   -> Reactive rows swing 20-30% run-to-run on a shared machine; fallback and
 //     lifecycle rows are stable. signal-shallow-ab (same-process A/B) is the
-//     trustworthy regression guard — it still shows shallowRef faster. No beta.15
+//     trustworthy regression guard - it still shows shallowRef faster. No beta.15
 //     reactivity regression; the cross-run spread is host state, not code.
 // ---------------------------------------------------------------------------
 
-describe('signal path comparison — fallback vs alien-signals add-on vs Vue ref', () => {
+describe('signal path comparison - fallback vs alien-signals add-on vs Vue ref', () => {
   beforeAll(async () => {
     await waitForVueDetection();
   });
 
   // ── without add-on (default fallback) ─────────────────────────────────────
 
-  bench('plain { value } object — actual fallback (no Vue, no alien-signals)', () => {
+  bench('plain { value } object - actual fallback (no Vue, no alien-signals)', () => {
     // NOTE: V8 may dead-code-eliminate these writes (no subscribers, fresh object
     // per iteration). The ~370k hz figure is an upper bound; real cost is near
     // zero overhead. The honest takeaway: plain property access has no function
@@ -992,8 +992,8 @@ describe('signal path comparison — fallback vs alien-signals add-on vs Vue ref
     if (sink < 0) console.log(sink);
   }, { baseline: true });
 
-  bench('closure getter/setter — old v1.3 fallback (historical comparison)', () => {
-    // Replaced in v1.4.0. The setter is a real function call — V8 cannot
+  bench('closure getter/setter - old v1.3 fallback (historical comparison)', () => {
+    // Replaced in v1.4.0. The setter is a real function call - V8 cannot
     // eliminate it, so this measures actual invocation cost.
     let _v = 0;
     const s = { get value() { return _v; }, set value(v: number) { _v = v; } };
@@ -1004,7 +1004,7 @@ describe('signal path comparison — fallback vs alien-signals add-on vs Vue ref
 
   // ── with alien-signals add-on ──────────────────────────────────────────────
 
-  bench('alien-signals via alienSignalAdapter — opt-in reactive path', () => {
+  bench('alien-signals via alienSignalAdapter - opt-in reactive path', () => {
     // What you get after: configureAlienSignals(alienSignal)
     // or: configureSignal(alienSignalAdapter(alienSignal))
     const s = _alienFactory(0);
@@ -1015,17 +1015,17 @@ describe('signal path comparison — fallback vs alien-signals add-on vs Vue ref
 
   // ── Vue auto-detected (v1.5.0: signal() wires shallowRef) ──────────────────
 
-  bench('Vue shallowRef via signal() — auto-detected (v1.5.0 default)', () => {
+  bench('Vue shallowRef via signal() - auto-detected (v1.5.0 default)', () => {
     // What signal() returns when Vue is present: shallowRef (v1.5.0+). Goes
-    // through the signal() indirection, so V8 can't constant-fold it — this is
-    // a reliable scalar-write measurement (~40-62k hz run-dependent, ~4-7× the old deep-ref ~9k).
+    // through the signal() indirection, so V8 can't constant-fold it - this is
+    // a reliable scalar-write measurement (~40-62k hz run-dependent, ~4-7x the old deep-ref ~9k).
     const s = signal(0);
     let sink = 0;
     for (let i = 0; i < 10_000; i++) { s.value = i; sink = s.value; }
     if (sink < 0) console.log(sink);
   });
 
-  bench(`Vue ref + watchEffect subscriber — notify path (vue ${VUE_VERSION})`, async () => {
+  bench(`Vue ref + watchEffect subscriber - notify path (vue ${VUE_VERSION})`, async () => {
     const { ref, watchEffect, effectScope } = await import('vue');
     const scope = effectScope();
     const r = ref(0);
@@ -1040,19 +1040,19 @@ describe('signal path comparison — fallback vs alien-signals add-on vs Vue ref
 
   // ── lifecycle overhead (current Vue) ──────────────────────────────────────
 
-  bench(`effectScope + onScopeDispose only × 1k (vue ${VUE_VERSION} lazy job cost)`, async () => {
+  bench(`effectScope + onScopeDispose only x 1k (vue ${VUE_VERSION} lazy job cost)`, async () => {
     const { effectScope } = await import('vue');
     for (let i = 0; i < 1_000; i++) {
       const scope = effectScope();
       scope.run(() => {
-        // tryAutoCleanup path — beta.13 does NOT allocate an update job here
+        // tryAutoCleanup path - beta.13 does NOT allocate an update job here
         // because no reactive state is tracked inside the scope.
       });
       scope.stop();
     }
   });
 
-  bench(`effectScope + reactive signal + onScopeDispose × 1k (vue ${VUE_VERSION} full path)`, async () => {
+  bench(`effectScope + reactive signal + onScopeDispose x 1k (vue ${VUE_VERSION} full path)`, async () => {
     const { effectScope, onScopeDispose } = await import('vue');
     for (let i = 0; i < 1_000; i++) {
       const scope = effectScope();
@@ -1067,7 +1067,7 @@ describe('signal path comparison — fallback vs alien-signals add-on vs Vue ref
 
   // ── useCommandState with real Vue refs ────────────────────────────────────
 
-  bench(`useCommandState 100 dispatches — Vue ref signal writes (vue ${VUE_VERSION})`, () => {
+  bench(`useCommandState 100 dispatches - Vue ref signal writes (vue ${VUE_VERSION})`, () => {
     effectScope().run(() => {
       const bus = createCommandBus();
       const { state, dispose } = useCommandState<number>(0, { inc: (s) => s + 1 });
@@ -1077,7 +1077,7 @@ describe('signal path comparison — fallback vs alien-signals add-on vs Vue ref
     });
   });
 
-  bench(`useCommandState coalesced 100 dispatches — Vue ref, 1 reactive write (vue ${VUE_VERSION})`, () => {
+  bench(`useCommandState coalesced 100 dispatches - Vue ref, 1 reactive write (vue ${VUE_VERSION})`, () => {
     effectScope().run(() => {
       const bus = createCommandBus();
       const { state, dispose } = useCommandState<number>(0, { inc: (s) => s + 1 }, { coalesce: true });
@@ -1091,11 +1091,11 @@ describe('signal path comparison — fallback vs alien-signals add-on vs Vue ref
 // NOTE: isolated ref-vs-shallowRef micro-benches were intentionally NOT added
 // here. Pure deterministic signal loops are constant-foldable, so V8 dead-code-
 // eliminates the shallowRef path (whose writes have no observable effect) while
-// keeping ref's Proxy-trap side effects — producing inflated, unstable ratios
-// (observed 800×+ with ±100% rme). The honest, DCE-safe measurement lives in
+// keeping ref's Proxy-trap side effects - producing inflated, unstable ratios
+// (observed 800x+ with ±100% rme). The honest, DCE-safe measurement lives in
 // tests/signal-shallow-ab.test.ts, which runs the REAL dispatch path (the bus
 // indirection defeats constant-folding) interleaved in-process and asserts the
-// ratio (~3.4× / +245% on the array path). Use that as the source of truth.
+// ratio (~3.4x / +245% on the array path). Use that as the source of truth.
 
 describe('command.meta', () => {
   it('command.meta.id is populated', () => {

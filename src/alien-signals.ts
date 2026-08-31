@@ -1,5 +1,5 @@
 /**
- * vapor-chamber — alien-signals connector.
+ * vapor-chamber - alien-signals connector.
  *
  * Bridges [alien-signals](https://github.com/stackblitz/alien-signals)'
  * function-call API to vapor-chamber's `.value`-style `Signal` interface.
@@ -7,7 +7,7 @@
  * ## Why this exists
  *
  * Vue 3.6's `ref()` is itself a port of alien-signals' algorithm
- * ([vuejs/core#12349](https://github.com/vuejs/core/pull/12349)) — so when
+ * ([vuejs/core#12349](https://github.com/vuejs/core/pull/12349)) - so when
  * vapor-chamber auto-detects `vue.ref`, you're already on alien-signals
  * under the hood. This connector is for **non-Vue consumers** who want
  * the same fine-grained reactivity:
@@ -32,7 +32,7 @@
  *
  * // From this point on, every vapor-chamber signal() call wraps an
  * // alien-signal under the hood. useCommand, useSharedCommandState, the
- * // FormBus signals — all backed by alien-signals' propagation algorithm.
+ * // FormBus signals - all backed by alien-signals' propagation algorithm.
  */
 
 import { configureSignal, type Signal, type CreateSignal } from './signal';
@@ -42,16 +42,24 @@ import { configureSignal, type Signal, type CreateSignal } from './signal';
  * (`s()`) and writing (`s(value)`) go through the same callable.
  *
  * Defined locally so the connector has no `import 'alien-signals'`
- * dependency — consumers feed in the function from their own install.
+ * dependency - consumers feed in the function from their own install.
  */
 export type AlienSignalFn = <T>(initial?: T) => {
   /** Read */ (): T;
   /** Write */ (next: T): T;
 };
 
+/** Class wrapper gives V8 a stable hidden class across all adapter instances. */
+class AlienSignalWrapper<T> {
+  private readonly _s: { (): T; (next: T): T };
+  constructor(s: { (): T; (next: T): T }) { this._s = s; }
+  get value(): T { return this._s(); }
+  set value(next: T) { this._s(next); }
+}
+
 /**
  * Build a `CreateSignal` adapter from alien-signals' `signal` function.
- * The returned function is what `configureSignal()` expects — it produces
+ * The returned function is what `configureSignal()` expects - it produces
  * vapor-chamber-style `{ value }` objects backed by an alien-signal.
  *
  * Use this when you want manual control. For the typical case, prefer
@@ -64,14 +72,6 @@ export type AlienSignalFn = <T>(initial?: T) => {
  *
  * configureSignal(alienSignalAdapter(alienSignal));
  */
-/** Class wrapper gives V8 a stable hidden class across all adapter instances. */
-class AlienSignalWrapper<T> {
-  private readonly _s: { (): T; (next: T): T };
-  constructor(s: { (): T; (next: T): T }) { this._s = s; }
-  get value(): T { return this._s(); }
-  set value(next: T) { this._s(next); }
-}
-
 export function alienSignalAdapter(alienSignal: AlienSignalFn): CreateSignal {
   return <T>(initial: T): Signal<T> => new AlienSignalWrapper<T>(alienSignal<T>(initial));
 }
@@ -87,7 +87,7 @@ export function alienSignalAdapter(alienSignal: AlienSignalFn): CreateSignal {
  *
  * configureAlienSignals(alienSignal);
  *
- * // Now use vapor-chamber composables / signal() normally — they're
+ * // Now use vapor-chamber composables / signal() normally - they're
  * // backed by alien-signals' push-pull propagation.
  */
 export function configureAlienSignals(alienSignal: AlienSignalFn): void {

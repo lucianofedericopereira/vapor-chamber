@@ -1,5 +1,5 @@
 /**
- * plugins-core coverage — the leftover error-path catches and async rollback
+ * plugins-core coverage - the leftover error-path catches and async rollback
  * branches in logger / history / debounce / optimistic / optimisticUndo.
  * All reachable with deliberately-throwing handlers/undo/rollback fns + a
  * console.error spy (and fake timers for debounce). No Vue, no I/O mocks.
@@ -11,7 +11,7 @@ import { logger, history, debounce, optimistic, optimisticUndo } from '../src/pl
 afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
 
 // ── logger: failed-dispatch error branch (line 34) ────────────────────────────
-describe('plugins-core coverage — logger', () => {
+describe('plugins-core coverage - logger', () => {
   it('logs the error on a failed dispatch', () => {
     vi.spyOn(console, 'group').mockImplementation(() => {});
     vi.spyOn(console, 'groupCollapsed').mockImplementation(() => {});
@@ -21,14 +21,14 @@ describe('plugins-core coverage — logger', () => {
 
     const bus = createCommandBus();
     bus.use(logger());
-    bus.dispatch('missing', {}); // no handler → result.ok === false
+    bus.dispatch('missing', {}); // no handler -> result.ok === false
 
     expect(errSpy).toHaveBeenCalledWith('error:', expect.anything());
   });
 });
 
 // ── history: undo handler throws + redo dispatch throws ────────────
-describe('plugins-core coverage — history undo/redo errors', () => {
+describe('plugins-core coverage - history undo/redo errors', () => {
   it('catches a throwing undo handler', () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const bus = createCommandBus();
@@ -37,7 +37,7 @@ describe('plugins-core coverage — history undo/redo errors', () => {
     bus.register('act', () => 'ok', { undo: () => { throw new Error('undo boom'); } });
 
     bus.dispatch('act', {});            // recorded in `past`
-    expect(() => h.undo()).not.toThrow(); // undo handler throws → caught
+    expect(() => h.undo()).not.toThrow(); // undo handler throws -> caught
 
     expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('Undo handler error'), expect.anything());
   });
@@ -50,8 +50,8 @@ describe('plugins-core coverage — history undo/redo errors', () => {
     const unreg = bus.register('act', () => 'ok');
 
     bus.dispatch('act', {}); // recorded
-    h.undo();                // past → future
-    unreg();                 // remove handler → redo's dispatch throws (onMissing:'throw')
+    h.undo();                // past -> future
+    unreg();                 // remove handler -> redo's dispatch throws (onMissing:'throw')
     expect(() => h.redo()).not.toThrow();
 
     expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('Redo dispatch error'), expect.anything());
@@ -59,7 +59,7 @@ describe('plugins-core coverage — history undo/redo errors', () => {
 });
 
 // ── debounce: debounced execution throws ────────────────────────────────
-describe('plugins-core coverage — debounce', () => {
+describe('plugins-core coverage - debounce', () => {
   it('catches a throwing debounced execution', () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.useFakeTimers();
@@ -69,21 +69,21 @@ describe('plugins-core coverage — debounce', () => {
     bus.register('act', () => 'ok');
 
     bus.dispatch('act', {});       // schedules the debounce timer, stores `next`
-    vi.advanceTimersByTime(100);   // timer fires → currentNext() → inner plugin throws → caught
+    vi.advanceTimersByTime(100);   // timer fires -> currentNext() -> inner plugin throws -> caught
 
     expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('Debounced execution error'), expect.anything());
   });
 });
 
-// ── optimistic: rollback throws — sync + async ─────────────────
-describe('plugins-core coverage — optimistic rollback errors', () => {
+// ── optimistic: rollback throws - sync + async ─────────────────
+describe('plugins-core coverage - optimistic rollback errors', () => {
   it('catches a throwing sync rollback', () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const bus = createCommandBus();
     bus.use(optimistic({ act: { apply: () => () => { throw new Error('rollback boom'); } } }));
     bus.register('act', () => { throw new Error('handler fail'); });
 
-    bus.dispatch('act', {}); // handler fails → rollback() throws → caught
+    bus.dispatch('act', {}); // handler fails -> rollback() throws -> caught
 
     expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('Rollback error'), expect.anything());
   });
@@ -94,19 +94,19 @@ describe('plugins-core coverage — optimistic rollback errors', () => {
     bus.use(optimistic({ act: { apply: () => () => { throw new Error('async rollback boom'); } } }));
     bus.register('act', async () => { throw new Error('async fail'); });
 
-    await bus.dispatch('act', {}); // async fail → .then → rollback throws → caught
+    await bus.dispatch('act', {}); // async fail -> .then -> rollback throws -> caught
 
     expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('Rollback error'), expect.anything());
   });
 });
 
-// ── optimisticUndo: undo throws — sync + async + onRollback ────
-describe('plugins-core coverage — optimisticUndo rollback errors', () => {
+// ── optimisticUndo: undo throws - sync + async + onRollback ────
+describe('plugins-core coverage - optimisticUndo rollback errors', () => {
   it('sync: catches a throwing undo and console.errors with no onRollbackError', () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const bus = createCommandBus();
     bus.register('act', () => { throw new Error('fail'); }, { undo: () => { throw new Error('undo boom'); } });
-    bus.use(optimisticUndo(bus, ['act'])); // no onRollbackError → falls to console.error
+    bus.use(optimisticUndo(bus, ['act'])); // no onRollbackError -> falls to console.error
 
     bus.dispatch('act', {});
 

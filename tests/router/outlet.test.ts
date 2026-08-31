@@ -1,12 +1,13 @@
 // @vitest-environment happy-dom
 /**
- * Tests for router/outlet.ts — <RouterOutlet> renders the matched component at
+ * Tests for router/outlet.ts - <RouterOutlet> renders the matched component at
  * its depth, falls back to the default slot when nothing matches, and requires
  * an installed router.
  */
 
 import { describe, expect, it } from 'vitest';
 import { createApp, defineComponent, h } from 'vue';
+import { isRouterError } from '../../src/router/errors';
 import { createMemoryHistory } from '../../src/router/history';
 import { createRouter } from '../../src/router/index';
 import { RouterOutlet } from '../../src/router/outlet';
@@ -48,7 +49,7 @@ describe('RouterOutlet', () => {
 
   it('renders the default slot when nothing matches at this depth', () => {
     const router = makeRouter();
-    // Not started → START_LOCATION, render[] is empty at depth 0.
+    // Not started -> START_LOCATION, render[] is empty at depth 0.
     const host = document.createElement('div');
     const app = createApp({
       render: () => h(RouterOutlet, null, { default: () => h('em', 'fallback') }),
@@ -65,9 +66,23 @@ describe('RouterOutlet', () => {
     const app = createApp({ render: () => h(RouterOutlet) });
     expect(() => app.mount(host)).toThrow(/without an installed router/);
   });
+
+  it('reports that failure with a code, not just a message', () => {
+    const host = document.createElement('div');
+    const app = createApp({ render: () => h(RouterOutlet) });
+    // Handlers switch on `code` everywhere else in this router; this throw
+    // used to be a bare Error, so it was the one they could not.
+    let caught: unknown;
+    try {
+      app.mount(host);
+    } catch (error) {
+      caught = error;
+    }
+    expect(isRouterError(caught, 'no_router')).toBe(true);
+  });
 });
 
-describe('RouterOutlet — default slot', () => {
+describe('RouterOutlet - default slot', () => {
   it('renders the default slot when nothing matches at this depth', async () => {
     // A nested outlet past the end of the render chain: the fallback is what a
     // layout uses for "no child route selected".
@@ -90,7 +105,7 @@ describe('RouterOutlet — default slot', () => {
   });
 });
 
-describe('RouterOutlet — nothing to render and no slot', () => {
+describe('RouterOutlet - nothing to render and no slot', () => {
   it('renders null rather than failing when there is no match and no default slot', async () => {
     const router = createRouter({
       base: '',

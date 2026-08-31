@@ -1,10 +1,10 @@
 /**
- * vapor-chamber — Standard Schema validator plugin.
+ * vapor-chamber - Standard Schema validator plugin.
  *
  * Schema-library agnostic. Works with any schema lib implementing
  * [Standard Schema v1](https://standardschema.dev/): Zod, Valibot,
  * ArkType, Effect Schema, etc. The plugin only depends on the
- * `~standard` interop shape — no schema lib is bundled.
+ * `~standard` interop shape - no schema lib is bundled.
  *
  * @example with Zod
  *   import { z } from 'zod';
@@ -37,7 +37,7 @@ import type { Command, CommandResult, Plugin, AsyncPlugin } from './command-bus'
 import { BusError } from './command-bus';
 
 // ---------------------------------------------------------------------------
-// Standard Schema v1 — minimal interop types.
+// Standard Schema v1 - minimal interop types.
 // We don't `import` from any schema lib; we duck-type via the `~standard`
 // property that all conforming libs expose.
 // ---------------------------------------------------------------------------
@@ -71,21 +71,21 @@ export interface StandardSchemaV1Issue {
 export type SchemaValidatorOptions = {
   /**
    * Which field on the Command to validate. Default: `'target'`.
-   * - `'target'` — validate `cmd.target`
-   * - `'payload'` — validate `cmd.payload`
-   * - `'both'` — validate `{ target, payload }` as a single object
-   * - `(cmd) => unknown` — extract a custom value from `cmd`
+   * - `'target'` - validate `cmd.target`
+   * - `'payload'` - validate `cmd.payload`
+   * - `'both'` - validate `{ target, payload }` as a single object
+   * - `(cmd) => unknown` - extract a custom value from `cmd`
    */
   field?: 'target' | 'payload' | 'both' | ((cmd: Command) => unknown);
   /**
    * What to do on validation failure:
-   * - `'reject'` (default) — return `{ ok: false, error: BusError(VC_VALIDATION_FAILED) }`
+   * - `'reject'` (default) - return `{ ok: false, error: BusError(VC_VALIDATION_FAILED) }`
    *   without invoking the handler
-   * - `'warn'` — `console.warn` and continue to the handler with the
+   * - `'warn'` - `console.warn` and continue to the handler with the
    *   original (un-coerced) command
    *
    * Even in 'warn' mode, the schema's `.parse()` coercions are NOT
-   * applied — the original command flows through unchanged. To use
+   * applied - the original command flows through unchanged. To use
    * coerced values, use `'reject'` mode and validate before dispatching.
    */
   onInvalid?: 'reject' | 'warn';
@@ -140,7 +140,7 @@ export function validateSchemas(
     const value = pickValue(cmd, field);
     const result = schema['~standard'].validate(value);
 
-    // Sync plugin can't await — if a schema returns a Promise, we treat
+    // Sync plugin can't await - if a schema returns a Promise, we treat
     // that as a configuration error and fail the dispatch loudly.
     if (typeof (result as Promise<unknown>).then === 'function') {
       return rejectResult(
@@ -163,7 +163,7 @@ export function validateSchemas(
 }
 
 /**
- * Async variant — supports schemas whose `validate` returns a Promise.
+ * Async variant - supports schemas whose `validate` returns a Promise.
  * Use with `createAsyncCommandBus()`.
  */
 export function validateSchemasAsync(

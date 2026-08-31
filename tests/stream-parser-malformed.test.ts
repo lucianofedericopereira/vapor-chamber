@@ -1,5 +1,5 @@
 /**
- * StreamParser — malformed input.
+ * StreamParser - malformed input.
  *
  * The existing suite parses well-formed JSON thoroughly; what it never does is
  * hand the parser something broken. That left the error arms of nearly every
@@ -8,7 +8,7 @@
  * These are the branches that matter most in a streaming parser: it consumes
  * bytes off a network, so malformed input is an expected condition, not an
  * exotic one. Each case pins the specific handler that must reject, and asserts
- * the *message* rather than just "an error happened" — otherwise a parser that
+ * the *message* rather than just "an error happened" - otherwise a parser that
  * rejected everything for the wrong reason would pass.
  */
 import { describe, expect, it } from 'vitest';
@@ -32,7 +32,7 @@ function errorsFor(json: string): string[] {
   return errors;
 }
 
-describe('StreamParser — structural errors', () => {
+describe('StreamParser - structural errors', () => {
   it('rejects junk where a key must start', () => {
     expect(errorsFor('{x:1}').join(' ')).toMatch(/Expected " or }/);
   });
@@ -60,7 +60,7 @@ describe('StreamParser — structural errors', () => {
   });
 });
 
-describe('StreamParser — string escapes', () => {
+describe('StreamParser - string escapes', () => {
   it('rejects an unknown escape', () => {
     expect(errorsFor('{"a":"\\q"}').join(' ')).toMatch(/Invalid escape/);
   });
@@ -86,7 +86,7 @@ describe('StreamParser — string escapes', () => {
   });
 });
 
-describe('StreamParser — keywords and numbers', () => {
+describe('StreamParser - keywords and numbers', () => {
   it('rejects a mistyped keyword and names what it wanted', () => {
     expect(errorsFor('{"a":tru3}').join(' ')).toMatch(/Expected "true"/);
     expect(errorsFor('{"a":fals3}').join(' ')).toMatch(/Expected "false"/);

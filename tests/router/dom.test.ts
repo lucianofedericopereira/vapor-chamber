@@ -1,12 +1,12 @@
 // @vitest-environment happy-dom
 /**
- * Tests for src/dom.ts — installDomIntegration / stampActiveLinks.
+ * Tests for src/dom.ts - installDomIntegration / stampActiveLinks.
  *
  * dom.ts is otherwise excluded from this project's node-environment vitest
  * run (see vitest.config.ts) and was, until now, covered only by a browser
  * playground that doesn't exist in this checkout. This file closes that gap
- * for the click-interception/active-stamping core and — the reason it was
- * added — the bfcache (`pageshow`/`persisted`) restore wiring, which had no
+ * for the click-interception/active-stamping core and - the reason it was
+ * added - the bfcache (`pageshow`/`persisted`) restore wiring, which had no
  * verification at all beyond code review.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -27,7 +27,7 @@ function pageshow(persisted: boolean): void {
 afterEach(() => {
   document.body.innerHTML = '';
   // The cross-origin/external-target click tests dispatch a real click on an
-  // anchor that dom.ts deliberately never preventDefault()s — happy-dom then
+  // anchor that dom.ts deliberately never preventDefault()s - happy-dom then
   // follows it for real, mutating window.location (and so window.location.origin)
   // for every test that runs after. Reset it so later tests' own origin-based
   // routability checks aren't polluted by an earlier test's "let the browser
@@ -35,7 +35,7 @@ afterEach(() => {
   (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM.setURL('http://localhost:3000/');
 });
 
-describe('installDomIntegration — click interception', () => {
+describe('installDomIntegration - click interception', () => {
   it('intercepts an in-base link and calls navigate', () => {
     const anchor = document.createElement('a');
     anchor.href = '/admin/products';
@@ -148,7 +148,7 @@ describe('installDomIntegration — click interception', () => {
   });
 });
 
-describe('installDomIntegration — hover preheat', () => {
+describe('installDomIntegration - hover preheat', () => {
   it('preheats the hovered link after the intent delay, cancels on mouseout', () => {
     vi.useFakeTimers();
     const anchor = document.createElement('a');
@@ -174,7 +174,7 @@ describe('installDomIntegration — hover preheat', () => {
   });
 });
 
-describe('installDomIntegration — bfcache restore (onRestore)', () => {
+describe('installDomIntegration - bfcache restore (onRestore)', () => {
   it('calls onRestore when the page is restored from bfcache (pageshow, persisted)', () => {
     const onRestore = vi.fn();
     const teardown = installDomIntegration({ base: '/admin', canHandle: () => true, navigate: vi.fn(), onRestore });
@@ -224,7 +224,7 @@ describe('stampActiveLinks', () => {
       <a id="a4" href="https://example.com/admin/products/7">External-ish</a>
     `;
 
-    // Currently on the deeper path — a1 (the parent "Products" link) should
+    // Currently on the deeper path - a1 (the parent "Products" link) should
     // be a prefix match (active, not exact); a2 (this exact record) should
     // be both; a3 (a sibling section) neither.
     stampActiveLinks('/admin', '/products/7');
@@ -264,7 +264,7 @@ describe('preheatIdle', () => {
 
     preheatIdle(factories, { gap: 50 });
 
-    // No requestIdleCallback in happy-dom → Safari fallback (setTimeout 2500ms)
+    // No requestIdleCallback in happy-dom -> Safari fallback (setTimeout 2500ms)
     await vi.advanceTimersByTimeAsync(2500);
     await vi.advanceTimersByTimeAsync(100);
 
@@ -285,7 +285,7 @@ describe('preheatIdle', () => {
     preheatIdle(factories, { gap: 50 });
     await vi.advanceTimersByTimeAsync(2500); // fallback fires, factory 1 runs
     window.dispatchEvent(new Event('click'));
-    await vi.advanceTimersByTimeAsync(1000); // past the gap — factory 2 would have run by now
+    await vi.advanceTimersByTimeAsync(1000); // past the gap - factory 2 would have run by now
 
     expect(order).toEqual([1]);
     vi.useRealTimers();
@@ -310,7 +310,7 @@ describe('preheatIdle', () => {
   });
 });
 
-describe('installDomIntegration — click guard branches', () => {
+describe('installDomIntegration - click guard branches', () => {
   it('ignores an already-defaultPrevented click', () => {
     const anchor = document.createElement('a');
     anchor.href = '/admin/products';
@@ -383,7 +383,7 @@ describe('installDomIntegration — click guard branches', () => {
   });
 });
 
-describe('installDomIntegration — hover guard branches', () => {
+describe('installDomIntegration - hover guard branches', () => {
   it('ignores a data-native anchor and an out-of-base anchor, and re-arms on rapid re-hover', () => {
     vi.useFakeTimers();
     const native = document.createElement('a');
@@ -398,8 +398,8 @@ describe('installDomIntegration — hover guard branches', () => {
     const preheat = vi.fn();
     const teardown = installDomIntegration({ base: '/admin', canHandle: () => true, navigate: vi.fn(), preheat });
 
-    native.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); // data-native → ignored
-    out.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); // out-of-base → not routable
+    native.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); // data-native -> ignored
+    out.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); // out-of-base -> not routable
     inBase.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); // arms timer
     inBase.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })); // clears + re-arms
     vi.advanceTimersByTime(100);
@@ -411,7 +411,7 @@ describe('installDomIntegration — hover guard branches', () => {
   });
 });
 
-describe('preheatIdle — environment branches', () => {
+describe('preheatIdle - environment branches', () => {
   it('skips entirely under saveData', () => {
     Object.defineProperty(navigator, 'connection', { value: { saveData: true }, configurable: true });
     const factory = vi.fn(async () => {});
@@ -459,7 +459,7 @@ describe('preheatIdle — environment branches', () => {
   it('aborts between the factory and the gap wait when cancelled mid-run', async () => {
     Object.defineProperty(document, 'readyState', { value: 'complete', configurable: true });
     // Defer the callback so preheatIdle returns (and `cancel` is assigned) before
-    // run() starts — otherwise factory 1 would call the initial no-op cancel.
+    // run() starts - otherwise factory 1 would call the initial no-op cancel.
     (window as unknown as { requestIdleCallback: (cb: () => void) => void }).requestIdleCallback = (cb) => {
       setTimeout(cb, 0);
     };

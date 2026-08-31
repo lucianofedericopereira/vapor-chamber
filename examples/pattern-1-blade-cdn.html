@@ -11,7 +11,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Vapor Chamber — Blade + CDN</title>
+  <title>Vapor Chamber - Blade + CDN</title>
 </head>
 <body>
 
@@ -23,17 +23,17 @@
   <p id="error-msg" style="color:red;display:none"></p>
 </div>
 
-<!-- No npm, no build — one script tag. Three ways to serve that tag:
-     1. self-hosted (below): what `examples/laravel-app` actually does — it
+<!-- No npm, no build - one script tag. Three ways to serve that tag:
+     1. self-hosted (below): what `examples/laravel-app` actually does - it
         copies the IIFE into public/js/. Best default for Blade: no third-party
         origin in your CSP, no CDN outage in your checkout path.
      2. CDN, VERSION-PINNED:
         <script src="https://cdn.jsdelivr.net/npm/vapor-chamber@<version>/dist/vapor-chamber.iife.min.js"></script>
-     3. CDN, unpinned — `npm/vapor-chamber/...` with no @version. Avoid: it
+     3. CDN, unpinned - `npm/vapor-chamber/...` with no @version. Avoid: it
         resolves to whatever is published *now* and is edge-cached, so the page
         silently changes under you on every release, and it can never be run
         against unreleased code. This example used to do that, which made it
-        the one example nobody could verify before publishing — and the one
+        the one example nobody could verify before publishing - and the one
         that shipped broken.
 
      Local path so this file is runnable today:
@@ -49,7 +49,7 @@
   })
 
   // Persist cart count across page reloads. persist() is used here only for
-  // its load()/save() storage helpers — we save explicitly below, because the
+  // its load()/save() storage helpers - we save explicitly below, because the
   // HTTP transport handles matching commands itself (it does not fall through
   // to local plugins/handlers).
   const cartPersist = VaporChamber.persist({
@@ -68,7 +68,7 @@
   // never run). on() listeners fire after the dispatch settles, with the
   // server's state in result.value.
   // One listener for both commands: whatever the server says the cart is,
-  // that is what the page shows — and only then is it persisted. The local
+  // that is what the page shows - and only then is it persisted. The local
   // copy is a cache of the server's answer, never a second source of truth.
   bus.on('cartAdd', (cmd, result) => render(result))
   bus.on('cartClear', (cmd, result) => render(result))
@@ -79,7 +79,7 @@
     cartPersist.save()
   }
 
-  // Wire up buttons. Note both go through the SAME dispatch path — a button
+  // Wire up buttons. Note both go through the SAME dispatch path - a button
   // is just a call site; the transport decides where the command runs.
   const send = async (btn, action, target, payload) => {
     btn.disabled = true
@@ -99,7 +99,7 @@
 
   // Clear resets the SERVER cart; the listener above then overwrites the
   // persisted copy with the server's zero. Without this, a restored count
-  // from localStorage has no way back down — the page would keep showing a
+  // from localStorage has no way back down - the page would keep showing a
   // number the backend no longer agrees with.
   const clearBtn = document.getElementById('clear-btn')
   clearBtn.addEventListener('click', () => send(clearBtn, 'cartClear', {}, null))

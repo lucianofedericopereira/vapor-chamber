@@ -1,9 +1,9 @@
 /**
- * measure-loc — code-vs-comment line counter.
+ * measure-loc - code-vs-comment line counter.
  *
  * Reports each .ts file as code / comment / blank lines, so source size is
  * measured as CODE, not raw lines. Counting raw lines (or stripping comments to
- * look "smaller") is an invitation to write cryptic, comment-free code — this
+ * look "smaller") is an invitation to write cryptic, comment-free code - this
  * separates the two so good comments are never a size penalty.
  *
  * A line with any code counts as code even if it has a trailing comment, so the

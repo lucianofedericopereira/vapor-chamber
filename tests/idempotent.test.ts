@@ -1,5 +1,5 @@
 /**
- * Tests for the `idempotent` plugin — collapse duplicate commands (the
+ * Tests for the `idempotent` plugin - collapse duplicate commands (the
  * client-side half of exactly-once) and stamp an idempotency key that the HTTP
  * bridge forwards as an `Idempotency-Key` header (the wire half).
  */
@@ -10,7 +10,7 @@ import { idempotent } from '../src/plugins-extra';
 const tick = (ms = 0) => new Promise<void>((r) => setTimeout(r, ms));
 
 describe('idempotent plugin', () => {
-  it('collapses concurrent duplicates — handler runs once', async () => {
+  it('collapses concurrent duplicates - handler runs once', async () => {
     const bus = createAsyncCommandBus();
     let runs = 0;
     bus.use(idempotent());
@@ -34,7 +34,7 @@ describe('idempotent plugin', () => {
     bus.use(idempotent({ ttl: 10_000 }));
     bus.register('pay', async () => { runs++; return 'ok'; });
     await bus.dispatch('pay', { invoice: 7 });
-    await bus.dispatch('pay', { invoice: 7 }); // duplicate within TTL → cached
+    await bus.dispatch('pay', { invoice: 7 }); // duplicate within TTL -> cached
     expect(runs).toBe(1);
   });
 
@@ -50,7 +50,7 @@ describe('idempotent plugin', () => {
     expect(runs).toBe(2);
   });
 
-  it('does NOT cache failures — a retry after error runs again', async () => {
+  it('does NOT cache failures - a retry after error runs again', async () => {
     const bus = createAsyncCommandBus();
     let n = 0;
     bus.use(idempotent());
@@ -82,8 +82,8 @@ describe('idempotent plugin', () => {
     bus.register('act', async () => { runs++; return 1; });
     await Promise.all([
       bus.dispatch('act', { requestId: 'r1' }),
-      bus.dispatch('act', { requestId: 'r1' }), // same key → collapsed
-      bus.dispatch('act', { requestId: null }), // null key → never collapsed
+      bus.dispatch('act', { requestId: 'r1' }), // same key -> collapsed
+      bus.dispatch('act', { requestId: null }), // null key -> never collapsed
       bus.dispatch('act', { requestId: null }),
     ]);
     expect(runs).toBe(3); // r1 once + two un-keyed
@@ -95,7 +95,7 @@ describe('idempotent plugin', () => {
     bus.use(idempotent({ actions: ['order*'] }));
     bus.register('ping', async () => { runs++; return 1; });
     await Promise.all([bus.dispatch('ping', {}), bus.dispatch('ping', {})]);
-    expect(runs).toBe(2); // 'ping' not in scope → not deduped
+    expect(runs).toBe(2); // 'ping' not in scope -> not deduped
   });
 });
 
@@ -103,7 +103,7 @@ describe('idempotent plugin', () => {
 // done-cache bounds + rejection path
 // ---------------------------------------------------------------------------
 
-describe('idempotent — done-cache eviction and rejection', () => {
+describe('idempotent - done-cache eviction and rejection', () => {
   it('evicts the oldest done entry past maxKeys, so the evicted command re-runs', async () => {
     const bus = createAsyncCommandBus();
     bus.use(idempotent({ maxKeys: 1 }));
@@ -112,7 +112,7 @@ describe('idempotent — done-cache eviction and rejection', () => {
 
     await bus.dispatch('op', { id: 'a' });   // cached
     await bus.dispatch('op', { id: 'b' });   // caches b, evicts a (maxKeys: 1)
-    await bus.dispatch('op', { id: 'a' });   // a was evicted — must run again
+    await bus.dispatch('op', { id: 'a' });   // a was evicted - must run again
 
     expect(runs).toBe(3);
 
@@ -121,7 +121,7 @@ describe('idempotent — done-cache eviction and rejection', () => {
     expect(runs).toBe(3);
   });
 
-  it('a thrown/rejected dispatch is not cached — the retry genuinely re-runs', async () => {
+  it('a thrown/rejected dispatch is not cached - the retry genuinely re-runs', async () => {
     const bus = createAsyncCommandBus();
     bus.use(idempotent());
     let attempts = 0;

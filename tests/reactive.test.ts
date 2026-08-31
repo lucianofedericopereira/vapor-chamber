@@ -1,5 +1,5 @@
 /**
- * Tests for vapor-chamber/reactive — the opt-in DEEP reactivity companion.
+ * Tests for vapor-chamber/reactive - the opt-in DEEP reactivity companion.
  *
  * Proves the "best of both worlds" contract:
  *   - the core stays shallow + fast (covered in chamber.test.ts);
@@ -27,7 +27,7 @@ describe('vapor-chamber/reactive', () => {
       await waitForVueDetection();
       const s = deepSignal({ nested: { n: 1 } });
       expect(isShallow(s)).toBe(false);
-      // deep ⇒ nested value is a reactive proxy
+      // deep => nested value is a reactive proxy
       expect(isReactive(s.value.nested)).toBe(true);
     });
 
@@ -39,7 +39,7 @@ describe('vapor-chamber/reactive', () => {
       const scope = effectScope();
       scope.run(() => { watchEffect(() => { seen.push(s.value.profile.name); }); });
 
-      s.value.profile.name = 'Ada'; // direct nested mutation — no reassignment
+      s.value.profile.name = 'Ada'; // direct nested mutation - no reassignment
       await Promise.resolve();
 
       expect(seen[0]).toBe('');
@@ -84,7 +84,7 @@ describe('vapor-chamber/reactive', () => {
       const scope = effectScope();
       scope.run(() => { watchEffect(() => { seen.push(state.value.draft.title); }); });
 
-      // mutate in place (e.g. a v-model field) — deep ref makes this reactive
+      // mutate in place (e.g. a v-model field) - deep ref makes this reactive
       state.value.draft.title = 'Hello';
       await Promise.resolve();
 

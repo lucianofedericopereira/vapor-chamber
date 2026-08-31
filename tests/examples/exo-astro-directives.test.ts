@@ -1,13 +1,13 @@
 // @vitest-environment happy-dom
 /**
- * examples/exo-astro/src/directives — the declarative directive scanner the
+ * examples/exo-astro/src/directives - the declarative directive scanner the
  * Astro example ships (and that the README tells readers to copy into their
  * own project). It is example code, but it is *published* example code, so it
  * gets the same treatment as the library: the contract is pinned by tests.
  *
  * Covered here: the four directives, scope resolution (local vs. atmosphere),
  * scan idempotence across a client-side page swap, and the example's headline
- * claim — clicks dispatched before handlers hydrate are replayed in order.
+ * claim - clicks dispatched before handlers hydrate are replayed in order.
  */
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
@@ -20,7 +20,7 @@ import {
 } from '../../examples/exo-astro/src/directives/index';
 import { createCommandBus } from '../../src/command-bus';
 
-/** busState is a module singleton — wipe it between tests. */
+/** busState is a module singleton - wipe it between tests. */
 function resetBusState(): void {
   for (const key of Object.keys(busState)) delete busState[key];
 }
@@ -49,14 +49,14 @@ describe('reactive + addEffect', () => {
     expect(seen).toEqual([1, 2, 3]);
   });
 
-  it('re-runs every effect of the object — a flat set, no dependency graph', () => {
+  it('re-runs every effect of the object - a flat set, no dependency graph', () => {
     const state = reactive<Record<string, any>>({ a: 0, b: 0 });
     const hits: string[] = [];
     addEffect(state, () => hits.push('one'));
     addEffect(state, () => hits.push('two'));
     hits.length = 0;
 
-    state.a = 1; // touches `a` only — both effects still re-run, by design
+    state.a = 1; // touches `a` only - both effects still re-run, by design
     expect(hits).toEqual(['one', 'two']);
   });
 
@@ -68,7 +68,7 @@ describe('reactive + addEffect', () => {
     expect(seen).toEqual([1]);
   });
 
-  it('nested writes re-run the root effects — what keeps dot-path bindings live', () => {
+  it('nested writes re-run the root effects - what keeps dot-path bindings live', () => {
     const state = reactive<Record<string, any>>({ cart: { count: 0, tags: ['new'] } });
     const seen: number[] = [];
     addEffect(state, () => seen.push(state.cart.count));
@@ -84,13 +84,13 @@ describe('reactive + addEffect', () => {
     const seen: any[] = [];
     addEffect(state, () => seen.push(state.cart?.count));
 
-    state.cart = { count: 1 }; // plain object in…
+    state.cart = { count: 1 }; // plain object in...
     seen.length = 0;
-    state.cart.count = 4; // …reactive out
+    state.cart.count = 4; // ...reactive out
     expect(seen).toEqual([4]);
   });
 
-  it('leaves exotic values alone — a Date/Map is stored, never proxied', () => {
+  it('leaves exotic values alone - a Date/Map is stored, never proxied', () => {
     const when = new Date(0);
     const state = reactive<Record<string, any>>({ when });
     expect(state.when).toBe(when);
@@ -226,10 +226,10 @@ describe('v-scope', () => {
     scan(createCommandBus(), root);
 
     expect(scopeOf($(root, 'div'))).toEqual({});
-    expect($(root, 'span').textContent).toBe('9'); // nothing declared ⇒ atmosphere
+    expect($(root, 'span').textContent).toBe('9'); // nothing declared => atmosphere
   });
 
-  it('a bus handler writes local scope state through scopeOf — the click site never does', () => {
+  it('a bus handler writes local scope state through scopeOf - the click site never does', () => {
     const bus = createCommandBus();
     const root = mount(`
       <div id="panel" v-scope='{"open":false}'>
@@ -248,7 +248,7 @@ describe('v-scope', () => {
 });
 
 describe('v-each', () => {
-  // Prototype-as-first-child form — the one that survives every table parser.
+  // Prototype-as-first-child form - the one that survives every table parser.
   const list = `
     <table><tbody v-each="items">
       <tr><td v-bind-text="name"></td><td v-bind-text="price"></td></tr>
@@ -301,7 +301,7 @@ describe('v-each', () => {
     expect(root.querySelector('template')).not.toBeNull(); // kept, inert
   });
 
-  it('a row reads its own item, not a sibling — scope is per clone', () => {
+  it('a row reads its own item, not a sibling - scope is per clone', () => {
     busState.items = [{ name: 'A', price: '$1.00' }, { name: 'B', price: '$2.00' }];
     const root = mount(list);
     scan(createCommandBus(), root);
@@ -349,7 +349,7 @@ describe('v-each', () => {
 
   it('re-renders when an existing row is mutated in place, not replaced', () => {
     // The aggregating-cart case: a repeat "Add" bumps qty on the row that is
-    // already in the array. That write is one level deep — it only reaches the
+    // already in the array. That write is one level deep - it only reaches the
     // bindings because reactivity is deep.
     busState.items = [{ name: 'Tea', price: '$3.00' }];
     const root = mount(list);
@@ -419,7 +419,7 @@ describe('the headline: dispatch before hydration', () => {
     `);
     scan(bus, root);
 
-    // Nothing is registered yet — this is the first 2s of the demo page.
+    // Nothing is registered yet - this is the first 2s of the demo page.
     $(root, '#tea').click();
     $(root, '#espresso').click();
     $(root, '#tea').click();

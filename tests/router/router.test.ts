@@ -76,7 +76,7 @@ const data = (router: ReturnType<typeof makeRouter>['router'], name: string) =>
   router.currentRoute.value.data.get(name) as { ref: string; page: string; name: string };
 
 describe('startup', () => {
-  it('constructor is pure — nothing commits until isReady()', async () => {
+  it('constructor is pure - nothing commits until isReady()', async () => {
     const { router } = makeRouter();
     expect(loc(router).name).toBeNull();
     await router.isReady();
@@ -99,7 +99,7 @@ describe('navigation basics', () => {
     expect(loc(router).name).toBe('home');
   });
 
-  it('unmatched → coded error + onError, nothing committed', async () => {
+  it('unmatched -> coded error + onError, nothing committed', async () => {
     const onError = vi.fn();
     const { router } = makeRouter({ onError });
     await router.isReady();
@@ -108,7 +108,7 @@ describe('navigation basics', () => {
     expect(loc(router).name).toBe('home');
   });
 
-  it('guard refusal → "aborted" (no onError); redirect flows', async () => {
+  it('guard refusal -> "aborted" (no onError); redirect flows', async () => {
     const onError = vi.fn();
     const { router } = makeRouter({ onError });
     await router.isReady();
@@ -192,11 +192,11 @@ describe('loader mechanics (via test preset)', () => {
     await router.push('/products');
     const before = rowsCalls.length;
 
-    router.setQuery({ page: '2' }); // default policy would refetch — the hook ignores it
+    router.setQuery({ page: '2' }); // default policy would refetch - the hook ignores it
     await new Promise((r) => setTimeout(r, 10));
     expect(rowsCalls.length).toBe(before);
 
-    router.setQuery({ zoom: '1' }); // undeclared, non-pagination — the hook opts it in
+    router.setQuery({ zoom: '1' }); // undeclared, non-pagination - the hook opts it in
     await vi.waitFor(() => expect(rowsCalls.length).toBe(before + 1));
   });
 
@@ -223,7 +223,7 @@ describe('loader mechanics (via test preset)', () => {
     expect(loc(router).name).toBe('product');
   });
 
-  it('loader failure → "load_failed" with cause, navigation not committed', async () => {
+  it('loader failure -> "load_failed" with cause, navigation not committed', async () => {
     const onError = vi.fn();
     const boom = new Error('500');
     const { router } = makeRouter({ onError }, async (template) => {
@@ -237,14 +237,14 @@ describe('loader mechanics (via test preset)', () => {
     expect(loc(router).name).toBe('home');
   });
 
-  it('no preset configured + load route → "load_failed"', async () => {
+  it('no preset configured + load route -> "load_failed"', async () => {
     const { router } = makeRouter({ loaders: undefined });
     await router.isReady();
     expect(isRouterError(await router.push('/products'), 'load_failed')).toBe(true);
   });
 });
 
-describe('locale-prefixed admin (/admin/:locale/…) — param inheritance', () => {
+describe('locale-prefixed admin (/admin/:locale/...) - param inheritance', () => {
   const LOCALE_ROWS = [
     { name: 'home', path: '/:locale(it|en)', component: 'Home', params: { locale: 'string' as const } },
     { name: 'products', path: '/:locale(it|en)/products', component: 'Products', params: { locale: 'string' as const } },
@@ -266,7 +266,7 @@ describe('locale-prefixed admin (/admin/:locale/…) — param inheritance', () 
   });
 });
 
-describe('setRouteData — the hot path', () => {
+describe('setRouteData - the hot path', () => {
   it('patches loader data with zero loader runs, reactively, snapshot frozen', async () => {
     const { router, rowsCalls } = makeRouter();
     await router.isReady();

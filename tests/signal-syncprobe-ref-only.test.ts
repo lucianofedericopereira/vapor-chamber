@@ -1,21 +1,21 @@
 /**
- * Covers src/signal.ts's OWN standalone syncProbe() — both branches of
+ * Covers src/signal.ts's OWN standalone syncProbe() - both branches of
  * `if (shallowRef) ... else if (ref) ...`. chamber.ts's applyVueModule wires
  * Vue's shallowRef in via configureSignal() directly, bypassing signal.ts's
- * internal syncProbe()/_vueRef entirely — that path only ever runs when
+ * internal syncProbe()/_vueRef entirely - that path only ever runs when
  * signal.ts is used standalone (transports/plugins/form, no chamber.ts
  * loaded). Every other test either has no __VUE__ (signal-race-warning.test.ts)
  * or goes through chamber.ts's own wiring, so neither branch here was
  * previously exercised on signal.ts's own probe.
  *
  * Imports src/signal directly (not chamber) and stubs __VUE__ purely
- * synchronously — no async Vue-detection race involved, unlike chamber.ts's
+ * synchronously - no async Vue-detection race involved, unlike chamber.ts's
  * probe. Module-level counters make this order-sensitive, so (like
  * signal-race-warning.test.ts) it lives in its own file.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 
-describe('signal() sync probe — src/signal.ts\'s own __VUE__ detection', () => {
+describe('signal() sync probe - src/signal.ts\'s own __VUE__ detection', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.resetModules();

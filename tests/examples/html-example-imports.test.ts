@@ -4,14 +4,14 @@
  *
  * WHY THIS EXISTS. `examples/` has three tiers of enforcement, and until this
  * file the third tier was empty:
- *   1. the top-level `.ts` snippets  → `examples/tsconfig.patterns.json`, run
+ *   1. the top-level `.ts` snippets  -> `examples/tsconfig.patterns.json`, run
  *      by `npm run typecheck`
- *   2. the three package.json projects → real `vite build` / `astro build`
- *   3. the plain-HTML examples        → nothing
+ *   2. the three package.json projects -> real `vite build` / `astro build`
+ *   3. the plain-HTML examples        -> nothing
  *
  * Tier 3 is not a lesser tier. `feature-directives.html` and
- * `router-demo/index.html` are runnable ESM pages that `import { … } from
- * '/dist/index.js'` — the same files npm publishes — so a renamed or removed
+ * `router-demo/index.html` are runnable ESM pages that `import { ... } from
+ * '/dist/index.js'` - the same files npm publishes - so a renamed or removed
  * export breaks them exactly as it would break a consumer, silently, with no
  * gate to notice. That is not hypothetical: `useCommandBus()` was removed in
  * this cycle, and the only reason no example broke is that none happened to
@@ -19,7 +19,7 @@
  *
  * So this walks every HTML example, extracts each named import from a `/dist/`
  * specifier, and asserts the built module actually exports it. It is a link
- * check, not a behavior test — running these pages needs a browser and a static
+ * check, not a behavior test - running these pages needs a browser and a static
  * server (`node examples/static-server.mjs`), which is out of scope here.
  *
  * Skipped when `dist/` is absent, matching `tests/dist-*.test.ts`: a fresh

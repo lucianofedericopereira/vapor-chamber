@@ -11,7 +11,7 @@
  * variable is exactly the micro-bench docs/performance.md warns is worthless:
  * `Date.now()` has an observable side effect and survives, while a loop-invariant
  * variable read is hoisted or dead-code-eliminated, so the "saving" is inflated by
- * an unknown amount. (Measured that way first, it reported ~28ns recoverable —
+ * an unknown amount. (Measured that way first, it reported ~28ns recoverable -
  * treat that number as garbage.) The same doc explains the fix: measure through
  * the real bus, because "the command bus is opaque indirection" and defeats
  * folding. So both arms here run the REAL `bus.dispatch` / `bus.query` path, and
@@ -19,12 +19,12 @@
  *
  * NO SOURCE CHANGE is required to run it: `stampMeta` calls the global
  * `Date.now`, so swapping the global swaps the clock source for the real code
- * path. That keeps this an experiment rather than a commitment — nothing ships
+ * path. That keeps this an experiment rather than a commitment - nothing ships
  * unless the number justifies it.
  *
  * Conventions follow tests/signal-shallow-ab.test.ts: interleaved A/B reps to
  * cancel thermal drift, medians (never a single run), the table PRINTED as the
- * evidence, and deliberately NO timing-threshold assertion — single-host ratios
+ * evidence, and deliberately NO timing-threshold assertion - single-host ratios
  * are unstable under parallel load and asserting them only makes CI flaky.
  */
 import { afterAll, describe, expect, it } from 'vitest';
@@ -48,7 +48,7 @@ type Mode = 'dispatch' | 'query' | 'loaded' | 'realistic' | 'listeners' | 'batch
 
 /**
  * A deliberately ORDINARY app-level handler: build a small object, touch a few
- * fields, return it. Not a stress test and not a no-op — the point is to find
+ * fields, return it. Not a stress test and not a no-op - the point is to find
  * out whether a fixed ~16ns clock saving still shows up once the handler does
  * the kind of work a real `cartAdd` does. Claiming it "disappears into noise"
  * without measuring it is the same mistake as the isolated loop above.
@@ -70,7 +70,7 @@ function runOnce(mode: Mode, n: number): void {
   bus.register('test', (cmd) => cmd.target);
 
   // Consuming shapes. A fixed per-command cost is only interesting where it is
-  // still a visible share of the work — and only worth paying for if it does
+  // still a visible share of the work - and only worth paying for if it does
   // not COST anything on paths that read the clock rarely or not at all.
   // `emit` is the control: it deliberately skips stampMeta entirely, so it must
   // show ~1.00x. If it moves, the harness is measuring something other than the
@@ -127,20 +127,20 @@ function median(xs: number[]): number {
   return s[Math.floor(s.length / 2)];
 }
 
-describe('meta.ts clock source — real dispatch path A/B', () => {
+describe('meta.ts clock source - real dispatch path A/B', () => {
   const underCoverage = process.env.npm_lifecycle_event === 'test:coverage';
 
   it.skipIf(underCoverage)('measures what Date.now() costs inside a real dispatch', () => {
     const cached = makeCachedClock();
     const N = 2_000;
     const cases: Array<{ key: string; mode: Mode; iters: number }> = [
-      { key: 'bus.dispatch — bare bus', mode: 'dispatch', iters: 120 },
-      { key: 'bus.query — bare bus', mode: 'query', iters: 120 },
-      { key: 'dispatch — 3 plugins + 1 listener', mode: 'loaded', iters: 120 },
-      { key: 'dispatch — ordinary handler', mode: 'realistic', iters: 120 },
-      { key: 'dispatch — 50 listeners + 5 wild', mode: 'listeners', iters: 40 },
-      { key: 'dispatchBatch — 20 per batch', mode: 'batch', iters: 80 },
-      { key: 'emit — CONTROL, no stampMeta', mode: 'emit', iters: 120 },
+      { key: 'bus.dispatch - bare bus', mode: 'dispatch', iters: 120 },
+      { key: 'bus.query - bare bus', mode: 'query', iters: 120 },
+      { key: 'dispatch - 3 plugins + 1 listener', mode: 'loaded', iters: 120 },
+      { key: 'dispatch - ordinary handler', mode: 'realistic', iters: 120 },
+      { key: 'dispatch - 50 listeners + 5 wild', mode: 'listeners', iters: 40 },
+      { key: 'dispatchBatch - 20 per batch', mode: 'batch', iters: 80 },
+      { key: 'emit - CONTROL, no stampMeta', mode: 'emit', iters: 120 },
     ];
 
     for (const c of cases) { opsPerSec(undefined, c.mode, N, 10); opsPerSec(cached, c.mode, N, 10); }
@@ -149,7 +149,7 @@ describe('meta.ts clock source — real dispatch path A/B', () => {
     // the clock swappable cost the DEFAULT path? `undefined` is the shipped
     // default (a wrapper reading the global each call); REAL_NOW is the same
     // clock without the wrapper. The gap between them is the price everyone
-    // pays for an option most consumers will never turn on — and if that price
+    // pays for an option most consumers will never turn on - and if that price
     // is not ~zero, the whole feature is a net loss no matter how good the
     // cached arm looks.
     const rows: Array<{ key: string; real: number; cached: number; ratio: number; nsSaved: number; wrapper: number }> = [];
@@ -182,7 +182,7 @@ describe('meta.ts clock source — real dispatch path A/B', () => {
       });
     }
 
-    console.log('\n  meta.ts clock source — real path, median of 5 interleaved reps, ' + N + ' commands/op');
+    console.log('\n  meta.ts clock source - real path, median of 5 interleaved reps, ' + N + ' commands/op');
     for (const r of rows) {
       console.log(
         '   ' + r.key.padEnd(26),
@@ -199,7 +199,7 @@ describe('meta.ts clock source — real dispatch path A/B', () => {
     );
 
     // Evidence is the printed table. No timing threshold asserted, per the
-    // house rule — only that the measurement genuinely ran.
+    // house rule - only that the measurement genuinely ran.
     for (const r of rows) {
       expect(Number.isFinite(r.ratio)).toBe(true);
       expect(r.real).toBeGreaterThan(0);

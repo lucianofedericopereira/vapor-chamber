@@ -1,5 +1,5 @@
 /**
- * Tests for all Track A bug fixes (A1–A7)
+ * Tests for all Track A bug fixes (A1-A7)
  */
 import { describe, it, expect, vi, } from 'vitest';
 import { createTestBus } from '../src/testing';
@@ -7,7 +7,7 @@ import { createAsyncCommandBus } from '../src/command-bus';
 import { createFormBus } from '../src/form';
 
 // ---------------------------------------------------------------------------
-// A1: testing.ts — passthroughHandlers fix
+// A1: testing.ts - passthroughHandlers fix
 // ---------------------------------------------------------------------------
 
 describe('A1: createTestBus passthroughHandlers', () => {
@@ -17,7 +17,7 @@ describe('A1: createTestBus passthroughHandlers', () => {
     bus.register('test', handler);
     const result = bus.dispatch('test', {});
     expect(result.ok).toBe(true);
-    expect(result.value).toBeUndefined(); // Stubbed — handler NOT called
+    expect(result.value).toBeUndefined(); // Stubbed - handler NOT called
     expect(handler).not.toHaveBeenCalled();
   });
 
@@ -63,7 +63,7 @@ describe('A1: createTestBus passthroughHandlers', () => {
 });
 
 // ---------------------------------------------------------------------------
-// A2: command-bus.ts — asyncRequest dedup
+// A2: command-bus.ts - asyncRequest dedup
 // ---------------------------------------------------------------------------
 
 describe('A2: asyncRequest deduplication', () => {
@@ -115,14 +115,14 @@ describe('A2: asyncRequest deduplication', () => {
     await bus.request('counter', { id: 1 });
     expect(callCount).toBe(1);
 
-    // Second request after first completes — should NOT be deduped
+    // Second request after first completes - should NOT be deduped
     await bus.request('counter', { id: 1 });
     expect(callCount).toBe(2);
   });
 });
 
 // ---------------------------------------------------------------------------
-// A7: form.ts — isValidating and isBusy
+// A7: form.ts - isValidating and isBusy
 // ---------------------------------------------------------------------------
 
 describe('A7: form isValidating and isBusy', () => {

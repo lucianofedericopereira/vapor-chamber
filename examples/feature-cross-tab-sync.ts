@@ -1,5 +1,5 @@
 /**
- * Feature example: sync plugin — cross-tab coordination via BroadcastChannel
+ * Feature example: sync plugin - cross-tab coordination via BroadcastChannel
  * ===========================================================================
  * Commands dispatched in one tab are re-dispatched in all other open tabs.
  * Keeps cart, auth state, and notifications in sync across tabs automatically.
@@ -21,7 +21,7 @@ setCommandBus(bus)
 const tabSync = sync(
   {
     channel: 'vapor-chamber:app',   // all tabs sharing this channel stay in sync
-    // Only sync state-changing commands — skip read-only / analytics
+    // Only sync state-changing commands - skip read-only / analytics
     filter: (cmd) => cmd.action.startsWith('cart') || cmd.action.startsWith('auth'),
   },
   // Pass bus.dispatch so the plugin can re-dispatch received commands
@@ -48,7 +48,7 @@ const cartState = useCommandState<CartState>(
   }
 )
 
-// Tab A dispatches → Tab B and Tab C automatically update:
+// Tab A dispatches -> Tab B and Tab C automatically update:
 bus.dispatch('cartAdd', { id: 1, name: 'T-Shirt' })
 // Other tabs receive 'cartAdd' via BroadcastChannel and re-dispatch it locally.
 // cartState.state.value updates reactively in all tabs.
@@ -61,7 +61,7 @@ bus.register('authLogout', () => {
   window.location.href = '/login'
 })
 
-// Dispatching 'authLogout' in any tab → all tabs redirect to /login
+// Dispatching 'authLogout' in any tab -> all tabs redirect to /login
 // bus.dispatch('authLogout', {})
 
 // ─── Filtering: only sync specific namespaces ─────────────────────────────────
@@ -107,7 +107,7 @@ const prefsState = useCommandState<UserPrefs>(
   }
 )
 
-// User changes theme in Tab A → persisted to localStorage AND synced to all tabs
+// User changes theme in Tab A -> persisted to localStorage AND synced to all tabs
 bus.dispatch('prefsSetTheme', { theme: 'dark' })
 
 // ─── Cleanup ──────────────────────────────────────────────────────────────────

@@ -1,20 +1,20 @@
 /**
  * vapor-chamber - Directive plugin (opt-in, 0KB when not imported)
  *
- * Vue alignment history (one line per version — full per-item detail lives in
+ * Vue alignment history (one line per version - full per-item detail lives in
  * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table):
- *   rc.5 — pass-through. Two upstream commits independently reached rules this
+ *   rc.5 - pass-through. Two upstream commits independently reached rules this
  *          file already applied (direct listeners, per-Document delegation).
- *   rc.2 — pass-through; Vue's compiled `@click` delegation flips to opt-in
+ *   rc.2 - pass-through; Vue's compiled `@click` delegation flips to opt-in
  *          (#15127). LIB-SIDE: v-vc:command gains its own `.delegate` opt-in.
- *   beta.17 / beta.16 — pass-through. LIB-SIDE in beta.16: v-vc:command honors
+ *   beta.17 / beta.16 - pass-through. LIB-SIDE in beta.16: v-vc:command honors
  *          event modifiers (.stop/.prevent/.self/.left/.middle/.right/.capture/
  *          .once/.passive), which the direct listener had been dropping.
- *   v1.6.0 / beta.15 — buildHandler() skips dispatch on disabled /
+ *   v1.6.0 / beta.15 - buildHandler() skips dispatch on disabled /
  *          aria-disabled / in-flight elements, mirroring #14948 for the DIRECT
  *          listener this directive attaches.
- *   v1.4.0 / beta.13 — pass-through (shared event invoker wrapping).
- *   v0.4.4 — Added: v-vc:command, v-vc:optimistic directives.
+ *   v1.4.0 / beta.13 - pass-through (shared event invoker wrapping).
+ *   v0.4.4 - Added: v-vc:command, v-vc:optimistic directives.
  *
  * Provides a Vue plugin that installs two directives for declarative command
  * dispatch directly in templates, combining dispatch + loading + error
@@ -61,21 +61,21 @@ type DirectiveState = {
   rollback?: (() => void) | null;
   /** Timeout in ms for async dispatch. Default: 30_000 */
   timeout: number;
-  /** `.stop` — call event.stopPropagation() before dispatch. */
+  /** `.stop` - call event.stopPropagation() before dispatch. */
   stop?: boolean;
-  /** `.prevent` — call event.preventDefault() before dispatch. */
+  /** `.prevent` - call event.preventDefault() before dispatch. */
   prevent?: boolean;
-  /** `.self` — only dispatch when event.target is the bound element. */
+  /** `.self` - only dispatch when event.target is the bound element. */
   self?: boolean;
   /** Allowed mouse buttons from `.left`/`.middle`/`.right` (0/1/2). Empty = any. */
   buttons?: number[];
-  /** `.capture` — capture-phase listener. Also matched on removeEventListener. */
+  /** `.capture` - capture-phase listener. Also matched on removeEventListener. */
   capture?: boolean;
-  /** `.delegate` — dispatched via the shared document-level listener instead of
+  /** `.delegate` - dispatched via the shared document-level listener instead of
    *  a direct one on this element. See "Opt-in delegation" below. */
   delegate?: boolean;
   /** The document this element's delegated listener was counted against.
-   *  Recorded at mount so teardown decrements the RIGHT document — an element
+   *  Recorded at mount so teardown decrements the RIGHT document - an element
    *  can be moved between documents, and `ownerDocument` at unmount time is
    *  not necessarily the one it registered with. */
   delegatedDoc?: Document | null;
@@ -84,13 +84,13 @@ type DirectiveState = {
 const stateMap = new WeakMap<Element, DirectiveState>();
 
 // ---------------------------------------------------------------------------
-// Opt-in delegation (.delegate modifier) — lib-side, not required by Vue
+// Opt-in delegation (.delegate modifier) - lib-side, not required by Vue
 // ---------------------------------------------------------------------------
 //
 // MEASURED (tests/perf.bench.ts, 5k elements), because the intuitive reading
 // is wrong: mount+unmount is ~1.3x SLOWER in delegate mode, not faster. The
 // payoff is the standing LISTENER COUNT while mounted (1 vs N), not attach or
-// detach speed. Do not reach for `.delegate` as a mount-cost optimization — it
+// detach speed. Do not reach for `.delegate` as a mount-cost optimization - it
 // is a memory / retained-listener trade for large, mostly-static lists, which
 // is Vue's own reasoning for the same default.
 //
@@ -102,15 +102,15 @@ const stateMap = new WeakMap<Element, DirectiveState>();
 // Simplified vs. Vue's own compiler-vapor delegation (which replays every
 // matching listener along the DOM path): only the CLOSEST delegated ancestor
 // of the click target fires. v-vc:command elements are leaf controls
-// (buttons/links) in practice — nesting two dispatching elements isn't a
+// (buttons/links) in practice - nesting two dispatching elements isn't a
 // supported pattern in delegate mode; use the default (direct) mode for that.
 // Delegated elements are counted PER DOCUMENT. A single count + a single
 // `delegatedListenerDoc` meant the listener only ever attached to whichever
 // document happened to register first: delegated elements in an iframe or a
 // `window.open` popup bumped the count and got no listener at all, and
 // unmounting the first document's elements while others remained stranded the
-// listener on the wrong document. Both failed as SILENT no-dispatch — the
-// control renders, clicks do nothing, no error — which is the worst shape for
+// listener on the wrong document. Both failed as SILENT no-dispatch - the
+// control renders, clicks do nothing, no error - which is the worst shape for
 // an opt-in perf flag, because turning `.delegate` on CONVERTS WORKING
 // CONTROLS INTO DEAD ONES.
 const delegatedDocs = new Map<Document, number>();
@@ -118,7 +118,7 @@ const delegatedDocs = new Map<Document, number>();
 function delegatedClickHandler(event: Event): void {
   // composedPath crosses shadow boundaries; a parentElement walk stops at the
   // shadow root, and at document level `event.target` has been retargeted to
-  // the shadow HOST — so the stateMap lookup never found the real element and
+  // the shadow HOST - so the stateMap lookup never found the real element and
   // a delegated control inside a shadow root simply never dispatched.
   // `router/dom.ts` link interception documents this same fix; the delegated
   // handler predates that lesson.
@@ -130,7 +130,7 @@ function delegatedClickHandler(event: Event): void {
         state.handler(event);
         return;
       }
-      // Stop at the document — beyond it the path holds Window, and an
+      // Stop at the document - beyond it the path holds Window, and an
       // ancestor match outside the event's tree is not ours to fire.
       if ((node as Node).nodeType === 9 /* DOCUMENT_NODE */) break;
     }
@@ -175,25 +175,25 @@ function removeDelegatedElement(doc: Document | null): void {
 // Binding value: action name string (e.g. 'cartAdd')
 // arg: 'command' (used as the directive name)
 // Modifiers (the directive attaches a DIRECT listener, so Vue's compiled
-// withModifiers never reaches it — they are applied here by hand):
-//   .stop .prevent .self        — DOM-event guards/actions, like v-on
-//   .left .middle .right        — only dispatch for that mouse button
-//   .capture .once .passive     — addEventListener options
-//   .delegate                   — one shared document listener instead of a
+// withModifiers never reaches it - they are applied here by hand):
+//   .stop .prevent .self        - DOM-event guards/actions, like v-on
+//   .left .middle .right        - only dispatch for that mouse button
+//   .capture .once .passive     - addEventListener options
+//   .delegate                   - one shared document listener instead of a
 //                                  per-element one (see "Opt-in delegation"
 //                                  above); incompatible with .capture/.once/
 //                                  .passive, which fall back to a direct
 //                                  listener with a dev warning if combined
-//   .<number> (e.g. .5000)      — async dispatch timeout in ms (default 30000)
+//   .<number> (e.g. .5000)      - async dispatch timeout in ms (default 30000)
 //
 // Additional data attributes read from the element:
-//   data-vc-payload — JSON-encoded payload (optional)
-//   data-vc-target  — JSON-encoded target (optional, defaults to {})
+//   data-vc-payload - JSON-encoded payload (optional)
+//   data-vc-target  - JSON-encoded target (optional, defaults to {})
 //
 // CSS classes added to the element:
-//   vc-loading  — while the dispatch is in flight
-//   vc-error    — when the last dispatch failed
-//   vc-success  — briefly added on success (removed after 1 tick)
+//   vc-loading  - while the dispatch is in flight
+//   vc-error    - when the last dispatch failed
+//   vc-success  - briefly added on success (removed after 1 tick)
 
 const LOADING_CLASS = 'vc-loading';
 const ERROR_CLASS = 'vc-error';
@@ -205,7 +205,7 @@ function parseJson(s: string | null | undefined): any {
 
 function buildHandler(el: Element, state: DirectiveState): (event: Event) => void {
   return async (event: Event) => {
-    // Event modifiers — mirror Vue's compiled withModifiers, which never reaches a
+    // Event modifiers - mirror Vue's compiled withModifiers, which never reaches a
     // DIRECT addEventListener: .self and mouse-button modifiers abort the dispatch;
     // .stop / .prevent act on the DOM event. (.capture/.once/.passive are applied as
     // addEventListener options in mounted().)
@@ -255,7 +255,7 @@ function buildHandler(el: Element, state: DirectiveState): (event: Event) => voi
       // Handle result (may be a Promise if using async bus shim)
       if (result && typeof (result as any).then === 'function') {
         // Race against timeout to prevent infinite loading states. Clear the
-        // timer when the dispatch wins the race — otherwise every click leaves
+        // timer when the dispatch wins the race - otherwise every click leaves
         // a live timer (default 30s) pinning this closure.
         let timeoutId: ReturnType<typeof setTimeout> | undefined;
         const timeoutPromise = new Promise<{ ok: false; error: Error }>((resolve) => {
@@ -275,7 +275,7 @@ function buildHandler(el: Element, state: DirectiveState): (event: Event) => voi
     } catch (e) {
       resolved = { ok: false, error: e as Error };
     } finally {
-      // Always reset loading state — prevents stuck buttons
+      // Always reset loading state - prevents stuck buttons
       state.loading = false;
       el.classList.remove(LOADING_CLASS);
       if (el instanceof HTMLButtonElement) el.disabled = false;
@@ -296,7 +296,7 @@ function buildHandler(el: Element, state: DirectiveState): (event: Event) => voi
 // ---------------------------------------------------------------------------
 
 /**
- * createDirectivePlugin — installs v-vc:command and v-vc:optimistic directives.
+ * createDirectivePlugin - installs v-vc:command and v-vc:optimistic directives.
  *
  * Opt-in: import and use this plugin only when you need template directives.
  * Zero cost when not imported.
@@ -311,7 +311,7 @@ export function createDirectivePlugin(): { install(app: any): void } {
       // start: `withVaporDirectives` is a public export of the with-vapor
       // build and ships in every Vue version this project has tracked
       // (verified by unpacking the published @vue/runtime-vapor dist for
-      // 3.6.0-alpha.3 through rc.3 — present in all of them; rc.3 only
+      // 3.6.0-alpha.3 through rc.3 - present in all of them; rc.3 only
       // hardened it, #15258/#15167/#15158). Measured in
       // tests/vapor-directives-fixture.test.ts.
       //
@@ -319,9 +319,9 @@ export function createDirectivePlugin(): { install(app: any): void } {
       // wants two different things under one name:
       //   VDOM   { mounted(el, binding), updated(el, binding), beforeUnmount(el) }
       //   Vapor  (el, value, argument, modifiers) => cleanup | void
-      // and there is no `updated` hook in the Vapor form at all — the value
+      // and there is no `updated` hook in the Vapor form at all - the value
       // arrives as a getter and a directive that must react opens its own
-      // effect. So `app.directive('vc', …)` cannot serve both from one
+      // effect. So `app.directive('vc', ...)` cannot serve both from one
       // registration, and porting is real work rather than a rename. Until
       // that lands, the practical advice below is unchanged; only the reason
       // is now accurate.
@@ -329,7 +329,7 @@ export function createDirectivePlugin(): { install(app: any): void } {
         console.warn(
           '[vapor-chamber] v-vc:command is implemented with VDOM directive hooks, ' +
           'so it will not run inside <script setup vapor> components. (Vapor DOES ' +
-          'support custom directives — via a different, function-shaped API this ' +
+          'support custom directives - via a different, function-shaped API this ' +
           'directive has not been ported to yet.) Use useCommand() or ' +
           'defineVaporCommand() for Vapor components. For async operations under ' +
           'Suspense, use useVaporAsyncCommand(). This directive still works in VDOM ' +

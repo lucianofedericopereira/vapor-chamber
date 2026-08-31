@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE — is the detection failure an artefact of how the other tests probe,
+ * FIXTURE - is the detection failure an artefact of how the other tests probe,
  * or does it happen with the real Vue build and the real `chamber.ts`?
  *
  * Worth asking, because the two neighbouring suites each prove only half:
@@ -12,7 +12,7 @@
  *
  * Neither on its own shows an end-to-end failure. This file closes that gap:
  * real `vue.runtime-with-vapor.esm-browser.js`, a real `createVaporApp().mount()`,
- * and a real, freshly-evaluated `src/chamber.ts` — nothing stubbed, nothing
+ * and a real, freshly-evaluated `src/chamber.ts` - nothing stubbed, nothing
  * mocked. The only thing arranged is the ORDER, which is the variable under
  * test.
  *
@@ -22,7 +22,7 @@
  * script pull in vapor-chamber. In a bundler this is harmless because the
  * async `import('vue')` fallback resolves; on a no-bundler page that fallback
  * is a bare specifier the browser cannot resolve at all, so the synchronous
- * global is the only channel left — and by then it holds `true`.
+ * global is the only channel left - and by then it holds `true`.
  */
 
 import { describe, expect, it, vi, afterEach } from 'vitest';
@@ -53,19 +53,19 @@ describe('real ordering: app mounts first, library loads second', () => {
   it('REAL FAILURE: after a real mount, a fresh chamber.ts cannot see Vapor via __VUE__', async () => {
     const vue = await mountRealVaporApp();
 
-    // Real Vue really did this — no stub involved.
+    // Real Vue really did this - no stub involved.
     expect((globalThis as unknown as Record<string, unknown>).__VUE__).toBe(true);
 
     // The page genuinely has Vapor sitting right there.
     expect(typeof vue.createVaporApp).toBe('function');
 
     // Now the library loads, for the first time, into that page. `vi.resetModules`
-    // is not simulating anything about detection — it is how a fresh module
+    // is not simulating anything about detection - it is how a fresh module
     // evaluation is obtained in-process, which is what a late chunk does.
     vi.resetModules();
     const chamber = await import('../src/chamber');
 
-    // MEASURED, end to end: detection comes up empty. Not a mock artefact —
+    // MEASURED, end to end: detection comes up empty. Not a mock artefact -
     // the boolean on the left was written by Vue, and the probe on the right
     // is the shipping one.
     //
@@ -82,7 +82,7 @@ describe('real ordering: app mounts first, library loads second', () => {
     expect(chamber.vueDetectionHint()).toMatch(/unreachable/);
   });
 
-  it('the bundler case is genuinely unaffected — the async probe still resolves', async () => {
+  it('the bundler case is genuinely unaffected - the async probe still resolves', async () => {
     await mountRealVaporApp();
     vi.resetModules();
     const chamber = await import('../src/chamber');
@@ -99,7 +99,7 @@ describe('real ordering: app mounts first, library loads second', () => {
     await chamber.waitForVueDetection();
 
     // The plain `vue` entry ships no Vapor runtime (whitepaper §11.6), so Vapor
-    // specifically stays false even here — but Vue itself was found.
+    // specifically stays false even here - but Vue itself was found.
     expect(chamber.getVueDeepRefFn()).not.toBeNull();
   });
 

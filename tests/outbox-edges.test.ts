@@ -1,7 +1,7 @@
 /**
- * Outbox — the paths the happy-path suite does not reach.
+ * Outbox - the paths the happy-path suite does not reach.
  *
- * `tests/outbox.test.ts` covers queue → flush → drain. What it never exercises
+ * `tests/outbox.test.ts` covers queue -> flush -> drain. What it never exercises
  * are the arms that only fire when something is wrong or unusual: no bus, a
  * re-entrant flush, going offline mid-flush, a handler that throws rather than
  * returning `{ ok: false }`, and the `window`-less (SSR / worker) branch of
@@ -29,7 +29,7 @@ function memoryStorage(seed: OutboxRecord[] = []): OutboxStorage {
   };
 }
 
-describe('outbox — flush without a bus', () => {
+describe('outbox - flush without a bus', () => {
   it('rejects with an actionable message instead of throwing something opaque', async () => {
     const outbox = createOutbox({ storage: memoryStorage(), autoFlush: false });
     await expect(outbox.flush()).rejects.toThrow(/no bus available/);
@@ -39,7 +39,7 @@ describe('outbox — flush without a bus', () => {
   });
 });
 
-describe('outbox — flush re-entrancy', () => {
+describe('outbox - flush re-entrancy', () => {
   it('a second flush joins the in-progress one rather than starting a race', async () => {
     let release: (() => void) | null = null;
     const gate = new Promise<void>((r) => { release = r; });
@@ -62,7 +62,7 @@ describe('outbox — flush re-entrancy', () => {
     online = true;
     const a = outbox.flush();
     const b = outbox.flush();
-    expect(a).toBe(b); // identical promise — the second call joined, it did not re-enter
+    expect(a).toBe(b); // identical promise - the second call joined, it did not re-enter
 
     release?.();
     await a;
@@ -70,7 +70,7 @@ describe('outbox — flush re-entrancy', () => {
   });
 });
 
-describe('outbox — failure and interruption during flush', () => {
+describe('outbox - failure and interruption during flush', () => {
   it('a handler that THROWS is captured as a failed result, not an unhandled rejection', async () => {
     const bus = createAsyncCommandBus();
     bus.register('sync', async () => { throw new Error('backend exploded'); });
@@ -81,7 +81,7 @@ describe('outbox — failure and interruption during flush', () => {
       autoFlush: false,
       isOnline: () => online,
     });
-    outbox.install(bus); // registers the plugin itself — do NOT bus.use() it again
+    outbox.install(bus); // registers the plugin itself - do NOT bus.use() it again
 
     const queued = await bus.dispatch('sync', 'row-1');
     expect((queued.value as { queued?: boolean } | undefined)?.queued).toBe(true);
@@ -108,7 +108,7 @@ describe('outbox — failure and interruption during flush', () => {
       online = false; // the connection drops while the first record replays
       return { ok: true } as const;
     });
-    outbox.install(bus); // registers the plugin itself — do NOT bus.use() it again
+    outbox.install(bus); // registers the plugin itself - do NOT bus.use() it again
 
     await bus.dispatch('sync', 'row-1');
     await bus.dispatch('sync', 'row-2');
@@ -124,7 +124,7 @@ describe('outbox — failure and interruption during flush', () => {
   });
 });
 
-describe('outbox — autoFlush without a window', () => {
+describe('outbox - autoFlush without a window', () => {
   it('does not attempt to bind an online listener under SSR / workers', () => {
     vi.stubGlobal('window', undefined);
     // The branch under test is the `typeof window !== 'undefined'` guard: with

@@ -1,5 +1,5 @@
 /**
- * generate-laravel codegen smoke test — locks the schema → Laravel contract.
+ * generate-laravel codegen smoke test - locks the schema -> Laravel contract.
  *
  * Runs scripts/generate-laravel.mjs against a temp schema module and asserts:
  *   - config/vapor-chamber.php registers every action (camelCase-normalized)
@@ -53,7 +53,7 @@ function run(args: string[]): RunResult {
   }
 }
 
-describe('generate-laravel — schema → Laravel backend codegen', () => {
+describe('generate-laravel - schema -> Laravel backend codegen', () => {
   let dir: string;
   let schemaFile: string;
   let out: string;
@@ -114,7 +114,7 @@ describe('generate-laravel — schema → Laravel backend codegen', () => {
     expect(orderCreate).toContain("'payload.items' => 'required|array',");
     // An 'object' field gets more than `required|array`: a decoded JSON list
     // and a decoded JSON object are BOTH PHP arrays, and schemaValidator on
-    // the TS side rejects a list for an 'object' field — so without the extra
+    // the TS side rejects a list for an 'object' field - so without the extra
     // check a payload the browser refuses would pass on the server. The two
     // sides of one schema have to agree.
     expect(orderCreate).toContain("'payload.options' => ['required', 'array', function");
@@ -127,7 +127,7 @@ describe('generate-laravel — schema → Laravel backend codegen', () => {
     expect(stub).toContain('use Illuminate\\Support\\Facades\\Gate;');
     expect(stub).toContain("Gate::forUser($user)->authorize('checkout', [$target, $payload]);");
     expect(stub).toContain('Requires the "checkout" ability');
-    // authorization runs before validation — an unauthorized caller learns nothing
+    // authorization runs before validation - an unauthorized caller learns nothing
     // about the shape of data it isn't allowed to touch
     expect(stub.indexOf('Gate::forUser')).toBeLessThan(stub.indexOf('Validator::make('));
   });
@@ -153,7 +153,7 @@ describe('generate-laravel — schema → Laravel backend codegen', () => {
   });
 
   it('never overwrites existing action stubs without --force, but always regenerates config', () => {
-    const marker = '// USER LOGIC — must survive regeneration';
+    const marker = '// USER LOGIC - must survive regeneration';
     const mutated = readFileSync(actionPath('CartAdd'), 'utf8').replace('// TODO: implement', marker);
     writeFileSync(actionPath('CartAdd'), mutated);
     rmSync(configPath());
@@ -162,7 +162,7 @@ describe('generate-laravel — schema → Laravel backend codegen', () => {
     expect(second.status, second.stderr).toBe(0);
     expect(second.stdout).toContain('skipped');
     expect(readFileSync(actionPath('CartAdd'), 'utf8')).toContain(marker);
-    expect(existsSync(configPath()), 'config is a pure registry — always regenerated').toBe(true);
+    expect(existsSync(configPath()), 'config is a pure registry - always regenerated').toBe(true);
   });
 
   it('--force overwrites existing action stubs', () => {

@@ -1,15 +1,15 @@
 /**
- * vapor-chamber — Model Context Protocol (MCP) server layer
+ * vapor-chamber - Model Context Protocol (MCP) server layer
  *
  * Exposes a schema command bus as an MCP server: every schema action becomes
  * an MCP tool, and `tools/call` requests dispatch through the bus. Zero
- * dependencies — the JSON-RPC 2.0 / MCP handshake is implemented inline, no
+ * dependencies - the JSON-RPC 2.0 / MCP handshake is implemented inline, no
  * SDK required.
  *
  * Three layers, use what you need:
- *   - `busToMcpTools(schema)` — schema → MCP tool definitions (pure mapping)
- *   - `createMcpHandler(bus)` — transport-agnostic JSON-RPC message handler
- *   - `serveMcpStdio(bus)`    — Node-only newline-delimited stdio transport
+ *   - `busToMcpTools(schema)` - schema -> MCP tool definitions (pure mapping)
+ *   - `createMcpHandler(bus)` - transport-agnostic JSON-RPC message handler
+ *   - `serveMcpStdio(bus)`    - Node-only newline-delimited stdio transport
  *
  * @example
  * import { createSchemaCommandBus } from 'vapor-chamber';
@@ -47,14 +47,14 @@ export type McpTool = {
   };
 };
 
-/** JSON Schema property map for a FieldMap ('any' → no type constraint). */
+/** JSON Schema property map for a FieldMap ('any' -> no type constraint). */
 function fieldsToJsonProps(fields: FieldMap): Record<string, { type?: string }> {
   return Object.fromEntries(
     Object.entries(fields).map(([k, v]) => [k, v === 'any' ? {} : { type: v }]),
   );
 }
 
-/** Field names that carry a concrete type — 'any' fields are optional/untyped. */
+/** Field names that carry a concrete type - 'any' fields are optional/untyped. */
 function requiredFieldNames(fields: FieldMap): string[] {
   return Object.entries(fields)
     .filter(([, v]) => v !== 'any')
@@ -97,7 +97,7 @@ function actionToMcpTool(name: string, def: ActionSchema): McpTool {
  * const tools = busToMcpTools({
  *   cartAdd: { description: 'Add item', target: { id: 'number' }, payload: { qty: 'number' } },
  * });
- * // → [{ name: 'cartAdd', description: 'Add item', inputSchema: {
+ * // -> [{ name: 'cartAdd', description: 'Add item', inputSchema: {
  * //      type: 'object',
  * //      properties: {
  * //        target:  { type: 'object', properties: { id:  { type: 'number' } }, required: ['id'] },
@@ -111,20 +111,20 @@ export function busToMcpTools(schema: BusSchema): McpTool[] {
 }
 
 // ---------------------------------------------------------------------------
-// agentOrigin — stamp meta.origin on MCP-driven dispatches
+// agentOrigin - stamp meta.origin on MCP-driven dispatches
 // ---------------------------------------------------------------------------
 
 /**
  * @deprecated Since v1.12.0 `meta.origin === 'agent'` is stamped by the core,
  * from the `__origin` key {@link createMcpHandler} puts in the payload it
- * dispatches — so this plugin has nothing left to do and is a no-op kept for
+ * dispatches - so this plugin has nothing left to do and is a no-op kept for
  * one release.
  *
  * It used to work off a module-level boolean raised around the handler's
  * dispatch call, which was exact on a sync bus and wrong on an async one: any
  * LOCAL dispatch entering the plugin chain while an MCP tool call was awaiting
  * an async handler got stamped `'agent'` too. The doc admitted it ("advisory,
- * not a security boundary") — but the first thing anyone builds on `origin`
+ * not a security boundary") - but the first thing anyone builds on `origin`
  * is an audit trail or a permission gate, which is exactly the consumer that
  * needs it exact, on exactly the bus type where it wasn't. A marker that
  * travels ON the dispatch cannot be misattributed by interleaving.
@@ -136,10 +136,10 @@ export function agentOrigin(): Plugin {
 }
 
 // ---------------------------------------------------------------------------
-// createMcpHandler — transport-agnostic JSON-RPC 2.0 message handler
+// createMcpHandler - transport-agnostic JSON-RPC 2.0 message handler
 // ---------------------------------------------------------------------------
 
-/** Minimal bus surface the MCP layer needs — any schema bus (sync or async) satisfies it. */
+/** Minimal bus surface the MCP layer needs - any schema bus (sync or async) satisfies it. */
 export type McpBus = {
   dispatch: (action: string, target: any, payload?: any) => CommandResult | Promise<CommandResult>;
   getSchema: () => BusSchema;
@@ -147,11 +147,11 @@ export type McpBus = {
 
 export type McpHandlerOptions = {
   /**
-   * Action whitelist — glob patterns matched with {@link matchesPattern}
+   * Action whitelist - glob patterns matched with {@link matchesPattern}
    * (`'cart*'`, exact names, or `'*'`). Only matching schema actions are
    * listed by `tools/list` and callable via `tools/call`.
    *
-   * **Pass this.** Omitting it exposes EVERY schema action — writes included —
+   * **Pass this.** Omitting it exposes EVERY schema action - writes included -
    * to an LLM-driven caller, and dev-warns to say so. An MCP client is the one
    * caller class this library treats as untrusted by construction, and least
    * privilege applies: expose reads broadly, writes narrowly. `['*']` opts
@@ -168,12 +168,12 @@ export type McpHandlerOptions = {
 /**
  * Version reported by the MCP `initialize` handshake.
  *
- * Kept in sync with package.json by `tests/mcp.test.ts`, not by discipline —
+ * Kept in sync with package.json by `tests/mcp.test.ts`, not by discipline -
  * it sat at a hardcoded '1.7.0' for four releases, so every handshake
  * advertised a version that had not existed for months. A failing test at
  * release time is the cheapest possible checklist.
  */
-export const MCP_SERVER_VERSION = '1.16.0';
+export const MCP_SERVER_VERSION = '1.18.0';
 
 /** Latest MCP protocol revision this handler speaks. */
 const MCP_PROTOCOL_VERSION = '2025-06-18';
@@ -200,22 +200,22 @@ function toolResult(text: string, isError?: boolean): object {
 /**
  * Create a transport-agnostic MCP message handler for a schema command bus.
  *
- * Takes one parsed JSON-RPC 2.0 message, returns the reply object — or `null`
+ * Takes one parsed JSON-RPC 2.0 message, returns the reply object - or `null`
  * for notifications (messages without an `id`), which MUST NOT be answered.
  * Wire it to any transport: stdio (see {@link serveMcpStdio}), an HTTP POST
  * body, a WebSocket frame, or a test harness.
  *
  * Protocol methods handled:
- *   - `initialize` — echoes the client's `protocolVersion` (or advertises
+ *   - `initialize` - echoes the client's `protocolVersion` (or advertises
  *     `'2025-06-18'`), declares `capabilities: { tools: {} }`
- *   - `notifications/initialized` — notification, no reply
- *   - `ping` — replies `{}`
- *   - `tools/list` — whitelisted schema actions as {@link McpTool}s
- *   - `tools/call` — dispatches `{ target, payload }` from `params.arguments`
+ *   - `notifications/initialized` - notification, no reply
+ *   - `ping` - replies `{}`
+ *   - `tools/list` - whitelisted schema actions as {@link McpTool}s
+ *   - `tools/call` - dispatches `{ target, payload }` from `params.arguments`
  *     through the bus; the CommandResult is serialized as a text content
  *     block (`result.value` as JSON on success; `error.message` with
- *     `isError: true` on failure — tool errors are results, not JSON-RPC errors)
- *   - anything else with an `id` — JSON-RPC error `-32601` (method not found)
+ *     `isError: true` on failure - tool errors are results, not JSON-RPC errors)
+ *   - anything else with an `id` - JSON-RPC error `-32601` (method not found)
  *
  * Origin stamping: install {@link agentOrigin} on the bus
  * (`bus.use(agentOrigin(), { priority: 150 })`) to stamp `meta.origin='agent'`
@@ -225,7 +225,7 @@ function toolResult(text: string, isError?: boolean): object {
  * @example
  * const handle = createMcpHandler(bus, { actions: ['cartGet', 'cartAdd'] });
  * const reply = await handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
- * // → { jsonrpc: '2.0', id: 1, result: { tools: [...] } }
+ * // -> { jsonrpc: '2.0', id: 1, result: { tools: [...] } }
  */
 export function createMcpHandler(
   bus: McpBus,
@@ -237,7 +237,7 @@ export function createMcpHandler(
   if (whitelist === undefined && DEV) {
     const exposed = Object.keys(bus.getSchema());
     console.warn(
-      `[vapor-chamber] createMcpHandler({ actions }) was omitted — all ${exposed.length} schema ` +
+      `[vapor-chamber] createMcpHandler({ actions }) was omitted - all ${exposed.length} schema ` +
         `action(s) are exposed to the MCP client, writes included: ${exposed.join(', ')}. ` +
         'An MCP client is an LLM-driven caller; pass an explicit whitelist ' +
         "(e.g. actions: ['cartRead*']), or actions: ['*'] to accept full exposure deliberately.",
@@ -254,7 +254,7 @@ export function createMcpHandler(
     }
     // Object.hasOwn, not `schema[name] === undefined`: a plain-object schema
     // inherits Object.prototype, so `constructor` / `toString` / `__proto__` /
-    // `hasOwnProperty` all read back as defined and passed this gate — names
+    // `hasOwnProperty` all read back as defined and passed this gate - names
     // `tools/list` never advertises (busToMcpTools uses Object.entries) yet
     // reached bus.dispatch. An MCP client is untrusted by construction; a tool
     // that is not listed must not be callable.
@@ -266,31 +266,31 @@ export function createMcpHandler(
     // race-free place to put it: it travels with this dispatch instead of
     // sitting in a module flag that a concurrent local dispatch can read.
     // Non-object payloads (a bare string an LLM sent where an object belongs)
-    // are passed through untouched — schema validation owns that complaint.
+    // are passed through untouched - schema validation owns that complaint.
     const rawPayload = args?.payload;
-    // An absent payload is legitimate — `actionToMcpTool` only declares (and
+    // An absent payload is legitimate - `actionToMcpTool` only declares (and
     // requires) `payload` for actions whose schema has one, so an action
     // without a payload schema has no payload checks to fail. Stamping the
     // marker anyway keeps the audit trail hole-free.
     //
     // A non-object payload is REFUSED rather than passed through. This used to
     // forward it untouched, on the reasoning that "schemaValidator rejects that
-    // shape on its own" — which holds only for actions that DECLARE payload
+    // shape on its own" - which holds only for actions that DECLARE payload
     // fields. `schema.ts` guards with `c.payload && c.payload.length > 0`, so
     // an action with no payload schema (`cartClear`-shaped) has no such check,
     // and a bare string sailed through. The marker cannot ride on a primitive
     // or an array, so those dispatches reached handlers with
-    // `meta.origin === undefined` — indistinguishable from a local, non-agent
+    // `meta.origin === undefined` - indistinguishable from a local, non-agent
     // command. MEASURED: `cartClear` + `{a:1}` stamped 'agent', `cartClear` +
     // `'bare-string'` stamped nothing and still dispatched. An audit trail
     // filtering on `origin === 'agent'` silently missed it, which is the
-    // "misattributed audit origins" failure stampMeta's docblock names — on a
+    // "misattributed audit origins" failure stampMeta's docblock names - on a
     // boundary that is untrusted by construction (see above).
     //
     // Refusing costs nothing legitimate: `actionToMcpTool` only ever advertises
     // `payload` as `{ type: 'object' }`, so a non-object payload is already off
     // -contract for every tool this server exposes. A counter or module flag
-    // (the `_mcpDispatching` shape) is NOT an option here — this handler awaits
+    // (the `_mcpDispatching` shape) is NOT an option here - this handler awaits
     // its dispatch, so a flag would span the await and reintroduce the original
     // race the marker was built to kill.
     if (
@@ -308,7 +308,7 @@ export function createMcpHandler(
       // `await` handles both sync and async buses (thenable or plain result).
       // `_withOrigin` stamps `meta.origin = 'agent'` from the core rather than
       // by spreading a key into the caller's payload: no allocation, and the
-      // handler receives exactly the object the client sent. Awaiting is safe —
+      // handler receives exactly the object the client sent. Awaiting is safe -
       // the slot is consumed in dispatch's synchronous prologue, long before
       // this promise settles.
       result = await _withOrigin('agent', () => bus.dispatch(name, target, rawPayload));
@@ -321,7 +321,7 @@ export function createMcpHandler(
   }
 
   return async (message: unknown): Promise<object | null> => {
-    // Malformed envelope — not an object, missing jsonrpc/method.
+    // Malformed envelope - not an object, missing jsonrpc/method.
     if (message === null || typeof message !== 'object' || Array.isArray(message)) {
       return rpcError(null, -32600, 'Invalid Request');
     }
@@ -334,7 +334,7 @@ export function createMcpHandler(
     }
     const method: string = msg.method;
 
-    // Notifications (no id) never get a reply — process known ones silently.
+    // Notifications (no id) never get a reply - process known ones silently.
     if (!hasId) return null;
 
     switch (method) {
@@ -360,14 +360,14 @@ export function createMcpHandler(
 }
 
 // ---------------------------------------------------------------------------
-// serveMcpStdio — Node-only newline-delimited stdio transport
+// serveMcpStdio - Node-only newline-delimited stdio transport
 // ---------------------------------------------------------------------------
 
 export type McpStdioOptions = McpHandlerOptions & {
   /**
    * Cap on a single line's length (UTF-16 code units) before it is abandoned.
    * A client that never sends a newline would otherwise grow the read buffer
-   * without bound — same class of input-driven memory guard as the stream
+   * without bound - same class of input-driven memory guard as the stream
    * parser's `maxDepth`. On overflow the partial line is dropped, a `-32700`
    * is written, and input is skipped to the next newline so the stream
    * resynchronises instead of dying. Default: 1 MiB.
@@ -393,20 +393,20 @@ export type McpStdioOptions = McpHandlerOptions & {
  * detaches from stdin.
  *
  * Two input-driven limits keep a hostile or broken client from growing memory
- * without bound — see {@link McpStdioOptions.maxLineLength} and
+ * without bound - see {@link McpStdioOptions.maxLineLength} and
  * {@link McpStdioOptions.maxInFlight}.
  *
  * Replies are written in COMPLETION order, not arrival order: messages are
  * dispatched concurrently, so a fast tool answers before a slow one issued
- * earlier. That is deliberate and JSON-RPC-legal — responses may arrive in any
- * order and `id` correlates them — and it is what keeps one slow tool call from
+ * earlier. That is deliberate and JSON-RPC-legal - responses may arrive in any
+ * order and `id` correlates them - and it is what keeps one slow tool call from
  * blocking every reply queued behind it.
  *
- * IMPORTANT: while serving, do not `console.log` to stdout — it would corrupt
+ * IMPORTANT: while serving, do not `console.log` to stdout - it would corrupt
  * the protocol stream. Log to stderr instead.
  *
  * @example
- * // mcp-server.ts — spawned by an MCP client
+ * // mcp-server.ts - spawned by an MCP client
  * const bus = createSchemaCommandBus(schema);
  * bus.use(agentOrigin(), { priority: 150 });
  * registerHandlers(bus);
@@ -466,7 +466,7 @@ export function serveMcpStdio(bus: McpBus, options?: McpStdioOptions): () => voi
       buffer = buffer.slice(newline + 1);
       newline = buffer.indexOf('\n');
       if (resyncing) {
-        resyncing = false; // tail of the abandoned line — dropped, stream resynced
+        resyncing = false; // tail of the abandoned line - dropped, stream resynced
         continue;
       }
       if (!line) continue;

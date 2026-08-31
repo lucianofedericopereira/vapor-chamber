@@ -1,5 +1,5 @@
 /**
- * Tests for src/http-errors.ts — classifyError
+ * Tests for src/http-errors.ts - classifyError
  */
 import { describe, expect, it } from 'vitest';
 import { classifyError } from '../src/http-errors';
@@ -29,7 +29,7 @@ describe('classifyError', () => {
   });
 
   it('handles null/undefined input', () => {
-    expect(classifyError(null).transient).toBe(true); // "no response" — treated as network failure
+    expect(classifyError(null).transient).toBe(true); // "no response" - treated as network failure
     expect(classifyError(undefined).transient).toBe(true);
   });
 });

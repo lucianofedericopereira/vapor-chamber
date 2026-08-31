@@ -9,13 +9,13 @@
 
   Memory math: this approach allocates ~5 signal nodes total. If we instead
   gave every panel a private `useCommand`, we'd allocate 2 signals per
-  panel × N panels.
+  panel x N panels.
 -->
 <script setup vapor lang="ts">
 import { useSharedCommandState } from 'vapor-chamber';
 import { asRef } from './_reactive';
 
-// asRef: signals are Vue shallowRefs at runtime — typed as such so vue-tsc
+// asRef: signals are Vue shallowRefs at runtime - typed as such so vue-tsc
 // auto-unwraps them in the template (see _reactive.ts).
 const shared = useSharedCommandState({ errorCap: 5 });
 const isAnyLoading = asRef(shared.isAnyLoading);
@@ -28,9 +28,9 @@ const { clear } = shared;
   <section class="panel" style="background: #fafafa;">
     <h2>
       Status
-      <!-- Top-level refs are auto-unwrapped in templates — no .value. -->
+      <!-- Top-level refs are auto-unwrapped in templates - no .value. -->
       <span v-if="isAnyLoading" style="font-weight: normal; color: #08c;">
-        — loading…
+        - loading...
       </span>
     </h2>
     <p>

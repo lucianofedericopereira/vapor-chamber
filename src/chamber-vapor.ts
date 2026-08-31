@@ -1,21 +1,21 @@
 /**
- * vapor-chamber — Vue 3.6+ Vapor-specific API
+ * vapor-chamber - Vue 3.6+ Vapor-specific API
  *
- * Vue alignment history (one line per version — full per-item detail lives in
+ * Vue alignment history (one line per version - full per-item detail lives in
  * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table, the single
  * source of per-beta detail; this header records only changes to THIS file):
- *   rc.5 / rc.2 / rc.1 / beta.17 / beta.16 — pass-through. This file renders
+ *   rc.5 / rc.2 / rc.1 / beta.17 / beta.16 - pass-through. This file renders
  *          nothing; it forwards Vue's own define* functions, so rendering-side
  *          work (attrs fallthrough, interop, hydration) lands below it.
- *   v1.6.0 / beta.15 — lib-side: the define* wrappers and createVaporChamberApp
+ *   v1.6.0 / beta.15 - lib-side: the define* wrappers and createVaporChamberApp
  *          gained an opt-in return generic (`<T = any>`) and `object`-typed
  *          options. Importing Vue's Vapor types here would put a hard `vue`
  *          type dependency on the main barrel and break Vue-less command-bus
  *          consumers, so callers opt in: `defineVaporComponent<MyComp>(opts)`.
- *   v1.5.0 / v1.4.0 / v1.3.0 — pass-through.
- *   v1.1.0 — Added: defineVaporCustomElement, defineVaporComponent,
+ *   v1.5.0 / v1.4.0 / v1.3.0 - pass-through.
+ *   v1.1.0 - Added: defineVaporCustomElement, defineVaporComponent,
  *          defineVaporAsyncComponent wrappers; useVaporAsyncCommand.
- *   v0.6.0 — Added: useVaporCommand. v0.4.0 — Added: createVaporChamberApp.
+ *   v0.6.0 - Added: useVaporCommand. v0.4.0 - Added: createVaporChamberApp.
  *
  * Separated from chamber.ts to keep the core composable module CDCC-compliant.
  */
@@ -41,17 +41,17 @@ import { DEV } from './dev';
  * documented to check. But a bare `null` is the same failure shape that hid a
  * real bug for several releases: `tryKeepAliveHooks` guarded on an accessor
  * that silently answers "no" under Vapor, so a feature was inert with nothing
- * to see (rc.4 cycle — see tests/keepalive-input-scope-fixture.test.ts). Silent
+ * to see (rc.4 cycle - see tests/keepalive-input-scope-fixture.test.ts). Silent
  * negatives are how detection bugs survive.
  *
- * So the null stays — throwing would break the documented contract and the
- * tests that assert it — but it is no longer quiet. The call sites gate on
+ * So the null stays - throwing would break the documented contract and the
+ * tests that assert it - but it is no longer quiet. The call sites gate on
  * `DEV`, so the whole call (and every byte of message text) folds out of the
  * production IIFE builds; this helper is then unreferenced and tree-shaken.
  */
 function devWarnNoVapor(api: string): void {
   console.warn(
-    `[vapor-chamber] ${api}() returned null — Vue 3.6+ with Vapor mode was not detected, ` +
+    `[vapor-chamber] ${api}() returned null - Vue 3.6+ with Vapor mode was not detected, ` +
       `so the component was NOT created. ${vueDetectionHint()} ` +
       'For VDOM mode use the matching define* helper from vue instead.',
   );
@@ -61,7 +61,7 @@ function devWarnNoVapor(api: string): void {
  * Create a Vapor app instance with vapor-chamber ready.
  * Requires Vue 3.6+. Throws if Vapor is not available.
  *
- * Pass-through over Vue's createVaporApp — scope-ID handling, HMR app-instance
+ * Pass-through over Vue's createVaporApp - scope-ID handling, HMR app-instance
  * refresh, and setup() error recovery are Vue runtime behavior (per-beta detail:
  * CHANGELOG / whitepaper alignment log).
  *
@@ -77,7 +77,7 @@ export function createVaporChamberApp<TApp = any>(
   const fn = getVaporAppFn();
   if (!fn) {
     // The bare "Vapor required" message was the same whether Vue was absent,
-    // present-without-Vapor, or present-but-unreachable — three different
+    // present-without-Vapor, or present-but-unreachable - three different
     // problems with three different fixes. vueDetectionHint() names which.
     throw new Error(
       `[vapor-chamber] Vue 3.6+ with Vapor mode required. ${vueDetectionHint()} ` +
@@ -107,11 +107,11 @@ export function getVaporInteropPlugin(): any | null {
 }
 
 // ---------------------------------------------------------------------------
-// Vapor Custom Elements (Vue 3.6 — defineVaporCustomElement introduced in 3.6.0-alpha.4, #14017)
+// Vapor Custom Elements (Vue 3.6 - defineVaporCustomElement introduced in 3.6.0-alpha.4, #14017)
 // ---------------------------------------------------------------------------
 
 /**
- * defineVaporCustomElement — create a custom element backed by Vapor rendering.
+ * defineVaporCustomElement - create a custom element backed by Vapor rendering.
  *
  * Wraps Vue's `defineVaporCustomElement()` (introduced in 3.6.0-alpha.4, #14017). The generated custom
  * element uses Vapor's compiler-optimized rendering instead of the VDOM, giving
@@ -119,7 +119,7 @@ export function getVaporInteropPlugin(): any | null {
  * options object, and children re-render on reactive prop changes (beta.14+;
  * per-beta detail: CHANGELOG / whitepaper alignment log).
  *
- * Returns null if the Vapor runtime (Vue 3.6+) is not detected — check before calling
+ * Returns null if the Vapor runtime (Vue 3.6+) is not detected - check before calling
  * `customElements.define()`.
  *
  * @example
@@ -140,11 +140,11 @@ export function defineVaporCustomElement<T = any>(options: object, extraOptions?
 }
 
 /**
- * defineVaporComponent — define a Vapor component with proper type inference.
+ * defineVaporComponent - define a Vapor component with proper type inference.
  *
  * Wraps Vue's `defineVaporComponent()` (typed since 3.6.0-alpha.5, #13831). Use this to get full
  * TypeScript inference for props, emits, and slots in Vapor components.
- * Pass-through — emits/$attrs routing, v-once interop, scope IDs, and the
+ * Pass-through - emits/$attrs routing, v-once interop, scope IDs, and the
  * compiler optimizations are Vue behavior (per-beta detail: CHANGELOG /
  * whitepaper alignment log).
  *
@@ -168,12 +168,12 @@ export function defineVaporComponent<T = any>(options: object): T | null {
 }
 
 /**
- * defineVaporAsyncComponent — define an async Vapor component for lazy loading.
+ * defineVaporAsyncComponent - define an async Vapor component for lazy loading.
  *
  * Wraps Vue's `defineVaporAsyncComponent()` (introduced in 3.6.0-alpha.3, #13059). Async Vapor
  * components are cached by VaporKeepAlive and hydrate under VDOM Suspense.
  * The loading placeholder receives the deferred component's props and slots
- * (beta.14+) — render a skeleton matching the final shape. Per-beta detail:
+ * (beta.14+) - render a skeleton matching the final shape. Per-beta detail:
  * CHANGELOG / whitepaper alignment log.
  *
  * Returns null if the Vapor runtime (Vue 3.6+) is not detected.
@@ -198,7 +198,7 @@ export function defineVaporAsyncComponent<T = any>(
 // ---------------------------------------------------------------------------
 
 /**
- * defineVaporCommand — zero-overhead command for hot paths in Vapor mode.
+ * defineVaporCommand - zero-overhead command for hot paths in Vapor mode.
  *
  * Unlike useCommand(), this skips reactive loading/error signal creation.
  * Ideal for high-frequency, fire-and-forget patterns where reactive
@@ -236,7 +236,7 @@ export function defineVaporCommand(
 // ---------------------------------------------------------------------------
 
 /**
- * useVaporAsyncCommand — async-aware command dispatch for Vapor components
+ * useVaporAsyncCommand - async-aware command dispatch for Vapor components
  * used inside Suspense boundaries.
  *
  * Vue 3.6.0-beta.10 introduced proper async component hydration under VDOM
@@ -263,9 +263,9 @@ export function useVaporAsyncCommand(asyncBus?: { dispatch: (action: string, tar
 
   // Intentionally hand-rolled, NOT routed through the shared runDispatch() that
   // useCommand / useCommandQuery use. A single async/await is
-  // ~1.2× leaner on the dispatch wrapper than runDispatch's .then-chain (measured);
+  // ~1.2x leaner on the dispatch wrapper than runDispatch's .then-chain (measured);
   // this is the awaited HTTP/WS path, so keep it lean. Do not "consolidate" into
-  // runDispatch — the consistency isn't worth the wrapper overhead here.
+  // runDispatch - the consistency isn't worth the wrapper overhead here.
   async function dispatch(action: string, target: any, payload?: any): Promise<CommandResult> {
     loading.value = true;
     lastError.value = null;
@@ -282,7 +282,7 @@ export function useVaporAsyncCommand(asyncBus?: { dispatch: (action: string, tar
     }
   }
 
-  // Dispatch-only composable (no register/on, unlike useCommand) — there are no
+  // Dispatch-only composable (no register/on, unlike useCommand) - there are no
   // subscriptions to tear down. Kept as a no-op for return-shape symmetry with the
   // other composables (callers may destructure `dispose`).
   function dispose() {}

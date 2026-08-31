@@ -1,5 +1,5 @@
 /**
- * vapor-chamber — IIFE variant: FULL
+ * vapor-chamber - IIFE variant: FULL
  *
  * Exposes the full vapor-chamber API as `window.VaporChamber`. For sites that
  * want every feature in a single `<script>` tag drop-in. For smaller bundles,
@@ -54,7 +54,7 @@ import { useSharedCommandState, useCommand } from './chamber';
 import type { AsyncPlugin, Plugin } from './command-bus';
 
 // ---------------------------------------------------------------------------
-// createApp — convenience entry point for CDN usage
+// createApp - convenience entry point for CDN usage
 // ---------------------------------------------------------------------------
 
 export type CreateAppOptions = {
@@ -74,7 +74,7 @@ export type CreateAppOptions = {
 };
 
 /**
- * createApp — creates a configured command bus, installs transport + plugins.
+ * createApp - creates a configured command bus, installs transport + plugins.
  *
  * @example
  * const { bus, dispatch } = VaporChamber.createApp({
@@ -99,19 +99,19 @@ function createApp(options: CreateAppOptions = {}): {
 }
 
 // ---------------------------------------------------------------------------
-// mount — mount a command-bus-driven island to a DOM element
+// mount - mount a command-bus-driven island to a DOM element
 // ---------------------------------------------------------------------------
 
 export type MountOptions = CreateAppOptions & {
   /**
-   * Initial state object. Not reactive on its own — use with your own
+   * Initial state object. Not reactive on its own - use with your own
    * signal library or Vue's ref() for reactivity.
    */
   state?: Record<string, any>;
 };
 
 /**
- * mount — attach a command bus island to a specific DOM element.
+ * mount - attach a command bus island to a specific DOM element.
  *
  * @example
  * VaporChamber.mount('#analytics-island', {
@@ -133,7 +133,7 @@ function mount(selector: string, options: MountOptions = {}): {
 }
 
 /**
- * connect — one-line setup mirroring the CORE variant's API. Equivalent to
+ * connect - one-line setup mirroring the CORE variant's API. Equivalent to
  * `createApp({ transport: createHttpBridge({ csrf: true, ...opts }) })`.
  * Available in every variant so the same call site works regardless of which
  * IIFE bundle is loaded.
@@ -148,7 +148,7 @@ function connect(options: HttpBridgeOptions & { plugins?: Plugin[]; onMissing?: 
 }
 
 /**
- * defineWidget — one-line custom-element registration mirroring the ELEMENTS
+ * defineWidget - one-line custom-element registration mirroring the ELEMENTS
  * variant's API. Returns `false` if Vue 3.6+ Vapor is not detected.
  */
 function defineWidget(tagName: string, options: any, extraOptions?: any): boolean {
@@ -163,7 +163,7 @@ function defineWidget(tagName: string, options: any, extraOptions?: any): boolea
 }
 
 /**
- * emitDOMEvent — bridge Vue's component emit() to a real DOM CustomEvent so
+ * emitDOMEvent - bridge Vue's component emit() to a real DOM CustomEvent so
  * host pages can `addEventListener` on the widget tag. See ELEMENTS variant
  * for the full doc + attribution.
  */
@@ -239,6 +239,6 @@ if (typeof globalThis !== 'undefined') {
 // Default export only: the IIFE build assigns the DEFAULT export to the
 // `VaporChamber` global, so the API object lands directly on window
 // (`VaporChamber.connect(...)`). A second named export would force the
-// bundler to emit a module-namespace wrapper — `{ VaporChamber, default }`
-// — and every documented call site would be undefined in a <script> tag.
+// bundler to emit a module-namespace wrapper - `{ VaporChamber, default }`
+// - and every documented call site would be undefined in a <script> tag.
 export default VaporChamber;

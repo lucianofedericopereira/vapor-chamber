@@ -60,10 +60,10 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// readCsrfToken — DOM source fallbacks
+// readCsrfToken - DOM source fallbacks
 // ---------------------------------------------------------------------------
 
-describe('readCsrfToken — DOM sources', () => {
+describe('readCsrfToken - DOM sources', () => {
   it('falls back to hidden input[name="_token"] when meta and cookie are absent', () => {
     vi.stubGlobal('document', {
       querySelector: (sel: string) => {
@@ -106,10 +106,10 @@ describe('readCsrfToken — DOM sources', () => {
 });
 
 // ---------------------------------------------------------------------------
-// refreshCsrfOnce — coalescing + failure paths (driven via the 419 flow)
+// refreshCsrfOnce - coalescing + failure paths (driven via the 419 flow)
 // ---------------------------------------------------------------------------
 
-describe('refreshCsrfOnce — failure path', () => {
+describe('refreshCsrfOnce - failure path', () => {
   it('throws when no token is found in the DOM after refresh', async () => {
     // No DOM token at all -> readCsrfToken() returns null post-refresh -> throw.
     vi.stubGlobal('document', {
@@ -127,7 +127,7 @@ describe('refreshCsrfOnce — failure path', () => {
   });
 });
 
-describe('refreshCsrfOnce — coalescing', () => {
+describe('refreshCsrfOnce - coalescing', () => {
   it('coalesces a concurrent 419 refresh: second waiter reuses the in-flight refresh and succeeds', async () => {
     // Both requests get 419 first. The csrf-cookie endpoint is slow so the two
     // refreshes overlap; the second caller must enter the coalescing wait loop
@@ -189,7 +189,7 @@ describe('refreshCsrfOnce — coalescing', () => {
       postCommand('/api/y', {}, { retry: 0 }),
     ]);
 
-    // Both reject — one from the primary refresh, one from the coalesced wait.
+    // Both reject - one from the primary refresh, one from the coalesced wait.
     expect(results[0].status).toBe('rejected');
     expect(results[1].status).toBe('rejected');
     const messages = results.map((r) => (r as PromiseRejectedResult).reason?.message ?? '');
@@ -201,10 +201,10 @@ describe('refreshCsrfOnce — coalescing', () => {
 });
 
 // ---------------------------------------------------------------------------
-// parseRetryAfter — HTTP-date branch via retry timing
+// parseRetryAfter - HTTP-date branch via retry timing
 // ---------------------------------------------------------------------------
 
-describe('parseRetryAfter — HTTP-date Retry-After', () => {
+describe('parseRetryAfter - HTTP-date Retry-After', () => {
   it('honors a Retry-After HTTP date in the future and retries', async () => {
     const future = new Date(Date.now() + 2000).toUTCString();
     (globalThis.fetch as any)
@@ -250,10 +250,10 @@ describe('parseRetryAfter — HTTP-date Retry-After', () => {
 });
 
 // ---------------------------------------------------------------------------
-// combineSignals — AbortSignal.any fallback
+// combineSignals - AbortSignal.any fallback
 // ---------------------------------------------------------------------------
 
-describe('combineSignals — fallback without AbortSignal.any', () => {
+describe('combineSignals - fallback without AbortSignal.any', () => {
   it('uses the manual fallback and still propagates a user abort', async () => {
     const realAny = (AbortSignal as any).any;
     // Force the fallback branch by removing AbortSignal.any.
@@ -280,10 +280,10 @@ describe('combineSignals — fallback without AbortSignal.any', () => {
 });
 
 // ---------------------------------------------------------------------------
-// sleepMs — abort path via user abort during retry backoff
+// sleepMs - abort path via user abort during retry backoff
 // ---------------------------------------------------------------------------
 
-describe('sleepMs — abort during retry backoff', () => {
+describe('sleepMs - abort during retry backoff', () => {
   it('rejects the backoff sleep with AbortError when the user signal fires mid-wait', async () => {
     const ctrl = new AbortController();
     // Network error so the catch path schedules sleepMs(backoff, userSignal),
@@ -303,10 +303,10 @@ describe('sleepMs — abort during retry backoff', () => {
 });
 
 // ---------------------------------------------------------------------------
-// doClientFetch — json content-type fallback to text
+// doClientFetch - json content-type fallback to text
 // ---------------------------------------------------------------------------
 
-describe('doClientFetch — non-JSON content-type falls back to text', () => {
+describe('doClientFetch - non-JSON content-type falls back to text', () => {
   it('returns text when responseType is json but content-type is not application/json', async () => {
     // content-type omitted -> not "application/json" -> data = await raw.text()
     (globalThis.fetch as any).mockResolvedValue(mockResponse(200, 'raw-body-text'));
@@ -320,10 +320,10 @@ describe('doClientFetch — non-JSON content-type falls back to text', () => {
 });
 
 // ---------------------------------------------------------------------------
-// clientRequest — 419 CSRF retry + session expiry after retry
+// clientRequest - 419 CSRF retry + session expiry after retry
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — 419 CSRF retry', () => {
+describe('createHttpClient - 419 CSRF retry', () => {
   beforeEach(() => {
     vi.stubGlobal('document', {
       querySelector: (sel: string) =>
@@ -371,10 +371,10 @@ describe('createHttpClient — 419 CSRF retry', () => {
 });
 
 // ---------------------------------------------------------------------------
-// clientRequest — network-error retry backoff
+// clientRequest - network-error retry backoff
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — network error retry', () => {
+describe('createHttpClient - network error retry', () => {
   it('GET retries after a network error via backoff sleep, then succeeds', async () => {
     (globalThis.fetch as any)
       .mockRejectedValueOnce(new Error('network glitch'))
@@ -393,10 +393,10 @@ describe('createHttpClient — network error retry', () => {
 });
 
 // ---------------------------------------------------------------------------
-// request interceptor — onRejected when onFulfilled throws
+// request interceptor - onRejected when onFulfilled throws
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — request interceptor error path', () => {
+describe('createHttpClient - request interceptor error path', () => {
   it('invokes onRejected when the request onFulfilled interceptor throws', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, { ok: true }));
     const http = createHttpClient();
@@ -417,10 +417,10 @@ describe('createHttpClient — request interceptor error path', () => {
 });
 
 // ---------------------------------------------------------------------------
-// request body — String(rawData) for primitive data
+// request body - String(rawData) for primitive data
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — primitive body serialization', () => {
+describe('createHttpClient - primitive body serialization', () => {
   it('stringifies a primitive (number) body via String() with no JSON Content-Type', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, {}));
     const http = createHttpClient();
@@ -448,7 +448,7 @@ describe('createHttpClient — primitive body serialization', () => {
 // safe.put / safe.patch / safe.delete wrappers
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — safe.put/patch/delete', () => {
+describe('createHttpClient - safe.put/patch/delete', () => {
   it('safe.put returns a success SafeResult', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, { updated: true }));
     const http = createHttpClient();
@@ -493,7 +493,7 @@ describe('createHttpClient — safe.put/patch/delete', () => {
   });
 });
 
-describe('response cache — per-instance LRU', () => {
+describe('response cache - per-instance LRU', () => {
   it('evicts the LEAST RECENTLY USED entry, not simply the oldest', () => {
     const cache = createResponseCache();
     for (let i = 0; i < 50; i++) cache.set(`key-${i}`, { i }, 60_000); // fills to CACHE_MAX_SIZE
@@ -502,16 +502,16 @@ describe('response cache — per-instance LRU', () => {
     // eviction candidate. This is what makes it an LRU rather than a FIFO.
     expect(cache.get('key-0')).not.toBeNull();
 
-    cache.set('key-50', { i: 50 }, 60_000); // 51st insert → one eviction
+    cache.set('key-50', { i: 50 }, 60_000); // 51st insert -> one eviction
     expect(cache.get('key-1')).toBeNull(); // the least recently used went
     expect(cache.get('key-0')).not.toBeNull(); // the recently read one stayed
     expect(cache.get('key-50')).not.toBeNull();
   });
 
   // Item 6: the maps used to be module-level, so every client shared one
-  // cache and one dedupe map — an instance illusion, and under concurrent SSR
+  // cache and one dedupe map - an instance illusion, and under concurrent SSR
   // a cross-request leak (the key has no auth/cookie dimension).
-  it('two caches are independent — one clear() cannot empty the other', () => {
+  it('two caches are independent - one clear() cannot empty the other', () => {
     const a = createResponseCache();
     const b = createResponseCache();
     a.set('json:/api/me', { user: 'A' }, 60_000);
@@ -537,7 +537,7 @@ describe('response cache — per-instance LRU', () => {
   });
 });
 
-describe('getAny — last-resort lookup for cache.serveStaleOnError', () => {
+describe('getAny - last-resort lookup for cache.serveStaleOnError', () => {
   it('returns the entry even past its stale window (get would call it a miss)', () => {
     const cache = createResponseCache();
     cache.set('json:/api/x', { x: 1 }, /* ttl */ -1, /* staleTtl */ 0); // already expired
@@ -579,7 +579,7 @@ describe('cache.invalidate', () => {
   });
 
   // Item 9: `new RegExp(pattern)` on a plain string threw on this library's
-  // OWN output — buildFullUrl serializes arrays as `ids[0]=`, so the key holds
+  // OWN output - buildFullUrl serializes arrays as `ids[0]=`, so the key holds
   // a literal `[`.
   it('does not throw on a URL containing regex metacharacters', () => {
     const cache = createResponseCache();
@@ -597,7 +597,7 @@ describe('cache.invalidate', () => {
     cache.invalidate('/api/products?page=1');
 
     expect(cache.getAny('json:/api/products?page=1')).toBeNull();
-    // `?` as a quantifier made '/api/product' + 'sage=1' a match — it is not.
+    // `?` as a quantifier made '/api/product' + 'sage=1' a match - it is not.
     expect(cache.getAny('json:/api/productsage=1')).not.toBeNull();
   });
 
@@ -633,7 +633,7 @@ describe('cached responses are immutable in dev (item 8)', () => {
 // that yields no fresh token, and a fetch Response with no `headers`.
 // ---------------------------------------------------------------------------
 
-describe('readCsrfToken — the TTL cache hit', () => {
+describe('readCsrfToken - the TTL cache hit', () => {
   it('serves a second read from cache without touching the DOM again', () => {
     // The 5-minute cache. This used to be covered incidentally by the 419 path,
     // which called readCsrfToken() a second time right after refreshCsrfOnce();
@@ -664,9 +664,9 @@ describe('readCsrfToken — the TTL cache hit', () => {
   });
 });
 
-describe('readCsrfToken — a document without querySelector', () => {
+describe('readCsrfToken - a document without querySelector', () => {
   it('skips both DOM probes and still reads the cookie', () => {
-    // `typeof document.querySelector === 'function' ? … : null` — the null arm,
+    // `typeof document.querySelector === 'function' ? ... : null` - the null arm,
     // which then short-circuits BOTH `if (q)` blocks. This is the shape a
     // non-DOM `document` shim has (some SSR/test harnesses expose only
     // `cookie`), and a bare property read on it would throw.
@@ -683,13 +683,13 @@ describe('readCsrfToken — a document without querySelector', () => {
   });
 });
 
-describe('clientRequest — 419 CSRF refresh returns the token it proved readable', () => {
+describe('clientRequest - 419 CSRF refresh returns the token it proved readable', () => {
   it('retries with the token handed back by the refresh, not a re-read', async () => {
     // refreshCsrfOnce() now RESOLVES WITH the token instead of leaving the
     // caller to call readCsrfToken() again. That removed a real window: the
     // two statements were separated by a microtask boundary that coalesced
     // waiters resume across, so a waiter running first could invalidate the
-    // cache or clear the DOM and leave a later waiter re-reading null — then
+    // cache or clear the DOM and leave a later waiter re-reading null - then
     // silently retrying with no CSRF header.
     let token = 'token-after-refresh';
     vi.stubGlobal('document', {
@@ -755,8 +755,8 @@ describe('clientRequest — 419 CSRF refresh returns the token it proved readabl
   });
 });
 
-describe('doClientFetch — a Response with no headers', () => {
-  // `headersToObject(raw.headers)` — the absent-headers arm. Some fetch
+describe('doClientFetch - a Response with no headers', () => {
+  // `headersToObject(raw.headers)` - the absent-headers arm. Some fetch
   // polyfills and hand-rolled doubles omit `headers` entirely.
   //
   // This used to be split in two, with the second case PINNING a defect: the
@@ -782,7 +782,7 @@ describe('doClientFetch — a Response with no headers', () => {
   it('no longer throws on the DEFAULT json path', async () => {
     // Regression: this threw `TypeError: Cannot read properties of undefined
     // (reading 'get')`. With no content-type to read, the response falls
-    // through to the non-JSON branch and yields the raw text — the same
+    // through to the non-JSON branch and yields the raw text - the same
     // graceful degradation any content-type-less response already gets.
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(headerless('{"fine":true}')));
     const client = createHttpClient();
@@ -813,7 +813,7 @@ describe('doClientFetch — a Response with no headers', () => {
 });
 
 // ---------------------------------------------------------------------------
-// headersToObject — what it does and does NOT normalize.
+// headersToObject - what it does and does NOT normalize.
 // ---------------------------------------------------------------------------
 
 describe('response header snapshot', () => {
@@ -822,7 +822,7 @@ describe('response header snapshot', () => {
     // ['retry-after'] and ['x-ratelimit-reset'] in both retry loops,
     // ['content-disposition'] in the download path. A Headers whose entries()
     // yields canonical casing would make every one of them miss with NO error
-    // — backoff not honoured, filename lost. Normalizing once in
+    // - backoff not honoured, filename lost. Normalizing once in
     // headersToObject is what rules that out.
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
@@ -849,7 +849,7 @@ describe('response header snapshot', () => {
     expect(res.headers['Retry-After']).toBeUndefined(); // normalized, not duplicated
 
     // And the content-type decision still delegates to Headers.get(), so JSON
-    // parses regardless of casing — belt and braces, from both directions.
+    // parses regardless of casing - belt and braces, from both directions.
     expect(res.data).toEqual({ parsed: true });
   });
 });

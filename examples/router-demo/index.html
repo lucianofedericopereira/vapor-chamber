@@ -1,5 +1,5 @@
 <!--
-  vapor-chamber/router — runnable demo.
+  vapor-chamber/router - runnable demo.
 
   The shape it models: the server owns ONE catch-all (`/admin/{any?}` in
   Laravel; here `examples/static-server.mjs` returns this file for every URL
@@ -16,7 +16,7 @@
   publishes. Vue comes from the repo's node_modules so this works offline.
 
   What is worth watching, because none of it is wired up by hand here:
-    · links are intercepted document-wide — no @click on any <a>
+    · links are intercepted document-wide - no @click on any <a>
     · `data-active` / `data-exact-active` are stamped onto those anchors
     · loaders run on navigation and commit atomically with the page
     · ?page= is STATE: it refetches without remounting the component
@@ -28,13 +28,13 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>vapor-chamber/router — demo</title>
+<title>vapor-chamber/router - demo</title>
 <style>
   body { font-family: system-ui, sans-serif; max-width: 860px; margin: 2rem auto; padding: 0 1rem; }
   nav { display: flex; gap: .25rem; border-bottom: 2px solid #eee; padding-bottom: .5rem; margin-bottom: 1rem; flex-wrap: wrap; }
   nav a { padding: .4rem .8rem; border-radius: 6px; text-decoration: none; color: #333; }
   nav a:hover { background: #f2f2f2; }
-  /* Stamped by the router itself — never assigned in this file.
+  /* Stamped by the router itself - never assigned in this file.
      ACTIVE  = this link is the current page OR an ancestor of it. Query is
                ignored, because query is state, not navigation: "Products" and
                "Products p3" are the same destination.
@@ -42,11 +42,11 @@
      On /products/7 you should see three actives (both Products links are
      ancestors, Product #7 is exact) and exactly one exact. */
   /* `!important` on color is defensive, not normally needed. "Force readable
-     text" / dark-mode browser extensions inject `a { color: … !important }`,
-     which overrides the tab text while leaving our background — producing a
+     text" / dark-mode browser extensions inject `a { color: ... !important }`,
+     which overrides the tab text while leaving our background - producing a
      blue tab with black (extension-forced) text. This wins that fight so the
      active tab stays legible regardless of extensions. (The tell-tale is a
-     `content.js` / "Ignoring unsupported entryTypes: longtask" console line —
+     `content.js` / "Ignoring unsupported entryTypes: longtask" console line -
      that is the extension, not this page.) */
   nav a[data-active] { background: #eef4ff; color: #1a4bd6 !important; }
   nav a[data-exact-active] { background: #1a4bd6; color: #fff !important; font-weight: 600; }
@@ -82,7 +82,7 @@
 
 <h1>vapor-chamber/router</h1>
 <p class="muted">
-  Path = navigation, query = state. The address bar is the source of truth —
+  Path = navigation, query = state. The address bar is the source of truth -
   copy any URL into a new tab, or hit reload, and you land in the same place.
 </p>
 
@@ -96,7 +96,7 @@
 </nav>
 
 <!-- Deep links live OUTSIDE the tab bar on purpose. `?page=3` is the same
-     destination as `/products` — query is state, not navigation — so the
+     destination as `/products` - query is state, not navigation - so the
      router marks both links active, exactly as vue-router does. Two tabs
      lighting up together is not a bug, but a tab bar should still have one
      entry per destination, so these sit here instead. -->
@@ -111,7 +111,7 @@
      demo explaining itself: ACTIVE = current page or an ancestor of it,
      EXACT = same path. If a tab looks wrong, this line says what it actually
      carries. -->
-<p class="muted" id="stamps">stamps: —</p>
+<p class="muted" id="stamps">stamps: -</p>
 
 <!-- Boot diagnostics. An example that fails silently teaches nothing: if the
      module throws, never evaluates, or mounts nothing, say so ON THE PAGE
@@ -136,13 +136,13 @@
     var r = e.reason || {};
     window.__vcrFail('unhandled rejection', (r.code ? '[' + r.code + '] ' : '') + (r.stack || r.message || String(r)));
   });
-  // Watchdog: covers the case nothing can catch — the module never ran at all.
+  // Watchdog: covers the case nothing can catch - the module never ran at all.
   setTimeout(function () {
     var app = document.getElementById('app');
     if (app && app.children.length === 0) {
       window.__vcrFail(
         'nothing mounted after 2s',
-        'the module script did not render. Check the Network tab for a failed import of /dist/router/index.js, /dist/router-fetch/index.js or /node_modules/vue/dist/vue.esm-browser.js — the page needs `npm run build` at the repo root and `node examples/static-server.mjs`.',
+        'the module script did not render. Check the Network tab for a failed import of /dist/router/index.js, /dist/router-fetch/index.js or /node_modules/vue/dist/vue.esm-browser.js - the page needs `npm run build` at the repo root and `node examples/static-server.mjs`.',
       );
     }
   }, 2000);
@@ -188,7 +188,7 @@
     createRouter,
     useRouter, useRoute, useRouteData, useRouteError, useQueryParam, usePagination, useMenu,
   } from '/dist/router/index.js';
-  // <RouterOutlet> lives on the vdom subpath — importing it is what opts you
+  // <RouterOutlet> lives on the vdom subpath - importing it is what opts you
   // into Vue's virtual-DOM runtime. Register it locally (as Shell does below);
   // the router deliberately does not register it globally.
   import { RouterOutlet } from '/dist/router/vdom.js';
@@ -199,7 +199,7 @@
       // NOTE for readers: refs returned from setup() are AUTO-UNWRAPPED in the
       // template, so templates below never write `.value`. The one exception
       // is a `useQueryParam()` handle, which is a plain writable object rather
-      // than a ref — hence `page.value = n` in script, never in a template.
+      // than a ref - hence `page.value = n` in script, never in a template.
       const menu = useMenu();
       return { menu };
     },
@@ -221,7 +221,7 @@
       // usePagination reads the loader's envelope and gives back the whole
       // pager: rows, page (a real ref backed by ?page=), totals, bounds, a
       // windowed pageRange and the router's in-flight flag. Paging is STATE,
-      // not navigation — the component is never remounted, and `page` pushes
+      // not navigation - the component is never remounted, and `page` pushes
       // by convention so Back walks the pages.
       const { items, page, pageRange, total, lastPage, hasNext, hasPrev, next, prev, go, loading } =
         usePagination();
@@ -236,16 +236,16 @@
       });
 
       const sortBy = (field) => {
-        // Same column → invert direction. Different column → that column, asc.
+        // Same column -> invert direction. Different column -> that column, asc.
         const next = cur.value.field === field ? (cur.value.desc ? field : '-' + field) : field;
         // Re-sorting resets to page 1: the row you were on has no meaning under
         // a new order. Both params in ONE setQuery = one navigation, one
-        // refetch — not a page write and a sort write racing each other.
+        // refetch - not a page write and a sort write racing each other.
         router.setQuery({ sort: next, page: 1 });
       };
 
       // Everything below is a ref or a function, so the template needs no
-      // `.value` anywhere — refs returned from setup() auto-unwrap.
+      // `.value` anywhere - refs returned from setup() auto-unwrap.
       return {
         rows: items, page, pageRange, total, lastPage, hasNext, hasPrev,
         next, prev, go, loading,
@@ -276,13 +276,13 @@
           <button :disabled="!hasPrev" @click="prev()">Prev</button>
           <!-- pageRange is windowed: first + last always shown, 0 = elision. -->
           <template v-for="(n, i) in pageRange" :key="i">
-            <span v-if="n === 0" class="muted">…</span>
+            <span v-if="n === 0" class="muted">...</span>
             <button v-else :disabled="n === page" @click="go(n)">{{ n }}</button>
           </template>
           <button :disabled="!hasNext" @click="next()">Next</button>
           <span class="muted">
             page {{ page }} / {{ lastPage }} · {{ total }} items
-            <span v-if="loading">· loading…</span>
+            <span v-if="loading">· loading...</span>
           </span>
         </div>
         <p class="muted">
@@ -300,21 +300,21 @@
     },
     template: `
       <div class="panel">
-        <h2>{{ item?.name ?? 'Loading…' }}</h2>
+        <h2>{{ item?.name ?? 'Loading...' }}</h2>
         <p class="muted">path param id = <code>{{ id }}</code>
           (typed <code>int</code> by the table), interpolated into the row's
           <code>load</code> template.</p>
         <table><tbody>
-          <tr><td>Price</td><td class="right">\${{ item?.price?.toFixed(2) ?? '—' }}</td></tr>
-          <tr><td>Stock</td><td class="right">{{ item?.stock ?? '—' }}</td></tr>
+          <tr><td>Price</td><td class="right">\${{ item?.price?.toFixed(2) ?? '-' }}</td></tr>
+          <tr><td>Stock</td><td class="right">{{ item?.stock ?? '-' }}</td></tr>
         </tbody></table>
-        <p class="bar"><a href="/examples/router-demo/products">← Back to products</a></p>
+        <p class="bar"><a href="/examples/router-demo/products"><- Back to products</a></p>
       </div>`,
   };
 
   const NotFound = {
     setup() {
-      // useRoute() must run DURING setup — it injects the router, and inject()
+      // useRoute() must run DURING setup - it injects the router, and inject()
       // needs an active component instance. Calling it lazily inside the
       // computed would run it on first render, outside that window.
       const route = useRoute();
@@ -323,7 +323,7 @@
     template: `
       <div class="panel">
         <h2>404</h2>
-        <p class="muted">No row matched <code>{{ path }}</code> — the
+        <p class="muted">No row matched <code>{{ path }}</code> - the
           splat row caught it. The server never saw this navigation.</p>
       </div>`,
   };
@@ -338,7 +338,7 @@
       <div>
         <p v-if="error" class="err">
           Navigation error: <code>{{ error.code }}</code>
-          — {{ error.message }}
+          - {{ error.message }}
           <button @click="clear()">dismiss</button>
         </p>
         <RouterOutlet />
@@ -357,7 +357,7 @@
   app.config.warnHandler = (msg) => window.__vcrFail('vue warning', msg);
 
   app.use(router);
-  // Mount IMMEDIATELY — do not gate the mount on isReady(). If the first
+  // Mount IMMEDIATELY - do not gate the mount on isReady(). If the first
   // navigation fails, gating means the page renders nothing at all and the
   // reader is left with a blank screen and no clue; mounting first means the
   // shell (and its error banner) is on screen to explain what went wrong.
@@ -375,11 +375,11 @@
         ? 'EXACT'
         : a.hasAttribute('data-active')
           ? 'active'
-          : '—';
+          : '-';
       return `${label}=${state}`;
     });
     const loc = router.currentRoute.value.location;
-    stampsEl.textContent = `stamps @ ${loc.path}${location.search} → ${parts.join('  ')}`;
+    stampsEl.textContent = `stamps @ ${loc.path}${location.search} -> ${parts.join('  ')}`;
   };
   router.afterEach(() => queueMicrotask(reportStamps));
   queueMicrotask(reportStamps);

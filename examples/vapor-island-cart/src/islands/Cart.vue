@@ -7,7 +7,7 @@ const undoCmd  = useAction('cartUndo');
 const redoCmd  = useAction('cartRedo');
 </script>
 
-<!-- No <style>: LIGHT-DOM custom element — page CSS applies directly. -->
+<!-- No <style>: LIGHT-DOM custom element - page CSS applies directly. -->
 <template>
   <section class="cart" :class="{ 'cart--filled': cart.count > 0 }">
     <h2>Cart</h2>
@@ -29,8 +29,8 @@ const redoCmd  = useAction('cartRedo');
       <button class="btn-clear" @click="clearCmd.execute()">Clear cart</button>
     </div>
     <div class="cart-actions">
-      <button class="btn-undo" :disabled="cart.cantUndo" @click="undoCmd.execute()">↩ Undo</button>
-      <button class="btn-redo" :disabled="cart.cantRedo" @click="redoCmd.execute()">↪ Redo</button>
+      <button class="btn-undo" :disabled="cart.cantUndo" @click="undoCmd.execute()"><- Undo</button>
+      <button class="btn-redo" :disabled="cart.cantRedo" @click="redoCmd.execute()">-> Redo</button>
     </div>
   </section>
 </template>

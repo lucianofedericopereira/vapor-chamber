@@ -1,25 +1,26 @@
 /**
- * vapor-chamber/router — router for Vue 3.6 over a server-owned catch-all.
+ * vapor-chamber/router - router for Vue 3.6 over a server-owned catch-all.
  *
  * Hard requirement by design: Vue >= 3.6. Rows come from a server-side route
  * generator emitting the RouteRecord schema (types.ts).
- * The server owns one catch-all (`/admin/{any?}` → Blade shell → one island);
+ * The server owns one catch-all (`/admin/{any?}` -> Blade shell -> one island);
  * this router owns every URL inside it. Path = navigation, query = state.
  *
  * Route table delivery:
- *   routes: adminRoutes                          // generated TS module — primary
+ *   routes: adminRoutes                          // generated TS module - primary
  *   routes: { inline: '#vcr-routes' }            // Blade-inlined, per-user filtered
  *   routes: { url: '/api/vc/routes' }            // admin tasks / router.reload()
  *
  * Data delivery: each row's `load` string is resolved by a loader PRESET (see
- * loaders.ts SPI) — `vapor-chamber/router-fetch` (in-box, plain JSON backends)
+ * loaders.ts SPI) - `vapor-chamber/router-fetch` (in-box, plain JSON backends)
  * or your own LoaderHandlers for any other backend convention.
  *
- * `createRouter()` is pure — IO and listeners begin at start()/app.use().
+ * `createRouter()` is pure - IO and listeners begin at start()/app.use().
  */
 
 import { DEV } from '../dev';
-import { createHttpClient } from '../http';
+// TYPE-ONLY. The client is never built here - it arrives via `options.http`,
+// or not at all. See the comment at `http` in createRouter below.
 import type { HttpClient } from '../http';
 import { computed, getCurrentScope, onScopeDispose, shallowRef } from 'vue';
 import { installDomIntegration, preheatIdle, stampActiveLinks } from './dom';
@@ -46,7 +47,7 @@ import { resolveQueryHistory } from './url';
 // ---- public surface ------------------------------------------------------------
 
 // NOTE: RouterOutlet / makeBladeComponent are deliberately NOT re-exported
-// here — they live in `vapor-chamber/router/vdom`. A static re-export is a
+// here - they live in `vapor-chamber/router/vdom`. A static re-export is a
 // static reference: it drags defineComponent/h into this entry's chunk (and
 // degrades the on-demand blade import below into a static one), which puts
 // Vue's vDOM runtime in every consumer's bundle. See ./vdom.ts.
@@ -73,6 +74,13 @@ export { canUseWebHistory, createMemoryHistory, createWebHistory, normalizeBase,
 export type { ResolveBaseOptions } from './history';
 export type { RouterHistory } from './history';
 export { defaultAffects, interpolateLoad, runLoaders } from './loaders';
+// Mutation-driven revalidation. Exported from THIS entry rather than minted as
+// its own subpath: it imports nothing the router core does not already have
+// (loaders, errors, types, shallowRef), so a subpath would isolate no cost -
+// which is the only thing the subpath convention exists to do. It is a pure
+// function export and tree-shakes away for consumers that never call it.
+export { revalidateRoutes } from './revalidate';
+export type { RevalidateMap, RevalidateOptions, RevalidatePlugin } from './revalidate';
 export type { LoaderContext, LoaderHandlers, PrefixHandler, UrlHandler } from './loaders';
 export type { Router } from './router-type';
 export { compilePath, createRouteTable } from './table';
@@ -90,30 +98,31 @@ export type RouterOptions = {
   /** Mount base, e.g. '/admin'. Falls back to the payload's base, then ''. */
   base?: string;
   routes: RoutesSource;
-  /** component key → component | () => import(...) */
+  /** component key -> component | () => import(...) */
   components?: ComponentMap;
-  /** Loader preset resolving `load` values — vapor-chamber/router-fetch (in-box)
+  /** Loader preset resolving `load` values - vapor-chamber/router-fetch (in-box)
    *  or your own LoaderHandlers. Routes without `load` never need this. */
   loaders?: LoaderHandlers;
   /** Override history (createMemoryHistory for tests/SSR). Default: web. */
   history?: RouterHistory;
-  /** Override the http client (tests). Default: chamber client with
-   *  X-Vapor-Router marker. */
+  /** The http client `routes: { url }` loads through. REQUIRED for that source;
+   *  unused otherwise. `routerHttp()` from `vapor-chamber/router/remote` is the
+   *  preconfigured one, and any `HttpClient` works. */
   http?: HttpClient;
   /** Document-level link interception + active stamping + hover preheat.
    *  Default: true in the browser. */
   links?: boolean;
-  /** Selector scoping data-active stamping (e.g. the admin shell) — stamping
+  /** Selector scoping data-active stamping (e.g. the admin shell) - stamping
    *  walks only this subtree instead of the whole document. Interception
    *  stays document-level. */
   linksRoot?: string;
-  /** Island hooks for blade rows — app conventions injected, never assumed. */
+  /** Island hooks for blade rows - app conventions injected, never assumed. */
   hydrate?: (el: Element) => unknown;
   dehydrate?: (el: Element) => unknown;
-  /** Fetch server HTML for blade rows. Default: http client + bladeRoot. */
+  /** Fetch server HTML for blade rows. REQUIRED if the table has any;
+   *  `bladeFetcher()` from `vapor-chamber/router/remote` is the in-box one. A
+   *  blade row with no fetcher is a coded `blade_unconfigured`. */
   fetchBlade?: (href: string) => Promise<string>;
-  /** Selector extracted from fetched blade HTML. Default: 'main'. */
-  bladeRoot?: string;
   /** Terminal error handler. Default: hard-navigate on HARD_NAV_CODES, log
    *  the rest. */
   onError?: (error: unknown, to: RouteLocation) => void;
@@ -142,7 +151,7 @@ export function unwrapRoutesPayload(raw: unknown): RoutesPayload {
  * Read an inline route payload synchronously, for the one thing that cannot
  * wait: `base`, which the history needs before anything else happens.
  *
- * Deliberately total — a missing element, malformed JSON or a non-DOM
+ * Deliberately total - a missing element, malformed JSON or a non-DOM
  * environment all return null and leave the real diagnosis to
  * `loadInlineTable()` during start(), which throws a coded router error. This
  * runs inside the constructor, and the constructor is documented as pure.
@@ -170,7 +179,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
           // at start(): `base` has to be known before the history is created,
           // and a payload-declared base that arrives later is a base that never
           // applies. Without this, `{ inline }` + a payload base silently ran
-          // on base '' — every link fell outside the base, nothing was
+          // on base '' - every link fell outside the base, nothing was
           // intercepted, and every in-app navigation was a full page load.
           readInlinePayload((source as { inline: string }).inline)
         : null;
@@ -190,7 +199,22 @@ export function createRouter<TName extends string = string>(options: RouterOptio
             ? (stripBase(window.location.pathname, normalizeBaseSafe(base)) ?? '/') + window.location.search + window.location.hash
             : '/',
         ));
-  const http: HttpClient = options.http ?? createHttpClient({ headers: { 'X-Vapor-Router': '1' } });
+  /**
+   * The http client is SUPPLIED, never built here.
+   *
+   * Only two features need one - loading a `{ url }` route table and fetching a
+   * blade row - and the primary documented setup, a generated route module with
+   * no blade rows, uses neither. Building it here put the whole client (CSRF,
+   * interceptors, retry, cache) in every consumer's graph: 8.5 KB raw / 3.4 KB
+   * brotli, about a quarter of this subpath, for code most apps never execute.
+   * Deferring it behind a dynamic import fixed the startup cost but still
+   * charged consumers whose bundler does not code split, and still had
+   * `createRouter` choosing a dependency on its caller's behalf.
+   *
+   * `vapor-chamber/router/remote` provides `routerHttp()` and `bladeFetcher()`
+   * for the common case. Neither is privileged - any `HttpClient` works.
+   */
+  const http: HttpClient | null = options.http ?? null;
   const loaders: LoaderHandlers = options.loaders ?? {};
   // The affect policy is resolved once: loaders are fixed for the router's life
   // (setRoutes swaps rows, never loaders), so there is nothing to recompute per
@@ -198,7 +222,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
   const affects: (record: TableRecord, keys: readonly string[]) => boolean =
     loaders.affects ?? ((record, keys) => defaultAffects(record, keys, loaders));
 
-  // A ref so table projections (router.routes → useMenu) track swaps from
+  // A ref so table projections (router.routes -> useMenu) track swaps from
   // start()/{ url } loads, setRoutes() and reload().
   const tableRef = shallowRef<RouteTable | null>(syncPayload ? createRouteTable(syncPayload.routes) : null);
 
@@ -210,7 +234,15 @@ export function createRouter<TName extends string = string>(options: RouterOptio
     const key = record.component as string;
     const cached = componentCache.get(key);
     if (cached !== undefined) return cached;
-    const entry = options.components?.[key];
+    // `Object.hasOwn`, not `components?.[key]`: `key` is `record.component`,
+    // which arrives in the ROUTES PAYLOAD - fetched over HTTP or inlined by the
+    // server, i.e. a string from outside. A plain-object lookup answered for
+    // keys nobody registered, so a row naming `constructor` resolved to
+    // `Object`, survived the missing-check below, failed `isComponentLike`,
+    // was called as a lazy import (`Object()` -> `{}`) and RENDERED as a blank
+    // component. A coded error turned into a silently empty outlet. Sixth site
+    // of the class in `../dict`.
+    const entry = options.components && Object.hasOwn(options.components, key) ? options.components[key] : undefined;
     if (entry === undefined) {
       throw routerError('component_missing', `no component registered for key "${key}"`, { to });
     }
@@ -219,7 +251,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
       try {
         mod = await (entry as () => Promise<unknown>)();
       } catch (cause) {
-        // Stale chunk after a deploy — default handler hard-navigates.
+        // Stale chunk after a deploy - default handler hard-navigates.
         throw routerError('component_load_failed', `failed to load component "${key}"`, { to, cause });
       }
       const component = unwrapModule(mod);
@@ -230,8 +262,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
     return entry;
   }
 
-  const fetchBlade =
-    options.fetchBlade ?? (hasWindow ? defaultFetchBlade(http, options.bladeRoot ?? 'main') : undefined);
+  const fetchBlade = options.fetchBlade;
 
   async function resolveRender(records: readonly TableRecord[], to: RouteLocation): Promise<RenderEntry[]> {
     return Promise.all(
@@ -281,7 +312,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
       // Handing the URL back to the server only helps if the server can answer
       // it differently. Under the catch-all this router is built for, it
       // cannot: the shell comes back, the router says `unmatched` again, and
-      // location.assign() fires again — an endless reload storm that survives
+      // location.assign() fires again - an endless reload storm that survives
       // refreshes, because the offending URL stays in the address bar.
       // Hard-navigate only when it actually moves us somewhere else.
       const here = window.location.pathname + window.location.search + window.location.hash;
@@ -291,7 +322,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
       }
       if (DEV) {
         console.error(
-          `[vapor-chamber-router] ${error.code} for "${href}", which is already the current URL — refusing to hard-navigate (it would reload forever behind a catch-all). Add a catch-all row (path: "/*") so the client can render its own 404.`,
+          `[vapor-chamber-router] ${error.code} for "${href}", which is already the current URL - refusing to hard-navigate (it would reload forever behind a catch-all). Add a catch-all row (path: "/*") so the client can render its own 404.`,
           error,
         );
         return;
@@ -321,20 +352,26 @@ export function createRouter<TName extends string = string>(options: RouterOptio
             return;
           }
         } catch {
-          /* invalid selector in hash — fall through */
+          /* invalid selector in hash - fall through */
         }
       }
       if (!info.popstate) window.scrollTo({ top: 0, behavior: 'instant' as ScrollBehavior });
     },
   });
 
-  // ---- start (all IO and listeners — the constructor is pure) -------------------
+  // ---- start (all IO and listeners - the constructor is pure) -------------------
 
   let started: Promise<void> | null = null;
   const teardowns: Array<() => void> = [];
 
   async function loadRemoteTable(url: string): Promise<void> {
     try {
+      if (!http) {
+        throw routerError(
+          'http_unconfigured',
+          `routes: { url: "${url}" } needs an http client - pass \`http: routerHttp()\` from vapor-chamber/router/remote (or any HttpClient of your own)`,
+        );
+      }
       const response = await http.get<unknown>(url, { retry: 2 });
       const payload = unwrapRoutesPayload(response.data);
       if (DEV) warnRemoteBase(payload);
@@ -348,7 +385,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
 
   function loadInlineTable(selector: string): void {
     if (typeof document === 'undefined') {
-      throw routerError('inline_routes_missing', 'inline routes need a DOM — pass rows or { url } instead');
+      throw routerError('inline_routes_missing', 'inline routes need a DOM - pass rows or { url } instead');
     }
     const el = document.querySelector(selector);
     if (!el?.textContent) {
@@ -357,13 +394,13 @@ export function createRouter<TName extends string = string>(options: RouterOptio
     tableRef.value = createRouteTable(unwrapRoutesPayload(JSON.parse(el.textContent)).routes);
   }
 
-  /** Remote payloads cannot inform `base` — the history exists before the
+  /** Remote payloads cannot inform `base` - the history exists before the
    *  fetch resolves. Say so loudly in dev instead of running on the wrong
    *  base, which manifests as "no link is ever intercepted". */
   function warnRemoteBase(payload: RoutesPayload): void {
     if (payload.base && payload.base !== history.base && options.base === undefined) {
       console.warn(
-        `[vapor-chamber-router] the fetched route payload declares base "${payload.base}", but the router was already created with base "${history.base}". A remote payload arrives after the history is built — pass \`base\` to createRouter() explicitly (or deliver the table inline).`,
+        `[vapor-chamber-router] the fetched route payload declares base "${payload.base}", but the router was already created with base "${history.base}". A remote payload arrives after the history is built - pass \`base\` to createRouter() explicitly (or deliver the table inline).`,
       );
     }
   }
@@ -390,10 +427,14 @@ export function createRouter<TName extends string = string>(options: RouterOptio
 
       // Idle preheat: rows flagged meta.preheat load their lazy components
       // after the page settles (saveData/2g-aware, aborts on interaction).
-      // Re-armable — the original wiring is tied to the page's `load` event,
-      // which never fires again on a bfcache restore (`pageshow` instead) —
+      // Re-armable - the original wiring is tied to the page's `load` event,
+      // which never fires again on a bfcache restore (`pageshow` instead) -
       // onRestore below calls this again for any record still uncached.
       let stopIdlePreheat: (() => void) | null = null;
+      // ONE teardown, registered once and reading the current canceller. It
+      // used to push a fresh entry per arming, so every bfcache restore grew
+      // `teardowns` by one closure over an already-cancelled preheat run.
+      teardowns.push(() => stopIdlePreheat?.());
       const armIdlePreheat = () => {
         if (!hasWindow || !tableRef.value) return;
         stopIdlePreheat?.();
@@ -402,15 +443,14 @@ export function createRouter<TName extends string = string>(options: RouterOptio
         );
         if (flagged.length === 0) return;
         stopIdlePreheat = preheatIdle(flagged.map((record) => () => loadComponent(record, engine.snapshot.value.location)));
-        teardowns.push(stopIdlePreheat);
       };
 
       if (hasWindow && options.links !== false) {
         const stampRoot = (options.linksRoot ? document.querySelector(options.linksRoot) : null) ?? document;
         // NOTE (measured, 2026-08-10): active-link stamping runs ONLY on path
-        // changes. `afterEach` does not fire on query-only commits — the
+        // changes. `afterEach` does not fire on query-only commits - the
         // engine's query fast path (`commitQueryLocation` + `refetchAffected`,
-        // and `setQuery` likewise) returns before the after-hook loop — so the
+        // and `setQuery` likewise) returns before the after-hook loop - so the
         // per-keystroke full-document walk that a `setQuery`-driven search box
         // would imply does not happen, and no memo is needed here. That is
         // also correct: `data-active`/`data-exact-active` derive from
@@ -428,7 +468,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
             preheat: preheatPath,
             // The frozen page's active-link stamps and any still-uncached
             // preheat targets are exactly as stale as they were at freeze
-            // time — nothing here re-runs on its own otherwise.
+            // time - nothing here re-runs on its own otherwise.
             onRestore: () => {
               stamp();
               armIdlePreheat();
@@ -507,11 +547,12 @@ export function createRouter<TName extends string = string>(options: RouterOptio
     },
     install: (app) => {
       app.provide(ROUTER_KEY, router);
-      // Deliberately NOT app.component('RouterOutlet', …). A global
+      // Deliberately NOT app.component('RouterOutlet', ...). A global
       // registration is a live reference from the router to a vDOM component,
-      // which pins Vue's virtual-DOM runtime into every consumer's bundle —
+      // which pins Vue's virtual-DOM runtime into every consumer's bundle -
       // including Vapor apps that never render one. Import <RouterOutlet>
-      // where you use it. (vue-router hit the same wall; see plan.md §2.)
+      // where you use it. (vue-router hit the same wall; see docs/router.md
+      // §"Why the outlet is a separate subpath".)
       void start();
     },
     destroy: () => {
@@ -538,16 +579,3 @@ function unwrapModule(mod: unknown): unknown {
   return candidate && typeof candidate === 'object' && 'default' in candidate ? candidate.default : mod;
 }
 
-/** Blade HTML through the chamber http client — inherits timeout, retry,
- *  session-expired hook and error mapping. */
-function defaultFetchBlade(http: HttpClient, bladeRoot: string): (href: string) => Promise<string> {
-  return async (href) => {
-    const response = await http.get<string>(href, {
-      responseType: 'text',
-      headers: { Accept: 'text/html' },
-    });
-    if (typeof DOMParser === 'undefined') return response.data;
-    const doc = new DOMParser().parseFromString(response.data, 'text/html');
-    return (doc.querySelector(bladeRoot) ?? doc.body).innerHTML;
-  };
-}

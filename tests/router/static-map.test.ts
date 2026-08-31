@@ -2,14 +2,14 @@ import { describe, expect, it } from 'vitest';
 import { createRouteTable } from '../../src/router/table';
 import type { RouteRecord } from '../../src/router/types';
 
-describe('static fast path — correctness', () => {
+describe('static fast path - correctness', () => {
   it('does not let a static row jump ahead of an earlier parameterised row', () => {
     const table = createRouteTable([
       { name: 'shell', path: '/', parent: null },
       { name: 'product', path: '/products/:id', parent: 'shell', component: 'P' },
       { name: 'new', path: '/products/new', parent: 'shell', component: 'N' }, // later, shadowed
     ]);
-    // server priority says :id wins — the map must not change that
+    // server priority says :id wins - the map must not change that
     expect(table.resolve('/products/new')?.record.name).toBe('product');
     expect(table.resolve('/products/new')?.record.params ?? {}).toBeTruthy();
     expect(table.resolve('/products/7')?.record.name).toBe('product');
@@ -27,7 +27,7 @@ describe('static fast path — correctness', () => {
 
   it('keeps the scan rules: case-insensitive, optional trailing slash, groups skipped', () => {
     const table = createRouteTable([
-      { name: 'shell', path: '/', parent: null }, // group — never matches
+      { name: 'shell', path: '/', parent: null }, // group - never matches
       { name: 'dash', path: '/Dashboard', parent: 'shell', component: 'D' },
     ]);
     expect(table.resolve('/dashboard')?.record.name).toBe('dash');
@@ -42,19 +42,21 @@ describe('static fast path — correctness', () => {
   });
 });
 
-describe('static fast path — cost', () => {
-  // No assertion here beyond `expect(true)` — this only logs numbers for a
+describe('static fast path - cost', () => {
+  // No assertion here beyond `expect(true)` - this only logs numbers for a
   // human to read. It runs 200 table builds plus 80,000 resolves (many
   // against the param/miss linear-scan fallback, ~300 regex tests each), so
   // it can clear vitest's default 5000ms budget on slower or shared CI
   // hardware without anything actually being wrong.
   //
   // Skip under `npm run test:coverage`: same root cause as
-  // tests/signal-shallow-ab.test.ts — V8 coverage instrumentation slows the
+  // tests/signal-shallow-ab.test.ts - V8 coverage instrumentation slows the
   // resolve loops enough to blow even the generous 20s override below, and
   // the printed numbers wouldn't be real timings anyway (instrumented code
   // paths, not the fast path being measured). The timeout, not the
-  // assertion, was the source of the flake — there is no assertion.
+  // assertion, was the source of the flake. (It used to say "there is no
+  // assertion" - and there was not, only `expect(true).toBe(true)`. It now
+  // asserts the resolves it already performs, so the reporter can fail.)
   const underCoverage = process.env.npm_lifecycle_event === 'test:coverage';
   it.skipIf(underCoverage)('measures build and resolve', () => {
     const rows: RouteRecord[] = [{ name: 'shell', path: '/', parent: null }];
@@ -78,8 +80,17 @@ describe('static fast path — cost', () => {
     };
 
     console.log(
-      `[301 rows] build ${build.toFixed(2)}ms | ${N} resolves — first ${timeIt('/section0/page').toFixed(1)}ms, last ${timeIt('/section299/page').toFixed(1)}ms, param ${timeIt('/thing/9').toFixed(1)}ms, miss ${timeIt('/nope/nope').toFixed(1)}ms`,
+      `[301 rows] build ${build.toFixed(2)}ms | ${N} resolves - first ${timeIt('/section0/page').toFixed(1)}ms, last ${timeIt('/section299/page').toFixed(1)}ms, param ${timeIt('/thing/9').toFixed(1)}ms, miss ${timeIt('/nope/nope').toFixed(1)}ms`,
     );
-    expect(true).toBe(true);
+    // The table this measured must also be CORRECT - the loop above resolves
+    // these exact paths 20k times each, so asserting them costs nothing and
+    // turns a pure reporter into a reporter that can fail.
+    expect(table.resolve('/section0/page')?.record.name).toBe('r0');
+    expect(table.resolve('/section299/page')?.record.name).toBe('r299');
+    expect(table.resolve('/thing/9')?.record.name).toBe('p');
+    // '9', not 9: the row declares no `params: { id: 'int' }`, so nothing
+    // casts it. Asserting the cast was my first guess and it was wrong.
+    expect(table.resolve('/thing/9')?.params.id).toBe('9');
+    expect(table.resolve('/nope/nope')).toBeNull();
   }, 20000);
 });

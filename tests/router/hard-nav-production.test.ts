@@ -4,7 +4,7 @@
  *
  * When an `unmatched` (or other HARD_NAV_CODE) error names a URL that is ALREADY
  * the current one, handing it back to the server would reload forever behind a
- * catch-all — so the router refuses. In dev it explains why and returns; in
+ * catch-all - so the router refuses. In dev it explains why and returns; in
  * production it falls through to the generic `console.error(error)`. Both arms
  * refuse the navigation; they differ only in what gets logged, and only the dev
  * one was ever exercised because DEV is true under vitest unless a test
@@ -29,7 +29,7 @@ async function bootRouter(): Promise<{ router: any; errors: unknown[][]; assign:
   vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => { errors.push(args); });
 
   // Sit on a URL the table cannot match, so navigating to it is `unmatched`
-  // AND `href === here` — the refusal case. Set the URL BEFORE spying, so the
+  // AND `href === here` - the refusal case. Set the URL BEFORE spying, so the
   // router reads the live location rather than a snapshot taken too early.
   window.history.replaceState({ __vr: 0 }, '', '/nowhere');
   const assign = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
@@ -48,7 +48,7 @@ describe('hard-navigation refusal', () => {
     const { router, errors, assign } = await bootRouter();
     await router.isReady().catch(() => {});
 
-    expect(assign).not.toHaveBeenCalled(); // refused — no reload storm
+    expect(assign).not.toHaveBeenCalled(); // refused - no reload storm
     const messages = errors.map((e) => String(e[0]));
     expect(messages.some((m) => m.includes('refusing to hard-navigate'))).toBe(true);
     router.destroy();
@@ -62,7 +62,7 @@ describe('hard-navigation refusal', () => {
     const { router, errors, assign } = await bootRouter();
     await router.isReady().catch(() => {});
 
-    expect(assign).not.toHaveBeenCalled(); // still refuses — that is the point
+    expect(assign).not.toHaveBeenCalled(); // still refuses - that is the point
     const messages = errors.map((e) => String(e[0]));
     expect(messages.some((m) => m.includes('refusing to hard-navigate'))).toBe(false);
     expect(errors.length).toBeGreaterThan(0); // but the error is still surfaced

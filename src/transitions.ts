@@ -1,23 +1,23 @@
 /**
- * vapor-chamber — Transition integration
+ * vapor-chamber - Transition integration
  *
- * Vue alignment history (one line per version — full per-item detail lives in
+ * Vue alignment history (one line per version - full per-item detail lives in
  * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table):
- *   rc.5 — pass-through; the only module rc.5 reaches at all (TransitionGroup
- *          internals). Idempotent here by construction — see `buildHooks`.
- *   rc.2 — pass-through; unblocks a prior failure mode (#15133).
- *   beta.17 / beta.16 — pass-through; beta.16 brings inherited onLeave correctness.
- *   v1.6.0 / beta.15 — pass-through (transition-group hook restore, key stability).
- *   v1.5.0 / beta.14 — pass-through (onMove suppressed for v-show-hidden children).
- *   v1.4.0 / beta.13 — pass-through (onMove for Vapor+VDOM component moves).
+ *   rc.5 - pass-through; the only module rc.5 reaches at all (TransitionGroup
+ *          internals). Idempotent here by construction - see `buildHooks`.
+ *   rc.2 - pass-through; unblocks a prior failure mode (#15133).
+ *   beta.17 / beta.16 - pass-through; beta.16 brings inherited onLeave correctness.
+ *   v1.6.0 / beta.15 - pass-through (transition-group hook restore, key stability).
+ *   v1.5.0 / beta.14 - pass-through (onMove suppressed for v-show-hidden children).
+ *   v1.4.0 / beta.13 - pass-through (onMove for Vapor+VDOM component moves).
  *          Behaviour notes for all three live on the onMove() JSDoc, not here.
- *   v1.1.0 — module added: dispatches bus commands from <Transition> /
+ *   v1.1.0 - module added: dispatches bus commands from <Transition> /
  *          <TransitionGroup> lifecycle hooks, enabling animation coordination
  *          through the command bus without direct DOM coupling.
  *
  * Two entry points:
- *   createTransitionBridge — framework-agnostic factory (accepts BaseBus)
- *   useTransitionCommand   — Vue composable (uses shared bus + auto-cleanup)
+ *   createTransitionBridge - framework-agnostic factory (accepts BaseBus)
+ *   useTransitionCommand   - Vue composable (uses shared bus + auto-cleanup)
  *
  * @example
  * // Factory (any JS context):
@@ -27,7 +27,7 @@
  * @example
  * // Vue composable:
  * const t = useTransitionCommand({ namespace: 'drawer' });
- * // <Transition v-bind="t"> — all hooks wired automatically
+ * // <Transition v-bind="t"> - all hooks wired automatically
  */
 
 import type { BaseBus, CommandMap } from './command-bus';
@@ -41,7 +41,7 @@ import type { Signal } from './chamber';
 export type TransitionPhase = 'idle' | 'entering' | 'leaving';
 
 export type TransitionBridgeOptions = {
-  /** Namespace prefix for dispatched actions (e.g. 'modal' → 'modalEnter'). */
+  /** Namespace prefix for dispatched actions (e.g. 'modal' -> 'modalEnter'). */
   namespace?: string;
   /** Bus to dispatch on. Required for createTransitionBridge. */
   bus?: BaseBus;
@@ -69,7 +69,7 @@ export type TransitionHooks = {
    * TransitionGroup-only: called when an element moves due to reorder.
    *
    * Vue 3.6.0-beta.15: a move that was skipped (e.g. for a v-show-hidden child)
-   * no longer permanently drops the element's move hooks — they are restored, so
+   * no longer permanently drops the element's move hooks - they are restored, so
    * a later genuine reorder of that same child dispatches `*Move` as normal. You
    * do not need to re-register the `*Move` handler after a hidden item reappears.
    *
@@ -81,7 +81,7 @@ export type TransitionHooks = {
    *
    * Vue 3.6.0-beta.13: fires correctly for both Vapor and VDOM component moves
    * inside a Vapor TransitionGroup. Guaranteed to be called after all child
-   * updates have flushed — `el` is in its pre-move position, ready for the CSS
+   * updates have flushed - `el` is in its pre-move position, ready for the CSS
    * move class to be applied. No `done()` callback; moves are CSS-only.
    */
   onMove: (el: Element) => void;
@@ -98,11 +98,11 @@ export type TransitionBridge = TransitionHooks & {
 // Internal: action name prefixing (same convention as useCommandGroup)
 // ---------------------------------------------------------------------------
 
-// camelCase namespace join ('modal' + 'enter' → 'modalEnter').
+// camelCase namespace join ('modal' + 'enter' -> 'modalEnter').
 //
 // This carried a "DO NOT consolidate, settled, do not re-evaluate" note, on the
 // grounds that it sat on the per-hook dispatch hot path where a shared call
-// measured ~0.6–1.3% slower. That reasoning was sound but the premise no longer
+// measured ~0.6-1.3% slower. That reasoning was sound but the premise no longer
 // holds, because the premise itself was the bug: the call did not need to be on
 // the dispatch path at all. `buildHooks` now resolves all nine names once at
 // construction (see there), so this runs 9 times per bridge instead of once per
@@ -113,7 +113,7 @@ export type TransitionBridge = TransitionHooks & {
 // call cannot cost a per-dispatch percentage. The right way to retire a
 // "don't merge, it costs 1%" constraint is to remove the hot path, not to pay
 // the 1%. The other two sites (useCommandGroup / createChamber) keep their own
-// copies until each is shown to be off its hot path the same way — createChamber
+// copies until each is shown to be off its hot path the same way - createChamber
 // is already setup-only, useCommandGroup is not yet checked.
 function prefixed(namespace: string | undefined, hook: string): string {
   if (!namespace) return hook;
@@ -132,10 +132,10 @@ function buildHooks(
   // Action names are built ONCE per bridge, not once per hook dispatch. Both
   // inputs are fixed here: `namespace` is captured at construction and every
   // `hook` below is a string literal, so the concatenation could never produce a
-  // different answer on a later call — it was pure repeated work on the hot
+  // different answer on a later call - it was pure repeated work on the hot
   // path. Isolating that segment (120k hook calls, interleaved A/B): building
   // per dispatch 3.668ms vs precomputed 0.237ms, i.e. the string work is gone
-  // (~15x on the segment; far less end-to-end, where bus.dispatch dominates —
+  // (~15x on the segment; far less end-to-end, where bus.dispatch dominates -
   // see the transition-bridge rows in tests/perf.bench.ts).
   //
   // This is also what makes `prefixed` safe to share: it is now a setup-time
@@ -151,17 +151,17 @@ function buildHooks(
   const aLeaveCancelled = prefixed(namespace, 'leaveCancelled');
   const aMove = prefixed(namespace, 'move');
 
-  /** Dispatch and ignore missing handlers — transitions should never break the app. */
+  /** Dispatch and ignore missing handlers - transitions should never break the app. */
   function dispatchSafe(action: string, el: Element): any {
     try {
       return bus.dispatch(action, el);
     } catch {
-      // No handler registered — safe to ignore for transition hooks.
+      // No handler registered - safe to ignore for transition hooks.
       return undefined;
     }
   }
 
-  /** Dispatch with done() callback — awaits async results before calling done(). */
+  /** Dispatch with done() callback - awaits async results before calling done(). */
   function dispatchWithDone(action: string, el: Element, done: () => void): void {
     const result = dispatchSafe(action, el); // dispatchSafe never throws (own try/catch)
     if (result && typeof result.then === 'function') {
@@ -236,14 +236,14 @@ function buildHooks(
  *     <div class="panel" phase="[object Object]" dispose="() => {}">hi</div>
  *
  * Shipped that way since v1.1.0. Every existing test called the hooks directly
- * on a mock element, so nothing ever rendered the bridge and nothing saw it —
+ * on a mock element, so nothing ever rendered the bridge and nothing saw it -
  * the same shape of blind spot as the rc.4 KeepAlive bug, where a stand-in
  * fixture could only check the half already understood. The regression test is
  * therefore a REAL mount, not another direct call.
  *
  * Non-enumerability is the minimal fix: it changes what SPREADING the bridge
  * yields, and nothing else. `t.phase.value`, `t.dispose()` and
- * `const { phase } = t` all read the property directly and are unaffected —
+ * `const { phase } = t` all read the property directly and are unaffected -
  * destructuring does not require enumerability. The one intentional casualty is
  * `{ ...bridge }`, which no longer carries `phase`/`dispose`; that is precisely
  * the operation that was putting them in the DOM.
@@ -270,11 +270,11 @@ function assembleBridge(
 }
 
 // ---------------------------------------------------------------------------
-// createTransitionBridge — framework-agnostic factory
+// createTransitionBridge - framework-agnostic factory
 // ---------------------------------------------------------------------------
 
 /**
- * createTransitionBridge — wire Vue transition hooks to bus commands.
+ * createTransitionBridge - wire Vue transition hooks to bus commands.
  *
  * Framework-agnostic: accepts any BaseBus (sync or async). Use this in
  * non-Vue contexts or when you need explicit lifecycle control.
@@ -293,7 +293,7 @@ export function createTransitionBridge(
 ): TransitionBridge {
   const { bus, namespace } = options;
 
-  // Plain signal — no Vue dependency in the factory path
+  // Plain signal - no Vue dependency in the factory path
   let _phase: TransitionPhase = 'idle';
   const phase: Signal<TransitionPhase> = {
     get value() { return _phase; },
@@ -306,11 +306,11 @@ export function createTransitionBridge(
 }
 
 // ---------------------------------------------------------------------------
-// useTransitionCommand — Vue composable
+// useTransitionCommand - Vue composable
 // ---------------------------------------------------------------------------
 
 /**
- * useTransitionCommand — Vue composable that wires transition hooks to the
+ * useTransitionCommand - Vue composable that wires transition hooks to the
  * shared command bus with reactive phase signal and auto-cleanup.
  *
  * Bind directly to `<Transition>` via `v-bind`:

@@ -72,10 +72,10 @@ describe('busToMcpTools', () => {
 });
 
 // ---------------------------------------------------------------------------
-// createMcpHandler — protocol methods
+// createMcpHandler - protocol methods
 // ---------------------------------------------------------------------------
 
-describe('createMcpHandler — protocol', () => {
+describe('createMcpHandler - protocol', () => {
   it("initialize echoes the client's protocolVersion and reports serverInfo", async () => {
     const handle = createMcpHandler(makeBus(), { serverName: 'test-server', serverVersion: '9.9.9' });
 
@@ -127,7 +127,7 @@ describe('createMcpHandler — protocol', () => {
     expect(names).toEqual(['cartAdd', 'cartClear']);
   });
 
-  it('notifications (no id) get null — including notifications/initialized', async () => {
+  it('notifications (no id) get null - including notifications/initialized', async () => {
     const handle = createMcpHandler(makeBus());
 
     expect(await handle({ jsonrpc: '2.0', method: 'notifications/initialized' })).toBeNull();
@@ -136,7 +136,7 @@ describe('createMcpHandler — protocol', () => {
     expect(await handle({ jsonrpc: '2.0', method: 'nope/nothing' })).toBeNull();
   });
 
-  it('unknown method with an id → -32601 with matching id', async () => {
+  it('unknown method with an id -> -32601 with matching id', async () => {
     const handle = createMcpHandler(makeBus());
 
     const reply: any = await handle({ jsonrpc: '2.0', id: 42, method: 'resources/list' });
@@ -146,7 +146,7 @@ describe('createMcpHandler — protocol', () => {
     expect(reply.error.message).toContain('resources/list');
   });
 
-  it('malformed messages → -32600', async () => {
+  it('malformed messages -> -32600', async () => {
     const handle = createMcpHandler(makeBus());
 
     const notObject: any = await handle('nonsense');
@@ -162,10 +162,10 @@ describe('createMcpHandler — protocol', () => {
 });
 
 // ---------------------------------------------------------------------------
-// createMcpHandler — tools/call
+// createMcpHandler - tools/call
 // ---------------------------------------------------------------------------
 
-describe('createMcpHandler — tools/call', () => {
+describe('createMcpHandler - tools/call', () => {
   it('dispatches on a real schema bus and returns the value as JSON text', async () => {
     const handle = createMcpHandler(makeBus());
 
@@ -185,7 +185,7 @@ describe('createMcpHandler — tools/call', () => {
     // Regression. `meta.origin` is derived by stampMeta from a `__origin` key
     // in the PAYLOAD, so it can only mark objects and the absent case. A
     // non-object payload used to be forwarded untouched on the reasoning that
-    // schema validation would reject it — but schema.ts only checks payload
+    // schema validation would reject it - but schema.ts only checks payload
     // shape when the action DECLARES payload fields. `cartClear` declares
     // none, so a bare string dispatched successfully with
     // `meta.origin === undefined`: an agent-driven command that an audit
@@ -255,7 +255,7 @@ describe('createMcpHandler — tools/call', () => {
     expect(reply.result.content[0].text).toBe('null');
   });
 
-  it('failing handler → isError result with the error message (not a protocol error)', async () => {
+  it('failing handler -> isError result with the error message (not a protocol error)', async () => {
     const bus = makeBus();
     bus.register('cartClear', () => {
       throw new Error('cart is locked');
@@ -274,7 +274,7 @@ describe('createMcpHandler — tools/call', () => {
     expect(reply.result.content[0].text).toContain('cart is locked');
   });
 
-  it('unhandled action → isError result including the BusError code', async () => {
+  it('unhandled action -> isError result including the BusError code', async () => {
     const bus = createSchemaCommandBus(cartSchema); // no handlers registered
     const handle = createMcpHandler(bus);
 
@@ -289,7 +289,7 @@ describe('createMcpHandler — tools/call', () => {
     expect(reply.result.content[0].text).toContain('VC_CORE_NO_HANDLER');
   });
 
-  it('non-whitelisted action → isError, and the handler is never invoked', async () => {
+  it('non-whitelisted action -> isError, and the handler is never invoked', async () => {
     const bus = makeBus();
     const spy = vi.fn();
     bus.on('*', spy);
@@ -307,7 +307,7 @@ describe('createMcpHandler — tools/call', () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it('unknown tool name → isError', async () => {
+  it('unknown tool name -> isError', async () => {
     const handle = createMcpHandler(makeBus());
 
     const reply: any = await handle({
@@ -321,7 +321,7 @@ describe('createMcpHandler — tools/call', () => {
     expect(reply.result.content[0].text).toContain('unknown or not permitted');
   });
 
-  it('missing tool name → isError', async () => {
+  it('missing tool name -> isError', async () => {
     const handle = createMcpHandler(makeBus());
 
     const reply: any = await handle({ jsonrpc: '2.0', id: 17, method: 'tools/call', params: {} });
@@ -342,16 +342,16 @@ describe('agentOrigin', () => {
     bus.on('cartAdd', (cmd) => origins.push(cmd.meta?.origin));
     const handle = createMcpHandler(bus);
 
-    // Direct dispatch — no stamp.
+    // Direct dispatch - no stamp.
     bus.dispatch('cartAdd', { id: 1 }, { qty: 1 });
-    // MCP-driven dispatch — stamped.
+    // MCP-driven dispatch - stamped.
     await handle({
       jsonrpc: '2.0',
       id: 20,
       method: 'tools/call',
       params: { name: 'cartAdd', arguments: { target: { id: 2 }, payload: { qty: 2 } } },
     });
-    // Direct dispatch after the MCP call — flag was cleared, no stamp.
+    // Direct dispatch after the MCP call - flag was cleared, no stamp.
     bus.dispatch('cartAdd', { id: 3 }, { qty: 3 });
 
     expect(origins).toEqual([undefined, 'agent', undefined]);
@@ -411,7 +411,7 @@ describe('serveMcpStdio', () => {
       .map((line) => line.trim())
       .filter((line) => line.startsWith('{"jsonrpc"'))
       .map((line) => JSON.parse(line));
-    // Parse errors are written synchronously, handler replies on a microtask —
+    // Parse errors are written synchronously, handler replies on a microtask -
     // so match by id rather than arrival order.
     expect(replies).toHaveLength(3); // ping + parse error + tools/list; the notification got no reply
     expect(replies.find((r) => r.id === 1)).toEqual({ jsonrpc: '2.0', id: 1, result: {} });
@@ -422,7 +422,7 @@ describe('serveMcpStdio', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Item 17 — the two defaults.
+// Item 17 - the two defaults.
 // ---------------------------------------------------------------------------
 
 describe('createMcpHandler defaults', () => {
@@ -444,7 +444,7 @@ describe('createMcpHandler defaults', () => {
     warn.mockRestore();
   });
 
-  it("does not warn when exposure is declared — including the explicit ['*']", () => {
+  it("does not warn when exposure is declared - including the explicit ['*']", () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     createMcpHandler(makeBus(), { actions: ['cartAdd'] });
     createMcpHandler(makeBus(), { actions: ['*'] });

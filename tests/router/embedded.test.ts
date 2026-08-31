@@ -4,7 +4,7 @@ import { createRouter } from '../../src/router/index';
 
 /**
  * Embedded/opaque-origin contexts (sandboxed or srcdoc iframes, data:
- * documents, freshly-created browsing contexts — whatwg/html#6836) throw
+ * documents, freshly-created browsing contexts - whatwg/html#6836) throw
  * SecurityError on replaceState. The guard is a PROBE, not attribute
  * sniffing, and createRouter degrades to a seeded memory history instead of
  * crashing at boot.
@@ -12,18 +12,18 @@ import { createRouter } from '../../src/router/index';
 describe('embedded-context history guard', () => {
   afterEach(() => vi.unstubAllGlobals());
 
-  it('no window → not usable (SSR/node)', () => {
+  it('no window -> not usable (SSR/node)', () => {
     expect(canUseWebHistory()).toBe(false);
   });
 
-  it('healthy window → usable', () => {
+  it('healthy window -> usable', () => {
     vi.stubGlobal('window', {
       history: { state: null, replaceState: () => {} },
     });
     expect(canUseWebHistory()).toBe(true);
   });
 
-  it('replaceState throwing (opaque origin) → not usable', () => {
+  it('replaceState throwing (opaque origin) -> not usable', () => {
     vi.stubGlobal('window', {
       history: {
         state: null,
@@ -45,7 +45,7 @@ describe('embedded-context history guard', () => {
       },
       location: { pathname: '/admin/products', search: '?page=2', hash: '' },
       // start() installs listeners only when links !== false; keep it off
-      // — this stub has no document.
+      // - this stub has no document.
     });
 
     const router = createRouter({

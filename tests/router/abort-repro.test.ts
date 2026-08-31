@@ -1,5 +1,5 @@
 /**
- * REPRO — shared AbortController between the navigation lane and the
+ * REPRO - shared AbortController between the navigation lane and the
  * query-refetch lane (src/router/engine.ts:81).
  *
  * A query-only change fired while a PATH navigation is still loading calls
@@ -18,7 +18,7 @@ const ROWS: RouteRecord[] = [
   { name: 'shell', path: '/', parent: null },
   { name: 'home', path: '/', parent: 'shell', component: 'Home' },
   {
-    // the page we start ON — has an affected loader, so setQuery triggers a refetch
+    // the page we start ON - has an affected loader, so setQuery triggers a refetch
     name: 'products',
     path: '/products',
     parent: 'shell',
@@ -27,7 +27,7 @@ const ROWS: RouteRecord[] = [
     query: { page: { type: 'int', default: 1 }, name: {} },
   },
   {
-    // the page we navigate TO — slow loader we control
+    // the page we navigate TO - slow loader we control
     name: 'remote',
     path: '/remote',
     parent: 'shell',
@@ -78,11 +78,11 @@ describe('REPRO: query change during an in-flight navigation', () => {
     await router.isReady();
     expect(router.currentRoute.value.location.name).toBe('products');
 
-    // 1. user clicks through to /remote — loaders start, nothing committed yet
+    // 1. user clicks through to /remote - loaders start, nothing committed yet
     const pending = router.push('/remote');
     await Promise.resolve();
 
-    // 2. user types in the list's search box — query-only change on /products
+    // 2. user types in the list's search box - query-only change on /products
     router.setQuery({ name: 'abc' });
 
     // 3. the /remote loader finishes

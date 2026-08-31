@@ -16,8 +16,8 @@
     "vapor-chamber": "file:../.."
   },
   "devDependencies": {
-    "astro": "^7.2.1",
-    "typescript": "^5.9.0"
+    "astro": "^7.2.9",
+    "typescript": "^6.0.3"
   },
   "engines": {
     "node": ">=22.12.0"

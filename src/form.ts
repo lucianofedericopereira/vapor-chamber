@@ -1,7 +1,7 @@
 /**
  * vapor-chamber - Form Bus
  *
- * v0.5.0 — Reactive form state management built on the command bus.
+ * v0.5.0 - Reactive form state management built on the command bus.
  *
  * createFormBus wraps a command bus around a typed form, giving you:
  *   - Reactive values, errors, dirty, valid, and submitting state
@@ -38,7 +38,7 @@ export type FormRules<T extends Record<string, any>> = {
 };
 
 export type FormBusOptions<T extends Record<string, any>> = {
-  /** Initial field values — also used as the reset target. */
+  /** Initial field values - also used as the reset target. */
   fields: T;
   /** Per-field validation rules. Return a string on error, null on pass. */
   rules?: FormRules<T>;
@@ -47,14 +47,14 @@ export type FormBusOptions<T extends Record<string, any>> = {
   /**
    * Create reactive signals for all form state (values, errors, isDirty, etc.).
    * Default: true. Set to false for headless / server-side / batch use cases
-   * where reactivity is not needed — avoids 7 signal allocations per form.
+   * where reactivity is not needed - avoids 7 signal allocations per form.
    * When false, all Signal fields still work as plain get/set wrappers.
    */
   reactive?: boolean;
   /**
    * Inject an external command bus instead of creating an isolated one.
    * When provided, form commands (formSet, formTouch, formReset, formValidate)
-   * flow through this bus — making them visible to DevTools, metrics, logger,
+   * flow through this bus - making them visible to DevTools, metrics, logger,
    * and global listeners.
    *
    * @example
@@ -80,7 +80,7 @@ export type FormBus<T extends Record<string, any>> = {
   isSubmitting: Signal<boolean>;
   /** True while async validation is running. */
   isValidating: Signal<boolean>;
-  /** True when either validating or submitting — use for disabling submit buttons. */
+  /** True when either validating or submitting - use for disabling submit buttons. */
   isBusy: Signal<boolean>;
   /** Set a single field value and re-run validation. */
   set<K extends keyof T>(field: K, value: T[K]): void;
@@ -92,7 +92,7 @@ export type FormBus<T extends Record<string, any>> = {
   reset(): void;
   /** Attach a plugin to the form's internal command bus. */
   use(plugin: Plugin, options?: PluginOptions): void;
-  /** The underlying command bus — for advanced use (DevTools, testing). */
+  /** The underlying command bus - for advanced use (DevTools, testing). */
   bus: CommandBus;
 };
 
@@ -107,7 +107,7 @@ function runRulesSync<T extends Record<string, any>>(
 ): Partial<Record<keyof T, string>> {
   const errs: Partial<Record<keyof T, string>> = {};
   for (const key in rules) {
-    // Object.hasOwn, not `in` — see ../dict. A field literally named `toString`
+    // Object.hasOwn, not `in` - see ../dict. A field literally named `toString`
     // or `constructor` would otherwise validate against an inherited function
     // rather than be skipped as absent.
     if (!Object.hasOwn(values, key)) continue;
@@ -125,7 +125,7 @@ async function runRulesAsync<T extends Record<string, any>>(
   values: T,
 ): Promise<Partial<Record<keyof T, string>>> {
   const errs: Partial<Record<keyof T, string>> = {};
-  // Run fields concurrently — two 300ms server-side validators cost 300ms, not
+  // Run fields concurrently - two 300ms server-side validators cost 300ms, not
   // 600ms. Sync rules resolve immediately; per-field error mapping is preserved.
   const keys: Array<keyof T> = [];
   const results: Array<string | null | undefined | Promise<string | null | undefined>> = [];
@@ -152,7 +152,7 @@ function hasDiff<T extends Record<string, any>>(a: T, b: T): boolean {
 // ---------------------------------------------------------------------------
 
 /**
- * createFormBus — reactive form state manager built on the command bus.
+ * createFormBus - reactive form state manager built on the command bus.
  *
  * All form mutations go through the internal bus, so plugins (logger,
  * throttle, authGuard, etc.) intercept them like any other command.
@@ -252,7 +252,7 @@ export function createFormBus<T extends Record<string, any>>(
     // two `finally` blocks fighting over isSubmitting/isValidating (the first
     // to finish cleared the flag while the second was still in flight).
     // First-write-wins is chosen over supersede semantics because the
-    // in-flight call may already have reached the server — cancelling the
+    // in-flight call may already have reached the server - cancelling the
     // *local* half of a submit that has been sent is the more surprising of
     // the two. Callers wanting last-write-wins have the `supersede` plugin.
     if (isSubmitting.value) return false;
@@ -271,7 +271,7 @@ export function createFormBus<T extends Record<string, any>>(
     // were never validated.
     const snapshot = { ...values.value } as T;
 
-    // Run all rules — awaits async validators too
+    // Run all rules - awaits async validators too
     // Set isValidating so the UI can show loading state during async validation
     isValidating.value = true;
     updateBusy();

@@ -57,5 +57,9 @@ vite.config.*.timestamp-*
 rc1.txt
 resume.txt
 
+# Session handoff / working state (transient, machine-local)
+HANDOFF.md
+TODO.md
+
 # Laravel example scaffold output (examples/laravel-app/setup.sh)
 demo-app/

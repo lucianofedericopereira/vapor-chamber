@@ -60,7 +60,7 @@ describe('resolve() shapes', () => {
     await router.isReady();
     await router.push('/list');
 
-    // `{ query }` with no `path` means "stay here, change the query" — the
+    // `{ query }` with no `path` means "stay here, change the query" - the
     // fallback to snapshot.location.path is what makes that work.
     await router.push({ query: { tag: 'x' } } as never);
     expect(router.currentRoute.value.location.path).toBe('/list');
@@ -91,7 +91,7 @@ describe('query patch cleaning', () => {
     await Promise.resolve();
 
     const q = router.currentRoute.value.location.query;
-    // Array → repeated values, kept as strings; null → key removed entirely
+    // Array -> repeated values, kept as strings; null -> key removed entirely
     // (not serialised as the string "null", which is the bug this guards).
     expect(q.tag).toEqual(['a', 'b']);
     expect(q.page === undefined || q.page === '1').toBe(true);
@@ -142,6 +142,77 @@ describe('guards', () => {
     const off = router.beforeEach((to) => (to.path === '/list' ? '/' : true));
     expect(await router.push('/list')).toBeNull();
     expect(router.currentRoute.value.location.path).toBe('/');
+    off();
+    router.destroy();
+  });
+
+  it('reports redirect_loop instead of hanging when two guards redirect at each other', async () => {
+    // Two targets that are BOTH away from the start: a redirect landing on the
+    // location already committed is a duplicate and short-circuits, which
+    // would end the chain before it could loop.
+    const router = createRouter({
+      history: createMemoryHistory('/'),
+      routes: [
+        { name: 'home', path: '/', component: 'Home' },
+        { name: 'a', path: '/a', component: 'Home' },
+        { name: 'b', path: '/b', component: 'Home' },
+      ] as RouteRecord[],
+      components: { Home: { name: 'Home' } },
+      onError: () => {},
+    });
+    await router.isReady();
+
+    // The realistic shape: an auth guard sending users to /b and an onboarding
+    // guard sending them back to /a. Each is reasonable alone.
+    const offA = router.beforeEach((to) => (to.path === '/a' ? '/b' : true));
+    const offB = router.beforeEach((to) => (to.path === '/b' ? '/a' : true));
+
+    const result = await router.push('/a');
+
+    // Pre-fix this recursed forever: async, so no stack overflow to point at -
+    // push() simply never settled and the page never moved.
+    expect(isRouterError(result, 'redirect_loop')).toBe(true);
+    offA();
+    offB();
+    router.destroy();
+  });
+
+  it('a self-redirecting guard chain still resolves within the bound', async () => {
+    const router = makeRouter();
+    await router.isReady();
+
+    // Three hops, the realistic ceiling (auth -> locale -> onboarding), must
+    // stay well inside the bound rather than tripping it.
+    let hops = 0;
+    const off = router.beforeEach((to) => {
+      if (to.path === '/list' && hops < 3) {
+        hops++;
+        return hops < 3 ? '/list' : '/';
+      }
+      return true;
+    });
+
+    expect(await router.push('/list')).toBeNull();
+    expect(router.currentRoute.value.location.path).toBe('/');
+    off();
+    router.destroy();
+  });
+
+  it('a redirect during a popstate replaces rather than pushing', async () => {
+    const history = createMemoryHistory('/');
+    const router = makeRouter({ history });
+    await router.isReady();
+    await router.push('/list');
+
+    // Redirect anything arriving at '/' back to '/list' - the guard shape that
+    // makes a Back press interesting.
+    const off = router.beforeEach((to) => (to.path === '/' ? '/list' : true));
+    router.back();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    // Pushing here would leave the '/' entry behind, so the next Back would
+    // hit it, redirect again, and strand the user. Replacing consumes it.
+    expect(router.currentRoute.value.location.path).toBe('/list');
     off();
     router.destroy();
   });

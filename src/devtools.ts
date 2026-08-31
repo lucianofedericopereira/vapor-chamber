@@ -2,7 +2,7 @@
  * vapor-chamber - Vue DevTools integration
  *
  * Optional. Call setupDevtools(bus, app) once at app setup.
- * Requires @vue/devtools-api to be installed — silently no-ops if not present.
+ * Requires @vue/devtools-api to be installed - silently no-ops if not present.
  */
 
 import type { Command, CommandResult, Hook } from './command-bus';
@@ -10,7 +10,7 @@ import type { Command, CommandResult, Hook } from './command-bus';
 const INSPECTOR_ID = 'vapor-chamber';
 const LAYER_ID = 'vapor-chamber';
 
-// Minimal interface — only what setupDevtools actually uses.
+// Minimal interface - only what setupDevtools actually uses.
 // Accepts both CommandBus and AsyncCommandBus without requiring the full type.
 interface Observable {
   onAfter: (hook: Hook) => () => void;
@@ -33,7 +33,7 @@ interface CommandEntry {
  *
  * @param bus  A CommandBus or AsyncCommandBus instance to observe.
  * @param app  The Vue app instance (passed to setupDevtoolsPlugin).
- * @returns    Unsubscribe function — call it to detach from the bus.
+ * @returns    Unsubscribe function - call it to detach from the bus.
  *
  * @example
  * import { createApp } from 'vue';
@@ -47,7 +47,7 @@ export function setupDevtools(bus: Observable, app: unknown): () => void {
   // Guard: no-op in production. Bundlers (Vite, webpack, Rollup) replace the
   // bare process.env.NODE_ENV literal in prod builds, making this entire
   // function body dead code that tree-shakers eliminate for a true 0KB footprint.
-  // Must stay a bare literal — wrapping it (globalThis., typeof guards) breaks
+  // Must stay a bare literal - wrapping it (globalThis., typeof guards) breaks
   // the replacement. IIFE builds pre-define it (scripts/build.mjs); Node reads it natively.
   if (process.env.NODE_ENV === 'production') {
     return () => {};
@@ -57,7 +57,7 @@ export function setupDevtools(bus: Observable, app: unknown): () => void {
   let counter = 0;
   let devApi: any = null;
 
-  // Hook into the bus — this runs even before devtools loads
+  // Hook into the bus - this runs even before devtools loads
   const unsubscribe = bus.onAfter((cmd, result) => {
     const entry: CommandEntry = {
       id: counter++,
@@ -92,7 +92,7 @@ export function setupDevtools(bus: Observable, app: unknown): () => void {
     }
   });
 
-  // Dynamic import — zero cost if @vue/devtools-api is not installed.
+  // Dynamic import - zero cost if @vue/devtools-api is not installed.
   // Using a variable prevents TypeScript from attempting module resolution
   // on an optional peer dependency that may not be installed.
   //
@@ -100,7 +100,7 @@ export function setupDevtools(bus: Observable, app: unknown): () => void {
   // through the `vapor-chamber/devtools` subpath. A bundler must be able to
   // resolve the specifier for devtools to work at all (a browser cannot
   // resolve a bare "@vue/devtools-api" at runtime), and the only way to reach
-  // this file is to import the subpath — which means you opted in and
+  // this file is to import the subpath - which means you opted in and
   // installed the peer.
   //
   // It must NEVER be re-exported from `src/index.ts`. From the barrel this
@@ -189,7 +189,7 @@ export function setupDevtools(bus: Observable, app: unknown): () => void {
       );
     })
     .catch(() => {
-      // @vue/devtools-api not installed — silently no-op in production
+      // @vue/devtools-api not installed - silently no-op in production
     });
 
   return unsubscribe;

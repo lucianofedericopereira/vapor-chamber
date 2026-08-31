@@ -1,14 +1,15 @@
 // @vitest-environment happy-dom
 /**
- * Tests for router/index.ts — blade-row rendering (custom + default fetchBlade)
- * and the table loaders (remote { url } / inline { inline }), lazy component
- * import, and the component_missing path.
+ * Tests for router/index.ts - blade-row rendering (a custom fetchBlade and the
+ * in-box `bladeFetcher`) and the table loaders (remote { url } / inline
+ * { inline }), lazy component import, and the component_missing path.
  */
 
 import { describe, expect, it, vi } from 'vitest';
 import { defineComponent, h } from 'vue';
 import { createMemoryHistory } from '../../src/router/history';
 import { createRouter } from '../../src/router/index';
+import { bladeFetcher } from '../../src/router/remote';
 import { isRouterError } from '../../src/router/errors';
 import type { HttpClient } from '../../src/http';
 import type { RouteRecord } from '../../src/router/types';
@@ -21,7 +22,7 @@ const ROWS: RouteRecord[] = [
 
 const HOME = { Home: defineComponent({ render: () => h('span', 'home') }) };
 
-/** Minimal fake HttpClient — only get() is used by the router. */
+/** Minimal fake HttpClient - only get() is used by the router. */
 function fakeHttp(get: (url: string, config?: unknown) => Promise<{ data: unknown }>): HttpClient {
   return { get } as unknown as HttpClient;
 }
@@ -63,7 +64,7 @@ describe('blade rows', () => {
     expect(onError).toHaveBeenCalled();
   });
 
-  it('default fetchBlade extracts bladeRoot from fetched HTML via the http client', async () => {
+  it('bladeFetcher extracts bladeRoot from fetched HTML via the http client', async () => {
     const get = vi.fn(async () => ({
       data: '<html><body><main><h1>Hi</h1></main><footer>skip</footer></body></html>',
     }));
@@ -72,7 +73,9 @@ describe('blade rows', () => {
       history: createMemoryHistory('/admin'),
       routes: ROWS,
       components: HOME,
-      http: fakeHttp(get), // no fetchBlade → defaultFetchBlade(http, 'main')
+      // bladeFetcher lives in vapor-chamber/router/remote now: the router core
+      // no longer builds an http client for a feature most tables never use.
+      fetchBlade: bladeFetcher({ http: fakeHttp(get) }),
     });
     await router.isReady();
 
@@ -119,8 +122,8 @@ describe('table loaders', () => {
   });
 
   it('loads a remote table with no global `process` (no-bundler delivery)', async () => {
-    // The router's headline delivery — Blade inline payloads, plain ESM +
-    // import map, pattern-1 no-build — has no bundler define and no `process`.
+    // The router's headline delivery - Blade inline payloads, plain ESM +
+    // import map, pattern-1 no-build - has no bundler define and no `process`.
     // A bare `process.env.NODE_ENV` read inside loadRemoteTable's try threw
     // ReferenceError there, which the catch rewrapped as `routes_load_failed`
     // and blamed on the URL. Node always has `process`, so only deleting it
@@ -137,7 +140,7 @@ describe('table loaders', () => {
       onError,
     });
 
-    // @ts-expect-error — deleting a required global on purpose.
+    // @ts-expect-error - deleting a required global on purpose.
     delete globalThis.process;
     try {
       await router.isReady();

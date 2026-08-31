@@ -31,11 +31,11 @@ No manual step.
 
 ## What to look for
 
-- **CartPanel** — the loading button disables only itself, not the whole page.
+- **CartPanel** - the loading button disables only itself, not the whole page.
   Each `useCommand` instance has its own `loading` signal.
-- **SearchPanel** — type 2+ characters; watch the browser console for
+- **SearchPanel** - type 2+ characters; watch the browser console for
   `[searchExecute]` lines. No reactive overhead per keystroke.
-- **StatusBar** — observes both. The "loading…" indicator shows whenever any
+- **StatusBar** - observes both. The "loading..." indicator shows whenever any
   dispatch is in flight on the bus, regardless of which component triggered
   it. Erroring out (clicking "Add invalid product") populates the shared
   error list.
@@ -44,7 +44,7 @@ No manual step.
 
 ```
 examples/vapor-sfc/
-├── package.json          # workspace deps — vue@^3.6.0-beta.17, vite@^8
+├── package.json          # workspace deps - vue@^3.6.0-beta.17, vite@^8
 ├── vite.config.ts        # @vitejs/plugin-vue + vaporChamberHMR
 ├── tsconfig.json         # strict TS, ES2022, vue:client types
 ├── index.html            # mount point + minimal styles

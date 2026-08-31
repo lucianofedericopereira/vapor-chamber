@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE — the public composables running inside a REAL Vapor component.
+ * FIXTURE - the public composables running inside a REAL Vapor component.
  *
  * WHY THIS FILE EXISTS. The suite had 93 files and 1500+ tests, and exactly one
  * of the eight public `use*` composables had ever executed inside a real Vapor
@@ -18,15 +18,15 @@
  * differs. Only mounting a real `createVaporApp` can.
  *
  * WHAT IS PINNED HERE, per composable: that it runs at all inside a Vapor
- * `setup()`, that the reactive values it hands back actually update, and — the
- * load-bearing one — that `tryAutoCleanup()` really disposes it when the Vapor
+ * `setup()`, that the reactive values it hands back actually update, and - the
+ * load-bearing one - that `tryAutoCleanup()` really disposes it when the Vapor
  * component unmounts. That last is the Vapor-sensitive part: auto-cleanup rides
  * on `getCurrentScope()`/`onScopeDispose()`, and if those answered the way
  * `getCurrentInstance()` does, every composable here would leak its bus
  * subscription on unmount with nothing to show for it.
  *
  * Chamber is pointed at the same module object the components are built from
- * via `configureVue()` — two separately-imported Vue dists are two disconnected
+ * via `configureVue()` - two separately-imported Vue dists are two disconnected
  * reactivity instances (chamber.ts §probeVue), so skipping that would measure
  * nothing.
  */
@@ -48,7 +48,7 @@ import { createCommandBus } from '../src/command-bus';
 
 const WITH_VAPOR = 'vue/dist/vue.runtime-with-vapor.esm-browser.js';
 
-/** Raw runtime-vapor surface — deliberately untyped; this file builds trees by hand. */
+/** Raw runtime-vapor surface - deliberately untyped; this file builds trees by hand. */
 type VaporApi = any;
 
 async function vapor(): Promise<VaporApi> {
@@ -81,7 +81,7 @@ describe('composables inside a real Vapor component', () => {
     setCommandBus(createCommandBus());
   });
 
-  it('useCommand — dispatches, tracks loading/error, and unsubscribes on unmount', async () => {
+  it('useCommand - dispatches, tracks loading/error, and unsubscribes on unmount', async () => {
     const bus = getCommandBus();
     let api!: ReturnType<typeof useCommand>;
     const seen: string[] = [];
@@ -100,10 +100,10 @@ describe('composables inside a real Vapor component', () => {
     // The Vapor-sensitive half: tryAutoCleanup must have armed on this scope.
     unmount();
     bus.dispatch('cartAdd', 'b');
-    expect(seen).toEqual(['cartAdd']); // no growth — listener really went away
+    expect(seen).toEqual(['cartAdd']); // no growth - listener really went away
   });
 
-  it('useCommandState — state updates from a dispatch and stops on unmount', async () => {
+  it('useCommandState - state updates from a dispatch and stops on unmount', async () => {
     const bus = getCommandBus();
     let state!: { value: { count: number } };
 
@@ -121,7 +121,7 @@ describe('composables inside a real Vapor component', () => {
     expect(state.value).toEqual({ count: 7 }); // subscription disposed with the component
   });
 
-  it('useSharedCommandState — two Vapor components observe the same bus-wide error state', async () => {
+  it('useSharedCommandState - two Vapor components observe the same bus-wide error state', async () => {
     const bus = getCommandBus();
     bus.register('boom', () => { throw new Error('shared-boom'); });
     let a!: ReturnType<typeof useSharedCommandState>;
@@ -132,7 +132,7 @@ describe('composables inside a real Vapor component', () => {
 
     bus.dispatch('boom', null);
 
-    // One shared entry per bus — both Vapor components read the same node.
+    // One shared entry per bus - both Vapor components read the same node.
     expect(a.lastError.value?.message).toBe('shared-boom');
     expect(b.lastError.value?.message).toBe('shared-boom');
     expect(a.errorCount.value).toBe(1);
@@ -145,7 +145,7 @@ describe('composables inside a real Vapor component', () => {
     second.unmount();
   });
 
-  it('useCommandQuery — read path resolves inside a Vapor setup', async () => {
+  it('useCommandQuery - read path resolves inside a Vapor setup', async () => {
     const bus = getCommandBus();
     bus.register('cartTotal', () => 42);
     let q!: ReturnType<typeof useCommandQuery>;
@@ -158,7 +158,7 @@ describe('composables inside a real Vapor component', () => {
     unmount();
   });
 
-  it('useCommandGroup — namespaced dispatch + register, all cleaned up on unmount', async () => {
+  it('useCommandGroup - namespaced dispatch + register, all cleaned up on unmount', async () => {
     const bus = getCommandBus();
     let calls = 0;
     let group!: ReturnType<typeof useCommandGroup>;
@@ -183,7 +183,7 @@ describe('composables inside a real Vapor component', () => {
     expect(calls).toBe(2);
   });
 
-  it('useCommandError — captures a failed dispatch, then detaches on unmount', async () => {
+  it('useCommandError - captures a failed dispatch, then detaches on unmount', async () => {
     const bus = getCommandBus();
     bus.register('boom', () => { throw new Error('kaboom'); });
     let err!: ReturnType<typeof useCommandError>;
@@ -199,7 +199,7 @@ describe('composables inside a real Vapor component', () => {
     expect(err.errors.value.length).toBe(1); // no capture after disposal
   });
 
-  it('defineVaporCommand — the zero-overhead path works under a real Vapor app', async () => {
+  it('defineVaporCommand - the zero-overhead path works under a real Vapor app', async () => {
     const bus = getCommandBus();
     let handled = 0;
     let cmd!: ReturnType<typeof defineVaporCommand>;

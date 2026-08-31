@@ -1,9 +1,9 @@
 /**
- * vapor-chamber/router-fetch — the in-box, plain-JSON loader preset.
+ * vapor-chamber/router-fetch - the in-box, plain-JSON loader preset.
  *
  * The batteries-included preset and reference implementation of the loader SPI:
  * `load` URL templates are interpolated and fetched through vapor-chamber's own
- * HttpClient — the JSON body (`response.data`) is the loader result as-is, no
+ * HttpClient - the JSON body (`response.data`) is the loader result as-is, no
  * envelope, no paginator assumptions. Works against any backend. Built on
  * `createHttpClient()` rather than a hand-rolled fetch(), so it inherits the
  * same retry/timeout/CSRF handling as the rest of vapor-chamber; a custom
@@ -15,7 +15,7 @@
 import { type HttpClient, createHttpClient } from '../http';
 import { type LoaderHandlers, interpolateLoad, routerError } from '../router/index';
 
-/** Fresh/stale windows for a cached loader read — the http client's own shape. */
+/** Fresh/stale windows for a cached loader read - the http client's own shape. */
 export type LoaderCache = { ttl?: number; staleTtl?: number; serveStaleOnError?: boolean };
 
 export type FetchLoadersOptions = {
@@ -24,14 +24,15 @@ export type FetchLoadersOptions = {
   /** vapor-chamber http client override (tests, a pre-configured instance). Default: fresh client. */
   http?: HttpClient;
   /**
-   * Cache loader reads through the http client's LRU. Default: **false** —
+   * Cache loader reads through the http client's LRU. Default: **false** -
    * opt-in, like every other cache in this library.
    *
    * `true` uses the client's default TTL. The object form opens the same
    * fresh/stale windows the client already implements: `staleTtl` serves a
-   * past-fresh entry instantly and revalidates in the background (the commit
-   * carries `snapshot.revalidating` while it does), `serveStaleOnError` falls
-   * back to a retained entry when a read fails transiently.
+   * past-fresh entry instantly and revalidates in the background (`router.isRevalidating`
+   * is true while it does - the flag lives on the router, not on the snapshot,
+   * which is only `{ location, render, data }`), `serveStaleOnError` falls back
+   * to a retained entry when a read fails transiently.
    *
    * Per-record override: a route row's `meta.cache` wins over this default, so
    * a reference-data row and a live-inventory row can differ:
@@ -59,7 +60,7 @@ export function fetchLoaders(options: FetchLoadersOptions = {}): LoaderHandlers 
       const url = interpolateLoad(template, location, record.queryDefs);
       const cache = resolveCache(record.meta, options.cache);
       try {
-        // Only pass `cache` when it was asked for — an explicit `cache:
+        // Only pass `cache` when it was asked for - an explicit `cache:
         // undefined` is indistinguishable from absent to the client, but
         // keeping the config minimal keeps the miss path free of the key.
         const response = cache === undefined
@@ -67,7 +68,7 @@ export function fetchLoaders(options: FetchLoadersOptions = {}): LoaderHandlers 
           : await http.get(url, { signal, cache });
         // Stale-while-revalidate: this value is real data from a past-fresh
         // entry, so the navigation commits on it immediately. Hand the
-        // background refresh to the engine — otherwise it would land in the
+        // background refresh to the engine - otherwise it would land in the
         // HTTP cache and the page would keep the stale copy until the next
         // navigation. `ctx` is optional for hand-written handlers.
         if (response.stale && response.revalidation) {
@@ -76,7 +77,7 @@ export function fetchLoaders(options: FetchLoadersOptions = {}): LoaderHandlers 
         return response.data;
       } catch (cause) {
         // runLoaders (vapor-chamber-router core) already reclassifies this as
-        // 'cancelled' when `signal` is the one that aborted — no need to
+        // 'cancelled' when `signal` is the one that aborted - no need to
         // special-case AbortError here, just attach the cause either way.
         throw routerError('load_failed', `loader request failed for "${url}": ${(cause as Error).message}`, {
           to: location,

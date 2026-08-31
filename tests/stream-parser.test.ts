@@ -1,5 +1,5 @@
 /**
- * Tests for src/stream-parser.ts — StreamParser / createStreamParser
+ * Tests for src/stream-parser.ts - StreamParser / createStreamParser
  */
 import { describe, expect, it } from 'vitest';
 import { createStreamParser } from '../src/stream-parser';
@@ -14,7 +14,7 @@ function collect() {
   return { parser, values, errors };
 }
 
-describe('StreamParser — basic values', () => {
+describe('StreamParser - basic values', () => {
   it('parses a flat object', () => {
     const { parser, values } = collect();
     parser.write('{"a":1,"b":"two","c":true,"d":false,"e":null}');
@@ -59,7 +59,7 @@ describe('StreamParser — basic values', () => {
   });
 });
 
-describe('StreamParser — numbers', () => {
+describe('StreamParser - numbers', () => {
   it('handles negative, fractional, and exponent forms', () => {
     const { parser, values } = collect();
     parser.write('[-5, 3.14, 1e3, 2.5e-2, 0]');
@@ -75,7 +75,7 @@ describe('StreamParser — numbers', () => {
   });
 });
 
-describe('StreamParser — strings and escapes', () => {
+describe('StreamParser - strings and escapes', () => {
   it('decodes standard escapes', () => {
     const { parser, values } = collect();
     parser.write(String.raw`{"s":"line1\nline2\ttab\"quote\\slash"}`);
@@ -98,7 +98,7 @@ describe('StreamParser — strings and escapes', () => {
     expect(values[0]?.value).toBe('é 😀');
   });
 
-  // The module's headline input is an LLM completion or an export row — one
+  // The module's headline input is an LLM completion or an export row - one
   // long string value. `String.fromCharCode.apply` passes the buffer as call
   // arguments, and engines cap argument counts, so the whole parse threw
   // RangeError somewhere past ~65k characters.
@@ -115,7 +115,7 @@ describe('StreamParser — strings and escapes', () => {
   });
 
   it('keeps a surrogate pair intact across a flush-chunk boundary', () => {
-    // flush() converts in 8192-unit chunks, and the split is on UTF-16 units —
+    // flush() converts in 8192-unit chunks, and the split is on UTF-16 units -
     // so a pair can straddle a boundary. Concatenating the halves must still
     // yield one code point. 8191 'x' + 😀 puts the high surrogate at index
     // 8191 and the low surrogate at 8192, exactly on the seam.
@@ -130,7 +130,7 @@ describe('StreamParser — strings and escapes', () => {
   });
 });
 
-describe('StreamParser — chunked / streamed input', () => {
+describe('StreamParser - chunked / streamed input', () => {
   it('reassembles a value split across many small writes', () => {
     const { parser, values } = collect();
     const json = '{"greeting":"hello world","n":123}';
@@ -163,7 +163,7 @@ describe('StreamParser — chunked / streamed input', () => {
   });
 });
 
-describe('StreamParser — errors', () => {
+describe('StreamParser - errors', () => {
   it('reports unexpected characters without throwing', () => {
     const { parser, errors } = collect();
     parser.write('{"a": }');
@@ -178,7 +178,7 @@ describe('StreamParser — errors', () => {
   });
 });
 
-describe('StreamParser — reset/getState', () => {
+describe('StreamParser - reset/getState', () => {
   it('reset() returns the parser to a clean idle state', () => {
     const { parser, values } = collect();
     parser.write('{"a":1');
@@ -193,7 +193,7 @@ describe('StreamParser — reset/getState', () => {
   });
 });
 
-describe('StreamParser — object/array lifecycle callbacks', () => {
+describe('StreamParser - object/array lifecycle callbacks', () => {
   it('fires onObjectStart/End and onArrayStart/End around onValue', () => {
     const events: string[] = [];
     const parser = createStreamParser({
@@ -207,7 +207,7 @@ describe('StreamParser — object/array lifecycle callbacks', () => {
     parser.end();
 
     // `key` tracks the nearest enclosing OBJECT property name (arrays have
-    // no keys of their own — `path`'s index disambiguates array members),
+    // no keys of their own - `path`'s index disambiguates array members),
     // so the scalar array element still reports key "list".
     expect(events).toEqual(['obj-start', 'arr-start', 'value:list', 'arr-end', 'obj-end']);
   });

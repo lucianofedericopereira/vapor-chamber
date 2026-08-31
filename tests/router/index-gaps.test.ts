@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * createRouter wiring paths the router suite leaves open — the table-source
+ * createRouter wiring paths the router suite leaves open - the table-source
  * variants and the helpers that only run for specific option shapes.
  *
  *  - loadInlineTable: a selector that matches nothing / an empty
@@ -16,6 +16,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMemoryHistory } from '../../src/router/history';
+import { bladeFetcher } from '../../src/router/remote';
 import { createRouter, unwrapRoutesPayload } from '../../src/router/index';
 import type { RouteRecord } from '../../src/router/types';
 
@@ -153,7 +154,7 @@ describe('remote routes source', () => {
 
   it('passes a coded router error through unwrapped', async () => {
     // A payload with no routes array makes unwrapRoutesPayload throw a coded
-    // error inside the try — it must not be re-wrapped as routes_load_failed.
+    // error inside the try - it must not be re-wrapped as routes_load_failed.
     const http = { get: vi.fn().mockResolvedValue({ data: { nope: true } }) } as any;
     const router = createRouter({
       routes: { url: '/routes.json' } as never,
@@ -172,7 +173,7 @@ describe('remote routes source', () => {
 // ---------------------------------------------------------------------------
 
 describe('preheat wiring', () => {
-  /** preheatPath is internal — the DOM integration drives it on link hover. */
+  /** preheatPath is internal - the DOM integration drives it on link hover. */
   function hover(anchor: Element): void {
     anchor.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
   }
@@ -190,7 +191,7 @@ describe('preheat wiring', () => {
     hover(document.getElementById('to-list')!);
     await vi.waitFor(() => expect(lazy).toHaveBeenCalledTimes(1), { timeout: 2000 });
 
-    // Hovering again is served from the component cache — no second load.
+    // Hovering again is served from the component cache - no second load.
     hover(document.getElementById('to-list')!);
     await new Promise(r => setTimeout(r, 200));
     expect(lazy).toHaveBeenCalledTimes(1);
@@ -221,7 +222,7 @@ describe('preheat wiring', () => {
 describe('inline routes injected after construction', () => {
   it('reads the payload at start() when the element appears late', async () => {
     // createRouter's synchronous read (readInlinePayload) finds nothing, so
-    // the table stays null and start() falls through to loadInlineTable —
+    // the table stays null and start() falls through to loadInlineTable -
     // the deferred-script / late-hydration ordering.
     const router = createRouter({
       routes: { inline: '#late-routes' } as never,
@@ -273,7 +274,7 @@ describe('preheat racing a table swap', () => {
 // createRouter option shapes the suite otherwise reaches only one arm of
 // ---------------------------------------------------------------------------
 
-describe('createRouter — table source and base variants', () => {
+describe('createRouter - table source and base variants', () => {
   it('accepts the { routes } payload OBJECT, not just a bare array', async () => {
     // Every other test passes `routes: ROWS` (the array arm). The object form
     // is the shape a Blade-inlined or fetched payload arrives in, and it may
@@ -289,7 +290,7 @@ describe('createRouter — table source and base variants', () => {
   });
 
   it('exposes a frozen empty routes list before any table exists', () => {
-    // `tableRef.value?.records ?? noRecords` — the fallback arm. A remote
+    // `tableRef.value?.records ?? noRecords` - the fallback arm. A remote
     // source has no table until start() resolves, so anything rendering a menu
     // during setup reads this.
     const router = createRouter({
@@ -303,7 +304,7 @@ describe('createRouter — table source and base variants', () => {
   });
 
   it('setQuery before a route is matched finds no leaf defs', () => {
-    // `matched[matched.length - 1]?.queryDefs ?? {}` — the `?? {}` arm needs an
+    // `matched[matched.length - 1]?.queryDefs ?? {}` - the `?? {}` arm needs an
     // EMPTY matched chain, which is exactly the pre-isReady() state.
     const router = createRouter({
       history: createMemoryHistory('/'),
@@ -318,7 +319,7 @@ describe('createRouter — table source and base variants', () => {
   it('falls back to memory history and normalizes a slashless base', () => {
     // `canUseWebHistory()` probes by calling replaceState; a sandboxed/opaque
     // -origin document throws SecurityError there. That is the one path that
-    // reaches the memory-history fallback WITH a window present — and so the
+    // reaches the memory-history fallback WITH a window present - and so the
     // only path that runs normalizeBaseSafe, whose leading-slash arm a bare
     // `base: 'admin'` then exercises.
     const spy = vi.spyOn(window.history, 'replaceState').mockImplementation(() => {
@@ -335,7 +336,7 @@ describe('createRouter — table source and base variants', () => {
   });
 
   it('scopes link stamping to linksRoot when one is given', async () => {
-    // `options.linksRoot ? document.querySelector(...) : null` — the
+    // `options.linksRoot ? document.querySelector(...) : null` - the
     // querySelector arm. Every other test omits linksRoot and takes `document`.
     document.body.innerHTML = `<nav id="side"><a href="/list">L</a></nav><a href="/list">outside</a>`;
     const router = createRouter({
@@ -359,7 +360,7 @@ describe('createRouter — table source and base variants', () => {
 describe('preheat failure and idle arming', () => {
   it('swallows a preheat load that REJECTS', async () => {
     // preheatPath fires `void loadComponent(...).catch(() => {})`. The existing
-    // hover test resolves, so the catch never ran — yet a rejected chunk is the
+    // hover test resolves, so the catch never ran - yet a rejected chunk is the
     // normal case after a deploy invalidates a hashed asset. It must not
     // surface as an unhandled rejection from a mere hover.
     document.body.innerHTML = '<a id="to-list" href="/list">list</a>';
@@ -378,7 +379,7 @@ describe('preheat failure and idle arming', () => {
       await router.isReady();
 
       document.getElementById('to-list')!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
-      // Hover preheat is delayed — poll for the side effect, as the sibling
+      // Hover preheat is delayed - poll for the side effect, as the sibling
       // test does, rather than racing a fixed tick.
       await vi.waitFor(() => expect(lazy).toHaveBeenCalledTimes(1), { timeout: 2000 });
       // Let the rejection settle so an unhandled one would surface.
@@ -418,10 +419,13 @@ describe('preheat failure and idle arming', () => {
 });
 
 // ---------------------------------------------------------------------------
-// defaultFetchBlade — the two arms the suite never reached.
+// bladeFetcher - the two arms the suite never reached. It moved to
+// `vapor-chamber/router/remote` when the router stopped building an http
+// client for features most apps never use; the behaviour is unchanged, so the
+// assertions are the same and only the wiring moved.
 // ---------------------------------------------------------------------------
 
-describe('defaultFetchBlade', () => {
+describe('bladeFetcher', () => {
   const BLADE_ROWS: RouteRecord[] = [
     { name: 'home', path: '/', component: 'Home' },
     { name: 'legacy', path: '/legacy', blade: true },
@@ -431,7 +435,7 @@ describe('defaultFetchBlade', () => {
   const htmlClient = (html: string) => ({ get: vi.fn(async () => ({ data: html })) }) as any;
 
   it('falls back to doc.body when the blade root selector matches nothing', async () => {
-    // `(doc.querySelector(bladeRoot) ?? doc.body).innerHTML` — the `?? doc.body`
+    // `(doc.querySelector(bladeRoot) ?? doc.body).innerHTML` - the `?? doc.body`
     // arm. A server template that does not wrap its content in the configured
     // root must still yield its markup rather than an empty string.
     const http = htmlClient('<html><body><p id="from-body">legacy page</p></body></html>');
@@ -439,7 +443,8 @@ describe('defaultFetchBlade', () => {
       history: createMemoryHistory('/'),
       routes: BLADE_ROWS,
       components: { Home: { name: 'Home' } },
-      http, // no <main> in the response, and bladeRoot defaults to 'main'
+      // No <main> in the response, and bladeRoot defaults to 'main'.
+      fetchBlade: bladeFetcher({ http }),
     } as any);
     await router.isReady();
 
@@ -460,7 +465,7 @@ describe('defaultFetchBlade', () => {
         history: createMemoryHistory('/'),
         routes: BLADE_ROWS,
         components: { Home: { name: 'Home' } },
-        http,
+        fetchBlade: bladeFetcher({ http }),
       } as any);
       await router.isReady();
 

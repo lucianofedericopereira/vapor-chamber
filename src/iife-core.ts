@@ -1,7 +1,7 @@
 /**
- * vapor-chamber — IIFE variant: CORE
+ * vapor-chamber - IIFE variant: CORE
  *
- * Audience: server-rendered apps with sprinkled JS — Blade, Rails, Django,
+ * Audience: server-rendered apps with sprinkled JS - Blade, Rails, Django,
  * .NET MVC, WordPress. The page already returns HTML; you need a command bus
  * to dispatch user actions to the backend (cart add, form submit, analytics).
  *
@@ -10,13 +10,13 @@
  *   • HTTP transport only (createHttpBridge)
  *   • Lightweight plugins: logger, validator, debounce, throttle, retry, authGuard
  *   • createApp() for one-line setup
- *   • connect() — even shorter: HTTP + CSRF in a single call
+ *   • connect() - even shorter: HTTP + CSRF in a single call
  *
  * NOT in this variant (use `vapor-chamber.iife.js` if you need them):
- *   • WebSocket / SSE transports — realtime infra is a different deployment shape
- *   • persist / sync / history / optimistic — stateful plugins, niche for sprinkled JS
- *   • mount() — DOM-coupled convenience
- *   • Vapor custom elements — see `vapor-chamber-elements.iife.js`
+ *   • WebSocket / SSE transports - realtime infra is a different deployment shape
+ *   • persist / sync / history / optimistic - stateful plugins, niche for sprinkled JS
+ *   • mount() - DOM-coupled convenience
+ *   • Vapor custom elements - see `vapor-chamber-elements.iife.js`
  *
  * Variant contents are not stable across major versions until v2.0; see ROADMAP.md.
  */
@@ -51,7 +51,7 @@ function createApp(options: CreateAppOptions = {}) {
 }
 
 /**
- * connect — one-line setup for the sprinkled-JS audience.
+ * connect - one-line setup for the sprinkled-JS audience.
  *
  * Equivalent to:
  *   createApp({ transport: createHttpBridge({ endpoint, csrf: true, ...rest }) })
@@ -98,6 +98,6 @@ if (typeof globalThis !== 'undefined') {
 // Default export only: the IIFE build assigns the DEFAULT export to the
 // `VaporChamber` global, so the API object lands directly on window
 // (`VaporChamber.connect(...)`). A second named export would force the
-// bundler to emit a module-namespace wrapper — `{ VaporChamber, default }`
-// — and every documented call site would be undefined in a <script> tag.
+// bundler to emit a module-namespace wrapper - `{ VaporChamber, default }`
+// - and every documented call site would be undefined in a <script> tag.
 export default VaporChamber;

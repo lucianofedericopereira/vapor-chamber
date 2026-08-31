@@ -14,13 +14,13 @@ import { createDirectivePlugin } from 'vapor-chamber/directives'
 import { createApp, h } from 'vue'
 import { createInertiaApp } from '@inertiajs/vue3'
 
-// ASYNC bus (createHttpBridge is an async plugin) — it lives outside the
+// ASYNC bus (createHttpBridge is an async plugin) - it lives outside the
 // Inertia page lifecycle. `csrf: 'inertia'` defers token management to
 // Inertia's Axios instance instead of reading the DOM.
 const bus = createAsyncCommandBus()
 bus.use(createHttpBridge({ endpoint: '/api/vc', csrf: 'inertia' }))
 
-// Make it the shared bus — useCommand() in page components dispatches on
+// Make it the shared bus - useCommand() in page components dispatches on
 // getCommandBus(), not on a provide()'d instance.
 setCommandBus(bus)
 
@@ -41,7 +41,7 @@ createInertiaApp({
 
 /*
  * resources/js/pages/Orders.vue
- * ——————————————————————————————
+ * ------------------------------
  * Inertia handles the route, vapor-chamber handles the action.
  * No conflict, no duplication.
  *
@@ -63,7 +63,7 @@ createInertiaApp({
  *   <div v-for="order in orders" :key="order.id">
  *     <span>{{ order.reference }}</span>
  *     <button @click="cancelOrder(order.id)" :disabled="loading.value">
- *       {{ loading.value ? 'Cancelling…' : 'Cancel' }}
+ *       {{ loading.value ? 'Cancelling...' : 'Cancel' }}
  *     </button>
  *   </div>
  * </template>
@@ -72,12 +72,12 @@ createInertiaApp({
 /*
  * When to use Inertia vs Vapor Chamber:
  *
- * Inertia router.visit()  → full page transitions, URL changes, back/forward
- * Vapor Chamber dispatch() → in-page actions, reactive microinteractions,
+ * Inertia router.visit()  -> full page transitions, URL changes, back/forward
+ * Vapor Chamber dispatch() -> in-page actions, reactive microinteractions,
  *                            optimistic updates, live search, field validation
  *
- * Inertia page props      → server-rendered initial state
- * useCommandState()       → reactive state that updates from commands
+ * Inertia page props      -> server-rendered initial state
+ * useCommandState()       -> reactive state that updates from commands
  *
  * Both share the same Laravel controller layer. No duplication.
  */

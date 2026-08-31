@@ -1,11 +1,11 @@
 /**
- * vapor-chamber-router — the route table.
+ * vapor-chamber-router - the route table.
  *
- * Rows (generator-emitted, server-sorted by priority) → compiled table.
+ * Rows (generator-emitted, server-sorted by priority) -> compiled table.
  * Everything static is precomputed here once: parent chain, renderable
  * chain, load chain, merged query defs, name map. Hot paths never derive.
  *
- * The generator is trusted — duplicate-name / unknown-parent validation runs
+ * The generator is trusted - duplicate-name / unknown-parent validation runs
  * in dev only; production assumes well-formed rows the same way it assumes a
  * valid migration.
  */
@@ -34,7 +34,7 @@ const PARAM_RE = /^:([A-Za-z_][A-Za-z0-9_]*)(\(([^)]+)\))?(\?)?$/;
  * missing param MEANS: `buildPath` throws (a link the app asked for and cannot
  * build is a bug), while breadcrumb projection yields a non-linking crumb (an
  * ancestor the current URL simply cannot address is normal). Keeping one copy
- * of the walk keeps route-URL construction from drifting between the two —
+ * of the walk keeps route-URL construction from drifting between the two -
  * which in a router is precisely where a subtle mismatch would hide.
  */
 export function renderSegments(
@@ -88,7 +88,7 @@ export function compilePath(path: string): {
       source += optional ? `(?:/(${pattern}))?` : `/(${pattern})`;
     } else {
       // A segment that opens with ':' was unambiguously meant to be a param.
-      // Falling through to `static` compiles it to a LITERAL — the row then
+      // Falling through to `static` compiles it to a LITERAL - the row then
       // matches only a URL containing the typo itself, i.e. never. That is a
       // silent dead route whose only symptom is a 404 somewhere else, so in
       // dev it is an error, not a shrug. (`/:name*` is the common one: the
@@ -96,7 +96,7 @@ export function compilePath(path: string): {
       if (DEV && raw.startsWith(':')) {
         throw routerError(
           'invalid_path',
-          `route path segment ":${raw.slice(1)}" in "${path}" is not a valid param — supported forms are :name, :name(regex), :name? and a trailing /* splat. As written it compiles to a literal segment and the route can never match.`,
+          `route path segment ":${raw.slice(1)}" in "${path}" is not a valid param - supported forms are :name, :name(regex), :name? and a trailing /* splat. As written it compiles to a literal segment and the route can never match.`,
         );
       }
       segments.push({ kind: 'static', value: raw });
@@ -128,7 +128,7 @@ export function createRouteTable(rows: readonly RouteRecord[]): RouteTable {
   const records: TableRecord[] = [];
   const byName = new Map<string, TableRecord>();
 
-  // Pass 1 — compile rows.
+  // Pass 1 - compile rows.
   for (const row of rows) {
     if (DEV && byName.has(row.name)) {
       throw routerError('duplicate_route', `duplicate route name "${row.name}"`);
@@ -153,7 +153,7 @@ export function createRouteTable(rows: readonly RouteRecord[]): RouteTable {
     byName.set(record.name, record);
   }
 
-  // Pass 2 — link parents.
+  // Pass 2 - link parents.
   rows.forEach((row, i) => {
     if (!row.parent) return;
     const parent = byName.get(row.parent);
@@ -166,7 +166,7 @@ export function createRouteTable(rows: readonly RouteRecord[]): RouteTable {
     (records[i] as TableRecord).parent = parent;
   });
 
-  // Pass 3 — precompute chains + merged query defs (leaf wins).
+  // Pass 3 - precompute chains + merged query defs (leaf wins).
   const rowByName = new Map(rows.map((row) => [row.name, row]));
   for (const record of records) {
     const chain: TableRecord[] = [];

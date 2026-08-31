@@ -2,13 +2,13 @@
 
 [Node's `EventEmitter`](https://nodejs.org/api/events.html) and
 [`eventemitter3`](https://github.com/primus/eventemitter3) are the canonical
-class-based event emitters. vapor-chamber is a command bus — a different
+class-based event emitters. vapor-chamber is a command bus - a different
 shape. This guide is for users who reached for an EventEmitter for app-wide
 state coordination and outgrew it.
 
 If you only need pub/sub event broadcast (no return values, no plugins,
 no transports), **stay on EventEmitter** or use vapor-chamber's
-[fast lane](../performance.md) — both are smaller and faster than the
+[fast lane](../performance.md) - both are smaller and faster than the
 general-purpose bus.
 
 ---
@@ -26,9 +26,9 @@ general-purpose bus.
 | `emitter.emit('foo', a, b, c)`                  | `bus.emit('foo', { a, b, c })` *(single-arg payload)*      |
 | `emitter.listeners('foo')`                      | Inspect via `inspectBus(bus).listenerPatterns`             |
 | `emitter.listenerCount('foo')`                  | Same                                                       |
-| `setMaxListeners(n)`                            | No equivalent — vapor-chamber doesn't cap listener count   |
+| `setMaxListeners(n)`                            | No equivalent - vapor-chamber doesn't cap listener count   |
 
-## Multi-argument emit → single-payload emit
+## Multi-argument emit -> single-payload emit
 
 EventEmitter accepts varargs:
 ```ts
@@ -57,7 +57,7 @@ onArgs('userUpdate', (userId, oldName, newName) => {});
 ## Listener signature change
 
 EventEmitter listeners receive the emitted args directly. vapor-chamber
-listeners receive `(cmd, result)` — `cmd.target` is the payload, `result`
+listeners receive `(cmd, result)` - `cmd.target` is the payload, `result`
 is `{ ok, value, error }`. For pure pub/sub use cases the second arg
 doesn't matter (emit always uses a singleton ok-result).
 
@@ -89,12 +89,12 @@ You probably reached for vapor-chamber because you needed something
 EventEmitter doesn't have. Here's the surface:
 
 ```ts
-// Handlers with results — emit doesn't have a return path
+// Handlers with results - emit doesn't have a return path
 bus.register('cartAdd', (cmd) => addToCart(cmd.target));
 const result = bus.dispatch('cartAdd', { id: 42 });
 if (result.ok) console.log('added', result.value);
 
-// Plugins (logger, retry, debounce, throttle, persist, sync, …)
+// Plugins (logger, retry, debounce, throttle, persist, sync, ...)
 bus.use(retry({ maxAttempts: 3 }));
 
 // Async + AbortController
@@ -102,7 +102,7 @@ const asyncBus = createAsyncCommandBus();
 const ac = new AbortController();
 const result = await asyncBus.dispatch('orderCreate', cart, undefined, { signal: ac.signal });
 
-// HTTP transport — dispatches forward to a backend
+// HTTP transport - dispatches forward to a backend
 asyncBus.use(createHttpBridge({ endpoint: '/api/vc', csrf: true }));
 
 // Schema introspection (LLM tool-use)
@@ -110,7 +110,7 @@ import { toAnthropicTools } from 'vapor-chamber';
 const tools = toAnthropicTools(busSchema);
 ```
 
-## Memory leaks — listener cleanup
+## Memory leaks: listener cleanup
 
 EventEmitter's `setMaxListeners(n)` warns if you accumulate too many
 listeners; this is a leak detector. vapor-chamber doesn't have an
@@ -129,7 +129,7 @@ and check whether the count grows without bound.
 
 ## When NOT to migrate
 
-- Your codebase is built around `extends EventEmitter` — vapor-chamber's
+- Your codebase is built around `extends EventEmitter` - vapor-chamber's
   functional shape doesn't fit. Keep EventEmitter for the per-class event
   surface and use vapor-chamber as the cross-cutting bus.
 - You only need EventEmitter's pub/sub semantics and don't need results,
@@ -142,14 +142,16 @@ lane.on('userUpdate', (data) => updateUI(data));
 lane.emit('userUpdate', { userId, name });
 ```
 
-On multi-listener fan-out the fast lane's `on`/`emit` is **~1.9–2.0× faster
-than mitt**. Against nanoevents it depends on the removal mode: the default
-(`'live'`, which matches the main bus — a listener removed mid-emit does not
-run) sits **~10–15% behind**, while `createFastLane({ removal: 'snapshot' })`
-is **at parity** (~0.9–1.0×). This paragraph previously claimed a flat "ties
+On multi-listener fan-out the fast lane's `on`/`emit` is **~1.9-2.0x faster
+than mitt** (ratios below are from `npm run bench`; unlike the size and coverage
+figures they have no generator behind them, so re-run the bench before trusting
+them after a hot-path change). Against nanoevents it depends on the removal mode: the default
+(`'live'`, which matches the main bus - a listener removed mid-emit does not
+run) sits **~10-15% behind**, while `createFastLane({ removal: 'snapshot' })`
+is **at parity** (~0.9-1.0x). This paragraph previously claimed a flat "ties
 nanoevents within 5%", which predated the v1.12.0 unsub-during-emit identity
 guard that bought correctness for that margin.
 
-Single-handler `compile()` dispatch is a different and much wider lead —
-**~2.1× nanoevents** — and is untouched by any of the above. Current numbers
+Single-handler `compile()` dispatch is a different and much wider lead -
+**~2.1x nanoevents** - and is untouched by any of the above. Current numbers
 and the mode trade-off: [performance.md](../performance.md).

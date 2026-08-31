@@ -1,5 +1,5 @@
 /**
- * Tests for src/http.ts — postCommand, CSRF, retry, timeout, session expiry
+ * Tests for src/http.ts - postCommand, CSRF, retry, timeout, session expiry
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
@@ -39,7 +39,7 @@ afterEach(() => {
 // Basic success
 // ---------------------------------------------------------------------------
 
-describe('postCommand — basic', () => {
+describe('postCommand - basic', () => {
   it('returns data on 200', async () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(200, { id: 42 }));
 
@@ -81,7 +81,7 @@ describe('postCommand — basic', () => {
 // Retry on 5xx / 429
 // ---------------------------------------------------------------------------
 
-describe('postCommand — retry', () => {
+describe('postCommand - retry', () => {
   it('retries on 500 and succeeds', async () => {
     (globalThis.fetch as any)
       .mockResolvedValueOnce(mockResponse(500))
@@ -147,7 +147,7 @@ describe('postCommand — retry', () => {
 
   // postCommand is createHttpBridge's transport, so this is every bus command
   // dispatched with `retry` configured: a 422 used to be thrown inside the try,
-  // caught by the retry catch, and re-sent — the exact mutation replay that
+  // caught by the retry catch, and re-sent - the exact mutation replay that
   // Idempotency-Key forwarding exists to make survivable.
   it('does NOT retry a 422 validation failure', async () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(422, { message: 'validation_failed' }));
@@ -178,7 +178,7 @@ describe('postCommand — retry', () => {
 // Timeout
 // ---------------------------------------------------------------------------
 
-describe('postCommand — timeout', () => {
+describe('postCommand - timeout', () => {
   it('throws TimeoutError when request exceeds timeout', async () => {
     (globalThis.fetch as any).mockImplementation((_url: string, init: RequestInit) =>
       new Promise((_, reject) => {
@@ -198,7 +198,7 @@ describe('postCommand — timeout', () => {
 // User abort
 // ---------------------------------------------------------------------------
 
-describe('postCommand — user abort', () => {
+describe('postCommand - user abort', () => {
   it('throws AbortError when user signal fires', async () => {
     const ctrl = new AbortController();
     (globalThis.fetch as any).mockImplementation((_url: string, init: RequestInit) =>
@@ -227,7 +227,7 @@ describe('postCommand — user abort', () => {
 // silent flag
 // ---------------------------------------------------------------------------
 
-describe('postCommand — silent flag', () => {
+describe('postCommand - silent flag', () => {
   it('stamps error.silent when config.silent is true', async () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(500, { message: 'boom' }));
 
@@ -249,7 +249,7 @@ describe('postCommand — silent flag', () => {
 // Session expiry
 // ---------------------------------------------------------------------------
 
-describe('postCommand — session expiry', () => {
+describe('postCommand - session expiry', () => {
   it('calls onSessionExpired on 401', async () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(401));
     const onSessionExpired = vi.fn();
@@ -275,7 +275,7 @@ describe('postCommand — session expiry', () => {
 // 419 CSRF refresh
 // ---------------------------------------------------------------------------
 
-describe('postCommand — CSRF 419 refresh', () => {
+describe('postCommand - CSRF 419 refresh', () => {
   // After the A3 fix, refreshCsrfOnce throws if readCsrfToken() returns null
   // post-refresh. In Node there's no real DOM, so we mock document + querySelector
   // to provide a CSRF meta tag after the csrf-cookie fetch completes.
@@ -294,9 +294,9 @@ describe('postCommand — CSRF 419 refresh', () => {
 
   it('retries once after 419 and does not count against retry budget', async () => {
     (globalThis.fetch as any)
-      .mockResolvedValueOnce(mockResponse(419))          // original request → 419
+      .mockResolvedValueOnce(mockResponse(419))          // original request -> 419
       .mockResolvedValueOnce(mockResponse(200, {}))      // GET /sanctum/csrf-cookie
-      .mockResolvedValueOnce(mockResponse(200, { refreshed: true })); // retry → 200
+      .mockResolvedValueOnce(mockResponse(200, { refreshed: true })); // retry -> 200
 
     const res = await postCommand('/api/cmd', {}, { retry: 0 });
 
@@ -311,7 +311,7 @@ describe('postCommand — CSRF 419 refresh', () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(419));
 
     await expect(postCommand('/api/cmd', {}, { retry: 0 })).rejects.toMatchObject({ status: 419 });
-    // call[0] = original POST, call[1] = csrf-cookie GET, call[2] = retry POST → 419 again → throw
+    // call[0] = original POST, call[1] = csrf-cookie GET, call[2] = retry POST -> 419 again -> throw
     expect((globalThis.fetch as any).mock.calls).toHaveLength(3);
   });
 
@@ -333,7 +333,7 @@ describe('postCommand — CSRF 419 refresh', () => {
 
     await postCommand('/api/cmd', {}, { retry: 0, csrfCookieUrl: '' });
 
-    // Only original POST + retry POST — no csrf-cookie fetch
+    // Only original POST + retry POST - no csrf-cookie fetch
     expect((globalThis.fetch as any).mock.calls).toHaveLength(2);
   });
 
@@ -364,7 +364,7 @@ describe('readCsrfToken', () => {
   it('returns null when document is not available', () => {
     // In Node/vitest jsdom, document exists. Check cache invalidated path.
     const result = readCsrfToken();
-    // No DOM CSRF tokens set — either null or a cached result. Just verify shape.
+    // No DOM CSRF tokens set - either null or a cached result. Just verify shape.
     if (result !== null) {
       expect(result).toHaveProperty('token');
       expect(result).toHaveProperty('headerName');
@@ -380,7 +380,7 @@ describe('readCsrfToken', () => {
   it('invalidateCsrfCache clears cache', () => {
     readCsrfToken(); // prime cache
     invalidateCsrfCache();
-    // After invalidation the next call re-reads from DOM — just ensure it runs without error
+    // After invalidation the next call re-reads from DOM - just ensure it runs without error
     expect(() => readCsrfToken()).not.toThrow();
   });
 

@@ -2,7 +2,7 @@
  * Pattern 2: Laravel + Vite + SFC (full build, no Livewire)
  * ==========================================================
  * Full build pipeline. Command bus replaces Livewire's component model.
- * The backend is a standard Laravel controller — no Livewire dependency.
+ * The backend is a standard Laravel controller - no Livewire dependency.
  *
  * resources/js/app.ts
  */
@@ -13,13 +13,13 @@ import { createDirectivePlugin } from 'vapor-chamber/directives'
 import { createApp } from 'vue'
 import App from './App.vue'
 
-// 1. Create the bus. ASYNC bus — retry and createHttpBridge are async plugins;
+// 1. Create the bus. ASYNC bus - retry and createHttpBridge are async plugins;
 //    on a sync createCommandBus() they'd return a Promise where a result is
 //    expected and every dispatch would silently fail.
 const bus = createAsyncCommandBus()
 
 // 2. Install plugins (before transport so they run before forwarding).
-//    Log via onAfter — it observes settled results on the async bus.
+//    Log via onAfter - it observes settled results on the async bus.
 bus.onAfter((cmd, result) => {
   if (!cmd.action.startsWith('analytics')) {
     console.log(`⚡ ${cmd.action}`, result.ok ? result.value : result.error)
@@ -27,7 +27,7 @@ bus.onAfter((cmd, result) => {
 })
 bus.use(retry({ maxAttempts: 3, baseDelay: 300, actions: ['api*', 'order*'] }))
 
-// 3. Install HTTP transport — all unhandled commands go to the server
+// 3. Install HTTP transport - all unhandled commands go to the server
 bus.use(createHttpBridge({
   endpoint: '/api/vc',
   csrf: true,
@@ -47,7 +47,7 @@ const sse = createSseBridge({
 sse.install(bus)
 
 // 5. Make this bus the shared one. useCommand(), the directives, and every
-//    other composable dispatch on getCommandBus() — a provide()'d bus would
+//    other composable dispatch on getCommandBus() - a provide()'d bus would
 //    never be seen by them.
 setCommandBus(bus)
 
@@ -73,7 +73,7 @@ window.addEventListener('beforeunload', () => sse.teardown())
  * <template>
  *   <!-- With composable -->
  *   <button @click="dispatch('productFavorite', { id: product.id })" :disabled="loading.value">
- *     {{ loading.value ? '…' : '♥ Save' }}
+ *     {{ loading.value ? '...' : '♥ Save' }}
  *   </button>
  *
  *   <!-- Or declaratively with directive -->

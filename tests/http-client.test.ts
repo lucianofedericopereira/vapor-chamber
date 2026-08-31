@@ -1,5 +1,5 @@
 /**
- * Tests for createHttpClient — multi-method HTTP client
+ * Tests for createHttpClient - multi-method HTTP client
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createHttpClient } from '../src/http';
@@ -28,7 +28,7 @@ function jsonResponse(status: number, body: unknown) {
 }
 
 beforeEach(() => {
-  // Each createHttpClient() owns its cache (item 6) — nothing global to reset.
+  // Each createHttpClient() owns its cache (item 6) - nothing global to reset.
   vi.stubGlobal('fetch', vi.fn());
 });
 
@@ -41,7 +41,7 @@ afterEach(() => {
 // HTTP methods
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — methods', () => {
+describe('createHttpClient - methods', () => {
   it('get() sends GET request', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, { users: [] }));
     const http = createHttpClient();
@@ -103,7 +103,7 @@ describe('createHttpClient — methods', () => {
 // Body handling
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — body', () => {
+describe('createHttpClient - body', () => {
   it('auto-serializes objects as JSON with Content-Type', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, {}));
     const http = createHttpClient();
@@ -133,7 +133,7 @@ describe('createHttpClient — body', () => {
 // Query params
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — query params', () => {
+describe('createHttpClient - query params', () => {
   it('appends scalar params to URL', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, []));
     const http = createHttpClient();
@@ -173,7 +173,7 @@ describe('createHttpClient — query params', () => {
 // BaseURL
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — baseURL', () => {
+describe('createHttpClient - baseURL', () => {
   it('prepends baseURL to relative paths', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, {}));
     const http = createHttpClient({ baseURL: 'https://api.example.com' });
@@ -199,7 +199,7 @@ describe('createHttpClient — baseURL', () => {
 // Retry
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — retry', () => {
+describe('createHttpClient - retry', () => {
   it('GET retries on 500 (default retry: 2)', async () => {
     let attempts = 0;
     (globalThis.fetch as any).mockImplementation(async () => {
@@ -242,7 +242,7 @@ describe('createHttpClient — retry', () => {
     await expect(http.post('/api/cmd', { qty: -1 }, { retry: 2 })).rejects.toMatchObject({
       response: { status: 422 },
     });
-    expect(attempts).toBe(1); // was 3 — the mutation was re-sent twice
+    expect(attempts).toBe(1); // was 3 - the mutation was re-sent twice
   });
 
   it('GET with retry configured does NOT retry a 404', async () => {
@@ -254,7 +254,7 @@ describe('createHttpClient — retry', () => {
 
     const http = createHttpClient();
     await expect(http.get('/api/missing', { retry: 2 })).rejects.toThrow();
-    expect(attempts).toBe(1); // was 3 — every backoff burned before surfacing
+    expect(attempts).toBe(1); // was 3 - every backoff burned before surfacing
   });
 
   it('still retries a 500 when retry is configured on a POST', async () => {
@@ -273,12 +273,12 @@ describe('createHttpClient — retry', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Timeout retry — a timeout-triggered abort must compete for the same
+// Timeout retry - a timeout-triggered abort must compete for the same
 // retry budget as a 5xx/429/408 response, not throw on the first attempt
 // regardless of `retry`.
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — timeout retry', () => {
+describe('createHttpClient - timeout retry', () => {
   it('retries a GET after a timeout instead of failing on the first attempt', async () => {
     let attempts = 0;
     (globalThis.fetch as any).mockImplementation((_url: string, init: RequestInit) => {
@@ -320,10 +320,10 @@ describe('createHttpClient — timeout retry', () => {
 });
 
 // ---------------------------------------------------------------------------
-// silent flag — stamped on thrown errors for a caller's global error handler
+// silent flag - stamped on thrown errors for a caller's global error handler
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — silent flag', () => {
+describe('createHttpClient - silent flag', () => {
   it('stamps error.silent when config.silent is true', async () => {
     (globalThis.fetch as any).mockImplementation(async () => jsonResponse(500, { message: 'boom' }));
 
@@ -347,7 +347,7 @@ describe('createHttpClient — silent flag', () => {
 // Request deduplication
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — deduplication', () => {
+describe('createHttpClient - deduplication', () => {
   it('deduplicates concurrent GET requests to the same URL', async () => {
     let fetchCount = 0;
     (globalThis.fetch as any).mockImplementation(async () => {
@@ -389,7 +389,7 @@ describe('createHttpClient — deduplication', () => {
 // LRU cache
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — cache', () => {
+describe('createHttpClient - cache', () => {
   it('caches GET responses with cache: true', async () => {
     let fetchCount = 0;
     (globalThis.fetch as any).mockImplementation(async () => {
@@ -443,7 +443,7 @@ describe('createHttpClient — cache', () => {
 // Stale-while-revalidate (cache.staleTtl)
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — stale-while-revalidate', () => {
+describe('createHttpClient - stale-while-revalidate', () => {
   it('serves a stale hit instantly and revalidates in the background', async () => {
     let fetchCount = 0;
     (globalThis.fetch as any).mockImplementation(async () => {
@@ -486,7 +486,7 @@ describe('createHttpClient — stale-while-revalidate', () => {
 
     const r2 = await http.get('/api/thing', { cache, dedupe: false });
     expect(r2.stale).toBeFalsy();
-    expect(fetchCount).toBe(2); // no stale hit — a real blocking refetch
+    expect(fetchCount).toBe(2); // no stale hit - a real blocking refetch
   });
 });
 
@@ -494,7 +494,7 @@ describe('createHttpClient — stale-while-revalidate', () => {
 // serveStaleOnError (opt-in resilience)
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — serveStaleOnError', () => {
+describe('createHttpClient - serveStaleOnError', () => {
   it('serves the retained entry on a transient failure (500)', async () => {
     let attempts = 0;
     (globalThis.fetch as any).mockImplementation(async () => {
@@ -554,7 +554,7 @@ describe('createHttpClient — serveStaleOnError', () => {
 // Interceptors
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — interceptors', () => {
+describe('createHttpClient - interceptors', () => {
   it('request interceptor modifies config', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, {}));
     const http = createHttpClient();
@@ -602,7 +602,7 @@ describe('createHttpClient — interceptors', () => {
 // Safe mode
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — safe mode', () => {
+describe('createHttpClient - safe mode', () => {
   it('returns { data, error: null, status } on success', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, { id: 42 }));
     const http = createHttpClient();
@@ -628,7 +628,7 @@ describe('createHttpClient — safe mode', () => {
 // Instance creation
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — create instance', () => {
+describe('createHttpClient - create instance', () => {
   it('create() produces a new client with merged defaults', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, {}));
 
@@ -647,7 +647,7 @@ describe('createHttpClient — create instance', () => {
 // CSRF on mutations only
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — CSRF', () => {
+describe('createHttpClient - CSRF', () => {
   it('attaches CSRF token to POST but not GET', async () => {
     // Mock a CSRF meta tag
     const metaEl = { content: 'test-csrf-token' };
@@ -673,7 +673,7 @@ describe('createHttpClient — CSRF', () => {
 // Response types
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — response types', () => {
+describe('createHttpClient - response types', () => {
   it('parses text response', async () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(200, 'plain text'));
     const http = createHttpClient();
@@ -687,7 +687,7 @@ describe('createHttpClient — response types', () => {
 // Download
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — download', () => {
+describe('createHttpClient - download', () => {
   it('returns blob data with filename', async () => {
     const blob = new Blob(['csv,data'], { type: 'text/csv' });
     (globalThis.fetch as any).mockResolvedValue({

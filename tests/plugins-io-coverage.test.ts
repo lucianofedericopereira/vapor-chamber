@@ -2,14 +2,14 @@
  * Coverage-focused tests for I/O plugins (retry, persist, sync).
  *
  * Drives the arms the main plugins-io suite does not reach:
- *   159        — getStorage() falling back to globalThis.localStorage
- *   168        — save() catch branch (storage.setItem throws)
- *   185-186    — load() catch branch (storage.getItem / deserialize throws)
- *   194        — clear() catch branch (storage.removeItem throws)
- *   200-202    — scheduleSave() coalescing (microtask flush + early return)
- *   207-209    — coalesce plugin branch (schedules a single save per burst)
- *   259        — sync() called without a busRef (warning path)
- *   279-280    — sync onReceive returning false suppresses re-dispatch
+ *   159        - getStorage() falling back to globalThis.localStorage
+ *   168        - save() catch branch (storage.setItem throws)
+ *   185-186    - load() catch branch (storage.getItem / deserialize throws)
+ *   194        - clear() catch branch (storage.removeItem throws)
+ *   200-202    - scheduleSave() coalescing (microtask flush + early return)
+ *   207-209    - coalesce plugin branch (schedules a single save per burst)
+ *   259        - sync() called without a busRef (warning path)
+ *   279-280    - sync onReceive returning false suppresses re-dispatch
  */
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -17,10 +17,10 @@ import { createCommandBus, resetCommandBus } from '../src/index';
 import { persist, sync } from '../src/plugins';
 
 // ---------------------------------------------------------------------------
-// persist plugin — storage fallback, error handling, coalescing
+// persist plugin - storage fallback, error handling, coalescing
 // ---------------------------------------------------------------------------
 
-describe('persist plugin — coverage', () => {
+describe('persist plugin - coverage', () => {
   let warnSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -159,7 +159,7 @@ describe('persist plugin — coverage', () => {
     bus.dispatch('inc', {});
     bus.dispatch('inc', {});
 
-    // Nothing written yet — the flush is deferred to a microtask.
+    // Nothing written yet - the flush is deferred to a microtask.
     expect(setCalls).toBe(0);
 
     // Let the queued microtask run.
@@ -178,7 +178,7 @@ describe('persist plugin — coverage', () => {
     expect(data.coalesced).toBe(JSON.stringify({ count: 4 }));
   });
 
-  it('coalesce respects filter (line 208) — non-matching command schedules no save', async () => {
+  it('coalesce respects filter (line 208) - non-matching command schedules no save', async () => {
     const bus = createCommandBus();
     bus.register('cartAdd', () => {});
     bus.register('analyticsTrack', () => {});
@@ -213,10 +213,10 @@ describe('persist plugin — coverage', () => {
 });
 
 // ---------------------------------------------------------------------------
-// sync plugin — busRef-less warning + onReceive suppression
+// sync plugin - busRef-less warning + onReceive suppression
 // ---------------------------------------------------------------------------
 
-describe('sync plugin — coverage', () => {
+describe('sync plugin - coverage', () => {
   type BcMessage = { __vc: boolean; action: string; target: any; payload?: any };
 
   function makeMockBroadcastChannel() {
@@ -259,7 +259,7 @@ describe('sync plugin — coverage', () => {
     vi.stubGlobal('BroadcastChannel', makeBcConstructor(mockBc));
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    // No second argument → busRef?.dispatch is falsy → warning path (line 259).
+    // No second argument -> busRef?.dispatch is falsy -> warning path (line 259).
     const tabSync = sync({ channel: 'no-busref' });
 
     expect(warnSpy).toHaveBeenCalledWith(

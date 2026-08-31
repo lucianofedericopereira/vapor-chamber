@@ -1,14 +1,14 @@
 <!--
-  Feature example: Directive plugin — v-vc:command, v-vc-payload, v-vc-optimistic
+  Feature example: Directive plugin - v-vc:command, v-vc-payload, v-vc-optimistic
   ================================================================================
   Declarative dispatch straight from the template: no <script setup> wiring, no
-  per-button click handler. The directive owns the whole interaction — dispatch,
+  per-button click handler. The directive owns the whole interaction - dispatch,
   in-flight state, disable-while-busy, error class, optimistic rollback.
 
   RUNNABLE, no build step. From the repo root:
 
       npm run build                       # once, so dist/ exists
-      node examples/static-server.mjs     # → http://localhost:3000
+      node examples/static-server.mjs     # -> http://localhost:3000
       # then open
       #   http://localhost:3000/examples/feature-directives.html
 
@@ -17,7 +17,7 @@
   map at a CDN, or just bundle like every other example here.
 
   IMPORTANT: these directives are VDOM-only. Inside <script setup vapor> use
-  useCommand() / defineVaporCommand() instead — the plugin warns if it detects
+  useCommand() / defineVaporCommand() instead - the plugin warns if it detects
   Vapor. That boundary is deliberate, not a gap.
 -->
 <!DOCTYPE html>
@@ -25,7 +25,7 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>vapor-chamber — directive plugin demo</title>
+<title>vapor-chamber - directive plugin demo</title>
 <style>
   body { font-family: system-ui, sans-serif; max-width: 760px; margin: 2rem auto; padding: 0 1rem; }
   .panel { border: 1px solid #ddd; padding: 1rem 1.25rem; margin: 1rem 0; border-radius: 6px; }
@@ -39,10 +39,10 @@
   pre { background: #f5f5f5; padding: .5rem; border-radius: 4px; font-size: 12px; overflow: auto; min-height: 7em; }
   .count { font-variant-numeric: tabular-nums; min-width: 12ch; display: inline-block; }
 
-  /* The two classes the directive manages. Nothing here is wired up in JS —
+  /* The two classes the directive manages. Nothing here is wired up in JS -
      the directive adds and removes them around every dispatch. */
   .vc-loading { opacity: .55; }
-  .vc-loading::after { content: ' …'; }
+  .vc-loading::after { content: ' ...'; }
   .vc-error { border-color: #c00; color: #c00; }
 </style>
 </head>
@@ -51,14 +51,14 @@
 <h1>Directive plugin</h1>
 <p class="muted">
   Every button below dispatches through <code>v-vc:command</code>. There is no
-  click handler anywhere in this file — the directive adds
+  click handler anywhere in this file - the directive adds
   <code>.vc-loading</code> while a dispatch is in flight, disables the button,
   adds <code>.vc-error</code> on failure, and runs optimistic rollbacks.
 </p>
 
 <div id="app">
   <div class="panel">
-    <h2>1 — dispatch on click</h2>
+    <h2>1 - dispatch on click</h2>
     <div class="row">
       <button v-vc:command="'cartAdd'">Add to cart</button>
       <span class="count">{{ cart.count }} in cart</span>
@@ -67,7 +67,7 @@
   </div>
 
   <div class="panel">
-    <h2>2 — payload from a data attribute (static JSON)</h2>
+    <h2>2 - payload from a data attribute (static JSON)</h2>
     <div class="row">
       <button v-vc:command="'cartAdd'" data-vc-payload='{"qty":3}'>Add 3</button>
       <button v-vc:command="'cartAdd'" data-vc-payload='{"qty":10}'>Add 10</button>
@@ -76,7 +76,7 @@
   </div>
 
   <div class="panel">
-    <h2>3 — reactive payload via v-vc-payload</h2>
+    <h2>3 - reactive payload via v-vc-payload</h2>
     <div class="row">
       <label>qty <input type="number" v-model.number="qty" min="1" max="99" style="width:5rem"></label>
       <button v-vc:command="'cartAdd'" v-vc-payload="{ qty }">Add {{ qty }}</button>
@@ -85,7 +85,7 @@
   </div>
 
   <div class="panel">
-    <h2>4 — a failing dispatch adds .vc-error</h2>
+    <h2>4 - a failing dispatch adds .vc-error</h2>
     <div class="row">
       <button v-vc:command="'cartAddFailing'">Add (server says no)</button>
       <span class="muted">{{ lastError || 'no error yet' }}</span>
@@ -93,10 +93,10 @@
   </div>
 
   <div class="panel">
-    <h2>5 — optimistic update, rolled back on failure</h2>
+    <h2>5 - optimistic update, rolled back on failure</h2>
     <div class="row">
       <button v-vc:command="'cartAddFailing'" v-vc-optimistic="bumpOptimistically">
-        Add optimistically (fails → rolls back)
+        Add optimistically (fails -> rolls back)
       </button>
       <span class="count">{{ cart.count }} in cart</span>
     </div>
@@ -108,7 +108,7 @@
 
   <div class="panel">
     <h2>Telemetry</h2>
-    <pre>{{ log.join('\n') || '(waiting…)' }}</pre>
+    <pre>{{ log.join('\n') || '(waiting...)' }}</pre>
   </div>
 </div>
 
@@ -122,7 +122,7 @@
 
 <script type="module">
   import { createApp, reactive, ref } from 'vue';
-  // Straight from the built package — the same files npm publishes.
+  // Straight from the built package - the same files npm publishes.
   import { createAsyncCommandBus, setCommandBus, logger } from '/dist/index.js';
   import { createDirectivePlugin } from '/dist/directives.js';
 
@@ -149,7 +149,7 @@
   bus.use(logger());
   bus.on('*', (cmd, result) => {
     const ts = new Date().toTimeString().slice(0, 8);
-    log.unshift(`[${ts}] ${cmd.action} → ${result.ok ? 'ok' : 'fail: ' + result.error?.message}`);
+    log.unshift(`[${ts}] ${cmd.action} -> ${result.ok ? 'ok' : 'fail: ' + result.error?.message}`);
     if (!result.ok) lastError.value = result.error?.message ?? 'failed';
     if (log.length > 6) log.pop();
   });

@@ -68,11 +68,11 @@ describe('logger plugin', () => {
     bus.use(logger({ level: 'warn' }));
     bus.register('quietAction', () => 'fine');
 
-    bus.dispatch('quietAction', {}); // ok → info → suppressed
+    bus.dispatch('quietAction', {}); // ok -> info -> suppressed
     expect(group).not.toHaveBeenCalled();
     expect(log).not.toHaveBeenCalled();
 
-    bus.dispatch('missingAction', {}); // no handler → error → logged
+    bus.dispatch('missingAction', {}); // no handler -> error -> logged
     expect(group).toHaveBeenCalledWith('⚡ missingAction');
     expect(error).toHaveBeenCalledWith('error:', expect.anything());
   });
@@ -103,7 +103,7 @@ describe('logger plugin', () => {
     bus.dispatch('goodAction', {});
     expect(group).toHaveBeenCalledWith('[  OK  ] ⚡ goodAction');
 
-    bus.dispatch('badAction', {}); // no handler → failure
+    bus.dispatch('badAction', {}); // no handler -> failure
     expect(group).toHaveBeenCalledWith('[ FAIL ] ⚡ badAction');
   });
 
@@ -182,7 +182,7 @@ describe('validator plugin', () => {
   });
 });
 
-describe('history plugin — undoAction/redoAction triggers', () => {
+describe('history plugin - undoAction/redoAction triggers', () => {
   it('repeated undo + redo work when triggers are dispatched through the bus (cart scenario)', () => {
     const bus = createCommandBus();
     let total = 0;
@@ -669,7 +669,7 @@ describe('throttle plugin dispose()', () => {
 
     bus.dispatch('a', {}); // first call goes through, starts timer
     t.dispose(); // cancel the timer
-    // No timer leak — test just verifies dispose exists and doesn't throw
+    // No timer leak - test just verifies dispose exists and doesn't throw
   });
 });
 
@@ -682,6 +682,6 @@ describe('debounce plugin dispose()', () => {
 
     bus.dispatch('a', {}); // starts debounce timer
     d.dispose(); // cancel the timer
-    // No timer leak — test just verifies dispose exists and doesn't throw
+    // No timer leak - test just verifies dispose exists and doesn't throw
   });
 });

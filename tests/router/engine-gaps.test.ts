@@ -1,12 +1,12 @@
 // @vitest-environment happy-dom
 /**
- * Engine paths engine-edges.test.ts leaves open — the async lanes that only
+ * Engine paths engine-edges.test.ts leaves open - the async lanes that only
  * appear when a background operation outlives, or loses to, the navigation
  * that started it.
  *
  *  - trackRevalidation: a loader's background refresh (reported via
  *    LoaderContext.revalidate) landing after the user navigated away,
- *    and one that REJECTS — which must leave the stale data in place and
+ *    and one that REJECTS - which must leave the stale data in place and
  *    never reach onError.
  *  - refetchAffected's async arms: a query-only refetch that
  *    rejects reaching onError, and one superseded by a later
@@ -38,7 +38,7 @@ const ROWS: RouteRecord[] = [
   { name: 'other', path: '/other', parent: 'shell', component: 'Home' },
 ];
 
-/** Router wired to a single `rows:` prefix handler — the loader under test. */
+/** Router wired to a single `rows:` prefix handler - the loader under test. */
 function makeRouter(handler: (...args: any[]) => unknown, opts: Record<string, unknown> = {}) {
   return createRouter({
     history: createMemoryHistory('/'),
@@ -55,7 +55,7 @@ const flush = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 afterEach(() => vi.restoreAllMocks());
 
 // ---------------------------------------------------------------------------
-// trackRevalidation — background refresh outcomes
+// trackRevalidation - background refresh outcomes
 // ---------------------------------------------------------------------------
 
 describe('stale-while-revalidate background refresh', () => {
@@ -124,7 +124,7 @@ describe('stale-while-revalidate background refresh', () => {
 });
 
 // ---------------------------------------------------------------------------
-// refetchAffected — query-only change re-running loaders
+// refetchAffected - query-only change re-running loaders
 // ---------------------------------------------------------------------------
 
 describe('query-only refetch', () => {
@@ -135,10 +135,10 @@ describe('query-only refetch', () => {
     await router.push('/list?page=1');
     expect(router.currentRoute.value.data.get('list')).toBe('data-1');
 
-    await router.push('/list?page=2'); // query-only → fast path, not a re-navigation
+    await router.push('/list?page=2'); // query-only -> fast path, not a re-navigation
     await flush();
 
-    // location.query holds RAW strings — typed decoding (int, defaults) is a
+    // location.query holds RAW strings - typed decoding (int, defaults) is a
     // read-time concern (decodeQueryParam / useRouteQuery), not stored here.
     expect(router.currentRoute.value.location.query.page).toBe('2');
     expect(router.currentRoute.value.data.get('list')).toBe('data-2');
@@ -210,7 +210,7 @@ describe('location resolution', () => {
 
   it('treats a query-only string target as the ROOT path, not an empty one', async () => {
     // `(queryIndex >= 0 ? beforeHash.slice(0, queryIndex) : beforeHash) || '/'`
-    // — the `|| '/'` arm. A bare '?x=y' slices to an empty path, which would
+    // - the `|| '/'` arm. A bare '?x=y' slices to an empty path, which would
     // match nothing; the fallback is what makes `push('?tag=blue')` mean "the
     // root with this query" instead of an unmatched navigation.
     const router = makeRouter(() => 'x');
@@ -225,7 +225,7 @@ describe('location resolution', () => {
   });
 
   it('stringifies each element of an ARRAY query value', async () => {
-    // `Array.isArray(value) ? value.map(String) : String(value)` — the array
+    // `Array.isArray(value) ? value.map(String) : String(value)` - the array
     // arm. Repeated query keys (?tag=a&tag=b) are the shape parseQuery
     // produces, so a patch must be able to round-trip one.
     const router = makeRouter(() => 'x');
@@ -245,7 +245,7 @@ describe('location resolution', () => {
     const { query } = router.currentRoute.value.location;
     expect(query.tag).toBe('red');
     expect(query.missing).toBeUndefined();
-    // Both null and undefined are dropped outright — a declared default is
+    // Both null and undefined are dropped outright - a declared default is
     // applied when the value is READ, so nothing is stored for `page`.
     expect(query.page).toBeUndefined();
     expect(Object.keys(query)).toEqual(['tag']);
@@ -267,7 +267,7 @@ describe('setRouteData', () => {
     router.setRouteData('lsit', { typo: true }); // transposed name
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0]![0]).toContain('no route record by that name');
-    // The value still lands — lenient, just loud.
+    // The value still lands - lenient, just loud.
     expect(router.currentRoute.value.data.get('lsit')).toEqual({ typo: true });
     router.destroy();
   });
@@ -287,7 +287,7 @@ describe('setRouteData', () => {
   it('skips the table lookup entirely in production (DEV=false)', async () => {
     // The `if (DEV)` FALSE arm: "loud in dev, lenient in prod" is the stated
     // contract, but only the loud half was tested. In production the unknown
-    // name must warn NOTHING and still store the value — and the compiled
+    // name must warn NOTHING and still store the value - and the compiled
     // table must not be consulted at all.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.stubEnv('NODE_ENV', 'production');
@@ -315,12 +315,12 @@ describe('setRouteData', () => {
 });
 
 // ---------------------------------------------------------------------------
-// commitQueryLocation — the replace arm of a query-only change
+// commitQueryLocation - the replace arm of a query-only change
 // ---------------------------------------------------------------------------
 
 describe('query-only navigation', () => {
   it('honours replace vs push on a query-only change', async () => {
-    // `opts.replace ? 'replace' : 'push'` — only the push arm ran. The
+    // `opts.replace ? 'replace' : 'push'` - only the push arm ran. The
     // difference is invisible in the location and visible only in history
     // depth, which is the whole point of the flag.
     const router = makeRouter(() => 'x');
@@ -421,16 +421,16 @@ describe('hook unsubscribe', () => {
 });
 
 // ---------------------------------------------------------------------------
-// refetchAffected — the two stale-result guards
+// refetchAffected - the two stale-result guards
 //
 // The existing superseded test navigates away, and a navigation aborts the
-// refetch controller (engine.ts:254) — so it returns at the `own.signal.aborted`
+// refetch controller (engine.ts:254) - so it returns at the `own.signal.aborted`
 // check on :385 and never reaches :387. Getting there needs the location to move
 // WITHOUT aborting: a second query-only change whose keys affect no loader
 // returns early at :376, before the abort on :378.
 // ---------------------------------------------------------------------------
 
-describe('refetchAffected — stale guards', () => {
+describe('refetchAffected - stale guards', () => {
   it('discards a refetch whose location moved on beneath it', async () => {
     let calls = 0;
     let release!: (v: string) => void;
@@ -458,7 +458,7 @@ describe('refetchAffected — stale guards', () => {
     expect(router.currentRoute.value.data.get('list')).toBe('data-1');
 
     await router.push('/list?page=2'); // starts the slow refetch (not aborted below)
-    await router.push('/list?page=2&tag=x'); // affects nothing → returns before the abort
+    await router.push('/list?page=2&tag=x'); // affects nothing -> returns before the abort
 
     release('too-late');
     await flush();
@@ -472,7 +472,7 @@ describe('refetchAffected — stale guards', () => {
 
   it('stays silent when a refetch rejects as cancelled', async () => {
     // The catch arm's early return. A cancelled loader is an expected outcome
-    // of superseding, not an application error — routing it to onError would
+    // of superseding, not an application error - routing it to onError would
     // surface a spurious failure in useRouteError on every fast retype.
     let calls = 0;
     const router = makeRouter(() => {
@@ -497,8 +497,8 @@ describe('refetchAffected — stale guards', () => {
 
 describe('navigation error wrapping', () => {
   it('wraps a NON-router error as component_load_failed', async () => {
-    // `isRouterError(error) ? error : routerError('component_load_failed', …)`
-    // — the wrap arm. Coded router errors pass through untouched (covered
+    // `isRouterError(error) ? error : routerError('component_load_failed', ...)`
+    // - the wrap arm. Coded router errors pass through untouched (covered
     // elsewhere); a plain Error from a component chunk is the common real case
     // and had never reached this branch.
     const router = createRouter({
@@ -525,10 +525,10 @@ describe('navigation error wrapping', () => {
   });
 });
 
-describe('navigation error wrapping — uncoded errors', () => {
+describe('navigation error wrapping - uncoded errors', () => {
   it('wraps a plain Error thrown by a beforeEach guard', async () => {
-    // `isRouterError(error) ? error : routerError('component_load_failed', …)`
-    // — the WRAP arm. Component load failures arrive already coded, so they
+    // `isRouterError(error) ? error : routerError('component_load_failed', ...)`
+    // - the WRAP arm. Component load failures arrive already coded, so they
     // take the pass-through arm; guards are awaited unwrapped inside the same
     // try, so a guard that throws (a buggy auth check, a failed permission
     // lookup) is the path that produces an uncoded error here.

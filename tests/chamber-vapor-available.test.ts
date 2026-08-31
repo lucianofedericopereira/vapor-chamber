@@ -1,12 +1,12 @@
 /**
- * Covers src/chamber-vapor.ts's SUCCESS paths — createVaporChamberApp's return
+ * Covers src/chamber-vapor.ts's SUCCESS paths - createVaporChamberApp's return
  * (not just its throw) and defineVaporCustomElement's extraOptions ternary.
  *
  * tests/chamber-vapor.test.ts exercises the "Vapor not available" throw path
  * exclusively. That's not a timing gap to await past: Node's plain
  * `import('vue')` does not expose createVaporApp / defineVaporCustomElement /
  * vaporInteropPlugin as main-entry exports at all in this environment (only a
- * bundler-resolved build does) — confirmed directly, `waitForVueDetection()`
+ * bundler-resolved build does) - confirmed directly, `waitForVueDetection()`
  * changes nothing. tests/vue-global-detection.test.ts already established the
  * fix for exactly this: stub `globalThis.__VUE__` with a mock Vue object
  * before chamber.ts's module-load probe runs, so its SYNCHRONOUS `__VUE__`
@@ -49,7 +49,7 @@ async function freshChamberVapor() {
   return import('../src/chamber-vapor');
 }
 
-describe('createVaporChamberApp — Vapor available', () => {
+describe('createVaporChamberApp - Vapor available', () => {
   it('returns the app instance from Vue\'s createVaporApp(), not a throw', async () => {
     const { createVaporChamberApp } = await freshChamberVapor();
     const rootComponent = { setup() { return () => null; } };
@@ -68,10 +68,10 @@ describe('createVaporChamberApp — Vapor available', () => {
   });
 });
 
-describe('defineVaporCustomElement — Vapor available', () => {
+describe('defineVaporCustomElement - Vapor available', () => {
   const options = { props: {}, setup() { return () => null; } };
 
-  it('calls fn(options) — no extraOptions branch', async () => {
+  it('calls fn(options) - no extraOptions branch', async () => {
     const { defineVaporCustomElement } = await freshChamberVapor();
     const El = defineVaporCustomElement(options) as any;
 
@@ -80,7 +80,7 @@ describe('defineVaporCustomElement — Vapor available', () => {
     expect(El.extraOptions).toBeUndefined();
   });
 
-  it('calls fn(options, extraOptions) — extraOptions branch', async () => {
+  it('calls fn(options, extraOptions) - extraOptions branch', async () => {
     const { defineVaporCustomElement } = await freshChamberVapor();
     const extra = { shadowRoot: false };
     const El = defineVaporCustomElement(options, extra) as any;
@@ -91,17 +91,17 @@ describe('defineVaporCustomElement — Vapor available', () => {
 });
 
 // The remaining two wrappers had their "Vapor present" side stubbed in mockVue
-// but never actually called, so only their null-return branch was reached —
+// but never actually called, so only their null-return branch was reached -
 // which is the half that cannot regress silently, since it now DEV-warns. The
 // forwarding half is the half a refactor could quietly break.
-describe('defineVaporComponent / defineVaporAsyncComponent — Vapor available', () => {
+describe('defineVaporComponent / defineVaporAsyncComponent - Vapor available', () => {
   it('defineVaporComponent forwards options to Vue and returns its result', async () => {
     const { defineVaporComponent } = await freshChamberVapor();
     const options = { props: { count: Number }, setup: () => () => null };
     const Comp = defineVaporComponent(options) as any;
 
     expect(Comp).not.toBeNull();
-    expect(Comp).toBe(options); // mock is identity — proves pass-through, not re-wrapping
+    expect(Comp).toBe(options); // mock is identity - proves pass-through, not re-wrapping
     expect(mockVue.defineVaporComponent).toHaveBeenCalledWith(options);
   });
 
@@ -116,7 +116,7 @@ describe('defineVaporComponent / defineVaporAsyncComponent — Vapor available',
 
   it('the three wrappers are silent in production, and still return null', async () => {
     // The `if (DEV)` guard added around each devWarnNoVapor() has a false side
-    // that vitest never takes on its own — NODE_ENV is not 'production' here,
+    // that vitest never takes on its own - NODE_ENV is not 'production' here,
     // so DEV is always true and the branch is dead in a normal run. Pin it the
     // way tests/dev-flag.test.ts pins DEV itself: force the runtime fallback to
     // false, then assert the warning is gone while the RETURN CONTRACT is not.
@@ -126,7 +126,7 @@ describe('defineVaporComponent / defineVaporAsyncComponent — Vapor available',
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
       // No __VUE__ stub here, so the Vapor surface is absent and all three take
-      // the null path — the same path that warns in dev.
+      // the null path - the same path that warns in dev.
       const m = await import('../src/chamber-vapor');
       expect(m.defineVaporCustomElement({})).toBeNull();
       expect(m.defineVaporComponent({})).toBeNull();

@@ -1,5 +1,5 @@
 /**
- * Observable adapter — bridges bus events to Symbol.observable / RxJS.
+ * Observable adapter - bridges bus events to Symbol.observable / RxJS.
  *
  * Locks v1.2.x behavior: each subscribe creates an independent listener;
  * unsubscribe drops it; Symbol.observable interop returns self; dispatchFrom

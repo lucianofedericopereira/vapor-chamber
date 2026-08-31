@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE — custom directives on a real Vapor app, vue@3.6.0-rc.3.
+ * FIXTURE - custom directives on a real Vapor app, vue@3.6.0-rc.3.
  *
  * WHY THIS FILE EXISTS. Four places in this repo asserted that custom
  * directives are a VDOM-only feature and will never work in Vapor:
@@ -11,7 +11,7 @@
  *
  * The claim is false, and was false when it was written. `withVaporDirectives`
  * is a public export of the with-vapor build and ships in EVERY Vue version
- * this project has tracked — verified by unpacking the published
+ * this project has tracked - verified by unpacking the published
  * `@vue/runtime-vapor` dist for 3.6.0-alpha.3, beta.8, beta.10, beta.15,
  * beta.17, rc.1 and rc.2: the helper is present in all of them. rc.3 did not
  * add the feature; it hardened it (#15258 codegen parens, #15167 async
@@ -20,7 +20,7 @@
  * So this fixture measures the thing the docs asserted about, the same way
  * `tests/router/vapor-fixture.test.ts` measures provide/inject rather than
  * trusting a roadmap checkbox. The rule that file states cuts both ways: an
- * unchecked box never meant missing — and a confident sentence in our own
+ * unchecked box never meant missing - and a confident sentence in our own
  * docs is not evidence either.
  *
  * WHAT IS ACTUALLY DIFFERENT IN VAPOR (the reason a port is not a rename):
@@ -31,12 +31,12 @@
  *
  * It is invoked ONCE per root element inside a detached `EffectScope`, and a
  * returned function is registered via `onScopeDispose`. There is no `updated`
- * hook at all — a Vapor directive that must react to changing values creates
+ * hook at all - a Vapor directive that must react to changing values creates
  * its own effect inside that scope, because `value` is delivered as a getter.
  * That is the substantive porting cost for `v-vc:command`, and the reason
  * this fixture asserts the shape rather than just "it runs".
  *
- * Everything is imported from the single with-vapor browser build on purpose —
+ * Everything is imported from the single with-vapor browser build on purpose -
  * two separately-imported Vue dists are two disconnected reactivity instances
  * (chamber.ts §probeVue, whitepaper §11.6), so mixing builds here would
  * silently measure nothing.
@@ -156,12 +156,12 @@ describe('custom directives on a vapor app (rc.3)', () => {
     app.unmount();
 
     // The returned function is registered with onScopeDispose on a detached
-    // scope, so teardown is scope-driven — which is exactly the lifecycle
+    // scope, so teardown is scope-driven - which is exactly the lifecycle
     // every composable in this lib already uses (tryAutoCleanup).
     expect(cleaned).toBe(1);
   });
 
-  it('has NO updated hook — the value arrives as a getter, reactivity is the directive\'s own job', async () => {
+  it('has NO updated hook - the value arrives as a getter, reactivity is the directive\'s own job', async () => {
     const { createVaporApp, defineVaporComponent, withVaporDirectives, template, shallowRef, renderEffect, nextTick } = await vapor();
 
     const action = shallowRef('cartAdd');

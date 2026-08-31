@@ -1,6 +1,6 @@
 {
   "name": "vapor-chamber",
-  "version": "1.16.0",
+  "version": "1.18.0",
   "description": "Lightweight command bus for Vue Vapor - plugins, hooks, undo/redo, Vue 3.6 Vapor aligned",
   "type": "module",
   "main": "./dist/index.js",
@@ -16,6 +16,11 @@
       "types": "./dist/vue.d.ts",
       "import": "./dist/vue.js",
       "default": "./dist/vue.js"
+    },
+    "./vapor": {
+      "types": "./dist/vapor.d.ts",
+      "import": "./dist/vapor.js",
+      "default": "./dist/vapor.js"
     },
     "./transports": {
       "types": "./dist/transports.d.ts",
@@ -87,6 +92,11 @@
       "import": "./dist/stream-parser.js",
       "default": "./dist/stream-parser.js"
     },
+    "./store": {
+      "types": "./dist/store.d.ts",
+      "import": "./dist/store.js",
+      "default": "./dist/store.js"
+    },
     "./router": {
       "types": "./dist/router/index.d.ts",
       "import": "./dist/router/index.js",
@@ -96,6 +106,16 @@
       "types": "./dist/router/vdom.d.ts",
       "import": "./dist/router/vdom.js",
       "default": "./dist/router/vdom.js"
+    },
+    "./router/vapor": {
+      "types": "./dist/router/vapor.d.ts",
+      "import": "./dist/router/vapor.js",
+      "default": "./dist/router/vapor.js"
+    },
+    "./router/remote": {
+      "types": "./dist/router/remote.d.ts",
+      "import": "./dist/router/remote.js",
+      "default": "./dist/router/remote.js"
     },
     "./router-fetch": {
       "types": "./dist/router-fetch/index.d.ts",
@@ -124,10 +144,12 @@
     "src",
     "scripts",
     "ROADMAP.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "sideEffects": [
     "./dist/vue.js",
+    "./dist/vapor.js",
     "./dist/iife.js",
     "./dist/iife-core.js",
     "./dist/iife-elements.js",
@@ -142,7 +164,7 @@
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.typecheck.json && tsc -p examples/tsconfig.patterns.json",
     "lint": "biome check --write src tests scripts",
-    "lint:check": "biome check src tests scripts && node scripts/check-env-guards.mjs && node scripts/check-line-citations.mjs && node scripts/stamp-docs.mjs --check",
+    "lint:check": "biome check src tests scripts && node scripts/check-env-guards.mjs && node scripts/check-line-citations.mjs && node scripts/check-doc-claims.mjs && node scripts/stamp-docs.mjs --check && node scripts/check-ascii.mjs",
     "docs:stamp": "node scripts/stamp-docs.mjs",
     "docs:check": "node scripts/stamp-docs.mjs --check",
     "test": "vitest run && vitest run -c vitest.vapor.config.ts",
@@ -160,7 +182,7 @@
     "loc": "node scripts/measure-loc.mjs src",
     "docs": "typedoc",
     "docs:watch": "typedoc --watch",
-    "prepublishOnly": "npm run typecheck && npm run lint:check && npm run test:run && npm run build && npm run size:check"
+    "prepublishOnly": "npm run typecheck && npm run lint:check && npm run test:run && npm run build && npm run test:vapor && npm run size:check"
   },
   "keywords": [
     "vue",
@@ -195,9 +217,9 @@
   "peerDependencies": {
     "@vitejs/plugin-vue": ">=5.0.0",
     "@vue/devtools-api": ">=6.0.0",
-    "@vue/reactivity": ">=3.5.0 || >=3.6.0-rc.5",
+    "@vue/reactivity": ">=3.5.0 || >=3.6.0-rc.6",
     "vite": ">=5.0.0",
-    "vue": ">=3.5.0 || >=3.6.0-rc.5"
+    "vue": ">=3.5.0 || >=3.6.0-rc.6"
   },
   "peerDependenciesMeta": {
     "vue": {
@@ -224,7 +246,7 @@
     "@types/node": "^26.2.0",
     "@vitest/coverage-v8": "^4.1.9",
     "@vue/devtools-api": "^8.1.5",
-    "@vue/reactivity": "^3.6.0-rc.5",
+    "@vue/reactivity": "^3.6.0-rc.6",
     "esbuild": "^0.28.2",
     "eventemitter3": "^5.0.4",
     "happy-dom": "^20.11.2",
@@ -236,7 +258,7 @@
     "typescript": "^6.0.3",
     "vite": "^8.2.1",
     "vitest": "^4.1.9",
-    "vue": "^3.6.0-rc.5"
+    "vue": "^3.6.0-rc.6"
   },
   "engines": {
     "node": ">=22.12.0"

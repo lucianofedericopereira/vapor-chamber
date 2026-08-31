@@ -1,10 +1,10 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE — provide/inject on a real Vapor app, vue@3.6.0-rc.2.
+ * FIXTURE - provide/inject on a real Vapor app, vue@3.6.0-rc.2.
  *
  * Two things this router depends on, MEASURED here rather than inferred:
- *   - app.provide → inject   backs every composable (composables.ts useRouter)
- *   - provide() → inject     backs nested outlets (outlet.ts OUTLET_DEPTH_KEY)
+ *   - app.provide -> inject   backs every composable (composables.ts useRouter)
+ *   - provide() -> inject     backs nested outlets (outlet.ts OUTLET_DEPTH_KEY)
  *
  * The roadmap (vuejs/core#13687) listed "Provide/Inject System" unchecked when
  * this fixture was written, and now lists it checked. The measurements are
@@ -15,7 +15,7 @@
  * Everything is imported from the single with-vapor browser build on purpose.
  * Vapor ships as a physically separate dist file (see chamber.ts §probeVue and
  * whitepaper §11.6), and two separately-imported Vue dists are two disconnected
- * reactivity instances — mixing `vue` and the with-vapor build in one test would
+ * reactivity instances - mixing `vue` and the with-vapor build in one test would
  * silently measure nothing.
  */
 
@@ -45,13 +45,13 @@ describe('provide/inject on a vapor app', () => {
     // shape mirrors outlet.ts: a component that provides, wrapping one that injects
     const Grandchild = defineVaporComponent({
       setup() {
-        componentLevel = inject(DEPTH_KEY, '(default — provide() did NOT reach)');
+        componentLevel = inject(DEPTH_KEY, '(default - provide() did NOT reach)');
         return [];
       },
     });
     const Child = defineVaporComponent({
       setup() {
-        appLevel = inject(APP_KEY, '(default — app.provide did NOT reach)');
+        appLevel = inject(APP_KEY, '(default - app.provide did NOT reach)');
         provide(DEPTH_KEY, 'component-level OK');
         return createComponent(Grandchild);
       },
@@ -62,7 +62,7 @@ describe('provide/inject on a vapor app', () => {
     app.mount(document.createElement('div'));
 
     // MEASURED on 3.6.0-rc.2: both resolve. Upstream now agrees (the roadmap
-    // box is checked), but the assertion — not the box — is why we rely on it.
+    // box is checked), but the assertion - not the box - is why we rely on it.
     expect(appLevel).toBe('app-level OK');
     expect(componentLevel).toBe('component-level OK');
   });

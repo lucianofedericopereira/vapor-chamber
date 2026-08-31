@@ -1,27 +1,27 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE — the router composables inside a REAL mounted Vapor component.
+ * FIXTURE - the router composables inside a REAL mounted Vapor component.
  *
  * WHY THIS FILE EXISTS. `tests/router/composables.test.ts` covers all eight
- * composables, but through `app.runWithContext(fn)` on a VDOM app — no
+ * composables, but through `app.runWithContext(fn)` on a VDOM app - no
  * component, no mount, no Vapor. `tests/router/vapor-fixture.test.ts` does use
  * a real Vapor app, but only to measure provide/inject as a primitive; it never
- * calls a composable. So the actual shipped combination — a router composable
- * executing inside `defineVaporComponent({ setup() })` — had no coverage.
+ * calls a composable. So the actual shipped combination - a router composable
+ * executing inside `defineVaporComponent({ setup() })` - had no coverage.
  *
  * That is the same gap that hid the rc.4 KeepAlive bug: `tryKeepAliveHooks`
  * was gated on `getCurrentInstance()`, which answers null in a Vapor setup, so
  * a feature was inert on Vapor while every VDOM-shaped test stayed green. The
  * router is the largest surface still exposed to that class, because it leans
- * on three context-sensitive Vue primitives — `inject()`, `getCurrentScope()`
- * and `onScopeDispose()` — and each is a place where "works in VDOM" does not
+ * on three context-sensitive Vue primitives - `inject()`, `getCurrentScope()`
+ * and `onScopeDispose()` - and each is a place where "works in VDOM" does not
  * imply "works in Vapor".
  *
  * This file runs under `vitest.vapor.config.ts`, which aliases `vue` to the
  * with-vapor build. That alias is not a convenience: the router imports `vue`
  * as a bare specifier, so without it the router and the Vapor app would be two
  * disconnected reactivity instances and `inject(ROUTER_KEY)` would miss for
- * harness reasons. Real Vapor apps alias exactly the same way — see
+ * harness reasons. Real Vapor apps alias exactly the same way - see
  * `examples/vapor-sfc`.
  */
 
@@ -41,7 +41,7 @@ import {
 import type { RouteRecord } from '../../src/router/types';
 
 // Pulled from the alias target, so this is the SAME module instance the router
-// imports as bare `vue` — the whole point of this config.
+// imports as bare `vue` - the whole point of this config.
 import { createVaporApp, defineVaporComponent, nextTick, template } from 'vue';
 
 const ROWS: RouteRecord[] = [
@@ -101,7 +101,7 @@ describe('router composables inside a real Vapor component', () => {
       path = useRoute().value.path;
     });
 
-    // The load-bearing one: app.use(router) → app.provide → inject() all work
+    // The load-bearing one: app.use(router) -> app.provide -> inject() all work
     // across the Vapor boundary, from inside a mounted component.
     expect(injected).toBe(router);
     expect(path).toBe('/');
@@ -120,7 +120,7 @@ describe('router composables inside a real Vapor component', () => {
     await nextTick();
 
     // A computed() created inside a Vapor setup must still track the router's
-    // shallowRefs — one reactivity instance, so this holds.
+    // shallowRefs - one reactivity instance, so this holds.
     expect(route.value.path).toBe('/list');
     unmount();
   });
@@ -197,7 +197,7 @@ describe('router composables inside a real Vapor component', () => {
 
     // useQueryParam registers its unsubscribe via
     // `if (getCurrentScope()) onScopeDispose(off)`. If getCurrentScope() were
-    // falsy in a Vapor setup — as getCurrentInstance() is — that cleanup would
+    // falsy in a Vapor setup - as getCurrentInstance() is - that cleanup would
     // never arm and every mounted route component would leak a router
     // subscription. Navigating after unmount must stay quiet.
     await expect(router.push('/')).resolves.toBeNull();

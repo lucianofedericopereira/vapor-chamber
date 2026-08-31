@@ -2,7 +2,7 @@
  * The router's exported helpers, tested against their PUBLIC contract.
  *
  * All four are heavily used inside the router, so they were already covered
- * incidentally — but a preset author calls `routerError()` directly (that is
+ * incidentally - but a preset author calls `routerError()` directly (that is
  * how `router-fetch` reports `load_failed`), a Blade shell computes its base
  * with `normalizeBase`/`stripBase`, and `HARD_NAV_CODES` decides whether a
  * failed navigation hands the URL back to the server. Incidental coverage
@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
 import { HARD_NAV_CODES, isRouterError, routerError } from '../../src/router/errors';
 import { normalizeBase, stripBase } from '../../src/router/history';
 
-describe('routerError — the error constructor presets use', () => {
+describe('routerError - the error constructor presets use', () => {
   it('produces a narrowable RouterError with a machine-readable code', () => {
     const error = routerError('load_failed', 'loader blew up');
     expect(error).toBeInstanceOf(Error);
@@ -43,7 +43,7 @@ describe('routerError — the error constructor presets use', () => {
   });
 });
 
-describe('HARD_NAV_CODES — which failures the server gets the last word on', () => {
+describe('HARD_NAV_CODES - which failures the server gets the last word on', () => {
   it('contains exactly the codes a full page load can recover', () => {
     // Adding or removing a code here silently changes navigation behaviour:
     // members hand the URL to the server, everything else stays client-side.
@@ -84,7 +84,7 @@ describe('stripBase', () => {
   });
 
   it('returns null when the path is outside the base', () => {
-    // This is what tells link interception "not ours — let the browser have it".
+    // This is what tells link interception "not ours - let the browser have it".
     expect(stripBase('/other/items', '/admin')).toBeNull();
     expect(stripBase('/administrator', '/admin')).toBeNull(); // prefix, not a segment
   });

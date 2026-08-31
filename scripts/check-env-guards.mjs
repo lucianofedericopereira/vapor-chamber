@@ -3,7 +3,7 @@
  * Gate: no unguarded `process.env` reads in src/.
  *
  * A bare `process.env.NODE_ENV` is a ReferenceError anywhere this library is
- * delivered without a bundler — Blade inline payloads, plain ESM + import map
+ * delivered without a bundler - Blade inline payloads, plain ESM + import map
  * (examples/router-demo), pattern-1 no-build. The guarded form is
  * `typeof process !== 'undefined' && process.env?.NODE_ENV !== 'production'`.
  *
@@ -13,21 +13,24 @@
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = new URL('..', import.meta.url).pathname;
+// `fileURLToPath`, not `.pathname` - the latter yields `/C:/...` on Windows,
+// and stamp-docs.mjs next door already does it this way.
+const ROOT = fileURLToPath(new URL('..', import.meta.url));
 const SRC = join(ROOT, 'src');
 
 /**
  * Documented exceptions:
- * - command-bus.ts / devtools.ts — bundler-only surfaces where the bare
+ * - command-bus.ts / devtools.ts - bundler-only surfaces where the bare
  *   literal is load-bearing for dead-code elimination (commented at the site).
- * - vite-hmr.ts — a Vite plugin; it only ever executes inside Node.
+ * - vite-hmr.ts - a Vite plugin; it only ever executes inside Node.
  */
 const ALLOWLIST = new Set(['src/command-bus.ts', 'src/devtools.ts', 'src/vite-hmr.ts']);
 
 const TYPEOF_GUARD = /typeof\s+process\s*!==\s*['"]undefined['"]/;
 const READ = /\bprocess\.env\b/;
-/** How many lines above a read a `typeof process` guard may sit (multi-line `if (…)`). */
+/** How many lines above a read a `typeof process` guard may sit (multi-line `if (...)`). */
 const WINDOW = 4;
 
 function* walk(dir) {
@@ -45,7 +48,7 @@ for (const file of walk(SRC)) {
   const lines = readFileSync(file, 'utf8').split('\n');
   // Block-comment state has to be tracked ACROSS lines, not just stripped
   // per line: a `process.env` mentioned in prose on a continuation line of a
-  // /** … */ block matched neither the `//` nor the single-line `/* … */`
+  // /** ... */ block matched neither the `//` nor the single-line `/* ... */`
   // strip, so documenting this very rule tripped it. A guard that fires on
   // its own explanation is not a guard.
   let inBlockComment = false;
@@ -63,7 +66,7 @@ for (const file of walk(SRC)) {
     code = code.replace(/\/\/.*$/, '');
     if (!READ.test(code)) return;
     // The guard may sit on this line or a few lines above, inside a wrapped
-    // `if (…)` condition — scan a small window rather than the line alone.
+    // `if (...)` condition - scan a small window rather than the line alone.
     const window = lines.slice(Math.max(0, i - WINDOW), i + 1).join('\n');
     if (!TYPEOF_GUARD.test(window)) offenders.push(`${rel}:${i + 1}  ${line.trim()}`);
   });

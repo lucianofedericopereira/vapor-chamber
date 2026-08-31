@@ -1,5 +1,5 @@
 /**
- * Tests for onMissing: 'buffer' — deferred dispatch (buffer-until-registered).
+ * Tests for onMissing: 'buffer' - deferred dispatch (buffer-until-registered).
  * Built for lazy/async wiring (island hydration, code-split panels) where a
  * command can be dispatched before its handler exists: the command is queued
  * per-action and replayed, in order, the moment a handler registers.
@@ -9,12 +9,12 @@ import { createCommandBus, createAsyncCommandBus } from '../src/command-bus';
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 
-describe("onMissing: 'buffer' — deferred dispatch", () => {
+describe("onMissing: 'buffer' - deferred dispatch", () => {
   it('replays commands dispatched before the handler exists, in FIFO order', () => {
     const bus = createCommandBus({ onMissing: 'buffer' });
     const seen: number[] = [];
 
-    // dispatched with no handler yet → queued
+    // dispatched with no handler yet -> queued
     const r1 = bus.dispatch('open', 1);
     bus.dispatch('open', 2);
     bus.dispatch('open', 3);
@@ -23,12 +23,12 @@ describe("onMissing: 'buffer' — deferred dispatch", () => {
     expect(r1.ok).toBe(true);           // accepted (deferred)
     expect(r1.value).toBeUndefined();
 
-    // handler arrives → buffered commands replay in order
+    // handler arrives -> buffered commands replay in order
     bus.register('open', (cmd) => { seen.push(cmd.target as number); });
     expect(seen).toEqual([1, 2, 3]);
   });
 
-  it('does NOT buffer once a handler exists — later dispatches run immediately', () => {
+  it('does NOT buffer once a handler exists - later dispatches run immediately', () => {
     const bus = createCommandBus({ onMissing: 'buffer' });
     const seen: number[] = [];
     bus.register('go', (cmd) => { seen.push(cmd.target as number); });
@@ -68,14 +68,14 @@ describe("onMissing: 'buffer' — deferred dispatch", () => {
     const bus = createCommandBus({ onMissing: 'buffer', bufferLimit: 2 });
     bus.dispatch('q', 1);
     bus.dispatch('q', 2);
-    bus.dispatch('q', 3); // overflow → drops oldest (1)
+    bus.dispatch('q', 3); // overflow -> drops oldest (1)
     const seen: number[] = [];
     bus.register('q', (cmd) => seen.push(cmd.target as number));
     warn.mockRestore();
     expect(seen).toEqual([2, 3]);
   });
 
-  it('query never buffers — it falls back to error', () => {
+  it('query never buffers - it falls back to error', () => {
     const bus = createCommandBus({ onMissing: 'buffer' });
     const r = bus.query('missing', {});
     expect(r.ok).toBe(false);
@@ -126,7 +126,7 @@ describe("onMissing: 'buffer' — deferred dispatch", () => {
         onBufferOverflow: (_a, d) => dropped.push(d.target),
       });
       bus.dispatch('save', 'stale'); // at t=0
-      vi.setSystemTime(1_000_200);   // +200ms — past TTL
+      vi.setSystemTime(1_000_200);   // +200ms - past TTL
       bus.dispatch('save', 'fresh'); // push reaps 'stale'
       expect(dropped).toEqual(['stale']);
 

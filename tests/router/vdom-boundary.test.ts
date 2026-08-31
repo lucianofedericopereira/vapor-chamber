@@ -1,5 +1,5 @@
 /**
- * vDOM boundary regression — the base `vapor-chamber/router` entry must not
+ * vDOM boundary regression - the base `vapor-chamber/router` entry must not
  * drag Vue's virtual-DOM runtime in.
  *
  * A Vapor consumer that only calls createRouter() should end up importing
@@ -7,7 +7,7 @@
  * tell: they live in `outlet.ts` and `blade.ts`, and if either is reachable
  * from the entry's live bindings, the vDOM runtime is retained.
  *
- * (`vue` is an optional peer, so it stays external in this bundle — what we
+ * (`vue` is an optional peer, so it stays external in this bundle - what we
  * assert on is WHICH named bindings the router still asks `vue` for.)
  *
  * Skips when dist/ hasn't been built or esbuild is unavailable.
@@ -80,7 +80,7 @@ describe.skipIf(!haveDist || !esbuild)('vDOM boundary', () => {
     expect(leaked).toEqual([]);
   });
 
-  it('the vdom subpath DOES pull vDOM — the cost is opt-in, not default', async () => {
+  it('the vdom subpath DOES pull vDOM - the cost is opt-in, not default', async () => {
     const imports = await vueImportsOf(`
       import { RouterOutlet } from '${vdomEntry.replace(/\\/g, '\\\\')}';
       globalThis.__vc = RouterOutlet;

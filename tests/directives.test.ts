@@ -1,5 +1,5 @@
 /**
- * Tests for src/directives.ts — v-vc:command, v-vc:payload, v-vc:optimistic
+ * Tests for src/directives.ts - v-vc:command, v-vc:payload, v-vc:optimistic
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createDirectivePlugin } from '../src/directives';
@@ -24,7 +24,7 @@ function createMockApp() {
   };
 }
 
-// Minimal mock document — stands in for the real `document` the .delegate
+// Minimal mock document - stands in for the real `document` the .delegate
 // modifier registers a shared listener on (tests/directives.test.ts runs in
 // the plain 'node' vitest environment, no real DOM/happy-dom).
 function createMockDocument() {
@@ -73,7 +73,7 @@ function createElement(tag = 'button', opts: { parent?: any; ownerDocument?: any
     ownerDocument: opts.ownerDocument,
     get _classes() { return [...classes]; },
     get _listenerOpts() { return listenerOpts.get('click'); },
-    // Type guard — mock is not HTMLButtonElement by default
+    // Type guard - mock is not HTMLButtonElement by default
     ...(tag === 'button' ? { __isButton: true } : {}),
   };
   return self;
@@ -159,7 +159,7 @@ describe('createDirectivePlugin', () => {
       expect(calls).toBe(0);
     });
 
-    // Event modifiers — the direct listener never sees Vue's compiled withModifiers,
+    // Event modifiers - the direct listener never sees Vue's compiled withModifiers,
     // so v-vc:command applies .stop/.prevent/.self/.left/.middle/.right/.capture/
     // .once/.passive itself (the numeric modifier remains the dispatch timeout).
     describe('event modifiers', () => {
@@ -175,16 +175,16 @@ describe('createDirectivePlugin', () => {
         expect(calls).toBe(1);
       });
 
-      it('honors .self — only dispatches when the event targets the bound element', () => {
+      it('honors .self - only dispatches when the event targets the bound element', () => {
         const el = createElement();
         let calls = 0;
         bus.register('selfAction', () => { calls += 1; });
         const vcDir = app.getDirective('vc');
         vcDir.mounted(el, { arg: 'command', value: 'selfAction', modifiers: { self: true } });
-        // target is a different element → ignored
+        // target is a different element -> ignored
         el.triggerClick({ type: 'click', target: {}, stopPropagation() {}, preventDefault() {} });
         expect(calls).toBe(0);
-        // target is the bound element → dispatched
+        // target is the bound element -> dispatched
         el.triggerClick({ type: 'click', target: el, stopPropagation() {}, preventDefault() {} });
         expect(calls).toBe(1);
       });
@@ -195,10 +195,10 @@ describe('createDirectivePlugin', () => {
         bus.register('btnAction', () => { calls += 1; });
         const vcDir = app.getDirective('vc');
         vcDir.mounted(el, { arg: 'command', value: 'btnAction', modifiers: { left: true } });
-        // right button (2) → ignored
+        // right button (2) -> ignored
         el.triggerClick({ type: 'click', target: el, button: 2, stopPropagation() {}, preventDefault() {} });
         expect(calls).toBe(0);
-        // left button (0) → dispatched
+        // left button (0) -> dispatched
         el.triggerClick({ type: 'click', target: el, button: 0, stopPropagation() {}, preventDefault() {} });
         expect(calls).toBe(1);
       });
@@ -228,7 +228,7 @@ describe('createDirectivePlugin', () => {
     // element.
     describe('.delegate modifier', () => {
       // The delegation registry (attach/detach refcount) is shared MODULE
-      // state, same as it would be in a real page with one `document` — each
+      // state, same as it would be in a real page with one `document` - each
       // test below mounts and unmounts in balance so it doesn't leak into
       // the next test.
 
@@ -276,12 +276,12 @@ describe('createDirectivePlugin', () => {
           vcDir.mounted(el, { arg: 'command', value: 'a', modifiers: { delegate: true } });
         }
         expect(doc.hasClickListener()).toBe(true);
-        // Unmount all but one — listener must stay attached.
+        // Unmount all but one - listener must stay attached.
         for (const el of els.slice(0, -1)) {
           vcDir.beforeUnmount(el, { arg: 'command' });
         }
         expect(doc.hasClickListener()).toBe(true);
-        // Unmount the last one — listener is removed.
+        // Unmount the last one - listener is removed.
         vcDir.beforeUnmount(els[els.length - 1], { arg: 'command' });
         expect(doc.hasClickListener()).toBe(false);
       });
@@ -309,7 +309,7 @@ describe('createDirectivePlugin', () => {
           preventDefault() {},
         });
 
-        expect(calls).toBe(1); // was 0 — the control rendered and did nothing
+        expect(calls).toBe(1); // was 0 - the control rendered and did nothing
         vcDir.beforeUnmount(button, { arg: 'command' });
       });
 

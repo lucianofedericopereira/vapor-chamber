@@ -1,16 +1,16 @@
 /**
- * vapor-chamber — streaming JSON parser
+ * vapor-chamber - streaming JSON parser
  *
- * Adapted from a dependency-free incremental JSON parser (bytes → state
- * machine → values), for progressively consuming a `fetch()` response body
+ * Adapted from a dependency-free incremental JSON parser (bytes -> state
+ * machine -> values), for progressively consuming a `fetch()` response body
  * (LLM/AI streaming completions, SSE tokens, large exports) without
- * buffering the whole payload. Framework-agnostic — no Vue imports; pair
+ * buffering the whole payload. Framework-agnostic - no Vue imports; pair
  * with `http.ts`'s `HttpClient` or a bare `fetch()`.
  *
  * Reorganized from the source's one large dispatch switch into small
  * per-state-group handlers (CDCC: functions stay near cyclomatic complexity
- * 10) — notably, the keyword states (`true`/`false`/`null`) collapse from
- * ten near-duplicate `S_TRUE_1`/`S_FALSE_2`/… cases into one target-string
+ * 10) - notably, the keyword states (`true`/`false`/`null`) collapse from
+ * ten near-duplicate `S_TRUE_1`/`S_FALSE_2`/... cases into one target-string
  * index walk.
  *
  * @example
@@ -69,7 +69,7 @@ function isDigit(cp: number): boolean {
 // Parser states
 // ============================================================
 
-// Plain numeric constants, not `const enum` — esbuild/Rolldown (this
+// Plain numeric constants, not `const enum` - esbuild/Rolldown (this
 // project's bundlers) don't support const enums in isolated-file transpiles.
 const S_VALUE = 0;
 const S_AFTER_VALUE = 1;
@@ -94,10 +94,10 @@ const PARENT_OBJECT = 1;
 const PARENT_ARRAY = 2;
 
 // ============================================================
-// String buffer — avoids += string-concat GC pressure
+// String buffer - avoids += string-concat GC pressure
 // ============================================================
 
-/** UTF-16 units per `fromCharCode.apply` call — see StringBuffer.flush. */
+/** UTF-16 units per `fromCharCode.apply` call - see StringBuffer.flush. */
 const FLUSH_CHUNK = 8192;
 
 class StringBuffer {
@@ -119,13 +119,13 @@ class StringBuffer {
 
   flush(): string {
     // Chunked on purpose. `String.fromCharCode.apply` passes the whole buffer
-    // as call ARGUMENTS, and engines cap argument counts — V8 throws
-    // `RangeError: Maximum call stack size exceeded` somewhere around 65k–125k
+    // as call ARGUMENTS, and engines cap argument counts - V8 throws
+    // `RangeError: Maximum call stack size exceeded` somewhere around 65k-125k
     // (stack-dependent, so it fails flakily rather than deterministically).
     // This module's stated inputs are LLM streaming completions and large
     // exports, where a single long string value is the headline case, not the
     // edge case. 8192 is safely under every engine's cap, and `+=` on ~8k
-    // segments is rope concatenation — cheap.
+    // segments is rope concatenation - cheap.
     const { buf, len } = this;
     if (len <= FLUSH_CHUNK) {
       const str = String.fromCharCode.apply(null, buf.subarray(0, len) as unknown as number[]);
@@ -286,7 +286,7 @@ export class StreamParser {
         this.state = S_KEY;
       } else {
         // Array continuation: advance the index HERE, at the element
-        // boundary — not in emitValue(), which only fires for scalars and
+        // boundary - not in emitValue(), which only fires for scalars and
         // would never advance the slot for an array of objects/arrays (the
         // member's own onValue calls happen at a deeper nesting level, with
         // this array's slot as an ancestor path segment, not the immediate
@@ -327,7 +327,7 @@ export class StreamParser {
       return;
     }
     if (cp === BACKSLASH) { this.state = S_ESCAPE; return; }
-    // `cp` is a UTF-16 code unit straight from write()'s charCodeAt loop —
+    // `cp` is a UTF-16 code unit straight from write()'s charCodeAt loop -
     // never an astral codepoint. Surrogate pairs arrive pre-split as two
     // units and pass through verbatim; flush() reassembles them.
     this.strBuf.push(cp);
@@ -357,7 +357,7 @@ export class StreamParser {
     }
   }
 
-  /** `true`/`false`/`null` — a single target-string index walk instead of
+  /** `true`/`false`/`null` - a single target-string index walk instead of
    *  ten near-duplicate per-letter states. */
   private startKeyword(rest: string, value: boolean | null): void {
     this.keywordTarget = rest;
@@ -469,7 +469,7 @@ export class StreamParser {
   private emitValue(value: unknown): void {
     // The array-index path slot is maintained at element boundaries
     // (openArray's initial 0, handleAfterValue's comma-continuation bump),
-    // not here — this fires for every value, but an array member's index
+    // not here - this fires for every value, but an array member's index
     // must already be current before its own onValue call, whether that
     // member is this scalar or something several levels deeper.
     this.callbacks.onValue?.(this.currentKey, value, this.path);

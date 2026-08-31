@@ -1,5 +1,5 @@
 /**
- * vapor-chamber — Built-in plugins
+ * vapor-chamber - Built-in plugins
  *
  * Re-exports all plugins from split modules:
  *  - plugins-core: logger, validator, history, debounce, throttle, authGuard, optimistic, optimisticUndo

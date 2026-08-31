@@ -4,23 +4,34 @@
  * `parseQuery` built into a `{}` and then read `query[key]` to detect a repeated
  * key. On a plain object that read walks the prototype chain, so any query key
  * named after an Object.prototype member came back DEFINED and took the
- * "repeated key" branch — turning a scalar into an array whose first element was
+ * "repeated key" branch - turning a scalar into an array whose first element was
  * the inherited function. `?__proto__=` was worse: the assignment went through
  * the `__proto__` setter, so the key never became an own property and the parsed
  * object's prototype was replaced.
  *
- * Reachable from a plain link — no privileged caller required. Same bug class
+ * Reachable from a plain link - no privileged caller required. Same bug class
  * v1.15.0 fixed in the MCP `tools/call` gate (`Object.hasOwn`), which is why
  * this one is pinned rather than trusted to review.
+ *
+ * THE SECOND HALF OF THIS FILE exists because pinning `parseQuery` alone was
+ * not enough: `setQuery` rebuilt the merged query with a SPREAD, and spreading
+ * a null-prototype object produces a plain one. So the property held after
+ * `navigate()` and was lost after the first typed query write - the two arms
+ * disagreeing is exactly what the engine says must never happen. Asserted
+ * through the REAL router (real table, real engine, memory history) rather
+ * than against the helper, because the helper was never the part that broke.
  */
 
 import { describe, expect, it } from 'vitest';
+import { createMemoryHistory } from '../../src/router/history';
+import { createRouter } from '../../src/router/index';
 import { defaultAffects } from '../../src/router/loaders';
+import type { RouteRecord } from '../../src/router/types';
 import { parseQuery, stringifyQuery } from '../../src/router/url';
 
 const POLLUTING_KEYS = ['constructor', 'toString', 'valueOf', 'hasOwnProperty', 'isPrototypeOf'];
 
-describe('parseQuery — prototype safety', () => {
+describe('parseQuery - prototype safety', () => {
   it('has a null prototype', () => {
     expect(Object.getPrototypeOf(parseQuery('?a=1'))).toBe(null);
     expect(Object.getPrototypeOf(parseQuery(''))).toBe(null);
@@ -54,7 +65,7 @@ describe('parseQuery — prototype safety', () => {
 
   it('round-trips a polluting key back through stringifyQuery', () => {
     // stringifyQuery uses Object.keys (own, enumerable), so a null-prototype
-    // object serialises exactly like a plain one — no key gained or lost.
+    // object serialises exactly like a plain one - no key gained or lost.
     expect(stringifyQuery(parseQuery('?constructor=1&page=2'))).toBe('constructor=1&page=2');
   });
 
@@ -66,7 +77,7 @@ describe('parseQuery — prototype safety', () => {
   });
 });
 
-describe('defaultAffects — an undeclared query key must not force a refetch', () => {
+describe('defaultAffects - an undeclared query key must not force a refetch', () => {
   const record = { name: 'r', load: 'rows:products', queryDefs: {} } as never;
   const handlers = { prefixes: { 'rows:': () => [] } } as never;
 
@@ -86,5 +97,75 @@ describe('defaultAffects — an undeclared query key must not force a refetch', 
     expect(defaultAffects(record, ['page'], handlers)).toBe(true);
     expect(defaultAffects(record, ['per_page'], handlers)).toBe(true);
     expect(defaultAffects(record, ['sort'], handlers)).toBe(true);
+  });
+});
+
+const ROWS: RouteRecord[] = [
+  { name: 'products', path: '/products', component: 'Products', query: { page: { type: 'int', default: 1 } } },
+];
+
+function makeRouter() {
+  return createRouter({
+    history: createMemoryHistory(''),
+    routes: ROWS,
+    components: { Products: { render: () => null } } as never,
+    links: false,
+    scroll: false,
+    onError: () => {},
+  });
+}
+
+describe('location.query prototype - uniform across BOTH commit paths', () => {
+  it('is prototype-free after a path navigation', async () => {
+    const router = makeRouter();
+    await router.isReady();
+    await router.push('/products?page=2');
+    expect(Object.getPrototypeOf(router.currentRoute.value.location.query)).toBe(null);
+  });
+
+  it('is prototype-free after a typed query write', async () => {
+    const router = makeRouter();
+    await router.isReady();
+    await router.push('/products');
+    router.setQuery({ page: 3 });
+    // Pre-fix this was Object.prototype: setQuery spread the query into a `{}`.
+    expect(Object.getPrototypeOf(router.currentRoute.value.location.query)).toBe(null);
+  });
+
+  it('does not answer for an unset polluting key after a query write', async () => {
+    const router = makeRouter();
+    await router.isReady();
+    await router.push('/products');
+    router.setQuery({ page: 3 });
+    const query = router.currentRoute.value.location.query as Record<string, unknown>;
+    // Pre-fix: [Function Object].
+    expect(query.constructor).toBeUndefined();
+    expect(query.toString).toBeUndefined();
+  });
+
+  it('lands a __proto__ query write as an own key instead of losing it', async () => {
+    const router = makeRouter();
+    await router.isReady();
+    await router.push('/products');
+    // COMPUTED key, deliberately: a `{ __proto__: 'x' }` literal is the
+    // prototype-setting syntax and never creates a key at all. `useQueryParam`
+    // writes `{ [key]: value }`, so a computed key is the shape that actually
+    // reaches setQuery from the public surface.
+    router.setQuery({ ['__proto__']: 'x' });
+    const query = router.currentRoute.value.location.query;
+    // Pre-fix the inherited setter swallowed the write: no own key, and the
+    // value never reached the URL.
+    expect(Object.hasOwn(query, '__proto__')).toBe(true);
+    expect(Object.getPrototypeOf(query)).toBe(null);
+    expect(router.currentRoute.value.location.fullPath).toContain('__proto__=x');
+  });
+
+  it('does not pollute Object.prototype through a query write', async () => {
+    const router = makeRouter();
+    await router.isReady();
+    await router.push('/products');
+    router.setQuery({ ['__proto__']: 'x' });
+    expect(({} as Record<string, unknown>).polluted).toBeUndefined();
+    expect((Object.prototype as Record<string, unknown>).x).toBeUndefined();
   });
 });

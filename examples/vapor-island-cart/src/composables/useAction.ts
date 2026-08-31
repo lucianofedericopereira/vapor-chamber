@@ -6,8 +6,8 @@ import { bus } from '../store';
 // shadowing the library's useCommand(), which takes no arguments and uses
 // the shared bus.
 //
-// The sync bus never throws — missing handlers and handler exceptions come
-// back as { ok: false, error } — so read the returned result instead of
+// The sync bus never throws - missing handlers and handler exceptions come
+// back as { ok: false, error } - so read the returned result instead of
 // wrapping dispatch in try/catch.
 //
 // NOTE the `untracked()` wrapper, which is the point of this file as an
@@ -17,7 +17,7 @@ import { bus } from '../store';
 //
 // A dispatch is an action, not a read. Without untracked(), any reactive value
 // the HANDLER happens to read gets collected as a dependency of whatever effect
-// called execute() — so a component would re-render on state it never mentions,
+// called execute() - so a component would re-render on state it never mentions,
 // silently. Today every call site here is a click handler, where there is no
 // active effect and untracked() costs nothing; it is written this way so the
 // pattern stays correct if someone later calls execute() from a watchEffect or

@@ -1,5 +1,5 @@
 /**
- * Coverage-focused tests for src/transports.ts — drives the WebSocket bridge
+ * Coverage-focused tests for src/transports.ts - drives the WebSocket bridge
  * reconnect / queue-expiry / maxQueueSize paths, the HTTP bridge redirect &
  * custom-httpClient error paths, the SSE bridge, and the Echo broadcast error
  * path. Reuses the same WS/SSE mock shapes as transports.test.ts.
@@ -14,7 +14,7 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// createHttpBridge — redirect handling and custom httpClient !ok
+// createHttpBridge - redirect handling and custom httpClient !ok
 // ---------------------------------------------------------------------------
 
 describe('createHttpBridge redirect & error-body paths', () => {
@@ -89,13 +89,13 @@ describe('createHttpBridge redirect & error-body paths', () => {
 });
 
 // ---------------------------------------------------------------------------
-// createBatchingHttpBridge — same !ok-without-throwing gap as createHttpBridge
+// createBatchingHttpBridge - same !ok-without-throwing gap as createHttpBridge
 // above, but on the batching bridge's own flush(): postCommand() throws on a
 // real HTTP failure, so this branch is likewise only reachable through a
 // custom httpClient that resolves { ok: false, ... } instead.
 // ---------------------------------------------------------------------------
 
-describe('createBatchingHttpBridge — custom httpClient !ok path', () => {
+describe('createBatchingHttpBridge - custom httpClient !ok path', () => {
   it('fails every queued command with the extracted message when httpClient resolves !ok', async () => {
     const httpClient = {
       post: vi.fn().mockResolvedValue({
@@ -139,7 +139,7 @@ class MockWebSocket {
   static CONNECTING = 0;
   static OPEN = 1;
   static CLOSED = 3;
-  /** When false, the constructor does NOT auto-open — tests open manually. */
+  /** When false, the constructor does NOT auto-open - tests open manually. */
   static autoOpen = true;
   readyState = MockWebSocket.autoOpen ? MockWebSocket.OPEN : MockWebSocket.CLOSED;
   onopen: (() => void) | null = null;
@@ -203,7 +203,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
 
     // First dispatch queues (queue length now 1 == maxQueueSize).
     const first = bus.dispatch('cartAdd', { id: 1 });
-    // Second dispatch overflows → oldest is shifted out and resolved as overflow error.
+    // Second dispatch overflows -> oldest is shifted out and resolved as overflow error.
     const second = bus.dispatch('cartUpdate', { id: 2 });
 
     const firstResult = await first;
@@ -211,7 +211,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     expect(firstResult.error?.message).toContain('queue overflow');
     expect(firstResult.error?.message).toContain('cartAdd');
 
-    // The second (newer) message is still queued — flush it via reconnect.
+    // The second (newer) message is still queued - flush it via reconnect.
     sockets[0].open();
     expect(sockets[0].sent.length).toBe(1);
     const flushed = JSON.parse(sockets[0].sent[0]);
@@ -223,7 +223,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
   it('a request that times out WHILE QUEUED settles once, and overflow does not re-settle it', async () => {
     // The per-request timer is armed before send(), so it runs while the entry
     // sits in `queue` waiting for a socket. When it fires, settle() clears the
-    // timer, removes the id from `pending` and resolves — but leaves the entry
+    // timer, removes the id from `pending` and resolves - but leaves the entry
     // in `queue`. A later overflow then shifts out an entry whose `pending`
     // record is already gone.
     //
@@ -268,7 +268,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     // The reason settle() now removes the entry from `queue` as well. Before,
     // a timed-out request kept its slot until an overflow or a flush evicted
     // it, so maxQueueSize bounded "entries ever queued" rather than "requests
-    // still waiting" — with maxQueueSize: 1 a single dead entry could evict a
+    // still waiting" - with maxQueueSize: 1 a single dead entry could evict a
     // live one. Nothing was lost (flushQueue's elapsed check stopped stale
     // sends), but two mechanisms owned the same fact.
     vi.useFakeTimers();
@@ -280,7 +280,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     ws.connect();
 
     const doomed = bus.dispatch('cartAdd', { id: 1 });
-    await vi.advanceTimersByTimeAsync(60); // times out while queued → slot freed
+    await vi.advanceTimersByTimeAsync(60); // times out while queued -> slot freed
     expect((await doomed).error?.message).toContain('timed out');
 
     // With the slot freed, this live request does NOT evict anything...
@@ -314,7 +314,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     // assert the timeout error, then prove flushQueue's expiry branch runs.
     await vi.advanceTimersByTimeAsync(6_000);
 
-    // Now reconnect → flushQueue sees elapsed >= timeout and rejects (no send).
+    // Now reconnect -> flushQueue sees elapsed >= timeout and rejects (no send).
     sockets[0].open();
     expect(sockets[0].sent.length).toBe(0); // expired message was NOT sent
 
@@ -341,12 +341,12 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     const promise = bus.dispatch('expireMe', { id: 7 });
 
     // Move the clock past the 5s queued-message timeout without advancing the
-    // timer queue — the dispatch timeout callback has NOT run, so pending still
+    // timer queue - the dispatch timeout callback has NOT run, so pending still
     // holds this id.
     vi.setSystemTime(t0 + 6_000);
 
-    sockets[0].open(); // flushQueue: elapsed (6000) >= timeout (5000) → 329-331 fire
-    expect(sockets[0].sent.length).toBe(0); // expired → NOT sent
+    sockets[0].open(); // flushQueue: elapsed (6000) >= timeout (5000) -> 329-331 fire
+    expect(sockets[0].sent.length).toBe(0); // expired -> NOT sent
 
     const result = await promise;
     expect(result.ok).toBe(false);
@@ -370,11 +370,11 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     expect(onConnect).toHaveBeenCalledTimes(1);
     expect(sockets.length).toBe(1);
 
-    // Unintentional close → scheduleReconnect arms a timer.
+    // Unintentional close -> scheduleReconnect arms a timer.
     sockets[0].onclose?.({ code: 1006, reason: 'dropped' });
 
     // Backoff is reconnectDelay * reconnectCount (1000ms for the first attempt).
-    await vi.advanceTimersByTimeAsync(1000); // fires the reconnect timer → connect()
+    await vi.advanceTimersByTimeAsync(1000); // fires the reconnect timer -> connect()
     await vi.runAllTimersAsync(); // new socket opens
 
     expect(sockets.length).toBe(2); // connect() ran inside the reconnect timer (346)
@@ -405,7 +405,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     await vi.advanceTimersByTimeAsync(5000);
     await vi.runAllTimersAsync();
 
-    expect(sockets.length).toBe(1); // reconnect timer was cleared → no second socket
+    expect(sockets.length).toBe(1); // reconnect timer was cleared -> no second socket
     expect(ws.isConnected()).toBe(false);
   });
 
@@ -423,7 +423,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     ws.disconnect();
   });
 
-  it('reconnect: false — an unintentional close never schedules a reconnect', async () => {
+  it('reconnect: false - an unintentional close never schedules a reconnect', async () => {
     vi.useFakeTimers();
     const ws = createWsBridge({ url: 'ws://localhost', reconnect: false });
     ws.connect();
@@ -453,9 +453,9 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     ws.connect();
     expect(sockets.length).toBe(1);
 
-    // Two consecutive unintentional closes → two reconnects (hits the cap
+    // Two consecutive unintentional closes -> two reconnects (hits the cap
     // exactly). Delay is reconnectDelay * reconnectCount, so it grows each
-    // attempt (10ms, then 20ms) — advance generously rather than exactly.
+    // attempt (10ms, then 20ms) - advance generously rather than exactly.
     sockets[0].onclose?.({ code: 1006, reason: 'dropped' });
     await vi.advanceTimersByTimeAsync(100);
     expect(sockets.length).toBe(2);
@@ -464,7 +464,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     await vi.advanceTimersByTimeAsync(100);
     expect(sockets.length).toBe(3);
 
-    // A third close must NOT schedule another reconnect — cap already reached.
+    // A third close must NOT schedule another reconnect - cap already reached.
     sockets[2].onclose?.({ code: 1006, reason: 'dropped' });
     await vi.advanceTimersByTimeAsync(60_000);
     expect(sockets.length).toBe(3);
@@ -479,7 +479,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     expect(sockets.length).toBe(1);
 
     // Real WebSockets start CONNECTING synchronously (the mock defaults
-    // straight to OPEN) — force it to test the guard specifically.
+    // straight to OPEN) - force it to test the guard specifically.
     sockets[0].readyState = MockWebSocket.CONNECTING;
     ws.connect(); // must not create a second socket while CONNECTING
     expect(sockets.length).toBe(1);
@@ -522,7 +522,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     sockets[0].receive({ id: sentFirst.id, ok: true });
     expect((await first).ok).toBe(true);
 
-    // The second item was re-queued, not lost — a later open flushes it.
+    // The second item was re-queued, not lost - a later open flushes it.
     sockets[0].open();
     expect(sockets[0].sent.length).toBe(2);
     const sentSecond = JSON.parse(sockets[0].sent[1]);
@@ -556,7 +556,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     await vi.runAllTimersAsync();
     expect(sockets.length).toBe(1);
 
-    // socket[0] closes unintentionally → reconnect fires → socket[1] takes over.
+    // socket[0] closes unintentionally -> reconnect fires -> socket[1] takes over.
     sockets[0].onclose?.({ code: 1006, reason: 'dropped' });
     await vi.advanceTimersByTimeAsync(100);
     await vi.runAllTimersAsync();
@@ -589,7 +589,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     const result = await bus.dispatch('cartAdd', { id: 1 }, undefined, { signal: controller.signal });
 
     expect(result.ok).toBe(false);
-    expect(sockets[0].sent.length).toBe(0); // never sent — aborted before dispatch
+    expect(sockets[0].sent.length).toBe(0); // never sent - aborted before dispatch
     ws.disconnect();
   });
 
@@ -603,12 +603,12 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
 
     const result = bus.dispatch('cartAdd', { id: 1 });
     const sent = JSON.parse(sockets[0].sent[0]);
-    // Response arrives well before the timeout — settles as a success.
+    // Response arrives well before the timeout - settles as a success.
     sockets[0].receive({ id: sent.id, ok: true, state: 42 });
     expect((await result).ok).toBe(true);
 
     // The timeout firing afterwards must not overwrite the already-settled
-    // result — settle() cleared the timer, and resolve() is a no-op repeated.
+    // result - settle() cleared the timer, and resolve() is a no-op repeated.
     await vi.advanceTimersByTimeAsync(100);
     expect((await result).value).toBe(42);
 
@@ -617,7 +617,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
 });
 
 // ---------------------------------------------------------------------------
-// createSseBridge — extra coverage alongside transports.test.ts
+// createSseBridge - extra coverage alongside transports.test.ts
 // ---------------------------------------------------------------------------
 
 class MockEventSource {
@@ -670,7 +670,7 @@ describe('createSseBridge routing & reconnect noop', () => {
     lastEs.onmessage?.({ data: JSON.stringify({ command: 'priceChanged', target: { sku: 'A1' } }) } as MessageEvent);
     expect(dispatched).toEqual([['priceChanged', { sku: 'A1' }]]);
 
-    // EventSource native reconnect handler is a no-op — just must not throw.
+    // EventSource native reconnect handler is a no-op - just must not throw.
     expect(() => lastEs.onerror?.()).not.toThrow();
 
     sse.teardown();
@@ -679,7 +679,7 @@ describe('createSseBridge routing & reconnect noop', () => {
 });
 
 // ---------------------------------------------------------------------------
-// createEchoBridge — broadcast handler error path
+// createEchoBridge - broadcast handler error path
 // ---------------------------------------------------------------------------
 
 describe('createEchoBridge broadcast error logging', () => {
@@ -727,12 +727,12 @@ describe('createEchoBridge broadcast error logging', () => {
 // Signal-merging fallbacks + the per-dispatch header/retry arms
 //
 // Every merge site is `typeof AbortSignal.any === 'function' ? any([...]) :
-// fallback`. Node has AbortSignal.any, so the fallback arms — the ones that run
-// on older Safari/Firefox — had no coverage. Removed the same way
+// fallback`. Node has AbortSignal.any, so the fallback arms - the ones that run
+// on older Safari/Firefox - had no coverage. Removed the same way
 // tests/plugins-extra-gaps.test.ts drives supersede's equivalent branch.
 // ---------------------------------------------------------------------------
 
-describe('bridge signal merging — AbortSignal.any fallbacks', () => {
+describe('bridge signal merging - AbortSignal.any fallbacks', () => {
   const okFetch = () =>
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ state: 1 }) }));
 
@@ -747,7 +747,7 @@ describe('bridge signal merging — AbortSignal.any fallbacks', () => {
         createHttpBridge({
           endpoint: '/api',
           scopeController: new AbortController(),
-          signal: new AbortController().signal, // both present → merge site
+          signal: new AbortController().signal, // both present -> merge site
         }),
       );
       const result = await bus.dispatch('act', {});
@@ -765,7 +765,7 @@ describe('bridge signal merging — AbortSignal.any fallbacks', () => {
       okFetch();
       const bus = createAsyncCommandBus();
       bus.use(createHttpBridge({ endpoint: '/api', signal: new AbortController().signal }));
-      // cmd.signal AND effectiveSignal both present → the second merge site.
+      // cmd.signal AND effectiveSignal both present -> the second merge site.
       const result = await bus.dispatch('act', {}, undefined, { signal: new AbortController().signal });
       expect(result.ok).toBe(true);
     } finally {
@@ -778,7 +778,20 @@ describe('bridge signal merging — AbortSignal.any fallbacks', () => {
     // @ts-expect-error deliberate removal to drive the fallback arm
     AbortSignal.any = undefined;
     try {
-      vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => [{ state: 1 }] }));
+      // The batch endpoint answers `{ results: [{ id, ok, state }] }` - a bare
+      // array never matched, so every dispatch through this mock failed and the
+      // swallowed `.catch()` hid it. The id is echoed from the request so the
+      // bridge can pair the reply to its caller.
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockImplementation(async (_url: string, init: RequestInit) => {
+          const sent = JSON.parse(String(init.body)) as { commands: Array<{ id: string }> };
+          return {
+            ok: true,
+            json: async () => ({ results: sent.commands.map((c) => ({ id: c.id, ok: true, state: 1 })) }),
+          };
+        }),
+      );
       const bus = createAsyncCommandBus();
       bus.use(
         createBatchingHttpBridge({
@@ -787,8 +800,13 @@ describe('bridge signal merging — AbortSignal.any fallbacks', () => {
           signal: new AbortController().signal,
         }),
       );
-      await bus.dispatch('act', {}).catch(() => {});
-      expect(true).toBe(true); // constructing + dispatching is what runs the merge
+      // Assert the RESULT, not merely that we got here. The previous form was
+      // `.catch(() => {})` followed by `expect(true).toBe(true)`: if the
+      // fallback merge threw, the catch swallowed it, the assertion still
+      // passed, and the coverage line was still counted - a test that drove a
+      // branch without checking it.
+      const result = await bus.dispatch('act', {});
+      expect(result.ok).toBe(true);
     } finally {
       AbortSignal.any = origAny;
     }

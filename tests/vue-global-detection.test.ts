@@ -1,5 +1,5 @@
 /**
- * Covers the `globalThis.__VUE__` synchronous probe path in chamber.ts — the
+ * Covers the `globalThis.__VUE__` synchronous probe path in chamber.ts - the
  * MPA / script-tag scenario where Vue is a page global rather than an ESM import.
  * Exercises applyVueModule's full Vapor-surface detection (createVaporApp,
  * vaporInteropPlugin, defineVapor* ) which the real beta.14 ESM `vue` doesn't
@@ -48,7 +48,7 @@ describe('Vue-as-global (script-tag / MPA) sync probe', () => {
   });
 
   it('ignores a __VUE__ global that lacks ref() (devtools-hook shape)', async () => {
-    vi.stubGlobal('__VUE__', { someDevtoolsField: true }); // no .ref → sync probe is a no-op
+    vi.stubGlobal('__VUE__', { someDevtoolsField: true }); // no .ref -> sync probe is a no-op
     vi.resetModules();
     const chamber = await import('../src/chamber');
     // Vapor getters stay null from the sync path (the real async ESM probe may
@@ -56,7 +56,7 @@ describe('Vue-as-global (script-tag / MPA) sync probe', () => {
     expect(chamber.getVaporAppFn()).toBeNull();
   });
 
-  it('ignores __VUE__ === true — Vue\'s own marker, written when an app mounts', async () => {
+  it('ignores __VUE__ === true - Vue\'s own marker, written when an app mounts', async () => {
     // Not a hypothetical: Vue assigns `target.__VUE__ = true` from prepareApp()
     // (Vapor) and baseCreateRenderer() (vDOM). Measured against the real build
     // in tests/vue-detection-global-clobber.test.ts. Any page that has mounted
@@ -85,7 +85,7 @@ describe('the library-owned detection slot', () => {
   });
 
   it('survives the case that breaks __VUE__: Vue\'s marker already written', async () => {
-    // The exact ordering that used to lose detection outright — an app has
+    // The exact ordering that used to lose detection outright - an app has
     // mounted (so __VUE__ is `true`), and the library is only imported after
     // that (a code-split chunk, a late island, an MPA page). The owned slot
     // still holds the namespace, so detection succeeds.
@@ -136,7 +136,7 @@ describe('configureVue', () => {
     const chamber = await import('../src/chamber');
 
     // Distinguishing "no Vue" from "Vue is here and I cannot see it" is the
-    // whole point — they have different one-line fixes.
+    // whole point - they have different one-line fixes.
     expect(chamber.vueDetectionHint()).toMatch(/unreachable/);
     expect(chamber.vueDetectionHint()).toMatch(/configureVue\(/);
   });

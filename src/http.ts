@@ -1,5 +1,5 @@
 /**
- * vapor-chamber — HTTP client
+ * vapor-chamber - HTTP client
  *
  * Adapted and improved from useFetch (2026-02-05A).
  * TypeScript rewrite aligned with vapor-chamber conventions and CDCC thresholds.
@@ -20,9 +20,23 @@
 // ---------------------------------------------------------------------------
 
 export type HttpConfig = {
-  /** Request timeout in ms. Default: 10_000 */
+  /**
+   * Request timeout in ms.
+   *
+   * Two consumers, two defaults - this type is shared by `postCommand` and by
+   * `createHttpClient` (via `HttpRequestConfig`), and they do not agree:
+   * **10_000 through `postCommand`, 30_000 through a client** (a command POST
+   * and a general-purpose GET have different patience). Stating only the first
+   * made this tooltip wrong for every `http.get()` caller.
+   */
   timeout?: number;
-  /** Max retry attempts on 5xx/429/408. Default: 0 */
+  /**
+   * Max retry attempts on 5xx/429/408.
+   *
+   * Same split: **0 through `postCommand`**, and through a client **2 for
+   * idempotent methods (GET), 0 for mutations** - retrying a POST is not safe
+   * to do on the caller's behalf.
+   */
   retry?: number;
   /** External abort signal (e.g. from component unmount) */
   signal?: AbortSignal;
@@ -31,7 +45,7 @@ export type HttpConfig = {
   /**
    * URL to fetch when a CSRF-expiry response (HTTP 419) occurs, to obtain a
    * fresh token. The default targets the Laravel Sanctum SPA convention
-   * because it's the most common backend issuing 419 — override for other
+   * because it's the most common backend issuing 419 - override for other
    * frameworks, or set to '' to disable the auto-refresh entirely (the lib
    * will then only re-read the token from the DOM on retry).
    * Default: '/sanctum/csrf-cookie'.
@@ -43,7 +57,7 @@ export type HttpConfig = {
   onSessionExpired?: (status: number) => void;
   /**
    * Stamps a thrown error's `.silent` so a caller-provided global error
-   * handler can skip it — for fire-and-forget requests (best-effort
+   * handler can skip it - for fire-and-forget requests (best-effort
    * telemetry, background prefetch) that shouldn't surface UI noise.
    * Default: false.
    */
@@ -61,7 +75,7 @@ export type HttpResponse<T = unknown> = {
   revalidation?: Promise<HttpResponse<T>>;
   /** True when this is a retained cache entry served in place of a transient failure (`cache.serveStaleOnError`). */
   servedOnError?: boolean;
-  /** The transient error `servedOnError` masked — surfaced alongside the stale data, never silently dropped. */
+  /** The transient error `servedOnError` masked - surfaced alongside the stale data, never silently dropped. */
   error?: unknown;
 };
 
@@ -87,7 +101,7 @@ const CSRF_TTL_MS = 300_000; // 5 min
 const DEFAULT_CSRF_COOKIE_URL = '/sanctum/csrf-cookie';
 
 // ---------------------------------------------------------------------------
-// CSRF — multi-source with TTL cache
+// CSRF - multi-source with TTL cache
 // ---------------------------------------------------------------------------
 
 type CsrfResult = { token: string; headerName: string };
@@ -95,7 +109,7 @@ type CsrfCacheEntry = CsrfResult & { expiresAt: number };
 
 let _csrfCache: CsrfCacheEntry | null = null;
 
-/** Read CSRF token from DOM: meta tag → cookie → hidden input. TTL-cached for 5 min. */
+/** Read CSRF token from DOM: meta tag -> cookie -> hidden input. TTL-cached for 5 min. */
 export function readCsrfToken(): CsrfResult | null {
   const now = Date.now();
   if (_csrfCache && now < _csrfCache.expiresAt) {
@@ -112,14 +126,14 @@ function readCsrfFromDom(): CsrfResult | null {
     ? (sel: string) => document.querySelector(sel)
     : null;
 
-  // 1. Meta tag — `<meta name="csrf-token" content="...">`. Common in
+  // 1. Meta tag - `<meta name="csrf-token" content="...">`. Common in
   //    server-rendered frameworks (Laravel Blade, Rails, others).
   if (q) {
     const meta = q('meta[name="csrf-token"]') as HTMLMetaElement | null;
     if (meta?.content) return { token: meta.content, headerName: 'X-CSRF-TOKEN' };
   }
 
-  // 2. Cookie — read cookie name from `<meta name="xsrf-cookie">` or default
+  // 2. Cookie - read cookie name from `<meta name="xsrf-cookie">` or default
   //    to `XSRF-TOKEN` (the de-facto SPA convention shared across frameworks).
   const cookieNameMeta = q?.('meta[name="xsrf-cookie"]') as HTMLMetaElement | null;
   const cookieName = cookieNameMeta?.content || 'XSRF-TOKEN';
@@ -127,7 +141,7 @@ function readCsrfFromDom(): CsrfResult | null {
   const cookieMatch = document.cookie?.match(new RegExp(`(?:^|;\\s*)${escaped}=([^;]+)`));
   if (cookieMatch) return { token: decodeURIComponent(cookieMatch[1]), headerName: 'X-XSRF-TOKEN' };
 
-  // 3. Hidden input — `<input name="_token">`. Emitted by Laravel's `@csrf`
+  // 3. Hidden input - `<input name="_token">`. Emitted by Laravel's `@csrf`
   //    Blade directive, also appears in Rails forms and other stacks.
   if (q) {
     const input = q('input[name="_token"]') as HTMLInputElement | null;
@@ -145,19 +159,19 @@ export function invalidateCsrfCache(): void {
 let _csrfRefreshPromise: Promise<CsrfResult> | null = null;
 
 function refreshCsrfOnce(cookieUrl: string): Promise<CsrfResult> {
-  // Coalesce: concurrent 419s share the single in-flight refresh promise —
+  // Coalesce: concurrent 419s share the single in-flight refresh promise -
   // waiters resolve/reject the instant it settles, no polling.
   //
   // RETURNS the token rather than leaving callers to re-read it. Both call
   // sites used to do `await refreshCsrfOnce(...); const fresh =
-  // readCsrfToken();` — and between those two statements sits a microtask
+  // readCsrfToken();` - and between those two statements sits a microtask
   // boundary that several coalesced waiters resume across. A waiter that ran
   // first could invalidate the cache (the exported `invalidateCsrfCache()`) or
   // clear the DOM before a later waiter re-read, so the later one saw null and
   // silently retried with no CSRF header. Handing back the value this function
   // has already proven readable closes that window, makes the coalescing
   // semantics exact (every waiter gets the SAME token), and removes the
-  // `if (fresh)` guard at both call sites — which was unreachable in ordinary
+  // `if (fresh)` guard at both call sites - which was unreachable in ordinary
   // flow anyway, because this function throws when no token is found.
   if (_csrfRefreshPromise) return _csrfRefreshPromise;
   _csrfRefreshPromise = (async () => {
@@ -213,12 +227,12 @@ function backoffMs(attempt: number): number {
 type CombinedSignal = { signal: AbortSignal; detach: () => void };
 
 function combineSignals(a: AbortSignal, b: AbortSignal): CombinedSignal {
-  // AbortSignal.any listeners are platform-managed (GC-safe) — nothing to detach.
+  // AbortSignal.any listeners are platform-managed (GC-safe) - nothing to detach.
   if (typeof AbortSignal.any === 'function') {
     return { signal: AbortSignal.any([a, b]), detach: () => {} };
   }
   // Fallback for environments without AbortSignal.any. Callers MUST detach()
-  // when the request settles — the user signal is typically component-lifetime,
+  // when the request settles - the user signal is typically component-lifetime,
   // so listeners left behind accrete once per request until unmount.
   const ctrl = new AbortController();
   const abort = () => ctrl.abort();
@@ -239,7 +253,7 @@ function sleepMs(ms: number, signal?: AbortSignal): Promise<void> {
       clearTimeout(id);
       reject(new DOMException('Aborted', 'AbortError'));
     };
-    // Detach on normal resolve too — the signal outlives this sleep, and the
+    // Detach on normal resolve too - the signal outlives this sleep, and the
     // listener would otherwise pin the timer closure per retry sleep.
     const id = setTimeout(() => {
       signal?.removeEventListener('abort', onAbort);
@@ -284,14 +298,14 @@ function handleSessionExpiry(status: number, url: string, onSessionExpired?: (s:
 // Core: postCommand
 //
 // Sends a single POST request with retry, CSRF, timeout and session detection.
-// Used by createHttpBridge — not intended as a general-purpose HTTP client.
+// Used by createHttpBridge - not intended as a general-purpose HTTP client.
 // ---------------------------------------------------------------------------
 
 /**
  * A Response's headers as a plain object, tolerating a double or polyfill that
  * has no `headers` at all.
  *
- * Extracted because this line existed TWICE, written out longhand — once in
+ * Extracted because this line existed TWICE, written out longhand - once in
  * `doFetch` and once in `doClientFetch`. That duplication is what let the two
  * drift: `doFetch` never touched `raw.headers` again and stayed correct, while
  * `doClientFetch` grew responseType handling whose content-type read went back
@@ -299,19 +313,19 @@ function handleSessionExpiry(status: number, url: string, onSessionExpired?: (s:
  * One owner for "normalize a Response's headers" removes that channel.
  *
  * Keys are lower-cased here, and this is the only place that should do it.
- * Every consumer reads this snapshot case-sensitively —
+ * Every consumer reads this snapshot case-sensitively -
  * `res.headers['retry-after']` and `['x-ratelimit-reset']` in both retry
- * loops, `['content-disposition']` in the download path — so a `Headers` whose
+ * loops, `['content-disposition']` in the download path - so a `Headers` whose
  * `entries()` yields `Retry-After` makes all of them miss with NO error:
  * backoff silently not honoured, filename silently lost.
  *
  * The Fetch spec does store header names lower-cased, so against a compliant
  * implementation this is a no-op, and it costs +6 bytes brotli in the minimal
- * consumer bundle (measured: 6_539 → 6_545). Taken deliberately: the argument
+ * consumer bundle (measured: 6_539 -> 6_545). Taken deliberately: the argument
  * for skipping it assumes every Headers implementation in every consumer's
  * environment is compliant, and the price of being wrong is a SILENT
  * mis-behaviour rather than a crash. Six bytes to make a silent failure
- * impossible is the trade this library wants — correctness over the byte.
+ * impossible is the trade this library wants - correctness over the byte.
  * Normalizing at the four call sites instead would re-create exactly the
  * duplication this helper exists to remove.
  *
@@ -319,7 +333,7 @@ function handleSessionExpiry(status: number, url: string, onSessionExpired?: (s:
  * than this snapshot for the same reason from the other direction: `get()` is
  * case-insensitive BY SPEC and joins repeated headers, so delegating keeps
  * both guarantees the platform's problem rather than ours. Reading
- * `resHeaders['content-type']` instead would miss on odd casing — and a miss
+ * `resHeaders['content-type']` instead would miss on odd casing - and a miss
  * there does not throw, it silently hands the caller a STRING where they asked
  * for JSON.
  */
@@ -375,7 +389,7 @@ export async function postCommand<T = unknown>(
       if (!res.ok) {
         if (SESSION_EXPIRED_STATUS.includes(res.status)) handleSessionExpiry(res.status, url, onSessionExpired);
 
-        // 419: CSRF expired — fetch fresh cookie, refresh once, doesn't count against retry budget
+        // 419: CSRF expired - fetch fresh cookie, refresh once, doesn't count against retry budget
         if (res.status === 419 && !csrfRetried) {
           csrfRetried = true;
           const fresh = await refreshCsrfOnce(csrfCookieUrl);
@@ -385,7 +399,7 @@ export async function postCommand<T = unknown>(
         }
 
         // NOTE: unlike clientRequest, a 419 that survives the refresh retry is
-        // NOT escalated to session expiry here — postCommand's documented
+        // NOT escalated to session expiry here - postCommand's documented
         // contract (whitepaper §5.7, pinned by tests) is that 419 never fires
         // onSessionExpired; the bridge surfaces it as an HttpError instead.
 
@@ -410,12 +424,12 @@ export async function postCommand<T = unknown>(
       combined?.detach();
       const err = e as HttpError;
       if (err.name === 'AbortError' && userSignal?.aborted) throw err;
-      // A timeout-triggered abort is a transient failure, not a user cancel —
+      // A timeout-triggered abort is a transient failure, not a user cancel -
       // it must compete for the same retry budget as a 5xx/429/408 response
       // instead of always throwing on the first attempt regardless of `retry`.
       const failure = err.name === 'AbortError' ? timeoutError(url, timeout) : err;
       // A non-transient response thrown above (`throw failed`) lands here too,
-      // and this catch used to retry everything that wasn't a user abort — so
+      // and this catch used to retry everything that wasn't a user abort - so
       // a 422 validation failure re-sent the mutation `retry` times. Re-throw
       // anything that carries a response classifyError calls permanent; the
       // RETRY_STATUS `continue` above still owns the transient statuses.
@@ -435,7 +449,7 @@ export async function postCommand<T = unknown>(
 }
 
 // ---------------------------------------------------------------------------
-// Multi-method HTTP client — createHttpClient
+// Multi-method HTTP client - createHttpClient
 //
 // For new code, prefer createHttpClient(). postCommand is retained for
 // backward compatibility and is used by createHttpBridge.
@@ -449,7 +463,7 @@ export type HttpRequestConfig = HttpConfig & {
   method?: HttpMethod;
   /** Request body (auto-serialized if object, passthrough for FormData) */
   data?: unknown;
-  /** Query parameters — supports arrays and nested objects */
+  /** Query parameters - supports arrays and nested objects */
   params?: Record<string, unknown>;
   /** Base URL prepended to relative paths */
   baseURL?: string;
@@ -582,12 +596,12 @@ async function doClientFetch<T>(
   } else if (responseType === 'text') {
     data = await raw.text();
   } else {
-    // json (default) — graceful fallback for non-JSON responses.
+    // json (default) - graceful fallback for non-JSON responses.
     //
     // `?.` rather than the `resHeaders` snapshot above, deliberately.
     // `Headers.get()` is case-INSENSITIVE by spec; a plain object lookup is
     // not, so reading `resHeaders['content-type']` would silently miss against
-    // any implementation whose `entries()` yields `Content-Type` — and a miss
+    // any implementation whose `entries()` yields `Content-Type` - and a miss
     // here does not throw, it falls through to `raw.text()` and hands the
     // caller a STRING where they asked for JSON. Loud crash traded for silent
     // wrong data. Delegating to the platform keeps that impossible.
@@ -640,7 +654,7 @@ async function clientRequest<T>(
       if (!res.ok) {
         if (SESSION_EXPIRED_STATUS.includes(res.status)) handleSessionExpiry(res.status, fullUrl, onSessionExpired);
 
-        // 419 CSRF refresh — once, doesn't count against retry budget
+        // 419 CSRF refresh - once, doesn't count against retry budget
         if (res.status === 419 && !csrfRetried) {
           csrfRetried = true;
           const fresh = await refreshCsrfOnce(csrfCookieUrl);
@@ -679,7 +693,7 @@ async function clientRequest<T>(
       // Same guard as postCommand: `throw httpError(...)` above re-enters this
       // catch, and retrying it re-sends the request. Only responses
       // classifyError calls transient (5xx / no response / timeout) may retry;
-      // 4xx — 404, 403, and above all 422 on a mutation — surface immediately.
+      // 4xx - 404, 403, and above all 422 on a mutation - surface immediately.
       if ((failure as HttpError).response && !classifyError(failure).transient) throw failure;
       if (attempt >= maxRetries) throw failure;
       await sleepMs(backoffMs(attempt), userSignal);
@@ -694,10 +708,10 @@ async function clientRequest<T>(
 // ---------------------------------------------------------------------------
 
 /**
- * createHttpClient — multi-method HTTP client with interceptors, caching,
+ * createHttpClient - multi-method HTTP client with interceptors, caching,
  * deduplication, safe mode, and file download.
  *
- * Aligned with useFetch (2026-02-05A) patterns. Framework-agnostic — no Vue imports.
+ * Aligned with useFetch (2026-02-05A) patterns. Framework-agnostic - no Vue imports.
  *
  * @example
  * const http = createHttpClient({ baseURL: '/api', csrf: true });
@@ -708,7 +722,7 @@ async function clientRequest<T>(
  * await http.put('/cart/1', { qty: 5 });
  * await http.delete('/cart/1');
  *
- * // Safe mode — never throws
+ * // Safe mode - never throws
  * const result = await http.safe.post('/login', credentials);
  * if (result.error) console.log(result.error.message);
  *
@@ -724,7 +738,7 @@ async function clientRequest<T>(
 export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = {}): HttpClient {
   const requestInterceptors = createInterceptorManager<HttpRequestConfig>();
   const responseInterceptors = createInterceptorManager<HttpResponse>();
-  // Owned by this client — see http-cache.ts. `create()` below mints a fresh
+  // Owned by this client - see http-cache.ts. `create()` below mints a fresh
   // one for the derived client, so one instance's clearCache() can never empty
   // another's, and a per-request client under SSR is genuinely isolated.
   const cache = createResponseCache();
@@ -758,7 +772,7 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
     const dedupe = config.dedupe ?? true;
 
     const fullUrl = buildFullUrl(url, config.baseURL, config.params);
-    // responseType is part of both keys — a concurrent get(url) (json) and
+    // responseType is part of both keys - a concurrent get(url) (json) and
     // get(url, { responseType: 'blob' }) must not collapse to one request or
     // one cache slot, or the loser receives the wrong data type.
     const dedupeKey = `${method}:${responseType}:${fullUrl}`;
@@ -772,7 +786,7 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
 
     // LRU cache for GET. A fresh hit short-circuits; a stale hit (within
     // cache.staleTtl) is captured and served below with a background
-    // revalidation attached — the stale-while-revalidate path.
+    // revalidation attached - the stale-while-revalidate path.
     const cacheEnabled = config.cache && isIdempotent;
     const cacheCfg = typeof config.cache === 'object' ? config.cache : {};
     let staleResponse: HttpResponse | null = null;
@@ -837,8 +851,8 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
     }
 
     // cache.serveStaleOnError (opt-in): a transient failure (timeout/network/
-    // 5xx per classifyError) with ANY retained entry for this URL — even one
-    // past its stale window — resolves to { stale, servedOnError, error }
+    // 5xx per classifyError) with ANY retained entry for this URL - even one
+    // past its stale window - resolves to { stale, servedOnError, error }
     // instead of rejecting. Business errors (4xx) and user aborts always
     // surface; deduped followers share this promise's outcome.
     if (cacheEnabled && cacheCfg.serveStaleOnError) {

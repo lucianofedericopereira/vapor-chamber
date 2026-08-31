@@ -1,13 +1,13 @@
 # Laravel backend companions
 
 Drop-in PHP files showing the backend side of a vapor-chamber dispatch.
-These are illustrative — adapt namespaces, models, and table names to your
+These are illustrative - adapt namespaces, models, and table names to your
 project.
 
 | File                                | Goes to                                       | Purpose                                              |
 |-------------------------------------|-----------------------------------------------|------------------------------------------------------|
 | `VaporChamberController.php`        | `app/Http/Controllers/`                       | Single dispatcher; resolves action classes by name   |
-| `config-vapor-chamber.php`          | `config/vapor-chamber.php`                    | Maps command names → action class FQCNs              |
+| `config-vapor-chamber.php`          | `config/vapor-chamber.php`                    | Maps command names -> action class FQCNs              |
 | `routes-web.php`                    | `routes/web.php` snippet                      | Two CSRF flows: Blade meta tag vs Sanctum SPA cookie |
 | `AddToCart.php`                     | `app/Actions/Cart/`                           | Action class with inline validation                  |
 | `CancelOrder.php`                   | `app/Actions/Order/`                          | Action class with Gate-based authorization           |
@@ -24,13 +24,13 @@ panels, Reverb realtime, queued commands).
 - **`__invoke($target, $payload, $user)` signature.** `$target` is the
   first arg from `bus.dispatch(action, target, payload)`; `$payload` is the
   optional second arg; `$user` is the authenticated user (or null).
-- **Return any JSON-serializable shape** — it becomes the client's
+- **Return any JSON-serializable shape** - it becomes the client's
   `result.value`.
 - **Throw framework exceptions** for failure paths. The controller maps:
-  - `ValidationException` → 422 + `{ ok: false, error }`
-  - `AuthorizationException` → 403 + `{ ok: false, error }`
-  - `ModelNotFoundException` → 404 + `{ ok: false, error }`
-  - Anything else → 500 + `{ ok: false, error: 'Internal error' }` (and
+  - `ValidationException` -> 422 + `{ ok: false, error }`
+  - `AuthorizationException` -> 403 + `{ ok: false, error }`
+  - `ModelNotFoundException` -> 404 + `{ ok: false, error }`
+  - Anything else -> 500 + `{ ok: false, error: 'Internal error' }` (and
     `report()`s the original)
 
 ## Idempotency (double-submit protection)
@@ -38,7 +38,7 @@ panels, Reverb realtime, queued commands).
 When the JS side enables the `idempotent()` plugin, retried/replayed commands
 carry an `Idempotency-Key` header. The controller honors it with a short-TTL
 cache: a second POST with the same key replays the cached response instead of
-running the action again — so a network retry can't create a duplicate order.
+running the action again - so a network retry can't create a duplicate order.
 No setup needed beyond a working Laravel cache store; the TTL (60s) matches the
 JS plugin's default.
 

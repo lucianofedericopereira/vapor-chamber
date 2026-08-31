@@ -2,12 +2,12 @@
 
 [mitt](https://github.com/developit/mitt) is a tiny event emitter (~200 bytes).
 vapor-chamber is a command bus with results, plugins, hooks, transports, and
-more. They solve different problems — but if you're outgrowing mitt because
+more. They solve different problems - but if you're outgrowing mitt because
 you've started building command-bus shape on top of it, this is the path.
 
 If your mitt usage is purely pub/sub event broadcast (no return values, no
 plugins, no async dispatching), **stay on mitt** or use vapor-chamber's
-[fast lane](../performance.md) — both are smaller and faster than the
+[fast lane](../performance.md) - both are smaller and faster than the
 general-purpose bus.
 
 ---
@@ -37,7 +37,7 @@ bus.on('cartAdd', (cmd, result) => console.log(cmd.target.id));
 ```
 
 The data your mitt code passed as `payload` lands on `cmd.target`. The
-second `result` arg is `{ ok, value, error }` — useful for listeners that
+second `result` arg is `{ ok, value, error }` - useful for listeners that
 need to know whether the dispatch succeeded.
 
 For a drop-in mitt-shaped wrapper:
@@ -57,7 +57,7 @@ emitter.on('*', (type, payload) => {});
 vapor-chamber:
 ```ts
 bus.on('*', (cmd) => {});           // matches everything
-bus.on('cart*', (cmd) => {});       // prefix wildcard — mitt doesn't have this
+bus.on('cart*', (cmd) => {});       // prefix wildcard - mitt doesn't have this
 ```
 
 ## Beyond what mitt does
@@ -66,13 +66,13 @@ You probably reached for vapor-chamber because you needed something mitt
 doesn't have. Here's the extra surface:
 
 ```ts
-// Results — handlers return values; consumers know if dispatch succeeded
+// Results - handlers return values; consumers know if dispatch succeeded
 bus.register('cartAdd', (cmd) => addToCart(cmd.target));
 const result = bus.dispatch('cartAdd', { id: 42 });
 if (result.ok) console.log('added', result.value);
 else console.error(result.error);
 
-// Plugins — logger, retry, debounce, throttle, persist, sync, …
+// Plugins - logger, retry, debounce, throttle, persist, sync, ...
 bus.use(logger());
 bus.use(retry({ maxAttempts: 3 }));
 
@@ -95,21 +95,23 @@ bus.dispatchBatch([
   { action: 'reserveSlot', target: slot },
   { action: 'chargeCard', target: payment },
   { action: 'sendConfirmation', target: order },
-], { transactional: true });   // any failure → reverse-order undo handlers
+], { transactional: true });   // any failure -> reverse-order undo handlers
 ```
 
 ## Bundle size
 
-mitt is ~200 bytes. vapor-chamber's `core` IIFE variant is **~7.7 KB brotli**
-(~39× larger). The size difference is the cost of all the extras above.
+mitt is ~200 bytes. vapor-chamber's `core` IIFE variant is
+**<!-- vc:sizeIifeCore -->7.6<!-- /vc:sizeIifeCore --> KB brotli**, i.e. a
+couple of orders of magnitude more. The size difference is the cost of all the
+extras above.
 Always-current per-export numbers: [BUNDLE-SIZES.md](../BUNDLE-SIZES.md)
-(generated, CI-verified fresh) — prefer it over any figure quoted in prose.
+(generated, CI-verified fresh) - prefer it over any figure quoted in prose.
 
 If you only need pub/sub and don't want to pay for those features:
 **don't migrate**. Either stay on mitt or use vapor-chamber's fast lane:
 
 ```ts
-// vapor-chamber/fast-lane — closer to mitt's size + speed,
+// vapor-chamber/fast-lane - closer to mitt's size + speed,
 // but with vapor-chamber's surface for everything else.
 import { createFastLane } from 'vapor-chamber/fast-lane';
 const lane = createFastLane();

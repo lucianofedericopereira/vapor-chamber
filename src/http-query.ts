@@ -1,5 +1,5 @@
 /**
- * vapor-chamber — URL builder + query params
+ * vapor-chamber - URL builder + query params
  *
  * Internal module used by createHttpClient. Not exported publicly.
  * SSR-safe: guards typeof window for URL constructor origin.

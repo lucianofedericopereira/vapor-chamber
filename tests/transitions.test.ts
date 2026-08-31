@@ -1,5 +1,5 @@
 /**
- * Tests for transitions.ts — createTransitionBridge + useTransitionCommand
+ * Tests for transitions.ts - createTransitionBridge + useTransitionCommand
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
@@ -84,7 +84,7 @@ describe('createTransitionBridge', () => {
     expect(receivedTarget).toBe(el);
   });
 
-  it('phase transitions: idle → entering → idle', () => {
+  it('phase transitions: idle -> entering -> idle', () => {
     const t = createTransitionBridge({ bus });
     const el = mockEl();
 
@@ -97,7 +97,7 @@ describe('createTransitionBridge', () => {
     expect(t.phase.value).toBe('idle');
   });
 
-  it('phase transitions: idle → leaving → idle', () => {
+  it('phase transitions: idle -> leaving -> idle', () => {
     const t = createTransitionBridge({ bus });
     const el = mockEl();
 
@@ -221,7 +221,7 @@ describe('createTransitionBridge', () => {
     expect(dispatched).toEqual(['move']);
   });
 
-  it('swallows a synchronous dispatch throw (naming:throw) — transitions never break', () => {
+  it('swallows a synchronous dispatch throw (naming:throw) - transitions never break', () => {
     // A strict naming bus throws synchronously in dispatch() when the action
     // violates the pattern. dispatchSafe's catch must absorb it for both the
     // direct path (onMove) and the done() path (onEnter), and done() still fires.
@@ -232,8 +232,8 @@ describe('createTransitionBridge', () => {
     const t = createTransitionBridge({ bus: strictBus, namespace: 'list' });
     const done = vi.fn();
 
-    expect(() => t.onMove(mockEl())).not.toThrow();       // 'listMove' → throws → swallowed
-    expect(() => t.onEnter(mockEl(), done)).not.toThrow(); // 'listEnter' → throws → swallowed
+    expect(() => t.onMove(mockEl())).not.toThrow();       // 'listMove' -> throws -> swallowed
+    expect(() => t.onEnter(mockEl(), done)).not.toThrow(); // 'listEnter' -> throws -> swallowed
     expect(done).toHaveBeenCalledTimes(1);                 // dispatchWithDone still calls done()
   });
 });

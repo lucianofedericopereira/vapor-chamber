@@ -10,11 +10,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# 1. CHANGE HERE: Expanded permissions to support BOTH git pushes and Pages deployments
+# `contents: write` is for the bundle-sizes auto-commit in the test job; the
+# other two are what actions/deploy-pages requires.
 permissions:
   contents: write
-  pages: write      # <-- ADDED
-  id-token: write   # <-- ADDED
+  pages: write
+  id-token: write
 
 jobs:
   lint:
@@ -54,10 +55,16 @@ jobs:
       - run: npm ci
       # No `npm ci --prefix examples/exo-astro` needed: tests/examples/
       # exo-astro-directives.test.ts imports that example's source directly,
-      # and Vite's oxc transform resolves the nearest tsconfig — which is now
+      # and Vite's oxc transform resolves the nearest tsconfig - which is now
       # the self-contained examples/exo-astro/src/directives/tsconfig.json.
       # The root install alone is enough; keep it that way.
       - run: npm run test:run
+      # The second vitest project, `vue` aliased to the with-vapor dist. It is
+      # NOT part of `test:run`, so without this line the router/vapor outlet
+      # ships unguarded: tests/vapor/vapor-outlet-size.test.ts is the acceptance
+      # guard on that subpath's brotli margin, and its whole purpose is to fail
+      # loudly when the margin erodes. `npm ci` ran `prepare`, so dist/ exists.
+      - run: npm run test:vapor
       - run: node scripts/check-size.mjs
       - run: npm run loc
       
@@ -73,8 +80,16 @@ jobs:
             git push
           fi
 
-      - if: matrix.os == 'ubuntu-latest' && matrix.node == '24'
-        run: npm run test:coverage
+      # Coverage, plus the freshness gate scripts/measure-coverage.mjs asks for
+      # in its own header. A hard diff rather than the auto-commit the sizes doc
+      # uses: two jobs pushing in one workflow would race. A failure here means
+      # coverage moved and nobody ran `npm run coverage:doc`.
+      - name: coverage + docs/COVERAGE.md freshness
+        if: matrix.os == 'ubuntu-latest' && matrix.node == '24'
+        run: |
+          npm run test:coverage
+          node scripts/measure-coverage.mjs --md > docs/COVERAGE.md
+          git diff --exit-code docs/COVERAGE.md
 
   bench:
     name: bench smoke (no regression vs baseline)
@@ -94,10 +109,10 @@ jobs:
           path: bench.txt
           retention-days: 14
 
-  # 2. CHANGE HERE: Add this entire new job at the very bottom of the file
   deploy-docs:
     name: deploy docs
-    needs: [test, lint] # Forces this to wait until tests finish and bundle sizes are pushed
+    # Waits for test so the bundle-sizes auto-commit has landed before checkout.
+    needs: [test, lint]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     environment:
@@ -106,18 +121,21 @@ jobs:
     steps:
       - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
         with:
-          ref: main # Pulls the fresh commit that includes the bundle sizes bot update
+          # Explicit ref, not the triggering SHA: picks up the bundle-sizes bot
+          # commit the test job may have just pushed.
+          ref: main
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: '22'
           cache: npm
       - run: npm ci
-      
+
       - run: npm run docs
-      
-      # 3. CRITICAL LINE: Creates the bypass file inside your output directory before uploading
-      - run: touch docs/api/.nojekyll # <-- ADDED HERE
-      
+
+      # Pages runs Jekyll by default, which drops paths beginning with `_`.
+      # TypeDoc emits several. Without this the API site 404s on those pages.
+      - run: touch docs/api/.nojekyll
+
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:

@@ -3,7 +3,7 @@
  * ================================================
  * Dispatches bus commands from Vue <Transition> lifecycle hooks.
  * Enables animation coordination through the command bus without
- * direct DOM coupling — handlers control timing, plugins observe.
+ * direct DOM coupling - handlers control timing, plugins observe.
  */
 
 import {
@@ -29,35 +29,35 @@ bus.register('modalBeforeEnter', (cmd) => {
 })
 
 bus.register('modalAfterEnter', () => {
-  console.log('Modal is now fully visible — focus trap can activate')
+  console.log('Modal is now fully visible - focus trap can activate')
 })
 
 bus.register('modalBeforeLeave', () => {
-  console.log('Starting modal exit — release focus trap')
+  console.log('Starting modal exit - release focus trap')
 })
 
 bus.register('modalAfterLeave', () => {
-  console.log('Modal removed from DOM — cleanup complete')
+  console.log('Modal removed from DOM - cleanup complete')
 })
 
-// Create the bridge — all hooks dispatch 'modal*' actions
+// Create the bridge - all hooks dispatch 'modal*' actions
 const modal = createTransitionBridge({ bus, namespace: 'modal' })
 
 // Simulate a transition lifecycle
 const el = {} as Element
 modal.onBeforeEnter(el)
-console.log('Phase during enter:', modal.phase.value) // → 'entering'
+console.log('Phase during enter:', modal.phase.value) // -> 'entering'
 
-modal.onEnter(el, () => console.log('done() called — enter complete'))
+modal.onEnter(el, () => console.log('done() called - enter complete'))
 modal.onAfterEnter(el)
-console.log('Phase after enter:', modal.phase.value)   // → 'idle'
+console.log('Phase after enter:', modal.phase.value)   // -> 'idle'
 
 modal.onBeforeLeave(el)
-console.log('Phase during leave:', modal.phase.value)  // → 'leaving'
+console.log('Phase during leave:', modal.phase.value)  // -> 'leaving'
 
-modal.onLeave(el, () => console.log('done() called — leave complete'))
+modal.onLeave(el, () => console.log('done() called - leave complete'))
 modal.onAfterLeave(el)
-console.log('Phase after leave:', modal.phase.value)   // → 'idle'
+console.log('Phase after leave:', modal.phase.value)   // -> 'idle'
 
 // ─── 2. Async handler controls animation timing ──────────────────────────────
 
@@ -77,7 +77,7 @@ asyncBus.register('drawerLeave', async () => {
 const drawer = createTransitionBridge({ bus: asyncBus, namespace: 'drawer' })
 
 // done() is called automatically after the async handler resolves
-drawer.onEnter(el, () => console.log('Drawer enter done() — Vue can proceed'))
+drawer.onEnter(el, () => console.log('Drawer enter done() - Vue can proceed'))
 
 // ─── 3. Vue composable usage ─────────────────────────────────────────────────
 
@@ -104,7 +104,7 @@ drawer.onEnter(el, () => console.log('Drawer enter done() — Vue can proceed'))
  * </template>
  */
 
-// ─── 4. Vapor component — same API ──────────────────────────────────────────
+// ─── 4. Vapor component - same API ──────────────────────────────────────────
 
 /*
  * <script setup vapor>

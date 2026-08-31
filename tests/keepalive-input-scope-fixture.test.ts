@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE — `tryKeepAliveHooks` against a REAL VaporKeepAlive, vue@3.6.0-rc.4.
+ * FIXTURE - `tryKeepAliveHooks` against a REAL VaporKeepAlive, vue@3.6.0-rc.4.
  *
  * WHY THIS FILE EXISTS, given we already have one. rc.3 gave us
  * `tests/keepalive-pause-fixture.test.ts`, which measured a bare
@@ -17,13 +17,13 @@
  *         revised comment, "only pauses branch-owned effects".
  *
  * So the pausing got NARROWER and moved to a different owner. A stand-in built
- * on generic scope semantics can no longer, by itself, settle the question —
+ * on generic scope semantics can no longer, by itself, settle the question -
  * it measures a mechanism Vue no longer uses on this path. Rather than argue
  * the conclusion still holds, this file measures the real thing: a real
  * `VaporKeepAlive`, a real cached Vapor component, and the real shipped
  * `useCommandHistory`, on rc.4.
  *
- * WHAT MEASURING IT ACTUALLY FOUND. The rc.3 conclusion survives — but the
+ * WHAT MEASURING IT ACTUALLY FOUND. The rc.3 conclusion survives - but the
  * guard it defended was never running under Vapor. `tryKeepAliveHooks` gated
  * itself on `getCurrentInstance()`, which reads VDOM's `currentInstance`; a
  * Vapor component is not stored there, so the guard returned early in every
@@ -36,7 +36,7 @@
  *
  * WHAT IT PINS. Two facts, and the second is the load-bearing one:
  *
- *   1. Our guard works on rc.4 — a command dispatched while the component is
+ *   1. Our guard works on rc.4 - a command dispatched while the component is
  *      deactivated does not enter that component's undo history, and recording
  *      resumes on reactivation.
  *   2. An UNGUARDED `bus.onAfter` hook registered by the same cached component
@@ -48,7 +48,7 @@
  *      release changed that.
  *
  * Everything is imported from the single with-vapor browser build, and the
- * chamber is pointed at that same module object via `configureVue()` — two
+ * chamber is pointed at that same module object via `configureVue()` - two
  * separately-imported Vue dists are two disconnected reactivity instances
  * (chamber.ts §probeVue), so skipping that would silently measure nothing:
  * `onDeactivated` would register on an instance our chamber never sees.
@@ -60,7 +60,7 @@ import { createCommandBus } from '../src/command-bus';
 
 const WITH_VAPOR = 'vue/dist/vue.runtime-with-vapor.esm-browser.js';
 
-/** Raw runtime-vapor surface — deliberately untyped; this file builds a component tree by hand. */
+/** Raw runtime-vapor surface - deliberately untyped; this file builds a component tree by hand. */
 type VaporApi = any;
 
 async function vapor(): Promise<VaporApi> {
@@ -74,7 +74,7 @@ describe('tryKeepAliveHooks under a real VaporKeepAlive (rc.4)', () => {
 
   it('guards history while deactivated, and the unguarded hook still fires', async () => {
     const v = await vapor();
-    // Same module object the components below are built from — otherwise our
+    // Same module object the components below are built from - otherwise our
     // onDeactivated lands on a different reactivity instance and no-ops.
     configureVue(v);
 
@@ -133,11 +133,11 @@ describe('tryKeepAliveHooks under a real VaporKeepAlive (rc.4)', () => {
 
     bus.dispatch('cartAdd', 'b');
 
-    // FACT 1 — the guard holds on rc.4. `b` was dispatched in a view the user
+    // FACT 1 - the guard holds on rc.4. `b` was dispatched in a view the user
     // was not looking at; it must not land in that view's undo history.
     expect(history.past.value.map((c) => c.target)).toEqual(['a']);
 
-    // FACT 2 — and it is doing real work: the identically-scoped UNGUARDED
+    // FACT 2 - and it is doing real work: the identically-scoped UNGUARDED
     // hook did fire. rc.4 pauses the instance's `inputScope` (prop/slot commit
     // effects); a bus hook is a plain callback in the bus's own array, owned by
     // no scope and scheduled by no scheduler, so nothing upstream can suppress
@@ -152,7 +152,7 @@ describe('tryKeepAliveHooks under a real VaporKeepAlive (rc.4)', () => {
 
     bus.dispatch('cartAdd', 'c');
 
-    // Recording resumes — onActivated cleared the flag. The command dispatched
+    // Recording resumes - onActivated cleared the flag. The command dispatched
     // while away stays absent; it is not replayed on activation.
     expect(history.past.value.map((c) => c.target)).toEqual(['a', 'c']);
 
@@ -160,7 +160,7 @@ describe('tryKeepAliveHooks under a real VaporKeepAlive (rc.4)', () => {
     host.remove();
   });
 
-  it('the cached component is deactivated, not unmounted — the premise of the above', async () => {
+  it('the cached component is deactivated, not unmounted - the premise of the above', async () => {
     const v = await vapor();
     configureVue(v);
 

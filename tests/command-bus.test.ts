@@ -230,7 +230,7 @@ describe('createCommandBus', () => {
 });
 
 describe('re-entrant plugin chain', () => {
-  // A plugin may call `next()` more than once per dispatch — retry() does it
+  // A plugin may call `next()` more than once per dispatch - retry() does it
   // once per attempt. Each call must replay the SAME tail of the chain, not
   // fall through to the handler because a shared cursor was already exhausted.
   it('replays every downstream plugin when an upstream plugin calls next() twice', () => {
@@ -257,7 +257,7 @@ describe('re-entrant plugin chain', () => {
     const result = bus.dispatch('act', {});
     expect(result.ok).toBe(true);
     expect(handlerRuns).toBe(2);
-    // 'inner' ran on both passes — it was skipped on the second before the fix.
+    // 'inner' ran on both passes - it was skipped on the second before the fix.
     expect(order).toEqual(['outer:1', 'inner', 'outer:2', 'inner']);
   });
 
@@ -616,7 +616,7 @@ describe('syncQuery bare-bus fast path', () => {
   it('returns handler result with no plugins installed', () => {
     const bus = createCommandBus();
     bus.register('getCount', () => 42);
-    // No plugins, hooks, or listeners — exercises the bare-bus branch
+    // No plugins, hooks, or listeners - exercises the bare-bus branch
     const r = bus.query('getCount', {});
     expect(r.ok).toBe(true);
     expect(r.value).toBe(42);
@@ -679,21 +679,21 @@ describe('listenerOffAll with wildcard pattern', () => {
 describe('asyncDispatchBatch mid-flight abort', () => {
   // Assertions here are derived from the DOCUMENTED BatchOptions contract, not
   // from what the implementation happens to do:
-  //   transactional — "All-or-nothing semantics: if any command fails,
+  //   transactional - "All-or-nothing semantics: if any command fails,
   //     automatically run the registered undo handler for every command that
-  //     already succeeded (in reverse order) … Commands without an undo
+  //     already succeeded (in reverse order) ... Commands without an undo
   //     handler are skipped during rollback."
-  //   signal — "aborting mid-flight stops further commands from dispatching
+  //   signal - "aborting mid-flight stops further commands from dispatching
   //     (the in-flight one runs to completion) and the batch result is
   //     { ok: false, error: BusError('VC_CORE_ABORTED'), results: [...partial] }".
-  //     (That doc line said `AbortError` until this pass — `abortedResult`
+  //     (That doc line said `AbortError` until this pass - `abortedResult`
   //     deliberately substitutes a BusError so the code is queryable, and the
   //     doc had never been corrected to match. Fixed with this rewrite.)
   //
   // The previous version of this block passed `transactional: false` and
   // asserted only that 'c' never ran, so the branch its title named was never
   // entered; and its 'undoA' was registered as a plain ACTION, while rollback
-  // only ever consults handlers registered with `{ undo }` — so even flipped
+  // only ever consults handlers registered with `{ undo }` - so even flipped
   // to true it would have proved nothing.
   it('rolls back every succeeded command, in reverse order, when the signal aborts mid-batch', async () => {
     const bus = createAsyncCommandBus();
@@ -727,7 +727,7 @@ describe('asyncDispatchBatch mid-flight abort', () => {
   });
 
   it('skips commands with no undo handler, and reports the rollbacks it did run', async () => {
-    // The documented skip behaviour — the honest caveat in BatchOptions.
+    // The documented skip behaviour - the honest caveat in BatchOptions.
     const bus = createAsyncCommandBus();
     const log: string[] = [];
     const ac = new AbortController();
@@ -749,7 +749,7 @@ describe('asyncDispatchBatch mid-flight abort', () => {
     );
 
     expect(result.ok).toBe(false);
-    // 'noUndo' left its side effect in place — that is the contract, not a bug.
+    // 'noUndo' left its side effect in place - that is the contract, not a bug.
     expect(log).toEqual(['withUndo', 'noUndo', 'undoWithUndo']);
     expect(result.rollbacks).toHaveLength(1);
     expect(result.successCount).toBe(0);
@@ -816,7 +816,7 @@ describe('asyncDispatchBatch mid-flight abort', () => {
 
   // The test above only proves the warning FIRES when DEV is true (the
   // vitest default). It never proves silence in production, on either of
-  // DEV's two resolution paths — same gap class devWarnThenableResult and
+  // DEV's two resolution paths - same gap class devWarnThenableResult and
   // the onMissing:'buffer' overflow warning had. Closing both here.
 
   it('warnBatchOptionConflict is silent when __VC_DEV__=false (IIFE build path)', async () => {
@@ -860,7 +860,7 @@ describe('asyncDispatchBatch mid-flight abort', () => {
   });
 });
 
-describe('per-instance throttle timers — async bus', () => {
+describe('per-instance throttle timers - async bus', () => {
   it('dispose clears a pending throttle timer (mirrors the sync-bus test above)', async () => {
     const bus1 = createAsyncCommandBus();
     const bus2 = createAsyncCommandBus();
@@ -868,18 +868,18 @@ describe('per-instance throttle timers — async bus', () => {
     bus1.register('a', async () => 1, { throttle: 10000 });
     bus2.register('a', async () => 2, { throttle: 10000 });
 
-    // First dispatch on each — goes through, parks a timer in each bus's own
+    // First dispatch on each - goes through, parks a timer in each bus's own
     // s.throttleTimers.
     const r1 = await bus1.dispatch('a', {});
     const r2 = await bus2.dispatch('a', {});
     expect(r1.ok).toBe(true);
     expect(r2.ok).toBe(true);
 
-    // Dispose bus1 while its timer is still pending — asyncDispose() must
+    // Dispose bus1 while its timer is still pending - asyncDispose() must
     // clear it, not just clear listeners/handlers.
     bus1.dispose();
 
-    // Bus2 is untouched — still throttled.
+    // Bus2 is untouched - still throttled.
     const r3 = await bus2.dispatch('a', {});
     expect(r3.ok).toBe(false);
     expect(r3.error?.message).toContain('throttled');
@@ -890,7 +890,7 @@ describe('per-instance throttle timers — async bus', () => {
 
 describe('async before-hook: plain synchronous throw + after-hooks registered', () => {
   // tests/command-bus-features.test.ts:2521 covers `onBefore(async () => { throw })`
-  // — an async function's synchronous throw is actually a REJECTED PROMISE, so
+  // - an async function's synchronous throw is actually a REJECTED PROMISE, so
   // that test exercises the thenable/await branch, not a plain sync hook. It
   // also registers no onAfter, so the "await the after-hooks promise from
   // inside the catch" branch never runs either. This test is the mirror image
@@ -902,7 +902,7 @@ describe('async before-hook: plain synchronous throw + after-hooks registered', 
     const afterCalls: Array<{ action: string; ok: boolean }> = [];
 
     bus.register('act', async () => { handlerRan = true; return 1; });
-    bus.onBefore((_cmd) => { throw new Error('sync-blocked'); }); // not async — no Promise involved
+    bus.onBefore((_cmd) => { throw new Error('sync-blocked'); }); // not async - no Promise involved
     bus.onAfter((cmd, result) => { afterCalls.push({ action: cmd.action, ok: result.ok }); });
 
     const result = await bus.dispatch('act', {});
@@ -914,10 +914,10 @@ describe('async before-hook: plain synchronous throw + after-hooks registered', 
   });
 });
 
-describe('devWarnThenableResult — folds away in production, both DEV paths', () => {
+describe('devWarnThenableResult - folds away in production, both DEV paths', () => {
   // DEV is a module-level const captured at import time (see src/dev.ts and
   // tests/dev-flag.test.ts), so flipping it means stubbing the build-time
-  // global (or the NODE_ENV fallback) and re-importing fresh — vitest
+  // global (or the NODE_ENV fallback) and re-importing fresh - vitest
   // supplies no __VC_DEV__ define, so every other test in this file runs
   // with the runtime fallback (DEV: true).
   afterEach(() => {
@@ -933,7 +933,7 @@ describe('devWarnThenableResult — folds away in production, both DEV paths', (
 
     const { createCommandBus: freshCreateCommandBus } = await import('../src/command-bus');
     const bus = freshCreateCommandBus();
-    // A plain (non-`async`) function that returns a thenable — isAsyncFn()
+    // A plain (non-`async`) function that returns a thenable - isAsyncFn()
     // only catches literal `async` functions at use()-time (an unconditional,
     // non-DEV-gated warning); this shape reaches devWarnThenableResult's
     // dispatch-time behavioral check instead, which IS the one gated by DEV.

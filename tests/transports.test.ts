@@ -179,7 +179,7 @@ describe('createBatchingHttpBridge', () => {
     expect(b.value).toEqual({ formOk: true });
   });
 
-  it('does not batch dispatches from separate ticks — each flush is its own POST', async () => {
+  it('does not batch dispatches from separate ticks - each flush is its own POST', async () => {
     const fetchMock = vi.fn(async (_url: string, init: any) => {
       const body = JSON.parse(init.body);
       return { ok: true, json: async () => ({ results: body.commands.map((c: any) => ({ id: c.id, ok: true, state: 1 })) }) };
@@ -404,7 +404,7 @@ describe('createWsBridge', () => {
     bus.use(ws);
     ws.connect();
 
-    // Don't await open — WS is not yet OPEN; stub readyState
+    // Don't await open - WS is not yet OPEN; stub readyState
     lastWs.readyState = 3; // CLOSED
 
     const promise = bus.dispatch('cartAdd', { id: 99 });
@@ -508,7 +508,7 @@ describe('createWsBridge', () => {
     await vi.runAllTimersAsync();
 
     const promise = bus.dispatch('save', { id: 3 });
-    lastWs.onclose?.({ code: 1006, reason: 'transient' }); // reconnect pending — must survive
+    lastWs.onclose?.({ code: 1006, reason: 'transient' }); // reconnect pending - must survive
 
     let settledEarly = false;
     void promise.then(() => { settledEarly = true; });
@@ -533,7 +533,7 @@ describe('createWsBridge', () => {
     await vi.runAllTimersAsync();
 
     const promise = bus.dispatch('ping', {});
-    // Malformed frame — should be ignored silently
+    // Malformed frame - should be ignored silently
     lastWs.onmessage?.({ data: 'not-json{{' });
 
     // Respond with a valid frame so the promise resolves
@@ -583,6 +583,28 @@ describe('createSseBridge', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+  });
+
+  it('reconnect:false closes the stream on error, and the default leaves it open', () => {
+    // `reconnect` was declared, typed and documented with a default of true -
+    // and never read. Setting it to false did nothing at all, while the doc
+    // said it controlled reconnection. EventSource only stops retrying if the
+    // stream is closed, so that is what the option now means.
+    const bus = createCommandBus();
+
+    const off = createSseBridge({ url: '/api/stream', onEvent: () => {}, reconnect: false });
+    off.install(bus);
+    lastEs.onerror?.();
+    expect(lastEs.closed).toBe(true);
+    expect(off.isConnected()).toBe(false);
+
+    // The default must keep EventSource's native retry: closing here would
+    // silently disable reconnection for everyone who never set the option.
+    const on = createSseBridge({ url: '/api/stream', onEvent: () => {} });
+    on.install(bus);
+    lastEs.onerror?.();
+    expect(lastEs.closed).toBe(false);
+    on.teardown();
   });
 
   it('install opens EventSource and calls onEvent for each message', () => {

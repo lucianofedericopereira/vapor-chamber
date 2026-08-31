@@ -1,19 +1,19 @@
 /**
- * Supplemental coverage for src/http.ts — createHttpClient regions the other
+ * Supplemental coverage for src/http.ts - createHttpClient regions the other
  * http test files leave open:
  *
  *  - download(): content-disposition filename parsing (quoted / unquoted /
- *    absent → 'download'), the explicit-filename bypass, and the SSR guard
- *    (831 — node env has no document, so the anchor-click trigger is skipped).
- *  - safeRequest fallbacks: non-object error body → { message, code },
+ *    absent -> 'download'), the explicit-filename bypass, and the SSR guard
+ *    (831 - node env has no document, so the anchor-click trigger is skipped).
+ *  - safeRequest fallbacks: non-object error body -> { message, code },
  *    and the status chain down to 0 on a network error.
  *  - interceptor arms: request onFulfilled returning undefined, an
  *    onFulfilled throw with NO onRejected registered, response
  *    interceptor returning undefined, and a failing request with a
  *    fulfilled-only response interceptor (759 skip arm).
- *  - request() with no method → GET default.
+ *  - request() with no method -> GET default.
  *  - stale-while-revalidate: background refresh failure absorbed, and
- *    serveStaleOnError with no retained entry → the error surfaces.
+ *    serveStaleOnError with no retained entry -> the error surfaces.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createHttpClient, invalidateCsrfCache } from '../src/http';
@@ -52,7 +52,7 @@ afterEach(() => {
 // download
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — download', () => {
+describe('createHttpClient - download', () => {
   it('parses a quoted content-disposition filename', async () => {
     (globalThis.fetch as any).mockResolvedValue(
       mockResponse(200, 'file-bytes', { 'content-disposition': 'attachment; filename="report Q3.pdf"' }),
@@ -74,7 +74,7 @@ describe('createHttpClient — download', () => {
     expect(result.filename).toBe('export.csv');
   });
 
-  it("falls back to 'download' when the header is absent (828)", async () => {
+  it("falls back to 'download' when the header is absent", async () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(200, 'file-bytes'));
     const http = createHttpClient();
 
@@ -97,7 +97,7 @@ describe('createHttpClient — download', () => {
 // safeRequest fallbacks
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — safe fallbacks', () => {
+describe('createHttpClient - safe fallbacks', () => {
   it('wraps a non-object error body as { message, code }', async () => {
     (globalThis.fetch as any).mockResolvedValue(
       mockResponse(500, 'plain text failure', { 'content-type': 'text/plain' }),
@@ -125,7 +125,7 @@ describe('createHttpClient — safe fallbacks', () => {
 // interceptor arms
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — interceptor arms', () => {
+describe('createHttpClient - interceptor arms', () => {
   it('keeps the original config when a request interceptor returns undefined', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, { ok: 1 }));
     const http = createHttpClient();
@@ -156,7 +156,7 @@ describe('createHttpClient — interceptor arms', () => {
   it('skips absent onRejected handlers on failure', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(500, { error: 'x' }));
     const http = createHttpClient();
-    http.interceptors.response.use((r) => r); // fulfilled-only — no onRejected
+    http.interceptors.response.use((r) => r); // fulfilled-only - no onRejected
 
     await expect(http.get('/api/data', { retry: 0 })).rejects.toMatchObject({ status: 500 });
   });
@@ -174,7 +174,7 @@ describe('createHttpClient — interceptor arms', () => {
 // stale-while-revalidate + serveStaleOnError
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — stale cache arms', () => {
+describe('createHttpClient - stale cache arms', () => {
   it('serves stale data and absorbs the failing background refresh', async () => {
     vi.setSystemTime(5_000_000);
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(200, { v: 1 }));

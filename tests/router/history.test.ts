@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * Tests for router/history.ts — createWebHistory (browser path, exercised under
+ * Tests for router/history.ts - createWebHistory (browser path, exercised under
  * happy-dom) and the createMemoryHistory state()/destroy() branches.
  */
 
@@ -50,7 +50,7 @@ describe('createWebHistory (happy-dom)', () => {
   it('treats a non-numeric __vr already in history state as position 0', () => {
     // The `: 0` arm of position(). The boot stamp on line 124 only fires when
     // `__vr` is UNDEFINED, so a foreign or corrupted value (another router, a
-    // server-rendered state blob) survives it and reaches position() as-is —
+    // server-rendered state blob) survives it and reaches position() as-is -
     // where it must degrade to 0 rather than poison every later delta with NaN.
     window.history.replaceState({ __vr: 'corrupt' }, '', '/admin/');
 
@@ -58,7 +58,7 @@ describe('createWebHistory (happy-dom)', () => {
     // Not stamped over, precisely because it was not undefined.
     expect(window.history.state.__vr).toBe('corrupt');
 
-    // lastPosition resolved to 0, so the next push is 1 — not NaN.
+    // lastPosition resolved to 0, so the next push is 1 - not NaN.
     h.push('/a');
     expect(window.history.state.__vr).toBe(1);
 
@@ -110,7 +110,7 @@ describe('createWebHistory (happy-dom)', () => {
   });
 });
 
-describe('createMemoryHistory — state() and destroy()', () => {
+describe('createMemoryHistory - state() and destroy()', () => {
   it('exposes committed state and clears listeners on destroy', () => {
     const h = createMemoryHistory('/admin', '/start');
     expect(h.location()).toBe('/start');
@@ -122,7 +122,7 @@ describe('createMemoryHistory — state() and destroy()', () => {
     const cb = vi.fn();
     h.listen(cb);
     h.destroy(); // clears listeners
-    h.go(-1); // no listeners left → cb never fires
+    h.go(-1); // no listeners left -> cb never fires
     expect(cb).not.toHaveBeenCalled();
   });
 });
@@ -132,11 +132,11 @@ describe('createMemoryHistory — state() and destroy()', () => {
 // resolveBase window-pathname default
 // ---------------------------------------------------------------------------
 
-describe('createWebHistory — fallback branches', () => {
+describe('createWebHistory - fallback branches', () => {
   it('location() falls back to "/" when the current pathname is outside the base', () => {
     window.history.replaceState(null, '', '/elsewhere/page');
     const history = createWebHistory('/app');
-    // '/elsewhere/page' does not start with '/app' → stripBase null → '/'
+    // '/elsewhere/page' does not start with '/app' -> stripBase null -> '/'
     expect(history.location()).toBe('/');
     history.destroy();
   });
@@ -159,13 +159,13 @@ describe('createWebHistory — fallback branches', () => {
   it('boot on a history entry that already has __vr does not restamp position 0', () => {
     window.history.replaceState({ __vr: 3 }, '', '/deep');
     const history = createWebHistory('');
-    history.push('/next'); // 3 → 4
+    history.push('/next'); // 3 -> 4
     expect((window.history.state as { __vr: number }).__vr).toBe(4);
     history.destroy();
   });
 });
 
-describe('resolveBase — window-pathname default (happy-dom)', () => {
+describe('resolveBase - window-pathname default (happy-dom)', () => {
   it('reads window.location.pathname when no pathname option is given', async () => {
     const { resolveBase } = await import('../../src/router/history');
     window.history.replaceState(null, '', '/en/checkout');

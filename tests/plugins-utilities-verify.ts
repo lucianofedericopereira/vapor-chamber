@@ -324,20 +324,20 @@ function cachePlugin(opts: { ttl?: number; maxSize?: number } = {}) {
 // ═══════════════════════════════════════════════════════════════════
 
 {
-  // No handler → BusError
+  // No handler -> BusError
   const bus = createCommandBus();
   const r = bus.dispatch('nope', {});
-  assert(r.error instanceof BusError, 'no handler → BusError');
+  assert(r.error instanceof BusError, 'no handler -> BusError');
   const be = r.error as BusError;
   assert(be.code === 'VC_CORE_NO_HANDLER', 'error code');
   assert(be.emitter === 'core', 'emitter');
   assert(be.action === 'nope', 'action in error');
 
-  // Throttle → BusError
+  // Throttle -> BusError
   bus.register('throttled', () => 'ok', { throttle: 5000 });
   bus.dispatch('throttled', 1);
   const r2 = bus.dispatch('throttled', 1);
-  assert(r2.error instanceof BusError, 'throttle → BusError');
+  assert(r2.error instanceof BusError, 'throttle -> BusError');
   assert((r2.error as BusError).code === 'VC_CORE_THROTTLED', 'throttle code');
 
   // instanceof Error

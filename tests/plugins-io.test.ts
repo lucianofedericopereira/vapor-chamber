@@ -127,7 +127,7 @@ describe('persist plugin', () => {
   });
 
   it('save() is a no-op when storage is unavailable', () => {
-    // No globalThis.localStorage in test env — should not throw
+    // No globalThis.localStorage in test env - should not throw
     const p = persist({ key: 'x', getState: () => ({}), storage: undefined });
     expect(() => p.save()).not.toThrow();
     expect(() => p.load()).not.toThrow();
@@ -242,7 +242,7 @@ describe('sync plugin', () => {
     return bc;
   }
 
-  // Constructor stub — `new BroadcastChannel(...)` returns the mock instance
+  // Constructor stub - `new BroadcastChannel(...)` returns the mock instance
   function makeBcConstructor(mockBc: ReturnType<typeof makeMockBroadcastChannel>) {
     return function MockBroadcastChannel(_channel: string) {
       return mockBc;
@@ -294,8 +294,8 @@ describe('sync plugin', () => {
   it('does not broadcast when an ASYNC dispatch rejects', async () => {
     // The async arm settles the promise before deciding to broadcast. Its
     // `.catch` had no coverage: a handler that throws resolves to
-    // `{ ok: false }` (covered above), so only a REJECTED dispatch — a
-    // downstream plugin or transport failing outright — reaches it. Without
+    // `{ ok: false }` (covered above), so only a REJECTED dispatch - a
+    // downstream plugin or transport failing outright - reaches it. Without
     // the catch this would also surface as an unhandled rejection.
     const mockBc = makeMockBroadcastChannel();
     vi.stubGlobal('BroadcastChannel', makeBcConstructor(mockBc));
@@ -319,7 +319,7 @@ describe('sync plugin', () => {
   it('does not broadcast an ASYNC dispatch that settles ok:false', async () => {
     // The other half of `if (settled?.ok)`. On an async bus a throwing handler
     // RESOLVES to `{ ok: false }` rather than rejecting, so this is a distinct
-    // path from the rejection test above — and the async counterpart of the
+    // path from the rejection test above - and the async counterpart of the
     // sync "does not broadcast failed dispatches" case.
     const mockBc = makeMockBroadcastChannel();
     vi.stubGlobal('BroadcastChannel', makeBcConstructor(mockBc));
@@ -365,7 +365,7 @@ describe('sync plugin', () => {
   });
 
   it('delivers a received payload untouched and attributes it via meta.origin', () => {
-    // Was: asserted a shape-dependent normalization — objects spread with
+    // Was: asserted a shape-dependent normalization - objects spread with
     // `__origin: 'sync'`, primitives and arrays passed through bare. That
     // asymmetry WAS the echo bug: the shapes that could not carry the key
     // arrived unattributed and got re-broadcast. With `_withOrigin` the
@@ -395,7 +395,7 @@ describe('sync plugin', () => {
     expect(seen[0]).toEqual({ qty: 2 });
     expect(seen[1]).toBe(42);
     expect(seen[2]).toEqual(['a', 'b']);
-    expect(seen[3]).toBeUndefined(); // absent stays absent — no synthetic object
+    expect(seen[3]).toBeUndefined(); // absent stays absent - no synthetic object
 
     // ...and every one of them is attributed, which is what suppresses the echo.
     expect(origins).toEqual(['sync', 'sync', 'sync', 'sync']);
@@ -408,7 +408,7 @@ describe('sync plugin', () => {
     // in the PAYLOAD, so it can only mark plain objects and the absent case.
     // Primitives and arrays reached the plugin unmarked and were re-broadcast:
     // two tabs ping-ponging forever, each hop a real dispatch through
-    // handlers, plugins and transports. Measured before the fix — object and
+    // handlers, plugins and transports. Measured before the fix - object and
     // absent were suppressed; number, string, boolean and array all echoed.
     const mockBc = makeMockBroadcastChannel();
     vi.stubGlobal('BroadcastChannel', makeBcConstructor(mockBc));
@@ -431,14 +431,14 @@ describe('sync plugin', () => {
       return mockBc.posted.length;
     };
 
-    expect(receive({ qty: 2 })).toBe(0); // markable — was already suppressed
+    expect(receive({ qty: 2 })).toBe(0); // markable - was already suppressed
     expect(receive(undefined, true)).toBe(0); // markable
     expect(receive(42)).toBe(0); // was 1 (echo)
     expect(receive('hello')).toBe(0); // was 1 (echo)
     expect(receive(false)).toBe(0); // was 1 (echo)
     expect(receive(['a', 'b'])).toBe(0); // was 1 (echo)
 
-    // The suppression must be scoped to received commands only — a genuine
+    // The suppression must be scoped to received commands only - a genuine
     // LOCAL dispatch with a primitive payload still has to go out, or the fix
     // would have traded an echo loop for silent cross-tab breakage.
     mockBc.posted.length = 0;
@@ -451,7 +451,7 @@ describe('sync plugin', () => {
 
   it('suppresses the echo for unmarkable payloads on an ASYNC bus too', async () => {
     // The async arm decides a microtask after next() settles, so the echo flag
-    // must be captured synchronously at plugin entry — this is the case the
+    // must be captured synchronously at plugin entry - this is the case the
     // old `receiving = true` flag got wrong.
     const mockBc = makeMockBroadcastChannel();
     vi.stubGlobal('BroadcastChannel', makeBcConstructor(mockBc));
@@ -545,7 +545,7 @@ describe('sync plugin', () => {
     const tabSync = sync({ channel: 'test' }, { dispatch: bus.dispatch.bind(bus) });
     bus.use(tabSync);
 
-    // Malformed / foreign message — should be ignored
+    // Malformed / foreign message - should be ignored
     mockBc.simulateMessage({ __vc: false, action: 'evil', target: {} });
     mockBc.simulateMessage(null as any);
     mockBc.simulateMessage({} as any);
@@ -625,7 +625,7 @@ describe('retry plugin', () => {
     expect(attempts).toBe(2);
   });
 
-  it('respects actions filter — skips retry for unmatched actions', async () => {
+  it('respects actions filter - skips retry for unmatched actions', async () => {
     const bus = createAsyncCommandBus();
     bus.use(retry({ maxAttempts: 3, baseDelay: 0, actions: ['api*'] }));
 
@@ -695,7 +695,7 @@ describe('retry plugin', () => {
 
     const result = await bus.dispatch('save', {});
     expect(result.ok).toBe(false);
-    expect(attempts).toBe(1); // permanent code — no retries wasted
+    expect(attempts).toBe(1); // permanent code - no retries wasted
   });
 
   it('default predicate keeps retrying retryable BusError codes', async () => {
@@ -710,7 +710,7 @@ describe('retry plugin', () => {
 
     const result = await bus.dispatch('call', {});
     expect(result.ok).toBe(false);
-    expect(attempts).toBe(3); // transient code — retried to maxAttempts
+    expect(attempts).toBe(3); // transient code - retried to maxAttempts
   });
 
   it('default predicate still retries plain (non-Bus) errors, even with a code field', async () => {
@@ -721,7 +721,7 @@ describe('retry plugin', () => {
     bus.register('read', async () => {
       attempts++;
       const err = new Error('no such file') as Error & { code: string };
-      err.code = 'ENOENT'; // non-VC_ code — behaves like a plain error
+      err.code = 'ENOENT'; // non-VC_ code - behaves like a plain error
       throw err;
     });
 
@@ -753,13 +753,13 @@ describe('retry plugin', () => {
     const result = await bus.dispatch('flaky', {});
     expect(result.ok).toBe(true);
     expect(attempts).toBe(3);
-    expect(seen).toHaveLength(3); // was 1 — attempts 2+ skipped the whole tail
+    expect(seen).toHaveLength(3); // was 1 - attempts 2+ skipped the whole tail
   });
 
   it('reaches a downstream transport on the retried attempt', async () => {
     // The canonical pairing: retry() outer, createHttpBridge inner. With a
     // shared cursor, attempt 2 skipped the bridge and resolved against the
-    // local handler instead — the retry reported an outcome the server never
+    // local handler instead - the retry reported an outcome the server never
     // saw. Modelled here with a mock bridge that never calls next().
     const bus = createAsyncCommandBus();
     let bridgeCalls = 0;

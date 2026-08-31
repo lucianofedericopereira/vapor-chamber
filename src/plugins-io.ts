@@ -1,5 +1,5 @@
 /**
- * vapor-chamber — I/O plugins (async/storage/network)
+ * vapor-chamber - I/O plugins (async/storage/network)
  *
  * retry, persist, sync
  */
@@ -18,9 +18,9 @@ export type RetryOptions = {
   baseDelay?: number;
   /**
    * Backoff strategy:
-   * - 'fixed'       — always wait baseDelay ms
-   * - 'linear'      — baseDelay * attempt
-   * - 'exponential' — baseDelay * 2^(attempt-1)
+   * - 'fixed'       - always wait baseDelay ms
+   * - 'linear'      - baseDelay * attempt
+   * - 'exponential' - baseDelay * 2^(attempt-1)
    * Default: 'exponential'
    */
   strategy?: 'fixed' | 'linear' | 'exponential';
@@ -34,7 +34,7 @@ export type RetryOptions = {
    *
    * Default: BusErrors (a `.code` starting with 'VC_') are retried only when
    * the code is transient per RETRYABLE_CODES (throttled, rate-limited,
-   * timeout, circuit-open, ...) — known-permanent codes (validation, sealed
+   * timeout, circuit-open, ...) - known-permanent codes (validation, sealed
    * bus, max depth, ...) stop retrying immediately instead of wasting
    * attempts. All other errors are always retried. (Before v1.3 the default
    * retried everything; behavior for plain Errors is unchanged.)
@@ -55,10 +55,10 @@ function defaultIsRetryable(error: Error): boolean {
 }
 
 /**
- * retry — async plugin that retries failed dispatches with configurable backoff.
+ * retry - async plugin that retries failed dispatches with configurable backoff.
  *
  * By default, permanent BusError codes (e.g. validation failures) are not
- * retried — see RetryOptions.isRetryable to customize.
+ * retried - see RetryOptions.isRetryable to customize.
  *
  * @example
  * const bus = createAsyncCommandBus()
@@ -150,7 +150,7 @@ export type PersistOptions<T = any> = {
 };
 
 /**
- * persist — auto-save state to localStorage (or custom storage) after each command.
+ * persist - auto-save state to localStorage (or custom storage) after each command.
  *
  * @example
  * const cartPersist = persist({ key: 'vc:cart', getState: () => cartState.value })
@@ -196,7 +196,7 @@ export function persist<T>(options: PersistOptions<T>): Plugin & {
       const state = deserialize(raw);
       if (state == null) return null;
       if (validate && !validate(state)) {
-        console.warn(`[vapor-chamber] persist: validation failed for key "${key}" — returning null. Persisted state may be stale after a deploy.`);
+        console.warn(`[vapor-chamber] persist: validation failed for key "${key}" - returning null. Persisted state may be stale after a deploy.`);
         return null;
       }
       return state;
@@ -213,7 +213,7 @@ export function persist<T>(options: PersistOptions<T>): Plugin & {
     catch (e) { console.warn(`[vapor-chamber] persist: failed to clear key "${key}":`, e); }
   }
 
-  // Coalesced save scheduling — flushes one save per microtask burst.
+  // Coalesced save scheduling - flushes one save per microtask burst.
   let _saveScheduled = false;
   function scheduleSave(): void {
     if (_saveScheduled) return;
@@ -258,7 +258,7 @@ export type SyncOptions = {
 type SyncMessage = { __vc: true; action: string; target: any; payload?: any };
 
 /**
- * sync — broadcast successful commands to all other open tabs via BroadcastChannel.
+ * sync - broadcast successful commands to all other open tabs via BroadcastChannel.
  *
  * @example
  * const tabSync = sync({ channel: 'vapor-chamber:app' })
@@ -276,10 +276,10 @@ export function sync(
 
   // DEV-gated: a missing busRef is a call-site mistake fixed at build time, not
   // a runtime condition the deployed app can recover from. Unlike the persist
-  // validation warning below — which fires on real production state (a stale
+  // validation warning below - which fires on real production state (a stale
   // payload after a deploy) and therefore stays unconditional.
   if (DEV && !busRef?.dispatch) {
-    console.warn('[vapor-chamber] sync() called without busRef — received messages will not be re-dispatched locally. Pass { dispatch: bus.dispatch } as the second argument.');
+    console.warn('[vapor-chamber] sync() called without busRef - received messages will not be re-dispatched locally. Pass { dispatch: bus.dispatch } as the second argument.');
   }
 
   let bc: BroadcastChannel | null = null;
@@ -307,12 +307,12 @@ export function sync(
         // a `receiving = true` flag cleared in a `finally`, which holds only on
         // a sync bus (the dispatch completes inside the try). On an async bus
         // `localDispatch` returns a pending promise and the plugin chain runs a
-        // microtask later — after `finally` already cleared the flag.
+        // microtask later - after `finally` already cleared the flag.
         //
         // MEASURED, and worth recording because it is not what you would
         // predict: on an async bus that flag never actually mattered, because
         // the plugin below never broadcast anything at all (it read `.ok` off a
-        // promise). Fixing that no-op is what makes the flag's race reachable —
+        // promise). Fixing that no-op is what makes the flag's race reachable -
         // with the broadcast working and the flag still in place, two tabs
         // ping-pong forever, every hop a real dispatch through handlers,
         // plugins and transports. So the marker is a PREREQUISITE for the
@@ -320,7 +320,7 @@ export function sync(
         //
         // `_withOrigin` sets `meta.origin = 'sync'` for EVERY payload shape,
         // including the primitives and arrays a `__origin` key cannot ride on
-        // — those used to arrive unmarked and get re-broadcast, ping-ponging
+        // - those used to arrive unmarked and get re-broadcast, ping-ponging
         // between tabs forever. The payload now reaches handlers exactly as
         // the sending tab wrote it: no spread, no allocation, no injected key.
         _withOrigin('sync', () => localDispatch(msg.action, msg.target, msg.payload));
@@ -333,7 +333,7 @@ export function sync(
   function broadcast(cmd: Command): void {
     // A command that arrived FROM another tab must not be sent back out.
     // `meta.origin` is stamped by the core via `_withOrigin` on the receive
-    // path, so it is already set by the time any plugin runs — on a sync bus
+    // path, so it is already set by the time any plugin runs - on a sync bus
     // and an async one alike, and for every payload shape.
     if (cmd.meta?.origin === 'sync') return;
     if (filter && !filter(cmd)) return;
@@ -343,7 +343,7 @@ export function sync(
   const plugin: Plugin = (cmd, next) => {
     const result = next();
     // `sync()` is typed as a sync Plugin and installs happily on an
-    // AsyncCommandBus — where `next()` returns a PENDING PROMISE. Reading
+    // AsyncCommandBus - where `next()` returns a PENDING PROMISE. Reading
     // `result.ok` on it yields `undefined`, so this plugin used to broadcast
     // nothing at all on an async bus: cross-tab sync was silently dead, with
     // no warning, for every setup whose handlers are async. Decide after it

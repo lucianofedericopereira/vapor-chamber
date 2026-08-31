@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { resolveBase } from '../../src/router/history';
 
-describe('resolveBase — concept: prefix?, locale?, or explicit baseurl', () => {
+describe('resolveBase - concept: prefix?, locale?, or explicit baseurl', () => {
   const locales = ['it', 'en'];
 
   it('explicit url wins outright', () => {
@@ -13,7 +13,7 @@ describe('resolveBase — concept: prefix?, locale?, or explicit baseurl', () =>
     expect(resolveBase({ prefix: '/admin', locales, pathname: '/admin/EN/catalog' })).toBe('/admin/en');
   });
 
-  it('locale segment is optional — bare prefix mounts at prefix', () => {
+  it('locale segment is optional - bare prefix mounts at prefix', () => {
     expect(resolveBase({ prefix: '/admin', locales, pathname: '/admin/catalog' })).toBe('/admin');
     expect(resolveBase({ prefix: '/admin', locales, pathname: '/admin' })).toBe('/admin');
   });
@@ -31,8 +31,8 @@ describe('resolveBase — concept: prefix?, locale?, or explicit baseurl', () =>
     expect(resolveBase({ prefix: '/admin', locales, pathname: '/shop/x' })).toBe('/admin');
   });
 
-  // Every case above supplies `pathname` explicitly, so the `??` fallback —
-  // and specifically its no-`window` arm — was never taken. This file has no
+  // Every case above supplies `pathname` explicitly, so the `??` fallback -
+  // and specifically its no-`window` arm - was never taken. This file has no
   // `@vitest-environment` docblock, so it runs under the default `node`
   // environment where `window` genuinely does not exist: the SSR shape.
   describe('no pathname and no window (SSR)', () => {

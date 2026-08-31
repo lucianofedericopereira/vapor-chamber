@@ -1,8 +1,9 @@
 /**
- * vapor-chamber-router — URL/query layer. Pure string/data functions.
+ * vapor-chamber-router - URL/query layer. Pure string/data functions.
  *
- * Query params are STATE, not navigation (ARCHITECTURE.md §3): the typed
- * codec here backs the engine's query fast path and useQueryParam.
+ * Query params are STATE, not navigation (docs/router.md, "Path = navigation,
+ * query = state"): the typed codec here backs the engine's query fast path and
+ * useQueryParam.
  */
 
 import { dict } from '../dict';
@@ -14,7 +15,7 @@ export function parseQuery(search: string): QueryValues {
   // Prototype-free: the read below (`const existing = query[key]`) walks the
   // chain on a `{}`, so `?constructor=1` came back "already set" and produced
   // `[Object, '1']` instead of `'1'`. Rule and full evidence in `../dict`.
-  // (vue-router v5 hardened its own query parsing the same way — different
+  // (vue-router v5 hardened its own query parsing the same way - different
   // codebase, same lesson, one call to take it.)
   const query: QueryValues = dict<string | string[]>();
   const raw = search.startsWith('?') ? search.slice(1) : search;
@@ -92,7 +93,7 @@ export function decodeQueryParam(raw: string | string[] | undefined, def: QueryP
 }
 
 /** Encode a typed value for the URL. Returns null when the key should be
- *  DROPPED — values equal to the declared default never pollute the URL. */
+ *  DROPPED - values equal to the declared default never pollute the URL. */
 export function encodeQueryParam(value: unknown, def: QueryParamDef): string | string[] | null {
   if (value === null || value === undefined) return null;
   if ((def.type ?? 'string') === 'array') {
@@ -111,7 +112,7 @@ function sameStringArray(a: string[], b: string[]): boolean {
 }
 
 /**
- * Shared active/exact semantics for a link target against the current path —
+ * Shared active/exact semantics for a link target against the current path -
  * `data-active` stamping (dom.ts) and useMenu() both go through here, so a
  * Blade-rendered menu and a Vue-rendered menu can never disagree.
  * Trailing-slash tolerant. exact = same path; active = exact or path prefix
@@ -129,7 +130,7 @@ export function pathActivity(targetPath: string, currentPath: string): { active:
  *   1. explicit per-call override
  *   2. the route's declaration
  *   3. convention: `page` pushes (back steps through pages), everything else
- *      (filters, sort, search…) replaces.
+ *      (filters, sort, search...) replaces.
  */
 export function resolveQueryHistory(
   key: string,

@@ -8,7 +8,7 @@
  * frozen or coarse clock cannot silently extend a cache entry, hold a circuit
  * breaker open, or defeat a rate limiter.
  *
- * That containment is currently true by construction rather than by design —
+ * That containment is currently true by construction rather than by design -
  * `cache`, `idempotent`, `circuitBreaker`, `rateLimit`, `throttle`, the
  * transport queues, the CSRF cache and the outbox all call `Date.now()` at their
  * own call sites. This file pins it, so a future refactor that routes any of
@@ -19,7 +19,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { _configureClock, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { cache, idempotent } from '../src/plugins-extra';
 
-/** A deliberately FROZEN clock — the worst case for anything that expires. */
+/** A deliberately FROZEN clock - the worst case for anything that expires. */
 const FROZEN = 1_000_000;
 
 afterEach(() => {
@@ -32,7 +32,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('_configureClock — containment', () => {
+describe('_configureClock - containment', () => {
   it('changes meta.ts and leaves meta.id monotonic', () => {
     _configureClock(() => FROZEN);
     const bus = createCommandBus();
@@ -43,7 +43,7 @@ describe('_configureClock — containment', () => {
     bus.dispatch('t', 1);
     bus.dispatch('t', 2);
 
-    // Both commands share the frozen timestamp — the documented trade.
+    // Both commands share the frozen timestamp - the documented trade.
     expect(seen[0].ts).toBe(FROZEN);
     expect(seen[1].ts).toBe(FROZEN);
     // ...but identity is still unique and ordered, which is what ordering must
@@ -84,7 +84,7 @@ describe('_configureClock — containment', () => {
 
   it('leaves meta.ts tracking faked system time by DEFAULT', () => {
     // 12+ files in this suite fake time. With the default clock, meta.ts must
-    // follow it — this is precisely what a cached clock would break, and why
+    // follow it - this is precisely what a cached clock would break, and why
     // caching is opt-in rather than the default.
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-01-01T00:00:00Z'));

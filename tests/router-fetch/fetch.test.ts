@@ -35,7 +35,7 @@ afterEach(() => {
 });
 
 describe('fetchLoaders', () => {
-  it('interpolates, fetches through vapor-chamber\'s HttpClient, returns bare JSON — no envelope games', async () => {
+  it('interpolates, fetches through vapor-chamber\'s HttpClient, returns bare JSON - no envelope games', async () => {
     const seen: string[] = [];
     (globalThis.fetch as any).mockImplementation(async (url: string | URL | Request) => {
       seen.push(String(url));
@@ -54,13 +54,13 @@ describe('fetchLoaders', () => {
     expect(router.currentRoute.value.data.get('items')).toEqual({ items: [1, 2, 3] });
   });
 
-  it('non-2xx → coded load_failed, navigation not committed', async () => {
+  it('non-2xx -> coded load_failed, navigation not committed', async () => {
     (globalThis.fetch as any).mockImplementation(async () => jsonResponse({ error: 'nope' }, false, 500));
     const router = createRouter({
       history: createMemoryHistory(),
       routes: ROWS,
       components: { Home: { name: 'Home' }, Items: { name: 'Items' } },
-      // retry: 0 keeps this deterministic and fast — the default client
+      // retry: 0 keeps this deterministic and fast - the default client
       // (createHttpClient()'s own retry: 2 for GET) behaves the same, just
       // after its own backoff delays, which real consumers get for free.
       loaders: fetchLoaders({ http: createHttpClient({ retry: 0 }) }),
@@ -100,11 +100,11 @@ describe('fetchLoaders', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Loader caching (item 2) — the http client's cache engine sits directly
+// Loader caching (item 2) - the http client's cache engine sits directly
 // underneath every loader read; before this it was unreachable from here.
 // ---------------------------------------------------------------------------
 
-describe('fetchLoaders — cache', () => {
+describe('fetchLoaders - cache', () => {
   const CACHE_ROWS = [
     { name: 'home', path: '/', component: 'Home' },
     { name: 'items', path: '/items', component: 'Items', load: '/api/items' },
@@ -129,7 +129,7 @@ describe('fetchLoaders — cache', () => {
     });
   }
 
-  it('is off by default — every navigation re-reads', async () => {
+  it('is off by default - every navigation re-reads', async () => {
     let calls = 0;
     (globalThis.fetch as any).mockImplementation(async () => {
       calls++;
@@ -188,12 +188,12 @@ describe('fetchLoaders — cache', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Stale-while-revalidate (item 2a) — the third lane. A stale hit commits
+// Stale-while-revalidate (item 2a) - the third lane. A stale hit commits
 // instantly; the refresh behind it has to reach the snapshot, and has to be
 // distinguishable from "loading".
 // ---------------------------------------------------------------------------
 
-describe('fetchLoaders — stale-while-revalidate', () => {
+describe('fetchLoaders - stale-while-revalidate', () => {
   const SWR_ROWS = [
     { name: 'home', path: '/', component: 'Home' },
     { name: 'items', path: '/items', component: 'Items', load: '/api/items' },
@@ -202,7 +202,7 @@ describe('fetchLoaders — stale-while-revalidate', () => {
 
   it('commits stale data, then patches the fresh value into the snapshot', async () => {
     // The revalidation response is held open so the stale-commit moment is
-    // observable — with an instantly-resolving mock the refresh lands before
+    // observable - with an instantly-resolving mock the refresh lands before
     // the push() await returns and there is nothing to assert about.
     let calls = 0;
     let releaseRefresh: (() => void) | null = null;
@@ -218,7 +218,7 @@ describe('fetchLoaders — stale-while-revalidate', () => {
       history: createMemoryHistory(),
       routes: SWR_ROWS,
       components: COMPONENTS,
-      // ttl 0 → the entry is past-fresh immediately, staleTtl keeps it servable.
+      // ttl 0 -> the entry is past-fresh immediately, staleTtl keeps it servable.
       loaders: fetchLoaders({
         cache: { ttl: 0, staleTtl: 60_000 },
         http: createHttpClient({ retry: 0 }),
@@ -226,13 +226,13 @@ describe('fetchLoaders — stale-while-revalidate', () => {
     });
     await router.isReady();
 
-    await router.push('/items'); // miss → version 1, cached
+    await router.push('/items'); // miss -> version 1, cached
     expect(router.currentRoute.value.data.get('items')).toEqual({ version: 1 });
 
     await router.push('/');
-    await router.push('/items'); // stale hit → commits version 1 immediately
+    await router.push('/items'); // stale hit -> commits version 1 immediately
     expect(router.currentRoute.value.data.get('items')).toEqual({ version: 1 });
-    expect(router.isLoading.value).toBe(false); // it has data — it is not loading
+    expect(router.isLoading.value).toBe(false); // it has data - it is not loading
     expect(router.isRevalidating.value).toBe(true); // ...but a refresh is running
 
     releaseRefresh?.();

@@ -1,11 +1,11 @@
 /**
- * src/dev.ts — the DEV constant's four resolution paths.
+ * src/dev.ts - the DEV constant's four resolution paths.
  *
  * DEV is a build-time answer with a runtime fallback, and the fallback is the
  * only path the rest of the suite ever exercises, because vitest supplies no
  * `__VC_DEV__` define. The whole thing is ONE expression, so a line- or
  * statement-based reading of this file can never distinguish its four
- * resolutions — only exercising them can.
+ * resolutions - only exercising them can.
  *
  * Each case re-imports the module after arranging globals, because DEV is
  * evaluated once at module scope.
@@ -18,20 +18,20 @@ async function freshDEV(): Promise<boolean> {
   return (await import('../src/dev')).DEV;
 }
 
-describe('DEV — build define takes precedence', () => {
+describe('DEV - build define takes precedence', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     vi.resetModules();
   });
 
-  it('__VC_DEV__ = true → DEV is true, regardless of NODE_ENV', async () => {
+  it('__VC_DEV__ = true -> DEV is true, regardless of NODE_ENV', async () => {
     vi.stubGlobal('__VC_DEV__', true);
     vi.stubEnv('NODE_ENV', 'production'); // deliberately contradicts the define
     expect(await freshDEV()).toBe(true);
   });
 
-  it('__VC_DEV__ = false → DEV is false, regardless of NODE_ENV', async () => {
+  it('__VC_DEV__ = false -> DEV is false, regardless of NODE_ENV', async () => {
     // The production IIFE case: the define folds the branch away and takes the
     // warning strings with it. Here we only assert the value it folds to.
     vi.stubGlobal('__VC_DEV__', false);
@@ -40,24 +40,24 @@ describe('DEV — build define takes precedence', () => {
   });
 });
 
-describe('DEV — runtime fallback when no define exists', () => {
+describe('DEV - runtime fallback when no define exists', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     vi.resetModules();
   });
 
-  it('NODE_ENV=production → false', async () => {
+  it('NODE_ENV=production -> false', async () => {
     vi.stubEnv('NODE_ENV', 'production');
     expect(await freshDEV()).toBe(false);
   });
 
-  it('NODE_ENV=development → true', async () => {
+  it('NODE_ENV=development -> true', async () => {
     vi.stubEnv('NODE_ENV', 'development');
     expect(await freshDEV()).toBe(true);
   });
 
-  it('no `process` at all → false, not a ReferenceError', async () => {
+  it('no `process` at all -> false, not a ReferenceError', async () => {
     // The no-bundler browser case the `typeof` guard exists for: a bare
     // `process.env` read here would throw, which is the whole point of
     // scripts/check-env-guards.mjs.

@@ -5,7 +5,7 @@
  * Why this exists as its own test and not in perf.bench.ts: vitest's bench()
  * harness has a ~480µs/iteration setup floor (createCommandBus + effectScope +
  * the bench machinery) that swamps the signal-write cost and compresses every
- * useCommandState case to the same ~2,100 ops/sec — it literally cannot resolve
+ * useCommandState case to the same ~2,100 ops/sec - it literally cannot resolve
  * the ref-vs-shallowRef difference. This harness uses precise process.hrtime
  * timing with the setup amortised, interleaves A/B reps to cancel thermal drift,
  * and takes medians. The numbers it prints are the source of truth for the
@@ -57,7 +57,7 @@ function median(xs: number[]): number {
   return s[Math.floor(s.length / 2)];
 }
 
-describe('signal() shallowRef vs ref — empirical proof (real useCommandState path)', () => {
+describe('signal() shallowRef vs ref - empirical proof (real useCommandState path)', () => {
   // Leave the factory as the library default (shallowRef) for any later tests.
   afterAll(() => { configureSignal(shallowRef as any); });
 
@@ -69,7 +69,7 @@ describe('signal() shallowRef vs ref — empirical proof (real useCommandState p
   // is synchronous, CPU-bound work that runs concurrently with the rest of the
   // suite, so under heavy parallel load wall-clock time stretches well past the
   // raw compute time. Iteration/rep counts are sized to leave comfortable
-  // headroom under that timeout — the assertions only smoke-check that the
+  // headroom under that timeout - the assertions only smoke-check that the
   // ratios are finite/positive, so precision beyond this buys nothing. That
   // timeout, not the assertions, was the source of the flake.
   const underCoverage = process.env.npm_lifecycle_event === 'test:coverage';
@@ -101,7 +101,7 @@ describe('signal() shallowRef vs ref — empirical proof (real useCommandState p
     }
 
     // eslint-disable-next-line no-console
-    console.log('\n  signal() backend — real useCommandState dispatch path (median of 5 interleaved reps)');
+    console.log('\n  signal() backend - real useCommandState dispatch path (median of 5 interleaved reps)');
     for (const [k, v] of Object.entries(results)) {
       const pct = ((v.ratio - 1) * 100);
       // eslint-disable-next-line no-console
@@ -114,10 +114,10 @@ describe('signal() shallowRef vs ref — empirical proof (real useCommandState p
     }
 
     // This test PRINTS the evidence (the table above, in CI logs and quoted in
-    // docs/performance.md) — that is the proof shallowRef wins. It deliberately
+    // docs/performance.md) - that is the proof shallowRef wins. It deliberately
     // does NOT assert a timing threshold: (a) it measures Vue's ref vs shallowRef
-    // *directly*, so it can't catch a library regression anyway — that guard is
-    // chamber.test.ts › "signal() factory — shallow reactivity" (isShallow); and
+    // *directly*, so it can't catch a library regression anyway - that guard is
+    // chamber.test.ts › "signal() factory - shallow reactivity" (isShallow); and
     // (b) timing ratios are unstable under heavy parallel load / --coverage
     // instrumentation, so asserting them just makes CI flaky. We only smoke-check
     // that the measurement actually ran and produced finite, positive ratios.

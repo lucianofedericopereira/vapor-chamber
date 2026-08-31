@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE — `globalThis.__VUE__` is a key Vue itself owns and overwrites with
+ * FIXTURE - `globalThis.__VUE__` is a key Vue itself owns and overwrites with
  * a BOOLEAN, and it does so at app-creation time. Measured on vue@3.6.0-rc.3.
  *
  * `src/chamber.ts` §probeVue reads `globalThis.__VUE__` and expects to find
@@ -14,8 +14,8 @@
  * without a bundler (the async `import('vue')` fallback is a bare specifier
  * that cannot resolve in a browser).
  *
- * But `__VUE__` is not ours. Vue assigns `target.__VUE__ = true` — a devtools
- * marker — from `prepareApp()` (Vapor) and `baseCreateRenderer()` (vDOM), in
+ * But `__VUE__` is not ours. Vue assigns `target.__VUE__ = true` - a devtools
+ * marker - from `prepareApp()` (Vapor) and `baseCreateRenderer()` (vDOM), in
  * both the dev and the production builds. Two writers, two incompatible value
  * types, one key.
  *
@@ -24,10 +24,10 @@
  * reasoning about it:
  *
  *   1. First draft claimed a later `import()` of Vue clobbers a manually
- *      assigned namespace. It does not — ESM evaluates a module once per
+ *      assigned namespace. It does not - ESM evaluates a module once per
  *      realm, so the second import is a cache hit that re-runs no init.
  *   2. Second draft claimed merely importing Vue sets `__VUE__`. It does not
- *      either — the assignment is lazy, and the tests below show import alone
+ *      either - the assignment is lazy, and the tests below show import alone
  *      leaves the key `undefined`.
  *
  * What survives measurement is narrower than either, and worse in a more
@@ -35,14 +35,14 @@
  * documented recipe (import, assign, then load vapor-chamber) is sound only
  * while vapor-chamber's one-shot probe wins the race against the app's own
  * `mount()`. Once anything mounts, the namespace is gone. A build that
- * imports the library lazily — a code-split chunk, a second island, an MPA
- * page with different script order — probes *after* that point, finds `true`,
+ * imports the library lazily - a code-split chunk, a second island, an MPA
+ * page with different script order - probes *after* that point, finds `true`,
  * cannot use it, and falls through to the async import that browsers cannot
  * resolve. `createVaporChamberApp()` then throws "Vue 3.6+ with Vapor mode
  * required" on a page that demonstrably has Vapor, with nothing logged to say
  * why.
  *
- * This is why detection gains a channel the library owns — `configureVue()`
+ * This is why detection gains a channel the library owns - `configureVue()`
  * and `__VAPOR_CHAMBER_VUE__` in `src/chamber.ts`. `__VUE__` stays supported
  * as a legacy fallback (devtools-hook pages and existing setups rely on it),
  * but it is no longer the only door, and it is no longer asked to hold a
@@ -60,7 +60,7 @@ type VaporApi = {
 };
 
 describe('globalThis.__VUE__ is Vue-owned, not a namespace slot', () => {
-  it('importing Vue does NOT set __VUE__ — the key is untouched until an app is created', async () => {
+  it('importing Vue does NOT set __VUE__ - the key is untouched until an app is created', async () => {
     const g = globalThis as unknown as Record<string, unknown>;
     const before = g.__VUE__;
     try {
@@ -68,7 +68,7 @@ describe('globalThis.__VUE__ is Vue-owned, not a namespace slot', () => {
       await import(/* @vite-ignore */ WITH_VAPOR);
 
       // MEASURED: still absent. This is the window in which the documented
-      // no-bundler recipe works — and it is the whole of that window.
+      // no-bundler recipe works - and it is the whole of that window.
       expect(g.__VUE__).toBeUndefined();
     } finally {
       if (before === undefined) delete g.__VUE__; else g.__VUE__ = before;
@@ -116,7 +116,7 @@ describe('globalThis.__VUE__ is Vue-owned, not a namespace slot', () => {
     }
   });
 
-  it('the capability itself is present — only our route to it is lost', async () => {
+  it('the capability itself is present - only our route to it is lost', async () => {
     const vue = (await import(/* @vite-ignore */ WITH_VAPOR)) as Record<string, unknown>;
 
     // The counterpart fact, and the reason the failure reads as a library bug

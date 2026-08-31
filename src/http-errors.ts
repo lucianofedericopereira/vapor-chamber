@@ -1,9 +1,9 @@
 /**
- * vapor-chamber — HTTP error classification
+ * vapor-chamber - HTTP error classification
  *
  * The single, named "is this worth retrying / can a cached response stand
  * in for it" rule, extracted so `http.ts`'s retry loop and `cache.serveStaleOnError`
- * can't drift on what counts as transient — a timeout, a network failure (no
+ * can't drift on what counts as transient - a timeout, a network failure (no
  * response at all), or a 5xx. A 4xx is a business/client error and is never
  * transient, no matter how tempting it is to retry a flaky-looking 429.
  */

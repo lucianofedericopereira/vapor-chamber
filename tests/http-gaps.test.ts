@@ -1,9 +1,9 @@
 /**
- * Supplemental coverage for src/http.ts — the paths http-coverage.test.ts and
+ * Supplemental coverage for src/http.ts - the paths http-coverage.test.ts and
  * http-errors.test.ts leave open:
  *
  *  - postCommand: `silent` stamped on a PERMANENT failure re-thrown from the
- *    catch — the 4xx path, distinct from the already-covered `throw
+ *    catch - the 4xx path, distinct from the already-covered `throw
  *    failed` stamp at 348.
  *  - clientRequest: pre-attempt user abort, 401 session expiry,
  *    and a mid-flight user abort surfacing as AbortError.
@@ -44,10 +44,10 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// postCommand — silent on the permanent-failure re-throw
+// postCommand - silent on the permanent-failure re-throw
 // ---------------------------------------------------------------------------
 
-describe('postCommand — silent on permanent failures', () => {
+describe('postCommand - silent on permanent failures', () => {
   it('stamps silent on a 422 re-thrown from the catch and does not retry it', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(422, { error: 'invalid' }));
 
@@ -69,10 +69,10 @@ describe('postCommand — silent on permanent failures', () => {
 });
 
 // ---------------------------------------------------------------------------
-// clientRequest — abort and session-expiry paths
+// clientRequest - abort and session-expiry paths
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — abort and session expiry', () => {
+describe('createHttpClient - abort and session expiry', () => {
   it('throws AbortError before issuing a request when the signal is already aborted', async () => {
     const ac = new AbortController();
     ac.abort();
@@ -121,10 +121,10 @@ describe('createHttpClient — abort and session expiry', () => {
 });
 
 // ---------------------------------------------------------------------------
-// createHttpClient — response interceptor onRejected
+// createHttpClient - response interceptor onRejected
 // ---------------------------------------------------------------------------
 
-describe('createHttpClient — response interceptor onRejected', () => {
+describe('createHttpClient - response interceptor onRejected', () => {
   it('runs onRejected with the error and still rejects', async () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(500, { error: 'boom' }));
     const onRejected = vi.fn();

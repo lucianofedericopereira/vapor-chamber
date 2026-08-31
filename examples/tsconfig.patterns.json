@@ -1,8 +1,8 @@
 {
   // Type-checks the top-level example/pattern reference snippets against the
   // real library types (paths below map straight into ../src). Nothing else
-  // runs these files — they're not part of any package.json, not built, not
-  // tested — so before this config existed, real API-misuse bugs could sit
+  // runs these files - they're not part of any package.json, not built, not
+  // tested - so before this config existed, real API-misuse bugs could sit
   // indefinitely with nothing to catch them (found two this way in
   // pattern-6-vapor-router.ts: createHttpBridge({ bus, ... }) treating `bus`
   // as a config option instead of a plugin for bus.use(), and a sync
@@ -11,8 +11,8 @@
   // including missing imports" check.
   //
   // Excluded, each for its own reason:
-  //   pattern-1-blade-cdn.html, feature-directives.html — plain HTML, nothing to check
-  //   pattern-4-nextjs.tsx — needs @types/react/@types/react-dom just to parse
+  //   pattern-1-blade-cdn.html, feature-directives.html - plain HTML, nothing to check
+  //   pattern-4-nextjs.tsx - needs @types/react/@types/react-dom just to parse
   //     JSX, a real devDependency to add for one snippet that otherwise only
   //     exercises the same getCommandBus()/dispatch surface the others do
   "compilerOptions": {

@@ -3,7 +3,7 @@
 
   Demonstrates: useCommand, useCommandState, useCommandHistory composables
 
-  Works in Vapor (`<script setup vapor>` with Vue 3.6+) and VDOM alike — the
+  Works in Vapor (`<script setup vapor>` with Vue 3.6+) and VDOM alike - the
   composables never touch getCurrentInstance(), so only the script attribute
   differs between the two modes.
 -->
@@ -85,7 +85,7 @@ const { canUndo, canRedo, undo, redo } = useCommandHistory({
   filter: (cmd) => cmd.action.startsWith('todo') && cmd.action !== 'todoFilter'
 });
 
-// Computed filtered items — access todos.value properties directly without
+// Computed filtered items - access todos.value properties directly without
 // destructuring, so reads always go through the signal getter and remain reactive.
 function getFilteredItems() {
   switch (todos.value.filter) {
@@ -103,7 +103,7 @@ function addTodo() {
   if (!newTodoText.value.trim()) return;
 
   // dispatch() is typed CommandResult | Promise<CommandResult> (the shared bus
-  // may be sync or async) — this app's shared bus is sync, so narrow with an
+  // may be sync or async) - this app's shared bus is sync, so narrow with an
   // instanceof check that also keeps an async bus working.
   const result = dispatch('todoAdd', newTodoText.value.trim());
   if (!(result instanceof Promise) && result.ok) {
@@ -127,7 +127,7 @@ function setFilter(filter: TodoState['filter']) {
   dispatch('todoFilter', filter);
 }
 
-// Stats as a reactive signal — updated after every todo command so the template
+// Stats as a reactive signal - updated after every todo command so the template
 // reads a single signal instead of re-running filter() for every binding.
 const stats = signal({ total: 0, active: 0, completed: 0 });
 

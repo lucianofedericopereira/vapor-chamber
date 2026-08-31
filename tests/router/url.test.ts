@@ -96,7 +96,7 @@ describe('resolveQueryHistory', () => {
   });
 });
 
-describe('parseQuery — repeated keys', () => {
+describe('parseQuery - repeated keys', () => {
   it('collects a repeated key into an array, in order', () => {
     // Third and later occurrences take the push branch, not the pair branch.
     expect(parseQuery('tag=a&tag=b&tag=c')).toEqual({ tag: ['a', 'b', 'c'] });
@@ -130,7 +130,7 @@ describe('query edge cases', () => {
   });
 
   it('encodeQueryParam drops a value equal to its declared default', () => {
-    // Defaults never appear in the URL — that is what keeps a shared link clean.
+    // Defaults never appear in the URL - that is what keeps a shared link clean.
     expect(encodeQueryParam(['a', 'b'], { type: 'array', default: ['a', 'b'] })).toBeNull();
     expect(encodeQueryParam(['a', 'c'], { type: 'array', default: ['a', 'b'] })).toEqual(['a', 'c']);
     expect(encodeQueryParam([], { type: 'array' })).toBeNull();

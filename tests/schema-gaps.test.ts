@@ -2,10 +2,10 @@
  * Supplemental coverage for src/schema.ts.
  *
  * `defineSchema` is the headline: an exported public API with no test calling
- * it at all — the identity helper every typed-bus consumer starts from.
+ * it at all - the identity helper every typed-bus consumer starts from.
  *
  * Also here:
- *  - toProps' absent-FieldMap guard — an action with only a target, or
+ *  - toProps' absent-FieldMap guard - an action with only a target, or
  *    only a payload.
  *  - schemaLogger's validated-payload arm and its result line.
  *  - synthesize with a tool_use block carrying no `input`.
@@ -36,7 +36,7 @@ describe('defineSchema', () => {
     } as const;
 
     const defined = defineSchema(schema);
-    expect(defined).toBe(schema); // identity helper — no copying, no mutation
+    expect(defined).toBe(schema); // identity helper - no copying, no mutation
   });
 
   it('feeds the rest of the schema surface unchanged', () => {
@@ -47,7 +47,7 @@ describe('defineSchema', () => {
 });
 
 // ---------------------------------------------------------------------------
-// toProps — absent FieldMap
+// toProps - absent FieldMap
 // ---------------------------------------------------------------------------
 
 describe('tool mapping with a partial action', () => {
@@ -96,7 +96,7 @@ describe('schemaLogger', () => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
 
     const schema = { cartAdd: { target: { id: 'number' }, payload: { qty: 'number' } } } as unknown as BusSchema;
-    // Validator off — the logger is what reports here, so the dispatch lands.
+    // Validator off - the logger is what reports here, so the dispatch lands.
     const bus = createSchemaCommandBus(schema as any, { validate: false } as any);
     bus.use(schemaLogger(schema));
     bus.register('cartAdd', () => 'added');
@@ -126,7 +126,7 @@ describe('schemaLogger', () => {
 });
 
 // ---------------------------------------------------------------------------
-// synthesize — tool_use with no input
+// synthesize - tool_use with no input
 // ---------------------------------------------------------------------------
 
 describe('synthesize', () => {

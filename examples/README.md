@@ -9,33 +9,33 @@ Two shared helpers sit here rather than in each example:
 
 | Helper | Role |
 |--------|------|
-| [`ensure-lib.mjs`](./ensure-lib.mjs) | Run by every app's `predev`/`prebuild`. A `file:` dep with a `prepare` script is installed as a **frozen copy**, not a symlink — this mirrors the freshly built `dist/` into it and drops Vite's pre-bundle cache, so an example can never run stale library code. |
+| [`ensure-lib.mjs`](./ensure-lib.mjs) | Run by every app's `predev`/`prebuild`. A `file:` dep with a `prepare` script is installed as a **frozen copy**, not a symlink - this mirrors the freshly built `dist/` into it and drops Vite's pre-bundle cache, so an example can never run stale library code. |
 | [`static-server.mjs`](./static-server.mjs) | Static host for the no-build pages (serves the repo root so `../../dist/...` resolves), with `Cache-Control: no-store` and a mock `POST /api/vc` so a dispatching page actually completes. |
 
 ## Full-project apps (runnable)
 
 | App | What it shows |
 |-----|---------------|
-| [`vapor-sfc/`](./vapor-sfc) | End-to-end `<script setup vapor>` SFC tree — three panels showing `useCommand`, `defineVaporCommand`, and `useSharedCommandState` side by side. |
+| [`vapor-sfc/`](./vapor-sfc) | End-to-end `<script setup vapor>` SFC tree - three panels showing `useCommand`, `defineVaporCommand`, and `useSharedCommandState` side by side. |
 | [`vapor-island-cart/`](./vapor-island-cart) | Light-DOM Vapor custom-element islands coordinating through one bus (progressive enhancement: `logger` + `history` undo/redo + cross-tab `sync` + `persist`). |
-| [`exo-astro/`](./exo-astro) | Five declarative directives for Astro pages (incl. `v-each`) — **dispatch before hydration** via `onMissing:'buffer'`. Its scanner is covered by [`tests/examples/`](../tests/examples/). |
-| [`laravel-app/`](./laravel-app) | Real, verified Laravel app (13.x on a current skeleton): Blade page → core IIFE → dispatch → session-backed actions, with real CSRF (419/401). |
-| [`laravel-backend/`](./laravel-backend) | Drop-in PHP controller/action files — the backend half of a dispatch. |
-| [`sprinkled-blade/`](./sprinkled-blade) | Minimal sprinkled-JS pattern — server-rendered HTML enhanced with the core IIFE. One process serves page + API; shows server-rendered state vs. the fetch-on-load alternative. |
+| [`exo-astro/`](./exo-astro) | Five declarative directives for Astro pages (incl. `v-each`) - **dispatch before hydration** via `onMissing:'buffer'`. Its scanner is covered by [`tests/examples/`](../tests/examples/). |
+| [`laravel-app/`](./laravel-app) | Real, verified Laravel app (13.x on a current skeleton): Blade page -> core IIFE -> dispatch -> session-backed actions, with real CSRF (419/401). |
+| [`laravel-backend/`](./laravel-backend) | Drop-in PHP controller/action files - the backend half of a dispatch. |
+| [`sprinkled-blade/`](./sprinkled-blade) | Minimal sprinkled-JS pattern - server-rendered HTML enhanced with the core IIFE. One process serves page + API; shows server-rendered state vs. the fetch-on-load alternative. |
 
 ## Feature snippets (single-file)
 
 | File | Feature |
 |------|---------|
-| [`feature-command-group.ts`](./feature-command-group.ts) | `useCommandGroup` — namespace isolation |
-| [`feature-cross-tab-sync.ts`](./feature-cross-tab-sync.ts) | `sync` plugin — cross-tab coordination (BroadcastChannel) |
-| [`feature-error-boundary.ts`](./feature-error-boundary.ts) | `useCommandError` — component-scoped error boundary |
-| [`feature-persistence.ts`](./feature-persistence.ts) | `persist` plugin — localStorage / sessionStorage / custom storage (incl. IndexedDB) |
-| [`feature-retry.ts`](./feature-retry.ts) | `retry` plugin — configurable backoff for failed dispatches |
+| [`feature-command-group.ts`](./feature-command-group.ts) | `useCommandGroup` - namespace isolation |
+| [`feature-cross-tab-sync.ts`](./feature-cross-tab-sync.ts) | `sync` plugin - cross-tab coordination (BroadcastChannel) |
+| [`feature-error-boundary.ts`](./feature-error-boundary.ts) | `useCommandError` - component-scoped error boundary |
+| [`feature-persistence.ts`](./feature-persistence.ts) | `persist` plugin - localStorage / sessionStorage / custom storage (incl. IndexedDB) |
+| [`feature-retry.ts`](./feature-retry.ts) | `retry` plugin - configurable backoff for failed dispatches |
 | [`feature-transitions.ts`](./feature-transitions.ts) | Transition-dispatched commands (the transitions bridge) |
 | [`feature-transports.ts`](./feature-transports.ts) | HTTP / WebSocket / SSE transport plugins |
-| [`feature-vite-hmr.ts`](./feature-vite-hmr.ts) | `vaporChamberHMR` — state-preserving Vite hot reload |
-| [`feature-directives.html`](./feature-directives.html) | `v-vc:command` / `v-vc-payload` / `v-vc-optimistic` — **runnable**, no build step (ESM + import map): `node examples/static-server.mjs` |
+| [`feature-vite-hmr.ts`](./feature-vite-hmr.ts) | `vaporChamberHMR` - state-preserving Vite hot reload |
+| [`feature-directives.html`](./feature-directives.html) | `v-vc:command` / `v-vc-payload` / `v-vc-optimistic` - **runnable**, no build step (ESM + import map): `node examples/static-server.mjs` |
 
 ## Framework patterns
 

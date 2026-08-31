@@ -1,5 +1,5 @@
 /**
- * Feature example: vaporChamberHMR — Vite state-preserving hot reload
+ * Feature example: vaporChamberHMR - Vite state-preserving hot reload
  * ====================================================================
  * Without this plugin, each HMR update resets the bus: handlers are lost,
  * state is cleared, and the page feels like a full reload.
@@ -22,7 +22,7 @@ export default defineConfig({
   ],
 })
 
-// ─── main.ts — unchanged; HMR is transparent ────────────────────────────────
+// ─── main.ts - unchanged; HMR is transparent ────────────────────────────────
 
 import {
   createCommandBus,
@@ -33,13 +33,13 @@ import {
 const bus = createCommandBus()
 setCommandBus(bus)
 
-// This handler survives HMR — the bus is preserved across module reloads
+// This handler survives HMR - the bus is preserved across module reloads
 bus.register('cartAdd', (cmd) => {
   console.log('cartAdd handler still registered after HMR ✓')
   return { added: cmd.target }
 })
 
-// State also survives — items in the cart stay after a component hot-reload
+// State also survives - items in the cart stay after a component hot-reload
 const { state: cartState } = useCommandState(
   { items: [] as string[], count: 0 },
   {
@@ -49,8 +49,8 @@ const { state: cartState } = useCommandState(
 )
 
 bus.dispatch('cartAdd', { name: 'T-Shirt' })
-// → State: { items: ['T-Shirt'], count: 1 }
-// → After HMR: still { items: ['T-Shirt'], count: 1 }  (not reset)
+// -> State: { items: ['T-Shirt'], count: 1 }
+// -> After HMR: still { items: ['T-Shirt'], count: 1 }  (not reset)
 
 /*
  * How it works:

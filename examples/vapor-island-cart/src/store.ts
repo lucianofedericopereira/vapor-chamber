@@ -20,11 +20,11 @@ export const cart = reactive({
 
 export const bus = createCommandBus();
 
-// Logger — cart.* only
+// Logger - cart.* only
 bus.use(logger({ filter: cmd => cmd.action.startsWith('cart') }));
 
-// History — bus-backed undo. `undoAction`/`redoAction` (v1.6.0) register the
-// trigger handlers AND exclude them from recording automatically — without
+// History - bus-backed undo. `undoAction`/`redoAction` (v1.6.0) register the
+// trigger handlers AND exclude them from recording automatically - without
 // that, hand-wired `cart.undo` handlers get recorded into history themselves,
 // wiping the redo stack on every dispatch (undo works once, redo never enables).
 // The filter keeps history scoped to the one undoable command.

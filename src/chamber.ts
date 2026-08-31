@@ -1,29 +1,29 @@
 /**
  * vapor-chamber - Vue Vapor integration
  *
- * v1.10.0 — Vue 3.6.0-rc.2 alignment: #15141 fixed a bug where
+ * v1.10.0 - Vue 3.6.0-rc.2 alignment: #15141 fixed a bug where
  *           `setCurrentInstance`'s restore step re-triggered the default
- *           active-scope instead of truly restoring "no scope" — on a first
- *           client-side vdom→vapor navigation through `<Suspense>`, the vapor
+ *           active-scope instead of truly restoring "no scope" - on a first
+ *           client-side vdom->vapor navigation through `<Suspense>`, the vapor
  *           page mounted and was immediately torn down, killing every
  *           watcher created during its setup(). `tryAutoCleanup()` below only
  *           calls the PUBLIC `getCurrentScope()`/`onScopeDispose()` pair, not
  *           the internal restore path itself, so this was never a bug IN this
- *           function — but any composable here called from a vapor page's
+ *           function - but any composable here called from a vapor page's
  *           setup() reached via that exact navigation was swept up in the
  *           same teardown as the rest of that page's reactive state, with no
  *           userland workaround possible. Now fixed upstream; no code change
  *           needed here, but Nuxt-style vdom-shell/vapor-page apps using
  *           useCommand()/useCommandState() etc. inherit the fix for free.
- * v1.3.0 — Vue 3.6.0-beta.12 alignment: error recovery (component context,
+ * v1.3.0 - Vue 3.6.0-beta.12 alignment: error recovery (component context,
  *           fallthrough props, render effects restored after setup errors);
  *           VDOM slots interop normalization; no code changes needed here.
- * v1.1.0 — Vue 3.6.0-beta.10 alignment: defineVaporCustomElement, defineVaporComponent,
+ * v1.1.0 - Vue 3.6.0-beta.10 alignment: defineVaporCustomElement, defineVaporComponent,
  *           defineVaporAsyncComponent detection; improved hydration interop.
- * v0.4.1 — Added: useCommandGroup (namespace isolation), useCommandError (error boundary).
- * v0.4.0 — Vue 3.6 Vapor alignment: onScopeDispose, Vapor detection,
+ * v0.4.1 - Added: useCommandGroup (namespace isolation), useCommandError (error boundary).
+ * v0.4.0 - Vue 3.6 Vapor alignment: onScopeDispose, Vapor detection,
  *           defineVaporCommand, createVaporChamberApp.
- * v0.3.0 — Fixed: signal shim, resetCommandBus, auto-cleanup on Vue unmount.
+ * v0.3.0 - Fixed: signal shim, resetCommandBus, auto-cleanup on Vue unmount.
  */
 
 import { DEV } from './dev';
@@ -34,7 +34,7 @@ import { configureSignal, signal } from './signal';
  * Build-time flag injected by `scripts/build.mjs` via Vite `define`: `true` in
  * the three IIFE (<script>-tag) bundles, `false` in the ESM build.
  *
- * Declared inline rather than in a `.d.ts` so it travels with this module —
+ * Declared inline rather than in a `.d.ts` so it travels with this module -
  * `examples/tsconfig.patterns.json` reaches this file through imports and
  * would not pick up an ambient declaration from `src/`.
  *
@@ -68,7 +68,7 @@ export { signal };
 let _vueOnScopeDispose: ((fn: () => void) => void) | null = null;
 let _vueGetCurrentScope: (() => any) | null = null;
 let _vueGetCurrentInstance: (() => any) | null = null;
-/** Vue 3.3+. True inside BOTH a Vapor and a VDOM setup() — see tryKeepAliveHooks. */
+/** Vue 3.3+. True inside BOTH a Vapor and a VDOM setup() - see tryKeepAliveHooks. */
 let _vueHasInjectionContext: (() => boolean) | null = null;
 let _vueOnActivated: ((fn: () => void) => void) | null = null;
 let _vueOnDeactivated: ((fn: () => void) => void) | null = null;
@@ -82,7 +82,7 @@ let _vueDeepRefFn: (<T>(v: T) => { value: T }) | null = null;
 let _hasVapor = false;
 let _createVaporAppFn: any = null;
 let _vaporInteropPluginRef: any = null;
-// Vue 3.6+ Vapor APIs (introduced across 3.6.0-alpha.3–5)
+// Vue 3.6+ Vapor APIs (introduced across 3.6.0-alpha.3-5)
 let _defineVaporCustomElementFn: any = null;
 let _defineVaporComponentFn: any = null;
 let _defineVaporAsyncComponentFn: any = null;
@@ -102,8 +102,8 @@ function applyVueModule(vue: any): void {
     // alien-signals-backed reactive WITHOUT the deep-Proxy wrap that ref()
     // applies to object/array values via toReactive(). The library only ever
     // REPLACES a signal's value wholesale (state.value = handler(...),
-    // errors.value = [...], past.value = [...]) — it never mutates nested fields
-    // in place — so shallow tracking is semantically equivalent here while
+    // errors.value = [...], past.value = [...]) - it never mutates nested fields
+    // in place - so shallow tracking is semantically equivalent here while
     // avoiding the per-write proxy cost. Measured on the real dispatch path
     // (`tests/signal-shallow-ab.test.ts`): array-state useCommandState
     // ~2.9-3.0x faster, scalar signals ~1.2x. Re-measured on 3.6.0-rc.5, median
@@ -115,7 +115,7 @@ function applyVueModule(vue: any): void {
     // was backwards: ~1.2x is what reproduces (1.18x / 1.24x / 1.23x across the
     // three runs) and ~1.5x did not appear once. Quote the runtime with the
     // number, and prefer the harness's printed table over any figure copied
-    // into prose — including this one.
+    // into prose - including this one.
     // Measure this with that harness, not with a raw shallowRef-vs-ref loop:
     // outside the dispatch path the two invert, because `ref(primitive)` never
     // builds a proxy and the gap there is a different phenomenon. Direct
@@ -132,7 +132,7 @@ function applyVueModule(vue: any): void {
   if (vue && typeof vue.onScopeDispose === 'function') {
     _vueOnScopeDispose = vue.onScopeDispose;
   }
-  // getCurrentScope() (Vue 3.2+) — returns the active effect scope or undefined.
+  // getCurrentScope() (Vue 3.2+) - returns the active effect scope or undefined.
   // Used as the guard before calling onScopeDispose, replacing the try/catch pattern.
   if (vue && typeof vue.getCurrentScope === 'function') {
     _vueGetCurrentScope = vue.getCurrentScope;
@@ -140,7 +140,7 @@ function applyVueModule(vue: any): void {
   if (vue && typeof vue.getCurrentInstance === 'function') {
     _vueGetCurrentInstance = vue.getCurrentInstance;
   }
-  // hasInjectionContext() (Vue 3.3+) — the only "am I inside a setup()?" probe
+  // hasInjectionContext() (Vue 3.3+) - the only "am I inside a setup()?" probe
   // that answers TRUE in Vapor as well as VDOM. See tryKeepAliveHooks.
   if (vue && typeof vue.hasInjectionContext === 'function') {
     _vueHasInjectionContext = vue.hasInjectionContext;
@@ -180,7 +180,7 @@ function applyVueModule(vue: any): void {
  *
  * Distinct from `__VUE__` on purpose. `__VUE__` belongs to Vue, which assigns
  * the BOOLEAN `true` to it from `prepareApp()` (Vapor) and
- * `baseCreateRenderer()` (vDOM) — i.e. the moment the first app is created.
+ * `baseCreateRenderer()` (vDOM) - i.e. the moment the first app is created.
  * A namespace parked on `__VUE__` therefore survives only until something
  * mounts, after which the sync channel yields a truthy value that cannot be
  * used for anything. Pinned by `tests/vue-detection-global-clobber.test.ts`.
@@ -196,7 +196,7 @@ function readGlobal(key: string): any | null {
   if (typeof globalThis === 'undefined') return null;
   try {
     const vue = (globalThis as any)[key];
-    // `__VUE__` is `true` on any page that has mounted — the `.ref` check is
+    // `__VUE__` is `true` on any page that has mounted - the `.ref` check is
     // what separates a namespace from Vue's devtools marker.
     return vue && typeof vue.ref === 'function' ? vue : null;
   } catch {
@@ -205,9 +205,9 @@ function readGlobal(key: string): any | null {
 }
 
 /**
- * configureVue — hand the library Vue's module namespace explicitly.
+ * configureVue - hand the library Vue's module namespace explicitly.
  *
- * The reliable channel — recommended for every consumer who wants
+ * The reliable channel - recommended for every consumer who wants
  * deterministic Vapor wiring, bundler or not. It seeds the registry
  * synchronously (no probe race, wrappers' null path becomes unreachable) and
  * is the one channel that behaves identically however the page obtains Vapor:
@@ -215,19 +215,19 @@ function readGlobal(key: string): any | null {
  * no-bundler pages, where it is the only channel that cannot come up empty:
  * Detection otherwise depends on either a global slot Vue overwrites when the
  * first app mounts (see {@link VUE_GLOBAL_KEY}) or a bare-specifier
- * `import('vue')` that cannot resolve in a browser at all — so on a
+ * `import('vue')` that cannot resolve in a browser at all - so on a
  * `<script>`-tag page the two automatic channels can both come up empty while
  * Vapor is sitting right there, and `createVaporChamberApp()` throws
  * "Vue 3.6+ with Vapor mode required" on a page that has it.
  *
  * Call this before creating signals or apps. Safe to call more than once; the
- * last usable namespace wins. Mirrors `configureSignal()` — an explicit
+ * last usable namespace wins. Mirrors `configureSignal()` - an explicit
  * escape hatch that removes a guess.
  *
  * IMPORTANT: pass the SAME Vue instance the rest of the page uses. Two
  * separately-imported Vue dist files are two disconnected reactivity engines
  * (a `ref()` from one is invisible to a `watchEffect` from the other, with no
- * error) — see the note in `probeVue` below.
+ * error) - see the note in `probeVue` below.
  *
  * @example
  * import * as Vue from 'vue/dist/vue.runtime-with-vapor.esm-browser.js';
@@ -253,7 +253,7 @@ let _untrack: (<T>(fn: () => T) => T) | null = null;
  *
  * The diagnostic below keys off this rather than off "the probe failed", and
  * the difference matters. Probe failure is only observable in a production
- * bundle, where `DEV` is false and nothing can be logged — so a warning keyed
+ * bundle, where `DEV` is false and nothing can be logged - so a warning keyed
  * to it fires essentially nowhere, which is what the first version of this
  * diagnostic did. Keying it to "you are on the probe path" instead fires under
  * the dev server, while the app still looks fine and there is time to change
@@ -271,7 +271,7 @@ let _untrackWarned = false;
  *
  * `viaSubpath` distinguishes that call from the runtime probe's, which wires
  * the same primitives but only in environments that can resolve a bare
- * specifier — never a production bundle. Only the former means "this app is
+ * specifier - never a production bundle. Only the former means "this app is
  * correct once built".
  */
 export function _wireUntrack(pause: () => void, reset: () => void, viaSubpath = false): void {
@@ -283,7 +283,7 @@ export function _wireUntrack(pause: () => void, reset: () => void, viaSubpath = 
 }
 
 /**
- * untracked — run `fn` without its reactive reads becoming dependencies of
+ * untracked - run `fn` without its reactive reads becoming dependencies of
  * whatever effect is currently running.
  *
  * A dispatch is an ACTION, not a read: nothing it touches should make the
@@ -301,7 +301,7 @@ export function _wireUntrack(pause: () => void, reset: () => void, viaSubpath = 
  *
  * No-op when Vue is not present, so it is safe to leave in shared code.
  * Vue fixed the same class of bug twice in 3.6.0-rc.3 (#15203, #15204) by
- * suspending tracking around callbacks — this is that idea at the bus edge.
+ * suspending tracking around callbacks - this is that idea at the bus edge.
  */
 export function untracked<T>(fn: () => T): T {
   // In an IIFE the wiring below never runs (no bundler can resolve
@@ -315,7 +315,7 @@ export function untracked<T>(fn: () => T): T {
   // server and silently stops working once the app is built, so warning only on
   // observed failure would warn only where nothing can be logged. Conditions:
   // Vue is here (`_vueDeepRefFn`), and the build-time wiring is not
-  // (`_vueSubpathLoaded`). One-shot — untracked() is on the dispatch path, and
+  // (`_vueSubpathLoaded`). One-shot - untracked() is on the dispatch path, and
   // every composable routes through it, so per-call would be a flood. Folds
   // away entirely in production builds.
   if (DEV && _vueDeepRefFn !== null && !_vueSubpathLoaded && !_untrackWarned) {
@@ -325,7 +325,7 @@ export function untracked<T>(fn: () => T): T {
       'untracked() works right now because the dev server can resolve a bare ' +
       '`import()`. A production bundle cannot, so it will silently degrade to a ' +
       "pass-through and dispatches made inside a reactive effect will leak the " +
-      "handler's reads into that effect — components re-rendering on state they " +
+      "handler's reads into that effect - components re-rendering on state they " +
       'never mention, with no error.\n' +
       "Fix: import the composables from 'vapor-chamber/vue' instead of " +
       "'vapor-chamber'. Same functions, resolved by your bundler. Nothing to call.",
@@ -339,25 +339,27 @@ export function untracked<T>(fn: () => T): T {
  * Wire {@link untracked} from `@vue/reactivity`, best-effort.
  *
  * That package and not `vue`: the primitives are simply not on the `vue` entry
- * — verified against 3.6.0-rc.3, where `pauseTracking`, `resetTracking` and
- * `setActiveSub` are absent from both `vue.runtime.esm-bundler.js` and
- * `vue.runtime-with-vapor.esm-browser.js`, while `@vue/reactivity` exports all
- * three and resolves to the *same module instance* Vue itself uses (a second
- * copy would toggle unrelated state and silently do nothing — checked).
+ * - re-verified at 3.6.0-rc.6 by enumerating both modules, where
+ * `pauseTracking`, `resetTracking`, `enableTracking` and `setActiveSub` are all
+ * `undefined` on `vue` and all functions on `@vue/reactivity`, which resolves
+ * to the *same module instance* Vue itself uses (a second copy would toggle
+ * unrelated state and silently do nothing - checked). First verified at rc.3
+ * and unchanged since; the RC is named because an unqualified "not on the vue
+ * entry" is the kind of claim that quietly stops being true.
  *
  * SCOPE, measured: this works under a dev server and in vitest, and fails in
- * every production bundle — the specifier is bare, and a built bundle has no
+ * every production bundle - the specifier is bare, and a built bundle has no
  * import map to resolve it against. It is kept because it is the zero-config
  * path where it does work; production correctness comes from
  * `enableVueReactivity()` in the `vapor-chamber/vue` subpath, which resolves
  * the same primitives at BUILD time. `untracked()` warns once in DEV when this
  * probe has failed, rather than degrading in silence.
  *
- * The specifier is held in a variable so no bundler can fold it into a literal
- * a literal `import()` of that specifier: that would make the optional peer statically
- * resolvable from the package root and break consumers who lack it. Guarded by
+ * The specifier is held in a variable so no bundler can fold it back into a
+ * literal `import()` of that specifier: that would make the optional peer
+ * statically resolvable from the package root and break consumers who lack it. Guarded by
  * `tests/dist-optional-peers.test.ts`, which is also why `src/vue.ts` is built
- * as its own pass in `scripts/build.mjs` — marking the peer external in the
+ * as its own pass in `scripts/build.mjs` - marking the peer external in the
  * main build is exactly what lets the fold happen.
  */
 async function wireUntracked(): Promise<void> {
@@ -365,16 +367,16 @@ async function wireUntracked(): Promise<void> {
   // resolve. `__VC_IIFE__` const-folds, so this whole function and its
   // specifier string are dropped from those bundles.
   if (typeof __VC_IIFE__ !== 'undefined' && __VC_IIFE__) return;
-  if (_vueDeepRefFn === null) return; // no Vue — nothing to suspend
+  if (_vueDeepRefFn === null) return; // no Vue - nothing to suspend
   try {
     // Assembled, not written. A plain `const pkg = '@vue/reactivity'` is folded
     // straight back into a literal `import()` of that specifier by Rollup now that the
-    // package is a declared (optional) peer — Vite's lib mode auto-externalises
+    // package is a declared (optional) peer - Vite's lib mode auto-externalises
     // peers, and an external specifier is exactly what constant propagation is
     // free to inline. That literal is the leak `tests/dist-optional-peers.test.ts`
     // guards: statically resolvable from the package root, so every consumer
     // without the optional peer breaks at dep-optimize. `@vite-ignore` does not
-    // prevent it — the pre-bundled dep is re-analysed.
+    // prevent it - the pre-bundled dep is re-analysed.
     const pkg = ['@vue', 'reactivity'].join('/');
     const r: any = await import(/* @vite-ignore */ pkg);
     if (typeof r?.pauseTracking === 'function' && typeof r?.resetTracking === 'function') {
@@ -395,7 +397,7 @@ function probeVue(): void {
   //    docs/whitepaper.md §11.6): the async probe below resolves a bare
   //    `import('vue')`, which Vue 3.6 NEVER wires to the Vapor-enabled build
   //    outside a bundler's alias magic (@vitejs/plugin-vue does this per-app
-  //    when it sees `<script setup vapor>`) — Vapor is a physically separate
+  //    when it sees `<script setup vapor>`) - Vapor is a physically separate
   //    dist file (vue.runtime-with-vapor.esm-*.js).
   //
   //    Two slots are read, ours first. `__VUE__` is kept for compatibility
@@ -405,7 +407,7 @@ function probeVue(): void {
   //    namespace wins; `configureVue()` bypasses both.
   //
   //    Do NOT try to "fix" a miss here with a second dynamic import of the
-  //    with-vapor build as a fallback — verified directly that two
+  //    with-vapor build as a fallback - verified directly that two
   //    separately-imported Vue dist files are two disconnected
   //    reactivity-engine instances (a ref() from one is invisible to a
   //    watchEffect from the other, silently, no error), so an automatic
@@ -423,7 +425,7 @@ function probeVue(): void {
       applyVueModule(vue);
     })
     .catch(() => {
-      // Vue not available — use plain signals, no auto-cleanup
+      // Vue not available - use plain signals, no auto-cleanup
     })
     .then(wireUntracked);
 }
@@ -464,7 +466,7 @@ export function isVaporAvailable(): boolean {
 }
 
 /**
- * @internal — one sentence explaining WHY detection came up empty, appended to
+ * @internal - one sentence explaining WHY detection came up empty, appended to
  * the `createVaporChamberApp` error.
  *
  * The failure this exists for is the confusing one: Vue is on the page, Vapor
@@ -476,11 +478,11 @@ export function isVaporAvailable(): boolean {
 export function vueDetectionHint(): string {
   // Deliberately NOT dev-gated. The audience most likely to hit this is the
   // no-bundler `<script>`-tag page (whitepaper §11.6), which only ever runs a
-  // production IIFE — stripping the diagnosis in prod would remove it exactly
+  // production IIFE - stripping the diagnosis in prod would remove it exactly
   // where it is needed. Kept as small as the three-way distinction allows:
   // one shared tail, three short causes, no helper function.
   const cause =
-    // Vue found, no Vapor: a genuine capability gap — the plain `vue` entry
+    // Vue found, no Vapor: a genuine capability gap - the plain `vue` entry
     // ships no Vapor runtime, which is a separate build.
     _vueDeepRefFn !== null
       ? 'Vue lacks the Vapor build (vue/dist/vue.runtime-with-vapor.esm-*)'
@@ -493,17 +495,17 @@ export function vueDetectionHint(): string {
   return `${cause}. Pass it: configureVue(Vue).`;
 }
 
-/** @internal — for chamber-vapor.ts use only */
+/** @internal - for chamber-vapor.ts use only */
 export function getVaporAppFn(): any { return _createVaporAppFn; }
-/** @internal — for chamber-vapor.ts use only */
+/** @internal - for chamber-vapor.ts use only */
 export function getVaporInteropRef(): any { return _vaporInteropPluginRef; }
-/** @internal — for chamber-vapor.ts use only */
+/** @internal - for chamber-vapor.ts use only */
 export function getDefineVaporCustomElementFn(): any { return _defineVaporCustomElementFn; }
-/** @internal — for chamber-vapor.ts use only */
+/** @internal - for chamber-vapor.ts use only */
 export function getDefineVaporComponentFn(): any { return _defineVaporComponentFn; }
-/** @internal — for chamber-vapor.ts use only */
+/** @internal - for chamber-vapor.ts use only */
 export function getDefineVaporAsyncComponentFn(): any { return _defineVaporAsyncComponentFn; }
-/** @internal — Vue's DEEP ref(), for the vapor-chamber/reactive companion only.
+/** @internal - Vue's DEEP ref(), for the vapor-chamber/reactive companion only.
  *  Returns null until Vue detection completes (or if Vue is absent). */
 export function getVueDeepRefFn(): (<T>(v: T) => { value: T }) | null { return _vueDeepRefFn; }
 
@@ -512,7 +514,7 @@ export function getVueDeepRefFn(): (<T>(v: T) => { value: T }) | null { return _
 // ---------------------------------------------------------------------------
 
 /**
- * GlobalCommands — module-augmentation hook that types the SHARED bus
+ * GlobalCommands - module-augmentation hook that types the SHARED bus
  * (pinia-style). Augment it once in your app and every `useCommand()` /
  * `getCommandBus()` call site gets typed dispatch/register with autocomplete
  * and compile errors:
@@ -545,7 +547,7 @@ export type SharedCommandMap = [keyof GlobalCommands] extends [never]
 let sharedBus: CommandBus | null = null;
 
 /**
- * Get the shared bus. Typed with {@link SharedCommandMap} — augment
+ * Get the shared bus. Typed with {@link SharedCommandMap} - augment
  * {@link GlobalCommands} to make every call site typed. Pass an explicit map
  * to override per call site (`getCommandBus<CommandMap>()` opts back out).
  */
@@ -559,15 +561,15 @@ export function getCommandBus<M extends CommandMap = SharedCommandMap>(): Comman
 /**
  * Replace the shared bus instance.
  *
- * SSR WARNING: the shared bus is a module global — one per Node process, not
+ * SSR WARNING: the shared bus is a module global - one per Node process, not
  * per request. The set-render-reset pattern (see ssr.ts) is only safe when
  * requests render strictly one at a time. Under CONCURRENT SSR renders,
  * interleaved requests stomp each other's bus: handlers and state leak across
- * requests. For concurrent servers, don't use the shared bus on the server —
+ * requests. For concurrent servers, don't use the shared bus on the server -
  * create a bus per request and pass it explicitly (every composable and plugin
  * accepts a `bus` option / argument).
  *
- * Accepts either bus flavor — the composables' dispatch path already handles
+ * Accepts either bus flavor - the composables' dispatch path already handles
  * thenable results (`runDispatch` awaits them), so an AsyncCommandBus works at
  * runtime; previously callers had to cast. `getCommandBus()`'s static type
  * stays `CommandBus` for compatibility.
@@ -585,7 +587,7 @@ export function resetCommandBus(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Vue lifecycle detection (optional — works without Vue too)
+// Vue lifecycle detection (optional - works without Vue too)
 // ---------------------------------------------------------------------------
 
 /**
@@ -593,20 +595,33 @@ export function resetCommandBus(): void {
  *
  * Uses `getCurrentScope()` (Vue 3.2+) to check whether a reactive scope is
  * active before calling `onScopeDispose`. This replaces the earlier try/catch
- * pattern — no exception-as-control-flow, no `onUnmounted` fallback needed.
+ * pattern - no exception-as-control-flow, no `onUnmounted` fallback needed.
  *
- * In Vue 3.5+ (the minimum peer dep), every component `setup()` — including
- * Vapor components — is wrapped in an effect scope, so `getCurrentScope()`
+ * In Vue 3.5+ (the minimum peer dep), every component `setup()` - including
+ * Vapor components - is wrapped in an effect scope, so `getCurrentScope()`
  * inside setup always returns something. The `onUnmounted` fallback is
  * unreachable under Vue 3.5+ and has been removed.
  *
  * Vue 3.6.0-beta.13 (runtime-vapor: only create lifecycle update jobs when
- * needed): lifecycle update jobs are now created lazily — only when a component
+ * needed): lifecycle update jobs are now created lazily - only when a component
  * actually has reactive state that can trigger updates. Registering
  * `onScopeDispose` via this function no longer causes a lifecycle update job
  * to be allocated for every vapor-chamber composable call. Components that use
  * vapor-chamber composables solely for dispatch (no reactive signals consumed
  * in the template) incur zero update-job overhead.
+ *
+ * Vue 3.6.0-rc.6 (runtime-vapor: own each dev render generation with a render
+ * scope for HMR, 9ab65a1): an HMR rerender now stops the scope of child
+ * components mounted INSIDE an element - children the parent's block graph
+ * cannot reach, which previously survived the reload. Nothing changed here, and
+ * that is the point worth recording: this function registers on whatever
+ * `getCurrentScope()` returns from `setup()`, so the cleanup was always correct
+ * and always attached to the right owner; what was missing was anyone stopping
+ * that owner. Before rc.6 the consequence was measurable - a `useCommand().on()`
+ * listener stayed subscribed once per hot reload, so one dispatch fanned out
+ * once per generation ever rendered (`tests/hmr-render-scope-fixture.test.ts`,
+ * verified to fail on rc.5). Do not "harden" this against leaked generations by
+ * tracking them here; the ownership belongs to Vue's scope, and it now works.
  *
  * No-ops entirely when called outside any Vue scope (e.g. module init time,
  * plain async callbacks). Caller is responsible for calling `dispose()` in
@@ -630,7 +645,7 @@ export function tryAutoCleanup(disposeFn: () => void): void {
       '[vapor-chamber] Heads-up (not an error): a composable ran outside a Vue ' +
       "setup() / effectScope(), so its cleanup won't run automatically. Either call " +
       'the returned dispose() yourself, or run the composable inside setup() / ' +
-      'effectScope(). Expected and harmless when intentional — e.g. in tests, ' +
+      'effectScope(). Expected and harmless when intentional - e.g. in tests, ' +
       'one-off scripts, or anywhere you dispose manually. Logged once per module.'
     );
   }
@@ -647,7 +662,7 @@ export function tryAutoCleanup(disposeFn: () => void): void {
  * When reactivated, `onResume` is called. No-ops if not inside a
  * KeepAlive-wrapped component or if Vue is not available.
  *
- * The guard must answer "am I inside a setup()?" — `onActivated`/`onDeactivated`
+ * The guard must answer "am I inside a setup()?" - `onActivated`/`onDeactivated`
  * do not throw outside one, they emit a Vue warning, so an unguarded call would
  * spam every non-component caller.
  *
@@ -656,14 +671,14 @@ export function tryAutoCleanup(disposeFn: () => void): void {
  * 3.6.0-rc.4, it returns null inside `defineVaporComponent({ setup() })` while
  * `onDeactivated()` registered at that same point works and fires. So the
  * former guard silently disabled KeepAlive pause/resume for every VAPOR
- * component — the platform this library is named for — while working in VDOM,
+ * component - the platform this library is named for - while working in VDOM,
  * which is why no existing test saw it. `hasInjectionContext()` (Vue 3.3+) is
  * the one probe that is true in both modes and false in a bare `effectScope()`,
  * measured alongside. `getCurrentInstance()` remains the fallback for a
  * partially-supplied Vue namespace that predates it.
  * Pinned by `tests/keepalive-input-scope-fixture.test.ts`.
  *
- * rc.5 cycle — this is now known to be PERMANENT, not a gap awaiting a fix.
+ * rc.5 cycle - this is now known to be PERMANENT, not a gap awaiting a fix.
  * The rc.4 change was made from measurement alone, which left open whether a
  * later Vue release would make `getCurrentInstance()` answer in Vapor and turn
  * this gate back into dead weight. It will not: on the Vapor roadmap
@@ -673,7 +688,7 @@ export function tryAutoCleanup(disposeFn: () => void): void {
  * component instance tree to userland by design. So do not "restore"
  * an instance-accessor probe here on the theory that it will start working.
  *
- * @internal — used by composables that manage bus subscriptions.
+ * @internal - used by composables that manage bus subscriptions.
  */
 export function tryKeepAliveHooks(onPause: () => void, onResume: () => void): void {
   probeVue();
@@ -686,9 +701,15 @@ export function tryKeepAliveHooks(onPause: () => void, onResume: () => void): vo
 }
 
 // ---------------------------------------------------------------------------
-// runDispatch — shared loading/error wrapper used by useCommand, useCommandQuery,
-// (chamber-vapor.ts). Accepts a thunk so the bus call is
-// made inside the try block.
+// runDispatch - shared loading/error wrapper. Two callers, both in this file:
+// `useCommand` and `useCommandQuery`. Accepts a thunk so the bus call is made
+// inside the try block.
+//
+// NOT used by chamber-vapor.ts, which this comment used to credit:
+// `defineVaporCommand` hand-rolls its own wrapper and says why at its own site
+// (~1.2x leaner than this .then-chain, measured, on a path whose entire point
+// is to allocate nothing). A comment naming the one module that deliberately
+// opted out was worse than naming nobody.
 // ---------------------------------------------------------------------------
 
 /** @internal */
@@ -736,15 +757,15 @@ export function runDispatch(
 // ---------------------------------------------------------------------------
 
 /**
- * useCommand — reactive command dispatch with optional bus subscriptions.
+ * useCommand - reactive command dispatch with optional bus subscriptions.
  *
  * Returns `dispatch` + reactive `loading` / `lastError`, plus `register` / `on` /
  * `emit` for managing handlers and listeners with auto-cleanup on scope disposal
- * (`onScopeDispose`). Vapor-safe — works in `<script setup vapor>` and VDOM alike,
+ * (`onScopeDispose`). Vapor-safe - works in `<script setup vapor>` and VDOM alike,
  * with no `getCurrentInstance()` dependency. For fire-and-forget with zero reactive
  * overhead, use `defineVaporCommand()` instead.
  *
- * (Absorbed the former `useVaporCommand` — the Vapor-safety distinction was obsolete;
+ * (Absorbed the former `useVaporCommand` - the Vapor-safety distinction was obsolete;
  * this is now the single command composable.)
  *
  * @example
@@ -784,7 +805,7 @@ export function useCommand() {
     return unsub;
   }
 
-  /** Fire a domain event — notifies on() listeners, no handler required, no result. */
+  /** Fire a domain event - notifies on() listeners, no handler required, no result. */
   function emit(event: string, data?: any): void {
     untracked(() => bus.emit(event, data));
   }
@@ -816,7 +837,7 @@ type SharedCommandStateEntry = {
   errorCount: Signal<number>;
   refCount: number;
   errorCap: number;
-  /** v1.6.0: bus-wide error observer — unhooked when refCount hits 0. */
+  /** v1.6.0: bus-wide error observer - unhooked when refCount hits 0. */
   unsub: () => void;
 };
 
@@ -837,14 +858,14 @@ export type UseSharedCommandStateOptions = {
 };
 
 /**
- * useSharedCommandState — one set of reactive signals shared across every
+ * useSharedCommandState - one set of reactive signals shared across every
  * caller, instead of two signals (`loading`, `lastError`) per call.
  *
  * Designed for component-heavy pages where many components need to react to
  * "is *anything* in flight?" or "what was the last error?". Replaces
- * `N × useCommand()` allocations with a single shared state per bus.
+ * `N x useCommand()` allocations with a single shared state per bus.
  *
- * Memory math: 50 components × 2 signals each = 100 signal nodes today.
+ * Memory math: 50 components x 2 signals each = 100 signal nodes today.
  * With shared state: ~5 signal nodes total + a counter, regardless of
  * subscriber count.
  *
@@ -880,8 +901,8 @@ export function useSharedCommandState(options: UseSharedCommandStateOptions = {}
       unsub: () => {},
     };
     // v1.6.0: observe errors BUS-WIDE, not only dispatches made through this
-    // composable's own dispatch wrapper. Any failed command on the bus — from
-    // useCommand, raw bus.dispatch, anywhere — lands in the
+    // composable's own dispatch wrapper. Any failed command on the bus - from
+    // useCommand, raw bus.dispatch, anywhere - lands in the
     // shared error list. (Both sync and async buses fan results to on('*')
     // listeners after settling.) inFlight/isAnyLoading remain scoped to this
     // composable's dispatch wrapper: bus-wide in-flight tracking would need
@@ -945,11 +966,11 @@ export function useSharedCommandState(options: UseSharedCommandStateOptions = {}
 
     if (result && typeof result.then === 'function') {
       return (result as Promise<CommandResult>).then(
-        // Settled results are recorded by the bus-wide on('*') observer —
+        // Settled results are recorded by the bus-wide on('*') observer -
         // recording here too would double-count (v1.6.0).
         (r) => { decrement(); return r; },
         // A rejected dispatch promise bypassed the bus's errResult fan-out,
-        // so no listener fired — record it here.
+        // so no listener fired - record it here.
         (e: Error) => { recordError(e); decrement(); return { ok: false, error: e, value: undefined }; },
       );
     }
@@ -990,7 +1011,7 @@ export function useSharedCommandState(options: UseSharedCommandStateOptions = {}
     errorCount: state.errorCount,
     /** Wipe accumulated errors. */
     clear,
-    /** Manually unhook. Most callers don't need this — `tryAutoCleanup`
+    /** Manually unhook. Most callers don't need this - `tryAutoCleanup`
      *  hooks Vue's scope/unmount lifecycle. */
     dispose,
   };
@@ -1008,7 +1029,7 @@ export type UseCommandStateOptions = {
    * write, Vue's runtime coalesces the resulting DOM update into one pass.
    *
    * Vue 3.6.0-beta.13: v-for consumers of coalesced state benefit from two
-   * additional runtime optimizations — specialized v-for block operations
+   * additional runtime optimizations - specialized v-for block operations
    * (runtime-vapor: specialize v-for block operations) and reduced v-if branch
    * scope overhead (runtime-vapor: reduce v-if branch scope overhead). Signal
    * writes flushed here land into a faster Vapor runtime patch path.
@@ -1030,7 +1051,7 @@ export type UseCommandStateOptions = {
  * const { state } = useCommandState([], { cartAdd: (s, cmd) => [...s, cmd.target] });
  *
  * @example
- * // Coalesced mode — batch writes for v-for lists:
+ * // Coalesced mode - batch writes for v-for lists:
  * const { state } = useCommandState([], { cartAdd: (s, cmd) => [...s, cmd.target] }, { coalesce: true });
  */
 export function useCommandState<T>(
@@ -1044,7 +1065,7 @@ export function useCommandState<T>(
 }
 
 /**
- * @internal — shared core for `useCommandState` (shallow, default) and the
+ * @internal - shared core for `useCommandState` (shallow, default) and the
  * opt-in `useDeepCommandState` from `vapor-chamber/reactive` (deep). The only
  * difference between the two is the `createSignal` factory: the core passes the
  * shallow `signal()`; the companion passes a deep `ref()`-backed factory. All
@@ -1064,7 +1085,7 @@ export function _createCommandState<T>(
   const state = createSignal(initial);
   const unregisters: Array<() => void> = [];
 
-  // coalesce bookkeeping — only allocated when coalesce: true
+  // coalesce bookkeeping - only allocated when coalesce: true
   let _pending: T = initial;
   let _hasPending = false;
   let _scheduled = false;
@@ -1123,10 +1144,10 @@ export function useCommandHistory(options: {
 
   let paused = false;
   /** One-shot identity fallback for redos whose primitive payload cannot
-   *  carry the `__origin` marker — see redo(). */
+   *  carry the `__origin` marker - see redo(). */
 
   const unsubscribe = bus.onAfter((cmd, result) => {
-    // `paused` brackets TIME (a KeepAlive deactivation), not one dispatch —
+    // `paused` brackets TIME (a KeepAlive deactivation), not one dispatch -
     // that distinction is why it is still a flag here and why redo() no longer
     // uses one. A redo is identified by the marker it dispatched with.
     if (paused || cmd.meta?.origin === 'redo') return;
@@ -1135,7 +1156,7 @@ export function useCommandHistory(options: {
       const newPast = past.value.slice(past.value.length >= maxSize ? 1 : 0);
       newPast.push(cmd);
       past.value = newPast;
-      // Only clear the redo stack when there is one — a fresh [] every dispatch
+      // Only clear the redo stack when there is one - a fresh [] every dispatch
       // is a new identity that re-triggers every future/canRedo watcher.
       if (future.value.length !== 0) {
         future.value = [];
@@ -1181,7 +1202,7 @@ export function useCommandHistory(options: {
       // Suppression rides ON the dispatch. A `paused = true` flag cleared in
       // `finally` held only on a sync bus, where onAfter fires inside
       // dispatch(). On an async bus dispatch returns a pending promise and the
-      // hook fires when it SETTLES — after the flag was cleared — so the redo
+      // hook fires when it SETTLES - after the flag was cleared - so the redo
       // was recorded twice: once here, once by the unsuppressed hook. Undo
       // then needed two steps to walk back one redo, and the duplicate wiped
       // the redo stack again.
@@ -1191,7 +1212,7 @@ export function useCommandHistory(options: {
       //
       // `_withOrigin` marks EVERY payload shape, so the primitive case no
       // longer needs the one-shot identity fallback it used to (`expectedRedo`
-      // — same action/target/payload reference, consumed on first hit), which
+      // - same action/target/payload reference, consumed on first hit), which
       // could swallow an identical concurrent dispatch. The replay now carries
       // the caller's original payload by reference: no spread, no allocation,
       // and the redone command is identical to the one recorded.
@@ -1237,13 +1258,13 @@ export function useCommandHistory(options: {
 // ---------------------------------------------------------------------------
 
 /**
- * useCommandQuery — CQRS read-side composable with reactive state.
+ * useCommandQuery - CQRS read-side composable with reactive state.
  *
  * Wraps bus.query() with reactive `data`, `loading`, and `lastError` signals.
  * query() skips onBefore hooks (no auth gates, no loading spinners for reads)
  * but runs plugins, handlers, and afterHooks.
  *
- * Supports both sync and async buses — if the result is a Promise, loading
+ * Supports both sync and async buses - if the result is a Promise, loading
  * stays true until it resolves.
  *
  * @example
@@ -1274,7 +1295,7 @@ export function useCommandQuery() {
 // ---------------------------------------------------------------------------
 
 /**
- * useCommandGroup — namespace isolation for large apps and multi-team projects.
+ * useCommandGroup - namespace isolation for large apps and multi-team projects.
  *
  * All dispatch/register/on calls are automatically prefixed with the namespace
  * in camelCase. This prevents action name collisions when composing multiple
@@ -1287,7 +1308,7 @@ export function useCommandQuery() {
  * cart.dispatch('add', product)    // dispatches 'cartAdd'
  * cart.on('*', listener)           // listens to 'cart*'
  *
- * // Orders feature — completely isolated
+ * // Orders feature - completely isolated
  * const orders = useCommandGroup('orders')
  * orders.dispatch('cancel', { id }) // dispatches 'ordersCancel'
  */
@@ -1295,19 +1316,19 @@ export function useCommandGroup(namespace: string) {
   const bus = getCommandBus<CommandMap>();
   const cleanups: Array<() => void> = [];
 
-  // camelCase namespace join ('cart' + 'add' → 'cartAdd'), memoised per group.
+  // camelCase namespace join ('cart' + 'add' -> 'cartAdd'), memoised per group.
   //
-  // Unlike the transition bridge — where every hook name is fixed at build time
-  // and the join was hoisted out of the dispatch path entirely — the short name
+  // Unlike the transition bridge - where every hook name is fixed at build time
+  // and the join was hoisted out of the dispatch path entirely - the short name
   // arrives here as a runtime ARGUMENT, so it cannot be precomputed. It can be
   // cached: a group dispatches a small, stable set of names ('add', 'remove',
   // 'clear'), so the second and every later dispatch of a name is a Map hit
   // instead of two allocations plus a concat.
   //
-  // Measured, interleaved A/B, 200k calls: 3 distinct names 4.669ms → 1.244ms
-  // (**-73%**), 8 names 5.171ms → 1.426ms (-72%). This replaces the old
+  // Measured, interleaved A/B, 200k calls: 3 distinct names 4.669ms -> 1.244ms
+  // (**-73%**), 8 names 5.171ms -> 1.426ms (-72%). This replaces the old
   // "inlined, DO NOT consolidate, a shared call costs ~1%" note: the 1% was
-  // real but it was the wrong thing to optimise — the join itself was the cost,
+  // real but it was the wrong thing to optimise - the join itself was the cost,
   // not the call, and removing the repeated work beats avoiding the indirection
   // by ~70x.
   //
@@ -1330,12 +1351,12 @@ export function useCommandGroup(namespace: string) {
     return untracked(() => bus.dispatch(prefixed(action), target, payload));
   }
 
-  /** Read-only dispatch — skips onBefore hooks, runs handler + plugins, fires afterHooks. */
+  /** Read-only dispatch - skips onBefore hooks, runs handler + plugins, fires afterHooks. */
   function query(action: string, target: any, payload?: any): CommandResult {
     return untracked(() => bus.query(prefixed(action), target, payload));
   }
 
-  /** Fire a namespaced domain event — notifies on() listeners, no handler required. */
+  /** Fire a namespaced domain event - notifies on() listeners, no handler required. */
   function emit(event: string, data?: any): void {
     untracked(() => bus.emit(prefixed(event), data));
   }
@@ -1353,7 +1374,7 @@ export function useCommandGroup(namespace: string) {
   }
 
   function on(pattern: string, listener: Listener): () => void {
-    // Translate wildcard to namespaced: '*' → 'cart*', 'add' → 'cartAdd'
+    // Translate wildcard to namespaced: '*' -> 'cart*', 'add' -> 'cartAdd'
     const namespacedPattern = pattern === '*' ? `${namespace}*` : prefixed(pattern);
     const unsub = bus.on(namespacedPattern, listener);
     cleanups.push(unsub);
@@ -1374,7 +1395,7 @@ export function useCommandGroup(namespace: string) {
 // ---------------------------------------------------------------------------
 
 /**
- * useCommandError — component-scoped error boundary for command failures.
+ * useCommandError - component-scoped error boundary for command failures.
  *
  * Subscribes to the bus and captures all failed command results reactively.
  * Optional filter narrows which actions are tracked.
@@ -1387,7 +1408,7 @@ export function useCommandGroup(namespace: string) {
  */
 export function useCommandError(options: {
   filter?: (cmd: Command) => boolean;
-  /** Max errors retained — oldest are dropped first (ring buffer). Default: 50. */
+  /** Max errors retained - oldest are dropped first (ring buffer). Default: 50. */
   errorCap?: number;
 } = {}) {
   const { filter, errorCap = 50 } = options;

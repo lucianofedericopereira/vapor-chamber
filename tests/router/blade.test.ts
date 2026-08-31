@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * Tests for router/blade.ts — makeBladeComponent wraps fetched HTML into a
+ * Tests for router/blade.ts - makeBladeComponent wraps fetched HTML into a
  * throwaway component whose lifecycle owns the swap.
  */
 
@@ -29,7 +29,7 @@ describe('makeBladeComponent', () => {
     expect(bladeEl.innerHTML).toBe('');
   });
 
-  it('no hooks provided — mount/unmount are safe no-ops', () => {
+  it('no hooks provided - mount/unmount are safe no-ops', () => {
     const Comp = makeBladeComponent('<span>x</span>', {});
     const host = document.createElement('div');
     const app = createApp(Comp);
@@ -40,7 +40,7 @@ describe('makeBladeComponent', () => {
   });
 });
 
-describe('makeBladeComponent — hook branches', () => {
+describe('makeBladeComponent - hook branches', () => {
   it('swaps HTML in and calls hydrate on mount, dehydrate + clears on unmount', async () => {
     const seen: string[] = [];
     const Comp = makeBladeComponent('<p id="blade-inner">server html</p>', {
@@ -64,7 +64,7 @@ describe('makeBladeComponent — hook branches', () => {
     host.remove();
   });
 
-  it('works with NO hooks at all — they are optional app conventions', () => {
+  it('works with NO hooks at all - they are optional app conventions', () => {
     const Comp = makeBladeComponent('<span>plain</span>', {});
     const host = document.createElement('div');
     document.body.appendChild(host);

@@ -1,14 +1,14 @@
 /**
- * emitDOMEvent — bridges Vue's component emit() to a real DOM CustomEvent
+ * emitDOMEvent - bridges Vue's component emit() to a real DOM CustomEvent
  * so host pages can subscribe with addEventListener on the widget tag.
  *
  * Pattern adapted from vue-custom-element's `customEmit` helper. Vue's
- * `emit` goes through Vue's component event system — these tests verify
+ * `emit` goes through Vue's component event system - these tests verify
  * the DOM-event path that escapes that system.
  *
  * Loaded from the IIFE bundle in a sandboxed VM context because emitDOMEvent
  * is exposed on the elements/full IIFE namespaces, not from the ESM main
- * entry. (It's a widget-only helper — has no place in the general bus API.)
+ * entry. (It's a widget-only helper - has no place in the general bus API.)
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 
@@ -39,13 +39,13 @@ describe('emitDOMEvent', () => {
   let host: Element;
 
   beforeEach(() => {
-    // Use Node's built-in EventTarget — works as a stand-in for an Element
+    // Use Node's built-in EventTarget - works as a stand-in for an Element
     // for dispatching events. CustomEvent is also available natively.
     host = new EventTarget() as unknown as Element;
   });
 
   afterEach(() => {
-    // Nothing to clean up — the EventTarget is GC'd.
+    // Nothing to clean up - the EventTarget is GC'd.
   });
 
   it('dispatches a CustomEvent with the given name and detail', () => {
@@ -73,7 +73,7 @@ describe('emitDOMEvent', () => {
     expect(result).toBe(false);
   });
 
-  it('passes detail of any type — primitives, arrays, objects, null', () => {
+  it('passes detail of any type - primitives, arrays, objects, null', () => {
     const captured: any[] = [];
     host.addEventListener('any', (e) => captured.push((e as CustomEvent).detail));
 
@@ -84,7 +84,7 @@ describe('emitDOMEvent', () => {
     emitDOMEvent(host, 'any', null);
     emitDOMEvent(host, 'any', undefined);
 
-    // The CustomEvent spec coerces undefined detail to null — both null and
+    // The CustomEvent spec coerces undefined detail to null - both null and
     // undefined arrive as null on the event object. This is browser behavior,
     // not vapor-chamber semantics.
     expect(captured).toEqual([42, 'string', [1, 2, 3], { nested: { value: true } }, null, null]);

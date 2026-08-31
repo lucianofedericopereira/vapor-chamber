@@ -1,9 +1,9 @@
 /**
- * vapor-chamber — Observable adapter.
+ * vapor-chamber - Observable adapter.
  *
  * Bridges `bus.on(pattern)` and `bus.dispatch()` into the Observable
  * protocol so RxJS / consumers using `Symbol.observable` can pipe bus
- * events through their own operator chains. Zero RxJS dependency — uses
+ * events through their own operator chains. Zero RxJS dependency - uses
  * `Symbol.observable` interop, which RxJS reads natively via `from()`.
  *
  * @example RxJS interop
@@ -24,14 +24,14 @@
 import type { BaseBus, Command, CommandResult } from './command-bus';
 
 /**
- * The shape an observable produces — matches the listener signature of
+ * The shape an observable produces - matches the listener signature of
  * `bus.on(pattern, (cmd, result) => ...)` packed into a single value so
  * RxJS-shaped operators can `.pipe(filter(...))` etc.
  */
 export type BusObservation = { cmd: Command; result: CommandResult };
 
 /**
- * Minimal observer / observable protocol — matches TC39 Observable proposal
+ * Minimal observer / observable protocol - matches TC39 Observable proposal
  * + `Symbol.observable` interop used by RxJS, xstream, callbag, kefir.
  */
 export interface Observer<T> {
@@ -47,7 +47,7 @@ export interface Subscription {
 
 export interface Observable<T> {
   subscribe(observer: Observer<T> | ((value: T) => void)): Subscription;
-  /** Symbol.observable interop — RxJS's `from()` calls this if present. */
+  /** Symbol.observable interop - RxJS's `from()` calls this if present. */
   [Symbol.observable]?: () => Observable<T>;
 }
 

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * Single-arm gaps across the small modules — each one line, each a normal
+ * Single-arm gaps across the small modules - each one line, each a normal
  * runtime condition rather than an exotic one.
  *
  *  - transitions: an async transition command that REJECTS must still call
@@ -25,7 +25,7 @@ import { createRouteTable } from '../src/router/table';
 afterEach(() => vi.restoreAllMocks());
 
 // ---------------------------------------------------------------------------
-// transitions — done() on a rejected dispatch
+// transitions - done() on a rejected dispatch
 // ---------------------------------------------------------------------------
 
 describe('transition bridge done() callback', () => {
@@ -42,7 +42,7 @@ describe('transition bridge done() callback', () => {
   });
 
   it('calls done() when the dispatch promise itself REJECTS', async () => {
-    // The chamber bus never rejects — failures come back as errResult — so this
+    // The chamber bus never rejects - failures come back as errResult - so this
     // arm exists for the other BaseBus implementations the bridge accepts. A
     // bus that breaks that contract must still not strand the element.
     const bus = { dispatch: () => Promise.reject(new Error('bus contract broken')) } as any;
@@ -65,7 +65,7 @@ describe('transition bridge done() callback', () => {
 });
 
 // ---------------------------------------------------------------------------
-// utilities — createReaction
+// utilities - createReaction
 // ---------------------------------------------------------------------------
 
 describe('createReaction', () => {
@@ -73,7 +73,7 @@ describe('createReaction', () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const bus = createCommandBus({ onMissing: 'ignore' });
 
-    // Source pattern matches its own target → refused (would self-trigger).
+    // Source pattern matches its own target -> refused (would self-trigger).
     const off = createReaction('cart*', 'cartSync').install(bus);
 
     expect(error).toHaveBeenCalledTimes(1);
@@ -90,7 +90,7 @@ describe('createReaction', () => {
     const off = createReaction('source', 'target', { mapPayload: () => 'a bare string' }).install(bus);
     bus.dispatch('source', {});
 
-    // Nothing to spread the causation marker into — the scalar rides as-is.
+    // Nothing to spread the causation marker into - the scalar rides as-is.
     expect(seen).toEqual(['a bare string']);
     off();
   });
@@ -111,7 +111,7 @@ describe('createReaction', () => {
 });
 
 // ---------------------------------------------------------------------------
-// router/url — encodeQueryParam array coercion
+// router/url - encodeQueryParam array coercion
 // ---------------------------------------------------------------------------
 
 describe('encodeQueryParam', () => {
@@ -131,12 +131,12 @@ describe('encodeQueryParam', () => {
 });
 
 // ---------------------------------------------------------------------------
-// router/history — resolveBase + position
+// router/history - resolveBase + position
 // ---------------------------------------------------------------------------
 
 describe('resolveBase', () => {
   it('falls back to an empty pathname with no window and no option', () => {
-    // Node environment: no window, no options.pathname → '' is the pathname.
+    // Node environment: no window, no options.pathname -> '' is the pathname.
     expect(resolveBase({})).toBe('');
     expect(resolveBase({ prefix: '/admin' })).toBe('/admin');
   });
@@ -147,7 +147,7 @@ describe('resolveBase', () => {
 });
 
 // ---------------------------------------------------------------------------
-// router/menu — nothing flagged for the menu
+// router/menu - nothing flagged for the menu
 // ---------------------------------------------------------------------------
 
 describe('buildMenu', () => {
@@ -156,7 +156,7 @@ describe('buildMenu', () => {
       { name: 'home', path: '/', component: 'Home' },
       { name: 'list', path: '/list', component: 'List' },
     ]);
-    // No root bucket exists at all — the `?? []` fallback is what answers.
+    // No root bucket exists at all - the `?? []` fallback is what answers.
     expect(buildMenu(table.records, '/')).toEqual([]);
   });
 
@@ -172,7 +172,7 @@ describe('buildMenu', () => {
 });
 
 // ---------------------------------------------------------------------------
-// ssr — the thenable guard's own catch
+// ssr - the thenable guard's own catch
 // ---------------------------------------------------------------------------
 
 describe('rehydrate on an async bus', () => {
@@ -189,7 +189,7 @@ describe('rehydrate on an async bus', () => {
     expect(results[0]!.ok).toBe(false);
     expect(warn).toHaveBeenCalledTimes(1);
 
-    // Give the rejection a turn to surface — the absorbed catch keeps it quiet.
+    // Give the rejection a turn to surface - the absorbed catch keeps it quiet.
     await new Promise(r => setTimeout(r, 0));
   });
 });

@@ -2,7 +2,7 @@
  * The prototype-key invariant, pinned outside the router.
  *
  * One rule (see src/dict.ts): a string that came from outside must never be a
- * key on — or a lookup in — an object inheriting from Object.prototype. This
+ * key on - or a lookup in - an object inheriting from Object.prototype. This
  * file pins the two non-router sites where breaking it had consequences.
  *
  * Both assertions below were verified to FAIL against the pre-fix code.
@@ -12,7 +12,7 @@ import { describe, expect, it } from 'vitest';
 import { commandKey } from '../src/command-bus';
 import { createFormBus } from '../src/form';
 
-describe('commandKey — an own __proto__ key must not be swallowed', () => {
+describe('commandKey - an own __proto__ key must not be swallowed', () => {
   // `JSON.parse` produces an OWN `__proto__` property; an HTTP bridge handing a
   // parsed server response to dispatch is the realistic path here.
   const a = JSON.parse('{"__proto__":"A","id":1}');
@@ -20,7 +20,7 @@ describe('commandKey — an own __proto__ key must not be swallowed', () => {
 
   it('gives different targets different keys', () => {
     expect(Object.hasOwn(a, '__proto__')).toBe(true);
-    // Pre-fix both produced `act:{"id":1}` — the key backing idempotent, cache,
+    // Pre-fix both produced `act:{"id":1}` - the key backing idempotent, cache,
     // serialize and supersede, so two distinct commands collapsed into one.
     expect(commandKey('act', a)).not.toBe(commandKey('act', b));
   });
@@ -37,7 +37,7 @@ describe('commandKey — an own __proto__ key must not be swallowed', () => {
   });
 });
 
-describe('form rules — absent fields named after Object.prototype members', () => {
+describe('form rules - absent fields named after Object.prototype members', () => {
   it('skips a rule whose field is not actually present', async () => {
     let sawToString = false;
     const form = createFormBus({

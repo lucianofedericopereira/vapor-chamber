@@ -1,5 +1,5 @@
 /**
- * vapor-chamber — IIFE variant: ELEMENTS
+ * vapor-chamber - IIFE variant: ELEMENTS
  *
  * Audience: widget builders. Embeddable chat bubbles, checkout buttons,
  * support pop-ups, third-party drop-ins. You ship a `<script>` tag and a
@@ -8,14 +8,14 @@
  *
  * Surface:
  *   • Everything in CORE (bus + HTTP + light plugins + connect/createApp)
- *   • defineVaporCustomElement — the headline API
- *   • defineWidget() — one-line custom-element registration helper
+ *   • defineVaporCustomElement - the headline API
+ *   • defineWidget() - one-line custom-element registration helper
  *
  * NOT in this variant (use `vapor-chamber.iife.js` if you need them):
- *   • WebSocket / SSE — most widgets poll or use server-side push to HTTP
- *   • persist / sync / history / optimistic — stateful plugins; widgets
+ *   • WebSocket / SSE - most widgets poll or use server-side push to HTTP
+ *   • persist / sync / history / optimistic - stateful plugins; widgets
  *     usually keep state in their own custom-element instance
- *   • Vapor sync/async composables — these target SFC-based apps, not
+ *   • Vapor sync/async composables - these target SFC-based apps, not
  *     custom-element widgets
  *
  * Variant contents are not stable across major versions until v2.0; see ROADMAP.md.
@@ -61,13 +61,13 @@ function connect(options: HttpBridgeOptions & { plugins?: Plugin[]; onMissing?: 
 }
 
 /**
- * defineWidget — one-line custom-element registration for embeddable widgets.
+ * defineWidget - one-line custom-element registration for embeddable widgets.
  *
  * Wraps `defineVaporCustomElement(options)` + `customElements.define(tag, ...)`.
  * No-ops gracefully if Vue 3.6+ Vapor is not detected on the page (returns
  * `false`); inspect the return value to fall back to a non-Vapor renderer.
  *
- * ## Naming convention — use the `vc-` prefix
+ * ## Naming convention - use the `vc-` prefix
  *
  * Recommended: prefix every vapor-chamber widget tag with `vc-`.
  *
@@ -76,19 +76,19 @@ function connect(options: HttpBridgeOptions & { plugins?: Plugin[]; onMissing?: 
  * Reasons it's the right convention here:
  *
  *   • Reads cleanly in server-rendered HTML next to Blade / Twig / ERB
- *     components — a Laravel dev sees `<vc-cart/>` in a `.blade.php` file
+ *     components - a Laravel dev sees `<vc-cart/>` in a `.blade.php` file
  *     and immediately recognizes it as a vapor-chamber widget, not a
  *     framework directive.
  *   • Avoids collisions with host-page elements when the widget is
  *     embedded into a third-party site.
  *   • Searchable: `grep -r "<vc-"` finds every widget instance in one shot.
- *   • Short — two characters of overhead.
+ *   • Short - two characters of overhead.
  *
  * The HTML spec requires custom-element names contain a hyphen;
  * `customElements.define()` enforces that. `vc-` satisfies it.
  *
  * If your project already has a brand prefix (`<acme-cart/>`,
- * `<myapp-checkout/>`), keep yours — the brand convention wins. The
+ * `<myapp-checkout/>`), keep yours - the brand convention wins. The
  * `vc-` recommendation is for projects without an existing convention.
  *
  * @example
@@ -116,14 +116,14 @@ function defineWidget(tagName: string, options: any, extraOptions?: any): boolea
  * Emit a real DOM `CustomEvent` from inside a widget so host pages can
  * subscribe with `addEventListener`.
  *
- * Vue's component `emit(...)` goes through Vue's event system — it does
+ * Vue's component `emit(...)` goes through Vue's event system - it does
  * NOT bubble out as a DOM event. For widgets that need to communicate with
  * the surrounding page (a `<vc-cart>` notifying its container that
  * a product was added), use this to dispatch an actual `CustomEvent`.
  *
  * Pattern adapted from
  * [vue-custom-element](https://github.com/karol-f/vue-custom-element)'s
- * `customEmit` helper (Karol-F, MIT) — original predates Vue 3.6's Vapor
+ * `customEmit` helper (Karol-F, MIT) - original predates Vue 3.6's Vapor
  * but the underlying gap (Vue emit ≠ DOM event) still exists today.
  *
  * @example Widget side
@@ -140,11 +140,11 @@ function defineWidget(tagName: string, options: any, extraOptions?: any): boolea
  *   console.log(e.detail.sku);   // 'X'
  * });
  *
- * @param el — the custom element instance (host element)
- * @param eventName — DOM event name (kebab-case is conventional for custom events)
- * @param detail — payload attached to event.detail
- * @param options — bubbles/composed/cancelable. Defaults: bubbles=true, composed=true
- *                  (composed=true escapes shadow-DOM boundaries by default — required
+ * @param el - the custom element instance (host element)
+ * @param eventName - DOM event name (kebab-case is conventional for custom events)
+ * @param detail - payload attached to event.detail
+ * @param options - bubbles/composed/cancelable. Defaults: bubbles=true, composed=true
+ *                  (composed=true escapes shadow-DOM boundaries by default - required
  *                  for events to reach light-DOM listeners on the host page).
  * @returns `false` if `event.preventDefault()` was called by a listener, `true` otherwise.
  */
@@ -193,6 +193,6 @@ if (typeof globalThis !== 'undefined') {
 // Default export only: the IIFE build assigns the DEFAULT export to the
 // `VaporChamber` global, so the API object lands directly on window
 // (`VaporChamber.connect(...)`). A second named export would force the
-// bundler to emit a module-namespace wrapper — `{ VaporChamber, default }`
-// — and every documented call site would be undefined in a <script> tag.
+// bundler to emit a module-namespace wrapper - `{ VaporChamber, default }`
+// - and every documented call site would be undefined in a <script> tag.
 export default VaporChamber;

@@ -1,5 +1,5 @@
 /**
- * Build orchestrator — single source of truth for the JS pipeline.
+ * Build orchestrator - single source of truth for the JS pipeline.
  *
  * Outputs:
  *   ESM multi-entry library (tree-shakable, sideEffects: false)
@@ -24,10 +24,10 @@ const pkg = JSON.parse(readFileSync('./package.json', 'utf8'));
 
 // A pointer, not a notice block. 22 bytes. Every emitted file carries this one
 // line; dist/LICENSE.txt carries the per-file notices and LICENSE the full
-// LGPL-2.1 text — both outside the bundle, where no size metric counts them.
+// LGPL-2.1 text - both outside the bundle, where no size metric counts them.
 //
 // `/*!` is load-bearing: it marks this a LEGAL comment, which minifiers keep. A
-// plain `/* … */` is not, and every minifier dropped it — before this, both
+// plain `/* ... */` is not, and every minifier dropped it - before this, both
 // .min.js IIFEs shipped with no licence reference at all.
 const pointer = '/*! See LICENSE.txt */';
 
@@ -40,10 +40,10 @@ const emitted = new Set();
  * `rollupOptions.output.banner` is applied BEFORE minification, so the minifier
  * ate it. `generateBundle` runs after, so the pointer always survives.
  *
- * `strip` also drops JSDoc from the emitted ESM — ~13.6 KB of dist/index.js,
+ * `strip` also drops JSDoc from the emitted ESM - ~13.6 KB of dist/index.js,
  * redundant there because the same prose is in the `.d.ts`, which is what
  * editors and TypeScript read. Source keeps every comment; only shipped JS
- * loses them. `/* @__PURE__ *​/` and `/* @vite-ignore *​/` survive: esbuild
+ * loses them. The `@__PURE__` and `@vite-ignore` annotations survive: esbuild
  * preserves them, and stripping them would break downstream tree-shaking.
  */
 function licenseNotice({ strip = false } = {}) {
@@ -64,7 +64,7 @@ function licenseNotice({ strip = false } = {}) {
   };
 }
 
-/** Writes dist/LICENSE.txt — one notice block per emitted JavaScript file. */
+/** Writes dist/LICENSE.txt - one notice block per emitted JavaScript file. */
 function writeLicenseManifest() {
   const notice = [
     `Copyright (C) Luciano Federico Pereira`,
@@ -82,7 +82,7 @@ function writeLicenseManifest() {
 
   writeFileSync(
     'dist/LICENSE.txt',
-    `vapor-chamber v${pkg.version} — licence information for the distributed JavaScript\n` +
+    `vapor-chamber v${pkg.version} - licence information for the distributed JavaScript\n` +
     `${'='.repeat(78)}\n\n` +
     `Every JavaScript file in this directory carries the one-line reference\n` +
     `"/*! See LICENSE.txt */". This file is that reference.\n\n` +
@@ -90,10 +90,10 @@ function writeLicenseManifest() {
     `are each covered by the following notice.\n\n` +
     `${'='.repeat(78)}\n\n${notice}\n`,
   );
-  console.log(`✓ dist/LICENSE.txt — ${emitted.size} files`);
+  console.log(`✓ dist/LICENSE.txt - ${emitted.size} files`);
 }
 
-// 1. ESM multi-entry library — preserves sub-path exports defined in package.json
+// 1. ESM multi-entry library - preserves sub-path exports defined in package.json
 await build({
   configFile: false,
   logLevel: 'warn',
@@ -101,12 +101,12 @@ await build({
   //
   // A `define` block used to sit inside `build:` here, carrying
   // `__VC_IIFE__: 'false'` and `__VC_DEV__: 'process.env.NODE_ENV !== "production"'`.
-  // Vite ignores that position, so it had never applied to the ESM output —
+  // Vite ignores that position, so it had never applied to the ESM output -
   // verified in `dist/dev.js`, where even the bare `__VC_DEV__` sat
   // unsubstituted. It was DELETED rather than hoisted, because hoisting it
   // would change behaviour and that is a call to make deliberately: rolldown
   // does substitute inside `typeof`, so a correctly-placed `__VC_DEV__` would
-  // fold `src/dev.ts` to a constant and discard its `typeof process` fallback —
+  // fold `src/dev.ts` to a constant and discard its `typeof process` fallback -
   // and that fallback is exactly what the ESM build wants to keep, since only
   // the CONSUMER's bundler knows whether their build is a dev build. Deleting
   // the dead block preserves today's behaviour and stops the config from
@@ -127,12 +127,16 @@ await build({
         'alien-signals': 'src/alien-signals.ts',
         'reactive':   'src/reactive.ts',
         'vue':        'src/vue.ts',
+        'vapor':      'src/vapor.ts',
         'outbox':     'src/outbox.ts',
         'mcp':        'src/mcp.ts',
         'stream-parser': 'src/stream-parser.ts',
         'devtools':   'src/devtools.ts',
+        'store':      'src/store.ts',
         'router/index':       'src/router/index.ts',
         'router/vdom':        'src/router/vdom.ts',
+        'router/vapor':       'src/router/vapor.ts',
+        'router/remote':      'src/router/remote.ts',
         'router-fetch/index': 'src/router-fetch/index.ts',
         'iife':       'src/iife.ts',
         'iife-core':  'src/iife-core.ts',
@@ -145,7 +149,7 @@ await build({
       output: {
         preserveModules: false,
         // Stable shared-chunk names, not `chamber-T4ImeORN.js`. Content hashes
-        // exist for HTTP cache-busting, and nothing serves these to a browser —
+        // exist for HTTP cache-busting, and nothing serves these to a browser -
         // consumers bundle them, and the entry names `exports` points at were
         // already stable. So the hash bought nothing and cost: builds were not
         // reproducible, `dist/` diffs churned on every rebuild, and stack traces
@@ -161,7 +165,7 @@ await build({
   plugins: [licenseNotice({ strip: true })],
 });
 
-// 2. IIFE variants — sized for <script> tag use cases
+// 2. IIFE variants - sized for <script> tag use cases
 const iifeVariants = [
   { name: 'vapor-chamber',          entry: 'src/iife.ts' },
   { name: 'vapor-chamber-core',     entry: 'src/iife-core.ts' },
@@ -174,7 +178,7 @@ for (const v of iifeVariants) {
       configFile: false,
       logLevel: 'warn',
       // __VC_IIFE__ lets source branch on "this is a <script>-tag bundle",
-      // which is a BUILD-time fact — no reason to answer it at runtime. It
+      // which is a BUILD-time fact - no reason to answer it at runtime. It
       // const-folds, so the dead branch is dropped by the minifier rather than
       // shipped. Used by chamber.ts to omit the `@vue/reactivity` probe, whose
       // dynamic import can never resolve without a bundler anyway.
@@ -186,7 +190,7 @@ for (const v of iifeVariants) {
         // ESM deliberately omits it (see the ESM define block) so the consumer's
         // bundler can opt out instead.
         // These are production artifacts, so dev diagnostics fold away
-        // entirely — branch AND message strings.
+        // entirely - branch AND message strings.
         __VC_DEV__: 'false',
       },
       build: {
@@ -196,11 +200,11 @@ for (const v of iifeVariants) {
           formats: ['iife'],
           fileName: () => `${v.name}.iife${min ? '.min' : ''}.js`,
         },
-        // exports: 'default' — the IIFE global must BE the API object, so a
+        // exports: 'default' - the IIFE global must BE the API object, so a
         // plain <script> user can call VaporChamber.connect(). With 'named',
         // rollup wraps the module's exports and assigns
         // { VaporChamber, default } to the global instead, so every documented
-        // call site (VaporChamber.connect, .createCommandBus, …) is undefined
+        // call site (VaporChamber.connect, .createCommandBus, ...) is undefined
         // and the API only reachable as VaporChamber.VaporChamber.
         rollupOptions: { output: { exports: 'default' } },
         emptyOutDir: false,
@@ -216,7 +220,7 @@ for (const v of iifeVariants) {
 writeLicenseManifest();
 console.log('✓ Built ESM library + 3 IIFE variants (full / core / elements)');
 
-// Print bundle-size table — keeps the README narrative honest each build.
+// Print bundle-size table - keeps the README narrative honest each build.
 import { statSync } from 'node:fs';
 import zlib from 'node:zlib';
 const kb = (n) => (n / 1024).toFixed(1) + ' KB';

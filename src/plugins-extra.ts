@@ -1,5 +1,5 @@
 /**
- * vapor-chamber — Extra plugins
+ * vapor-chamber - Extra plugins
  *
  * cache, circuitBreaker, rateLimit, metrics
  *
@@ -17,7 +17,7 @@ function makeActionFilter(patterns: string[] | undefined): (action: string) => b
 }
 
 // ---------------------------------------------------------------------------
-// cache — memoize query results with TTL
+// cache - memoize query results with TTL
 // ---------------------------------------------------------------------------
 
 export type CacheOptions = {
@@ -32,7 +32,7 @@ export type CacheOptions = {
 };
 
 /**
- * cache — memoize handler results by (action, target) key.
+ * cache - memoize handler results by (action, target) key.
  * Use with `query()` for read-only commands. The plugin intercepts the
  * dispatch/query pipeline and returns the cached result if fresh.
  *
@@ -52,7 +52,7 @@ export function cache(options: CacheOptions = {}): Plugin & {
   const { ttl = 30_000, maxSize: rawMaxSize = 100, actions, key: keyFn } = options;
   // Clamped, because it was not: a negative `maxSize` made `evictIfNeeded`'s
   // old `while (store.size > maxSize)` loop true against an EMPTY store, and
-  // its `firstKey !== undefined` guard then made no progress — so
+  // its `firstKey !== undefined` guard then made no progress - so
   // `cache({ maxSize: -1 })` hung the process on the first eviction instead of
   // throwing. Reachable from the public API with one bad option.
   const maxSize = Math.max(0, Math.trunc(rawMaxSize));
@@ -61,11 +61,11 @@ export function cache(options: CacheOptions = {}): Plugin & {
   // LRU-style cache: Map preserves insertion order, we move accessed entries to end
   const store = new Map<string, { result: CommandResult; expiresAt: number; action: string }>();
 
-  // action → the keys stored under it. Entries are keyed by `getKey`, which a
-  // custom `key` option can make ANY shape — so action-wide invalidation
+  // action -> the keys stored under it. Entries are keyed by `getKey`, which a
+  // custom `key` option can make ANY shape - so action-wide invalidation
   // cannot recompute them. It used to try (`commandKey(action, target)` and a
   // `action + ':'` prefix scan, both the DEFAULT key shape), which meant every
-  // `invalidate()` call silently deleted nothing whenever `key` was set — and
+  // `invalidate()` call silently deleted nothing whenever `key` was set - and
   // `key` exists precisely for callers whose identity ISN'T `action:target`.
   // Recording the mapping at insert time makes action-wide invalidation work
   // for any key shape instead of documenting a hole.
@@ -84,14 +84,14 @@ export function cache(options: CacheOptions = {}): Plugin & {
     keys.add(key);
   }
 
-  /** Single removal path — the index must never outlive the entry. */
+  /** Single removal path - the index must never outlive the entry. */
   function dropKey(key: string): void {
     const entry = store.get(key);
     if (entry === undefined) return;
     store.delete(key);
     // `!` not a guard: the index is written on every insert into `store` and
     // this is the single removal path, so an entry in `store` always has its
-    // action in `byAction` — the docstring above is that invariant. A miss
+    // action in `byAction` - the docstring above is that invariant. A miss
     // would mean the index outlived the entry, which is worth throwing over
     // rather than silently leaking a stale key set.
     const keys = byAction.get(entry.action)!;
@@ -104,7 +104,7 @@ export function cache(options: CacheOptions = {}): Plugin & {
     // which the old `while (store.size > maxSize)` form could: once the store
     // emptied, the condition stayed true under a negative bound while the
     // `firstKey !== undefined` guard deleted nothing. Bounding the ITERATION
-    // rather than guarding the value removes that failure mode entirely —
+    // rather than guarding the value removes that failure mode entirely -
     // and removes the unreachable-by-design branch the guard created.
     // (Deleting the current key mid-iteration is well-defined for a Map.)
     for (const key of store.keys()) {
@@ -131,7 +131,7 @@ export function cache(options: CacheOptions = {}): Plugin & {
     const result = next();
 
     function store_(r: CommandResult): void {
-      // Every later hit gets this exact object back — see freeze.ts.
+      // Every later hit gets this exact object back - see freeze.ts.
       store.set(k, { result: freezeCached(r), expiresAt: Date.now() + ttl, action: cmd.action });
       remember(k, cmd.action);
       evictIfNeeded();
@@ -153,14 +153,14 @@ export function cache(options: CacheOptions = {}): Plugin & {
     invalidate(action: string, target?: any): void {
       if (target !== undefined) {
         // Targeted invalidation needs the entry's exact key, and a custom
-        // `key` fn receives the whole Command — payload included — so there is
+        // `key` fn receives the whole Command - payload included - so there is
         // nothing to recompute from (action, target) alone. Say so instead of
         // deleting nothing quietly; action-wide invalidation below still works.
         if (keyFn) {
           if (DEV) {
             console.warn(
               `[vapor-chamber] cache().invalidate("${action}", target) cannot address entries stored ` +
-                'under a custom `key` function — the key may depend on the payload. ' +
+                'under a custom `key` function - the key may depend on the payload. ' +
                 `Use invalidate("${action}") to clear every entry for the action.`,
             );
           }
@@ -169,7 +169,7 @@ export function cache(options: CacheOptions = {}): Plugin & {
         dropKey(commandKey(action, target));
         return;
       }
-      // Invalidate all entries for this action — index-driven, so it holds for
+      // Invalidate all entries for this action - index-driven, so it holds for
       // any key shape.
       const keys = byAction.get(action);
       if (!keys) return;
@@ -181,7 +181,7 @@ export function cache(options: CacheOptions = {}): Plugin & {
 }
 
 // ---------------------------------------------------------------------------
-// circuitBreaker — trip after N consecutive failures, reject fast
+// circuitBreaker - trip after N consecutive failures, reject fast
 // ---------------------------------------------------------------------------
 
 export type CircuitBreakerOptions = {
@@ -200,7 +200,7 @@ export type CircuitBreakerOptions = {
 type CircuitState = 'closed' | 'open' | 'half-open';
 
 /**
- * circuitBreaker — trips after N consecutive failures, rejects fast while open.
+ * circuitBreaker - trips after N consecutive failures, rejects fast while open.
  *
  * @example
  * bus.use(circuitBreaker({ threshold: 3, resetTimeout: 10_000, actions: ['api*'] }));
@@ -233,7 +233,7 @@ export function circuitBreaker(options: CircuitBreakerOptions = {}): Plugin & {
     const c = getCircuit(cmd.action);
 
     if (c.state === 'open') {
-      // Check if reset timeout has elapsed → half-open
+      // Check if reset timeout has elapsed -> half-open
       if (Date.now() - c.openedAt >= resetTimeout) {
         c.state = 'half-open';
       } else {
@@ -274,7 +274,7 @@ export function circuitBreaker(options: CircuitBreakerOptions = {}): Plugin & {
 }
 
 // ---------------------------------------------------------------------------
-// rateLimit — per-action rate limiting with sliding window
+// rateLimit - per-action rate limiting with sliding window
 // ---------------------------------------------------------------------------
 
 export type RateLimitOptions = {
@@ -287,7 +287,7 @@ export type RateLimitOptions = {
 };
 
 /**
- * rateLimit — per-action sliding window rate limiter.
+ * rateLimit - per-action sliding window rate limiter.
  * Unlike throttle (which delays execution), rateLimit rejects immediately
  * when the limit is exceeded.
  *
@@ -298,7 +298,7 @@ export function rateLimit(options: RateLimitOptions = {}): Plugin {
   const { max = 10, window: windowMs = 1_000, actions } = options;
   const matchesActions = makeActionFilter(actions);
 
-  // Per-action sliding window: { timestamps[], head } — head index avoids O(n) shift()
+  // Per-action sliding window: { timestamps[], head } - head index avoids O(n) shift()
   const windows = new Map<string, { ts: number[]; head: number }>();
 
   return (cmd, next) => {
@@ -308,7 +308,7 @@ export function rateLimit(options: RateLimitOptions = {}): Plugin {
     let win = windows.get(cmd.action);
     if (!win) { win = { ts: [], head: 0 }; windows.set(cmd.action, win); }
 
-    // Advance head past expired timestamps — O(1) amortized
+    // Advance head past expired timestamps - O(1) amortized
     const cutoff = now - windowMs;
     while (win.head < win.ts.length && win.ts[win.head] <= cutoff) win.head++;
 
@@ -329,7 +329,7 @@ export function rateLimit(options: RateLimitOptions = {}): Plugin {
 }
 
 // ---------------------------------------------------------------------------
-// metrics — lightweight telemetry collection
+// metrics - lightweight telemetry collection
 // ---------------------------------------------------------------------------
 
 export type MetricsEntry = {
@@ -349,7 +349,7 @@ export type MetricsOptions = {
 };
 
 /**
- * metrics — lightweight telemetry plugin.
+ * metrics - lightweight telemetry plugin.
  * Tracks dispatch count, success rate, and avg duration per action.
  *
  * @example
@@ -369,7 +369,7 @@ export function metrics(options: MetricsOptions = {}): Plugin & {
   const { maxEntries = 1000, actions, onEntry } = options;
   const matchesActions = makeActionFilter(actions);
   let data: MetricsEntry[] = [];
-  let head = 0; // O(1) eviction — head index tracks first live entry
+  let head = 0; // O(1) eviction - head index tracks first live entry
 
   /** Compact when more than half the array is dead entries. */
   function compactIfNeeded(): void {
@@ -394,7 +394,7 @@ export function metrics(options: MetricsOptions = {}): Plugin & {
     };
 
     data.push(entry);
-    // Evict oldest by advancing head — O(1)
+    // Evict oldest by advancing head - O(1)
     while ((data.length - head) > maxEntries) head++;
     compactIfNeeded();
     if (onEntry) onEntry(entry);
@@ -429,7 +429,7 @@ export function metrics(options: MetricsOptions = {}): Plugin & {
 }
 
 // ---------------------------------------------------------------------------
-// serialize — per-key sequential processing for async commands
+// serialize - per-key sequential processing for async commands
 // ---------------------------------------------------------------------------
 
 export type SerializeOptions = {
@@ -447,7 +447,7 @@ export type SerializeOptions = {
    * - `'instance'` (default): a per-bus in-memory FIFO queue. Same-key commands
    *   serialize within THIS bus instance only.
    * - `'cross-tab'`: use the Web Locks API (`navigator.locks`) so same-key
-   *   commands serialize across every tab / window of the same origin — true
+   *   commands serialize across every tab / window of the same origin - true
    *   browser-arbitrated mutual exclusion, no custom transport. Automatically
    *   falls back to the `'instance'` queue when `navigator.locks` is unavailable
    *   (SSR, older browsers, or workers without the API).
@@ -458,7 +458,7 @@ export type SerializeOptions = {
 };
 
 /**
- * serialize — guarantee that async commands sharing a key never overlap.
+ * serialize - guarantee that async commands sharing a key never overlap.
  *
  * **Async bus only.** Sync handlers run to completion synchronously and cannot
  * interleave, so serialization is meaningless there (and would turn a sync
@@ -467,10 +467,10 @@ export type SerializeOptions = {
  * Prevents read-modify-write races on a shared resource: two `accountWithdraw`
  * for the same account, rapid `cartCheckout` clicks, or any handler where a
  * second dispatch must observe the first one's committed effect. This is
- * distinct from in-flight request dedup (which collapses *identical* requests) —
+ * distinct from in-flight request dedup (which collapses *identical* requests) -
  * serialize queues *distinct* same-key commands so they apply in order.
  *
- * Failure-safe: a rejected/failed command does NOT stall its lane — the next
+ * Failure-safe: a rejected/failed command does NOT stall its lane - the next
  * same-key command proceeds regardless of the previous outcome. Per-key entries
  * are reclaimed once a lane drains, so the map never grows unbounded.
  *
@@ -501,7 +501,7 @@ export function serialize(options: SerializeOptions = {}): AsyncPlugin {
 
   function inMemory(k: string, next: () => CommandResult | Promise<CommandResult>) {
     const prev = tails.get(k) ?? Promise.resolve();
-    // Run after the previous same-key command settles — success OR failure both
+    // Run after the previous same-key command settles - success OR failure both
     // release the lane, so one rejection can't deadlock the queue.
     const run = prev.then(
       () => next(),
@@ -537,7 +537,7 @@ export function serialize(options: SerializeOptions = {}): AsyncPlugin {
 }
 
 // ---------------------------------------------------------------------------
-// idempotent — collapse duplicate commands + stamp an idempotency key
+// idempotent - collapse duplicate commands + stamp an idempotency key
 // ---------------------------------------------------------------------------
 
 export type IdempotentOptions = {
@@ -548,7 +548,7 @@ export type IdempotentOptions = {
    */
   key?: (cmd: Command) => string | null | undefined;
   /**
-   * How long (ms) a *completed* key is remembered for dedup — the window in
+   * How long (ms) a *completed* key is remembered for dedup - the window in
    * which a repeat (double-click, retry, reconnect replay) is collapsed to the
    * first result instead of hitting the handler/backend again. Default: 60_000.
    */
@@ -561,25 +561,25 @@ export type IdempotentOptions = {
    */
   stampMeta?: boolean;
   /**
-   * Max completed keys remembered at once — oldest is evicted first, so memory
+   * Max completed keys remembered at once - oldest is evicted first, so memory
    * stays bounded on long-lived buses with many distinct targets. Default: 500.
    */
   maxKeys?: number;
 };
 
 /**
- * idempotent — make duplicate dispatches a no-op against the handler/backend.
+ * idempotent - make duplicate dispatches a no-op against the handler/backend.
  *
  * The client-side half of exactly-once delivery: it collapses repeats of the
- * same logical command — double-clicked Checkout, an auto-retry, a reconnect
- * that replays a queued action — so the handler (and the backend it calls) runs
+ * same logical command - double-clicked Checkout, an auto-retry, a reconnect
+ * that replays a queued action - so the handler (and the backend it calls) runs
  * **once**. Concurrent duplicates share the first in-flight promise; sequential
  * duplicates within `ttl` get the cached result. Failures are NOT cached, so a
  * genuine retry after an error still runs.
  *
  * Pairs with `serialize` (orders same-key commands locally) and with the HTTP
  * bridge, which forwards the stamped `cmd.meta.idempotencyKey` as an
- * `Idempotency-Key` header so the backend can reject the duplicate write too —
+ * `Idempotency-Key` header so the backend can reject the duplicate write too -
  * the wire half of exactly-once. Register `idempotent` at a HIGHER priority than
  * the transport so the key is stamped before the request is built.
  *
@@ -587,12 +587,12 @@ export type IdempotentOptions = {
  * const bus = createAsyncCommandBus();
  * bus.use(idempotent({ actions: ['order*'] }), { priority: 100 }); // outermost
  * bus.use(createHttpBridge({ endpoint: '/commands', csrf: true }));
- * // two rapid orderCreate dispatches → one handler run, one backend write
+ * // two rapid orderCreate dispatches -> one handler run, one backend write
  */
 export function idempotent(options: IdempotentOptions = {}): AsyncPlugin {
   const { key, ttl = 60_000, actions, stampMeta = true, maxKeys = 500 } = options;
   const matchesActions = makeActionFilter(actions);
-  // key → completed result (with timestamp) OR the in-flight promise.
+  // key -> completed result (with timestamp) OR the in-flight promise.
   const done = new Map<string, { at: number; result: CommandResult }>();
   const inflight = new Map<string, Promise<CommandResult>>();
 
@@ -611,7 +611,7 @@ export function idempotent(options: IdempotentOptions = {}): AsyncPlugin {
     const now = Date.now();
     if (cached) {
       if (now - cached.at < ttl) return cached.result; // collapse repeats within TTL
-      done.delete(k); // expired — drop so the map doesn't retain stale results
+      done.delete(k); // expired - drop so the map doesn't retain stale results
     }
 
     const run = Promise.resolve(next()).then(
@@ -629,7 +629,7 @@ export function idempotent(options: IdempotentOptions = {}): AsyncPlugin {
         return result;
       },
       (err) => {
-        inflight.delete(k); // thrown/rejected — also not cached
+        inflight.delete(k); // thrown/rejected - also not cached
         throw err;
       },
     );
@@ -639,11 +639,11 @@ export function idempotent(options: IdempotentOptions = {}): AsyncPlugin {
 }
 
 // ---------------------------------------------------------------------------
-// supersede — auto-abort the previous in-flight dispatch for the same key
+// supersede - auto-abort the previous in-flight dispatch for the same key
 //
 // A rapid second dispatch for the same logical slot silently cancels the
 // stale in-flight one instead of racing it. vapor-chamber already threads
-// `cmd.signal` all the way to `fetch()` (see transports.ts) — this plugin
+// `cmd.signal` all the way to `fetch()` (see transports.ts) - this plugin
 // generalizes that existing wiring into automatic per-key cancellation
 // instead of asking every caller to build and swap their own
 // AbortController by hand.
@@ -654,7 +654,7 @@ export type SupersedeOptions = {
    * Derive the supersede key from a command. Commands resolving to the SAME
    * key auto-cancel their predecessor; different keys race independently.
    * Return `null`/`undefined` to skip superseding for that command.
-   * Default: `commandKey(action, target)` — same default `idempotent` uses,
+   * Default: `commandKey(action, target)` - same default `idempotent` uses,
    * which already includes the action name, so distinct actions never
    * collide and are never silently dropped by this plugin.
    */
@@ -664,25 +664,25 @@ export type SupersedeOptions = {
 };
 
 /**
- * supersede — auto-cancel the previous in-flight dispatch for the same key.
+ * supersede - auto-cancel the previous in-flight dispatch for the same key.
  *
- * Built for rapid-fire reads that can overwrite each other in flight — a
+ * Built for rapid-fire reads that can overwrite each other in flight - a
  * search box re-querying on every keystroke, a filter changing before the
  * previous fetch lands. Without it, a slow first response can arrive AFTER a
  * faster second one and clobber it with stale data. With it, the first
  * dispatch's AbortSignal fires the instant a second dispatch for the same key
- * starts — `createHttpBridge` / `createBatchingHttpBridge` already forward
+ * starts - `createHttpBridge` / `createBatchingHttpBridge` already forward
  * `cmd.signal` to `fetch()`, so the stale request is genuinely cancelled, not
  * merely ignored once it resolves.
  *
- * **Async bus only** — mutates `cmd.signal` before the rest of the pipeline
+ * **Async bus only** - mutates `cmd.signal` before the rest of the pipeline
  * runs, which is only meaningful for cancelable async dispatches.
  *
  * @example
  * const bus = createAsyncCommandBus();
  * bus.use(supersede({ actions: ['productSearch'] }));
  * bus.use(createHttpBridge({ endpoint: '/api/vc' }));
- * // three quick productSearch dispatches → only the last one's response is
+ * // three quick productSearch dispatches -> only the last one's response is
  * // ever awaited; the first two are aborted mid-flight, not just discarded
  */
 export function supersede(options: SupersedeOptions = {}): AsyncPlugin {
@@ -702,7 +702,7 @@ export function supersede(options: SupersedeOptions = {}): AsyncPlugin {
     const ctrl = new AbortController();
     controllers.set(k, ctrl);
 
-    // Merge with any caller-supplied signal — same AbortSignal.any-with-
+    // Merge with any caller-supplied signal - same AbortSignal.any-with-
     // fallback pattern used throughout transports.ts.
     cmd.signal = cmd.signal
       ? (typeof AbortSignal.any === 'function' ? AbortSignal.any([cmd.signal, ctrl.signal]) : ctrl.signal)
@@ -711,7 +711,7 @@ export function supersede(options: SupersedeOptions = {}): AsyncPlugin {
     const result = Promise.resolve(next());
     result.finally(() => {
       // Only clear the map entry if we're still the current controller for
-      // this key — a newer dispatch may already have replaced us.
+      // this key - a newer dispatch may already have replaced us.
       if (controllers.get(k) === ctrl) controllers.delete(k);
     });
     return result;

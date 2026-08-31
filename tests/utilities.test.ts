@@ -201,7 +201,7 @@ describe('createReaction', () => {
 
     bus.dispatch('src', {});
     // The reaction also rides `__reactionHops` (cycle cap) and `__causationId`
-    // (tracing) on the payload — same `__`-key convention as the rest of the bus.
+    // (tracing) on the payload - same `__`-key convention as the rest of the bus.
     expect(handler).toHaveBeenCalledWith(expect.objectContaining({
       payload: expect.objectContaining({ echo: 1 }),
     }));
@@ -227,7 +227,7 @@ describe('createReaction', () => {
     bus.register('cartAdd',    () => 1);
     bus.register('cartRemove', () => 2);
     const handler = vi.fn(() => 1);
-    // Target must NOT match the source wildcard — 'stockSync' doesn't start
+    // Target must NOT match the source wildcard - 'stockSync' doesn't start
     // with 'cart', so the reaction listener won't re-fire on its own output.
     bus.register('stockSync', handler);
 

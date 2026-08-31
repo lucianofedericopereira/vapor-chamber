@@ -1,20 +1,20 @@
 /**
- * vapor-chamber-router — menu + breadcrumb projections of the route table.
+ * vapor-chamber-router - menu + breadcrumb projections of the route table.
  *
  * The table already carries everything a navigation UI needs; these builders
- * only project it — nothing here is authored client-side:
- *   · `meta.menu` (an INTEGER — the server-owned menu position; row order in
+ * only project it - nothing here is authored client-side:
+ *   · `meta.menu` (an INTEGER - the server-owned menu position; row order in
  *     the table is match-specificity order, so the menu has its own column)
- *     marks a row as a menu entry. Menu rows need `meta.title` (an i18n key —
+ *     marks a row as a menu entry. Menu rows need `meta.title` (an i18n key -
  *     translating is the view's job) and a static path: a required `:param`
- *     has no fixed href and is rejected. Group rows may be menued too — they
+ *     has no fixed href and is rejected. Group rows may be menued too - they
  *     become href-less section nodes.
  *   · Nesting follows the parent chain: an entry's menu parent is its nearest
  *     menued ancestor.
- *   · Permission filtering is the SERVER's job (visibleTo before delivery) —
+ *   · Permission filtering is the SERVER's job (visibleTo before delivery) -
  *     what the table holds is what the user may see, so the projection is
  *     permission-correct by construction.
- *   · active/exact use pathActivity — the SAME semantics as `data-active`
+ *   · active/exact use pathActivity - the SAME semantics as `data-active`
  *     stamping, so Blade menus and Vue menus always agree.
  *
  * Like table validation, the menu contract is enforced loudly in dev (and, by
@@ -30,9 +30,9 @@ import { pathActivity } from './url';
 
 export type MenuItem = {
   name: string;
-  /** `meta.title` — an i18n KEY; translate in the view. */
+  /** `meta.title` - an i18n KEY; translate in the view. */
   title: string;
-  /** Absolute href (base included) — null for group rows (section nodes). */
+  /** Absolute href (base included) - null for group rows (section nodes). */
   href: string | null;
   meta: Record<string, unknown>;
   /** Same semantics as data-active stamping; a parent also lights up when
@@ -44,12 +44,12 @@ export type MenuItem = {
 
 export type Breadcrumb = {
   name: string;
-  /** `meta.title` — an i18n KEY; translate in the view. */
+  /** `meta.title` - an i18n KEY; translate in the view. */
   title: string;
   /** Absolute href; null when the crumb is not a link target (group rows,
    *  ancestors whose params the current location cannot supply). */
   href: string | null;
-  /** True on the last crumb — the page being shown. */
+  /** True on the last crumb - the page being shown. */
   current: boolean;
   meta: Record<string, unknown>;
 };
@@ -97,7 +97,7 @@ export function buildMenu(records: readonly TableRecord[], currentPath: string, 
 }
 
 /** The current route's parent chain, filtered to rows with a `meta.title`,
- *  root-first — the page itself is the last crumb. */
+ *  root-first - the page itself is the last crumb. */
 export function buildBreadcrumbs(location: RouteLocation, base = ''): Breadcrumb[] {
   const titled = location.matched.filter((record) => typeof record.meta.title === 'string');
   return titled.map((record, index) => ({
@@ -119,8 +119,8 @@ function menuParentOf(record: TableRecord, inMenu: ReadonlySet<TableRecord>): Ta
 }
 
 /** A menu row's target path: its static segments (optional params and splats
- *  simply drop). A required param is a table defect — menus are static
- *  navigation — loud in dev; Routes::validate rejects it at export. */
+ *  simply drop). A required param is a table defect - menus are static
+ *  navigation - loud in dev; Routes::validate rejects it at export. */
 function menuPath(record: TableRecord): string {
   let path = '';
   for (const segment of record.segments) {
@@ -129,7 +129,7 @@ function menuPath(record: TableRecord): string {
     } else if (DEV && segment.kind === 'param' && !segment.optional) {
       throw routerError(
         'bad_menu_row',
-        `menu route "${record.name}" has a required param ":${segment.name}" — menu rows must be static`,
+        `menu route "${record.name}" has a required param ":${segment.name}" - menu rows must be static`,
       );
     }
   }

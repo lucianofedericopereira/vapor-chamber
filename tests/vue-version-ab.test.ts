@@ -9,12 +9,12 @@
  *
  * METHOD, and why it is this fussy. Both prod dists load into ONE process and
  * rounds alternate AB / BA, because the thing being measured (1-3%) is smaller
- * than the drift between two separate runs on a shared host — comparing today's
+ * than the drift between two separate runs on a shared host - comparing today's
  * bench output against numbers written into a previous release is not a
  * measurement at all. Medians and IQRs are reported, never a single run, and
  * the workloads are scaled so every round takes >1ms: at ~15µs a round the
  * timer quantises and results go bimodal, which reads as a spurious 2-3x
- * "speedup" (observed while building this — the first version of this harness
+ * "speedup" (observed while building this - the first version of this harness
  * reported 0.361x on a workload that is actually 1.013x).
  *
  * The workloads are the Vue primitives THIS library sits on, not a general Vue
@@ -28,7 +28,7 @@ const BASELINE = process.env.VC_AB_BASELINE;
 const BASELINE_VERSION = process.env.VC_AB_VERSION ?? 'baseline';
 const ROUNDS = 51;
 
-/** Raw Vue module surface — deliberately untyped; two dists loaded side by side. */
+/** Raw Vue module surface - deliberately untyped; two dists loaded side by side. */
 type V = any;
 
 const median = (xs: number[]): number => {
@@ -41,7 +41,7 @@ const quant = (xs: number[], p: number): number => {
   return s[Math.floor(s.length * p)];
 };
 
-/** Each round must exceed ~1ms — see the note about timer quantisation above. */
+/** Each round must exceed ~1ms - see the note about timer quantisation above. */
 const WORKLOADS: Record<string, (v: V) => void> = {
   'effectScope + onScopeDispose x20k (tryAutoCleanup path)': (v) => {
     for (let i = 0; i < 20000; i++) {
@@ -77,7 +77,7 @@ describe.skipIf(!BASELINE)('Vue version A/B (same process, interleaved)', () => 
     const base: V = await import(/* @vite-ignore */ BASELINE!);
     // MUST be the same dist flavour as the baseline. A bare `import('vue')`
     // resolves to the DEV bundler build, whose warning paths and instrumentation
-    // make it several times slower on the watcher path — comparing that against
+    // make it several times slower on the watcher path - comparing that against
     // a prod browser dist measures build flavour, not version. The first run of
     // this harness did exactly that and reported a 2.8x "regression" in rc.4
     // that does not exist. Both sides are now the prod with-vapor browser dist.
@@ -112,7 +112,7 @@ describe.skipIf(!BASELINE)('Vue version A/B (same process, interleaved)', () => 
     }
 
     console.log(
-      `\nVue A/B — ${BASELINE_VERSION} vs installed ${cur.version} (${ROUNDS} interleaved rounds)\n` +
+      `\nVue A/B - ${BASELINE_VERSION} vs installed ${cur.version} (${ROUNDS} interleaved rounds)\n` +
       lines.join('\n') +
       `\n\nworst ratio: ${worst.toFixed(3)}x`,
     );

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * Tests for router/index.ts — createRouter install/start/destroy lifecycle
+ * Tests for router/index.ts - createRouter install/start/destroy lifecycle
  * (DOM integration runs because happy-dom provides `window`) and the public
  * router methods node-env navigation tests don't reach.
  */
@@ -30,12 +30,12 @@ function makeRouter(overrides: Record<string, unknown> = {}) {
   });
 }
 
-describe('createRouter — install + lifecycle (happy-dom)', () => {
+describe('createRouter - install + lifecycle (happy-dom)', () => {
   it('app.use installs, starts, wires DOM integration, and destroy tears down', async () => {
     const router = makeRouter();
     const app = createApp({ render: () => h('div') });
 
-    app.use(router); // install → provide + component + start() → DOM integration
+    app.use(router); // install -> provide + component + start() -> DOM integration
     await router.isReady();
     expect(router.currentRoute.value.location.name).toBe('home');
 
@@ -44,7 +44,7 @@ describe('createRouter — install + lifecycle (happy-dom)', () => {
 
   it('DOM integration: intercepts in-base clicks, preheats on hover, restores on bfcache', async () => {
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-    // Poll rather than sleep a fixed amount — navigation is async and slower
+    // Poll rather than sleep a fixed amount - navigation is async and slower
     // under coverage instrumentation, so a fixed tick would be flaky.
     const waitFor = async (predicate: () => boolean, timeout = 1000) => {
       const deadline = Date.now() + timeout;
@@ -60,17 +60,17 @@ describe('createRouter — install + lifecycle (happy-dom)', () => {
     a.href = '/admin/list';
     document.body.appendChild(a);
 
-    // hover → the router's preheat callback (preheatPath)
+    // hover -> the router's preheat callback (preheatPath)
     a.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
     await sleep(120);
 
-    // click → the router's navigate callback intercepts it
+    // click -> the router's navigate callback intercepts it
     const click = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 });
     a.dispatchEvent(click);
     expect(click.defaultPrevented).toBe(true);
     expect(await waitFor(() => router.currentRoute.value.location.name === 'list')).toBe(true);
 
-    // bfcache restore → the router's onRestore (re-stamp + re-arm preheat)
+    // bfcache restore -> the router's onRestore (re-stamp + re-arm preheat)
     const pageshow = new Event('pageshow');
     Object.defineProperty(pageshow, 'persisted', { value: true });
     expect(() => window.dispatchEvent(pageshow)).not.toThrow();
@@ -80,7 +80,7 @@ describe('createRouter — install + lifecycle (happy-dom)', () => {
   });
 });
 
-describe('createRouter — public methods', () => {
+describe('createRouter - public methods', () => {
   it('replace / back / forward / go drive history', async () => {
     const router = makeRouter();
     await router.isReady();
@@ -109,11 +109,11 @@ describe('createRouter — public methods', () => {
     expect(after).toHaveBeenCalled();
 
     offAfter();
-    await router.push('/nope'); // unmatched → error dispatch
+    await router.push('/nope'); // unmatched -> error dispatch
     expect(onErr).toHaveBeenCalled();
   });
 
-  // Items 15 + 30 — after-hooks are post-commit observers. They must not be
+  // Items 15 + 30 - after-hooks are post-commit observers. They must not be
   // able to un-commit a navigation, and removing one must not skip its
   // neighbour.
   it('a throwing afterEach hook does not un-commit the navigation', async () => {
@@ -150,7 +150,7 @@ describe('createRouter — public methods', () => {
 
     await router.push('/list');
 
-    expect(second).toHaveBeenCalledTimes(1); // was 0 — the splice shifted it past
+    expect(second).toHaveBeenCalledTimes(1); // was 0 - the splice shifted it past
   });
 
   it('a self-removing beforeEach guard does not skip the next guard', async () => {
@@ -166,7 +166,7 @@ describe('createRouter — public methods', () => {
 
     await router.push('/list');
 
-    expect(second).toHaveBeenCalledTimes(1); // was 0 — never called on this navigation
+    expect(second).toHaveBeenCalledTimes(1); // was 0 - never called on this navigation
     expect(router.currentRoute.value.location.name).toBe('list');
   });
 
@@ -174,7 +174,7 @@ describe('createRouter — public methods', () => {
   // commits, making the full-document active-link walk a per-keystroke cost
   // for a `setQuery`-driven search box. Measured: it does not. The engine's
   // query fast path returns before the after-hook loop, so stamping runs on
-  // path changes only — which is also the correct behaviour, since the stamps
+  // path changes only - which is also the correct behaviour, since the stamps
   // derive from `location.path` alone. Pinned here so the premise can't
   // silently become true.
   it('after-hooks (and so active-link stamping) run on path changes only', async () => {
@@ -216,7 +216,7 @@ describe('createRouter — public methods', () => {
     expect(after).toHaveBeenCalledTimes(1);
     expect(walks).toBe(1);
 
-    // …and the stamps are right, which is why skipping query commits is safe.
+    // ...and the stamps are right, which is why skipping query commits is safe.
     const list = document.querySelector('a[href="/admin/list"]') as HTMLAnchorElement;
     expect(list.hasAttribute('data-active')).toBe(false);
 
@@ -231,7 +231,7 @@ describe('createRouter — public methods', () => {
 
     expect(router.resolve({ name: 'list' })).toContain('/list');
     expect(router.resolve('/raw')).toBe('/admin/raw');
-    // unresolvable object target → resolveLocation throws → catch fallback (to.path ?? '/')
+    // unresolvable object target -> resolveLocation throws -> catch fallback (to.path ?? '/')
     expect(router.resolve({ name: 'does-not-exist' })).toBe('/admin/');
 
     router.setRoutes(ROWS);
@@ -267,7 +267,7 @@ describe('inline route payloads inform `base` synchronously', () => {
     // so `{ inline }` + a payload base silently ran on base ''. Every in-base
     // link then failed `canHandle` (it was handed an unstripped path), no
     // anchor was ever intercepted, and every navigation became a full page
-    // load — invisible to a suite that navigates through router.push().
+    // load - invisible to a suite that navigates through router.push().
     // The document must sit inside the base, as the server's catch-all
     // guarantees in production.
     window.history.replaceState({}, '', '/admin/');
@@ -315,7 +315,7 @@ describe('hard-navigation loop guard', () => {
     // Regression: `unmatched` is a HARD_NAV code, so the router handed the URL
     // back to the server. Behind the catch-all this router targets, the server
     // returns the same shell, the router says `unmatched` again, and
-    // location.assign() fires again — an endless reload storm that survives
+    // location.assign() fires again - an endless reload storm that survives
     // refreshes, since the offending URL stays in the address bar.
     window.history.replaceState({}, '', '/admin/does-not-exist');
     const assign = vi.fn();
@@ -354,7 +354,7 @@ describe('hard-navigation loop guard', () => {
   });
 });
 
-describe('route table delivery — error paths', () => {
+describe('route table delivery - error paths', () => {
   it('inline: a missing element fails with a coded error from start(), not the constructor', async () => {
     const router = createRouter({ routes: { inline: '#vcr-absent' } });
     await expect(router.isReady()).rejects.toMatchObject({ code: 'inline_routes_missing' });

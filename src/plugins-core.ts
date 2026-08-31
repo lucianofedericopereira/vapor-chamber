@@ -1,5 +1,5 @@
 /**
- * vapor-chamber — Core plugins (sync)
+ * vapor-chamber - Core plugins (sync)
  *
  * logger, validator, history, debounce, throttle, authGuard, optimistic, optimisticUndo
  */
@@ -16,7 +16,7 @@ import { BusError, commandKey, disposeAll } from './command-bus';
  * 'warn' or 'error' to hide successful dispatches and only see failures.
  *
  * @example
- * bus.use(logger()); // ⚡ cartAdd — everything, as before
+ * bus.use(logger()); // ⚡ cartAdd - everything, as before
  *
  * @example
  * // Failures only, with fixed-width [  OK  ] / [ FAIL ] badges
@@ -32,7 +32,7 @@ export function logger(options: {
   badges?: boolean;
 } = {}): Plugin {
   const { collapsed = true, filter, level = 'info', badges = false } = options;
-  // Ok results log at 'info', failures at 'error' — only 'warn'/'error' can suppress.
+  // Ok results log at 'info', failures at 'error' - only 'warn'/'error' can suppress.
   const skipOk = level === 'warn' || level === 'error';
 
   return (cmd, next) => {
@@ -62,7 +62,7 @@ export function logger(options: {
     };
 
     // Fast path (defaults): open the group before the handler runs so nested
-    // dispatch logs stay grouped — output identical to previous versions.
+    // dispatch logs stay grouped - output identical to previous versions.
     if (!badges && !skipOk) {
       open(true);
       return close(next());
@@ -111,12 +111,12 @@ export interface HistoryState {
 export function history(options: {
   maxSize?: number;
   filter?: (cmd: Command) => boolean;
-  /** Reference to the command bus — enables undo() to execute inverse handlers */
+  /** Reference to the command bus - enables undo() to execute inverse handlers */
   bus?: CommandBus;
   /**
    * Action name to register as the undo trigger (e.g. 'cart.undo'). The plugin
    * registers the bus handler itself and ALWAYS excludes this action from
-   * recording — even if `filter` would match it. Without this, a hand-wired
+   * recording - even if `filter` would match it. Without this, a hand-wired
    * `bus.register('cart.undo', () => h.undo())` records the trigger command
    * into history (clearing the redo stack and burying real entries), so undo
    * works once and redo never enables. Requires `bus`.
@@ -135,7 +135,7 @@ export function history(options: {
   const { maxSize = 50, filter, bus, undoAction, redoAction } = options;
   const past: Command[] = [];
   const future: Command[] = [];
-  let _replaying = false; // true during redo dispatch — prevents double-recording
+  let _replaying = false; // true during redo dispatch - prevents double-recording
 
   const plugin: Plugin = (cmd, next) => {
     const result = next();
@@ -202,12 +202,12 @@ export function history(options: {
     },
   });
 
-  // Self-registered undo/redo triggers — recording above always skips them.
+  // Self-registered undo/redo triggers - recording above always skips them.
   const _triggerUnregisters: Array<() => void> = [];
   if (undoAction || redoAction) {
     if (!bus) {
       if (DEV) {
-        console.warn("[vapor-chamber] history(): undoAction/redoAction require the `bus` option — triggers not registered.");
+        console.warn("[vapor-chamber] history(): undoAction/redoAction require the `bus` option - triggers not registered.");
       }
     } else {
       if (undoAction) _triggerUnregisters.push(bus.register(undoAction, () => { api.undo(); }));
@@ -367,7 +367,7 @@ export function optimistic(
 }
 
 // ---------------------------------------------------------------------------
-// optimisticUndo — auto-rollback using registered undo handlers
+// optimisticUndo - auto-rollback using registered undo handlers
 // ---------------------------------------------------------------------------
 
 export type OptimisticUndoOptions = {
@@ -392,14 +392,14 @@ export type OptimisticUndoOptions = {
  * Optimistic dispatch plugin that auto-rollbacks using the bus's registered undo handlers.
  *
  * Unlike `optimistic()`, this plugin does **not** require separate `apply`/rollback
- * closures — it uses the undo handler already registered via `register(action, handler, { undo })`.
+ * closures - it uses the undo handler already registered via `register(action, handler, { undo })`.
  *
  * **How it works on an async bus:**
  * 1. Immediately returns `{ ok: true, value: predict(cmd) }` to the caller.
  * 2. The real handler runs in the background.
  * 3. If the real handler fails, the registered undo handler is called automatically.
  *
- * **On a sync bus:** behaves like the regular `optimistic()` — runs handler synchronously,
+ * **On a sync bus:** behaves like the regular `optimistic()` - runs handler synchronously,
  * rolls back via undo handler if it fails.
  *
  * **Requires** undo handlers to be registered for the targeted actions.
@@ -427,7 +427,7 @@ export function optimisticUndo(
     if (!actionSet.has(cmd.action)) return next();
 
     const undoHandler = bus.getUndoHandler(cmd.action);
-    if (!undoHandler) return next(); // no undo registered — passthrough
+    if (!undoHandler) return next(); // no undo registered - passthrough
 
     const result = next();
 

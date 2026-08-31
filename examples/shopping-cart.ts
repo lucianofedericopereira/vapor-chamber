@@ -36,12 +36,12 @@ bus.use(validator({
 }));
 
 // Pass `bus` so undo() executes the inverse handlers registered below with
-// `{ undo }` — without it, undo() only pops the history stack and the cart
+// `{ undo }` - without it, undo() only pops the history stack and the cart
 // state would stay unchanged.
 const historyPlugin = history({ bus, filter: (cmd) => cmd.action.startsWith('cart') });
 bus.use(historyPlugin);
 
-// Handlers — each mutating command registers its inverse via `{ undo }`
+// Handlers - each mutating command registers its inverse via `{ undo }`
 function recalcTotal() {
   cart.total = cart.items.reduce((sum, i) => sum + i.price * i.quantity, 0);
 }

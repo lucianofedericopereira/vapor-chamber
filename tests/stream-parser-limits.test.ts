@@ -1,19 +1,19 @@
 /**
- * StreamParser — buffer growth, depth limits, mismatched closers, post-end input.
+ * StreamParser - buffer growth, depth limits, mismatched closers, post-end input.
  *
  * The malformed-input suite covers the handlers' error arms; what it never
  * exercises are the *structural* limits that sit outside any single handler:
  *
- *  - StringBuffer.push growth — every existing test string fits the
+ *  - StringBuffer.push growth - every existing test string fits the
  *    initial 256-unit buffer, so the doubling path never ran.
- *  - openObject/openArray maxDepth guards — the parser's only
+ *  - openObject/openArray maxDepth guards - the parser's only
  *    protection against a hostile stream nesting until the process dies.
- *  - closeObject/closeArray parent mismatch — `[1}` / `{"a":1]`
+ *  - closeObject/closeArray parent mismatch - `[1}` / `{"a":1]`
  *    reach the closers with the *wrong* parent on the stack, which is a
  *    different path from the handler-level "unexpected character" rejects.
- *  - handleNumber's default arm — reachable only after end(), when the
+ *  - handleNumber's default arm - reachable only after end(), when the
  *    state is S_DONE and dispatch falls through to the number handler.
- *  - S_NUM_EXP_DIGIT digit accumulation — a multi-digit exponent.
+ *  - S_NUM_EXP_DIGIT digit accumulation - a multi-digit exponent.
  */
 import { describe, expect, it } from 'vitest';
 import { createStreamParser } from '../src/stream-parser';
@@ -31,7 +31,7 @@ function collect(options?: { maxDepth?: number }) {
   return { parser, errors, values };
 }
 
-describe('StreamParser — string buffer growth', () => {
+describe('StreamParser - string buffer growth', () => {
   it('grows past the initial buffer for a long string value', () => {
     // 5000 > the 256-unit initial buffer, so push() doubles several times.
     const long = 'x'.repeat(5000);
@@ -55,7 +55,7 @@ describe('StreamParser — string buffer growth', () => {
   });
 });
 
-describe('StreamParser — depth limit', () => {
+describe('StreamParser - depth limit', () => {
   it('rejects objects nested past maxDepth', () => {
     const { parser, errors } = collect({ maxDepth: 3 });
     parser.write('{"a":{"b":{"c":{"d":1}}}}');
@@ -77,7 +77,7 @@ describe('StreamParser — depth limit', () => {
   });
 });
 
-describe('StreamParser — mismatched closers', () => {
+describe('StreamParser - mismatched closers', () => {
   it('rejects } closing an array', () => {
     const { parser, errors } = collect();
     parser.write('[1}');
@@ -91,7 +91,7 @@ describe('StreamParser — mismatched closers', () => {
   });
 });
 
-describe('StreamParser — numbers and post-end input', () => {
+describe('StreamParser - numbers and post-end input', () => {
   it('accumulates multi-digit exponents', () => {
     const { parser, values, errors } = collect();
     parser.write('{"a":1.5e123}');

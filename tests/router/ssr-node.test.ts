@@ -1,6 +1,6 @@
 /**
  * The no-`window` arms. Nearly every router test opts into happy-dom because
- * the router needs a DOM — which left the SSR shape (default `node`
+ * the router needs a DOM - which left the SSR shape (default `node`
  * environment, no window at all) unexercised. No docblock here on purpose.
  */
 import { describe, expect, it } from 'vitest';
@@ -22,7 +22,7 @@ describe('createRouter without a window (SSR)', () => {
     });
     await router.isReady();
 
-    // The `: '/'` arm — with no window there is no location to derive from.
+    // The `: '/'` arm - with no window there is no location to derive from.
     expect(router.currentRoute.value.location.fullPath).toBe('/');
     expect(router.currentRoute.value.location.name).toBe('home');
 

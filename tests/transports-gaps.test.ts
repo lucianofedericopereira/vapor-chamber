@@ -4,7 +4,7 @@
  * Targets what transports.test.ts / transports-coverage.test.ts leave untouched:
  *
  *  - HTTP bridge error re-wrap keeping `status` AND `code`
- *  - `csrf: 'inertia'` → csrfFlag false on both HTTP bridges
+ *  - `csrf: 'inertia'` -> csrfFlag false on both HTTP bridges
  *  - signal + scopeController merge via AbortSignal.any, and the per-dispatch
  *    `cmd.signal` merge
  *  - batching bridge: idempotency key forwarding, a response with no
@@ -33,7 +33,7 @@ function callPlugin(plugin: any, cmd: Partial<Command>): Promise<CommandResult> 
 }
 
 // ---------------------------------------------------------------------------
-// createHttpBridge — error re-wrap detail
+// createHttpBridge - error re-wrap detail
 // ---------------------------------------------------------------------------
 
 describe('createHttpBridge error re-wrap', () => {

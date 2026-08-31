@@ -1,11 +1,15 @@
 /**
  * vapor-chamber - Command Bus for Vue Vapor
- * ~3.6 KB brotli core; full bundle ~10-20 KB depending on imports (see
- * docs/BUNDLE-SIZES.md) — DevTools loaded dynamically
+ *
+ * Sizes are not quoted here. This header carried "~3.6 KB brotli core" while
+ * the generated table measured 4.2 - a hand-typed number in a source file that
+ * no generator can reach and no gate can check. `docs/BUNDLE-SIZES.md` is
+ * regenerated every run and is the only place a size should be read from.
+ * DevTools is loaded dynamically.
  */
 
 // ---------------------------------------------------------------------------
-// Structured error codes — machine-readable, LLM-friendly, i18n-ready
+// Structured error codes - machine-readable, LLM-friendly, i18n-ready
 // ---------------------------------------------------------------------------
 
 /**
@@ -19,7 +23,7 @@ import { dict } from './dict';
 export type BusSeverity = 'error' | 'warn' | 'info';
 
 /**
- * Emitter tag — which subsystem produced the diagnostic.
+ * Emitter tag - which subsystem produced the diagnostic.
  * Allows filtering/routing in logging and monitoring.
  */
 export type BusEmitter =
@@ -36,7 +40,7 @@ export type BusEmitter =
 /**
  * Structured error code enum. Every error in vapor-chamber has a unique code.
  *
- * Naming: `VC_{EMITTER}_{DESCRIPTION}` — VC = vapor-chamber prefix.
+ * Naming: `VC_{EMITTER}_{DESCRIPTION}` - VC = vapor-chamber prefix.
  *
  * @example
  * if (result.error instanceof BusError) {
@@ -74,7 +78,7 @@ export type BusErrorCode =
   | 'VC_UNKNOWN';                 // Unclassified error
 
 /**
- * BusError — structured error with machine-readable code, severity, and emitter.
+ * BusError - structured error with machine-readable code, severity, and emitter.
  *
  * Extends native Error so it works everywhere errors work (catch, result.error, etc.).
  * The `code` field enables switch-based handling, the `severity` enables log filtering,
@@ -123,7 +127,7 @@ export class BusError extends Error {
 }
 
 /**
- * BusError codes that mark transient failures — safe to retry.
+ * BusError codes that mark transient failures - safe to retry.
  *
  * Deliberately a tiny standalone set (not a registry lookup): the full
  * ERROR_CODE_REGISTRY lives in the schema/LLM layer, which retry() consumers
@@ -132,7 +136,7 @@ export class BusError extends Error {
  *
  * @example
  * if (result.error instanceof BusError && RETRYABLE_CODES.has(result.error.code)) {
- *   // transient — safe to re-dispatch
+ *   // transient - safe to re-dispatch
  * }
  */
 export const RETRYABLE_CODES: ReadonlySet<string> = new Set([
@@ -151,20 +155,20 @@ export const RETRYABLE_CODES: ReadonlySet<string> = new Set([
 /** Automatic metadata stamped on every command. */
 export type CommandMeta = {
   /**
-   * Wall-clock stamp for correlation and audit — NOT a timing instrument.
+   * Wall-clock stamp for correlation and audit - NOT a timing instrument.
    *
    * Read from `Date.now()` **once per microtask turn** and shared by every
    * command dispatched inside that turn. The first command of each turn carries
    * an exact stamp; the 2nd..nth of the same synchronous run repeat it. Since
    * `Date.now()` is millisecond-resolution and a typical burst is
    * sub-millisecond, those commands would almost always have received the same
-   * number anyway — what is actually given up is intra-burst resolution in
+   * number anyway - what is actually given up is intra-burst resolution in
    * bursts long enough to cross a millisecond (a thousand-command `rehydrate`
    * reads as instantaneous). Bought ~15-25ns per dispatch; measured in
    * `tests/clock-source-ab.test.ts`.
    *
    * **Ordering does not depend on this field.** `meta.id` is a monotonic
-   * counter and stays unique and ordered — use it, not `ts`, to sequence
+   * counter and stays unique and ordered - use it, not `ts`, to sequence
    * commands.
    *
    * **Do not measure durations with it, cached or not.** `Date.now()` is wall
@@ -176,11 +180,19 @@ export type CommandMeta = {
    *
    * Note this is a wall clock, not an ordering key: two commands in the same
    * millisecond share a `ts`. For order use `meta.id`, whose default generator
-   * is a monotonic counter. To stamp an exact time, do it in a plugin — see the
+   * is a monotonic counter. To stamp an exact time, do it in a plugin - see the
    * note above `_configureClock`.
    */
   ts: number;
-  /** Unique command ID (crypto.randomUUID or fallback). */
+  /**
+   * Unique, monotonically increasing command ID - the ordering key.
+   *
+   * Default generator: a per-process random prefix plus an incrementing
+   * counter (`configureUid` swaps it; `crypto.randomUUID` is the documented
+   * opt-in for cross-process auditing, and is NOT the default - this line used
+   * to say it was, contradicting the `ts` field above, which correctly calls
+   * `id` a monotonic counter).
+   */
   id: string;
   /** ID of the command that caused this one (set manually via payload.__causationId). */
   causationId?: string;
@@ -189,19 +201,19 @@ export type CommandMeta = {
   /**
    * Idempotency key stamped by the `idempotent` plugin. Transports (e.g. the
    * HTTP bridge) forward it as an `Idempotency-Key` header so the backend can
-   * reject duplicate writes. Not set by default — only when `idempotent` runs.
+   * reject duplicate writes. Not set by default - only when `idempotent` runs.
    */
   idempotencyKey?: string;
   /**
    * Where the command originated. `undefined` (the default) means local user
-   * code called dispatch directly. The core never sets this field — dispatchers
+   * code called dispatch directly. The core never sets this field - dispatchers
    * that proxy external traffic (bridges, sync layers, replay tooling, agent
    * endpoints) stamp it post-hoc via plugins so downstream plugins, hooks, and
    * listeners can distinguish local intent from mirrored or machine-driven
    * commands (e.g. skip re-broadcasting a `'sync'` command, or audit-log
    * everything marked `'agent'`).
    *
-   * Well-known values: `'user'`, `'remote'`, `'sync'`, `'replay'`, `'agent'` —
+   * Well-known values: `'user'`, `'remote'`, `'sync'`, `'replay'`, `'agent'` -
    * but any string is accepted for custom origins.
    *
    * @example
@@ -217,14 +229,14 @@ export type Command<A extends string = string, T = any, P = any> = {
   action: A;
   target: T;
   payload?: P;
-  /** Auto-stamped metadata — timestamp, unique id, correlation/causation tracing.
+  /** Auto-stamped metadata - timestamp, unique id, correlation/causation tracing.
    *  Always present on commands from dispatch/query/emit. Optional on manually constructed commands. */
   meta?: CommandMeta;
   /**
    * AbortSignal forwarded by `bus.dispatch(..., { signal })`. Async handlers
    * may listen to `cmd.signal.aborted` / `cmd.signal.addEventListener('abort', ...)`
    * to short-circuit work; transport plugins (HTTP) auto-propagate it to the
-   * underlying fetch / xhr. Sync bus paths ignore this field — sync dispatch
+   * underlying fetch / xhr. Sync bus paths ignore this field - sync dispatch
    * is atomic and not cancelable.
    */
   signal?: AbortSignal;
@@ -238,7 +250,7 @@ export type DispatchOptions = {
 };
 
 /**
- * Result of a dispatch/query — a discriminated union on `ok`.
+ * Result of a dispatch/query - a discriminated union on `ok`.
  *
  * `if (result.ok)` narrows away `error`; on the failure arm `error` is a
  * guaranteed `Error` (no `!` or `?.` needed). `value` stays optional on the
@@ -283,11 +295,11 @@ export type BatchOptions = {
    * abort already happened or is the handler's responsibility) and the
    * batch result is
    * `{ ok: false, error: BusError('VC_CORE_ABORTED'), results: [...partial] }`
-   * — a BusError rather than the raw DOMException so the code is queryable
+   * - a BusError rather than the raw DOMException so the code is queryable
    * (see `abortedResult`; a caller-supplied `signal.reason` is passed through
    * unchanged). Under `transactional`, rollback runs first and
    * `successCount` is reported as 0.
-   * Async bus only — sync `dispatchBatch` accepts the option for type
+   * Async bus only - sync `dispatchBatch` accepts the option for type
    * uniformity but ignores it.
    */
   signal?: AbortSignal;
@@ -307,17 +319,17 @@ export type BatchResult = {
 };
 
 /**
- * Dead letter mode — what to do when a command has no registered handler.
+ * Dead letter mode - what to do when a command has no registered handler.
  * - `'error'` (default): returns `{ ok: false, error }`
  * - `'throw'`: throws the error
  * - `'ignore'`: returns `{ ok: true, value: undefined }`
- * - `'buffer'`: queue the command (per action, FIFO) and replay it — in order —
+ * - `'buffer'`: queue the command (per action, FIFO) and replay it - in order -
  *   the moment a handler for that action is `register()`-ed. Built for
  *   lazy/async wiring where a command can be dispatched before its handler
  *   exists (e.g. Astro/island hydration, code-split panels): the click isn't
  *   lost, it fires when the handler arrives. The synchronous dispatch returns
  *   `{ ok: true, value: undefined }` (the real handler runs later). `query`
- *   never buffers (it must return a value) — it falls back to `'error'`.
+ *   never buffers (it must return a value) - it falls back to `'error'`.
  *   Bounded by `bufferLimit` (drop-oldest + dev warning on overflow).
  * - function: called with the command, return value used as result
  */
@@ -354,15 +366,15 @@ export type CommandBusOptions = {
   bufferLimit?: number;
   /**
    * Max age (ms) a buffered command may wait for its handler when
-   * `onMissing: 'buffer'`. Expired entries are reaped lazily — on the next
-   * buffer push for that action and at flush time — so a handler that never
+   * `onMissing: 'buffer'`. Expired entries are reaped lazily - on the next
+   * buffer push for that action and at flush time - so a handler that never
    * arrives (e.g. an island that fails to hydrate) cannot pin stale commands
    * in memory indefinitely. Default: no TTL (entries wait until `bufferLimit`
    * pushes them out).
    */
   bufferTTL?: number;
   /**
-   * Called when `onMissing: 'buffer'` drops a queued command — either because
+   * Called when `onMissing: 'buffer'` drops a queued command - either because
    * the per-action queue hit `bufferLimit` (oldest dropped) or because the
    * entry outlived `bufferTTL`. Use for observability: without this, drops are
    * only visible as dev-mode console warnings.
@@ -380,12 +392,12 @@ export type Listener = (cmd: Command, result: CommandResult) => void;
  */
 export type ListenerOptions = {
   /** Auto-unsubscribe when the signal aborts. Already-aborted at call time
-   *  means the listener is never added — matches DOM `addEventListener`. */
+   *  means the listener is never added - matches DOM `addEventListener`. */
   signal?: AbortSignal;
 };
 
 /**
- * Typed command map — define action names, target, payload, and result shapes.
+ * Typed command map - define action names, target, payload, and result shapes.
  * Use with createCommandBus<MyMap>() for type-safe dispatch and register.
  *
  * @example
@@ -416,9 +428,9 @@ export type ResultOf<M extends CommandMap, A extends keyof M> = M[A] extends { r
  */
 export interface BaseBus {
   dispatch(action: string, target: any, payload?: any, options?: DispatchOptions): any;
-  /** Read-only dispatch — skips beforeHooks, runs handler + plugins, fires afterHooks. No mutation intent. */
+  /** Read-only dispatch - skips beforeHooks, runs handler + plugins, fires afterHooks. No mutation intent. */
   query(action: string, target: any, payload?: any): any;
-  /** Fire a domain event — notifies on() listeners, no handler required, no result returned. */
+  /** Fire a domain event - notifies on() listeners, no handler required, no result returned. */
   emit(event: string, data?: any): void;
   register(action: string, handler: any, options?: RegisterOptions): () => void;
   use(plugin: any, options?: PluginOptions): () => void;
@@ -433,11 +445,11 @@ export interface BaseBus {
   /** Returns all registered action names. Useful for introspection and DevTools. */
   registeredActions(): string[];
   clear(): void;
-  /** Full teardown — calls clear() and cancels all pending timers/requests. Use in SSR or component-scoped buses. */
+  /** Full teardown - calls clear() and cancels all pending timers/requests. Use in SSR or component-scoped buses. */
   dispose(): void;
   /**
-   * Seal the bus — prevents further register(), use(), onBefore(), onAfter(), respond() calls.
-   * Dispatch, query, emit, on(), once() still work — seal protects the handler/plugin topology,
+   * Seal the bus - prevents further register(), use(), onBefore(), onAfter(), respond() calls.
+   * Dispatch, query, emit, on(), once() still work - seal protects the handler/plugin topology,
    * not the observation layer. Listeners via on()/once() can still subscribe after seal.
    * Call after app initialization to lock down the graph in production. Throws BusError
    * with code 'VC_CORE_SEALED' on any mutation attempt. Cleared by clear() for HMR compat.
@@ -450,7 +462,7 @@ export interface BaseBus {
 export interface CommandBus<M extends CommandMap = CommandMap> extends BaseBus {
   /**
    * Sync dispatch. The optional `options.signal` is accepted for type
-   * compatibility with `AsyncCommandBus` but **ignored at runtime** — sync
+   * compatibility with `AsyncCommandBus` but **ignored at runtime** - sync
    * dispatches are atomic and not cancelable. Pass a signal here only if
    * you also use the async bus and want a uniform call site.
    */
@@ -460,14 +472,14 @@ export interface CommandBus<M extends CommandMap = CommandMap> extends BaseBus {
     payload?: PayloadOf<M, A>,
     options?: DispatchOptions,
   ): CommandResult<ResultOf<M, A>>;
-  /** Read-only dispatch — skips beforeHooks (no mutation gating), runs handler + plugins, fires afterHooks. */
+  /** Read-only dispatch - skips beforeHooks (no mutation gating), runs handler + plugins, fires afterHooks. */
   query<A extends keyof M & string>(action: A, target: TargetOf<M, A>, payload?: PayloadOf<M, A>): CommandResult<ResultOf<M, A>>;
-  /** Fire a domain event — notifies on() listeners, no handler required, no result. */
+  /** Fire a domain event - notifies on() listeners, no handler required, no result. */
   emit(event: string, data?: any): void;
   dispatchBatch(commands: BatchCommand[], options?: BatchOptions): BatchResult;
   register<A extends keyof M & string>(action: A, handler: (cmd: Command<A, TargetOf<M, A>, PayloadOf<M, A>>) => ResultOf<M, A>, options?: RegisterOptions): () => void;
   use(plugin: Plugin, options?: PluginOptions): () => void;
-  /** Subscribe before dispatch. Throw to cancel — dispatch returns `{ ok: false }`. */
+  /** Subscribe before dispatch. Throw to cancel - dispatch returns `{ ok: false }`. */
   onBefore(hook: BeforeHook): () => void;
   onAfter(hook: Hook): () => void;
   on(pattern: string, listener: Listener, options?: ListenerOptions): () => void;
@@ -482,17 +494,17 @@ export interface CommandBus<M extends CommandMap = CommandMap> extends BaseBus {
   registeredActions(): string[];
   /**
    * @internal Used by the history plugin to retrieve an undo handler registered alongside
-   * a command handler. Do not call this from application code — it will be moved to a
+   * a command handler. Do not call this from application code - it will be moved to a
    * plugin-private channel in a future release.
    */
   getUndoHandler(action: string): Handler | undefined;
   /** Remove all handlers, plugins, hooks, and listeners. Useful for testing and HMR. */
   clear(): void;
-  /** Freeze configuration — rejects register/use/clear after sealing. */
+  /** Freeze configuration - rejects register/use/clear after sealing. */
   seal(): void;
   /** Returns true if the bus is sealed. */
   isSealed(): boolean;
-  /** Clean teardown — clears state, cancels timers, marks bus as disposed. */
+  /** Clean teardown - clears state, cancels timers, marks bus as disposed. */
   dispose(): void;
 }
 
@@ -510,14 +522,14 @@ export interface AsyncCommandBus<M extends CommandMap = CommandMap> extends Base
     payload?: PayloadOf<M, A>,
     options?: DispatchOptions,
   ): Promise<CommandResult<ResultOf<M, A>>>;
-  /** Read-only dispatch — skips beforeHooks (no mutation gating), runs handler + plugins, fires afterHooks. */
+  /** Read-only dispatch - skips beforeHooks (no mutation gating), runs handler + plugins, fires afterHooks. */
   query<A extends keyof M & string>(action: A, target: TargetOf<M, A>, payload?: PayloadOf<M, A>): Promise<CommandResult<ResultOf<M, A>>>;
-  /** Fire a domain event — notifies on() listeners, no handler required, no result. */
+  /** Fire a domain event - notifies on() listeners, no handler required, no result. */
   emit(event: string, data?: any): void;
   dispatchBatch(commands: BatchCommand[], options?: BatchOptions): Promise<BatchResult>;
   register<A extends keyof M & string>(action: A, handler: (cmd: Command<A, TargetOf<M, A>, PayloadOf<M, A>>) => Promise<ResultOf<M, A>>, options?: RegisterOptions): () => void;
   use(plugin: AsyncPlugin, options?: PluginOptions): () => void;
-  /** Subscribe before dispatch. Throw or reject to cancel — dispatch returns `{ ok: false }`. */
+  /** Subscribe before dispatch. Throw or reject to cancel - dispatch returns `{ ok: false }`. */
   onBefore(hook: AsyncBeforeHook): () => void;
   onAfter(hook: AsyncHook): () => void;
   on(pattern: string, listener: Listener, options?: ListenerOptions): () => void;
@@ -532,17 +544,17 @@ export interface AsyncCommandBus<M extends CommandMap = CommandMap> extends Base
   registeredActions(): string[];
   /**
    * @internal Used by the history plugin to retrieve an undo handler registered alongside
-   * a command handler. Do not call this from application code — it will be moved to a
+   * a command handler. Do not call this from application code - it will be moved to a
    * plugin-private channel in a future release.
    */
   getUndoHandler(action: string): Handler | undefined;
   /** Remove all handlers, plugins, hooks, and listeners. Useful for testing and HMR. */
   clear(): void;
-  /** Freeze configuration — rejects register/use/clear after sealing. */
+  /** Freeze configuration - rejects register/use/clear after sealing. */
   seal(): void;
   /** Returns true if the bus is sealed. */
   isSealed(): boolean;
-  /** Clean teardown — clears state, cancels timers, marks bus as disposed. */
+  /** Clean teardown - clears state, cancels timers, marks bus as disposed. */
   dispose(): void;
 }
 
@@ -550,15 +562,15 @@ export interface AsyncCommandBus<M extends CommandMap = CommandMap> extends Base
 // Internal state types
 // ---------------------------------------------------------------------------
 
-/** Max nested dispatch depth — prevents infinite loops from reactions/listeners re-dispatching. */
+/** Max nested dispatch depth - prevents infinite loops from reactions/listeners re-dispatching. */
 const MAX_DISPATCH_DEPTH = 16;
 
 
 
-/** @internal Symbol used by unsealBus() — not on the public interface. */
+/** @internal Symbol used by unsealBus() - not on the public interface. */
 const _UNSEAL = Symbol('vapor-chamber:unseal');
 
-/** @internal Symbol used by inspectBus() — not on the public interface. */
+/** @internal Symbol used by inspectBus() - not on the public interface. */
 const _INSPECT = Symbol('vapor-chamber:inspect');
 
 /** Guard: throw if the bus is sealed. */
@@ -573,19 +585,19 @@ type SyncState = {
   pluginEntries: Array<{ plugin: Plugin; priority: number }>;
   beforeHooks: BeforeHook[];
   afterHooks: Hook[];
-  /** Exact-match listeners — O(1) lookup on the hot path. Action-keyed. */
+  /** Exact-match listeners - O(1) lookup on the hot path. Action-keyed. */
   exactListeners: Map<string, Listener[]>;
-  /** Wildcard listeners ('*' or 'foo*') — walked with matchesPattern() per dispatch. */
-  wildcardListeners: Array<{ pattern: string; listener: Listener }>;
+  /** Wildcard listeners ('*' or 'foo*') - walked per dispatch with a precomputed prefix (§WildcardEntry). */
+  wildcardListeners: WildcardEntry[];
   responders: Map<string, (cmd: Command) => any | Promise<any>>;
   runner: (cmd: Command, execute: () => CommandResult) => CommandResult;
-  /** Current nested dispatch depth — guards against infinite recursion. */
+  /** Current nested dispatch depth - guards against infinite recursion. */
   dispatchDepth: number;
   /** When true, register/use/onBefore/onAfter/respond throw. */
   sealed: boolean;
-  /** Per-instance throttle timers — dispose() cancels only this bus's timers. */
+  /** Per-instance throttle timers - dispose() cancels only this bus's timers. */
   throttleTimers: Set<ReturnType<typeof setTimeout>>;
-  /** onMissing:'buffer' queue — per-action FIFO of {target,payload}, replayed on
+  /** onMissing:'buffer' queue - per-action FIFO of {target,payload}, replayed on
    *  register(). Lazily null unless onMissing:'buffer' is configured, so non-buffer
    *  buses don't allocate it. */
   deferred: Map<string, Array<{ target: any; payload: any; at: number }>> | null;
@@ -598,21 +610,21 @@ type AsyncState = {
   pluginEntries: Array<{ plugin: AsyncPlugin; priority: number }>;
   beforeHooks: AsyncBeforeHook[];
   afterHooks: AsyncHook[];
-  /** Exact-match listeners — O(1) lookup on the hot path. Action-keyed. */
+  /** Exact-match listeners - O(1) lookup on the hot path. Action-keyed. */
   exactListeners: Map<string, Listener[]>;
-  /** Wildcard listeners ('*' or 'foo*') — walked with matchesPattern() per dispatch. */
-  wildcardListeners: Array<{ pattern: string; listener: Listener }>;
+  /** Wildcard listeners ('*' or 'foo*') - walked per dispatch with a precomputed prefix (§WildcardEntry). */
+  wildcardListeners: WildcardEntry[];
   responders: Map<string, (cmd: Command) => any | Promise<any>>;
   runner: (cmd: Command, execute: () => Promise<CommandResult>) => Promise<CommandResult>;
-  /** Per-instance dedup map for in-flight async requests — avoids module-level singleton leak in SSR. */
+  /** Per-instance dedup map for in-flight async requests - avoids module-level singleton leak in SSR. */
   pendingRequests: Map<string, Promise<CommandResult>>;
-  /** Current nested dispatch depth — guards against infinite recursion. */
+  /** Current nested dispatch depth - guards against infinite recursion. */
   dispatchDepth: number;
   /** When true, register/use/onBefore/onAfter/respond throw. */
   sealed: boolean;
-  /** Per-instance throttle timers — dispose() cancels only this bus's timers. */
+  /** Per-instance throttle timers - dispose() cancels only this bus's timers. */
   throttleTimers: Set<ReturnType<typeof setTimeout>>;
-  /** onMissing:'buffer' queue — per-action FIFO of {target,payload}, replayed on
+  /** onMissing:'buffer' queue - per-action FIFO of {target,payload}, replayed on
    *  register(). Lazily null unless onMissing:'buffer' is configured, so non-buffer
    *  buses don't allocate it. */
   deferred: Map<string, Array<{ target: any; payload: any; at: number }>> | null;
@@ -623,20 +635,20 @@ type AsyncState = {
 // ---------------------------------------------------------------------------
 
 /**
- * Lightweight unique ID — counter + per-process random prefix.
+ * Lightweight unique ID - counter + per-process random prefix.
  *
  * V8-aligned: monotonic counter + module-load random + module-load timestamp.
  * No `crypto.randomUUID()` syscall, no per-call `Date.now()`, no per-call
  * `Math.random()`. Re-measured on Node 24 (2026-08-17, `hrtime` medians over
- * 21×200k reps): **~12ns per call vs ~104ns for `crypto.randomUUID()`, ~8x**.
- * The figures this comment carried before ("~30–50ns vs ~1–2µs", implying
- * 20–60x) no longer describe any current runtime — modern V8/Node batch UUID
+ * 21x200k reps): **~12ns per call vs ~104ns for `crypto.randomUUID()`, ~8x**.
+ * The figures this comment carried before ("~30-50ns vs ~1-2µs", implying
+ * 20-60x) no longer describe any current runtime - modern V8/Node batch UUID
  * entropy, so `randomUUID` got ~10x cheaper while this counter stayed put.
  * The decision is unchanged and the direction still holds; only the margin is
  * smaller than it was when first measured. Quote the runtime with the number:
  * an unqualified ns figure is what let this drift unnoticed.
  *
- * Command IDs are correlation tokens, not security tokens — uniqueness is
+ * Command IDs are correlation tokens, not security tokens - uniqueness is
  * required across one process; cross-process collision risk is acceptable
  * for tracing/observability use cases. If you need cryptographically unique
  * IDs (cross-process auditing, distributed tracing IDs), call
@@ -651,8 +663,13 @@ let _uidFn: () => string = () => _uidPrefix + '-' + (++_uidCounter).toString(36)
 
 // Held as a binding, not called literally, so `configureClock` can swap it.
 //
-// The default is `() => Date.now()` — a wrapper that reads the GLOBAL on every
-// call — and NOT `Date.now` itself. Assigning the function reference captures
+// Whatever occupies this slot READS THE GLOBAL on every call rather than being
+// `Date.now` itself - true of the cached default below, and the rule any
+// replacement must follow. (This paragraph used to open "the default is
+// `() => Date.now()`", which stopped being true when the cached clock landed
+// and left it contradicting the paragraph directly beneath it. The reasoning
+// survived the change; the statement of the default did not.) Assigning the
+// function reference captures
 // the intrinsic at module load, so test doubles that replace the global
 // (`vi.useFakeTimers`, `vi.setSystemTime`) never reach it, and `meta.ts` silently
 // keeps reporting real time. That was the first version of this code and
@@ -662,14 +679,14 @@ let _uidFn: () => string = () => _uidPrefix + '-' + (++_uidCounter).toString(36)
 // default is not negotiable against that.
 //
 // It is a named constant, and `configureClock()` restores it, because the
-// obvious way to "put it back" — `configureClock(Date.now)` — is the same trap
+// obvious way to "put it back" - `configureClock(Date.now)` - is the same trap
 // wearing a different hat. That footgun was hit twice while writing this, once
 // in the implementation and once in the test's own teardown, which is two more
 // times than a comment would have prevented.
 // The DEFAULT: one real clock read per microtask turn, reused by every command
 // dispatched inside that turn.
 //
-// Note the refresh is EAGER — the clock is read on the first call of each turn,
+// Note the refresh is EAGER - the clock is read on the first call of each turn,
 // not scheduled for later. A lazy version (return the old value, queue a
 // refresh) would hand the first dispatch after an idle period a timestamp from
 // whenever the module loaded, which is arbitrarily stale. Reading first and
@@ -682,24 +699,24 @@ let _uidFn: () => string = () => _uidPrefix + '-' + (++_uidCounter).toString(36)
 // What is genuinely lost: intra-burst duration in bursts long enough to cross a
 // millisecond (a thousand-command rehydrate reads as instantaneous), and
 // tracking of `vi.setSystemTime` for the 2nd..nth command in a turn. Ordering is
-// NOT lost — `meta.id` is a monotonic counter and remains unique and ordered.
-// Consumers who need exact per-command wall clock stamp it themselves — see the
+// NOT lost - `meta.id` is a monotonic counter and remains unique and ordered.
+// Consumers who need exact per-command wall clock stamp it themselves - see the
 // note on `CommandMeta.ts`.
 //
 // `ts` is a WALL CLOCK, not an ordering key. Two commands dispatched in the
-// same millisecond share a value, and `Date.now()` is not monotonic — an NTP
-// correction or an operator setting the clock moves it, backwards included — so
+// same millisecond share a value, and `Date.now()` is not monotonic - an NTP
+// correction or an operator setting the clock moves it, backwards included - so
 // a `ts` delta was never a sound duration measurement, cache or no cache.
 //
 // For ORDER use `meta.id`: the default generator is a monotonic counter
 // (`(++_uidCounter).toString`). For real durations read `performance.now()`
 // in a plugin. On a hot loop use `createFastLane()`, which stamps no meta at
 // all. If an exact wall clock is ever genuinely needed, the cheap door is a
-// `clock?: () => number` bus option — one branch, no build step, and addable
+// `clock?: () => number` bus option - one branch, no build step, and addable
 // later without breaking anyone.
 
 // A boolean rather than a `0` sentinel. `_clockNow === 0` meaning "re-read me"
-// reads as safe — `Date.now()` cannot return 0, that is 1970 — but it is only
+// reads as safe - `Date.now()` cannot return 0, that is 1970 - but it is only
 // true in production: under a test clock pinned to the epoch
 // (`vi.useFakeTimers({ now: 0 })`) the cache silently never engages, and a
 // benchmark would measure the uncached path while believing otherwise.
@@ -731,7 +748,7 @@ export function configureUid(fn: () => string): void { _uidFn = fn; }
  * Swap the clock `stampMeta` reads. `_configureClock()` with no argument
  * restores the cached default.
  *
- * @internal — NOT public API, not exported from the barrel, no semver promise.
+ * @internal - NOT public API, not exported from the barrel, no semver promise.
  * It exists so `tests/clock-source-ab.test.ts` can A/B the two clock sources
  * through the real dispatch path, and so
  * `tests/clock-source-contained.test.ts` can drive a deliberately frozen clock
@@ -741,18 +758,18 @@ export function configureUid(fn: () => string): void { _uidFn = fn; }
  * There is deliberately no consumer-facing option. An option only earns its
  * place when both settings are right for different people; here the cached
  * clock is what essentially everyone wants, and the rare need for exact
- * per-command wall-clock is served by reading the clock yourself — see the
+ * per-command wall-clock is served by reading the clock yourself - see the
  * note on `CommandMeta.ts`.
  */
 export function _configureClock(fn?: () => number): void { _clockFn = fn ?? CACHED_CLOCK; }
 
-// V8 optimization: monomorphic result factories — always same hidden class
+// V8 optimization: monomorphic result factories - always same hidden class
 function okResult(value: any): CommandResult { return { ok: true, value, error: undefined }; }
 function errResult(error: Error): CommandResult { return { ok: false, value: undefined, error }; }
 
 /**
  * Singleton "successful empty" result used by `bus.emit()`. emit is fire-and-
- * forget — no value is computed, the result is constant. Reusing one frozen
+ * forget - no value is computed, the result is constant. Reusing one frozen
  * object eliminates a per-emit `okResult(undefined)` allocation. Listeners
  * receive this as the second arg; mutation attempts will throw in strict
  * mode (the freeze is intentional, not accidental).
@@ -770,37 +787,19 @@ async function tryCatchAsyncHandler(handler: AsyncHandler, cmd: Command): Promis
 }
 
 /**
- * Stamp a command with auto-generated metadata.
- *
- * The `__`-prefixed payload keys are the established convention for
- * per-dispatch meta without a signature change: they travel **with** the
- * dispatch rather than beside it.
- *
- * `__origin` was added for a family of four bugs that all shared one shape —
- * a module-level flag set before a dispatch and cleared in `finally`
- * (`_mcpDispatching` in mcp.ts, `receiving` in sync(), `paused` in redo(),
- * and the reaction guard). On a sync bus the dispatch completes inside the
- * `try`, so the flag holds and the tests pass. On an **async** bus the
- * dispatch returns a pending promise, the plugin chain runs a microtask later,
- * and `finally` has already fired — so the flag was cleared before the thing
- * it was guarding happened. The failure modes ranged from misattributed audit
- * origins to an infinite cross-tab broadcast loop. A marker on the dispatch is
- * race-free by construction, and one fix site serves all of them.
- */
-/**
- * One-shot origin slot — consumed by the NEXT `stampMeta` call.
+ * One-shot origin slot - consumed by the NEXT `stampMeta` call.
  *
  * Why a module slot is safe here when it was the original bug everywhere else:
  * the four flags this file's docblock indicts (`_mcpDispatching`, `receiving`,
  * `paused`, the reaction guard) all had to survive until a dispatch SETTLED,
- * which on an async bus means past a microtask — so `finally` cleared them
+ * which on an async bus means past a microtask - so `finally` cleared them
  * early. This slot only has to survive into `stampMeta`, which every dispatch
  * variant calls in its SYNCHRONOUS prologue while building `cmd`, before any
  * await exists. It cannot span a microtask by construction.
  *
  * It exists because `__origin`-in-the-payload can only mark payloads that hold
  * keys. A number, string, boolean or array cannot carry it, so those dispatches
- * reached handlers unattributed — an infinite cross-tab broadcast loop in
+ * reached handlers unattributed - an infinite cross-tab broadcast loop in
  * sync(), a double-recorded redo in chamber(), and an MCP command invisible to
  * an `origin === 'agent'` audit filter. Each site had grown its own workaround
  * (a depth counter, a one-shot identity match, a boundary refusal); this
@@ -810,12 +809,12 @@ async function tryCatchAsyncHandler(handler: AsyncHandler, cmd: Command): Promis
 let _nextOrigin: string | undefined;
 
 /**
- * Internal — stamp `origin` on the meta of the FIRST dispatch `fn` makes
+ * Internal - stamp `origin` on the meta of the FIRST dispatch `fn` makes
  * synchronously. Not public API; underscored like `_stampMeta`.
  *
  * The `finally` is leak protection, not a settlement guard: `validateNaming`
  * can throw before `stampMeta` runs, and an unconsumed slot must not bleed into
- * whatever dispatches next. Awaiting the result of `fn()` is fine — the slot is
+ * whatever dispatches next. Awaiting the result of `fn()` is fine - the slot is
  * already consumed by then.
  */
 export function _withOrigin<T>(origin: string, fn: () => T): T {
@@ -827,19 +826,37 @@ export function _withOrigin<T>(origin: string, fn: () => T): T {
   }
 }
 
+/**
+ * Stamp a command with auto-generated metadata.
+ *
+ * The `__`-prefixed payload keys are the established convention for
+ * per-dispatch meta without a signature change: they travel **with** the
+ * dispatch rather than beside it.
+ *
+ * `__origin` was added for a family of four bugs that all shared one shape -
+ * a module-level flag set before a dispatch and cleared in `finally`
+ * (`_mcpDispatching` in mcp.ts, `receiving` in sync(), `paused` in redo(),
+ * and the reaction guard). On a sync bus the dispatch completes inside the
+ * `try`, so the flag holds and the tests pass. On an **async** bus the
+ * dispatch returns a pending promise, the plugin chain runs a microtask later,
+ * and `finally` has already fired - so the flag was cleared before the thing
+ * it was guarding happened. The failure modes ranged from misattributed audit
+ * origins to an infinite cross-tab broadcast loop. A marker on the dispatch is
+ * race-free by construction, and one fix site serves all of them.
+ */
 function stampMeta(payload: any): CommandMeta {
-  // Read __causationId once — it is both `causationId` and `correlationId`'s fallback.
-  // V8 does not CSE the repeated optional-chain read (measured ~5–9% on an isolated A/B with
+  // Read __causationId once - it is both `causationId` and `correlationId`'s fallback.
+  // V8 does not CSE the repeated optional-chain read (measured ~5-9% on an isolated A/B with
   // the common no-ids payload; end-to-end it's within noise, dwarfed by uid()/Date.now()).
   // Behavior-identical; reading once also avoids a double getter invocation on exotic payloads.
   // `origin` is always present (undefined when unset) rather than conditionally
-  // added — one field set, one hidden class, monomorphic dispatch preserved.
+  // added - one field set, one hidden class, monomorphic dispatch preserved.
   const causationId = payload?.__causationId;
   const correlationId = payload?.__correlationId ?? causationId;
   // Read-and-clear, branchless: the slot is consumed unconditionally (a store
   // of undefined over undefined in the common case) and `??` falls back to the
   // documented public `__origin` payload key. The obvious `if (_nextOrigin !==
-  // undefined)` form costs more bytes for no measurable speed — and this
+  // undefined)` form costs more bytes for no measurable speed - and this
   // bundle's budget is a ratchet that gets argued down before it gets raised.
   const slot = _nextOrigin;
   _nextOrigin = undefined; // one-shot
@@ -847,7 +864,7 @@ function stampMeta(payload: any): CommandMeta {
 }
 
 /**
- * Internal — exported for `testing.ts` so the TestBus stamps the same meta the
+ * Internal - exported for `testing.ts` so the TestBus stamps the same meta the
  * real buses do. Underscored: not public API, not in the docs, may change.
  * Duplicating the `__`-key convention in the double is exactly how the double
  * drifts from the thing it doubles.
@@ -863,7 +880,7 @@ function validateNaming(action: string, naming?: NamingConvention): void {
   if (mode === 'warn') console.warn(msg);
 }
 
-// Pre-sliced prefix cache for wildcard patterns — avoids slice() on every match.
+// Pre-sliced prefix cache for wildcard patterns - avoids slice() on every match.
 // Capped at 256 entries to prevent unbounded growth in long-running processes.
 const _prefixCache = new Map<string, string>();
 const _PREFIX_CACHE_MAX = 256;
@@ -874,21 +891,49 @@ function isWildcardPattern(pattern: string): boolean {
 }
 
 /**
- * Walk listener buckets for an action. Exact-match bucket is O(1) lookup; wildcard
- * bucket is walked with matchesPattern. Both loops survive in-flight
+ * §WildcardEntry - a subscribed wildcard listener, with its match test already
+ * reduced to data.
+ *
+ * `pattern` is retained verbatim because `offAll(pattern)` and `inspectBus()`
+ * both report on it; `prefix` is what the dispatch path actually reads. It is
+ * `pattern.slice(0, -1)`, which is correct for BOTH wildcard shapes with no
+ * special case: `'cart*'` -> `'cart'`, and `'*'` -> `''`, where
+ * `action.startsWith('')` is unconditionally true. So the fan-out loop is one
+ * `startsWith` per listener with no branch, no `charCodeAt`, and no cache
+ * lookup.
+ *
+ * WHY IT LIVES ON THE ENTRY rather than in `matchesPattern`'s LRU. `on()`
+ * has already classified the pattern as a wildcard to decide which bucket it
+ * goes in, so by the time the entry exists the parse is a known result being
+ * thrown away. Storing it is the same move Vue made in 3.6.0-rc.6's `29ed4b0`
+ * (`parseAdoptTarget`): hoist a per-call string scan into a descriptor computed
+ * once by the factory, then compare cheap values on the hot path.
+ * `matchesPattern` keeps its cache - it is public API taking arbitrary
+ * caller-supplied patterns (plugin `actions:` filters, `mcp` whitelists), where
+ * nothing has classified anything in advance.
+ *
+ * Measured, real dispatch path, interleaved A/B - see
+ * `tests/wildcard-prefix-ab.test.ts`.
+ */
+type WildcardEntry = { pattern: string; prefix: string; listener: Listener };
+
+/**
+ * Walk listener buckets for an action. Exact-match bucket is O(1) lookup;
+ * wildcard bucket is walked with one `startsWith` against each entry's
+ * precomputed prefix (§WildcardEntry). Both loops survive in-flight
  * unsubscribe (a listener may remove itself or peers).
  *
  * The cursor is corrected by IDENTITY, not by length. The older `if (len <
  * lenBefore) i--` shape handled self-removal but over-corrected the other
  * direction: a listener that removed a LATER peer shrank the array without
  * moving anything at or before `i`, so the decrement re-invoked the listener
- * that had just run — a duplicate side effect on every dispatch that hit that
+ * that had just run - a duplicate side effect on every dispatch that hit that
  * shape. `bucket[i] !== listener` is the exact test for "the cursor moved",
  * and subtracting the full shrinkage handles removing several at once.
  */
 function fanOutListeners(
   exact: Map<string, Listener[]>,
-  wild: Array<{ pattern: string; listener: Listener }>,
+  wild: WildcardEntry[],
   action: string,
   cmd: Command,
   result: CommandResult,
@@ -904,7 +949,13 @@ function fanOutListeners(
   }
   for (let i = 0; i < wild.length; i++) {
     const entry = wild[i];
-    if (matchesPattern(entry.pattern, action)) {
+    // `entry.prefix` is `pattern.slice(0, -1)`, computed ONCE in `on()` - see
+    // §WildcardEntry. `'*'` slices to `''` and `''.startsWith` is always true,
+    // so match-all needs no branch of its own and this loop is a single
+    // `startsWith` per listener. `matchesPattern` (public API, arbitrary
+    // caller-supplied patterns) still re-derives the prefix through its LRU;
+    // only this loop knows the pattern was classified at subscribe time.
+    if (action.startsWith(entry.prefix)) {
       const lenBefore = wild.length;
       try { entry.listener(cmd, result); } catch (e) { console.error('[vapor-chamber] Listener error:', e); }
       if (wild.length < lenBefore && wild[i] !== entry) i -= lenBefore - wild.length;
@@ -930,9 +981,9 @@ export function matchesPattern(pattern: string, action: string): boolean {
  * Run every collected disposer in insertion order, then empty the list so a
  * second call is a no-op (idempotent teardown). Shared by the composables'
  * `dispose()` and the chamber/install + history-plugin cleanups. Cold path
- * (runs at unmount/disposal, never per dispatch) — a plain loop, no closure.
+ * (runs at unmount/disposal, never per dispatch) - a plain loop, no closure.
  *
- * No try/catch by design — settled, do not "harden". Every disposer collected
+ * No try/catch by design - settled, do not "harden". Every disposer collected
  * here is an internal `register`/`on`/`use`/`respond` unsub (`Map.delete` /
  * `Array.splice`); none can throw. A throw would mean corrupted internal state,
  * which should surface loudly during teardown, not be swallowed.
@@ -956,11 +1007,11 @@ export function commandKey(action: string, target: any): string {
   const t = typeof target;
   if (t === 'string' || t === 'number' || t === 'boolean') return `${action}:${target}`;
   // Object path: canonical, order-independent serialization. A function replacer
-  // rebuilds every object with its keys in sorted order — at EVERY level — so
+  // rebuilds every object with its keys in sorted order - at EVERY level - so
   // { b:2, a:1 } and { a:1, b:2 } produce the same key, while nested fields are
   // preserved in full and arrays keep their order. (The previous top-level array
   // replacer `Object.keys(target).sort()` silently DROPPED nested keys, collapsing
-  // { q:{page:2} } and { q:{page:3} } to the same key — fixed here.)
+  // { q:{page:2} } and { q:{page:3} } to the same key - fixed here.)
   let tkey: string;
   try {
     tkey = JSON.stringify(target, (_k, v) => {
@@ -968,7 +1019,7 @@ export function commandKey(action: string, target: any): string {
         // Prototype-free, and this one is load-bearing rather than defensive.
         // On a `{}`, `sorted['__proto__'] = value` goes through the inherited
         // setter and the key never becomes an own property, so it vanished from
-        // the serialization — and an own `__proto__` key is exactly what
+        // the serialization - and an own `__proto__` key is exactly what
         // `JSON.parse` of a server response produces. Measured: targets
         // `{"__proto__":"A","id":1}` and `{"__proto__":"B","id":1}` both keyed
         // to `act:{"id":1}`. This key backs `idempotent`, `cache`, `serialize`
@@ -985,15 +1036,15 @@ export function commandKey(action: string, target: any): string {
 }
 
 // ---------------------------------------------------------------------------
-// commandPool — circular buffer of pre-allocated Command objects (zero-GC)
+// commandPool - circular buffer of pre-allocated Command objects (zero-GC)
 // ---------------------------------------------------------------------------
 
 /**
- * CommandPool — pre-allocates Command objects in a circular buffer to
+ * CommandPool - pre-allocates Command objects in a circular buffer to
  * eliminate garbage collection pauses during dispatch bursts. When the
  * pool is exhausted, it wraps around and reuses the oldest slot.
  *
- * **Important**: The pool is a standalone utility — `bus.dispatch()` still
+ * **Important**: The pool is a standalone utility - `bus.dispatch()` still
  * creates its own Command internally and stamps `meta` (ts, id, correlationId).
  * Pooled commands do NOT have `meta` set. Use `pool.acquire()` for the action/target/payload,
  * then pass those values to `bus.dispatch(cmd.action, cmd.target, cmd.payload)`.
@@ -1014,7 +1065,7 @@ export interface CommandPool {
   acquire(action: string, target: any, payload?: any): Command;
   /** Current pool statistics. */
   stats(): { size: number; acquired: number; cursor: number };
-  /** Reset the pool — clears all slots and resets cursor. */
+  /** Reset the pool - clears all slots and resets cursor. */
   reset(): void;
   /** Pool capacity. */
   readonly size: number;
@@ -1023,7 +1074,7 @@ export interface CommandPool {
 export function createCommandPool(size: number = 64): CommandPool {
   if (size < 1) throw new RangeError('CommandPool size must be at least 1');
 
-  // Pre-allocate monomorphic command objects — same hidden class for V8 TurboFan
+  // Pre-allocate monomorphic command objects - same hidden class for V8 TurboFan
   const buffer: Command[] = new Array(size);
   for (let i = 0; i < size; i++) {
     buffer[i] = { action: '', target: undefined, payload: undefined, meta: undefined };
@@ -1037,7 +1088,7 @@ export function createCommandPool(size: number = 64): CommandPool {
     cmd.action = action;
     cmd.target = target;
     cmd.payload = payload;
-    cmd.meta = undefined; // reset meta — dispatch will stamp it
+    cmd.meta = undefined; // reset meta - dispatch will stamp it
     cursor = (cursor + 1) % size;
     totalAcquired++;
     return cmd;
@@ -1078,8 +1129,8 @@ function wrapThrottle(handler: Handler | AsyncHandler, wait: number, timers: Set
     const retryIn = wait - (now - last);
     // The rejected branch is the hot one by design (throttle exists for
     // scroll/mousemove-frequency sources), and V8 stack capture dominates its
-    // cost. A throttle rejection is expected control flow — code/context carry
-    // everything actionable — so skip the stack. No-op outside V8.
+    // cost. A throttle rejection is expected control flow - code/context carry
+    // everything actionable - so skip the stack. No-op outside V8.
     const savedLimit = (Error as any).stackTraceLimit;
     (Error as any).stackTraceLimit = 0;
     try {
@@ -1095,26 +1146,26 @@ function wrapThrottle(handler: Handler | AsyncHandler, wait: number, timers: Set
 // ---------------------------------------------------------------------------
 
 // `next` is index-parameterized: each level's continuation captures its own
-// position, so the chain does not depend on when — or how often — a plugin
+// position, so the chain does not depend on when - or how often - a plugin
 // calls it.
 //
 // The old shared cursor (`plugins[i++]` closed over one `i`) broke on
 // RE-INVOCATION: `retry()` calls `next()` once per attempt, so attempt 1
 // exhausted the index and attempt 2 fell straight through to `execute()`,
-// silently skipping every plugin downstream of retry — the HTTP bridge,
+// silently skipping every plugin downstream of retry - the HTTP bridge,
 // logging, metrics, cache, idempotent stamping.
 //
 // PERF NOTE, and the reason this is not the cheaper shape: one closure per
 // plugin level per dispatch costs ~13.5% on the documented hot-path row
-// ("syncDispatch — 3 plugins + 1 listener", interleaved same-machine A/B:
-// ~1261 → ~1090 ops/s). A save/restore cursor (`level = idx` in a `finally`)
-// measures identical to the old shared cursor and is re-entrant — but it is
+// ("syncDispatch - 3 plugins + 1 listener", interleaved same-machine A/B:
+// ~1261 -> ~1090 ops/s). A save/restore cursor (`level = idx` in a `finally`)
+// measures identical to the old shared cursor and is re-entrant - but it is
 // WRONG, and the suite says so: `debounce`/`throttle` call `next()` from a
 // timer, long after `plugin(cmd, next)` returned and the `finally` restored
 // the cursor, so the deferred call re-enters the debounce plugin itself and
 // the handler never runs (`tests/plugins.test.ts` "should debounce specified
 // actions", `tests/plugins-core-coverage.test.ts`). The old shared cursor
-// survived debounce only by accident — its exhausted index happened to land
+// survived debounce only by accident - its exhausted index happened to land
 // on `execute()`. Deferred continuations are a first-class case here, so
 // correctness takes the 13.5%.
 export function buildRunner(plugins: Plugin[]) {
@@ -1135,7 +1186,7 @@ export function buildRunner(plugins: Plugin[]) {
 // Shared helpers for both sync and async buses
 // ---------------------------------------------------------------------------
 
-/** Reusable priority comparator — avoids 4 inline arrow-function copies. */
+/** Reusable priority comparator - avoids 4 inline arrow-function copies. */
 const byPriority = (a: { priority: number }, b: { priority: number }) => b.priority - a.priority;
 
 /**
@@ -1155,7 +1206,7 @@ function register(s: SyncState | AsyncState, action: string, handler: any, opts:
   if (opts.throttle && opts.throttle > 0) h = wrapThrottle(h, opts.throttle, s.throttleTimers);
   if (opts.undo) s.undoHandlers.set(action, opts.undo);
   s.handlers.set(action, h);
-  // onMissing:'buffer' — replay any commands that arrived before this handler.
+  // onMissing:'buffer' - replay any commands that arrived before this handler.
   if (s.deferred !== null && s.deferred.size !== 0) flushDeferred(s, action);
   return () => { s.handlers.delete(action); s.undoHandlers.delete(action); };
 }
@@ -1173,7 +1224,7 @@ function clearState(s: SyncState | AsyncState): void {
   s.deferred?.clear();
 }
 
-/** Build the BusInspection snapshot — identical shape for sync and async buses. */
+/** Build the BusInspection snapshot - identical shape for sync and async buses. */
 function inspect(s: SyncState | AsyncState): BusInspection {
   return {
     actions:          Array.from(s.handlers.keys()),
@@ -1205,8 +1256,8 @@ function handleMissing(s: SyncState | AsyncState, cmd: Command, canDefer: boolea
     // Lazy init: the queue map is born on the first buffered command. Cheaper
     // than eager allocation (a bus that never buffers allocates nothing), and a
     // measured A/B showed gating the hot path on `deferred !== null` instead of
-    // this `onMissing` check is only faster when monomorphic — it regresses in
-    // mixed buffer/non-buffer apps — so the hot-path gate stays on onMissing.
+    // this `onMissing` check is only faster when monomorphic - it regresses in
+    // mixed buffer/non-buffer apps - so the hot-path gate stays on onMissing.
     const d = s.deferred ?? (s.deferred = new Map());
     let q = d.get(cmd.action);
     if (q === undefined) { q = []; d.set(cmd.action, q); }
@@ -1262,7 +1313,7 @@ function flushDeferred(s: SyncState | AsyncState, action: string): void {
     const { target, payload, at } = q[i];
     if (now !== 0 && now - at > ttl!) {
       s.opts.onBufferOverflow?.(action, { target, payload });
-      continue; // expired while waiting — don't replay stale commands
+      continue; // expired while waiting - don't replay stale commands
     }
     if (isAsync) void asyncDispatch(s as AsyncState, action, target, payload);
     else syncDispatch(s as SyncState, action, target, payload);
@@ -1270,7 +1321,7 @@ function flushDeferred(s: SyncState | AsyncState, action: string): void {
 }
 
 function syncRunHooks(s: SyncState, cmd: Command, result: CommandResult): void {
-  // V8 opt: index-based loops with length snapshot — avoids .slice() allocation
+  // V8 opt: index-based loops with length snapshot - avoids .slice() allocation
   const ah = s.afterHooks;
   for (let i = 0, len = ah.length; i < len; i++) {
     try { ah[i](cmd, result); } catch (e) { console.error('[vapor-chamber] Hook error:', e); }
@@ -1296,7 +1347,7 @@ function _syncDispatchInner(s: SyncState, action: string, target: any, payload?:
   // indirection and the post-dispatch hook + listener walk. Direct
   // handler call. The five length/size reads are O(1) property accesses.
   // (A cached `isBare` boolean was tested and showed a 25% regression vs
-  // these direct reads — V8's tight ICs on Map.size / Array.length already
+  // these direct reads - V8's tight ICs on Map.size / Array.length already
   // optimize the inline check; adding a state field changed the hidden
   // class for no benefit. See CHANGELOG performance section.)
   if (
@@ -1312,7 +1363,7 @@ function _syncDispatchInner(s: SyncState, action: string, target: any, payload?:
     return tryCatchHandler(handler, cmd);
   }
 
-  // onMissing:'buffer' — when there's no handler yet, queue WITHOUT running the
+  // onMissing:'buffer' - when there's no handler yet, queue WITHOUT running the
   // pipeline (plugins/hooks/listeners must fire on replay, not now). The
   // bare-path above already buffers correctly (nothing fires there). Skipped
   // for the request/respond path (executeOverride) and non-buffer buses.
@@ -1342,14 +1393,14 @@ function _syncDispatchInner(s: SyncState, action: string, target: any, payload?:
 }
 
 // Dev-only footgun guard: an ASYNC plugin (retry, createHttpBridge, ...) on a
-// SYNC bus makes the runner return the plugin's Promise as the CommandResult —
+// SYNC bus makes the runner return the plugin's Promise as the CommandResult -
 // `result.ok` is undefined and every dispatch silently "fails". Warn once per
 // action in dev.
 //
 // Keeping the check off the per-dispatch path still matters: `process.env`
 // reads go through a slow C++ interceptor, and an inline read measured ~150 ns
-// here (3 plugins + 1 listener bench dropped 1,240 → 350 ops/s). `DEV` is a
-// module-level const for that reason, and now also so the build can fold it —
+// here (3 plugins + 1 listener bench dropped 1,240 -> 350 ops/s). `DEV` is a
+// module-level const for that reason, and now also so the build can fold it -
 // see src/dev.ts. The comment that used to sit here explained that a BARE
 // `process.env.NODE_ENV` literal was load-bearing for define-replacement,
 // which is no longer how this works: the ESM build emits that expression from
@@ -1362,7 +1413,7 @@ function devWarnThenableResult(result: CommandResult, action: string): void {
     if (result && typeof (result as unknown as PromiseLike<unknown>).then === 'function' && !_thenableWarned.has(action)) {
       _thenableWarned.add(action);
       console.warn(
-        `[vapor-chamber] dispatch("${action}") on a SYNC bus returned a Promise — an async plugin ` +
+        `[vapor-chamber] dispatch("${action}") on a SYNC bus returned a Promise - an async plugin ` +
         `(retry, createHttpBridge, ...) is installed on a bus created with createCommandBus(). ` +
         `Use createAsyncCommandBus() instead; result.ok is undefined on this dispatch.`,
       );
@@ -1370,7 +1421,7 @@ function devWarnThenableResult(result: CommandResult, action: string): void {
   }
 }
 
-/** Read-only query — skips beforeHooks, runs handler + plugins, fires afterHooks. */
+/** Read-only query - skips beforeHooks, runs handler + plugins, fires afterHooks. */
 function syncQuery(s: SyncState, action: string, target: any, payload?: any): CommandResult {
   return _syncQueryInner(s, action, target, payload);
 }
@@ -1378,7 +1429,7 @@ function syncQuery(s: SyncState, action: string, target: any, payload?: any): Co
 function _syncQueryInner(s: SyncState, action: string, target: any, payload?: any): CommandResult {
   if (s.opts.naming !== undefined) validateNaming(action, s.opts.naming);
   const cmd: Command = { action, target, payload, meta: stampMeta(payload) };
-  // Bare-bus fast path — mirrors the one in _syncDispatchInner. Queries skip
+  // Bare-bus fast path - mirrors the one in _syncDispatchInner. Queries skip
   // beforeHooks by design so the condition omits that check.
   if (
     s.pluginEntries.length === 0 &&
@@ -1390,7 +1441,7 @@ function _syncQueryInner(s: SyncState, action: string, target: any, payload?: an
     if (handler === undefined) return handleMissing(s, cmd, false);
     return tryCatchHandler(handler, cmd);
   }
-  // Skip beforeHooks — queries don't trigger mutation gates (auth, loading spinners, etc.)
+  // Skip beforeHooks - queries don't trigger mutation gates (auth, loading spinners, etc.)
   const execute = (): CommandResult => {
     const handler = s.handlers.get(action);
     if (!handler) return handleMissing(s, cmd, false);
@@ -1402,18 +1453,18 @@ function _syncQueryInner(s: SyncState, action: string, target: any, payload?: an
   return result;
 }
 
-/** Fire a domain event — notifies on() listeners, no handler required, no result. */
+/** Fire a domain event - notifies on() listeners, no handler required, no result. */
 function syncEmit(s: SyncState, event: string, data?: any): void {
   _syncEmitInner(s, event, data);
 }
 
 function _syncEmitInner(s: SyncState, event: string, data?: any): void {
-  // Fast path: no listeners → return without allocating anything. Real apps
+  // Fast path: no listeners -> return without allocating anything. Real apps
   // emit many events with no subscribers (lifecycle, debug, conditional
-  // listeners) — this branch turns those into a hash lookup + length check.
+  // listeners) - this branch turns those into a hash lookup + length check.
   if (!s.exactListeners.has(event) && s.wildcardListeners.length === 0) return;
 
-  // emit is fire-and-forget — meta (id/correlationId/causationId) is unused
+  // emit is fire-and-forget - meta (id/correlationId/causationId) is unused
   // by the typical listener, so skip stampMeta to avoid the uid() call and
   // 4-field object allocation. Listeners that DO need meta on an emit can
   // call dispatch instead. The Command type already has `meta?` as optional.
@@ -1431,7 +1482,7 @@ function _syncEmitInner(s: SyncState, event: string, data?: any): void {
 function warnBatchOptionConflict(opts: BatchOptions): void {
   if (DEV && opts.transactional && opts.continueOnError) {
     console.warn(
-      '[vapor-chamber] dispatchBatch({ transactional: true, continueOnError: true }) — these are ' +
+      '[vapor-chamber] dispatchBatch({ transactional: true, continueOnError: true }) - these are ' +
         'mutually exclusive. `transactional` wins: the batch stops at the first failure and rolls back. ' +
         'Drop one of the two.',
     );
@@ -1469,7 +1520,7 @@ function syncRollback(s: SyncState, commands: BatchCommand[], results: CommandRe
     /* v8 ignore next -- defensive: batch halts at first failure, so every j < failedAt is ok */
     if (!results[j].ok) continue; // skip already-failed commands
     const undo = s.undoHandlers.get(commands[j].action);
-    if (!undo) continue; // no undo registered — skip
+    if (!undo) continue; // no undo registered - skip
     const cmd: Command = { action: commands[j].action, target: commands[j].target, payload: commands[j].payload, meta: stampMeta(commands[j].payload) };
     try { rollbacks.push(okResult(undo(cmd))); }
     catch (e) { rollbacks.push(errResult(e as Error)); }
@@ -1484,7 +1535,7 @@ function syncUse(s: SyncState, plugin: Plugin, opts: PluginOptions = {}): () => 
   // build-time wiring mistake, not a runtime condition. Gating `DEV` first also
   // skips the isAsyncFn() probe entirely in production.
   if (DEV && isAsyncFn(plugin)) {
-    console.warn('[vapor-chamber] Async plugin installed on sync bus — use createAsyncCommandBus() instead.');
+    console.warn('[vapor-chamber] Async plugin installed on sync bus - use createAsyncCommandBus() instead.');
   }
   const entry = { plugin, priority: opts.priority ?? 0 };
   s.pluginEntries.push(entry);
@@ -1493,29 +1544,29 @@ function syncUse(s: SyncState, plugin: Plugin, opts: PluginOptions = {}): () => 
 }
 
 // ---------------------------------------------------------------------------
-// Shared listener and hook helpers — used by both sync and async buses.
+// Shared listener and hook helpers - used by both sync and async buses.
 // Both SyncState and AsyncState carry exactListeners/wildcardListeners with
 // identical types, so a single implementation covers both.
 // ---------------------------------------------------------------------------
 
 type ListenerBucket = {
   exactListeners: Map<string, Listener[]>;
-  wildcardListeners: Array<{ pattern: string; listener: Listener }>;
+  wildcardListeners: WildcardEntry[];
 };
 
 // Self-polyfill: same `??=` idiom TS's own downlevel `using` helper applies,
-// so whichever side runs first, both agree on the same well-known symbol —
+// so whichever side runs first, both agree on the same well-known symbol -
 // works whether the runtime has native Explicit Resource Management or not.
 const _SYM_DISPOSE: symbol = ((Symbol as any).dispose ??= Symbol());
 
 /**
  * Finish an on()/once() unsubscribe fn: bind it to `signal` (self-detaching,
- * fires at most once — the abort listener doubles as the manual-off path, so
+ * fires at most once - the abort listener doubles as the manual-off path, so
  * there is only one removeEventListener site) and tag it with Symbol.dispose
  * so `using off = bus.on(...)` works. An already-aborted signal unsubscribes
- * synchronously before returning — same observable effect as never
+ * synchronously before returning - same observable effect as never
  * subscribing, matches DOM `addEventListener`, no separate pre-check needed
- * in `on()`. Cold path — runs once per subscription, never touches dispatch.
+ * in `on()`. Cold path - runs once per subscription, never touches dispatch.
  */
 function finalizeOff(off: () => void, signal?: AbortSignal): () => void {
   if (signal) {
@@ -1531,7 +1582,9 @@ function finalizeOff(off: () => void, signal?: AbortSignal): () => void {
 function on(s: ListenerBucket, pattern: string, listener: Listener, opts?: ListenerOptions): () => void {
   const signal = opts?.signal;
   if (isWildcardPattern(pattern)) {
-    const entry = { pattern, listener };
+    // Parse once, here, where the pattern has just been classified - see
+    // §WildcardEntry. Cold path: runs per subscription, never per dispatch.
+    const entry: WildcardEntry = { pattern, prefix: pattern.slice(0, -1), listener };
     s.wildcardListeners.push(entry);
     return finalizeOff(() => { const i = s.wildcardListeners.indexOf(entry); if (i !== -1) s.wildcardListeners.splice(i, 1); }, signal);
   }
@@ -1548,7 +1601,7 @@ function on(s: ListenerBucket, pattern: string, listener: Listener, opts?: Liste
 }
 
 /**
- * once() unsubscribes itself *before* calling the listener — matches
+ * once() unsubscribes itself *before* calling the listener - matches
  * DOM addEventListener({ once: true }) semantics.
  */
 function once(s: ListenerBucket, pattern: string, listener: Listener, opts?: ListenerOptions): () => void {
@@ -1675,13 +1728,13 @@ export function createCommandBus<M extends CommandMap = CommandMap>(options: Com
     dispatchDepth: 0,
     sealed: false,
     throttleTimers: new Set(),
-    // Lazily allocated on the first buffered command (handleMissing), not here —
+    // Lazily allocated on the first buffered command (handleMissing), not here -
     // a buffer-mode bus whose handlers always beat its dispatches allocates nothing.
     deferred: null,
   };
   const bus: CommandBus<M> = {
     // Sync bus accepts the options arg for type compatibility with BaseBus,
-    // but ignores `signal` — sync dispatches are atomic and not cancelable.
+    // but ignores `signal` - sync dispatches are atomic and not cancelable.
     dispatch:          (a, t, p, _o)   => syncDispatch(s, a as string, t, p),
     query:             (a, t, p)       => syncQuery(s, a as string, t, p),
     emit:              (e, d)          => syncEmit(s, e, d),
@@ -1703,7 +1756,7 @@ export function createCommandBus<M extends CommandMap = CommandMap>(options: Com
     seal:              ()              => { s.sealed = true; },
     isSealed:          ()              => s.sealed,
   };
-  // Symbol keys for tree-shakeable introspection — not on the public interface
+  // Symbol keys for tree-shakeable introspection - not on the public interface
   (bus as any)[_UNSEAL] = () => { s.sealed = false; };
   (bus as any)[_INSPECT] = () => inspect(s);
   return bus;
@@ -1713,7 +1766,7 @@ export function createCommandBus<M extends CommandMap = CommandMap>(options: Com
 // Async runner
 // ---------------------------------------------------------------------------
 
-// Same shape and same reasoning as `buildRunner` above — and here a
+// Same shape and same reasoning as `buildRunner` above - and here a
 // save/restore cursor would be unsound for a second reason on top of deferred
 // continuations: `plugin(cmd, next)` returns a PENDING PROMISE, so a `finally`
 // fires while the chain below is still running. That is exactly the
@@ -1743,7 +1796,7 @@ function asyncRebuildRunner(s: AsyncState): void {
 }
 
 // Returns void (not a promise) when there are no after-hooks, so callers can
-// skip the await entirely — an async frame + microtask hop per dispatch
+// skip the await entirely - an async frame + microtask hop per dispatch
 // otherwise, even on a bus with zero hooks. Callers: `const h = asyncRunHooks(...);
 // if (h) await h;`
 function asyncRunHooks(s: AsyncState, cmd: Command, result: CommandResult): void | Promise<void> {
@@ -1756,7 +1809,7 @@ function asyncRunHooks(s: AsyncState, cmd: Command, result: CommandResult): void
 
 async function asyncRunAfterHooks(s: AsyncState, cmd: Command, result: CommandResult): Promise<void> {
   // V8 opt: index-based loops, no .slice(). Sync hooks (loggers, guards) are
-  // the common case — the thenable check saves a microtask hop per hook.
+  // the common case - the thenable check saves a microtask hop per hook.
   const ah = s.afterHooks;
   for (let i = 0, len = ah.length; i < len; i++) {
     try {
@@ -1784,7 +1837,7 @@ async function asyncDispatch(s: AsyncState, action: string, target: any, payload
  *
  * After-hooks still fire from the caller, so observability is intact.
  *
- * @internal — also used by transports.ts for mid-flight signal handling.
+ * @internal - also used by transports.ts for mid-flight signal handling.
  */
 export function abortedResult(action: string, signal: AbortSignal): CommandResult {
   const reason = (signal as any).reason;
@@ -1809,20 +1862,20 @@ async function _asyncDispatchInner(s: AsyncState, action: string, target: any, p
   }
 
   // Note: a bare-bus fast path was tested for async dispatch and showed no
-  // measurable win (3,586 → 3,360 ops/sec across 3 runs — within noise, may
+  // measurable win (3,586 -> 3,360 ops/sec across 3 runs - within noise, may
   // be a slight regression). The async path's await + Promise machinery is
   // a larger fraction of the per-call cost than the runner indirection, so
   // skipping the runner doesn't move the needle. Sync dispatch DID win
   // (+18%) so the same fast path is kept in `_syncDispatchInner`.
 
-  // onMissing:'buffer' — queue WITHOUT running the pipeline when no handler yet
+  // onMissing:'buffer' - queue WITHOUT running the pipeline when no handler yet
   // (plugins/hooks/listeners fire on replay, not now). Skipped for request/respond.
   if (executeOverride === undefined && s.opts.onMissing === 'buffer' && !s.handlers.has(action)) {
     return handleMissing(s, cmd, true);
   }
 
   // V8 opt: index-based loop, no .slice(). Sync before-hooks (guards, loggers)
-  // are the common case — the thenable check skips a microtask hop per hook.
+  // are the common case - the thenable check skips a microtask hop per hook.
   const bh = s.beforeHooks;
   for (let i = 0, len = bh.length; i < len; i++) {
     try {
@@ -1847,7 +1900,7 @@ async function _asyncDispatchInner(s: AsyncState, action: string, target: any, p
   return result;
 }
 
-/** Async read-only query — skips beforeHooks, runs handler + plugins, fires afterHooks. */
+/** Async read-only query - skips beforeHooks, runs handler + plugins, fires afterHooks. */
 async function asyncQuery(s: AsyncState, action: string, target: any, payload?: any): Promise<CommandResult> {
   return await _asyncQueryInner(s, action, target, payload);
 }
@@ -1866,7 +1919,7 @@ async function _asyncQueryInner(s: AsyncState, action: string, target: any, payl
   return result;
 }
 
-/** Async emit — notifies on() listeners, no handler required, no result. */
+/** Async emit - notifies on() listeners, no handler required, no result. */
 function asyncEmit(s: AsyncState, event: string, data?: any): void {
   _asyncEmitInner(s, event, data);
 }
@@ -1886,14 +1939,14 @@ async function asyncDispatchBatch(s: AsyncState, commands: BatchCommand[], opts:
   let firstError: Error | undefined;
   let failCount = 0;
 
-  // Pre-flight abort — return without dispatching anything.
+  // Pre-flight abort - return without dispatching anything.
   if (signal?.aborted) {
     const abortErr = abortedResult('batch', signal).error!;
     return { ok: false, results: [], error: abortErr, successCount: 0, failCount: 0 };
   }
 
   for (let ci = 0; ci < commands.length; ci++) {
-    // Mid-flight abort — stop dispatching further commands. Already-completed
+    // Mid-flight abort - stop dispatching further commands. Already-completed
     // results are kept for inspection; abortError is the result error.
     if (signal?.aborted) {
       const abortErr = abortedResult('batch', signal).error!;
@@ -1954,10 +2007,10 @@ async function asyncRequest(s: AsyncState, action: string, target: any, payload?
   const signal = reqOpts.signal;
   const responder = s.responders.get(action);
 
-  // Pre-flight abort — return immediately, don't dedup or dispatch.
+  // Pre-flight abort - return immediately, don't dedup or dispatch.
   if (signal?.aborted) return abortedResult(action, signal);
 
-  // Dedup key — the canonical commandKey: order-independent and nested-faithful,
+  // Dedup key - the canonical commandKey: order-independent and nested-faithful,
   // so the same logical request collapses regardless of key order while distinct
   // nested targets stay separate (no false-dedup). Shared with debounce/throttle/cache.
   const dedupKey = commandKey(action, target);
@@ -1983,7 +2036,7 @@ async function asyncRequest(s: AsyncState, action: string, target: any, payload?
     );
   });
 
-  // Mid-flight abort — race against dispatchPromise and timeoutPromise so the
+  // Mid-flight abort - race against dispatchPromise and timeoutPromise so the
   // caller can cancel without waiting for the responder.
   let abortHandler: (() => void) | null = null;
   const abortPromise = signal
@@ -2056,7 +2109,7 @@ export function createAsyncCommandBus<M extends CommandMap = CommandMap>(options
     dispatchDepth: 0,
     sealed: false,
     throttleTimers: new Set(),
-    // Lazily allocated on the first buffered command (handleMissing), not here —
+    // Lazily allocated on the first buffered command (handleMissing), not here -
     // a buffer-mode bus whose handlers always beat its dispatches allocates nothing.
     deferred: null,
   };
@@ -2082,18 +2135,18 @@ export function createAsyncCommandBus<M extends CommandMap = CommandMap>(options
     seal:              ()            => { s.sealed = true; },
     isSealed:          ()            => s.sealed,
   };
-  // Symbol keys for tree-shakeable introspection — not on the public interface
+  // Symbol keys for tree-shakeable introspection - not on the public interface
   (bus as any)[_UNSEAL] = () => { s.sealed = false; };
   (bus as any)[_INSPECT] = () => inspect(s);
   return bus;
 }
 
 // ---------------------------------------------------------------------------
-// unsealBus — dev/HMR only, tree-shakeable in production
+// unsealBus - dev/HMR only, tree-shakeable in production
 // ---------------------------------------------------------------------------
 
 /**
- * Unseal a sealed bus. **Dev/HMR only** — if your production code never imports
+ * Unseal a sealed bus. **Dev/HMR only** - if your production code never imports
  * `unsealBus`, it gets tree-shaken out entirely, making `seal()` irreversible.
  *
  * @example
@@ -2112,7 +2165,7 @@ export function unsealBus(bus: BaseBus): void {
 }
 
 // ---------------------------------------------------------------------------
-// inspectBus — dev/debug only, tree-shakeable in production
+// inspectBus - dev/debug only, tree-shakeable in production
 // ---------------------------------------------------------------------------
 
 /**
@@ -2123,7 +2176,7 @@ export function unsealBus(bus: BaseBus): void {
  * import { inspectBus } from 'vapor-chamber';
  * const info = inspectBus(bus);
  * console.log(info.actions);        // ['cartAdd', 'cartRemove']
- * console.log(info.undoActions);     // ['cartAdd'] — only these can rollback
+ * console.log(info.undoActions);     // ['cartAdd'] - only these can rollback
  * console.log(info.pluginCount);     // 3
  * console.log(info.sealed);          // true
  */
@@ -2153,10 +2206,10 @@ export type BusInspection = {
 };
 
 /**
- * Inspect a bus's full topology. **Dev/debug only** — if your production code
+ * Inspect a bus's full topology. **Dev/debug only** - if your production code
  * never imports `inspectBus`, it gets tree-shaken out entirely.
  *
- * Returns a plain snapshot object — safe to serialize, log, or send to DevTools.
+ * Returns a plain snapshot object - safe to serialize, log, or send to DevTools.
  *
  * @example
  * import { inspectBus } from 'vapor-chamber';

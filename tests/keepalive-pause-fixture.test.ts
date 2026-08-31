@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * FIXTURE — what Vue's KeepAlive scope-pausing (#15237) does and does NOT
+ * FIXTURE - what Vue's KeepAlive scope-pausing (#15237) does and does NOT
  * suppress, measured on vue@3.6.0-rc.3.
  *
  * WHY. `docs/router.md` carries this note about `tryKeepAliveHooks` in
@@ -17,17 +17,17 @@
  * `useCommandError`.
  *
  * It is wrong, and this fixture is why. Vue pauses REACTIVE EFFECTS owned by
- * the deactivated scope. `tryKeepAliveHooks` guards a `bus.onAfter` hook —
+ * the deactivated scope. `tryKeepAliveHooks` guards a `bus.onAfter` hook -
  * a plain callback the command bus invokes synchronously inside `dispatch`,
  * held in the bus's own hook array, owned by no scope and scheduled by no
  * scheduler. Nothing upstream can suppress it, because upstream cannot see it.
  *
  * The two mechanisms also answer different questions:
- *   Vue's       — "should this cached component re-render / re-run watchers
+ *   Vue's       - "should this cached component re-render / re-run watchers
  *                  while it is off-screen?"   (a rendering concern)
- *   ours        — "should a command dispatched while this component is
+ *   ours        - "should a command dispatched while this component is
  *                  deactivated be RECORDED into its undo history?"
- *                  (a domain concern — the history would otherwise fill with
+ *                  (a domain concern - the history would otherwise fill with
  *                  commands the user never performed in that view)
  *
  * So the guard is not redundant and is not double-suppression. The note is
@@ -40,7 +40,7 @@
  * side of the boundary correctly and its conclusion holds. But it never calls
  * `tryKeepAliveHooks`, so it could not detect that the guard was gated on
  * `getCurrentInstance()` and therefore never armed in a Vapor component at all
- * — a real bug that a stand-in is structurally unable to see.
+ * - a real bug that a stand-in is structurally unable to see.
  * `tests/keepalive-input-scope-fixture.test.ts` runs the real VaporKeepAlive
  * and pins that. Keep both: this one isolates the mechanism, that one proves
  * the wiring.
@@ -67,7 +67,7 @@ async function vue(): Promise<Api> {
 }
 
 describe('what a paused effect scope suppresses (rc.3)', () => {
-  it('DOES suppress a watcher owned by the scope — this is what #15237 fixed', async () => {
+  it('DOES suppress a watcher owned by the scope - this is what #15237 fixed', async () => {
     const { effectScope, shallowRef, watch, nextTick } = await vue();
 
     const source = shallowRef(0);
@@ -88,7 +88,7 @@ describe('what a paused effect scope suppresses (rc.3)', () => {
     await nextTick();
 
     // MEASURED: the watcher does not run while paused. This is exactly the
-    // class of work Vue took over — and it is not the class of work
+    // class of work Vue took over - and it is not the class of work
     // tryKeepAliveHooks guards.
     expect(runs).toEqual([1]);
 
@@ -99,7 +99,7 @@ describe('what a paused effect scope suppresses (rc.3)', () => {
     scope.stop();
   });
 
-  it('does NOT suppress a plain callback invoked directly — the shape bus.onAfter has', async () => {
+  it('does NOT suppress a plain callback invoked directly - the shape bus.onAfter has', async () => {
     const { effectScope, shallowRef } = await vue();
 
     // Stand-in for the bus's hook array: a callback held outside any scope and
@@ -137,7 +137,7 @@ describe('what a paused effect scope suppresses (rc.3)', () => {
     scope.stop();
   });
 
-  it('a stopped scope still does not stop the callback — only unsubscribing does', async () => {
+  it('a stopped scope still does not stop the callback - only unsubscribing does', async () => {
     const { effectScope } = await vue();
 
     const hooks: Array<() => void> = [];
@@ -150,7 +150,7 @@ describe('what a paused effect scope suppresses (rc.3)', () => {
     for (const h of hooks) h();
 
     // The corollary: teardown is ours too. `onScopeDispose` fires and our
-    // `dispose()` calls the bus unsubscribe — the scope ending is not by
+    // `dispose()` calls the bus unsubscribe - the scope ending is not by
     // itself what detaches the hook.
     expect(calls).toBe(1);
   });

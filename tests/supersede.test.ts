@@ -1,5 +1,5 @@
 /**
- * Tests for the `supersede` plugin — auto-abort the previous in-flight
+ * Tests for the `supersede` plugin - auto-abort the previous in-flight
  * dispatch for the same key, so a rapid second dispatch (search-as-you-type,
  * a filter changing mid-fetch) cancels the stale one instead of racing it.
  */
@@ -31,7 +31,7 @@ describe('supersede plugin', () => {
     expect(r2.ok && r2.value).toBe('ab');
   });
 
-  it('different keys race independently — no cross-cancellation', async () => {
+  it('different keys race independently - no cross-cancellation', async () => {
     const bus = createAsyncCommandBus();
     const aborted: string[] = [];
     bus.use(supersede());
@@ -51,13 +51,13 @@ describe('supersede plugin', () => {
     expect(b.ok && b.value).toBe('email');
   });
 
-  it('distinct actions never collide, even with the same target — actions are never dropped', async () => {
+  it('distinct actions never collide, even with the same target - actions are never dropped', async () => {
     const bus = createAsyncCommandBus();
     bus.use(supersede());
     bus.register('search', async () => { await tick(5); return 'searched'; });
     bus.register('save', async () => { await tick(5); return 'saved'; });
 
-    // Same target ({}) but different actions — commandKey includes the
+    // Same target ({}) but different actions - commandKey includes the
     // action name, so these must never supersede each other.
     const [a, b] = await Promise.all([
       bus.dispatch('search', {}),
@@ -79,14 +79,14 @@ describe('supersede plugin', () => {
 
     const first = bus.dispatch('act', { lane: 'x' });
     await tick(0);
-    const second = bus.dispatch('act', { lane: 'x' }); // same lane → supersedes
+    const second = bus.dispatch('act', { lane: 'x' }); // same lane -> supersedes
     await Promise.all([first, second]);
     expect(aborts).toBe(1);
 
     aborts = 0;
     await Promise.all([
       bus.dispatch('act', { lane: null }),
-      bus.dispatch('act', { lane: null }), // null key → never superseded
+      bus.dispatch('act', { lane: null }), // null key -> never superseded
     ]);
     expect(aborts).toBe(0);
   });
@@ -105,10 +105,10 @@ describe('supersede plugin', () => {
     await tick(0);
     const second = bus.dispatch('ping', {});
     await Promise.all([first, second]);
-    expect(aborts).toBe(0); // 'ping' not in scope → not superseded
+    expect(aborts).toBe(0); // 'ping' not in scope -> not superseded
   });
 
-  it('merges with a caller-supplied signal — either source can abort', async () => {
+  it('merges with a caller-supplied signal - either source can abort', async () => {
     const bus = createAsyncCommandBus();
     let sawAbort = false;
     bus.use(supersede());
@@ -121,7 +121,7 @@ describe('supersede plugin', () => {
     const ctrl = new AbortController();
     const p = bus.dispatch('search', {}, {}, { signal: ctrl.signal });
     await tick(0);
-    ctrl.abort(); // the CALLER's signal fires — not a supersede — and must still propagate
+    ctrl.abort(); // the CALLER's signal fires - not a supersede - and must still propagate
     await p;
     expect(sawAbort).toBe(true);
   });

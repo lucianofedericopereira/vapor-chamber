@@ -1,11 +1,11 @@
 /**
  * Compile-time-only checks for the typed command contract:
- * GlobalCommands augmentation → typed useCommand()/getCommandBus().
+ * GlobalCommands augmentation -> typed useCommand()/getCommandBus().
  *
  * Included in `npm run typecheck` via tsconfig `include`; never executed
  * (the filename deliberately avoids vitest's *.test.ts pattern).
  *
- * NOTE: this file augments GlobalCommands for the whole tsc program — which is
+ * NOTE: this file augments GlobalCommands for the whole tsc program - which is
  * exactly the real-world consumer scenario. Library internals must stay pinned
  * to getCommandBus<CommandMap>() so they compile under augmentation; if a
  * future internal call site forgets that, THIS file is what breaks the build.
@@ -34,13 +34,13 @@ export function _typedComposable() {
   const r = dispatch('cartAdd', { id: 1, name: 'Widget' }, { qty: 2 });
   type _r = Assert<Eq<typeof r, CommandResult<Cart> | Promise<CommandResult<Cart>>>>;
 
-  // @ts-expect-error — action not declared in GlobalCommands
+  // @ts-expect-error - action not declared in GlobalCommands
   dispatch('notACommand', {});
 
-  // @ts-expect-error — wrong target shape for cartAdd
+  // @ts-expect-error - wrong target shape for cartAdd
   dispatch('cartAdd', { wrong: true }, { qty: 2 });
 
-  // @ts-expect-error — wrong payload shape for cartAdd
+  // @ts-expect-error - wrong payload shape for cartAdd
   dispatch('cartAdd', { id: 1, name: 'Widget' }, { quantity: 2 });
 
   register('cartClear', (cmd) => {
@@ -48,7 +48,7 @@ export function _typedComposable() {
     return { count: 0, total: 0 };
   });
 
-  // @ts-expect-error — handler result must be Cart
+  // @ts-expect-error - handler result must be Cart
   register('cartClear', () => 'not a cart');
 }
 
@@ -58,15 +58,15 @@ export function _typedSharedBus() {
   const r = bus.dispatch('cartClear', null);
   type _r = Assert<Eq<typeof r, CommandResult<Cart>>>;
 
-  // @ts-expect-error — unknown action on the typed shared bus
+  // @ts-expect-error - unknown action on the typed shared bus
   bus.dispatch('notACommand', {});
 
-  // Explicit opt-out returns the loose bus — arbitrary strings allowed again.
+  // Explicit opt-out returns the loose bus - arbitrary strings allowed again.
   const loose = getCommandBus<CommandMap>();
   loose.dispatch('anythingGoes', { free: true });
 }
 
-// ── schema-driven contract (defineSchema → CommandsOf → typed schema bus) ────
+// ── schema-driven contract (defineSchema -> CommandsOf -> typed schema bus) ────
 import { defineSchema, createSchemaCommandBus, type CommandsOf } from '../src/schema';
 
 const schema = defineSchema({
@@ -84,10 +84,10 @@ export function _schemaTypedBus() {
   type _ok = Assert<Eq<typeof r extends CommandResult<infer V> ? V : never,
     { orderId: string; totalCents: number }>>;
 
-  // @ts-expect-error — action not in the schema
+  // @ts-expect-error - action not in the schema
   bus.dispatch('unknownAction', {});
 
-  // @ts-expect-error — couponCode must be a string
+  // @ts-expect-error - couponCode must be a string
   bus.dispatch('orderCreate', { items: [], couponCode: 42 });
 
   // CommandsOf produces GlobalCommands-compatible entries

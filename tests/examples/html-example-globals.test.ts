@@ -7,20 +7,20 @@
  * html-example-imports.test.ts). Those fail loudly: a missing named import is a
  * module-resolution error the moment the page loads. A missing GLOBAL is just
  * `undefined`, so the page loads fine and dies later at
- * `VaporChamber.persist is not a function` — only on the code path that touches
+ * `VaporChamber.persist is not a function` - only on the code path that touches
  * it, only at runtime, in a browser nobody runs during CI.
  *
  * And the failure is live, not theoretical: the three IIFE variants do NOT have
  * the same surface. `persist` ships in `full` but is absent from `core` and
  * `elements` (measured). `examples/sprinkled-blade` loads `core` today and only
- * calls `connect`, which core has — but an example gaining one `persist` call,
+ * calls `connect`, which core has - but an example gaining one `persist` call,
  * or switching to the smaller bundle to save bytes, breaks with nothing to
  * catch it. That is exactly the kind of silent-negative this cycle spent its
  * time removing.
  *
  * METHOD: execute the real built IIFE (it assigns `globalThis.VaporChamber`),
  * then check the names the page actually references against it. Not a regex
- * over the bundle text — an earlier hand-check of this did use a regex on the
+ * over the bundle text - an earlier hand-check of this did use a regex on the
  * export tail, which is brittle and can quietly match nothing.
  *
  * HTML comments are stripped first: `pattern-1-blade-cdn.html` documents CDN
@@ -60,10 +60,10 @@ function analyse(file: string): Page | null {
 
   const globals = [...src.matchAll(/VaporChamber\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1]);
   // These pages are served from the REPO ROOT (examples/static-server.mjs), so
-  // a leading `/` means repo root, not filesystem root — resolve it the way the
-  // browser will. `pattern-1-blade-cdn.html` previously used `../../dist/…`,
+  // a leading `/` means repo root, not filesystem root - resolve it the way the
+  // browser will. `pattern-1-blade-cdn.html` previously used `../../dist/...`,
   // which from `examples/` points ABOVE the repo and only worked because
-  // browsers clamp excess `..` to the origin root; it now uses `/dist/…` like
+  // browsers clamp excess `..` to the origin root; it now uses `/dist/...` like
   // its siblings, verified live at http://localhost:3000.
   const src0 = script[1];
   const bundle = src0.startsWith('/') ? join(root, src0.slice(1)) : resolve(dirname(file), src0);

@@ -1,7 +1,7 @@
 /**
  * exo-style declarative directives over a vapor-chamber bus.
  *
- * Five directives, scanned once from static HTML — no framework runtime:
+ * Five directives, scanned once from static HTML - no framework runtime:
  *
  *   v-scope='{"open":false}'   declare reactive LOCAL state (inline JSON)
  *   v-bind-text="cart.count"   reactive textContent via dot-path
@@ -12,22 +12,22 @@
  *                              with optional v-target / v-payload JSON
  *
  * An element that starts hidden must SAY SO in the HTML (`style="display:none"`
- * alongside its `v-show`). The script is a module — it runs after parse, so
+ * alongside its `v-show`). The script is a module - it runs after parse, so
  * anything the server marked visible stays visible until the first effect. The
  * markup owns the initial state; the directive owns every state after it.
  *
- * Discipline: the ONLY write path is v-command — every mutation goes through
+ * Discipline: the ONLY write path is v-command - every mutation goes through
  * a named command handler on the bus. Sections never touch each other's DOM
  * or state; one dispatches into the bus, the other reads reactive state.
  * Local scope state is no exception: a handler writes it through `scopeOf(el)`,
  * never the click site.
  *
  * A binding reads from the nearest v-scope that DECLARED its head key, and
- * from the global busState otherwise — so a subtree can mix local UI state and
+ * from the global busState otherwise - so a subtree can mix local UI state and
  * bus state, and an undeclared key can never be shadowed by a scope.
  *
  * Reactivity is deliberately tiny: a Proxy per reactive object with a flat
- * effect set — any property mutation, at any depth, re-runs all of that
+ * effect set - any property mutation, at any depth, re-runs all of that
  * tree's effects synchronously. No dependency graph, no scheduler. For the
  * handful of bindings a static page carries, brute-force re-run is cheaper
  * than bookkeeping (and is exactly what the exo runtime does).
@@ -39,12 +39,12 @@ type Effect = () => void;
 
 const effectsOf = new WeakMap<object, Set<Effect>>();
 
-/** Raw targets and proxies we've already wrapped — stops double-wrapping an
+/** Raw targets and proxies we've already wrapped - stops double-wrapping an
  *  existing reactive, and stops a cyclic object graph recursing forever. */
 const known = new WeakSet<object>();
 
 /** Plain objects and arrays nest; anything exotic (Date, Map, DOM node, class
- *  instance) is stored as-is — wrapping it would break its internals. */
+ *  instance) is stored as-is - wrapping it would break its internals. */
 function nestable(v: unknown): v is object {
   if (v === null || typeof v !== 'object' || known.has(v)) return false;
   return Array.isArray(v) || Object.getPrototypeOf(v) === Object.prototype;
@@ -52,7 +52,7 @@ function nestable(v: unknown): v is object {
 
 /** Wrap `obj` and every plain object/array under it against ONE effect set, so
  *  a nested write (`cart.count = 7`) re-runs the same effects a top-level write
- *  does — that's what makes the dot-path bindings stay live. */
+ *  does - that's what makes the dot-path bindings stay live. */
 function wrap<T extends object>(obj: T, fx: Set<Effect>): T {
   known.add(obj);
   for (const key of Object.keys(obj)) {
@@ -70,7 +70,7 @@ function wrap<T extends object>(obj: T, fx: Set<Effect>): T {
   return proxy;
 }
 
-/** Wrap an object so any property mutation — at any depth — re-runs its
+/** Wrap an object so any property mutation - at any depth - re-runs its
  *  registered effects. */
 export function reactive<T extends object>(obj: T): T {
   const fx = new Set<Effect>();
@@ -85,10 +85,10 @@ export function addEffect(obj: object, run: Effect): void {
   run();
 }
 
-/** Global bus-managed state — the "atmosphere" sections read from. */
+/** Global bus-managed state - the "atmosphere" sections read from. */
 export const busState = reactive<Record<string, any>>({});
 
-/** Element → its v-scope object. Ancestor walk resolves the nearest scope. */
+/** Element -> its v-scope object. Ancestor walk resolves the nearest scope. */
 const scopeMap = new WeakMap<Element, object>();
 
 /** The reactive object declared by an element's own `v-scope`, if any. */
@@ -100,7 +100,7 @@ export function scopeOf(el: Element): any {
  * The object a binding reads from: the nearest ancestor v-scope that *declares*
  * the path's head key, else the global busState.
  *
- * Declaring a key in `v-scope` is what makes it local — anything a scope does
+ * Declaring a key in `v-scope` is what makes it local - anything a scope does
  * not declare falls through to the atmosphere. So one subtree can mix local UI
  * state (`open`) and bus state (`cartCount`) without either knowing the other
  * exists, and a scope can never accidentally shadow a bus key it never named.
@@ -162,7 +162,7 @@ export function scan(bus: BaseBus, root: ParentNode = document): void {
   wire(bus, root);
 }
 
-/** querySelectorAll, plus the root itself when it matches — a cloned `v-each`
+/** querySelectorAll, plus the root itself when it matches - a cloned `v-each`
  *  row can carry a directive on its outermost element. */
 function pick(root: ParentNode, selector: string): Element[] {
   const found = Array.from(root.querySelectorAll(selector));
@@ -191,7 +191,7 @@ function wire(bus: BaseBus, root: ParentNode): void {
     });
   }
 
-  // v-each="items" — repeat the element's <template> child once per array
+  // v-each="items" - repeat the element's <template> child once per array
   // entry, each clone scoped to its entry (`v-bind-text="name"` reads the item).
   // The list is rebuilt wholesale on any change: for the row counts a static
   // page carries, that beats keeping a keyed diff honest.
@@ -201,7 +201,7 @@ function wire(bus: BaseBus, root: ParentNode): void {
 
     // The row prototype is a <template> child when one is available, else the
     // first element child, detached on wire. Both forms exist because
-    // <template> is not universally safe inside table sections — the HTML spec
+    // <template> is not universally safe inside table sections - the HTML spec
     // allows it, but parsers disagree, and a dropped template silently turns
     // the prototype into a real row. Authoring the row directly always works.
     const tpl = el.querySelector('template') as HTMLTemplateElement | null;

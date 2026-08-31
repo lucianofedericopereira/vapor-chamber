@@ -6,7 +6,7 @@
  * Sends `Cache-Control: no-store` on everything. These pages load `dist/`
  * straight off disk with no cache headers of their own, and a browser that
  * heuristically caches the bundle leaves you testing the library build from
- * ten minutes ago — including a bug you already fixed.
+ * ten minutes ago - including a bug you already fixed.
  *
  *   node examples/static-server.mjs [port]      # default 3000
  */
@@ -92,11 +92,11 @@ createServer((req, res) => {
   const parsed = new URL(req.url || '/', 'http://localhost');
   const url = decodeURIComponent(parsed.pathname);
 
-  // Paginated list — what a `load: "/api/items?page={page}"` row fetches.
+  // Paginated list - what a `load: "/api/items?page={page}"` row fetches.
   if (url === '/api/items') {
     const perPage = Math.max(1, Math.min(50, Number(parsed.searchParams.get('per_page')) || 10));
     const page = Math.max(1, Number(parsed.searchParams.get('page')) || 1);
-    // `sort=price` ascending, `sort=-price` descending — the leading-'-'
+    // `sort=price` ascending, `sort=-price` descending - the leading-'-'
     // convention, so one query param carries both column and direction.
     const rawSort = parsed.searchParams.get('sort') || 'id';
     const desc = rawSort.startsWith('-');
@@ -126,7 +126,7 @@ createServer((req, res) => {
     return;
   }
 
-  // One item — `load: "/api/items/{id}"`, a path param this time.
+  // One item - `load: "/api/items/{id}"`, a path param this time.
   if (url.startsWith('/api/items/')) {
     const item = CATALOG.find((row) => String(row.id) === url.slice('/api/items/'.length));
     res.writeHead(item ? 200 : 404, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
@@ -135,7 +135,7 @@ createServer((req, res) => {
   }
 
   // THE CATCH-ALL. Every URL under the router demo's base returns the same
-  // shell, exactly like Laravel's `Route::get('/admin/{any?}')` — that is what
+  // shell, exactly like Laravel's `Route::get('/admin/{any?}')` - that is what
   // makes a deep link and a hard refresh work on a client-routed path.
   if (url.startsWith('/examples/router-demo')) {
     const file = resolve(repo, 'examples/router-demo/index.html');
@@ -145,7 +145,7 @@ createServer((req, res) => {
   }
 
   if (url === '/api/vc') {
-    // Same-origin here, but allow the cross-origin case too — every header the
+    // Same-origin here, but allow the cross-origin case too - every header the
     // bridge actually sends must be on the preflight allowlist.
     res.setHeader('Access-Control-Allow-Origin', req.headers.origin ?? '*');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
@@ -174,6 +174,6 @@ createServer((req, res) => {
   });
   createReadStream(file).pipe(res);
 }).listen(port, '127.0.0.1', () => {
-  console.log(`Static host for examples → http://localhost:${port}/`);
-  console.log(`  sprinkled-blade → http://localhost:${port}/examples/sprinkled-blade/index.html`);
+  console.log(`Static host for examples -> http://localhost:${port}/`);
+  console.log(`  sprinkled-blade -> http://localhost:${port}/examples/sprinkled-blade/index.html`);
 });

@@ -8,7 +8,7 @@
  * Neither is defensive filler. Scroll-on-commit is what makes a hash link land
  * on its anchor instead of the top of the page, and its `catch` exists because
  * a location hash is user-controlled text that is NOT guaranteed to be a valid
- * CSS selector — `#2024` throws in `querySelector`. `resolve()`'s fallback is
+ * CSS selector - `#2024` throws in `querySelector`. `resolve()`'s fallback is
  * what keeps `<RouterLink :to>` rendering an href during the window before
  * `start()` has loaded a remote table, which is exactly when a server-rendered
  * page is being hydrated.
@@ -56,7 +56,7 @@ describe('scroll on commit', () => {
     await router.push('/list#section');
 
     expect(scrollIntoView).toHaveBeenCalled();
-    // The early `return` after a hit is the point — landing on the anchor and
+    // The early `return` after a hit is the point - landing on the anchor and
     // ALSO jumping to the top would put the user somewhere they did not ask for.
     expect(scrollTo).not.toHaveBeenCalled();
     router.destroy();
@@ -73,7 +73,7 @@ describe('scroll on commit', () => {
   });
 
   it('survives a hash that is not a valid CSS selector', async () => {
-    // `#2024` is a legal URL fragment and an illegal selector — querySelector
+    // `#2024` is a legal URL fragment and an illegal selector - querySelector
     // throws. Without the catch, any such link would break navigation itself,
     // not merely fail to scroll.
     const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
@@ -137,7 +137,7 @@ describe('inline routes payload', () => {
   it('surfaces inline_routes_missing at start(), not at construction', async () => {
     // Two different readers touch the same selector, and only one throws.
     // The constructor calls `readInlinePayload`, which swallows and returns
-    // null — it runs only to learn `base` before the history is built, and a
+    // null - it runs only to learn `base` before the history is built, and a
     // missing element there is not yet fatal. `loadInlineTable` at start() is
     // where the absence actually matters, so that is where it reports.
     const router = createRouter({
@@ -173,7 +173,7 @@ describe('idle preheat', () => {
     });
 
     await router.isReady();
-    // No assertion on WHEN the idle callback fires — that is the browser's
+    // No assertion on WHEN the idle callback fires - that is the browser's
     // call and racing it would make this flaky. What matters is that arming
     // and tearing down the idle queue is exercised and does not throw.
     expect(() => router.destroy()).not.toThrow();
@@ -200,7 +200,7 @@ describe('resolve() before the table is ready', () => {
 
 describe('scroll restoration on back/forward', () => {
   it('does NOT scroll to top on a popstate navigation', () => {
-    // `if (!info.popstate)` — the else. On back/forward the browser restores
+    // `if (!info.popstate)` - the else. On back/forward the browser restores
     // the previous scroll position itself; scrolling to top would fight it.
     // Every other navigation test drives push(), so only the scroll-to-top arm
     // ran and this deliberate no-op was asserted nowhere.

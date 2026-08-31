@@ -9,7 +9,7 @@ import { describe, it, expect } from 'vitest';
 import { createCommandBus, createAsyncCommandBus } from '../src/command-bus';
 import { createWorkflow } from '../src/utilities';
 
-describe('createWorkflow — adversarial compensation', () => {
+describe('createWorkflow - adversarial compensation', () => {
   it('a compensation step that itself fails does not throw and is recorded', async () => {
     const bus = createCommandBus();
     const order: string[] = [];
@@ -23,7 +23,7 @@ describe('createWorkflow — adversarial compensation', () => {
     const wf = createWorkflow([
       { action: 'reserve', compensate: 'releaseReserve' },
       { action: 'charge', compensate: 'releaseCharge' },
-      { action: 'orderCreate' }, // fails → compensate charge then reserve, in reverse
+      { action: 'orderCreate' }, // fails -> compensate charge then reserve, in reverse
     ]);
 
     const result = await wf.run(bus, { id: 1 });
@@ -33,7 +33,7 @@ describe('createWorkflow — adversarial compensation', () => {
     // both compensations attempted in REVERSE order, even though the first threw
     expect(order).toEqual(['reserve', 'charge', 'releaseCharge', 'releaseReserve']);
     expect(result.compensations).toHaveLength(2);
-    expect(result.compensations![0].ok).toBe(false); // releaseCharge failed — captured, not thrown
+    expect(result.compensations![0].ok).toBe(false); // releaseCharge failed - captured, not thrown
     expect(result.compensations![1].ok).toBe(true);  // releaseReserve still ran
   });
 
@@ -47,7 +47,7 @@ describe('createWorkflow — adversarial compensation', () => {
     const result = await wf.run(bus, {});
     expect(result.ok).toBe(false);
     expect(result.failedAt).toBe(0);
-    expect(result.compensations).toEqual([]); // nothing succeeded before it → nothing to undo
+    expect(result.compensations).toEqual([]); // nothing succeeded before it -> nothing to undo
   });
 
   it('only steps with a compensate AND that succeeded are compensated', async () => {
@@ -59,9 +59,9 @@ describe('createWorkflow — adversarial compensation', () => {
     bus.register('undoB', () => { undone.push('undoB'); });
 
     const wf = createWorkflow([
-      { action: 'a' },                       // no compensate → not undone
+      { action: 'a' },                       // no compensate -> not undone
       { action: 'b', compensate: 'undoB' },  // undone
-      { action: 'c', compensate: 'undoC' },  // failed step → its own compensate never registered to run
+      { action: 'c', compensate: 'undoC' },  // failed step -> its own compensate never registered to run
     ]);
     const result = await wf.run(bus, {});
     expect(result.ok).toBe(false);
@@ -90,7 +90,7 @@ describe('createWorkflow — adversarial compensation', () => {
   });
 
   // Item 31: steps ran with MAPPED inputs, compensations with the raw workflow
-  // arguments — so a step that derived a sub-entity was compensated against
+  // arguments - so a step that derived a sub-entity was compensated against
   // the parent (or against nothing at all).
   it('compensates with the mapped target/payload the step actually acted on', async () => {
     const bus = createCommandBus();
@@ -119,7 +119,7 @@ describe('createWorkflow — adversarial compensation', () => {
 
     expect(result.ok).toBe(false);
     const compensation = seen.find((c) => c.action === 'releaseReserve');
-    // Was { cartId: 'cart-7' } / { qty: 3 } — the raw workflow arguments, so
+    // Was { cartId: 'cart-7' } / { qty: 3 } - the raw workflow arguments, so
     // the release addressed the cart instead of the reservation it created.
     expect(compensation?.target).toEqual({ reservationId: 'cart-7-res' });
     expect(compensation?.payload).toEqual({ qty: 3 });
@@ -142,7 +142,7 @@ describe('createWorkflow — adversarial compensation', () => {
     expect(seen).toEqual([{ id: 1 }]); // unchanged: mapped === raw
   });
 
-  it('all steps succeed → ok, no compensations', async () => {
+  it('all steps succeed -> ok, no compensations', async () => {
     const bus = createCommandBus();
     bus.register('a', () => 1);
     bus.register('b', () => 2);

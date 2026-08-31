@@ -1,13 +1,13 @@
 /**
- * Coverage + behavior for the less-exercised useCommandGroup methods —
+ * Coverage + behavior for the less-exercised useCommandGroup methods -
  * query, emit, use(plugin), on(pattern) (both the namespaced-prefix and the
- * '*' → '<ns>*' wildcard branch), and dispose() unhooking everything.
+ * '*' -> '<ns>*' wildcard branch), and dispose() unhooking everything.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { useCommandGroup, setCommandBus, resetCommandBus, getCommandBus } from '../src/chamber';
 import { createCommandBus } from '../src/command-bus';
 
-describe('useCommandGroup — query / emit / use / on / dispose', () => {
+describe('useCommandGroup - query / emit / use / on / dispose', () => {
   beforeEach(() => setCommandBus(createCommandBus()));
   afterEach(() => resetCommandBus());
 
@@ -26,8 +26,8 @@ describe('useCommandGroup — query / emit / use / on / dispose', () => {
     const cart = useCommandGroup('cart');
     const exact: string[] = [];
     const all: string[] = [];
-    cart.on('add', (cmd) => exact.push(cmd.action));   // → 'cartAdd'
-    cart.on('*', (cmd) => all.push(cmd.action));        // → 'cart*'
+    cart.on('add', (cmd) => exact.push(cmd.action));   // -> 'cartAdd'
+    cart.on('*', (cmd) => all.push(cmd.action));        // -> 'cart*'
     cart.register('add', () => {});
     cart.register('remove', () => {});
     cart.dispatch('add', {});
@@ -58,7 +58,7 @@ describe('useCommandGroup — query / emit / use / on / dispose', () => {
     calls.length = 0;
     cart.dispose();
 
-    // handler unregistered → dispatch misses; plugin + listener gone too
+    // handler unregistered -> dispatch misses; plugin + listener gone too
     const r = getCommandBus().dispatch('cartAdd', {});
     expect(r.ok).toBe(false);
     expect(calls).toEqual([]);

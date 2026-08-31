@@ -2,7 +2,7 @@
 /**
  * Supplemental coverage for src/router/dom.ts.
  *
- *  - routableTarget: empty/invalid hrefs — reached through the
+ *  - routableTarget: empty/invalid hrefs - reached through the
  *    non-composedPath ancestor walk, which requires an event without
  *    composedPath (older browsers; simulated by shadowing the method).
  *  - onMouseout with no pending hover timer.
@@ -11,7 +11,7 @@
  *
  * onMouseover's `!preheat` guard is NOT tested here: the mouseover
  * listener is only attached when `preheat` is set, so the guard is
- * unreachable through installDomIntegration — defensive only.
+ * unreachable through installDomIntegration - defensive only.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { installDomIntegration, preheatIdle } from '../../src/router/dom';
@@ -41,7 +41,7 @@ function install(overrides: Partial<Parameters<typeof installDomIntegration>[0]>
 }
 
 /**
- * Click without composedPath — forces the ancestor walk. happy-dom's
+ * Click without composedPath - forces the ancestor walk. happy-dom's
  * own dispatcher requires composedPath, so the captured listener is invoked
  * directly with a synthetic event, the way a legacy browser would deliver it.
  */
@@ -105,7 +105,7 @@ describe('hover preheat teardown', () => {
     const preheat = vi.fn();
     const { listeners } = install({ preheat });
 
-    // No mouseover happened — the timer slot is empty.
+    // No mouseover happened - the timer slot is empty.
     expect(() => listeners.get('mouseout')!(new MouseEvent('mouseout'))).not.toThrow();
     expect(preheat).not.toHaveBeenCalled();
   });

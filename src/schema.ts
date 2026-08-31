@@ -1,18 +1,18 @@
 /**
- * vapor-chamber — Schema layer
+ * vapor-chamber - Schema layer
  *
  * Flat runtime schema. One source of truth for:
  *   - TypeScript types (inferred, no separate CommandMap needed)
  *   - schemaLogger: enriched logging with descriptions and field validation
  *   - toTools(): Anthropic / OpenAI tool definitions
- *   - synthesize(): natural language → dispatch via LLM tool use
+ *   - synthesize(): natural language -> dispatch via LLM tool use
  */
 
 import { createCommandBus, createAsyncCommandBus, } from './command-bus';
 import type { CommandBus, AsyncCommandBus, Plugin, CommandResult, CommandBusOptions, CommandMap, BusErrorCode, BusSeverity, BusEmitter } from './command-bus';
 
 // ---------------------------------------------------------------------------
-// Schema types — flat and explicit
+// Schema types - flat and explicit
 // ---------------------------------------------------------------------------
 
 export type FieldType = 'string' | 'number' | 'boolean' | 'array' | 'object' | 'any';
@@ -24,7 +24,7 @@ export type ActionSchema = {
   payload?: FieldMap;
   result?:  FieldMap;
   /**
-   * Laravel Gate ability name required to run this action — declarative,
+   * Laravel Gate ability name required to run this action - declarative,
    * server-enforced authorization. Purely descriptive on the bus itself
    * (auth must be server-side, so
    * `schemaValidator` never checks it); `scripts/generate-laravel.mjs` reads
@@ -43,7 +43,7 @@ export type ActionSchema = {
 export type BusSchema = Record<string, ActionSchema>;
 
 // ---------------------------------------------------------------------------
-// Type inference — schema → TypeScript types (single source of truth)
+// Type inference - schema -> TypeScript types (single source of truth)
 // ---------------------------------------------------------------------------
 
 type InferField<F extends FieldType> =
@@ -64,18 +64,18 @@ export type InferMap<S extends BusSchema> = {
   }
 };
 
-/** Alias for {@link InferMap} — reads better at GlobalCommands augmentation sites. */
+/** Alias for {@link InferMap} - reads better at GlobalCommands augmentation sites. */
 export type CommandsOf<S extends BusSchema> = InferMap<S>;
 
 /**
- * defineSchema — identity helper that PRESERVES field-type literals, so the
+ * defineSchema - identity helper that PRESERVES field-type literals, so the
  * schema keeps its inference power. Without it, `{ id: 'number' }` widens to
  * `Record<string, string>` and every inferred type collapses to `any`.
  *
  * The complete one-source-of-truth wiring:
  *
  * @example
- * // commands.ts — define once
+ * // commands.ts - define once
  * export const schema = defineSchema({
  *   cartAdd: {
  *     description: 'Add a product to the cart',
@@ -85,29 +85,29 @@ export type CommandsOf<S extends BusSchema> = InferMap<S>;
  *   },
  *   cartCheckout: {
  *     description: 'Charge the cart and place the order',
- *     authorize: 'checkout',           // → Gate::forUser($user)->authorize('checkout', ...)
+ *     authorize: 'checkout',           // -> Gate::forUser($user)->authorize('checkout', ...)
  *     target:  { cartId: 'number' },
  *   },
  * });
  *
- * // → typed schema bus (validation + LLM tools included)
+ * // -> typed schema bus (validation + LLM tools included)
  * const bus = createSchemaCommandBus(schema);
  *
- * // → typed SHARED bus for every useCommand()/getCommandBus() call site
+ * // -> typed SHARED bus for every useCommand()/getCommandBus() call site
  * declare module 'vapor-chamber' {
  *   interface GlobalCommands extends CommandsOf<typeof schema> {}
  * }
  * setCommandBus(bus);
  *
- * // → Laravel stubs + registry: node scripts/generate-laravel.mjs commands.mjs
- * // → agent tools: bus.toTools() / vapor-chamber/mcp
+ * // -> Laravel stubs + registry: node scripts/generate-laravel.mjs commands.mjs
+ * // -> agent tools: bus.toTools() / vapor-chamber/mcp
  */
 export function defineSchema<const S extends BusSchema>(schema: S): S {
   return schema;
 }
 
 // ---------------------------------------------------------------------------
-// Tool format types (minimal — only what's needed externally)
+// Tool format types (minimal - only what's needed externally)
 // ---------------------------------------------------------------------------
 
 export type AnthropicTool = {
@@ -138,7 +138,7 @@ export type OpenAITool = {
 };
 
 // ---------------------------------------------------------------------------
-// Naming — normalize any style to camelCase
+// Naming - normalize any style to camelCase
 // ---------------------------------------------------------------------------
 
 function toCamel(s: string): string {
@@ -166,7 +166,7 @@ function normalizeSchema(schema: BusSchema): BusSchema {
 
 // Required, not optional: both call sites below are inside `if (def.target)` /
 // `if (def.payload)`, so the old `fields?` signature carried a `!fields` guard
-// nothing could reach. Typechecked, not assumed — an unguarded caller fails to
+// nothing could reach. Typechecked, not assumed - an unguarded caller fails to
 // compile rather than silently returning {}.
 function toProps(fields: FieldMap): Record<string, { type: string }> {
   return Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, { type: v }]));
@@ -190,7 +190,7 @@ function compileFields(fields: FieldMap): CompiledChecks {
   return checks;
 }
 
-/** True for a plain object — arrays excluded, matching JSON Schema's `object`. */
+/** True for a plain object - arrays excluded, matching JSON Schema's `object`. */
 function isPlainObject(v: unknown): boolean {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
@@ -205,8 +205,8 @@ function runChecks(checks: CompiledChecks, value: Record<string, any>): string[]
     if (expected === 'array') {
       if (!Array.isArray(v)) errors.push(`${key}: expected array, got ${describe(v)}`);
     } else if (expected === 'object') {
-      // `'object'` used to be presence-checked ONLY — excluded from the array
-      // branch and from the typeof branch alike — so `{ filters: 'object' }`
+      // `'object'` used to be presence-checked ONLY - excluded from the array
+      // branch and from the typeof branch alike - so `{ filters: 'object' }`
       // happily accepted `filters: 42`. Arrays do not satisfy `'object'`, per
       // JSON Schema (and per `InferField`, which maps it to Record<string, any>).
       if (!isPlainObject(v)) errors.push(`${key}: expected object, got ${describe(v)}`);
@@ -217,7 +217,7 @@ function runChecks(checks: CompiledChecks, value: Record<string, any>): string[]
   return errors;
 }
 
-/** typeof, but distinguishing null and arrays — the two that matter here. */
+/** typeof, but distinguishing null and arrays - the two that matter here. */
 function describe(v: unknown): string {
   if (v === null) return 'null';
   if (Array.isArray(v)) return 'array';
@@ -279,8 +279,8 @@ export function schemaValidator(schema: BusSchema): Plugin {
     if (!c) return next();
     // A NON-OBJECT value must fail, not skip. Both guards used to read
     // `typeof x === 'object'`, so a schema declaring required fields let
-    // `target: null` / `42` / `"oops"` — or `payload: "large"` against
-    // `{ qty: 'number' }` — bypass the whole block and reach the handler
+    // `target: null` / `42` / `"oops"` - or `payload: "large"` against
+    // `{ qty: 'number' }` - bypass the whole block and reach the handler
     // malformed: required-ness was enforced only for callers who already
     // passed an object. This gate's most important caller is an LLM (the MCP
     // layer forwards `args?.payload` raw), i.e. exactly the caller class most
@@ -317,7 +317,7 @@ export function schemaLogger(schema: BusSchema, options: SchemaLoggerOptions = {
   const collapsed = options.collapsed ?? true;
   return (cmd, next) => {
     const def = schema[cmd.action];
-    const desc = def?.description ? ` — ${def.description}` : '';
+    const desc = def?.description ? ` - ${def.description}` : '';
     const result = next();
     const fn = collapsed ? console.groupCollapsed : console.group;
     fn(`⚡ ${cmd.action}${desc}`);
@@ -363,16 +363,16 @@ export type LlmAdapter = (
 ) => Promise<ToolCallInput>;
 
 export type SynthesizeOptions = {
-  /** LLM adapter — required. Receives tool definitions + text, returns a ToolCallInput. */
+  /** LLM adapter - required. Receives tool definitions + text, returns a ToolCallInput. */
   adapter?: LlmAdapter;
   /** Passed through to the adapter for provider-specific config. */
   [key: string]: unknown;
 };
 
 /**
- * synthesize — natural language → bus dispatch via LLM tool use.
+ * synthesize - natural language -> bus dispatch via LLM tool use.
  *
- * Requires an `adapter` — a function that takes tool definitions + user text
+ * Requires an `adapter` - a function that takes tool definitions + user text
  * and returns a ToolCallInput. This keeps vapor-chamber vendor-agnostic:
  * bring your own Anthropic SDK, OpenAI SDK, or custom proxy.
  *
@@ -402,7 +402,7 @@ export async function synthesize(
 }
 
 // ---------------------------------------------------------------------------
-// describeSchema — plain-text schema summary for LLM system prompts
+// describeSchema - plain-text schema summary for LLM system prompts
 // ---------------------------------------------------------------------------
 
 export function describeSchema(schema: BusSchema): string {
@@ -425,7 +425,7 @@ export function describeSchema(schema: BusSchema): string {
 }
 
 // ---------------------------------------------------------------------------
-// fromToolCall — dispatch from a pre-existing LLM tool_use block
+// fromToolCall - dispatch from a pre-existing LLM tool_use block
 // ---------------------------------------------------------------------------
 
 export type ToolCallInput = {
@@ -468,24 +468,6 @@ export type AsyncSchemaCommandBus<M extends CommandMap = CommandMap> = AsyncComm
 };
 
 /**
- * Creates a CommandBus typed from a flat runtime schema.
- * No separate CommandMap needed — TypeScript types are inferred automatically.
- *
- * @example
- * const bus = createSchemaCommandBus({
- *   cartAdd: {
- *     description: 'Add item to cart',
- *     target:  { id: 'number' },
- *     payload: { qty: 'number' },
- *     result:  { newTotal: 'number' },
- *   },
- * });
- *
- * bus.dispatch('cartAdd', { id: 1 }, { qty: 2 }); // fully typed
- * const tools = bus.toTools();                     // Anthropic tool definitions
- * const result = await bus.synthesize('add 2 of item 5', { adapter: myAdapter });
- */
-/**
  * Creates an AsyncCommandBus typed from a flat runtime schema.
  * Use this when handlers perform async work (API calls, DB, LLM).
  *
@@ -512,6 +494,29 @@ export function createAsyncSchemaCommandBus<S extends BusSchema>(
   }) as AsyncSchemaCommandBus<InferMap<S>>;
 }
 
+/**
+ * Creates a CommandBus typed from a flat runtime schema.
+ * No separate CommandMap needed - TypeScript types are inferred automatically.
+ *
+ * (This block sat ABOVE `createAsyncSchemaCommandBus`'s own docblock, two
+ * comments stacked with no declaration between them - so an editor attached
+ * only the lower one to that function and this one to nothing, leaving the
+ * sync factory with no tooltip at all.)
+ *
+ * @example
+ * const bus = createSchemaCommandBus({
+ *   cartAdd: {
+ *     description: 'Add item to cart',
+ *     target:  { id: 'number' },
+ *     payload: { qty: 'number' },
+ *     result:  { newTotal: 'number' },
+ *   },
+ * });
+ *
+ * bus.dispatch('cartAdd', { id: 1 }, { qty: 2 }); // fully typed
+ * const tools = bus.toTools();                     // Anthropic tool definitions
+ * const result = await bus.synthesize('add 2 of item 5', { adapter: myAdapter });
+ */
 export function createSchemaCommandBus<S extends BusSchema>(
   schema:   S,
   options?: SchemaCommandBusOptions,
@@ -529,11 +534,11 @@ export function createSchemaCommandBus<S extends BusSchema>(
 }
 
 // ---------------------------------------------------------------------------
-// Error code registry — machine-readable table for LLMs, docs, i18n
+// Error code registry - machine-readable table for LLMs, docs, i18n
 // ---------------------------------------------------------------------------
 
 /**
- * Error code definition — every BusError code has a structured entry.
+ * Error code definition - every BusError code has a structured entry.
  * Useful for generating documentation, i18n lookups, and LLM error handling.
  */
 export type ErrorCodeEntry = {
@@ -542,7 +547,7 @@ export type ErrorCodeEntry = {
   emitter: BusEmitter;
   /**
    * Whether re-dispatching can plausibly succeed (transient failure, e.g.
-   * throttle/timeout) — false for permanent failures (validation, config).
+   * throttle/timeout) - false for permanent failures (validation, config).
    * Must stay in sync with RETRYABLE_CODES in command-bus.ts (asserted in tests).
    */
   retryable: boolean;
@@ -566,7 +571,7 @@ export type ErrorCodeEntry = {
  * @example
  * // Generate an LLM system prompt with all error codes
  * const prompt = ERROR_CODE_REGISTRY
- *   .map(e => `${e.code} (${e.severity}): ${e.message} → Fix: ${e.fix}`)
+ *   .map(e => `${e.code} (${e.severity}): ${e.message} -> Fix: ${e.fix}`)
  *   .join('\n');
  */
 // The pure-call annotation just below lets bundlers tree-shake the whole
@@ -587,7 +592,7 @@ export const ERROR_CODE_REGISTRY: readonly ErrorCodeEntry[] = /* @__PURE__ */ Ob
   // Plugins
   { code: 'VC_PLUGIN_CIRCUIT_OPEN',    severity: 'error', emitter: 'plugin',   retryable: true,  category: 'network',    message: 'Circuit breaker is open due to consecutive failures', fix: 'Wait for resetTimeout to elapse. The circuit will transition to half-open and retry.' },
   { code: 'VC_PLUGIN_RATE_LIMITED',    severity: 'error', emitter: 'plugin',   retryable: true,  category: 'general',    message: 'Rate limit exceeded for this action',               fix: 'Reduce call frequency or increase the max/window in rateLimit() options.' },
-  { code: 'VC_PLUGIN_CACHE_MISS',      severity: 'info',  emitter: 'plugin',   retryable: false, category: 'general',    message: 'Cache miss — handler will be called',               fix: 'This is informational. Increase TTL or warm the cache if needed.' },
+  { code: 'VC_PLUGIN_CACHE_MISS',      severity: 'info',  emitter: 'plugin',   retryable: false, category: 'general',    message: 'Cache miss - handler will be called',               fix: 'This is informational. Increase TTL or warm the cache if needed.' },
   // Workflow
   { code: 'VC_WORKFLOW_STEP_FAILED',       severity: 'error', emitter: 'workflow', retryable: false, category: 'logic',    message: 'A workflow step failed, running compensations',  fix: 'Check the step handler. Compensations run automatically for previous steps.' },
   { code: 'VC_WORKFLOW_COMPENSATE_FAILED', severity: 'error', emitter: 'workflow', retryable: false, category: 'internal', message: 'A compensation step also failed',               fix: 'Manual intervention needed. Check the compensation handler for errors.' },
@@ -619,7 +624,7 @@ export function getErrorEntry(code: BusErrorCode): ErrorCodeEntry | undefined {
  *
  * @example
  * if (result.error instanceof BusError && isRetryableCode(result.error.code) === false) {
- *   // permanent failure — don't re-dispatch
+ *   // permanent failure - don't re-dispatch
  * }
  */
 export function isRetryableCode(code: string): boolean | undefined {
@@ -627,7 +632,7 @@ export function isRetryableCode(code: string): boolean | undefined {
 }
 
 /**
- * Describe all error codes as plain text — useful for LLM system prompts.
+ * Describe all error codes as plain text - useful for LLM system prompts.
  *
  * @example
  * const systemPrompt = `When the bus returns an error, use this table:\n${describeErrorCodes()}`;
@@ -641,13 +646,13 @@ export function describeErrorCodes(): string {
 }
 
 // ---------------------------------------------------------------------------
-// busApiSchema — JSON Schema of the bus API for LLM code generation
+// busApiSchema - JSON Schema of the bus API for LLM code generation
 // ---------------------------------------------------------------------------
 
 /**
  * Generates a JSON Schema-style description of the bus API.
  * Include this in LLM system prompts so the model knows exactly what methods
- * are available and their signatures — reduces hallucinated method calls.
+ * are available and their signatures - reduces hallucinated method calls.
  *
  * @example
  * const schema = busApiSchema();
@@ -661,43 +666,43 @@ export function busApiSchema(): Record<string, {
   return {
     dispatch: {
       description: 'Execute a command through the handler + plugin pipeline. Runs beforeHooks, handler, plugins, afterHooks, listeners.',
-      params: { action: 'string — registered action name', target: 'any — primary data (entity, id, etc.)', payload: '(optional) any — secondary data (quantities, flags, etc.)' },
+      params: { action: 'string - registered action name', target: 'any - primary data (entity, id, etc.)', payload: '(optional) any - secondary data (quantities, flags, etc.)' },
       returns: 'CommandResult { ok: boolean, value?: any, error?: Error }',
     },
     query: {
-      description: 'Read-only dispatch — skips beforeHooks (no mutation gating), otherwise same as dispatch. Use for reads/queries.',
+      description: 'Read-only dispatch - skips beforeHooks (no mutation gating), otherwise same as dispatch. Use for reads/queries.',
       params: { action: 'string', target: 'any', payload: '(optional) any' },
       returns: 'CommandResult { ok: boolean, value?: any, error?: Error }',
     },
     emit: {
-      description: 'Fire a domain event — notifies on() listeners only, no handler required, no return value.',
-      params: { event: 'string — event name', data: '(optional) any — event payload' },
+      description: 'Fire a domain event - notifies on() listeners only, no handler required, no return value.',
+      params: { event: 'string - event name', data: '(optional) any - event payload' },
       returns: 'void',
     },
     register: {
       description: 'Register a handler for an action. Returns an unregister function.',
       params: { action: 'string', handler: '(cmd: Command) => any', options: '(optional) { throttle?: number, undo?: Handler }' },
-      returns: '() => void — call to unregister',
+      returns: '() => void - call to unregister',
     },
     use: {
       description: 'Install a plugin that wraps every dispatch in a middleware chain.',
       params: { plugin: '(cmd, next) => CommandResult', options: '(optional) { priority?: number }' },
-      returns: '() => void — call to remove plugin',
+      returns: '() => void - call to remove plugin',
     },
     onBefore: {
       description: 'Subscribe a hook that fires before every dispatch. Throw to cancel the dispatch.',
       params: { hook: '(cmd: Command) => void' },
-      returns: '() => void — call to unsubscribe',
+      returns: '() => void - call to unsubscribe',
     },
     onAfter: {
       description: 'Subscribe a hook that fires after every dispatch (including failed ones).',
       params: { hook: '(cmd: Command, result: CommandResult) => void' },
-      returns: '() => void — call to unsubscribe',
+      returns: '() => void - call to unsubscribe',
     },
     on: {
       description: 'Subscribe a listener for commands matching a glob pattern (e.g. "cart*", "*").',
-      params: { pattern: 'string — glob pattern (* supported at end)', listener: '(cmd: Command, result: CommandResult) => void' },
-      returns: '() => void — call to unsubscribe',
+      params: { pattern: 'string - glob pattern (* supported at end)', listener: '(cmd: Command, result: CommandResult) => void' },
+      returns: '() => void - call to unsubscribe',
     },
     once: {
       description: 'Like on(), but auto-unsubscribes after the first match.',
@@ -705,7 +710,7 @@ export function busApiSchema(): Record<string, {
       returns: '() => void',
     },
     request: {
-      description: 'Async request/response pattern — dispatches and waits for a respond() handler.',
+      description: 'Async request/response pattern - dispatches and waits for a respond() handler.',
       params: { action: 'string', target: 'any', payload: '(optional) any', options: '(optional) { timeout?: number }' },
       returns: 'Promise<CommandResult>',
     },

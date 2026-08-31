@@ -1,10 +1,10 @@
 /**
- * IIFE bundle smoke test — locks the audience-based variant contract.
+ * IIFE bundle smoke test - locks the audience-based variant contract.
  *
  * Variants reflect deployment shapes (sprinkled JS / widget / kitchen-sink),
  * not Vue feature axes. Drift = silent bloat or silent narrowing, both bad.
  *
- * Variant contents are not under semver before v2.0 — see ROADMAP.md.
+ * Variant contents are not under semver before v2.0 - see ROADMAP.md.
  *
  * Skips automatically when dist/ hasn't been built.
  */
@@ -25,7 +25,7 @@ const haveAll = Object.values(variants).every(f => existsSync(dist(f)));
 
 /**
  * Load a variant exactly the way a <script> tag does: whatever ends up on the
- * global IS the API. No unwrapping — an earlier version of this helper fell
+ * global IS the API. No unwrapping - an earlier version of this helper fell
  * back through `outer.default ?? outer.VaporChamber ?? outer`, which happily
  * passed while the shipped global was really `{ VaporChamber, default }` and
  * every documented call site (`VaporChamber.connect(...)`) threw
@@ -53,7 +53,7 @@ function assertAbsent(ns: Record<string, unknown>, names: string[]) {
   }
 }
 
-describe.skipIf(!haveAll)('IIFE variants — audience-based contracts', () => {
+describe.skipIf(!haveAll)('IIFE variants - audience-based contracts', () => {
   // ---------------------------------------------------------------------
   // The global shape itself, before any per-variant contract: a <script>
   // user calls VaporChamber.connect(), not VaporChamber.VaporChamber.connect
@@ -70,7 +70,7 @@ describe.skipIf(!haveAll)('IIFE variants — audience-based contracts', () => {
   });
 
   // -------------------------------------------------------------------------
-  // CORE — sprinkled JS (Blade / Rails / Django). Bus + HTTP + light plugins.
+  // CORE - sprinkled JS (Blade / Rails / Django). Bus + HTTP + light plugins.
   // -------------------------------------------------------------------------
   describe('core: dispatch over HTTP for sprinkled-JS sites', () => {
     it('exposes bus, createApp, connect, http transport, light plugins', () => {
@@ -97,7 +97,7 @@ describe.skipIf(!haveAll)('IIFE variants — audience-based contracts', () => {
   });
 
   // -------------------------------------------------------------------------
-  // ELEMENTS — embeddable widgets. Core + custom-element surface.
+  // ELEMENTS - embeddable widgets. Core + custom-element surface.
   // -------------------------------------------------------------------------
   describe('elements: embeddable widgets via custom elements', () => {
     it('exposes everything CORE does, plus defineVaporCustomElement + defineWidget + emitDOMEvent', () => {
@@ -124,7 +124,7 @@ describe.skipIf(!haveAll)('IIFE variants — audience-based contracts', () => {
   });
 
   // -------------------------------------------------------------------------
-  // FULL — kitchen sink for SPAs that grew big.
+  // FULL - kitchen sink for SPAs that grew big.
   // -------------------------------------------------------------------------
   describe('full: kitchen sink for SPAs', () => {
     it('exposes the union of all variants plus realtime transports + heavy plugins + Vapor', () => {
@@ -149,7 +149,7 @@ describe.skipIf(!haveAll)('IIFE variants — audience-based contracts', () => {
   });
 
   // -------------------------------------------------------------------------
-  // Size monotonicity — guards against accidental bloat.
+  // Size monotonicity - guards against accidental bloat.
   // -------------------------------------------------------------------------
   it('size order is core ≤ elements ≤ full', () => {
     const sz = (k: keyof typeof variants) => statSync(dist(variants[k])).size;

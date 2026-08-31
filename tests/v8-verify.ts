@@ -1,5 +1,5 @@
 /**
- * Quick V8 optimization verification — runs with node --experimental-strip-types
+ * Quick V8 optimization verification - runs with node --experimental-strip-types
  */
 import { createCommandBus, createAsyncCommandBus } from '../src/command-bus.ts';
 
@@ -13,7 +13,7 @@ const r = bus.dispatch('test', 21);
 assert(r.ok === true, 'dispatch ok');
 assert(r.value === 42, 'dispatch value');
 
-// Test 2: monomorphic results — both fields present
+// Test 2: monomorphic results - both fields present
 assert('error' in r, 'ok result has error field');
 assert(r.error === undefined, 'ok result error is undefined');
 
@@ -53,7 +53,7 @@ const bus3 = createCommandBus();
 bus3.register('x', () => 'val');
 bus3.onBefore(() => { throw new Error('cancel'); });
 const r3 = bus3.dispatch('x', 1);
-assert(r3.ok === false, 'beforeHook cancel → ok=false');
+assert(r3.ok === false, 'beforeHook cancel -> ok=false');
 assert(r3.error?.message === 'cancel', 'beforeHook cancel error message');
 assert('value' in r3, 'cancel result has value field (monomorphic)');
 

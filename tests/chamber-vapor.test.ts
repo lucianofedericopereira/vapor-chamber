@@ -1,5 +1,5 @@
 /**
- * Tests for src/chamber-vapor.ts — Vue 3.6+ Vapor API
+ * Tests for src/chamber-vapor.ts - Vue 3.6+ Vapor API
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createVaporChamberApp, getVaporInteropPlugin, defineVaporCommand, defineVaporCustomElement, defineVaporComponent, defineVaporAsyncComponent, useVaporAsyncCommand } from '../src/chamber-vapor';
@@ -24,7 +24,7 @@ describe('createVaporChamberApp', () => {
   it('error message diagnoses WHY detection failed, not just that it did', () => {
     // The old assertion sat inside a bare try/catch with no `expect.assertions`,
     // so it also passed when nothing threw at all. Assert on the thrown value
-    // directly instead — the failure mode this test exists to catch is the
+    // directly instead - the failure mode this test exists to catch is the
     // message going vague, and it cannot catch that if it can pass vacuously.
     expect(() => createVaporChamberApp({})).toThrow(/Vue 3\.6\+ with Vapor mode required/);
 
@@ -115,10 +115,10 @@ describe('defineVaporCommand', () => {
 });
 
 // ---------------------------------------------------------------------------
-// useCommand — full composable (register / on / emit / dispose)
+// useCommand - full composable (register / on / emit / dispose)
 // ---------------------------------------------------------------------------
 
-describe('useCommand — register/on/emit/dispose', () => {
+describe('useCommand - register/on/emit/dispose', () => {
   it('dispatches commands and tracks loading/error reactively', () => {
     const bus = getCommandBus();
     bus.register('vaporAdd', (cmd) => cmd.target.id);
@@ -271,7 +271,7 @@ describe('defineVaporComponent', () => {
       const result = defineVaporComponent(options);
       expect(spy).toHaveBeenCalled();
       expect(fakeDefine).toHaveBeenCalledTimes(1);
-      // Critical: the wrapper must NOT mutate or strip emits — beta.11 relies on
+      // Critical: the wrapper must NOT mutate or strip emits - beta.11 relies on
       // the declared emits list to keep onXxx listeners out of $attrs.
       expect(fakeDefine.mock.calls[0]![0]).toBe(options);
       expect(fakeDefine.mock.calls[0]![0].emits).toEqual(['select']);
@@ -355,7 +355,7 @@ describe('useVaporAsyncCommand', () => {
   });
 
   it('falls back to result.error ?? null when a failed result carries no error object', async () => {
-    // A non-throwing failure with no `error` field — distinct from the thrown-
+    // A non-throwing failure with no `error` field - distinct from the thrown-
     // error case above, which always produces a truthy result.error.
     const asyncBus = { dispatch: async () => ({ ok: false as const }) };
 

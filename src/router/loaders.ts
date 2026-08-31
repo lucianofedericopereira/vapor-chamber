@@ -1,13 +1,13 @@
 /**
- * vapor-chamber/router — the loader SPI.
+ * vapor-chamber/router - the loader SPI.
  *
  * The router core knows WHEN data loads (on navigation, abort-on-supersede,
  * two-phase committed onto the snapshot; on query-only changes, refetch of
  * affected loaders only). It does NOT know HOW: that's a preset's job,
- * resolved from the route row's `load` string —
+ * resolved from the route row's `load` string -
  *
- *   registered prefix wins:   "rows:products"        → handlers.prefixes['rows:']
- *   otherwise a URL template: "/api/x?page={page}"   → handlers.url
+ *   registered prefix wins:   "rows:products"        -> handlers.prefixes['rows:']
+ *   otherwise a URL template: "/api/x?page={page}"   -> handlers.url
  *
  * In-box preset: `vapor-chamber/router-fetch` (plain JSON backends). Any other
  * backend convention is a preset returning LoaderHandlers. A load with no
@@ -20,7 +20,7 @@ import { decodeQueryParam } from './url';
 
 /**
  * Per-record channel handed to a loader handler, bound to the record and
- * location of this run — so it cannot be misattributed when a navigation and
+ * location of this run - so it cannot be misattributed when a navigation and
  * a query refetch overlap. Optional, and appended last: handlers written
  * against the four-argument signature keep working untouched.
  */
@@ -28,7 +28,7 @@ export type LoaderContext = {
   /**
    * Report a background refresh behind stale data you are returning now.
    * The engine flips `router.isRevalidating` and patches `snapshot.data` when
-   * the promise resolves — dropping it if the location has since changed, and
+   * the promise resolves - dropping it if the location has since changed, and
    * leaving the stale data in place if it rejects. Without this a
    * stale-while-revalidate response would refresh the HTTP cache but never the
    * page.
@@ -37,7 +37,7 @@ export type LoaderContext = {
 };
 
 /** Handles `load` values under a registered prefix
- *  ('rows:products' → ref 'products'). */
+ *  ('rows:products' -> ref 'products'). */
 export type PrefixHandler = (
   ref: string,
   location: RouteLocation,
@@ -46,7 +46,7 @@ export type PrefixHandler = (
   ctx: LoaderContext,
 ) => unknown | Promise<unknown>;
 
-/** Handles plain URL-template `load` values. Receives the RAW template —
+/** Handles plain URL-template `load` values. Receives the RAW template -
  *  interpolation (interpolateLoad) is the handler's choice. */
 export type UrlHandler = (
   template: string,
@@ -63,13 +63,13 @@ export type LoaderHandlers = {
    *  record's loader to refetch. Default (`defaultAffects`): a prefix/row-source
    *  loader depends on its declared query params plus `page`/`per_page`/`sort`;
    *  a URL template depends only on the `{placeholders}` it mentions. Resolved
-   *  once at `createRouter` — override for a preset with different query
+   *  once at `createRouter` - override for a preset with different query
    *  semantics. */
   affects?: (record: TableRecord, changedKeys: readonly string[]) => boolean;
 };
 
 /** Fill `{placeholders}` from path params first, then typed query params
- *  (declared defaults apply — `{page}` is `1` when absent), else ''. */
+ *  (declared defaults apply - `{page}` is `1` when absent), else ''. */
 export function interpolateLoad(
   template: string,
   location: RouteLocation,
@@ -96,13 +96,13 @@ function matchPrefix(template: string, handlers: LoaderHandlers): [string, Prefi
 }
 
 /** Run every loader in a record chain. Results keyed by record name;
- *  failures throw coded RouterErrors (cause attached, abort → 'cancelled'). */
+ *  failures throw coded RouterErrors (cause attached, abort -> 'cancelled'). */
 export async function runLoaders(
   handlers: LoaderHandlers,
   records: readonly TableRecord[],
   location: RouteLocation,
   signal: AbortSignal,
-  /** Wired by createRouter — see LoaderContext.revalidate. */
+  /** Wired by createRouter - see LoaderContext.revalidate. */
   onRevalidate?: (recordName: string, revalidation: Promise<unknown>, location: RouteLocation) => void,
 ): Promise<Map<string, unknown>> {
   const results = new Map<string, unknown>();
@@ -119,7 +119,7 @@ export async function runLoaders(
         } else if (handlers.url) {
           results.set(record.name, await handlers.url(template, location, record, signal, ctx));
         } else {
-          throw routerError('load_failed', `no loader handler for "${template}" — register a preset`, {
+          throw routerError('load_failed', `no loader handler for "${template}" - register a preset`, {
             to: location,
           });
         }
@@ -143,7 +143,7 @@ export function defaultAffects(record: TableRecord, keys: readonly string[], han
   const template = record.load as string;
   if (matchPrefix(template, handlers)) {
     // `Object.hasOwn`, not `in`: query keys come from the URL, and `in` walks
-    // the prototype chain — `?toString=` / `?valueOf=` reported as DECLARED and
+    // the prototype chain - `?toString=` / `?valueOf=` reported as DECLARED and
     // refetched this record's loader for a key it never declared. See `../dict`.
     return keys.some(
       (key) => Object.hasOwn(record.queryDefs, key) || key === 'page' || key === 'per_page' || key === 'sort',

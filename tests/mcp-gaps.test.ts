@@ -4,10 +4,10 @@
  *
  *  - tools/call name gate: `schema[name] === undefined` walked the prototype
  *    chain, so `constructor` / `toString` / `__proto__` / `hasOwnProperty`
- *    passed as "known tools" and reached bus.dispatch — names tools/list never
+ *    passed as "known tools" and reached bus.dispatch - names tools/list never
  *    advertises. Now Object.hasOwn.
  *  - callTool's dispatch-throws arm.
- *  - a malformed envelope with NO id — a notification, which must never be
+ *  - a malformed envelope with NO id - a notification, which must never be
  *    answered even when invalid.
  *  - a non-object payload passing through untouched.
  *  - tool mapping without required fields and without a description.
@@ -46,7 +46,7 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// tools/call name gate — inherited keys (regression)
+// tools/call name gate - inherited keys (regression)
 // ---------------------------------------------------------------------------
 
 describe('tools/call rejects inherited Object.prototype keys', () => {
@@ -69,7 +69,7 @@ describe('tools/call rejects inherited Object.prototype keys', () => {
     expect(dispatch).toHaveBeenCalledTimes(1);
   });
 
-  it('is consistent with tools/list — an unlisted name is uncallable', async () => {
+  it('is consistent with tools/list - an unlisted name is uncallable', async () => {
     const { handle } = makeHandler();
     const listed: any = await handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
     const names = listed.result.tools.map((t: any) => t.name);
@@ -99,7 +99,7 @@ describe('callTool', () => {
   it('refuses a non-object payload instead of dispatching it unattributed', async () => {
     // BEHAVIOR CHANGE. This used to assert the payload was forwarded
     // untouched, on the reasoning that schema validation would reject it
-    // downstream. With a MOCKED dispatch that looked fine — but the mock is
+    // downstream. With a MOCKED dispatch that looked fine - but the mock is
     // exactly what hid the problem: schema.ts only checks payload shape when
     // the action declares payload fields, so against a REAL bus an action
     // without a payload schema dispatched the bare value successfully, with
@@ -114,18 +114,18 @@ describe('callTool', () => {
       expect(reply.result.isError).toBe(true);
       expect(reply.result.content[0].text).toMatch(/payload must be an object/);
     }
-    // Refused at the boundary — the bus is never reached at all.
+    // Refused at the boundary - the bus is never reached at all.
     expect(dispatch).not.toHaveBeenCalled();
   });
 
   it('forwards the payload to the bus untouched', async () => {
     // Was: asserted the payload arrived spread with `__origin: 'agent'`. The
     // marker now travels out-of-band via `_withOrigin`, so the bus receives
-    // exactly what the client sent — by reference, with no allocation and no
+    // exactly what the client sent - by reference, with no allocation and no
     // key injected into user data.
     //
     // NOTE: `dispatch` is MOCKED here, so `meta.origin` does not exist to
-    // assert — a mock cannot show attribution, which is precisely how the
+    // assert - a mock cannot show attribution, which is precisely how the
     // original attribution hole hid. The end-to-end guarantee is pinned
     // against a REAL bus in tests/mcp.test.ts ("never lets an MCP dispatch
     // reach a handler unattributed").
@@ -156,7 +156,7 @@ describe('callTool', () => {
 describe('JSON-RPC envelope', () => {
   it('never answers a malformed NOTIFICATION', async () => {
     const { handle } = makeHandler();
-    // Bad jsonrpc version, no id → a notification: MUST NOT be replied to.
+    // Bad jsonrpc version, no id -> a notification: MUST NOT be replied to.
     expect(await handle({ jsonrpc: '1.0', method: 'tools/list' })).toBeNull();
     expect(await handle({ jsonrpc: '2.0' })).toBeNull(); // no method, no id
   });
@@ -180,7 +180,7 @@ describe('JSON-RPC envelope', () => {
 // ---------------------------------------------------------------------------
 
 describe('busToMcpTools', () => {
-  it("omits `required` when every field is 'any' (67)", () => {
+  it("omits `required` when every field is 'any'", () => {
     const [tool] = busToMcpTools({ ping: { target: { anything: 'any' } } } as unknown as BusSchema);
     expect(tool!.inputSchema.properties.target.required).toBeUndefined();
     expect(tool!.inputSchema.properties.target.properties.anything).toEqual({});
@@ -227,7 +227,7 @@ describe('serveMcpStdio', () => {
 
     // Matched by id, not position: replies are written in COMPLETION order.
     // The parse error is produced synchronously while the ping goes through the
-    // async handler, so the error lands first — legal JSON-RPC (responses may
+    // async handler, so the error lands first - legal JSON-RPC (responses may
     // be out of order; `id` correlates), and worth pinning as actual behaviour.
     const replies = written.map(w => JSON.parse(w));
     expect(replies).toHaveLength(2);
@@ -248,7 +248,7 @@ describe('serveMcpStdio', () => {
     expect(JSON.parse(written[0]!)).toEqual({ jsonrpc: '2.0', id: 2, result: {} });
   });
 
-  it('stop() detaches — later input produces no output', async () => {
+  it('stop() detaches - later input produces no output', async () => {
     const written: string[] = [];
     vi.spyOn(process.stdout, 'write').mockImplementation(((s: string) => { written.push(s); return true; }) as any);
     const stop = serveMcpStdio({ dispatch: vi.fn(), getSchema: () => SCHEMA }, { actions: ['*'] });
@@ -261,7 +261,7 @@ describe('serveMcpStdio', () => {
 });
 
 // ---------------------------------------------------------------------------
-// serveMcpStdio — input-driven limits
+// serveMcpStdio - input-driven limits
 // ---------------------------------------------------------------------------
 
 describe('serveMcpStdio limits', () => {
@@ -317,7 +317,7 @@ describe('serveMcpStdio limits', () => {
     const pause = vi.spyOn(process.stdin, 'pause');
     const resume = vi.spyOn(process.stdin, 'resume');
 
-    // Handlers that park until released — enough to exceed maxInFlight.
+    // Handlers that park until released - enough to exceed maxInFlight.
     const releases: Array<() => void> = [];
     const dispatch = vi.fn(() => new Promise<any>((resolve) => {
       releases.push(() => resolve({ ok: true, value: 1 }));
@@ -367,7 +367,7 @@ describe('serveMcpStdio limits', () => {
     const written = capture();
     let calls = 0;
     // tools/list is the only method here that reads the schema (ping does
-    // not), so the SECOND read is the second tools/list — make that one throw
+    // not), so the SECOND read is the second tools/list - make that one throw
     // and the handler's promise rejects.
     const getSchema = () => {
       if (++calls === 2) throw new Error('schema source died');

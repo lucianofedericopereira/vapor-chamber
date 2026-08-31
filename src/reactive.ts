@@ -1,25 +1,25 @@
 /**
- * vapor-chamber/reactive — opt-in DEEP reactivity companion.
+ * vapor-chamber/reactive - opt-in DEEP reactivity companion.
  *
  * The core wires `signal()` to Vue's `shallowRef()` because the library replaces
  * state values wholesale (`state.value = handler(...)`) and never mutates nested
  * fields in place. Shallow tracking is therefore semantically identical for the
  * command-driven flow while avoiding the deep reactive Proxy (`toReactive()`)
- * that `ref()` wraps around object/array values — measured ~3.4× faster on the
+ * that `ref()` wraps around object/array values - measured ~3.4x faster on the
  * `useCommandState` array path (see docs/performance.md, tests/signal-shallow-ab).
  *
- * Import THIS module only when you genuinely need nested reactivity — e.g. a
+ * Import THIS module only when you genuinely need nested reactivity - e.g. a
  * state object two-way bound with `v-model` whose fields you mutate in place
  * (`state.value.name = 'x'`) rather than through dispatched commands. That path
  * bypasses the command bus, so reach for it deliberately; for the normal
  * command-driven flow the shallow default is both correct and faster.
  *
- * Nothing here is pulled into the core bundle — it lives behind the
+ * Nothing here is pulled into the core bundle - it lives behind the
  * `vapor-chamber/reactive` subpath so the default install stays lean.
  *
  * @example
  * import { useDeepCommandState } from 'vapor-chamber/reactive';
- * // state.value.profile.name is deeply reactive — direct mutation triggers Vue:
+ * // state.value.profile.name is deeply reactive - direct mutation triggers Vue:
  * const { state } = useDeepCommandState(
  *   { profile: { name: '' } },
  *   { rename: (s, cmd) => ({ ...s, profile: { ...s.profile, name: cmd.target } }) },
@@ -41,7 +41,7 @@ import {
 } from './chamber';
 
 /**
- * deepSignal — a deeply-reactive `Signal<T>` backed by Vue's `ref()`.
+ * deepSignal - a deeply-reactive `Signal<T>` backed by Vue's `ref()`.
  *
  * Unlike the core `signal()` (shallow), nested-property mutation of the value
  * triggers reactivity. Requires Vue to be present and detected; if Vue is not
@@ -57,7 +57,7 @@ export function deepSignal<T>(initial: T): Signal<T> {
 export type { UseCommandStateOptions };
 
 /**
- * useDeepCommandState — `useCommandState` with deep (Proxy-backed) reactivity.
+ * useDeepCommandState - `useCommandState` with deep (Proxy-backed) reactivity.
  *
  * Identical dispatch/coalesce/cleanup semantics to `useCommandState`; the only
  * difference is the returned `state` is a deep `ref()`, so BOTH command-driven

@@ -1,5 +1,5 @@
 /**
- * Tests for createEchoBridge — Laravel Echo / Reverb realtime → bus. Uses a
+ * Tests for createEchoBridge - Laravel Echo / Reverb realtime -> bus. Uses a
  * mock Echo that mirrors the laravel-echo API (channel/private/join + listen +
  * here/joining/leaving + leave), so no laravel-echo dependency is needed.
  */

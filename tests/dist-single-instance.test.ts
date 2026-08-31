@@ -4,13 +4,13 @@
  * `chamber.ts` keeps the Vue registry in module-level state: `configureVue()`
  * writes it, `isVaporAvailable()` / `getVaporAppFn()` read it. Two copies of
  * that module means writes land in one and reads come from the other, and the
- * symptom is the worst kind — `createVaporChamberApp()` throwing
+ * symptom is the worst kind - `createVaporChamberApp()` throwing
  * "No Vue detected" on a page that just called `configureVue()` successfully.
  *
  * This happened. `src/vue.ts` was briefly built in its own Vite pass (to keep
  * an optional peer out of the main build's `external` list). A separate pass
  * cannot share the main pass's chunks, so it inlined a private copy of
- * chamber — `dist/vue.js` was 41 KB instead of 1 KB — and any app importing
+ * chamber - `dist/vue.js` was 41 KB instead of 1 KB - and any app importing
  * from both the root and the subpath got two registries.
  *
  * Unit tests cannot catch this: vitest resolves `src/`, where there is only
@@ -38,7 +38,7 @@ function distFiles(dir: string): string[] {
   });
 }
 
-describe.skipIf(!haveDist)('dist — one chamber instance across all entries', () => {
+describe.skipIf(!haveDist)('dist - one chamber instance across all entries', () => {
   it('chamber.ts is emitted exactly once in the ESM output', () => {
     const holders = distFiles(distDir)
       .filter((f) => readFileSync(f, 'utf8').includes(CHAMBER_FINGERPRINT))
@@ -46,7 +46,7 @@ describe.skipIf(!haveDist)('dist — one chamber instance across all entries', (
 
     expect(
       holders,
-      `chamber.ts must live in exactly one chunk — found ${holders.length}. ` +
+      `chamber.ts must live in exactly one chunk - found ${holders.length}. ` +
       'More than one means entries get separate Vue registries: configureVue() ' +
       'writes to one, isVaporAvailable() reads the other.',
     ).toHaveLength(1);
@@ -81,7 +81,7 @@ describe.skipIf(!haveDist)('dist — one chamber instance across all entries', (
     // It wires two things and re-exports; ~1 KB. The regression made it 41 KB.
     expect(
       bytes,
-      `dist/vue.js is ${bytes} B — an order of magnitude over a re-export shim, ` +
+      `dist/vue.js is ${bytes} B - an order of magnitude over a re-export shim, ` +
       'which is what inlining chamber.ts looks like.',
     ).toBeLessThan(8_000);
   });

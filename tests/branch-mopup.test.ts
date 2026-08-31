@@ -1,5 +1,5 @@
 /**
- * Tier-1 branch mop-up — cheap, pure-logic branches reachable with plain calls
+ * Tier-1 branch mop-up - cheap, pure-logic branches reachable with plain calls
  * (no fetch/WS/storage mocks). Targets the leftover ternary/condition sides in
  * retryDelay, buildFullUrl, validateFields, and the Standard Schema validator.
  */
@@ -13,7 +13,7 @@ import { validateSchemasAsync, type StandardSchemaV1 } from '../src/plugins-sche
 afterEach(() => { vi.useRealTimers(); });
 
 // ── plugins-io: retryDelay 'linear' + missing-error fallback ──────────────────
-describe('branch mop-up — retry plugin', () => {
+describe('branch mop-up - retry plugin', () => {
   it("retries with the 'linear' backoff strategy", async () => {
     vi.useFakeTimers();
     const bus = createAsyncCommandBus();
@@ -26,7 +26,7 @@ describe('branch mop-up — retry plugin', () => {
     const result = await promise;
 
     expect(result.ok).toBe(false);
-    expect(calls).toBe(2); // retried once → the linear delay ran between attempts
+    expect(calls).toBe(2); // retried once -> the linear delay ran between attempts
   });
 
   it('falls back to a generic error when a failed result carries no error field', async () => {
@@ -43,7 +43,7 @@ describe('branch mop-up — retry plugin', () => {
 });
 
 // ── http-query: buildFullUrl baseURL join branches ────────────────────────────
-describe('branch mop-up — buildFullUrl', () => {
+describe('branch mop-up - buildFullUrl', () => {
   it('strips a trailing slash on baseURL and adds a missing leading slash on the path', () => {
     expect(buildFullUrl('users', 'http://api.test/')).toBe('http://api.test/users'); // trailing-slash strip
     expect(buildFullUrl('/users', 'http://api.test')).toBe('http://api.test/users'); // path already absolute
@@ -56,7 +56,7 @@ describe('branch mop-up — buildFullUrl', () => {
 });
 
 // ── schema: validateFields 'any' + 'array' branches via schemaValidator ───────
-describe('branch mop-up — schemaValidator field validation', () => {
+describe('branch mop-up - schemaValidator field validation', () => {
   it("skips 'any' fields and flags an 'array' field given a non-array", () => {
     const bus = createCommandBus();
     bus.register('save', () => 'ok');
@@ -80,14 +80,14 @@ function failingObjectPath(): StandardSchemaV1 {
     '~standard': {
       version: 1,
       vendor: 'fake',
-      // Path mixes an object segment ({ key }) and a primitive — covers both
+      // Path mixes an object segment ({ key }) and a primitive - covers both
       // sides of describe()'s path mapping (plugins-schema.ts:99).
       validate: () => ({ issues: [{ message: 'bad', path: [{ key: 'field' }, 'sub'] }] }),
     },
   };
 }
 
-describe('branch mop-up — Standard Schema validator', () => {
+describe('branch mop-up - Standard Schema validator', () => {
   it("pickValue handles field: 'payload' and field: 'both'", async () => {
     const busP = createAsyncCommandBus();
     busP.register('a', async () => 'ok');

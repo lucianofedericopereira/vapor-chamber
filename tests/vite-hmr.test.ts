@@ -1,5 +1,5 @@
 /**
- * Tests for src/vite-hmr.ts — Vite HMR plugin
+ * Tests for src/vite-hmr.ts - Vite HMR plugin
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { vaporChamberHMR } from '../src/vite-hmr';
@@ -48,7 +48,7 @@ describe('vaporChamberHMR', () => {
     // boolean `true` to it when the first app is created, so a namespace left
     // there is replaced on mount (tests/vue-detection-global-clobber.test.ts).
     // This also keeps the key duplicated in vite-hmr.ts in sync with
-    // chamber.ts §VUE_GLOBAL_KEY — the plugin cannot import it.
+    // chamber.ts §VUE_GLOBAL_KEY - the plugin cannot import it.
     expect(code).not.toContain('globalThis.__VUE__ =');
   });
 
@@ -125,7 +125,7 @@ describe('vaporChamberHMR', () => {
     });
 
     // Item 22: three loose guards, one file.
-    it("declares apply: 'serve' — the guard NODE_ENV cannot fool", () => {
+    it("declares apply: 'serve' - the guard NODE_ENV cannot fool", () => {
       // `--mode staging` or a programmatic build may never set NODE_ENV, and
       // if that check misses, the shim + virtual module + globalThis
       // bus-persistence keys ship in the production bundle. Vite's own
@@ -150,7 +150,7 @@ describe('vaporChamberHMR', () => {
 
     it('matches an import, not a passing mention of the package name', () => {
       // The predicate was `code.includes('vapor-chamber')`, which hits
-      // comments and string literals — while the comment above it claimed
+      // comments and string literals - while the comment above it claimed
       // "only the app entry".
       expect(
         plugin.transform("// TODO: migrate this to vapor-chamber\nexport const x = 1;", '/src/notes.ts'),
@@ -159,7 +159,7 @@ describe('vaporChamberHMR', () => {
         plugin.transform("const docsUrl = 'https://example.test/vapor-chamber';", '/src/links.ts'),
       ).toBeUndefined();
 
-      // …and still matches the real shapes.
+      // ...and still matches the real shapes.
       expect(plugin.transform("import 'vapor-chamber';", '/src/a.ts')?.code).toContain('virtual:');
       expect(
         plugin.transform("import { createCommandBus } from 'vapor-chamber';", '/src/b.ts')?.code,
@@ -201,12 +201,12 @@ describe('vaporChamberHMR', () => {
   // ---------------------------------------------------------------------------
   // beta.14 HMR dedup guard (dedupe HMR parent reloads + restore hmr context on
   // errors). This is the only new shim *logic* the beta.14 alignment introduced,
-  // so it gets executable coverage — not just substring checks. The generated
+  // so it gets executable coverage - not just substring checks. The generated
   // shim is reconstructed into a runnable function with injected dependencies so
   // the real dispose/accept callbacks run against a fake import.meta.hot.
   // ---------------------------------------------------------------------------
   describe('beta.14 dispose dedup guard', () => {
-    // Structural assertions — lock in that the generation still emits the guard,
+    // Structural assertions - lock in that the generation still emits the guard,
     // the accept-side reset, and the try/catch. These would have caught a silent
     // removal of any of the three pieces (the old tests did not).
     it('generates the per-cycle dedup guard, the accept-side reset, and a try/catch', async () => {
@@ -283,7 +283,7 @@ describe('vaporChamberHMR', () => {
       expect(getCommandBus).toHaveBeenCalledTimes(1);
       expect(hotData.__vc_disposed).toBe(true);
 
-      // Second dispose in the same cycle is a no-op — the guard short-circuits.
+      // Second dispose in the same cycle is a no-op - the guard short-circuits.
       captured.dispose!(hotData);
       expect(getCommandBus).toHaveBeenCalledTimes(1);
     });

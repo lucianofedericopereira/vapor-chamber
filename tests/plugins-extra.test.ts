@@ -108,7 +108,7 @@ describe('cache', () => {
   it('does not hang on a negative maxSize, and caches nothing', () => {
     // Regression: `maxSize` was unvalidated. `evictIfNeeded` looped
     // `while (store.size > maxSize)` and only deleted when
-    // `store.keys().next().value !== undefined` — so with a negative bound the
+    // `store.keys().next().value !== undefined` - so with a negative bound the
     // condition stayed true against an EMPTY store and the guard deleted
     // nothing: an infinite loop on the first eviction, from one bad option.
     // Measured before the fix: 500k iterations with store.size 0, no progress.
@@ -118,12 +118,12 @@ describe('cache', () => {
     const c = cache({ ttl: 60_000, maxSize: -1 });
     bus.use(c);
 
-    // If this hangs, the suite times out rather than failing — which is the
+    // If this hangs, the suite times out rather than failing - which is the
     // point: the old form could not fail fast.
     bus.query('getUser', { id: 1 });
     bus.query('getUser', { id: 2 });
 
-    expect(c.size()).toBe(0); // clamped to 0 — a cache that stores nothing
+    expect(c.size()).toBe(0); // clamped to 0 - a cache that stores nothing
     expect(calls).toBe(2); // ...so every query really ran
   });
 
@@ -237,14 +237,14 @@ describe('circuitBreaker', () => {
 
     // After resetTimeout=0, next call enters half-open
     shouldFail = false;
-    bus.dispatch('op', {}); // half-open → success → closed
+    bus.dispatch('op', {}); // half-open -> success -> closed
 
     expect(onClose).toHaveBeenCalledWith('op');
     expect(cb.getState('op')).toBe('closed');
   });
 
   it('recovers from half-open with no onClose callback configured', () => {
-    // `if (onClose)` — the false arm. The test above always supplies the
+    // `if (onClose)` - the false arm. The test above always supplies the
     // callback, so the optional-callback path (the default configuration) was
     // never exercised: a breaker with no observer must still close.
     const bus = createCommandBus();
@@ -258,7 +258,7 @@ describe('circuitBreaker', () => {
     expect(cb.getState('op')).toBe('open');
 
     shouldFail = false;
-    const result = bus.dispatch('op', {}); // half-open → success → closed
+    const result = bus.dispatch('op', {}); // half-open -> success -> closed
 
     expect(result.ok).toBe(true);
     expect(cb.getState('op')).toBe('closed');
@@ -273,7 +273,7 @@ describe('circuitBreaker', () => {
 
     bus.dispatch('op', {});
     const r = bus.dispatch('safe', {});
-    expect(r.ok).toBe(true); // circuit bypassed — 'safe' not in actions list
+    expect(r.ok).toBe(true); // circuit bypassed - 'safe' not in actions list
     expect(cb.getState('op')).toBe('open');
   });
 });
@@ -430,10 +430,10 @@ describe('metrics', () => {
 });
 
 // ---------------------------------------------------------------------------
-// cache — custom key, async results, and invalidation edges
+// cache - custom key, async results, and invalidation edges
 // ---------------------------------------------------------------------------
 
-describe('cache — key derivation and invalidation', () => {
+describe('cache - key derivation and invalidation', () => {
   it('uses a supplied key() instead of commandKey', () => {
     const bus = createCommandBus();
     const handler = vi.fn((cmd: any) => cmd.target.id);
@@ -523,7 +523,7 @@ describe('cache — key derivation and invalidation', () => {
   });
 });
 
-describe('cache — async bus', () => {
+describe('cache - async bus', () => {
   it('caches a resolved async result and serves the next call from it', async () => {
     const bus = createAsyncCommandBus();
     const handler = vi.fn(async (cmd: any) => cmd.target.id * 2);

@@ -44,7 +44,7 @@ describe('interpolateLoad', () => {
   });
 });
 
-describe('runLoaders — the SPI', () => {
+describe('runLoaders - the SPI', () => {
   it('dispatches by registered prefix, ref stripped', async () => {
     const handler = vi.fn((ref: string) => ({ from: ref }));
     const results = await runLoaders(
@@ -70,7 +70,7 @@ describe('runLoaders — the SPI', () => {
     expect(results.get('orders')).toEqual({ hit: '/api/vc/orders?page={page}' });
   });
 
-  it('no matching handler → coded load_failed', async () => {
+  it('no matching handler -> coded load_failed', async () => {
     await expect(runLoaders({}, [orders], locationWith({}), new AbortController().signal)).rejects.toMatchObject({
       code: 'load_failed',
     });
@@ -111,7 +111,7 @@ describe('loadChain precompute', () => {
   });
 });
 
-describe('interpolateLoad — array query values', () => {
+describe('interpolateLoad - array query values', () => {
   it('joins an array param with commas, each part encoded', () => {
     // type 'array' is what makes a repeated key decode to a list; the template
     // then gets one comma-joined value rather than the last occurrence.

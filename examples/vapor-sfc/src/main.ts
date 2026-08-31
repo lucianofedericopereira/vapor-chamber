@@ -1,31 +1,25 @@
-// configureVue() is required, not optional. In a production build neither
-// detection channel exists: vaporChamberHMR is apply:'serve' so nothing primes
-// the sync slot, and the async `import('vue')` is an unresolvable bare
-// specifier. Without this the built page threw while Vapor sat bundled in it.
-// Pinned by tests/vapor-sfc-prod-detection.test.ts.
+// Vapor wiring: none. That is the point of the `vapor-chamber/vapor` entry.
 //
-// Named imports, not `import * as Vue` — a namespace object forces the bundler
-// to retain every export (299 KB vs 76 KB). Pass only what the app uses;
-// unsupplied entries stay null in the registry.
-import {
-  ref, shallowRef, getCurrentScope, getCurrentInstance,
-  onScopeDispose, onActivated, onDeactivated,
-  createVaporApp,
-} from 'vue';
-// `configureVue` from the /vue subpath, not the root: same function, but
-// importing it also wires Vue's tracking primitives at build time. Without that
-// `untracked()` silently degrades to a pass-through once this app is built, and
-// the dev server warns about exactly this. The Vapor APIs below still go
-// through configureVue, because /vue is the Vue 3.5-safe surface and does not
-// carry them.
-import { configureVue } from 'vapor-chamber/vue';
-import { createVaporChamberApp } from 'vapor-chamber';
+// It statically imports Vue's Vapor APIs, so the bundler resolves them at build
+// time and they reach the library's registry the moment the module evaluates.
+// No configureVue() call, no list of names to keep in sync, and no dependency on
+// the runtime probe - which is the part that used to break.
+//
+// WHAT THIS REPLACES. The package root reaches Vue through a bare dynamic
+// `import()`, because the root must also work with no Vue in the tree. That
+// resolves under the dev server and CANNOT resolve in a production bundle, so
+// this page previously threw "Vue 3.6+ with Vapor mode required. No Vue
+// detected." while Vapor sat bundled inside the very same file - dev fine,
+// production blank. Pinned by tests/vapor-sfc-prod-detection.test.ts.
+//
+// The interim fix was an explicit configureVue({ createVaporApp }) here. That
+// still works and is still right for anyone who wants it (and remains the only
+// option on a no-build page, where nothing can be imported statically at all).
+// This entry just removes the step for consumers who have a bundler.
+//
+// The bus itself is framework-agnostic, so it keeps coming from the root - see
+// src/vapor.ts §"WHAT IT DOES NOT RE-EXPORT".
+import { createVaporChamberApp } from 'vapor-chamber/vapor';
 import App from './App.vue';
-
-configureVue({
-  ref, shallowRef, getCurrentScope, getCurrentInstance,
-  onScopeDispose, onActivated, onDeactivated,
-  createVaporApp,
-});
 
 createVaporChamberApp(App).mount('#app');

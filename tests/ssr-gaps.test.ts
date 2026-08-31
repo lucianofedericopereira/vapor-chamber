@@ -1,5 +1,5 @@
 /**
- * Supplemental coverage for src/ssr.ts — rehydrate on the wrong bus type, and
+ * Supplemental coverage for src/ssr.ts - rehydrate on the wrong bus type, and
  * rehydrateAsync in full (it had no direct tests: statements 299-305 were all
  * red).
  *
@@ -19,7 +19,7 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-describe('rehydrate — async bus misuse', () => {
+describe('rehydrate - async bus misuse', () => {
   it('reports each pending dispatch as a failure and warns once', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createAsyncCommandBus();
@@ -35,7 +35,7 @@ describe('rehydrate — async bus misuse', () => {
       expect(r.ok).toBe(false);
       expect(r.error?.message).toContain('rehydrateAsync');
     }
-    // One-shot warning — the second pending dispatch must not warn again.
+    // One-shot warning - the second pending dispatch must not warn again.
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0]![0]).toContain('rehydrateAsync');
   });

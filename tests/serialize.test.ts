@@ -1,5 +1,5 @@
 /**
- * Tests for the `serialize` plugin — per-key sequential processing of async
+ * Tests for the `serialize` plugin - per-key sequential processing of async
  * commands. Closes the one genuine core-feature gap: ordered serialization of
  * distinct same-key commands (as opposed to the in-flight dedup the bus already
  * has, which collapses *identical* requests).
@@ -11,7 +11,7 @@ import { serialize } from '../src/plugins-extra';
 const tick = (ms = 0) => new Promise<void>((r) => setTimeout(r, ms));
 
 /**
- * N-party barrier — `arrive()` returns a promise that resolves only once N
+ * N-party barrier - `arrive()` returns a promise that resolves only once N
  * callers have arrived. Makes concurrency/race tests DETERMINISTIC instead of
  * relying on timer windows: if commands that should run concurrently are instead
  * serialized, the barrier never reaches N and the test deadlocks (fails by
@@ -42,7 +42,7 @@ function stubWebLocks() {
   return calls;
 }
 
-// A read-modify-write handler with a yield in the middle — the classic race,
+// A read-modify-write handler with a yield in the middle - the classic race,
 // guarded by serialize keyed on target.id. (The without-serialize control lives
 // in its own test below, using a deterministic barrier instead of a timer.)
 function makeDepositBus() {
@@ -52,7 +52,7 @@ function makeDepositBus() {
   bus.register('deposit', async (cmd) => {
     const { id, amount } = cmd.target as { id: string; amount: number };
     const cur = accounts[id];   // READ
-    await tick(5);              // yield — a concurrent dispatch would read the same `cur`
+    await tick(5);              // yield - a concurrent dispatch would read the same `cur`
     accounts[id] = cur + amount; // WRITE
     return accounts[id];
   });
@@ -60,7 +60,7 @@ function makeDepositBus() {
 }
 
 describe('serialize plugin', () => {
-  it('serializes same-key commands — no lost updates', async () => {
+  it('serializes same-key commands - no lost updates', async () => {
     const { bus, accounts } = makeDepositBus();
     await Promise.all([
       bus.dispatch('deposit', { id: 'a', amount: 1 }),
@@ -74,7 +74,7 @@ describe('serialize plugin', () => {
     const bus = createAsyncCommandBus();
     const accounts: Record<string, number> = { a: 0 };
     // Barrier: all three READ, then wait until all three have read before any
-    // WRITE — deterministically forces the lost-update race (no timer reliance).
+    // WRITE - deterministically forces the lost-update race (no timer reliance).
     const arrive = barrier(3);
     bus.register('deposit', async (cmd) => {
       const { id, amount } = cmd.target as { id: string; amount: number };
@@ -88,7 +88,7 @@ describe('serialize plugin', () => {
       bus.dispatch('deposit', { id: 'a', amount: 1 }),
       bus.dispatch('deposit', { id: 'a', amount: 1 }),
     ]);
-    expect(accounts.a).toBe(1); // lost updates — proves the gap is real
+    expect(accounts.a).toBe(1); // lost updates - proves the gap is real
   });
 
   it('different keys run concurrently (no false serialization)', async () => {
@@ -96,7 +96,7 @@ describe('serialize plugin', () => {
     const done: string[] = [];
     bus.use(serialize({ key: (cmd) => (cmd.target as any).id }));
     // Both must arrive before either finishes. If different keys were wrongly
-    // serialized, the second never starts and this deadlocks (fails) — so a pass
+    // serialized, the second never starts and this deadlocks (fails) - so a pass
     // deterministically proves concurrency.
     const arrive = barrier(2);
     bus.register('work', async (cmd) => {
@@ -129,14 +129,14 @@ describe('serialize plugin', () => {
       bus.dispatch('step', {}),
       bus.dispatch('step', {}),
     ]);
-    // the lane drained past the failure — later commands still ran, in order
+    // the lane drained past the failure - later commands still ran, in order
     expect(completed).toEqual([2, 3]);
   });
 
   it('key() returning null skips serialization for that command', async () => {
     const bus = createAsyncCommandBus();
     const done: string[] = [];
-    bus.use(serialize({ key: () => null })); // null ⇒ never serialized
+    bus.use(serialize({ key: () => null })); // null => never serialized
     const arrive = barrier(2);
     bus.register('work', async (cmd) => {
       await arrive(); // both run concurrently or this deadlocks
@@ -150,7 +150,7 @@ describe('serialize plugin', () => {
   it('actions filter scopes serialization to matching actions only', async () => {
     const bus = createAsyncCommandBus();
     const done: string[] = [];
-    // only 'locked*' is serialized; 'free' is not → 'free' dispatches run concurrently
+    // only 'locked*' is serialized; 'free' is not -> 'free' dispatches run concurrently
     bus.use(serialize({ key: () => 'shared', actions: ['locked*'] }));
     const arrive = barrier(2);
     bus.register('free', async (cmd) => {
@@ -165,7 +165,7 @@ describe('serialize plugin', () => {
   it('default key serializes each action against itself', async () => {
     const bus = createAsyncCommandBus();
     const order: string[] = [];
-    bus.use(serialize()); // no key → defaults to cmd.action
+    bus.use(serialize()); // no key -> defaults to cmd.action
     bus.register('save', async (cmd) => {
       order.push(`start:${cmd.target}`);
       await tick(8);
@@ -173,7 +173,7 @@ describe('serialize plugin', () => {
       return cmd.target;
     });
     await Promise.all([bus.dispatch('save', 1), bus.dispatch('save', 2)]);
-    // same action → serialized: first fully completes before second starts
+    // same action -> serialized: first fully completes before second starts
     expect(order).toEqual(['start:1', 'end:1', 'start:2', 'end:2']);
   });
 

@@ -9,7 +9,7 @@ function assert(cond: boolean, msg: string) { if (cond) { pass++; } else { fail+
 // Test 1: No handler produces BusError with code
 const bus = createCommandBus();
 const r = bus.dispatch('missing', {});
-assert(r.ok === false, 'missing handler → ok=false');
+assert(r.ok === false, 'missing handler -> ok=false');
 assert(r.error instanceof BusError, 'error is BusError');
 const be = r.error as BusError;
 assert(be.code === 'VC_CORE_NO_HANDLER', 'code is VC_CORE_NO_HANDLER');
@@ -22,7 +22,7 @@ const bus2 = createCommandBus();
 bus2.register('t', () => 'ok', { throttle: 1000 });
 bus2.dispatch('t', 1); // first call succeeds
 const r2 = bus2.dispatch('t', 1); // second call should be throttled
-assert(r2.ok === false, 'throttled → ok=false');
+assert(r2.ok === false, 'throttled -> ok=false');
 // The handler throws BusError which gets caught by tryCatchHandler
 assert(r2.error instanceof BusError, 'throttle error is BusError');
 const te = r2.error as BusError;
@@ -33,7 +33,7 @@ assert(te.context?.retryIn !== undefined, 'context has retryIn');
 const bus3 = createCommandBus();
 bus3.respond('slow', async () => new Promise(() => {})); // never resolves
 const r3 = await bus3.request('slow', {}, undefined, { timeout: 50 });
-assert(r3.ok === false, 'timeout → ok=false');
+assert(r3.ok === false, 'timeout -> ok=false');
 assert(r3.error instanceof BusError, 'timeout error is BusError');
 const toe = r3.error as BusError;
 assert(toe.code === 'VC_CORE_REQUEST_TIMEOUT', 'code is VC_CORE_REQUEST_TIMEOUT');
@@ -54,7 +54,7 @@ assert(handled, 'switch on code works');
 // Test 6: Normal errors still work as Error
 bus.register('throws', () => { throw new Error('custom'); });
 const r4 = bus.dispatch('throws', {});
-assert(r4.ok === false, 'thrown → ok=false');
+assert(r4.ok === false, 'thrown -> ok=false');
 assert(r4.error instanceof Error, 'custom error is Error');
 assert(r4.error?.message === 'custom', 'custom error message preserved');
 

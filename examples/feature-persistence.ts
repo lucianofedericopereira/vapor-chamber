@@ -1,5 +1,5 @@
 /**
- * Feature example: persist plugin — localStorage / sessionStorage / custom storage
+ * Feature example: persist plugin - localStorage / sessionStorage / custom storage
  * ==================================================================================
  * Auto-saves state to storage after each successful command.
  * Loads and rehydrates on page reload.
@@ -50,7 +50,7 @@ const cartState = useCommandState<CartState>(
   }
 )
 
-// Dispatch commands — state is auto-saved after each one
+// Dispatch commands - state is auto-saved after each one
 bus.dispatch('cartAdd', { id: 1, name: 'T-Shirt', price: 29.99 }, { qty: 2 })
 bus.dispatch('cartAdd', { id: 2, name: 'Hoodie', price: 59.99 })
 
@@ -81,7 +81,7 @@ const searchState = useCommandState<SearchState>(
 const analyticsPrefs = persist<{ events: string[]; userId: string }>({
   key: 'vc:analytics',
   getState: () => ({ events: ['page_view', 'click'], userId: 'usr_123' }),
-  // Custom serializer — e.g. LZString compression for large state
+  // Custom serializer - e.g. LZString compression for large state
   serialize: (state) => btoa(JSON.stringify(state)),
   deserialize: (raw) => {
     try { return JSON.parse(atob(raw)) }
@@ -110,10 +110,10 @@ function onLogout() {
 
 /*
 function createIdbAdapter(dbName: string, storeName: string) {
-  // Simplified — use idb-keyval or similar in production
+  // Simplified - use idb-keyval or similar in production
   let cache: Record<string, string> = {}
 
-  // Warm the cache (async — call on app init)
+  // Warm the cache (async - call on app init)
   async function load() {
     const db = await openDB(dbName, 1, {
       upgrade(db) { db.createObjectStore(storeName) }

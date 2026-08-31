@@ -154,7 +154,7 @@ describe('schemaLogger', () => {
 });
 
 // ---------------------------------------------------------------------------
-// synthesize — mocked LLM
+// synthesize - mocked LLM
 // ---------------------------------------------------------------------------
 
 describe('synthesize', () => {
@@ -210,7 +210,7 @@ describe('synthesize', () => {
 
   it('returns error when adapter returns invalid result', async () => {
     const bus = createCommandBus();
-    // Adapter returns a tool name that doesn't exist — dispatch will fail
+    // Adapter returns a tool name that doesn't exist - dispatch will fail
     const adapter = vi.fn(async () => ({ name: 'nonExistent', input: {} }));
 
     const result = await synthesize(cartSchema, bus, 'tell me a joke', { adapter });
@@ -363,7 +363,7 @@ describe('schemaValidator', () => {
 
   // Item 32a: both guards were `typeof x === 'object'`, so a non-object value
   // bypassed the whole block and reached the handler malformed. Required-ness
-  // was enforced only for callers who already passed an object — and the
+  // was enforced only for callers who already passed an object - and the
   // caller class this gate exists for (an LLM, via the MCP layer's raw
   // `args?.payload`) is exactly the one that sends a string where an object
   // belongs.
@@ -402,7 +402,7 @@ describe('schemaValidator', () => {
     }
 
     it('an ABSENT payload still passes when the schema declares one', () => {
-      // undefined is not "the wrong shape", it is "not provided" — and the MCP
+      // undefined is not "the wrong shape", it is "not provided" - and the MCP
       // tool schema only requires `payload` for actions that declare one, so
       // this stays the documented skip.
       const bus = createCommandBus();

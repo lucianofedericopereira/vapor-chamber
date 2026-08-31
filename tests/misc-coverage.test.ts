@@ -2,13 +2,13 @@
  * Focused tests for narrow arms across several modules. Each block drives one
  * specific condition the module's main suite does not reach:
  *
- *   - observable.ts:88            — double unsubscribe early-return
- *   - plugins-schema.ts:185-186   — validateSchemasAsync "warn" mode passthrough
- *   - utilities.ts:135            — workflow step dispatch throws
- *   - utilities.ts:149            — workflow compensation dispatch throws
- *   - utilities.ts:209            — createReaction target dispatch throws
- *   - http-query.ts:37-38         — nested-object query param expansion
- *   - chamber-vapor.ts:261-263    — useVaporAsyncCommand catch on rejected dispatch
+ *   - observable.ts:88            - double unsubscribe early-return
+ *   - plugins-schema.ts:185-186   - validateSchemasAsync "warn" mode passthrough
+ *   - utilities.ts:135            - workflow step dispatch throws
+ *   - utilities.ts:149            - workflow compensation dispatch throws
+ *   - utilities.ts:209            - createReaction target dispatch throws
+ *   - http-query.ts:37-38         - nested-object query param expansion
+ *   - chamber-vapor.ts:261-263    - useVaporAsyncCommand catch on rejected dispatch
  */
 import { describe, it, expect, vi } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
@@ -19,10 +19,10 @@ import { buildFullUrl } from '../src/http-query';
 import { useVaporAsyncCommand } from '../src/chamber-vapor';
 
 // ---------------------------------------------------------------------------
-// observable.ts:88 — unsubscribe() is idempotent (second call early-returns)
+// observable.ts:88 - unsubscribe() is idempotent (second call early-returns)
 // ---------------------------------------------------------------------------
 
-describe('observe — idempotent unsubscribe', () => {
+describe('observe - idempotent unsubscribe', () => {
   it('a second unsubscribe() is a no-op and does not re-detach the listener', () => {
     const bus = createCommandBus();
     bus.register('act', () => 'ok');
@@ -52,7 +52,7 @@ describe('observe — idempotent unsubscribe', () => {
 });
 
 // ---------------------------------------------------------------------------
-// plugins-schema.ts:185-186 — async warn mode logs then calls next()
+// plugins-schema.ts:185-186 - async warn mode logs then calls next()
 // ---------------------------------------------------------------------------
 
 function fakeAsync<T>(predicate: (v: unknown) => v is T, message: string): StandardSchemaV1<T> {
@@ -66,7 +66,7 @@ function fakeAsync<T>(predicate: (v: unknown) => v is T, message: string): Stand
 }
 const isPositive = (v: unknown): v is number => typeof v === 'number' && v > 0;
 
-describe('validateSchemasAsync — warn mode', () => {
+describe('validateSchemasAsync - warn mode', () => {
   it('logs a warning and lets the dispatch through instead of rejecting', async () => {
     const { createAsyncCommandBus } = await import('../src/command-bus');
     const bus = createAsyncCommandBus();
@@ -89,12 +89,12 @@ describe('validateSchemasAsync — warn mode', () => {
 });
 
 // ---------------------------------------------------------------------------
-// utilities.ts:135 + 149 — workflow try/catch around bus.dispatch
+// utilities.ts:135 + 149 - workflow try/catch around bus.dispatch
 // The real command bus never throws from dispatch (it returns {ok:false}),
 // so we hand-roll a bus whose dispatch THROWS to exercise the catch blocks.
 // ---------------------------------------------------------------------------
 
-describe('createWorkflow — dispatch throws', () => {
+describe('createWorkflow - dispatch throws', () => {
   it('catches a thrown step dispatch and reports it as a failed result (line 135)', async () => {
     const bus = {
       on() { return () => {}; },
@@ -140,10 +140,10 @@ describe('createWorkflow — dispatch throws', () => {
 });
 
 // ---------------------------------------------------------------------------
-// utilities.ts:209 — createReaction logs when the target dispatch throws
+// utilities.ts:209 - createReaction logs when the target dispatch throws
 // ---------------------------------------------------------------------------
 
-describe('createReaction — target dispatch throws', () => {
+describe('createReaction - target dispatch throws', () => {
   it('logs an error (does not rethrow) when the reaction dispatch throws', () => {
     // Real bus to drive the source event; we make the target handler register a
     // listener whose own dispatch throws by stubbing bus.dispatch for the target.
@@ -164,7 +164,7 @@ describe('createReaction — target dispatch throws', () => {
     expect(() => bus.dispatch('src', {})).not.toThrow();
 
     expect(errorSpy).toHaveBeenCalledOnce();
-    expect(errorSpy.mock.calls[0]![0]).toMatch(/Reaction src → dst error/);
+    expect(errorSpy.mock.calls[0]![0]).toMatch(/Reaction src -> dst error/);
     expect(errorSpy.mock.calls[0]![1]).toBeInstanceOf(Error);
     expect((errorSpy.mock.calls[0]![1] as Error).message).toBe('reaction target boom');
 
@@ -173,10 +173,10 @@ describe('createReaction — target dispatch throws', () => {
 });
 
 // ---------------------------------------------------------------------------
-// http-query.ts:37-38 — nested object params expand to key[subkey]=value
+// http-query.ts:37-38 - nested object params expand to key[subkey]=value
 // ---------------------------------------------------------------------------
 
-describe('buildFullUrl — nested object params', () => {
+describe('buildFullUrl - nested object params', () => {
   it('expands a nested object value into key[subkey] query entries', () => {
     const url = buildFullUrl('/api/search', undefined, {
       filter: { status: 'active', tier: 'gold' },
@@ -199,12 +199,12 @@ describe('buildFullUrl — nested object params', () => {
 });
 
 // ---------------------------------------------------------------------------
-// chamber-vapor.ts:261-263 — useVaporAsyncCommand catch on a REJECTED dispatch
+// chamber-vapor.ts:261-263 - useVaporAsyncCommand catch on a REJECTED dispatch
 // The existing test uses an async bus that resolves {ok:false}; here the bus's
 // dispatch promise REJECTS, so the try/await throws and the catch runs.
 // ---------------------------------------------------------------------------
 
-describe('useVaporAsyncCommand — dispatch rejects', () => {
+describe('useVaporAsyncCommand - dispatch rejects', () => {
   it('catches a rejected dispatch, sets lastError, and returns { ok: false, error }', async () => {
     const thrown = new Error('transport rejected');
     const bus = {

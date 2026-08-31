@@ -49,7 +49,7 @@ describe('runDispatch (via useCommand)', () => {
   });
 });
 
-describe('useSharedCommandState — error recording', () => {
+describe('useSharedCommandState - error recording', () => {
   beforeEach(() => setCommandBus(createCommandBus({ onMissing: 'throw' })));
 
   it('records a synchronously-thrown dispatch and decrements in-flight', () => {
@@ -74,7 +74,7 @@ describe('useSharedCommandState — error recording', () => {
   });
 });
 
-describe('useCommandHistory — undo/redo error handling', () => {
+describe('useCommandHistory - undo/redo error handling', () => {
   it('catches a throwing undo handler (does not propagate)', () => {
     const bus = createCommandBus();
     setCommandBus(bus);
@@ -96,7 +96,7 @@ describe('useCommandHistory — undo/redo error handling', () => {
     const history = useCommandHistory({});
     bus.dispatch('act', {});   // tracked
     history.undo();            // moves to future
-    unregister();             // remove handler → redo's dispatch will throw (onMissing:'throw')
+    unregister();             // remove handler -> redo's dispatch will throw (onMissing:'throw')
 
     expect(() => history.redo()).not.toThrow(); // redo's bus.dispatch throw is caught
     err.mockRestore();

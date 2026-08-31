@@ -1,13 +1,13 @@
 /**
- * vapor-chamber — HTTP response cache + request deduplication
+ * vapor-chamber - HTTP response cache + request deduplication
  *
  * Internal module used by createHttpClient. Not exported publicly.
  *
  * Cache entries carry a fresh window (`freshUntil`) and, when a caller opts
  * into `cache.staleTtl`, a longer stale window (`staleUntil >= freshUntil`).
- * Inside `freshUntil` → a fresh hit (no fetch). Between the two → a stale
+ * Inside `freshUntil` -> a fresh hit (no fetch). Between the two -> a stale
  * hit: served instantly while the caller attaches a background revalidation
- * (see http.ts). Past `staleUntil` → a miss, but the entry is NOT deleted —
+ * (see http.ts). Past `staleUntil` -> a miss, but the entry is NOT deleted -
  * `getAny` still finds it as a last resort for `cache.serveStaleOnError`.
  * Only LRU size pressure or an explicit `invalidate` removes it.
  *
@@ -18,7 +18,7 @@
  * auth/header/cookie dimension, so user A's authenticated payload answered
  * user B's identical URL, and two concurrent requests for different users
  * collapsed into one in-flight promise. A fresh bus per request (whitepaper
- * §14.2) did not give a fresh HTTP cache — now a fresh client does. This is
+ * §14.2) did not give a fresh HTTP cache - now a fresh client does. This is
  * the same factory-closure shape the bus-level `cache()` plugin already uses.
  */
 
@@ -36,13 +36,13 @@ type CacheEntry = { data: any; freshUntil: number; staleUntil: number };
 
 export type CacheHit = { data: any; stale: boolean };
 
-/** Regex metacharacters — escaped so a string pattern matches literally. */
+/** Regex metacharacters - escaped so a string pattern matches literally. */
 const REGEX_METACHARS = /[.*+?^${}()|[\]\\]/g;
 
 export type ResponseCache = {
   /** A fresh or stale hit; `null` on a plain miss. Never deletes on read. */
   get(key: string): CacheHit | null;
-  /** Last-resort lookup for `cache.serveStaleOnError` — ignores freshness, never evicts. */
+  /** Last-resort lookup for `cache.serveStaleOnError` - ignores freshness, never evicts. */
   getAny(key: string): CacheEntry | null;
   set(key: string, data: any, ttl?: number, staleTtl?: number): void;
   clear(): void;
@@ -62,7 +62,7 @@ export function createResponseCache(): ResponseCache {
       if (!entry) return null;
 
       const now = Date.now();
-      if (now >= entry.staleUntil) return null; // expired past any stale window — retained, not a hit
+      if (now >= entry.staleUntil) return null; // expired past any stale window - retained, not a hit
 
       // LRU: move to end (most recently used)
       entries.delete(key);
@@ -81,7 +81,7 @@ export function createResponseCache(): ResponseCache {
         /* v8 ignore next -- defensive: size >= CACHE_MAX_SIZE (>0) already guarantees a first key */
         if (firstKey !== undefined) entries.delete(firstKey);
       }
-      // Shared by every later hit — see freeze.ts.
+      // Shared by every later hit - see freeze.ts.
       freezeCached(data);
       const now = Date.now();
       entries.set(key, { data, freshUntil: now + ttl, staleUntil: now + ttl + staleTtl });
@@ -96,9 +96,9 @@ export function createResponseCache(): ResponseCache {
 
     invalidate(pattern) {
       // A STRING IS A LITERAL SUBSTRING, not a pattern. `new RegExp(pattern)`
-      // on a plain string threw on this library's own output — `buildFullUrl`
+      // on a plain string threw on this library's own output - `buildFullUrl`
       // serializes arrays as `ids[0]=`, so a cache key contains a literal `[`
-      // and compiling it is `SyntaxError: unterminated character class` — and
+      // and compiling it is `SyntaxError: unterminated character class` - and
       // was silently wrong on ordinary URLs (`?` is a quantifier, so
       // '/api/products?page=1' matched '/api/product' + anything). The
       // `string | RegExp` signature reads as "substring or pattern"; this
@@ -110,7 +110,7 @@ export function createResponseCache(): ResponseCache {
       } else {
         if (DEV && (pattern.startsWith('^') || pattern.endsWith('$'))) {
           console.warn(
-            `[vapor-chamber] invalidateCache("${pattern}") — strings are matched as literal ` +
+            `[vapor-chamber] invalidateCache("${pattern}") - strings are matched as literal ` +
               'substrings, so anchors are matched literally too. Pass a RegExp for pattern semantics.',
           );
         }
@@ -118,7 +118,7 @@ export function createResponseCache(): ResponseCache {
       }
       const keysToDelete: string[] = [];
       for (const key of entries.keys()) {
-        // Keys are `responseType:fullUrl` — match user patterns against the URL
+        // Keys are `responseType:fullUrl` - match user patterns against the URL
         // part so anchored patterns like /^\/api/ keep working.
         const url = key.slice(key.indexOf(':') + 1);
         if (regex.test(url)) keysToDelete.push(key);

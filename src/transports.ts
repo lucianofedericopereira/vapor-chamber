@@ -1,8 +1,8 @@
 /**
  * vapor-chamber - Transport plugins
  *
- * v0.4.2 — Added: createHttpBridge, createWsBridge, createSseBridge.
- * v1.9.0 (unreleased) — Added: createBatchingHttpBridge.
+ * v0.4.2 - Added: createHttpBridge, createWsBridge, createSseBridge.
+ * v1.9.0 - Added: createBatchingHttpBridge.
  *
  * Transports are AsyncPlugin factories that forward commands to a backend.
  * Use with createAsyncCommandBus() for full async dispatch support.
@@ -42,12 +42,12 @@ export type HttpBridgeOptions = {
   endpoint: string;
   /**
    * CSRF token strategy:
-   *   • `false` (default) — don't attach any CSRF token
-   *   • `true` — read from DOM (meta tag, cookie, hidden input) and attach
+   *   • `false` (default) - don't attach any CSRF token
+   *   • `true` - read from DOM (meta tag, cookie, hidden input) and attach
    *     as the appropriate header. Works with any server-rendered framework
-   *     that exposes a token via one of those three sources — Laravel Blade,
+   *     that exposes a token via one of those three sources - Laravel Blade,
    *     Rails, Django, .NET MVC, custom stacks. Auto-refreshes on HTTP 419.
-   *   • `'inertia'` — defer token management to Inertia's Axios instance.
+   *   • `'inertia'` - defer token management to Inertia's Axios instance.
    *     The bridge will skip its own CSRF reading and rely on the consumer's
    *     `@inertiajs/inertia` axios setup to inject the token. Use this when
    *     vapor-chamber dispatches share an HTTP layer with Inertia routes.
@@ -99,7 +99,7 @@ export type HttpBridgeOptions = {
   /**
    * Abort controller whose signal cancels all in-flight requests when the
    * owning scope/component is disposed. In Vapor components, create an
-   * AbortController in setup and pass it here — call `.abort()` in
+   * AbortController in setup and pass it here - call `.abort()` in
    * onScopeDispose to cancel orphaned requests automatically.
    *
    * @example
@@ -124,7 +124,7 @@ export type HttpBridgeOptions = {
 
 
 /**
- * createHttpBridge — fetch-based transport plugin.
+ * createHttpBridge - fetch-based transport plugin.
  *
  * Intercepts matching commands and forwards them to the backend as JSON.
  * The backend receives `{ command, target, payload }` and returns `{ ok, state, error }`.
@@ -143,7 +143,7 @@ export type HttpBridgeOptions = {
  */
 export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
   const { endpoint, actions, csrf = false, csrfCookieUrl, headers = {}, timeout = 10_000, retry = 0, noRetry = [], signal, onSessionExpired, onRedirect, scopeController, httpClient } = options;
-  // `csrf: 'inertia'` means: don't read CSRF from the DOM ourselves —
+  // `csrf: 'inertia'` means: don't read CSRF from the DOM ourselves -
   // Inertia's Axios already injects the token. The HTTP layer shape just
   // needs to know "skip CSRF", same as `csrf: false`. Inertia handles it
   // upstream via its own request interceptor.
@@ -162,14 +162,14 @@ export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
     const effectiveRetry = noRetry.includes(cmd.action) ? 0 : retry;
 
     // Forward the idempotency key stamped by the `idempotent` plugin as an
-    // `Idempotency-Key` header so the backend can reject duplicate writes — the
+    // `Idempotency-Key` header so the backend can reject duplicate writes - the
     // wire half of exactly-once. No-op (same `headers` ref) when unset.
     const idemKey = cmd.meta?.idempotencyKey;
     const reqHeaders = idemKey ? { ...headers, 'Idempotency-Key': idemKey } : headers;
 
     // Merge bridge-level effectiveSignal with per-dispatch cmd.signal. The
     // dispatch-time signal (from `bus.dispatch(..., { signal })`) is
-    // auto-propagated to the HTTP request — consumers don't need to wire it
+    // auto-propagated to the HTTP request - consumers don't need to wire it
     // through the bridge options.
     const perCallSignal = cmd.signal && effectiveSignal
       ? (typeof AbortSignal.any === 'function'
@@ -186,7 +186,7 @@ export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
             csrf: csrfFlag, csrfCookieUrl, headers: reqHeaders, timeout, retry: effectiveRetry, signal: perCallSignal, onSessionExpired,
           });
 
-      // Backend redirect — either a body field or a 3xx status. Pass the URL
+      // Backend redirect - either a body field or a 3xx status. Pass the URL
       // to onRedirect (typically Inertia's `router.visit`) and resolve as a
       // failed dispatch. If onRedirect isn't set, surface as a string error.
       const redirectUrl = (res.data as any)?.redirect;
@@ -211,7 +211,7 @@ export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
     } catch (e) {
       // postCommand throws HttpError on non-2xx with the parsed body attached.
       // Surface the backend's own error/message (e.g. Laravel validation text)
-      // instead of the bare "HTTP 422" — the documented contract is that the
+      // instead of the bare "HTTP 422" - the documented contract is that the
       // failure body's `error` becomes `result.error.message`.
       const src = e as Error & { response?: { data?: unknown }; status?: number; code?: string };
       const body = src.response?.data as { error?: unknown; message?: unknown } | null | undefined;
@@ -233,19 +233,19 @@ export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
 // createBatchingHttpBridge
 //
 // createHttpBridge handles one dispatch per request; this variant adds
-// microtask-coalescing on top — a burst of dispatches issued in the same tick
-// is batched into one round trip — without changing that contract for anyone
+// microtask-coalescing on top - a burst of dispatches issued in the same tick
+// is batched into one round trip - without changing that contract for anyone
 // not opting in.
 // ---------------------------------------------------------------------------
 
 export type BatchingHttpBridgeOptions = HttpBridgeOptions & {
   /**
    * How long to hold the queue open before flushing.
-   *   • `'microtask'` (default) — coalesce every dispatch issued within the
+   *   • `'microtask'` (default) - coalesce every dispatch issued within the
    *     same JS tick (`queueMicrotask`). Zero added latency: a synchronous
    *     burst of dispatches (e.g. a `formSet` immediately followed by a
    *     `submit`) becomes one HTTP round trip.
-   *   • a number (ms) — hold the queue open for a small window instead,
+   *   • a number (ms) - hold the queue open for a small window instead,
    *     catching dispatches from separate ticks (e.g. two quick, distinct
    *     user interactions) at the cost of that much added latency.
    */
@@ -259,7 +259,7 @@ type BatchResponse = { results?: BatchedResult[] };
 type QueuedBatchEntry = { id: string; cmd: Command; resolve: (result: CommandResult) => void };
 
 /**
- * createBatchingHttpBridge — coalescing fetch-based transport plugin.
+ * createBatchingHttpBridge - coalescing fetch-based transport plugin.
  *
  * Same per-dispatch call shape and backend options as {@link createHttpBridge}
  * (CSRF, retry, timeout, session-expiry are all reused via the same
@@ -272,14 +272,14 @@ type QueuedBatchEntry = { id: string; cmd: Command; resolve: (result: CommandRes
  *
  *   { results: [{ id, ok, state, error }, ...] }
  *
- * Each queued command's own dispatch promise resolves independently — a
+ * Each queued command's own dispatch promise resolves independently - a
  * caller dispatches exactly as it would against createHttpBridge; the
  * coalescing is invisible to the call site.
  *
  * @example
  * const bus = createAsyncCommandBus()
  * bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', csrf: true }))
- * // two dispatches issued in the same tick → one HTTP round trip:
+ * // two dispatches issued in the same tick -> one HTTP round trip:
  * bus.dispatch('formSet', { field: 'email' }, { value: 'a@b.com' })
  * bus.dispatch('cartAdd', product, { quantity: 2 })
  */
@@ -310,7 +310,7 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
     if (batch.length === 0) return;
 
     // A batch containing any non-retryable command (payments, etc.) must not
-    // retry the whole request — retrying would resend that command too.
+    // retry the whole request - retrying would resend that command too.
     const effectiveRetry = batch.some(({ cmd }) => noRetry.includes(cmd.action)) ? 0 : retry;
 
     const commands: BatchedCommandEnvelope[] = batch.map(({ id, cmd }) => {
@@ -409,7 +409,7 @@ type PendingRequest = {
 };
 
 /**
- * createWsBridge — WebSocket transport plugin with reconnect and message queuing.
+ * createWsBridge - WebSocket transport plugin with reconnect and message queuing.
  *
  * Commands are sent as JSON frames over a persistent WebSocket connection.
  * Pending messages are queued during disconnects and flushed on reconnect.
@@ -424,7 +424,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
   connect(): void;
   disconnect(): void;
   isConnected(): boolean;
-  /** Reactive connection state — bindable in Vapor/VDOM templates without polling. */
+  /** Reactive connection state - bindable in Vapor/VDOM templates without polling. */
   connected: Signal<boolean>;
 } {
   const {
@@ -445,7 +445,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   let intentionalClose = false;
 
-  // Reactive signal for connection state — usable in Vapor/VDOM templates
+  // Reactive signal for connection state - usable in Vapor/VDOM templates
   const connected = signal(false);
 
   const pending = new Map<string, PendingRequest>();
@@ -463,7 +463,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
         const dropped = queue.shift()!;
         // `!` on the pending lookup, not a guard: `settle()` removes an entry
         // from BOTH `pending` and `queue`, and `failAllPending()` clears both
-        // together — so a queued id always has a pending record. This was a
+        // together - so a queued id always has a pending record. This was a
         // runtime `if (req)` while settle() left dead entries in the queue; now
         // that the two can no longer diverge, a miss here would mean the
         // invariant broke, and throwing says so instead of silently dropping a
@@ -484,7 +484,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
       const { id, envelope, timeout, queuedAt } = items[i];
       const elapsed = now - queuedAt;
       if (elapsed >= timeout) {
-        // Message expired while queued — reject it instead of sending stale
+        // Message expired while queued - reject it instead of sending stale
         // commands. Same invariant as the overflow path above: a queued id
         // always has a pending record, so this is `!` rather than a guard.
         const req = pending.get(id)!;
@@ -496,7 +496,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ id, ...envelope }));
       } else {
-        // Socket closed mid-flush — re-queue the remainder so they either go
+        // Socket closed mid-flush - re-queue the remainder so they either go
         // out on reconnect or settle via failAllPending/expiry, instead of
         // silently hanging until each per-request timeout.
         queue.unshift(...items.slice(i));
@@ -507,8 +507,8 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
 
   /**
    * Settle every in-flight request immediately with a failure result, and drop
-   * any unsent queued messages. Called on terminal teardown — an explicit
-   * `disconnect()`, or a socket close with no reconnect pending — so a caller
+   * any unsent queued messages. Called on terminal teardown - an explicit
+   * `disconnect()`, or a socket close with no reconnect pending - so a caller
    * awaiting a response doesn't hang until its per-request timeout fires.
    * Uses `resolve({ ok:false })`, matching every other settle path: the bus
    * never rejects a dispatch promise; failures are `CommandResult` values.
@@ -536,7 +536,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
 
   function connect(): void {
     if (typeof WebSocket === 'undefined') return;
-    // Already connecting/connected — a second socket would orphan the first
+    // Already connecting/connected - a second socket would orphan the first
     // with its handlers still live. Manual connect() also supersedes any
     // pending reconnect timer.
     if (ws && (ws.readyState === WebSocket.CONNECTING || ws.readyState === WebSocket.OPEN)) return;
@@ -576,11 +576,11 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
 
     ws.onclose = (event) => {
       connected.value = false;
-      // This socket is dead — drop the reference (unless a newer socket already
+      // This socket is dead - drop the reference (unless a newer socket already
       // replaced it) so the connect() liveness guard lets the next attempt through.
       if (ws === socket) ws = null;
       onDisconnect?.(event);
-      // Reconnect if we still can; otherwise this close is terminal — fail any
+      // Reconnect if we still can; otherwise this close is terminal - fail any
       // in-flight requests now rather than leaving them to hang until timeout.
       if (!intentionalClose && reconnect && reconnectCount < maxReconnects) {
         scheduleReconnect();
@@ -601,7 +601,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
       clearTimeout(reconnectTimer);
       reconnectTimer = null;
     }
-    // Fail any in-flight requests immediately — the caller explicitly tore the
+    // Fail any in-flight requests immediately - the caller explicitly tore the
     // connection down; don't make them wait out the per-request timeout.
     failAllPending('WebSocket disconnected');
     ws?.close();
@@ -617,14 +617,14 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
       return next();
     }
 
-    // Pre-flight abort — don't enqueue if signal is already tripped.
+    // Pre-flight abort - don't enqueue if signal is already tripped.
     if (cmd.signal?.aborted) return abortedResult(cmd.action, cmd.signal);
 
     return new Promise<CommandResult>((resolve) => {
       const id = genId();
       let abortHandler: (() => void) | null = null;
 
-      // Naturally idempotent — no `settled` flag needed: the first call
+      // Naturally idempotent - no `settled` flag needed: the first call
       // detaches every other settle source (timer cleared, `pending` entry
       // deleted, abort listener removed), and each teardown line plus
       // `resolve()` itself is a no-op when repeated.
@@ -635,7 +635,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
         // send(), so a request can settle (timeout, abort, disconnect) while
         // still sitting in `queue` waiting for a socket. Leaving it there meant
         // a dead entry occupied a maxQueueSize slot and had to be recognised
-        // again later — once by the overflow path's `pending.get(...)` miss,
+        // again later - once by the overflow path's `pending.get(...)` miss,
         // once by flushQueue's elapsed check. Two mechanisms responsible for
         // one fact. Removing it here makes settle() the single source of truth
         // for "this request is over", so maxQueueSize counts LIVE requests only.
@@ -656,7 +656,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
         timeoutId,
       });
 
-      // Mid-flight abort — drop the pending request and resolve with abort error.
+      // Mid-flight abort - drop the pending request and resolve with abort error.
       // The server may still process the command; this only cancels the client-side
       // wait. WS transports don't have per-message cancellation in the protocol.
       if (cmd.signal) {
@@ -699,7 +699,7 @@ export type SseBridgeOptions = {
 };
 
 /**
- * createSseBridge — server-sent events bridge for unidirectional server push.
+ * createSseBridge - server-sent events bridge for unidirectional server push.
  *
  * SSE is receive-only: the server pushes events to the client.
  * Use `onEvent` to map incoming server events to bus dispatches.
@@ -722,7 +722,7 @@ export function createSseBridge(options: SseBridgeOptions): {
   teardown(): void;
   isConnected(): boolean;
 } {
-  const { url, onEvent, withCredentials = false } = options;
+  const { url, onEvent, withCredentials = false, reconnect = true } = options;
 
   let source: EventSource | null = null;
 
@@ -739,7 +739,12 @@ export function createSseBridge(options: SseBridgeOptions): {
     };
 
     source.onerror = () => {
-      // EventSource reconnects automatically — no manual handling needed
+      // EventSource reconnects on its own, so `reconnect: true` needs no code.
+      // `reconnect: false` did until now: the option was declared, typed and
+      // documented with a default, and never read - setting it did nothing at
+      // all. Closing the stream is the only way to stop EventSource retrying,
+      // so that is what it means.
+      if (!reconnect) teardown();
     };
   }
 
@@ -756,7 +761,7 @@ export function createSseBridge(options: SseBridgeOptions): {
 }
 
 // ---------------------------------------------------------------------------
-// createEchoBridge — Laravel Echo / Reverb realtime → bus
+// createEchoBridge - Laravel Echo / Reverb realtime -> bus
 // ---------------------------------------------------------------------------
 
 export type EchoChannelType = 'public' | 'private' | 'presence';
@@ -774,7 +779,7 @@ export type EchoBridgeOptions = {
   /**
    * A configured laravel-echo instance (or any object exposing
    * `channel(name)` / `private(name)` / `join(name)` and `leave(name)`). The
-   * bridge takes your app's Echo so it never imports laravel-echo itself —
+   * bridge takes your app's Echo so it never imports laravel-echo itself -
    * keeping vapor-chamber backend-agnostic and the dependency out of the bundle.
    */
   echo: any;
@@ -794,12 +799,12 @@ export type EchoBridgeOptions = {
 };
 
 /**
- * createEchoBridge — wire Laravel Echo / Reverb realtime channels to the bus.
+ * createEchoBridge - wire Laravel Echo / Reverb realtime channels to the bus.
  *
  * Protocol-aware over the generic WS bridge: subscribes public / private /
  * presence channels and routes each broadcast to `bus.emit()` (or a command via
  * `onBroadcast`). Presence membership (`here` / `joining` / `leaving`) is emitted
- * too. Receive-only by design — outbound commands still go through the HTTP
+ * too. Receive-only by design - outbound commands still go through the HTTP
  * bridge. Pass your own Echo instance; the bridge never imports laravel-echo, so
  * non-Laravel consumers don't pay for it.
  *
@@ -813,7 +818,7 @@ export type EchoBridgeOptions = {
  *     { name: 'lobby',  type: 'presence', events: ['MessagePosted'] },
  *   ],
  * });
- * realtime.install(bus);   // OrderShipped → bus.emit('OrderShipped', payload)
+ * realtime.install(bus);   // OrderShipped -> bus.emit('OrderShipped', payload)
  * // on teardown:
  * realtime.teardown();
  */

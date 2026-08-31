@@ -85,7 +85,7 @@ describe('dispatchBatch (async)', () => {
 // ─── onMissing (dead letter handling) ────────────────────────────────────────
 
 describe('onMissing option', () => {
-  it("defaults to 'error' — returns { ok: false, error }", () => {
+  it("defaults to 'error' - returns { ok: false, error }", () => {
     const bus = createCommandBus();
     const result = bus.dispatch('no.handler', {});
 
@@ -93,13 +93,13 @@ describe('onMissing option', () => {
     expect(result.error?.message).toContain('No handler');
   });
 
-  it("'throw' — throws when no handler", () => {
+  it("'throw' - throws when no handler", () => {
     const bus = createCommandBus({ onMissing: 'throw' });
 
     expect(() => bus.dispatch('no.handler', {})).toThrow('No handler');
   });
 
-  it("'ignore' — returns { ok: true, value: undefined }", () => {
+  it("'ignore' - returns { ok: true, value: undefined }", () => {
     const bus = createCommandBus({ onMissing: 'ignore' });
     const result = bus.dispatch('no.handler', {});
 
@@ -107,7 +107,7 @@ describe('onMissing option', () => {
     expect(result.value).toBeUndefined();
   });
 
-  it('custom function — uses its return value', () => {
+  it('custom function - uses its return value', () => {
     const bus = createCommandBus({
       onMissing: (cmd) => ({ ok: true, value: `fallback:${cmd.action}` }),
     });
@@ -439,7 +439,7 @@ describe('on() pattern listeners', () => {
 
 // ─── once() ───────────────────────────────────────────────────────────────────
 
-describe('once() — sync bus', () => {
+describe('once() - sync bus', () => {
   it('fires exactly once and then auto-unsubscribes', () => {
     const bus = createCommandBus();
     bus.register('ping', () => null);
@@ -483,7 +483,7 @@ describe('once() — sync bus', () => {
   });
 });
 
-describe('once() — async bus', () => {
+describe('once() - async bus', () => {
   it('fires exactly once on async bus', async () => {
     const bus = createAsyncCommandBus();
     bus.register('ping', async () => null);
@@ -498,7 +498,7 @@ describe('once() — async bus', () => {
   });
 });
 
-describe('once() — mutation-during-iteration safety', () => {
+describe('once() - mutation-during-iteration safety', () => {
   it('does not skip the next listener when multiple once() share the same pattern', () => {
     const bus = createCommandBus();
     bus.register('ping', () => null);
@@ -510,7 +510,7 @@ describe('once() — mutation-during-iteration safety', () => {
 
     bus.dispatch('ping', {});
 
-    // All three must fire on the first dispatch — none skipped during splice
+    // All three must fire on the first dispatch - none skipped during splice
     expect(heard).toEqual([1, 2, 3]);
 
     // None fire on subsequent dispatches
@@ -660,7 +660,7 @@ describe('per-command throttle at register time', () => {
 
 // ─── SSR concurrency (independent bus instances, no state bleed) ─────────────
 
-describe('SSR concurrency — createCommandBus isolation', () => {
+describe('SSR concurrency - createCommandBus isolation', () => {
   it('two independent buses do not share handlers', () => {
     const busA = createCommandBus();
     const busB = createCommandBus();
@@ -730,7 +730,7 @@ describe('SSR concurrency — createCommandBus isolation', () => {
 });
 
 // ---------------------------------------------------------------------------
-// createTestBus — snapshot & time-travel
+// createTestBus - snapshot & time-travel
 // ---------------------------------------------------------------------------
 
 describe('createTestBus snapshot and time-travel', () => {
@@ -894,7 +894,7 @@ describe('bus.clear() (sync)', () => {
     bus.clear();
 
     const result = bus.dispatch('a', {});
-    expect(result.ok).toBe(false); // no handler → dead letter
+    expect(result.ok).toBe(false); // no handler -> dead letter
   });
 
   it('removes plugins', () => {
@@ -951,7 +951,7 @@ describe('bus.clear() (async)', () => {
 
 // ─── async bus on / request / respond ─────────────────────────────────────────
 
-describe('async bus — on() pattern listeners', () => {
+describe('async bus - on() pattern listeners', () => {
   it('wildcard * receives all dispatches', async () => {
     const bus = createAsyncCommandBus();
     const heard: string[] = [];
@@ -995,7 +995,7 @@ describe('async bus — on() pattern listeners', () => {
   });
 });
 
-describe('async bus — request/respond', () => {
+describe('async bus - request/respond', () => {
   it('gets response from async responder', async () => {
     const bus = createAsyncCommandBus();
 
@@ -1039,9 +1039,9 @@ describe('async bus — request/respond', () => {
   });
 });
 
-// ─── TestBus — plugin, onAfter, stubs ─────────────────────────────────────────
+// ─── TestBus - plugin, onAfter, stubs ─────────────────────────────────────────
 
-describe('createTestBus — plugin and hook support', () => {
+describe('createTestBus - plugin and hook support', () => {
   it('use(plugin) intercepts dispatches', () => {
     const bus = createTestBus();
     const seen: string[] = [];
@@ -1166,7 +1166,7 @@ describe('naming convention onViolation defaults to warn', () => {
   it("warns when onViolation is omitted (defaults to 'warn')", () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createCommandBus({
-      naming: { pattern: /^[a-z]+$/ }, // no onViolation — should default to 'warn'
+      naming: { pattern: /^[a-z]+$/ }, // no onViolation - should default to 'warn'
     });
     bus.dispatch('INVALID', {});
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('INVALID'));
@@ -1526,7 +1526,7 @@ describe('syncRequest async responder', () => {
 
 // ─── Command.meta ──────────────────────────────────────────────────────────────
 
-describe('Command.meta — auto-stamped metadata', () => {
+describe('Command.meta - auto-stamped metadata', () => {
   it('stamps meta.ts and meta.id on every dispatch', () => {
     const bus = createCommandBus();
     let captured: any;
@@ -1569,7 +1569,7 @@ describe('Command.meta — auto-stamped metadata', () => {
 
 // ─── bus.query() ─────────────────────────────────────────────────────────────
 
-describe('bus.query() — read-only dispatch', () => {
+describe('bus.query() - read-only dispatch', () => {
   it('executes handler and returns result', () => {
     const bus = createCommandBus();
     bus.register('getUser', (cmd) => ({ name: 'Dev', id: cmd.target.id }));
@@ -1635,7 +1635,7 @@ describe('bus.query() — read-only dispatch', () => {
     bus.register('getUser', async () => 'data');
     const result = await bus.query('getUser', {});
     // If _asyncQueryInner didn't await the after-hooks promise, afterCalls
-    // would still be empty here — the setTimeout wouldn't have had a chance
+    // would still be empty here - the setTimeout wouldn't have had a chance
     // to run before this assertion.
     expect(result.value).toBe('data');
     expect(afterCalls).toEqual(['getUser']);
@@ -1644,7 +1644,7 @@ describe('bus.query() — read-only dispatch', () => {
 
 // ─── bus.emit() ─────────────────────────────────────────────────────────────
 
-describe('bus.emit() — domain events', () => {
+describe('bus.emit() - domain events', () => {
   it('notifies on() listeners without requiring a handler', () => {
     const bus = createCommandBus();
     const events: string[] = [];
@@ -1686,7 +1686,7 @@ describe('bus.emit() — domain events', () => {
 
 // ─── bus.registeredActions() ─────────────────────────────────────────────────
 
-describe('bus.registeredActions() — introspection', () => {
+describe('bus.registeredActions() - introspection', () => {
   it('returns empty array when no handlers registered', () => {
     const bus = createCommandBus();
     expect(bus.registeredActions()).toEqual([]);
@@ -1721,7 +1721,7 @@ describe('bus.registeredActions() — introspection', () => {
 
 // ─── TestBus.onBefore (now fires for real) ──────────────────────────────────
 
-describe('TestBus.onBefore — real implementation', () => {
+describe('TestBus.onBefore - real implementation', () => {
   it('fires onBefore hooks before dispatch', () => {
     const bus = createTestBus();
     const calls: string[] = [];
@@ -1751,7 +1751,7 @@ describe('TestBus.onBefore — real implementation', () => {
 
 // ─── TestBus.query / emit / registeredActions ───────────────────────────────
 
-describe('TestBus — query, emit, registeredActions', () => {
+describe('TestBus - query, emit, registeredActions', () => {
   it('query skips beforeHooks on TestBus', () => {
     const bus = createTestBus();
     const beforeCalls: string[] = [];
@@ -1780,7 +1780,7 @@ describe('TestBus — query, emit, registeredActions', () => {
 
 // ─── seal() ────────────────────────────────────────────────────────────────────
 
-describe('seal() — freeze bus topology', () => {
+describe('seal() - freeze bus topology', () => {
   it('seal() prevents register() after sealing', () => {
     const bus = createCommandBus();
     bus.register('a', () => 1);
@@ -1850,7 +1850,7 @@ describe('seal() — freeze bus topology', () => {
   });
 });
 
-describe('seal() — async bus', () => {
+describe('seal() - async bus', () => {
   it('seal() prevents register() on async bus', () => {
     const bus = createAsyncCommandBus();
     bus.seal();
@@ -1870,7 +1870,7 @@ describe('seal() — async bus', () => {
 
 // ─── commandPool ───────────────────────────────────────────────────────────────
 
-describe('createCommandPool — zero-GC circular buffer', () => {
+describe('createCommandPool - zero-GC circular buffer', () => {
   it('acquires command objects with correct fields', () => {
     const pool = createCommandPool(4);
     const cmd = pool.acquire('cartAdd', { id: 1 }, { qty: 2 });
@@ -1968,7 +1968,7 @@ describe('createCommandPool — zero-GC circular buffer', () => {
 
 // ─── dispose() ─────────────────────────────────────────────────────────────────
 
-describe('dispose() — full teardown', () => {
+describe('dispose() - full teardown', () => {
   it('clears handlers, hooks, listeners, and plugins', () => {
     const bus = createCommandBus();
     bus.register('a', () => 1);
@@ -2007,7 +2007,7 @@ describe('recursion depth guard', () => {
     let count = 0;
     bus.register('loop', (cmd) => {
       count++;
-      // Re-dispatch — will eventually hit MAX_DISPATCH_DEPTH
+      // Re-dispatch - will eventually hit MAX_DISPATCH_DEPTH
       return bus.dispatch('loop', cmd.target);
     });
     const result = bus.dispatch('loop', {});
@@ -2040,12 +2040,12 @@ describe('recursion depth guard', () => {
       return bus.dispatch('inner', {});
     });
 
-    // First dispatch — nests 2 deep
+    // First dispatch - nests 2 deep
     bus.dispatch('outer', {});
     expect(depth1Count).toBe(1);
     expect(depth2Count).toBe(1);
 
-    // Second dispatch — depth should have reset, so this works fine
+    // Second dispatch - depth should have reset, so this works fine
     bus.dispatch('outer', {});
     expect(depth1Count).toBe(2);
     expect(depth2Count).toBe(2);
@@ -2082,7 +2082,7 @@ describe('TestBus dispose()', () => {
   });
 });
 
-// ─── unsealBus — tree-shakeable unseal ─────────────────────────────────────
+// ─── unsealBus - tree-shakeable unseal ─────────────────────────────────────
 
 describe('unsealBus()', () => {
   it('unseals a sealed sync bus', () => {
@@ -2114,7 +2114,7 @@ describe('unsealBus()', () => {
 
 // ─── commandKey fast-path ──────────────────────────────────────────────────
 
-describe('commandKey — fast path for primitives', () => {
+describe('commandKey - fast path for primitives', () => {
   it('handles string target', () => {
     expect(commandKey('a', 'hello')).toBe('a:hello');
   });
@@ -2152,13 +2152,13 @@ describe('per-instance throttle timers', () => {
     bus1.register('a', () => 1, { throttle: 10000 });
     bus2.register('a', () => 2, { throttle: 10000 });
 
-    // First dispatch on each — goes through
+    // First dispatch on each - goes through
     const r1 = bus1.dispatch('a', {});
     const r2 = bus2.dispatch('a', {});
     expect(r1.ok).toBe(true);
     expect(r2.ok).toBe(true);
 
-    // Dispose bus1 — should only clear bus1's timers
+    // Dispose bus1 - should only clear bus1's timers
     bus1.dispose();
 
     // Bus2 should still have its throttle active
@@ -2261,7 +2261,7 @@ describe('transactional dispatchBatch (sync)', () => {
     expect(result.rollbacks).toHaveLength(1);
   });
 
-  it('all succeed — no rollbacks field', () => {
+  it('all succeed - no rollbacks field', () => {
     const bus = createCommandBus();
     bus.register('a', () => 1, { undo: () => {} });
     bus.register('b', () => 2, { undo: () => {} });
@@ -2487,14 +2487,14 @@ describe('TestBus.inspect()', () => {
   });
 });
 
-// ─── core dispatch — error & edge branches (coverage of the §19 core guarantee) ──
+// ─── core dispatch - error & edge branches (coverage of the §19 core guarantee) ──
 //
 // These exercise the real createCommandBus/createAsyncCommandBus paths (NOT the
 // TestBus, whose dispatch lives in the coverage-excluded testing.ts), closing the
 // last untested branches in command-bus.ts: hook-throw, offAll-clear-all, the
 // async transactional abort/rollback paths, and the inspectBus fallback.
 
-describe('core dispatch — error & edge branches', () => {
+describe('core dispatch - error & edge branches', () => {
   it('real sync bus: a throwing onBefore hook cancels dispatch and returns errResult', () => {
     const bus = createCommandBus();
     let handlerRan = false;
@@ -2505,7 +2505,7 @@ describe('core dispatch — error & edge branches', () => {
 
     expect(result.ok).toBe(false);
     expect(result.error?.message).toBe('blocked-by-hook');
-    expect(handlerRan).toBe(false); // handler never runs — hook short-circuits
+    expect(handlerRan).toBe(false); // handler never runs - hook short-circuits
   });
 
   it('real async bus: a throwing onBefore hook cancels dispatch and returns errResult', async () => {
@@ -2528,7 +2528,7 @@ describe('core dispatch — error & edge branches', () => {
     bus.on('cart*', () => { hits.push('wild'); });
     expect(inspectBus(bus).listenerPatterns.length).toBeGreaterThan(0);
 
-    bus.offAll(); // no pattern → clear-all branch
+    bus.offAll(); // no pattern -> clear-all branch
 
     bus.emit('cartAdd', {});
     expect(hits).toEqual([]);
@@ -2562,7 +2562,7 @@ describe('core dispatch — error & edge branches', () => {
 
     expect(result.ok).toBe(false);
     expect(result.error).toBeDefined();
-    expect(result.successCount).toBe(0); // rolled back → reported as 0
+    expect(result.successCount).toBe(0); // rolled back -> reported as 0
     expect(result.rollbacks).toHaveLength(1);
     expect(undoCalls).toEqual(['undo-first']);
   });
@@ -2589,7 +2589,7 @@ describe('core dispatch — error & edge branches', () => {
     bus.register('b', () => 2);
 
     // TestBus exposes a public .inspect() but not the private _INSPECT symbol,
-    // so inspectBus() takes the fallback branch — undoActions is always [] there.
+    // so inspectBus() takes the fallback branch - undoActions is always [] there.
     const info = inspectBus(bus);
 
     expect(info.actions).toEqual(['a', 'b']);
@@ -2599,7 +2599,7 @@ describe('core dispatch — error & edge branches', () => {
   });
 });
 
-describe('core dispatch — query, rollback, buffer & error defaults', () => {
+describe('core dispatch - query, rollback, buffer & error defaults', () => {
   it('sync query() on a missing handler routes through the plugin runner', () => {
     const bus = createCommandBus();
     bus.use((_cmd, next) => next()); // installing a plugin forces the runner path
@@ -2608,7 +2608,7 @@ describe('core dispatch — query, rollback, buffer & error defaults', () => {
     expect(r.error?.message).toContain('No handler');
   });
 
-  it('async query() on a missing handler — bare and plugin-runner paths', async () => {
+  it('async query() on a missing handler - bare and plugin-runner paths', async () => {
     const bare = createAsyncCommandBus();
     const r1 = await bare.query('nope', {});
     expect(r1.ok).toBe(false);
@@ -2633,7 +2633,7 @@ describe('core dispatch — query, rollback, buffer & error defaults', () => {
     ], { transactional: true });
 
     expect(result.ok).toBe(false);
-    expect(undoCalls).toEqual(['undo-b']); // 'a' skipped — no undo handler
+    expect(undoCalls).toEqual(['undo-b']); // 'a' skipped - no undo handler
     expect(result.rollbacks).toHaveLength(1);
   });
 
@@ -2643,7 +2643,7 @@ describe('core dispatch — query, rollback, buffer & error defaults', () => {
 
     bus.dispatch('later', { id: 1 });
     bus.dispatch('later', { id: 2 });
-    bus.dispatch('later', { id: 3 }); // exceeds limit → drop oldest (id 1) + warn
+    bus.dispatch('later', { id: 3 }); // exceeds limit -> drop oldest (id 1) + warn
     expect(warn).toHaveBeenCalledTimes(1);
     warn.mockRestore();
 
@@ -2671,17 +2671,17 @@ describe('core dispatch — query, rollback, buffer & error defaults', () => {
 
   it('exact-listener unsubscribe is safe after offAll() cleared the bucket', () => {
     const bus = createCommandBus();
-    const un = bus.on('exactOnly', () => {}); // no wildcard → exact listener
+    const un = bus.on('exactOnly', () => {}); // no wildcard -> exact listener
     bus.offAll(); // clears the exact-listener map
-    expect(() => un()).not.toThrow(); // bucket now undefined → early return
+    expect(() => un()).not.toThrow(); // bucket now undefined -> early return
   });
 
   it('flushDeferred is a no-op for an action with nothing queued while others are buffered', () => {
     const bus = createCommandBus({ onMissing: 'buffer' });
-    bus.dispatch('queuedAction', { id: 1 }); // buffers A → deferred.size === 1
+    bus.dispatch('queuedAction', { id: 1 }); // buffers A -> deferred.size === 1
     const seen: unknown[] = [];
     // size !== 0 so register() DOES call flushDeferred, but the queue for
-    // 'otherAction' is undefined → early return (nothing replayed)
+    // 'otherAction' is undefined -> early return (nothing replayed)
     bus.register('otherAction', (cmd) => { seen.push(cmd); });
     expect(seen).toEqual([]);
     // the genuinely-queued action still replays when its own handler registers
@@ -2696,14 +2696,14 @@ describe('core dispatch — query, rollback, buffer & error defaults', () => {
     const unA = bus.on('evt', a);
     bus.on('evt', () => {}); // second listener keeps the bucket alive after unA
     unA(); // removes 'a' (i !== -1)
-    expect(() => unA()).not.toThrow(); // bucket still exists, 'a' gone → i === -1, no splice
+    expect(() => unA()).not.toThrow(); // bucket still exists, 'a' gone -> i === -1, no splice
   });
 
   it("onMissing:'buffer' overflow skips the dev warning in production", async () => {
     // The dev guard is now the module-level `DEV` from src/dev.ts, evaluated
     // ONCE at import (the same shape as Vue's own `__DEV__`) so that
     // `scripts/build.mjs` can const-fold it and drop both the branch and the
-    // warning strings from production bundles. That is the point of it — but
+    // warning strings from production bundles. That is the point of it - but
     // it means flipping NODE_ENV after import no longer flips the guard, which
     // is what the previous version of this test did.
     //
@@ -2717,7 +2717,7 @@ describe('core dispatch — query, rollback, buffer & error defaults', () => {
     const bus = freshBus({ onMissing: 'buffer', bufferLimit: 1 });
 
     bus.dispatch('x', { id: 1 });
-    bus.dispatch('x', { id: 2 }); // overflow, but DEV === false → no warn
+    bus.dispatch('x', { id: 2 }); // overflow, but DEV === false -> no warn
 
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
@@ -2727,8 +2727,8 @@ describe('core dispatch — query, rollback, buffer & error defaults', () => {
 
   it("onMissing:'buffer' overflow also skips the warning via __VC_DEV__=false (IIFE build path)", async () => {
     // The test above covers the ESM-consumer NODE_ENV fallback. DEV has a
-    // second resolution path — the direct __VC_DEV__ build define used by
-    // scripts/build.mjs for the IIFE bundles — and that path was untested
+    // second resolution path - the direct __VC_DEV__ build define used by
+    // scripts/build.mjs for the IIFE bundles - and that path was untested
     // for this warning site.
     vi.stubGlobal('__VC_DEV__', false);
     vi.resetModules();
@@ -2738,7 +2738,7 @@ describe('core dispatch — query, rollback, buffer & error defaults', () => {
     const bus = freshBus({ onMissing: 'buffer', bufferLimit: 1 });
 
     bus.dispatch('x', { id: 1 });
-    bus.dispatch('x', { id: 2 }); // overflow, but DEV === false → no warn
+    bus.dispatch('x', { id: 2 }); // overflow, but DEV === false -> no warn
 
     expect(warn).not.toHaveBeenCalled();
     warn.mockRestore();
@@ -2774,9 +2774,9 @@ describe('core dispatch — query, rollback, buffer & error defaults', () => {
   });
 });
 
-// ─── disposeAll — shared idempotent teardown ────────────────────────────────────
+// ─── disposeAll - shared idempotent teardown ────────────────────────────────────
 
-describe('disposeAll — teardown helper', () => {
+describe('disposeAll - teardown helper', () => {
   it('runs every disposer in insertion order, then empties the list', () => {
     const order: number[] = [];
     const fns = [() => order.push(1), () => order.push(2), () => order.push(3)];
@@ -2785,24 +2785,24 @@ describe('disposeAll — teardown helper', () => {
     expect(fns).toHaveLength(0); // cleared
   });
 
-  it('is idempotent — a second call is a no-op', () => {
+  it('is idempotent - a second call is a no-op', () => {
     let calls = 0;
     const fns = [() => { calls++; }, () => { calls++; }];
     disposeAll(fns);
-    disposeAll(fns); // already empty → nothing re-runs
+    disposeAll(fns); // already empty -> nothing re-runs
     expect(calls).toBe(2);
   });
 });
 
-// ─── commandKey — canonical key (order-independent, nested-faithful) ─────────────
+// ─── commandKey - canonical key (order-independent, nested-faithful) ─────────────
 
-describe('commandKey — canonical serialization', () => {
+describe('commandKey - canonical serialization', () => {
   it('is order-independent at every level', () => {
     expect(commandKey('x', { a: 1, b: 2 })).toBe(commandKey('x', { b: 2, a: 1 }));
     expect(commandKey('x', { o: { a: 1, b: 2 } })).toBe(commandKey('x', { o: { b: 2, a: 1 } }));
   });
 
-  it('distinguishes nested differences — no lossy collapse', () => {
+  it('distinguishes nested differences - no lossy collapse', () => {
     // regression: the old top-level array replacer dropped nested keys, colliding these
     expect(commandKey('s', { q: { page: 2 } })).not.toBe(commandKey('s', { q: { page: 3 } }));
   });
@@ -2827,13 +2827,13 @@ describe('request() dedup keys on canonical commandKey', () => {
     bus.respond('act', async () => { calls++; await new Promise(r => setTimeout(r, 10)); return calls; });
     const [r1, r2] = await Promise.all([
       bus.request('act', { a: 1, b: 2 }),
-      bus.request('act', { b: 2, a: 1 }), // same content, different order → now deduped
+      bus.request('act', { b: 2, a: 1 }), // same content, different order -> now deduped
     ]);
     expect(calls).toBe(1);
     expect(r1.value).toBe(r2.value);
   });
 
-  it('keeps nested-different requests separate — no false-dedup', async () => {
+  it('keeps nested-different requests separate - no false-dedup', async () => {
     const bus = createAsyncCommandBus();
     let calls = 0;
     bus.respond('act', async () => { calls++; await new Promise(r => setTimeout(r, 10)); return calls; });
@@ -2845,13 +2845,13 @@ describe('request() dedup keys on canonical commandKey', () => {
   });
 });
 
-describe('dev warning — async plugin on a sync bus', () => {
+describe('dev warning - async plugin on a sync bus', () => {
   afterEach(() => vi.restoreAllMocks());
 
   it('warns once per action when a sync dispatch returns a thenable', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createCommandBus();
-    // async plugin on a sync bus — the classic footgun
+    // async plugin on a sync bus - the classic footgun
     bus.use(((_cmd: any, next: any) => Promise.resolve(next())) as any);
     bus.register('oops', () => 1);
 

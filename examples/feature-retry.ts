@@ -1,5 +1,5 @@
 /**
- * Feature example: retry plugin — configurable backoff for failed dispatches
+ * Feature example: retry plugin - configurable backoff for failed dispatches
  * ==========================================================================
  */
 
@@ -11,7 +11,7 @@ import { createHttpBridge } from 'vapor-chamber/transports'
 
 const bus = createAsyncCommandBus()
 bus.use(retry({ maxAttempts: 3, strategy: 'exponential', baseDelay: 200 }))
-// Delays: 200ms, 400ms — then gives up
+// Delays: 200ms, 400ms - then gives up
 
 // ─── Fixed delay ──────────────────────────────────────────────────────────────
 
@@ -42,7 +42,7 @@ smartBus.use(retry({
   maxAttempts: 4,
   baseDelay: 200,
   isRetryable: (error, attempt) => {
-    // Don't retry client errors (4xx) — only server/network errors
+    // Don't retry client errors (4xx) - only server/network errors
     if (error.message.includes('400') || error.message.includes('422')) return false
     if (error.message.includes('401') || error.message.includes('403')) return false
     // Only retry up to attempt 2 for timeout errors

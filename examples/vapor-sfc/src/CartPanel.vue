@@ -8,14 +8,14 @@
 import { useCommand, signal } from 'vapor-chamber';
 import { asRef } from './_reactive';
 
-// asRef: vapor-chamber signals are Vue shallowRefs at runtime — typed as such here
+// asRef: vapor-chamber signals are Vue shallowRefs at runtime - typed as such here
 // so vue-tsc auto-unwraps them in the template (see _reactive.ts).
 const cmd = useCommand();
 const { dispatch } = cmd;
 const loading = asRef(cmd.loading);
 const lastError = asRef(cmd.lastError);
 
-// Success feedback: render the handler's CONFIRMED state — the single source
+// Success feedback: render the handler's CONFIRMED state - the single source
 // of truth. (Without this, a successful dispatch had no visible outcome.)
 const cart = asRef(signal<{ count: number; total: number } | null>(null));
 
@@ -32,18 +32,18 @@ async function addToCart(id: number) {
       Demonstrates per-component reactive state. The button disables only
       itself while the command is in flight.
     </p>
-    <!-- Top-level refs from setup are AUTO-UNWRAPPED in the template — no .value.
+    <!-- Top-level refs from setup are AUTO-UNWRAPPED in the template - no .value.
          (.value here would read a property off the unwrapped value instead.) -->
     <div class="row">
       <button :disabled="loading" @click="addToCart(1)">
-        {{ loading ? 'Adding…' : 'Add product #1' }}
+        {{ loading ? 'Adding...' : 'Add product #1' }}
       </button>
       <button :disabled="loading" @click="addToCart(-1)">
-        {{ loading ? 'Adding…' : 'Add invalid product (errors)' }}
+        {{ loading ? 'Adding...' : 'Add invalid product (errors)' }}
       </button>
     </div>
     <p v-if="cart" class="ok">
-      ✓ In cart: {{ cart.count }} item{{ cart.count > 1 ? 's' : '' }} — total ${{ cart.total.toFixed(2) }}
+      ✓ In cart: {{ cart.count }} item{{ cart.count > 1 ? 's' : '' }} - total ${{ cart.total.toFixed(2) }}
     </p>
     <p v-if="lastError" class="error">
       Error: {{ lastError.message }}

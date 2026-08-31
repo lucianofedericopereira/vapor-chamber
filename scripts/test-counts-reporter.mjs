@@ -1,10 +1,10 @@
 /**
- * vapor-chamber — vitest reporter that records nothing but counts.
+ * vapor-chamber - vitest reporter that records nothing but counts.
  *
  * WHY THIS EXISTS. `stamp-docs.mjs` can only own a value that some file the
  * repo produces already states. Coverage percentages have such a file
- * (`coverage/coverage-summary.json`); test counts did not — so README and the
- * whitepaper carried hand-typed totals that drifted every release (1491 → 1750
+ * (`coverage/coverage-summary.json`); test counts did not - so README and the
+ * whitepaper carried hand-typed totals that drifted every release (1491 -> 1750
  * across one cycle, in two places each). The whitepaper even documents deleting
  * a per-file inventory for drifting four times, and then its own summary line
  * drifted anyway. This closes that loop: the numbers become derived.
@@ -13,7 +13,7 @@
  * detail; this writes ~200 bytes.
  *
  * NOT COMMITTED (see .gitignore), and that is a measured decision rather than a
- * preference — the count is not one number, it depends on what else has run:
+ * preference - the count is not one number, it depends on what else has run:
  *
  *     build + coverage   1748 passed / 113 files   <- canonical, see below
  *     build, no coverage 1750 / 114                (2 more tests run)
@@ -26,7 +26,7 @@
  * passes untouched while local stamping still derives real numbers.
  *
  * CANONICAL: stamp from a built tree WITH coverage, so the test counts and the
- * coverage percentages in the same sentence come from the same run — which is
+ * coverage percentages in the same sentence come from the same run - which is
  * also the run docs/COVERAGE.md describes:
  *
  *     npm run build && npm run test:coverage && npm run test:vapor && npm run docs:stamp
@@ -43,7 +43,7 @@ const OUT = 'docs/metrics.json';
 
 /**
  * Count from Vitest 4's Reported Task API (`onTestRunEnd`). Kept behind a
- * capability check rather than a version check — the older `onFinished(files)`
+ * capability check rather than a version check - the older `onFinished(files)`
  * shape is walked instead when `children.allTests` is not there.
  */
 function countModules(modules) {
@@ -63,7 +63,7 @@ function countModules(modules) {
       else ran = true;
     }
     // `files` counts modules that actually RAN something, matching vitest's own
-    // "114 passed | 1 skipped" split — and matching `passed`, so a doc pairing
+    // "114 passed | 1 skipped" split - and matching `passed`, so a doc pairing
     // the two ("N tests across M files") is not quietly mixing a passed count
     // with a total. `filesTotal` keeps the other number available.
     if (ran) files++;
@@ -106,7 +106,7 @@ function countTasks(fileTasks) {
  * without it) and coverage on (2 more skip without it, and it is the run
  * docs/COVERAGE.md describes). stamp-docs ignores data that says otherwise, so
  * an ordinary `npm run test:run` can write this file freely without making the
- * next `lint:check` fail — which is exactly what it did before this existed.
+ * next `lint:check` fail - which is exactly what it did before this existed.
  */
 function write(key, counts) {
   // Merge rather than overwrite: the two projects run as separate processes.
@@ -115,11 +115,11 @@ function write(key, counts) {
     try {
       existing = JSON.parse(readFileSync(OUT, 'utf8'));
     } catch {
-      existing = {}; // unreadable/partial — regenerate from this run
+      existing = {}; // unreadable/partial - regenerate from this run
     }
   }
   const next = { ...existing, [key]: counts };
-  // Stable key order so the committed file has no spurious diffs.
+  // Stable key order so reruns produce no spurious diffs.
   const ordered = Object.fromEntries(Object.keys(next).sort().map((k) => [k, next[k]]));
   mkdirSync(dirname(OUT), { recursive: true });
   writeFileSync(OUT, `${JSON.stringify(ordered, null, 2)}\n`);
@@ -136,7 +136,7 @@ function isFilteredRun(argv = process.argv.slice(2)) {
   const SUBCOMMANDS = new Set(['run', 'watch', 'dev', 'bench', 'related', 'list']);
   // Flags whose VALUE is the next argv entry. Without this, `vitest run -c
   // vitest.vapor.config.ts` reads its own config path as a positional filter
-  // and the vapor project silently records nothing — which is exactly what it
+  // and the vapor project silently records nothing - which is exactly what it
   // did until this list existed.
   const TAKES_VALUE = new Set([
     '-c', '--config', '-r', '--root', '--reporter', '--outputFile', '--project',

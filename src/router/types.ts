@@ -1,24 +1,24 @@
 /**
- * vapor-chamber-router — public types.
+ * vapor-chamber-router - public types.
  *
- * `RouteRecord` is the router's own row schema — the contract a server-side
+ * `RouteRecord` is the router's own row schema - the contract a server-side
  * route generator emits against. A generator may ship a matching
  * `route-record.generated.d.ts`, but this interface is the source of truth for
- * the shape. Rows arrive pre-sorted by match priority — ordering is the
+ * the shape. Rows arrive pre-sorted by match priority - ordering is the
  * server's job; matching is linear first-hit-wins.
  */
 
 /** Cast applied to a path param or scalar query param. */
 export type ParamType = 'string' | 'int' | 'bool';
 
-/** Declaration for a typed query param (`?page=2` → `useQueryParam('page')`). */
+/** Declaration for a typed query param (`?page=2` -> `useQueryParam('page')`). */
 export type QueryParamDef = {
   /** Value cast. 'array' collects repeated keys as string[]. Default: 'string'. */
   type?: ParamType | 'array';
   /** Fallback when the key is absent or fails the cast. Values equal to the
    *  default are dropped from the URL on write. */
   default?: unknown;
-  /** How a write to this param lands in browser history. Unset → the
+  /** How a write to this param lands in browser history. Unset -> the
    *  convention: 'page' pushes, everything else replaces. */
   history?: 'push' | 'replace';
 };
@@ -27,7 +27,7 @@ export type QueryParamDef = {
 export type RouteRecord = {
   name: string;
   /** Pattern relative to the router base. `:param`, `:param(regex)`,
-   *  `:param?`, trailing `*` splat (→ params.pathMatch). */
+   *  `:param?`, trailing `*` splat (-> params.pathMatch). */
   path: string;
   parent?: string | null;
   /** Key into the client component map. null/absent + !blade = group record:
@@ -40,14 +40,14 @@ export type RouteRecord = {
    * Server-declared data loader: a URL template fetched on navigation with
    * `{placeholders}` filled from path params, then typed query params.
    *   "/api/vc/products?page={page}&sort={sort}"
-   * Fetched with an AbortController — a newer navigation aborts it. The
+   * Fetched with an AbortController - a newer navigation aborts it. The
    * response (house envelope or bare JSON) lands on `snapshot.data` atomically
    * with the commit; `useRouteData()` reads it.
    */
   load?: string | null;
   params?: Record<string, ParamType>;
   query?: Record<string, QueryParamDef>;
-  /** Server data: permissions, titles, `preheat` flag, … */
+  /** Server data: permissions, titles, `preheat` flag, ... */
   meta?: Record<string, unknown>;
 };
 
@@ -68,7 +68,7 @@ export type QueryPatch = Record<string, unknown | null | undefined>;
 /** Typed path params of a resolved location. */
 export type RouteParams = Record<string, string | number | boolean>;
 
-/** Compiled table record — a RouteRecord after createRouteTable(). Object
+/** Compiled table record - a RouteRecord after createRouteTable(). Object
  *  identity of these drives reuse-vs-remount classification. */
 export type TableRecord = {
   name: string;
@@ -82,7 +82,7 @@ export type TableRecord = {
   meta: Record<string, unknown>;
   /** Root-first parent chain (this record last). */
   chain: readonly TableRecord[];
-  /** chain filtered to renderable records — what outlets index by depth. */
+  /** chain filtered to renderable records - what outlets index by depth. */
   renderChain: readonly TableRecord[];
   /** chain filtered to records with a `load` template. */
   loadChain: readonly TableRecord[];
@@ -100,7 +100,7 @@ export type Segment =
   | { kind: 'param'; name: string; pattern: string; optional: boolean }
   | { kind: 'splat' };
 
-/** A resolved, normalized location — what guards and useRoute() see. */
+/** A resolved, normalized location - what guards and useRoute() see. */
 export type RouteLocation = {
   name: string | null;
   /** Decoded path relative to base, no query/hash. */
@@ -123,7 +123,7 @@ export type RenderEntry = {
   component: unknown;
 };
 
-/** The atomic unit of router state — one frozen object per commit. Loader
+/** The atomic unit of router state - one frozen object per commit. Loader
  *  data commits WITH the navigation (two-phase: load during, commit after),
  *  so a page never renders with the previous page's data. */
 export type RouteSnapshot = {
@@ -136,7 +136,7 @@ export type RouteSnapshot = {
 
 /** Target of a programmatic navigation. TName narrows `name` to the
  *  generated route-name union (AdminRouteName) when the router is created
- *  as `createRouter<AdminRouteName>(…)` — typos become compile errors. */
+ *  as `createRouter<AdminRouteName>(...)` - typos become compile errors. */
 export type RouteLocationRaw<TName extends string = string> =
   | string
   | {
@@ -150,9 +150,9 @@ export type RouteLocationRaw<TName extends string = string> =
 
 /**
  * Navigation guard. Return:
- *  - nothing / true   → continue
- *  - false            → abort (URL reverted on popstate navigations)
- *  - RouteLocationRaw → redirect
+ *  - nothing / true   -> continue
+ *  - false            -> abort (URL reverted on popstate navigations)
+ *  - RouteLocationRaw -> redirect
  */
 export type NavigationGuard = (
   to: RouteLocation,

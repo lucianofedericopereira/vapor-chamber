@@ -6,7 +6,7 @@ the optional pieces (Sanctum SPA flow, Filament panels, Inertia coexistence,
 Reverb / Echo realtime, queued commands).
 
 The examples in this guide ship as runnable PHP files under
-[`examples/laravel-backend/`](../../examples/laravel-backend/) — copy-paste
+[`examples/laravel-backend/`](../../examples/laravel-backend/) - copy-paste
 ready, not auto-loaded. Adapt namespaces and table names to your project.
 
 ---
@@ -14,7 +14,7 @@ ready, not auto-loaded. Adapt namespaces and table names to your project.
 ## What the lib expects from your backend
 
 The HTTP bridge POSTs every dispatch to a single endpoint. There is **one
-route, not one-per-command** — the action name is in the JSON body.
+route, not one-per-command** - the action name is in the JSON body.
 
 **Request body** (every dispatch):
 ```json
@@ -43,18 +43,18 @@ expired, 500 for unhandled).
 ### 1. Route
 
 ```php
-// routes/web.php  (cookie-CSRF case — see CSRF section below)
+// routes/web.php  (cookie-CSRF case - see CSRF section below)
 use App\Http\Controllers\VaporChamberController;
 
 Route::post('/api/vc', VaporChamberController::class)->middleware(['web']);
 ```
 
-Or under Sanctum if you're doing SPA cookie auth — note the path: routes in
+Or under Sanctum if you're doing SPA cookie auth - note the path: routes in
 `routes/api.php` are auto-prefixed with `api`, so `'/vc'` resolves to `/api/vc`
 (writing `'/api/vc'` here would resolve to `/api/api/vc` and 404 every dispatch):
 
 ```php
-// routes/api.php  ('/vc' → /api/vc — the api prefix is added automatically)
+// routes/api.php  ('/vc' -> /api/vc - the api prefix is added automatically)
 Route::post('/vc', VaporChamberController::class)
     ->middleware(['auth:sanctum']);
 ```
@@ -106,7 +106,7 @@ class VaporChamberController extends Controller
 }
 ```
 
-Don't put logic in the controller — keep it as a dispatcher. Put per-command
+Don't put logic in the controller - keep it as a dispatcher. Put per-command
 behavior in action classes.
 
 ### 3. Action classes
@@ -149,7 +149,7 @@ return [
         'cartAdd'     => \App\Actions\Cart\AddToCart::class,
         'cartRemove'  => \App\Actions\Cart\RemoveFromCart::class,
         'orderCreate' => \App\Actions\Order\CreateOrder::class,
-        // …
+        // ...
     ],
 ];
 ```
@@ -159,12 +159,12 @@ drop the IIFE script tag in, and you're done.
 
 ---
 
-## CSRF — pick one of two flows
+## CSRF: pick one of two flows
 
 The lib reads CSRF tokens from three DOM sources in order: meta tag, cookie,
 hidden input. Match one of them on the backend.
 
-### Flow A — `web` middleware + Blade meta tag
+### Flow A: `web` middleware + Blade meta tag
 
 For server-rendered Blade pages (no SPA, no Sanctum):
 
@@ -188,7 +188,7 @@ const { dispatch } = VaporChamber.connect({ endpoint: '/api/vc' });
 Laravel's `VerifyCsrfToken` middleware reads `X-CSRF-TOKEN` from the request
 header; the lib reads it from your meta tag and attaches it. Done.
 
-### Flow B — Sanctum SPA cookie flow
+### Flow B: Sanctum SPA cookie flow
 
 For SPA / Inertia setups using cookie-based session auth:
 
@@ -205,7 +205,7 @@ php artisan install:api   # Laravel 11+: creates routes/api.php (absent on a fre
 ```
 
 ```php
-// bootstrap/app.php (Laravel 11+) — without this every request 401s:
+// bootstrap/app.php (Laravel 11+) - without this every request 401s:
 // Sanctum only treats SPA requests as stateful when the middleware is enabled.
 ->withMiddleware(function (Middleware $middleware) {
     $middleware->statefulApi();
@@ -213,48 +213,48 @@ php artisan install:api   # Laravel 11+: creates routes/api.php (absent on a fre
 ```
 
 ```php
-// routes/api.php — auto-prefixed with `api`, so '/vc' → /api/vc
+// routes/api.php - auto-prefixed with `api`, so '/vc' -> /api/vc
 // (writing '/api/vc' here would resolve to /api/api/vc and 404)
 Route::post('/vc', VaporChamberController::class)
     ->middleware(['auth:sanctum']);
 ```
 
 ```js
-// client — same call site, csrf still on
+// client - same call site, csrf still on
 const { dispatch } = VaporChamber.connect({ endpoint: '/api/vc' });
 ```
 
 The lib auto-fetches `/sanctum/csrf-cookie` on a 419 response and retries
 once. No extra client config.
 
-### CORS — required when the page and the API are different origins
+### CORS: required when the page and the API are different origins
 
 Flow B typically means a Vite dev server (`localhost:5173`) talking to
-`localhost:8000` — a cross-origin pair, so every dispatch is preceded by a
+`localhost:8000` - a cross-origin pair, so every dispatch is preceded by a
 preflight. The bridge always sends `X-Requested-With: XMLHttpRequest` (it is
 what makes Laravel answer 419/401 as **JSON** instead of redirecting to a login
 page), and `Idempotency-Key` whenever the `idempotent()` plugin is enabled. A
 header the preflight does not allow fails the whole request *before it reaches
-Laravel*, and the browser reports it uselessly — Chrome says only
+Laravel*, and the browser reports it uselessly - Chrome says only
 `Failed to fetch`; Firefox at least names the header.
 
 ```php
-// config/cors.php  — `php artisan config:publish cors` to create it
+// config/cors.php  - `php artisan config:publish cors` to create it
 'paths' => ['api/*', 'sanctum/csrf-cookie'],
 'allowed_origins' => [env('FRONTEND_URL', 'http://localhost:5173')],
 'allowed_headers' => [
     'Content-Type',
     'Accept',
-    'X-Requested-With',    // ← always sent; omit it and every dispatch fails
-    'X-CSRF-TOKEN',        // ← Flow A (Blade meta tag)
-    'X-XSRF-TOKEN',        // ← Flow B (Sanctum cookie)
-    'Idempotency-Key',     // ← only with the idempotent() plugin
+    'X-Requested-With',    // <- always sent; omit it and every dispatch fails
+    'X-CSRF-TOKEN',        // <- Flow A (Blade meta tag)
+    'X-XSRF-TOKEN',        // <- Flow B (Sanctum cookie)
+    'Idempotency-Key',     // <- only with the idempotent() plugin
 ],
 'supports_credentials' => true,   // required for the cookie flows
 ```
 
 `'allowed_headers' => ['*']` also works and is common in dev, but note it does
-**not** cover credentials in every proxy setup — listing them is the safer
+**not** cover credentials in every proxy setup - listing them is the safer
 default. Same-origin deployments (Blade serving the page and the endpoint, i.e.
 Flow A) need none of this: there is no preflight at all.
 
@@ -266,7 +266,7 @@ The first-choice navigation layer for Blade apps is the in-box
 `vapor-chamber/router` subpath: Laravel keeps ONE catch-all
 (`Route::view('/admin/{any?}', 'admin.shell')->where('any', '.*')`), the
 Blade shell inlines the permission-filtered route table as JSON, and the
-router owns everything inside — reads via route-declared loaders
+router owns everything inside - reads via route-declared loaders
 (`load: "/api/vc/products?page={page}"`, aborted on supersede; the in-box
 `vapor-chamber/router-fetch` preset covers plain JSON, or supply your own
 preset to unwrap a house envelope), writes via this package's commands. The
@@ -285,13 +285,13 @@ page props, vapor-chamber owns in-page actions. They don't overlap.
 plain JSON instead of Inertia responses.
 
 ```php
-// routes/web.php — Inertia routes here
+// routes/web.php - Inertia routes here
 Route::middleware(['web', \App\Http\Middleware\HandleInertiaRequests::class])
     ->group(function () {
         Route::get('/orders', [OrderController::class, 'index'])->name('orders.index');
     });
 
-// vapor-chamber endpoint — same web middleware, NOT Inertia middleware
+// vapor-chamber endpoint - same web middleware, NOT Inertia middleware
 Route::post('/api/vc', VaporChamberController::class)->middleware(['web']);
 ```
 
@@ -312,7 +312,7 @@ async function cancelOrder(id: number) {
 Both `csrf: 'inertia'` and `onRedirect` are **shipped** on `createHttpBridge`:
 `csrf: 'inertia'` defers token management to Inertia's Axios instance instead
 of reading the meta tag, and `onRedirect(url)` is called when the backend
-response signals a redirect — wire it to `router.visit(url)` to let Inertia
+response signals a redirect - wire it to `router.visit(url)` to let Inertia
 take the navigation:
 
 ```ts
@@ -325,17 +325,17 @@ const bridge = createHttpBridge({
 
 ---
 
-## Widget ↔ Livewire / Alpine / Blade event bridging
+## Widget <-> Livewire / Alpine / Blade event bridging
 
 When you embed a Vapor custom element widget (`defineWidget`) into a Blade
 page, Alpine controller, or Filament/Livewire panel, the widget needs a way
-to notify the surrounding code when something happens inside it — a product
+to notify the surrounding code when something happens inside it - a product
 added, a form submitted, a step completed. Vue's `emit(...)` goes through
 Vue's component event system; it does **not** bubble out as a DOM event,
 so Livewire / Alpine / vanilla `addEventListener` can't see it.
 
-> **Tag naming — use the `vc-` prefix.** The recommended convention is
-> `<vc-cart/>`, `<vc-title/>`, `<vc-search/>` etc. — clean next to Blade
+> **Tag naming - use the `vc-` prefix.** The recommended convention is
+> `<vc-cart/>`, `<vc-title/>`, `<vc-search/>` etc. - clean next to Blade
 > components in `.blade.php` files, instantly recognizable as
 > vapor-chamber widgets, no collision with host-page elements, easy to
 > grep across a codebase. If your project already has a brand prefix
@@ -347,7 +347,7 @@ that gap by dispatching a real `CustomEvent` on the host element. Bubbles
 out, escapes shadow DOM (`composed: true` by default), reaches every
 listener that knows how to listen for DOM events.
 
-### Pattern 1 — Blade page + Alpine.js
+### Pattern 1: Blade page + Alpine.js
 
 ```html
 <!-- resources/views/cart.blade.php -->
@@ -371,7 +371,7 @@ listener that knows how to listen for DOM events.
         onClick: async (e) => {
           const result = await dispatch('cartAdd', { id: 1 }, { qty: 1 });
           if (result.ok) {
-            // Bridge widget event → Alpine listener
+            // Bridge widget event -> Alpine listener
             VaporChamber.emitDOMEvent(
               e.target.getRootNode().host,
               'cart-added',
@@ -389,7 +389,7 @@ Alpine's `@cart-added.window` listens at the window level (the event bubbles
 up). Use `@cart-added` directly on a parent element if you want scoped
 listening.
 
-### Pattern 2 — Livewire 3
+### Pattern 2: Livewire 3
 
 Livewire 3 components subscribe to DOM events declaratively:
 
@@ -426,9 +426,9 @@ that Livewire 3's `#[On('cart-added')]` attribute picks up. No JS plumbing
 in Livewire's view; the Vapor widget is a drop-in component that emits
 upward.
 
-### Pattern 3 — Filament panel widget
+### Pattern 3: Filament panel widget
 
-Filament panels are Livewire under the hood. Same pattern — embed a Vapor
+Filament panels are Livewire under the hood. Same pattern - embed a Vapor
 widget inside a Filament widget's view, listen via `#[On(...)]`:
 
 ```php
@@ -463,7 +463,7 @@ Inside `vc-search-bar`, the widget calls `emitDOMEvent(host, 'search-executed', 
 Filament's panel re-renders without a Livewire round-trip back through
 the server unless you want one.
 
-### Pattern 4 — vanilla DOM, no framework
+### Pattern 4: vanilla DOM, no framework
 
 The same `emitDOMEvent` works without Alpine/Livewire:
 
@@ -479,15 +479,15 @@ The same `emitDOMEvent` works without Alpine/Livewire:
 
 ### Why this matters for Laravel specifically
 
-Laravel projects typically have **multiple coexisting reactive layers** —
+Laravel projects typically have **multiple coexisting reactive layers** -
 Blade renders the page, Alpine handles small interactions, Livewire owns
 big component state, Filament renders admin panels on Livewire. Vapor
-Chamber's widget surface is **none** of those — it's Vue Vapor. The
+Chamber's widget surface is **none** of those - it's Vue Vapor. The
 `emitDOMEvent` bridge is the **interop primitive** that lets a Vapor
 widget participate in any of those layers without coupling to them.
 
 Same pattern works for Stimulus (Rails), HTMX (event listeners), Solid
-islands, vanilla — anything that reads DOM events.
+islands, vanilla - anything that reads DOM events.
 
 ---
 
@@ -526,7 +526,7 @@ class AnalyticsWidget extends Widget
 ```
 
 The vapor-chamber controller and Filament's panel guard sit on different
-routes — no auth conflict, no middleware overlap.
+routes - no auth conflict, no middleware overlap.
 
 See [`examples/pattern-5-filament.ts`](../../examples/pattern-5-filament.ts)
 for the full client-side island.
@@ -544,7 +544,7 @@ composer require laravel/reverb
 php artisan reverb:install
 ```
 
-Use the protocol-aware `createEchoBridge` — it subscribes public / private /
+Use the protocol-aware `createEchoBridge` - it subscribes public / private /
 presence channels and routes each broadcast to the bus, with presence membership
 (`here` / `joining` / `leaving`) emitted too. You pass your own Echo instance, so
 vapor-chamber never imports `laravel-echo`:
@@ -569,14 +569,14 @@ const realtime = createEchoBridge({
     { name: 'lobby',          type: 'presence', events: ['MessagePosted'] },
   ],
 });
-realtime.install(bus); // OrderShipped → bus.emit('OrderShipped', payload); lobby:joining on presence
+realtime.install(bus); // OrderShipped -> bus.emit('OrderShipped', payload); lobby:joining on presence
 
 // on teardown (component unmount / SPA route change):
 realtime.teardown();
 ```
 
 Need to react with a *command* instead of an event? Pass `onBroadcast: ({ payload }, b)
-=> b.dispatch('applyShipment', payload)`. Realtime is receive-only — outbound writes
+=> b.dispatch('applyShipment', payload)`. Realtime is receive-only - outbound writes
 still go through the HTTP bridge (with CSRF + the `Idempotency-Key` header above).
 
 ---
@@ -610,7 +610,7 @@ class ProcessCheckout
 
 On the client, pair with the lib's `optimistic` plugin (apply UI change
 immediately, roll back on failure) and/or a polling `orderStatusCheck`
-command — or push final state via Reverb.
+command - or push final state via Reverb.
 
 ---
 
@@ -676,13 +676,13 @@ error: ... }`.
 The classic "user clicks Checkout twice" race has two halves, and vapor-chamber
 covers the client side of both:
 
-- **Locally** — the `idempotent` plugin collapses duplicate dispatches of the same
+- **Locally** - the `idempotent` plugin collapses duplicate dispatches of the same
   logical command, so the handler (and the request it makes) runs once. Concurrent
   duplicates share the first in-flight promise; repeats within the TTL return the
   cached result. Failures aren't cached, so a genuine retry still runs.
-- **On the wire** — `idempotent` stamps `cmd.meta.idempotencyKey`, and the HTTP
+- **On the wire** - `idempotent` stamps `cmd.meta.idempotencyKey`, and the HTTP
   bridge forwards it as a standard `Idempotency-Key` request header. The backend
-  reads that header and rejects a second write with the same key — so even a retry
+  reads that header and rejects a second write with the same key - so even a retry
   that slips past the client lands once.
 
 ```ts
@@ -694,24 +694,24 @@ const bus = createAsyncCommandBus();
 bus.use(idempotent({ actions: ['order*', 'checkout*'] }), { priority: 100 });
 bus.use(createHttpBridge({ endpoint: '/api/vc', csrf: true }));
 
-// two rapid clicks → one handler run, one backend write
+// two rapid clicks -> one handler run, one backend write
 bus.dispatch('checkoutSubmit', { cartId });
 bus.dispatch('checkoutSubmit', { cartId });
 ```
 
 For commands that must also never *interleave* (two writes to the same account),
-add `serialize({ key })` — it orders same-key commands locally while `idempotent`
+add `serialize({ key })` - it orders same-key commands locally while `idempotent`
 collapses identical ones. Together they give exactly-once semantics on the client.
 The only backend contract is the standard one: honor the `Idempotency-Key` header
 (persist the key with its result; return the stored result on a repeat). The
 example controller implements exactly this with a short-TTL cache:
 
 ```php
-// VaporChamberController (see examples/laravel-backend/) — replay a processed key
+// VaporChamberController (see examples/laravel-backend/) - replay a processed key
 $idempotencyKey = $request->header('Idempotency-Key');
 $cacheKey = $idempotencyKey ? "vc:idem:{$command}:{$idempotencyKey}" : null;
 if ($cacheKey && ($cached = Cache::get($cacheKey)) !== null) {
-    return response()->json($cached);   // second write with the same key → cached result
+    return response()->json($cached);   // second write with the same key -> cached result
 }
 // ... run the action, then Cache::put($cacheKey, $body, 60) on success
 ```
@@ -741,7 +741,7 @@ Server log should show one `POST /api/vc`. Browser console should show
 `{ ok: true, value: { count: 1, total: ... } }`.
 
 If that round-trips, every other command on your bus uses identical
-plumbing — register the action class, add a line to `config/vapor-chamber.php`,
+plumbing - register the action class, add a line to `config/vapor-chamber.php`,
 done.
 
 ---
