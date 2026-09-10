@@ -27,6 +27,10 @@ export type RouterErrorCode =
   // route table
   | 'duplicate_route'
   | 'unknown_parent'
+  // A parent chain that loops back on itself. Its own code and not a flavour of
+  // `unknown_parent`, because every parent in the cycle resolves fine - the
+  // defect is the shape, not a missing row.
+  | 'cyclic_parent'
   | 'missing_param'
   | 'bad_menu_row'
   | 'invalid_path'

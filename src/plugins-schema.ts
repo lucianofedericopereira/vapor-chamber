@@ -110,6 +110,22 @@ function pickValue(cmd: Command, field: SchemaValidatorOptions['field']): unknow
   return cmd.target;
 }
 
+/**
+ * Own entries into a Map, once at plugin creation.
+ *
+ * `schemas[cmd.action]` looked up an action name - a string from outside - on
+ * an object inheriting from Object.prototype (see ../dict). For an action named
+ * `toString` the lookup returned the inherited FUNCTION, which is not
+ * `undefined`, so the plugin went on to read `fn['~standard'].validate` and
+ * threw a TypeError straight out of `bus.dispatch()` - breaking the contract
+ * that dispatch always returns a CommandResult. A Map has no chain to walk.
+ */
+function compileSchemas(
+  schemas: Record<string, StandardSchemaV1>,
+): Map<string, StandardSchemaV1> {
+  return new Map(Object.entries(schemas));
+}
+
 function rejectResult(action: string, message: string): CommandResult {
   return {
     ok: false,
@@ -132,9 +148,10 @@ export function validateSchemas(
   options: SchemaValidatorOptions = {},
 ): Plugin {
   const { field = 'target', onInvalid = 'reject' } = options;
+  const compiled = compileSchemas(schemas);
 
   return (cmd, next) => {
-    const schema = schemas[cmd.action];
+    const schema = compiled.get(cmd.action);
     if (schema === undefined) return next();
 
     const value = pickValue(cmd, field);
@@ -171,9 +188,10 @@ export function validateSchemasAsync(
   options: SchemaValidatorOptions = {},
 ): AsyncPlugin {
   const { field = 'target', onInvalid = 'reject' } = options;
+  const compiled = compileSchemas(schemas);
 
   return async (cmd, next) => {
-    const schema = schemas[cmd.action];
+    const schema = compiled.get(cmd.action);
     if (schema === undefined) return next();
 
     const value = pickValue(cmd, field);

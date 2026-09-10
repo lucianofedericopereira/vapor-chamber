@@ -2,7 +2,7 @@
 
 **Experimental.** State whose every mutation is a command.
 
-<!-- vc:sizeStore -->0.6<!-- /vc:sizeStore --> KB brotli. Imports `vue` and nothing else.
+<!-- vc:sizeStore -->0.7<!-- /vc:sizeStore --> KB brotli. Imports `vue` and nothing else.
 
 ```ts
 import { createCommandBus } from 'vapor-chamber';

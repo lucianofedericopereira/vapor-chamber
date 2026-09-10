@@ -109,12 +109,26 @@ function checkStackedDocblocks(file, lines) {
  */
 const DEFAULT_CLAIM = /Default:\s*`?((?:-?\d[\d_]*(?:\.\d+)?)|'[^']*'|"[^"]*"|true|false|null)`?/g;
 
+/**
+ * A STANDALONE TOKEN, not a substring. `rest.includes('5')` is true of almost
+ * any file - a version, an offset, an identifier ending in 5 - so for small
+ * numeric literals the check was close to vacuous: `Default: 3` passed while
+ * the real default was 7. Measured across all 68 `Default:` claims in the
+ * repo, the two tests agree on every one, so this closes a latent hole rather
+ * than fixing a live miss. That is the same trade this file's own CHECK 1
+ * docblock describes, and the reason check-line-citations widened its anchor.
+ */
+function appearsAsToken(haystack, literal) {
+  const escaped = literal.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![\\w.])${escaped}(?![\\w])`).test(haystack);
+}
+
 function checkDocumentedDefaults(file, source) {
   if (DEFAULT_ALLOW.has(file)) return;
   for (const match of source.matchAll(DEFAULT_CLAIM)) {
     const literal = match[1];
     const rest = source.slice(0, match.index) + source.slice(match.index + match[0].length);
-    if (!rest.includes(literal)) {
+    if (!appearsAsToken(rest, literal)) {
       const line = source.slice(0, match.index).split('\n').length;
       problems.push(
         `${file}:${line}  documents "Default: ${literal}" but ${literal} appears ` +

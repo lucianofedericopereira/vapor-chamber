@@ -6,7 +6,7 @@
  * These use only the public BaseBus interface. They are optional and tree-shaken.
  */
 
-import { disposeAll, matchesPattern } from './command-bus';
+import { _withCausation, disposeAll, matchesPattern } from './command-bus';
 import type { BaseBus, Command, CommandResult, Handler, RegisterOptions, } from './command-bus';
 
 // ---------------------------------------------------------------------------
@@ -246,14 +246,30 @@ export function createReaction(
       return () => {};
     }
 
+    // Hop count per chain, keyed by the id of the command that CAUSED the next
+    // dispatch. The next hop's listener sees that id as its own
+    // `meta.causationId`, so the chain is walked through meta rather than
+    // through the payload.
+    //
+    // It used to ride `__reactionHops` in the payload, which cannot mark a
+    // primitive or an array - so `mapPayload: () => 42` dropped the marker,
+    // every hop read as hop 1, and the cap never fired. Measured: an indirect
+    // cycle ran to MAX_DISPATCH_DEPTH (16) on a sync bus instead of stopping at
+    // maxHops, and is unbounded on an async bus, which is exactly the failure
+    // `ReactionOptions.allowSelfMatch` documents. The payload marker is still
+    // written when the payload can hold keys, so nothing reading it changed.
+    //
+    // Capped like `_prefixCache` in command-bus.ts: a long-lived reaction on a
+    // busy bus would otherwise grow this without bound. Eviction degrades a
+    // pathological chain to "starts counting again", never to a leak.
+    const chainHops = new Map<string, number>();
+    const CHAIN_MAX = 256;
+
     return bus.on(sourcePattern, (cmd: Command, result: CommandResult) => {
       if (when && !when(cmd, result)) return;
 
-      // Indirect cycles (A->B, B->A) are invisible at install time, so the chain
-      // carries its own hop count. It rides the same `__`-payload convention
-      // as `__causationId`/`__origin` - one dispatch, one marker, no flag that
-      // an await can outrun.
-      const hops = ((cmd.payload as { __reactionHops?: number } | undefined)?.__reactionHops ?? 0) + 1;
+      const parent = cmd.meta?.causationId;
+      const hops = (parent !== undefined ? (chainHops.get(parent) ?? 0) : 0) + 1;
       if (hops > maxHops) {
         console.error(
           `[vapor-chamber] Reaction "${sourcePattern}" -> "${targetAction}" exceeded maxHops (${maxHops}) - ` +
@@ -274,8 +290,17 @@ export function createReaction(
             ? { ...mapped, ...marker }
             : mapped;
 
+      // Record this chain's depth against the id the NEXT hop will carry as its
+      // causationId, then hand that id to the core's one-shot slot so the
+      // dispatched command is attributed whatever shape its payload has.
+      const id = cmd.meta?.id;
+      if (id !== undefined) {
+        if (chainHops.size >= CHAIN_MAX) chainHops.delete(chainHops.keys().next().value!);
+        chainHops.set(id, hops);
+      }
+
       try {
-        bus.dispatch(targetAction, target, payload);
+        _withCausation(id, () => bus.dispatch(targetAction, target, payload));
       } catch (e) {
         console.error(`[vapor-chamber] Reaction ${sourcePattern} -> ${targetAction} error:`, e);
       }

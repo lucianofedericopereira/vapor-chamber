@@ -25,10 +25,11 @@
  * Run: node scripts/check-ascii.mjs
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 
-const ROOTS = ['src', 'tests', 'scripts', 'docs', 'examples', '.github'];
+const ROOTS = ['src', 'tests', 'scripts', 'docs', 'examples', '.github', 'assets'];
 const ROOT_FILES = [
+  'index.html',
   'README.md',
   'CHANGELOG.md',
   'CONTRIBUTING.md',
@@ -38,15 +39,29 @@ const ROOT_FILES = [
   'vitest.vapor.config.ts',
   'tsconfig.json',
   'tsconfig.typecheck.json',
-  'typedoc.json',
   'biome.json',
   'package.json',
 ];
-const EXTENSIONS = ['.ts', '.js', '.mjs', '.md', '.json', '.vue', '.yml', '.yaml', '.html'];
+const EXTENSIONS = ['.ts', '.js', '.mjs', '.md', '.json', '.vue', '.yml', '.yaml', '.html', '.css'];
 const SKIP_DIRS = new Set(['node_modules', 'coverage', 'dist']);
 
-/** file-path substring -> reason. Empty on purpose; earn every entry. */
-const ALLOW = new Map();
+/**
+ * file-path substring -> reason. Earn every entry.
+ *
+ * The first one took a while to earn. Four console glyphs were deliberate but
+ * uncontrolled: this guard's alphabet did not include them, so it reported a
+ * clean sweep while they sat in SHIPPED strings in three modules - one of them
+ * `logger()`, which is in all three IIFE variants. Same shape as the arrow
+ * family below, which went in after a "completed" sweep left 48 arrows in 15
+ * files.
+ *
+ * Collecting them in one module inverts that: NON_ASCII below fails EVERY other
+ * file under `src/`, whatever the character, so the exception is one reviewable
+ * path rather than a rule nobody enforced.
+ */
+const ALLOW = new Map([
+  ['src/glyphs.ts', 'the project\'s only non-ASCII characters, by design - see that file'],
+]);
 
 // Written as \u escapes, not literal characters, so this file (which defines
 // the forbidden set) stays ASCII itself.
@@ -81,6 +96,32 @@ const ALLOW = new Map();
 // invisible: nothing was lost by not having them.
 const OFFENDERS =
   /[\u2013\u2014\u2018\u2019\u201c\u201d\u2026\u00d7\u200b\u2060\ufeff\u00a0\u2190\u2191\u2192\u2193\u2194\u21a9\u21aa\u21d2]/;
+
+/**
+ * `src/` IS HELD TO PLAIN ASCII, not to a list.
+ *
+ * Everywhere else this guard bans an alphabet, and an alphabet is a list of the
+ * characters somebody thought of. That list has now been wrong three times: the
+ * arrows (48 of them, in 15 files, after a "completed" sweep), the console
+ * glyphs (four, in shipped strings), and then a census that found 9,300 more
+ * characters it had no opinion about at all - box drawing, bullets, section
+ * signs, math symbols, emoji.
+ *
+ * The third time is enough. Inside `src/` the rule inverts: everything above
+ * U+007F fails, and `src/glyphs.ts` is the one file allowed to hold a character
+ * - every other module imports the const from it rather than typing the glyph.
+ * There is nothing left to enumerate and nothing left to forget.
+ *
+ * The wider tree keeps the alphabet. Box-drawing rules in test files and status
+ * markers in a README are not a cost - `src` is what ships in dist, and it is
+ * the only place a stray character can reach a consumer's bundle.
+ */
+// Written as the complement range rather than `[^\x00-\x7f]` because a negated
+// class of control characters is exactly what noControlCharactersInRegex
+// rejects, and it is right to: the interesting set is "above ASCII", not "not
+// a control character". Surrogate pairs are inside this range, so astral
+// characters (emoji) match on their lead unit.
+const NON_ASCII = /[\u0080-\uffff]/;
 const NAME = {
   '\u2013': 'en-dash',
   '\u2014': 'em-dash',
@@ -102,6 +143,10 @@ const NAME = {
   '\u21a9': 'arrow (use <-)',
   '\u21aa': 'arrow (use ->)',
   '\u21d2': 'arrow (use =>)',
+  '\u2713': 'glyph (import from src/glyphs.ts)',
+  '\u2717': 'glyph (import from src/glyphs.ts)',
+  '\u26a0': 'glyph (import from src/glyphs.ts)',
+  '\u26a1': 'glyph (import from src/glyphs.ts)',
 };
 
 function walk(dir, out = []) {
@@ -134,12 +179,19 @@ const files = [
 const hits = [];
 for (const file of files) {
   if ([...ALLOW.keys()].some((substring) => file.includes(substring))) continue;
+  // src/ is held to plain ASCII; everywhere else, to the alphabet.
+  const inSrc = file.startsWith(`src${sep}`) || file.startsWith('src/');
+  const banned = inSrc ? NON_ASCII : OFFENDERS;
   const lines = readFileSync(file, 'utf8').split('\n');
   lines.forEach((line, index) => {
-    const match = line.match(OFFENDERS);
+    const match = line.match(banned);
     if (match) {
-      const count = [...line].filter((ch) => OFFENDERS.test(ch)).length;
-      hits.push(`${file}:${index + 1}  ${NAME[match[0]]}${count > 1 ? ` (+${count - 1} more on this line)` : ''}`);
+      const count = [...line].filter((ch) => banned.test(ch)).length;
+      // src/ bans everything above U+007F, so the offender is often a character
+      // NAME has never heard of. Fall back to the codepoint: "U+2022" is a
+      // usable thing to search for, and `undefined` is not.
+      const what = NAME[match[0]] ?? `U+${match[0].codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`;
+      hits.push(`${file}:${index + 1}  ${what}${count > 1 ? ` (+${count - 1} more on this line)` : ''}`);
     }
   });
 }
@@ -149,6 +201,9 @@ if (hits.length) {
     `ascii: ${hits.length} line(s) carry typographic non-ASCII.\n` +
       'House rule: plain ASCII in prose and strings. Replacements: dash -> comma/colon/" - ", ' +
       'arrow -> "->", ellipsis -> "...", times -> "x", curly quotes -> straight.\n' +
+      'Under src/ the rule is stricter and simpler: NOTHING above U+007F. A glyph ' +
+      'that is genuinely dev-facing output belongs in src/glyphs.ts, imported as a ' +
+      'const - see that file.\n' +
       'A verbatim upstream quote that must stay byte-exact goes in ALLOW with a reason.\n',
   );
   for (const hit of hits) console.error(`  ${hit}`);

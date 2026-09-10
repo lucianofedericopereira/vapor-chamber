@@ -2,13 +2,13 @@
  * vapor-chamber-router - the single DOM integration point.
  *
  * One delegated listener pair owns everything link-shaped inside the base:
- *   · click interception (page.js checklist: shadow DOM via composedPath,
+ *   . click interception (page.js checklist: shadow DOM via composedPath,
  *     download, rel=external, explicit target, cross-origin - which also
  *     excludes mailto:/tel: - modifier keys, `data-native` opt-out,
  *     `data-replace` for replaceState)
- *   · `data-active` / `data-exact-active` stamping on in-base anchors after
+ *   . `data-active` / `data-exact-active` stamping on in-base anchors after
  *     each commit - Blade-rendered menus light up with zero Vue
- *   · hover preheat (100ms intent delay, cancelled on leave)
+ *   . hover preheat (100ms intent delay, cancelled on leave)
  *
  * Plus the idle preheater:
  * load event + requestIdleCallback, saveData/2g skip, abort on first user
@@ -16,6 +16,7 @@
  */
 
 import { stripBase } from './history';
+import { MAX_TIMEOUT_MS, countOption } from '../bounds';
 import { pathActivity } from './url';
 
 export type DomIntegrationOptions = {
@@ -42,7 +43,7 @@ export type DomIntegrationOptions = {
 export type RoutableTarget = { path: string; fullPath: string };
 
 /**
- * §routableMemo - one parse per anchor per href, not per commit.
+ * routableMemo - one parse per anchor per href, not per commit.
  *
  * `stampActiveLinks` walks EVERY in-base anchor after EVERY navigation, and the
  * per-anchor work is dominated by `new URL()` plus `stripBase` - both of which
@@ -112,7 +113,10 @@ function parseRoutable(href: string, base: string): RoutableTarget | null {
 }
 
 export function installDomIntegration(options: DomIntegrationOptions): () => void {
-  const { base, canHandle, navigate, preheat, hoverDelayMs = 100, onRestore } = options;
+  const { base, canHandle, navigate, preheat, hoverDelayMs: rawHoverDelayMs = 100, onRestore } = options;
+  // setTimeout reads NaN as 0, so a bad delay fires the preheat immediately on
+  // every hover - the intent delay this option exists for, silently gone.
+  const hoverDelayMs = countOption(rawHoverDelayMs, 100, 0, MAX_TIMEOUT_MS);
 
   function onClick(event: MouseEvent): void {
     if (event.defaultPrevented) return;
@@ -229,7 +233,9 @@ export type IdlePreheatOptions = {
  * One-shot per call; returns a cancel function.
  */
 export function preheatIdle(factories: ReadonlyArray<() => Promise<unknown>>, options: IdlePreheatOptions = {}): () => void {
-  const { gap = 200, idleTimeout = 4000 } = options;
+  const { gap: rawGap = 200, idleTimeout: rawIdleTimeout = 4000 } = options;
+  const gap = countOption(rawGap, 200, 0, MAX_TIMEOUT_MS);
+  const idleTimeout = countOption(rawIdleTimeout, 4000, 0, MAX_TIMEOUT_MS);
   if (typeof window === 'undefined' || factories.length === 0) return () => {};
 
   const connection = (navigator as { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
@@ -237,10 +243,18 @@ export function preheatIdle(factories: ReadonlyArray<() => Promise<unknown>>, op
   if (connection?.effectiveType && /2g/.test(connection.effectiveType)) return () => {};
 
   let aborted = false;
+  const abortEvents = ['scroll', 'click', 'keydown', 'pointerdown'] as const;
+  // `{ once: true }` removes only the listener that actually FIRES, so the
+  // returned canceller has to detach the rest itself. Without that, a visitor
+  // who never scrolls or clicks leaves four listeners attached for the life of
+  // the page - and the router re-arms this on every bfcache restore
+  // (`armIdlePreheat`), so the set grows once per restore. That is the same
+  // accumulation `start()` already fixed one level up, where re-arming used to
+  // push a fresh entry onto `teardowns` each time.
   const abort = () => {
     aborted = true;
+    for (const ev of abortEvents) window.removeEventListener(ev, abort);
   };
-  const abortEvents = ['scroll', 'click', 'keydown', 'pointerdown'] as const;
   for (const ev of abortEvents) window.addEventListener(ev, abort, { once: true, passive: true });
 
   const run = async () => {

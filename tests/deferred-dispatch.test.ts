@@ -115,6 +115,70 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
     expect(dropped).toEqual([{ action: 'q', target: 1 }]);
   });
 
+  // The eviction used to run BEFORE the push, so an empty queue still
+  // satisfied `q.length >= limit` at a bound of 0: `shift()` returned
+  // undefined and the overflow callback dereferenced it, throwing out of
+  // `bus.dispatch()`. It was invisible without `onBufferOverflow`, because
+  // optional-chaining a call skips evaluating its arguments - so adding the
+  // observability hook was what made the bus throw.
+  it('bufferLimit: 0 buffers nothing instead of throwing', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const dropped: Array<{ action: string; target: any }> = [];
+    const bus = createCommandBus({
+      onMissing: 'buffer',
+      bufferLimit: 0,
+      onBufferOverflow: (action, d) => dropped.push({ action, target: d.target }),
+    });
+
+    const result = bus.dispatch('q', 1);
+    warn.mockRestore();
+
+    expect(result.ok).toBe(true);
+    // Nothing retained, and the arriving command is the one reported dropped.
+    expect(dropped).toEqual([{ action: 'q', target: 1 }]);
+
+    // Registering later replays nothing, because nothing was buffered.
+    const seen: unknown[] = [];
+    bus.register('q', (cmd) => { seen.push(cmd.target); return { ok: true }; });
+    expect(seen).toEqual([]);
+  });
+
+  // Math.trunc and Math.max both propagate NaN, and every comparison against
+  // NaN is false - so `q.length > limit` never fired and the bound silently
+  // vanished. A `bufferLimit: Number(badConfigValue)` is all it takes.
+  it('a NaN bufferLimit buffers nothing instead of unbounding the queue', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const bus = createCommandBus({ onMissing: 'buffer', bufferLimit: Number('not-a-number') });
+
+    for (let i = 0; i < 300; i++) bus.dispatch('q', i);
+
+    let replayed = 0;
+    bus.register('q', () => { replayed++; return { ok: true }; });
+    warn.mockRestore();
+
+    // Measured at 300 buffered before the guard - unbounded growth. `| 0` maps
+    // NaN to 0, so a bad bound now buffers nothing: still bounded, and loud,
+    // because a misconfigured buffer that replays NOTHING is noticed at once
+    // where one silently running on the default is not.
+    expect(replayed).toBe(0);
+  });
+
+  it('a negative bufferLimit is clamped rather than draining into a crash', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const dropped: unknown[] = [];
+    const bus = createCommandBus({
+      onMissing: 'buffer',
+      bufferLimit: -3,
+      onBufferOverflow: (_a, d) => dropped.push(d.target),
+    });
+
+    expect(bus.dispatch('q', 1).ok).toBe(true);
+    expect(bus.dispatch('q', 2).ok).toBe(true);
+    warn.mockRestore();
+
+    expect(dropped).toEqual([1, 2]);
+  });
+
   it('bufferTTL reaps expired entries on push and skips them at flush', () => {
     vi.useFakeTimers();
     try {

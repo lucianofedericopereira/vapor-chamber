@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { isRouterError } from '../../src/router/errors';
 import { compilePath, createRouteTable } from '../../src/router/table';
 import type { RouteRecord } from '../../src/router/types';
 
@@ -271,5 +272,41 @@ describe('unknown parent in production (DEV=false)', () => {
     expect(table.getRecord('orphan')?.parent ?? null).toBeNull();
     // The well-formed sibling is unaffected.
     expect(table.resolve('/real')?.record.name).toBe('real');
+  });
+});
+describe('cyclic parent chains', () => {
+  // Before the guard this was not a failing test, it was a HANG: the chain walk
+  // in pass 3 is a synchronous `for (; r; r = r.parent)` with no terminator,
+  // so a cycle spins the main thread forever - no error, no stack, a locked
+  // tab. Measured as exactly that, holding a vitest worker until the run was
+  // killed at 120s. A test that hangs the suite is worse than no test, so this
+  // is the one defect in this file recorded by its fix rather than by a red run.
+  const cyclic: RouteRecord[] = [
+    { name: 'a', path: '/a', parent: 'b', component: 'A' },
+    { name: 'b', path: '/b', parent: 'a', component: 'B' },
+  ];
+
+  it('names the cycle in dev instead of spinning', () => {
+    expect(() => createRouteTable(cyclic)).toThrowError(/cyclic parent chain/);
+    try {
+      createRouteTable(cyclic);
+    } catch (error) {
+      expect(isRouterError(error, 'cyclic_parent')).toBe(true);
+    }
+  });
+
+  it('survives in production with a truncated chain', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.resetModules();
+    const prod = await import('../../src/router/table');
+
+    const table = prod.createRouteTable(cyclic);
+    // Stops at the repeat rather than looping: each row sees itself and its
+    // one distinct ancestor, and no row appears twice.
+    const chain = table.getRecord('a')?.chain.map((r) => r.name) ?? [];
+    expect(chain).toHaveLength(new Set(chain).size);
+    expect(chain).toContain('a');
+    // A wrong page beats a frozen tab: the route still resolves.
+    expect(table.resolve('/a')?.record.name).toBe('a');
   });
 });

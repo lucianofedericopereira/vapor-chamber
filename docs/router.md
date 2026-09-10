@@ -379,7 +379,7 @@ import { RouterOutlet } from 'vapor-chamber/router/vapor';  // Vapor, no interop
 
 What it costs, and what it requires:
 
-- **Measured saving: <!-- vc:outletSaving -->20.02<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->60.8<!-- /vc:outletSavingRaw --> KB raw** against the same app
+- **Measured saving: <!-- vc:outletSaving -->19.91<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->60.6<!-- /vc:outletSavingRaw --> KB raw** against the same app
   rendering through the vDOM outlet plus interop - re-derived every test run by
   `tests/vapor/vapor-outlet-size.test.ts` rather than quoted, with the baseline
   built by the same harness so the two arms cannot differ by method. The

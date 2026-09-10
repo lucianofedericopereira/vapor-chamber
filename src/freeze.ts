@@ -1,11 +1,20 @@
 /**
  * vapor-chamber - dev-only deep freeze for shared cache entries.
  *
- * Internal. Both caches in this library hand the SAME stored object to every
- * later hit: the HTTP response cache (`http-cache.ts`) and the bus-level
- * `cache()` plugin (`plugins-extra.ts`). A consumer that mutates what it got
- * back - sorts a list, deletes a row optimistically - therefore rewrites what
- * every later hit reads, silently and at a distance.
+ * Internal. FOUR stores in this library hand the SAME object to every later
+ * hit: the HTTP response cache (`http-cache.ts`), the bus-level `cache()`
+ * plugin, `idempotent()`'s completed-result map (both `plugins-extra.ts`), and
+ * a compiled route record's `meta` (`router/table.ts`), which the router hands
+ * out as `location.meta`, `MenuItem.meta` and `Breadcrumb.meta` for its whole
+ * life. A consumer that mutates what it got back - sorts a list, deletes a row
+ * optimistically, stashes a computed title on `route.meta` - therefore rewrites
+ * what every later hit reads, silently and at a distance.
+ *
+ * This list said "both caches" while `idempotent` was a third site and went
+ * unfrozen, which is the failure mode of a policy applied by hand at each
+ * call site rather than encoded in one place: the site that was forgotten was
+ * also the site absent from the list of sites. Add to this list when adding a
+ * store, or the next one is silent too.
  *
  * The contract is "treat cached values as immutable", and this makes that
  * contract enforceable where it matters: in dev, mutation throws at the

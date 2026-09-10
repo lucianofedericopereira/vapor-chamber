@@ -28,6 +28,7 @@
  */
 
 import { DEV } from './dev';
+import { countOption } from './bounds';
 import { BusError, matchesPattern, _withOrigin } from './command-bus';
 import type { CommandResult, Plugin } from './command-bus';
 import type { ActionSchema, BusSchema, FieldMap } from './schema';
@@ -173,7 +174,7 @@ export type McpHandlerOptions = {
  * advertised a version that had not existed for months. A failing test at
  * release time is the cheapest possible checklist.
  */
-export const MCP_SERVER_VERSION = '1.18.0';
+export const MCP_SERVER_VERSION = '1.19.0';
 
 /** Latest MCP protocol revision this handler speaks. */
 const MCP_PROTOCOL_VERSION = '2025-06-18';
@@ -370,7 +371,8 @@ export type McpStdioOptions = McpHandlerOptions & {
    * without bound - same class of input-driven memory guard as the stream
    * parser's `maxDepth`. On overflow the partial line is dropped, a `-32700`
    * is written, and input is skipped to the next newline so the stream
-   * resynchronises instead of dying. Default: 1 MiB.
+   * resynchronises instead of dying. Default: 1 MiB. Clamped to at least 1 -
+   * see the note at the destructure.
    */
   maxLineLength?: number;
   /**
@@ -378,7 +380,8 @@ export type McpStdioOptions = McpHandlerOptions & {
    * in-flight work drains, so a client that pipes thousands of lines cannot
    * open thousands of simultaneous dispatches. Deliberately NOT 1: MCP clients
    * legitimately issue parallel tool calls, and serialising them would make
-   * every slow tool block every fast one. Default: 32.
+   * every slow tool block every fast one. Default: 32. Clamped to at least 1 -
+   * see the note at the destructure.
    */
   maxInFlight?: number;
 };
@@ -417,7 +420,27 @@ export function serveMcpStdio(bus: McpBus, options?: McpStdioOptions): () => voi
   if (typeof process === 'undefined' || !process.stdin || !process.stdout) {
     throw new Error('[vapor-chamber] serveMcpStdio requires a Node.js environment (process.stdin/stdout)');
   }
-  const { maxLineLength = 1_048_576, maxInFlight = 32 } = options ?? {};
+  const { maxLineLength: rawMaxLineLength = 1_048_576, maxInFlight: rawMaxInFlight = 32 } = options ?? {};
+  // Both clamped to at least 1, because both are reachable from the public API
+  // and both had a value that stopped the server dead - the same "one bad
+  // option" class as `cache({ maxSize: -1 })` in plugins-extra.
+  //
+  // `maxInFlight: 0` was the sharp one. The first line raised inFlight to 1,
+  // `1 >= 0` paused stdin, and when the dispatch finished `0 < 0` was false, so
+  // it never resumed: the transport served exactly one message and then hung
+  // with nothing in flight. Verified before this clamp - pause called once,
+  // resume never.
+  //
+  // `maxLineLength: 0` is milder but still wrong: every chunk that does not end
+  // on a newline is over the cap, so a message split across chunks - which the
+  // suite covers as ordinary behaviour - would be abandoned as an over-long
+  // line instead of reassembled.
+  // Both go through ../bounds, which owns the rule: `inFlight >= maxInFlight`
+  // gates REFUSAL, so a NaN bound never pauses and the backpressure this option
+  // exists to provide silently does not exist. Floor of 1 because zero of
+  // either is nonsense; a bad bound lands on the documented default.
+  const maxLineLength = countOption(rawMaxLineLength, 1_048_576, 1);
+  const maxInFlight = countOption(rawMaxInFlight, 32, 1);
   const handle = createMcpHandler(bus, options);
   const write = (reply: object): void => {
     process.stdout.write(`${JSON.stringify(reply)}\n`);

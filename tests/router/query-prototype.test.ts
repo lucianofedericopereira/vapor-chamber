@@ -23,6 +23,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
+import { START_LOCATION } from '../../src/router/engine';
 import { createMemoryHistory } from '../../src/router/history';
 import { createRouter } from '../../src/router/index';
 import { defaultAffects } from '../../src/router/loaders';
@@ -167,5 +168,41 @@ describe('location.query prototype - uniform across BOTH commit paths', () => {
     router.setQuery({ ['__proto__']: 'x' });
     expect(({} as Record<string, unknown>).polluted).toBeUndefined();
     expect((Object.prototype as Record<string, unknown>).x).toBeUndefined();
+  });
+});
+
+/**
+ * The third arm, and the one the module SHIPS: START_LOCATION.
+ *
+ * Both arms of resolveLocation, cleanQueryPatch and setQuery go out of their way
+ * to stay prototype-free, on the stated grounds that "a consumer must not have
+ * to know which branch built the query". The location every router starts on was
+ * a literal `{}`, so the property held everywhere except before the first
+ * navigation - which is exactly when a consumer is most likely to read a query
+ * it has not populated yet.
+ *
+ * It is also a module-level singleton, exported publicly and shared by every
+ * router in the process, and `Object.freeze` reaches one level - so its nested
+ * objects were writable globals.
+ */
+describe('START_LOCATION', () => {
+  it('carries a prototype-free query like every other location', () => {
+    expect(Object.getPrototypeOf(START_LOCATION.query)).toBeNull();
+    expect('constructor' in START_LOCATION.query).toBe(false);
+  });
+
+  it('is frozen all the way down, being a shared global', () => {
+    expect(Object.isFrozen(START_LOCATION)).toBe(true);
+    expect(Object.isFrozen(START_LOCATION.params)).toBe(true);
+    expect(Object.isFrozen(START_LOCATION.query)).toBe(true);
+    expect(Object.isFrozen(START_LOCATION.meta)).toBe(true);
+    expect(Object.isFrozen(START_LOCATION.matched)).toBe(true);
+  });
+
+  it('refuses a write that used to poison every later router', () => {
+    expect(() => {
+      (START_LOCATION.params as Record<string, unknown>).id = 'poisoned';
+    }).toThrow();
+    expect(START_LOCATION.params).toEqual({});
   });
 });

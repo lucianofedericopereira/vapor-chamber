@@ -149,6 +149,39 @@ describe.skipIf(!haveAll)('IIFE variants - audience-based contracts', () => {
   });
 
   // -------------------------------------------------------------------------
+  // The escape hatch has to be reachable by the audience that needs it.
+  //
+  // A variant that ships a Vapor wrapper ships its failure path too: the
+  // wrapper returns `null` when Vapor is undetected and `vueDetectionHint()`
+  // says "Pass it: configureVue(Vue)." That hint is deliberately NOT dev-gated,
+  // precisely because the audience most likely to hit it is the no-bundler
+  // <script>-tag page - which only ever runs a production IIFE.
+  //
+  // It was unreachable there. `configureVue` was on no variant's namespace, so
+  // the one remedy the library prints for that audience threw
+  // "VaporChamber.configureVue is not a function" - found by actually loading
+  // the elements bundle in a browser, not by reading it.
+  //
+  // And on that page it is the ONLY channel: Vue publishes Vapor as
+  // `esm-browser` only (there is no `vue.runtime-with-vapor.global.js`), and the
+  // runtime probe's bare `import('vue')` cannot resolve in a browser.
+  // -------------------------------------------------------------------------
+  describe.each([
+    ['elements', variants.elements],
+    ['full', variants.full],
+  ])('%s: the documented Vapor escape hatch is callable', (_name, file) => {
+    it('exposes configureVue, which its own null path tells users to call', () => {
+      const ns = loadNamespace(file);
+      expect(typeof ns.defineVaporCustomElement).toBe('function');
+      assertPresent(ns, ['configureVue']);
+    });
+  });
+
+  it('core does NOT gain configureVue - it ships no Vapor wrapper to rescue', () => {
+    assertAbsent(loadNamespace(variants.core), ['configureVue']);
+  });
+
+  // -------------------------------------------------------------------------
   // Size monotonicity - guards against accidental bloat.
   // -------------------------------------------------------------------------
   it('size order is core ≤ elements ≤ full', () => {

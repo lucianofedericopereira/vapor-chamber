@@ -542,3 +542,126 @@ describe('revalidateRoutes - edges', () => {
     router.destroy();
   });
 });
+
+/**
+ * One controller per refresh, aborted only by a refresh that overlaps it.
+ *
+ * A single shared AbortController made every revalidation cancel every other
+ * one whatever it was refreshing. Two commands in a row mapped to different
+ * records meant the second aborted the first, the first record's fresh data was
+ * discarded, and nothing retried it. The command had succeeded, so the page
+ * kept stale data with no error anywhere - the exact outcome this plugin exists
+ * to prevent.
+ */
+describe('revalidateRoutes - overlapping refreshes only', () => {
+  const TWO_ROWS = [
+    { name: 'shop', path: '/', component: 'Shell' },
+    { name: 'shop.cart', path: '/cart', component: 'Cart', load: 'rows:cart' },
+    { name: 'shop.wish', path: '/cart/wish', parent: 'shop.cart', component: 'Wish', load: 'rows:wish' },
+  ];
+
+  /** Both records load; each returns a counter naming itself. */
+  function twoRecordRouter(counts: Record<string, number>) {
+    return createRouter({
+      history: createMemoryHistory(''),
+      routes: TWO_ROWS as never,
+      components: {
+        Shell: { render: () => null },
+        Cart: { render: () => null },
+        Wish: { render: () => null },
+      } as never,
+      loaders: {
+        prefixes: {
+          'rows:': (ref: string) => {
+            counts[ref] = (counts[ref] ?? 0) + 1;
+            return { ref, n: counts[ref] };
+          },
+        },
+      },
+      links: false,
+      scroll: false,
+      onError: () => {},
+    });
+  }
+
+  it('does not let a wishlist refresh discard the cart refresh', async () => {
+    const counts: Record<string, number> = {};
+    const router = twoRecordRouter(counts);
+    await router.isReady();
+    await router.push('/cart/wish');
+
+    const loaders: LoaderHandlers = {
+      prefixes: {
+        'rows:': (ref: string) => {
+          counts[ref] = (counts[ref] ?? 0) + 1;
+          return { ref, n: counts[ref] };
+        },
+      },
+    };
+    const plugin = revalidateRoutes(router, loaders, {
+      cartAdd: ['shop.cart'],
+      wishAdd: ['shop.wish'],
+    });
+
+    const cartBefore = router.currentRoute.value.data.get('shop.cart');
+    plugin({ action: 'cartAdd' }, () => ({ ok: true }));
+    plugin({ action: 'wishAdd' }, () => ({ ok: true }));
+    await settle();
+
+    // Both landed. The cart's refresh used to be aborted by the wishlist's and
+    // its value stayed exactly as it was before the command.
+    expect(router.currentRoute.value.data.get('shop.cart')).not.toEqual(cartBefore);
+    expect((router.currentRoute.value.data.get('shop.wish') as { ref: string }).ref).toBe('wish');
+
+    plugin.dispose();
+    router.destroy();
+  });
+
+  it('still lets the later refresh of the SAME record win', async () => {
+    const counts: Record<string, number> = {};
+    const router = twoRecordRouter(counts);
+    await router.isReady();
+    await router.push('/cart/wish');
+
+    const loaders: LoaderHandlers = {
+      prefixes: {
+        'rows:': async (ref: string) => {
+          counts[ref] = (counts[ref] ?? 0) + 1;
+          return { ref, n: counts[ref] };
+        },
+      },
+    };
+    const plugin = revalidateRoutes(router, loaders, { cartAdd: ['shop.cart'] });
+
+    plugin({ action: 'cartAdd' }, () => ({ ok: true }));
+    plugin({ action: 'cartAdd' }, () => ({ ok: true }));
+    await settle();
+
+    // The first was superseded, not merged: the committed value is the later
+    // run's, and the flag is back down.
+    expect((router.currentRoute.value.data.get('shop.cart') as { n: number }).n).toBe(counts.cart);
+    expect(plugin.isRevalidating.value).toBe(false);
+
+    plugin.dispose();
+    router.destroy();
+  });
+
+  it('clears the flag after dispose without letting a late finally reopen it', async () => {
+    const counts: Record<string, number> = {};
+    const router = twoRecordRouter(counts);
+    await router.isReady();
+    await router.push('/cart/wish');
+
+    const plugin = revalidateRoutes(
+      router,
+      { prefixes: { 'rows:': async (ref: string) => ({ ref }) } },
+      { cartAdd: ['shop.cart'] },
+    );
+    plugin({ action: 'cartAdd' }, () => ({ ok: true }));
+    plugin.dispose();
+    await settle();
+
+    expect(plugin.isRevalidating.value).toBe(false);
+    router.destroy();
+  });
+});

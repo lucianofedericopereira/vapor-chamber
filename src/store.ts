@@ -103,12 +103,33 @@ export type ChamberStore<S extends object, A extends Record<string, StoreAction<
   $dispose: () => void;
 } & { [K in keyof A]: (target?: any, payload?: any) => CommandResult | Promise<CommandResult> };
 
+/**
+ * A store plus the bookkeeping its LIFETIME needs.
+ *
+ * `holders` is the count of live component scopes using this store, and it is
+ * the whole reason this is an entry rather than the store alone. A store is
+ * shared by construction - the registry hands the same object to every caller
+ * of `useCart(bus)` - but disposal used to be wired to whichever scope happened
+ * to create it FIRST. So:
+ *
+ *   component A mounts   -> creates the store, registers the bus handlers
+ *   component B mounts   -> gets the same store back
+ *   component A unmounts -> $dispose(): handlers unregistered, registry cleared
+ *   component B, still on screen, calls cart.add(2)
+ *
+ * B holds a live object whose every action now returns `ok: false` and whose
+ * state never changes again. Silent - no throw, no warning, and B's own code is
+ * blameless. Measured exactly that way in tests/store.test.ts. Two components
+ * sharing a store is not an edge case, it is what a store IS.
+ */
+type StoreEntry = { store: unknown; offs: Array<() => void>; holders: number };
+
 /** One registry per bus, so a per-request bus gets a per-request store set -
  *  the SSR isolation the shared-bus module global cannot give. Weak, so a
  *  disposed bus takes its stores with it. */
-const registries = new WeakMap<BaseBus, Map<string, unknown>>();
+const registries = new WeakMap<BaseBus, Map<string, StoreEntry>>();
 
-function registryFor(bus: BaseBus): Map<string, unknown> {
+function registryFor(bus: BaseBus): Map<string, StoreEntry> {
   let registry = registries.get(bus);
   if (!registry) {
     registry = new Map();
@@ -138,11 +159,31 @@ export function defineChamberStore<S extends object, A extends Record<string, St
       );
     }
     const registry = registryFor(bus);
+
+    /**
+     * Join this scope to a store's holder count, and leave when the scope ends.
+     *
+     * The LAST holder out disposes, not the first one in. Outside a scope there
+     * is no lifetime to hook, so nothing is counted and the caller owns
+     * `$dispose()` - the same contract every composable here has.
+     */
+    const join = (entry: StoreEntry): void => {
+      if (!getCurrentScope()) return;
+      entry.holders++;
+      onScopeDispose(() => {
+        entry.holders--;
+        if (entry.holders <= 0) (entry.store as ChamberStore<S, A>).$dispose();
+      });
+    };
+
     // `Object.hasOwn` semantics via Map: the id is an external string and a
     // plain object would answer for `constructor`. See `./dict` for the rule
     // and the six sites that learned it.
     const existing = registry.get(id);
-    if (existing) return existing as ChamberStore<S, A>;
+    if (existing) {
+      join(existing);
+      return existing.store as ChamberStore<S, A>;
+    }
 
     const state = shallowRef(options.state()) as ShallowRef<S>;
     const offs: Array<() => void> = [];
@@ -204,14 +245,14 @@ export function defineChamberStore<S extends object, A extends Record<string, St
       }
     }
 
-    // Auto-dispose with the surrounding scope when created inside one; outside
-    // a scope the caller owns `$dispose`, same contract as every composable
-    // here. `getCurrentScope()` rather than an instance accessor - the rule
+    // Auto-dispose when the LAST holding scope ends; outside a scope the caller
+    // owns `$dispose`, same contract as every composable here.
+    // `getCurrentScope()` rather than an instance accessor - the rule
     // `tryAutoCleanup` records, and the reason `getCurrentInstance()` is never
     // used in this package.
-    if (getCurrentScope()) onScopeDispose(() => store.$dispose());
-
-    registry.set(id, store);
+    const entry: StoreEntry = { store, offs, holders: 0 };
+    registry.set(id, entry);
+    join(entry);
     return store;
   };
 }

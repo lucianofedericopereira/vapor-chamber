@@ -103,9 +103,30 @@ if (metrics?.outlet) {
   VALUES.outletSaving = metrics.outlet.savedBr;
   VALUES.outletSavingRaw = metrics.outlet.savedRaw;
   VALUES.outletMargin = metrics.outlet.margin;
+  // The accepting BAR itself, not just the result. It was hard-coded in the
+  // test and hand-copied into five documents - the exact shape this script
+  // exists to remove. Declared once at ACCEPTING_BAR_KB in
+  // tests/vapor/vapor-outlet-size.test.ts and published from there.
+  VALUES.outletBar = metrics.outlet.bar;
   VALUES.outletMachineryVapor = metrics.outlet.machineryVapor;
   VALUES.outletMachineryInterop = metrics.outlet.machineryInterop;
 }
+/**
+ * Peer-comparison ratios from `npm run bench`, published by
+ * `scripts/bench-ratios-reporter.mjs`.
+ *
+ * The migration guides quote these, and until this existed they were the one
+ * class of number in the docs with no generator - which the guide itself said
+ * out loud, and which had already drifted. Ratios only, never absolutes: a hz
+ * figure is host state, a same-run ratio is not.
+ *
+ * Absent unless someone ran the bench locally, and absent means SKIP, so CI and
+ * a fresh checkout leave whatever the doc says untouched.
+ */
+if (metrics?.bench) {
+  for (const [name, value] of Object.entries(metrics.bench)) VALUES[name] = String(value);
+}
+
 const main = metrics?.default?.dist && metrics.default.coverage ? metrics.default : null;
 const vapor = metrics?.vapor?.dist ? metrics.vapor : null;
 if (main) {
@@ -190,7 +211,13 @@ if (coverage) {
 
 const SCAN_DIRS = ['docs', 'examples'];
 const SCAN_FILES = ['README.md', 'CONTRIBUTING.md', 'ROADMAP.md', 'SECURITY.md'];
-const EXTS = ['.md', '.html'];
+// `.php` for the Blade views in examples/laravel-app: Blade passes HTML
+// comments through untouched, so a marker works there exactly as it does in
+// Markdown and plain HTML - which is the same reason `.html` is here. The
+// runnable Laravel demo pins Vue by CDN URL rather than vendoring a copy of the
+// dist, and that URL carries the version; a pin a human retypes is a pin that
+// drifts from the library's own devDependency.
+const EXTS = ['.md', '.html', '.php'];
 
 function walk(dir, out = []) {
   let entries;
@@ -219,9 +246,63 @@ const files = [
   }
 });
 
+/**
+ * The examples' `vue` pin, owned by the same source as `vc:vueAligned`.
+ *
+ * Markers cannot reach here: a `package.json` has nowhere to put an HTML
+ * comment, so the two Vapor examples carried their own literal `vue` range and
+ * an RC bump had TWO points of change - the root devDependency the suite runs
+ * against, and each example that the ritual then requires rebuilding, because
+ * compiled output is where compiler-vapor changes actually land. Miss one and
+ * the example builds against a different Vue than the library was verified on,
+ * which is precisely the mismatch nobody notices until the output differs.
+ *
+ * Same rule as every marker above, different mechanism: the value is READ FROM
+ * THE SOURCE and written into the derived file, so the only way to change what
+ * an example pins is to change what the library aligns to. Examples with no
+ * `vue` dependency (exo-astro) are skipped rather than gaining one.
+ */
+const VUE_RANGE = String(pkg.devDependencies?.vue ?? '');
+
+function examplePinFiles() {
+  const dir = join(root, 'examples');
+  let entries;
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  return entries
+    .map((entry) => join(dir, entry, 'package.json'))
+    .filter((file) => {
+      try {
+        return statSync(file).isFile();
+      } catch {
+        return false;
+      }
+    });
+}
+
 const check = process.argv.includes('--check');
 const stale = [];
 let rewritten = 0;
+
+if (VUE_RANGE) {
+  for (const file of examplePinFiles()) {
+    const before = readFileSync(file, 'utf8');
+    // Targeted replace rather than parse/serialize: rewriting the JSON would
+    // reformat files a human maintains.
+    const after = before.replace(/("vue"\s*:\s*")([^"]+)(")/, (whole, open, body, close) => {
+      if (body === VUE_RANGE) return whole;
+      stale.push(`${relative(root, file)}: "vue" is "${body}", root devDependency says "${VUE_RANGE}"`);
+      return `${open}${VUE_RANGE}${close}`;
+    });
+    if (after !== before && !check) {
+      writeFileSync(file, after);
+      rewritten++;
+    }
+  }
+}
 
 for (const file of files) {
   const before = readFileSync(file, 'utf8');

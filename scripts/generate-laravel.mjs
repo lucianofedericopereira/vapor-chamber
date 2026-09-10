@@ -157,12 +157,50 @@ function validateSchema(schema) {
   }
 }
 
-/** Normalize action names to camelCase - same behavior as the bus at runtime. */
+/**
+ * A PHP class name. Deliberately the language's rule and not a guess: the
+ * generator's whole job is emitting code that parses.
+ */
+const PHP_IDENTIFIER = /^[A-Za-z_\x80-\xff][A-Za-z0-9_\x80-\xff]*$/;
+
+/**
+ * Normalize action names to camelCase - same behavior as the bus at runtime -
+ * and refuse the two ways that quietly produced wrong output.
+ *
+ * COLLISIONS. `toCamel` is many-to-one: `cart.add`, `cart_add` and `cartAdd`
+ * all become `cartAdd`, and the old `out[normalized] = def` let the last one
+ * win. A four-action schema generated two files, kept only the last
+ * definition's validation rules, and announced "Generated Laravel backend for
+ * 2 command(s)" - the two rename warnings never said anything had been
+ * DROPPED. A backend silently missing a command is exactly the failure this
+ * generator exists to prevent.
+ *
+ * ILLEGAL CLASS NAMES. `toStudly('2faVerify')` is `2faVerify`, and `class
+ * 2faVerify` is a PHP parse error. The generator wrote the file and printed a
+ * success line; the failure surfaced later, in PHP, in someone else's
+ * terminal.
+ */
 function normalizeSchema(schema) {
   const out = {};
+  const source = new Map();
   for (const [key, def] of Object.entries(schema)) {
     const normalized = toCamel(key);
     if (normalized !== key) console.warn(`[generate-laravel] Schema key "${key}" normalized to "${normalized}"`);
+    const previous = source.get(normalized);
+    if (previous !== undefined) {
+      fail(
+        `Schema keys "${previous}" and "${key}" both normalize to "${normalized}", so they would ` +
+          'generate one action class and one of the two definitions would be lost. Rename one.',
+      );
+    }
+    const className = toStudly(normalized);
+    if (!PHP_IDENTIFIER.test(className)) {
+      fail(
+        `Action "${key}" produces the PHP class name "${className}", which is not a legal PHP ` +
+          'identifier (it must not start with a digit). Rename the action.',
+      );
+    }
+    source.set(normalized, key);
     out[normalized] = def;
   }
   return out;

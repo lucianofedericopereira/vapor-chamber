@@ -1,6 +1,5 @@
 import { defineConfig } from 'vite';
-import vue from '@vitejs/plugin-vue';
-import { vaporChamberHMR } from 'vapor-chamber/vite';
+import { createExampleConfig } from '../vite.base';
 
 // No vapor flag needed: @vitejs/plugin-vue >=5 detects `<script setup vapor>`
 // and routes those components to @vue/compiler-vapor automatically.
@@ -17,11 +16,14 @@ import { vaporChamberHMR } from 'vapor-chamber/vite';
 // without it produced byte-identical output across all four chunks - same
 // sizes, same content hashes. The enumeration behind the claim is pinned by
 // tests/vue-bundler-vapor-exports.test.ts.
-export default defineConfig({
-  optimizeDeps: { include: ['vue', 'vapor-chamber'] },
-  server: { port: 8889, strictPort: true },
-  plugins: [
-    vue(),
-    vaporChamberHMR({ verbose: false }), // keeps bus state across HMR
-  ],
-});
+//
+// `optimizeDeps` and `server` stay HERE rather than moving into
+// ../vite.base.ts: the islands are loaded through dynamic imports, so this
+// example pre-bundles, and its README names a fixed port. The base documents
+// both as deliberately per-example.
+export default defineConfig(
+  createExampleConfig({
+    optimizeDeps: { include: ['vue', 'vapor-chamber'] },
+    server: { port: 8889, strictPort: true },
+  }),
+);

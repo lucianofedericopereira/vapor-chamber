@@ -11,6 +11,7 @@
  */
 
 import { DEV } from '../dev';
+import { freezeDeep } from '../freeze';
 import { routerError } from './errors';
 import type { ParamType, RouteParams, RouteRecord, Segment, TableRecord } from './types';
 
@@ -149,6 +150,15 @@ export function createRouteTable(rows: readonly RouteRecord[]): RouteTable {
       queryDefs: {},
       ...compilePath(row.path),
     };
+    // `meta` is the ROW's object, and the table hands the same one to every
+    // consumer for the router's whole life: `location.meta` is it, so are
+    // `MenuItem.meta` and `Breadcrumb.meta`. A component that stashes a
+    // computed title on `route.meta` therefore rewrites the table. That is the
+    // contract ../freeze already enforces for the three shared caches, and its
+    // own docblock says the failure mode is a list applied by hand missing a
+    // site - this is the fourth, now on that list. Dev-only, like the others:
+    // the mutation throws where it happens, and production pays nothing.
+    if (DEV) freezeDeep(record.meta);
     records.push(record);
     byName.set(record.name, record);
   }
@@ -170,7 +180,29 @@ export function createRouteTable(rows: readonly RouteRecord[]): RouteTable {
   const rowByName = new Map(rows.map((row) => [row.name, row]));
   for (const record of records) {
     const chain: TableRecord[] = [];
-    for (let r: TableRecord | null = record; r; r = r.parent) chain.unshift(r);
+    // A cyclic parent chain (`a.parent = b`, `b.parent = a`) used to spin here
+    // FOREVER: a synchronous `for (; r; r = r.parent)` with no terminator, in a
+    // constructor, on the main thread. No error, no stack, no partial render -
+    // the tab locks. Measured as exactly that: it held a vitest worker until the
+    // run was killed at 120s.
+    //
+    // Every other malformed-table case in this file is loud in dev and lenient
+    // in prod, and a hang is the one failure where that split matters most:
+    // dev gets the diagnosis, and production still has to survive rows it did
+    // not validate, because a frozen tab cannot even hard-navigate away.
+    // Stopping at the repeat leaves a truncated chain - a wrong page beats no
+    // page at all.
+    const seen = new Set<TableRecord>();
+    for (let r: TableRecord | null = record; r && !seen.has(r); r = r.parent) {
+      seen.add(r);
+      chain.unshift(r);
+    }
+    if (DEV && chain[0]?.parent) {
+      throw routerError(
+        'cyclic_parent',
+        `route "${record.name}" has a cyclic parent chain (${chain.map((r) => r.name).join(' -> ')} -> ${chain[0].parent.name}) - a route cannot be its own ancestor`,
+      );
+    }
     (record as { chain: readonly TableRecord[] }).chain = Object.freeze(chain);
     (record as { renderChain: readonly TableRecord[] }).renderChain = Object.freeze(
       chain.filter((r) => r.component || r.blade),

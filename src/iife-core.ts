@@ -6,17 +6,17 @@
  * to dispatch user actions to the backend (cart add, form submit, analytics).
  *
  * Surface:
- *   • Command bus (sync + async)
- *   • HTTP transport only (createHttpBridge)
- *   • Lightweight plugins: logger, validator, debounce, throttle, retry, authGuard
- *   • createApp() for one-line setup
- *   • connect() - even shorter: HTTP + CSRF in a single call
+ *   - Command bus (sync + async)
+ *   - HTTP transport only (createHttpBridge)
+ *   - Lightweight plugins: logger, validator, debounce, throttle, retry, authGuard
+ *   - createApp() for one-line setup
+ *   - connect() - even shorter: HTTP + CSRF in a single call
  *
  * NOT in this variant (use `vapor-chamber.iife.js` if you need them):
- *   • WebSocket / SSE transports - realtime infra is a different deployment shape
- *   • persist / sync / history / optimistic - stateful plugins, niche for sprinkled JS
- *   • mount() - DOM-coupled convenience
- *   • Vapor custom elements - see `vapor-chamber-elements.iife.js`
+ *   - WebSocket / SSE transports - realtime infra is a different deployment shape
+ *   - persist / sync / history / optimistic - stateful plugins, niche for sprinkled JS
+ *   - mount() - DOM-coupled convenience
+ *   - Vapor custom elements - see `vapor-chamber-elements.iife.js`
  *
  * Variant contents are not stable across major versions until v2.0; see ROADMAP.md.
  */

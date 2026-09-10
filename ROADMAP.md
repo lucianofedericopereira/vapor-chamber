@@ -2,11 +2,11 @@
 
 This project tracks Vue 3.6 through its **release-candidate** phase (rc.1
 landed 2026-07-18; rc.2 on 2026-07-22; rc.3 on 2026-08-11; rc.4 on 2026-08-14;
-rc.5 on 2026-08-21; rc.6 on 2026-08-28). That has direct consequences for what's
-stable, what's transitional, and what will change once Vue 3.6 ships stable.
-This file is the source of truth for that distinction.
+rc.5 on 2026-08-21; rc.6 on 2026-08-28; rc.7 on 2026-09-04). That has direct
+consequences for what's stable, what's transitional, and what will change once
+Vue 3.6 ships stable. This file is the source of truth for that distinction.
 
-Last reviewed against **Vue 3.6.0-rc.6** (2026-08-28).
+Last reviewed against **Vue 3.6.0-rc.7** (2026-09-04).
 
 ---
 
@@ -34,7 +34,7 @@ runway, not the waiting room.** The freeze above still governs ordinary feature
 requests, and its real job is unchanged - standing pressure to justify every
 byte with evidence. What changed is the conclusion drawn from a tiny userbase
 and a pre-release peer dep. This repo's own history is the argument: the bus
-hardened over betas, the router was built and realigned across rc.1 to rc.6.
+hardened over betas, the router was built and realigned across rc.1 to rc.7.
 Waiting for stable buys safety at the cost of arriving unproven. Building now
 means v2.0 at stable is the promotion and semver stabilization of a system that
 has already survived N alignment cycles, not a construction start.
@@ -137,7 +137,7 @@ arm by reverting the shipped source so both arms are the real dispatch path.
 
 ## Pre-stable specifics
 
-- **Peer dependency:** `vue: ">=3.5.0 || >=3.6.0-rc.6"`. The lib supports
+- **Peer dependency:** `vue: ">=3.5.0 || >=3.6.0-rc.7"`. The lib supports
   Vue 3.5 (composables only) and Vue 3.6 RCs (full Vapor surface).
 - **Vapor APIs are still moving.** `defineVaporCustomElement`, `defineVaporComponent`,
   `defineVaporAsyncComponent` are stable in shape but their underlying behavior
@@ -539,7 +539,7 @@ What this file still owns, because §9 does not:
 | v1.13.0 | rc.3 alignment | Tracking bump + docs: `configureVue()` promoted from no-bundler escape hatch to the recommended deterministic Vapor wiring for all consumers. No API change. |
 | v1.16.0 | rc.5 alignment | Tracking bump, plus one real contract change: the transition bridge's `phase` / `dispose` became **non-enumerable**, so `{ ...bridge }` no longer carries them. Direct access and destructuring are unaffected; the change exists because `v-bind="t"` - the documented binding - was spreading both into the DOM as attributes. |
 | v1.17.0 | rc.6 alignment | Two measured perf wins (wildcard fan-out 1.14-1.32x, router active-link stamping 1.77-1.86x), both 0 B. **New subpath `vapor-chamber/vapor`** (no new capability - a build-time wiring channel replacing the probe; wired set measured, custom-element/interop opt-in). Plus one real fix: `vapor-chamber/vue` never passed `hasInjectionContext`, so in a **production bundle** (probe dead) the rc.4 KeepAlive guard fell back to `getCurrentInstance()` and went inert - `useCommandHistory`/`useCommandError` recorded commands dispatched into a deactivated view. Also: wildcard listeners match on a prefix computed at `on()` time (1.14-1.32x on wildcard fan-out, 0 B brotli, `'*'` unaffected); `configureVue()` documented as MERGING, so a Vapor app adds one name rather than re-enumerating eight; and one roadmap fact corrected - all four wrapped Vapor APIs are statically importable from `vue`, and were at rc.5. |
-| next minor | rc.6 window | **New subpath `vapor-chamber/router/vapor`** - a Vapor-native `RouterOutlet`, experimental. A genuinely new render surface, so it overrides the "new capability parks until after 3.6 stable" posture deliberately and on evidence, per the maturation posture under "Posture" above: the RC window is the runway, and an outlet built over N alignment cycles arrives at stable already hardened. Gated on a measured number before any of it was built - **<!-- vc:outletSaving -->20.02<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->60.8<!-- /vc:outletSavingRaw --> KB raw** saved versus the same app rendering through the vDOM outlet plus interop, against a ≥20 KB accepting bar, re-derived per run by `tests/vapor/vapor-outlet-size.test.ts`. **Margin is <!-- vc:outletMargin -->0.02<!-- /vc:outletMargin --> KB**; the guard is written to fail loudly if a later RC erodes it, and that failure is a decision trigger, not a threshold to raise. Contract changes: one additive `RouterErrorCode` (`mode_mismatch`), and route components on this outlet must be `defineVaporComponent` output. Blade rows still need the vDOM outlet. **Plus one BREAKING change to `vapor-chamber/router`**: it no longer builds an http client, so a `{ url }` route table now needs `http` and blade rows need `fetchBlade` - `routerHttp()` and `bladeFetcher()` ship as the new `vapor-chamber/router/remote` subpath. Two lines for the affected setups, nothing for a generated table with no blade rows, which is the primary setup and was paying 3.4 KB brotli for features it never called. Taken in the RC window on the same maturation logic as the outlet above: near-zero adoption now, and the cost of the break only rises. `./router` drops 12.4 -> 9.6 KB brotli. Three more additive codes: `redirect_loop`, `no_router`, `http_unconfigured`. **Plus a new subpath `vapor-chamber/store`** - `defineChamberStore`, experimental, <!-- vc:sizeStore -->0.6<!-- /vc:sizeStore --> KB brotli, importing `vue` and nothing else. Store actions are commands, so `persist`, `history`, `sync`, `optimistic`, `idempotent`, `serialize` and the devtools timeline apply to store state with no store-specific code, and URL-worthy fields delegate to the router rather than mirroring it. Lands with a deliberate reversal of whitepaper §6 recorded in that section - PACKAGE scope only: the bus still stores no state. No contract change for anyone not importing it. |
+| next minor | rc.6 window | **New subpath `vapor-chamber/router/vapor`** - a Vapor-native `RouterOutlet`, experimental. A genuinely new render surface, so it overrides the "new capability parks until after 3.6 stable" posture deliberately and on evidence, per the maturation posture under "Posture" above: the RC window is the runway, and an outlet built over N alignment cycles arrives at stable already hardened. Gated on a measured number before any of it was built - **<!-- vc:outletSaving -->19.91<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->60.6<!-- /vc:outletSavingRaw --> KB raw** saved versus the same app rendering through the vDOM outlet plus interop, against a >= <!-- vc:outletBar -->19.50<!-- /vc:outletBar --> KB accepting bar, re-derived per run by `tests/vapor/vapor-outlet-size.test.ts`. **Margin is <!-- vc:outletMargin -->0.41<!-- /vc:outletMargin --> KB**; the guard is written to fail loudly if a later RC erodes it, and that failure is a decision trigger, not a threshold to raise. Contract changes: one additive `RouterErrorCode` (`mode_mismatch`), and route components on this outlet must be `defineVaporComponent` output. Blade rows still need the vDOM outlet. **Plus one BREAKING change to `vapor-chamber/router`**: it no longer builds an http client, so a `{ url }` route table now needs `http` and blade rows need `fetchBlade` - `routerHttp()` and `bladeFetcher()` ship as the new `vapor-chamber/router/remote` subpath. Two lines for the affected setups, nothing for a generated table with no blade rows, which is the primary setup and was paying 3.4 KB brotli for features it never called. Taken in the RC window on the same maturation logic as the outlet above: near-zero adoption now, and the cost of the break only rises. `./router` drops 12.4 -> 9.6 KB brotli. Three more additive codes: `redirect_loop`, `no_router`, `http_unconfigured`. **Plus a new subpath `vapor-chamber/store`** - `defineChamberStore`, experimental, <!-- vc:sizeStore -->0.7<!-- /vc:sizeStore --> KB brotli, importing `vue` and nothing else. Store actions are commands, so `persist`, `history`, `sync`, `optimistic`, `idempotent`, `serialize` and the devtools timeline apply to store state with no store-specific code, and URL-worthy fields delegate to the router rather than mirroring it. Lands with a deliberate reversal of whitepaper §6 recorded in that section - PACKAGE scope only: the bus still stores no state. No contract change for anyone not importing it. |
 | v2.0.0 | One minor cycle after 3.6 stable | Stable-landing realignment: finalize the identity decision (Vapor-first vs bus-first). The `vue36` flavor + registry collapse were withdrawn at rc.3 (superseded by `configureVue()`, <0.9 KB at stake - see "What is transitional"). `useVaporCommand`->`useCommand` shipped early in v1.7.0. See the checklist below. |
 
 **Version policy before 3.6 stable.** Breaking changes ship as **minors**, not
@@ -571,14 +571,14 @@ transport adapter, fully decoupled from Vue, so it wasn't blocked); see
 ## Vue version-support matrix
 
 Which Vue versions each released lib line supports. The peer dep is permissive
-(`>=3.5.0 || >=3.6.0-rc.6`, matching `package.json`); this table is the *tested*
+(`>=3.5.0 || >=3.6.0-rc.7`, matching `package.json`); this table is the *tested*
 support statement.
 
 | vapor-chamber | Vue 3.5 (composables only) | Vue 3.6 | Notes |
 |---------------|----------------------------|---------|-------|
 | v1.2.x - v1.5.x | ✅ | beta.11 -> beta.14 | the beta-aligned lines; v1.5.x feature-locked |
 | v1.6.x - v1.7.0 | ✅ | beta.15 -> beta.17 | tracking-only bumps + the first post-lock delivery |
-| **v1.8.0 ->** | ✅ | **rc.1 -> rc.6** | current; tested against rc.6 |
+| **v1.8.0 ->** | ✅ | **rc.1 -> rc.7** | current; tested against rc.7 |
 | v2.0.0 | ✅ (composables) | **3.6 stable** | peer range gains stable; wiring unchanged - probe by default, `configureVue()` for determinism |
 
 On Vue 3.5 you get the framework-agnostic surface (bus, plugins, transports,
@@ -656,6 +656,51 @@ Versioning is semver-strict: the v2 changes only happen behind a major bump
 because the deprecations land first in v1.3 with at least one release cycle
 of warnings.
 
+## TypeScript 7: measured, and deliberately not taken yet
+
+The library is pinned to **TypeScript ^6.0.3**, and that pin is a decision
+rather than an oversight. TypeScript 7 is the Go port: its `exports` map is
+`lib/version.cjs` plus `unstable/*`, and the classic JS compiler API
+(`createProgram`, `parseJsonConfigFileContent`, `transform`, `factory`) is
+gone. Every tool that loads TypeScript as a *library* rather than shelling out
+to the `tsc` binary breaks on it.
+
+**The library itself is already TS 7 clean.** Measured on 7.0.2 in a clean
+worktree, every gate but one passes, and the one failure is ours:
+
+| gate | result on TS 7.0.2 |
+| --- | --- |
+| `typecheck` (all three projects) | passes |
+| `build` (declaration emit + esbuild) | passes |
+| `test:run` | 1981 passed, 1 skipped, same as TS 6 |
+| `size:check` | byte-identical, all variants under budget |
+| `docs` | **fails**: `ts.parseJsonConfigFileContent is not a function` |
+
+**What actually blocks the move:**
+
+- **`vue-tsc`**, which type-checks the example SFCs. 3.3.11 is the latest
+  release and it fails on `--version`, before doing any work at all:
+  `require.resolve('typescript/lib/tsc')` throws `ERR_PACKAGE_PATH_NOT_EXPORTED`.
+  This is ecosystem-wide, not a Vue oversight - the same missing API stops
+  Angular and typed ESLint rules, and TypeScript's own 7.0 notes tell Vue
+  projects to stay on 6. Tracked upstream in vuejs/language-tools#5381, waiting
+  on the TypeScript 7.1 programmatic API.
+- **[scripts/generate-api-docs.mjs](./scripts/generate-api-docs.mjs)**, which
+  reads the compiler directly.
+
+The generator is NOT ported ahead of time, and that is also deliberate: TS 6
+publishes no `exports` map and no `unstable/*`, while TS 7 publishes only
+`unstable/*`. The two APIs are mutually exclusive, so porting forward breaks
+the build today, and supporting both means a dual code path in a build script
+for a migration that cannot happen yet.
+
+**When 7.1 ships and vue-tsc supports it**, the work is known and small: bump
+`typescript` in the root and the three examples, and swap one function in the
+generator (`parseJsonConfigFileContent` + `createProgram` for `API` +
+`updateSnapshot` from `typescript/unstable/sync`). The TS 7 API was verified
+capable of everything the generator needs - entry points, alias resolution,
+signatures, doc comments and JSDoc tags - before this note was written.
+
 ## How to read this file
 
 If you're a consumer choosing between APIs in this lib:
@@ -674,7 +719,7 @@ Vue 3.6 RC. Both halves are dead: that apparatus was **withdrawn at rc.3** - see
 "Thin Vapor wrappers will become opt-in via build flag" above, where
 `configureVue()` replaced it and the `__VAPOR_NATIVE__` define, the second build
 and the `vue36` export condition were withdrawn rather than deferred - and the
-RC gate it waited on has since passed (we align on rc.6). The two statements sat
+RC gate it waited on has since passed (we align on rc.7). The two statements sat
 in the same file contradicting each other for two cycles.
 
 For performance characteristics, optimization philosophy, and tuning options

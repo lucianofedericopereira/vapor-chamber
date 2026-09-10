@@ -195,6 +195,55 @@ describe('createTestBus', () => {
     expect(bus.recorded[0].cmd.payload).toEqual({ qty: 2 });
   });
 
+  // The cursor in TestBus's listener fan-out was corrected by LENGTH, the
+  // shape command-bus.ts documents as wrong: removing a LATER peer shrinks the
+  // array without moving anything at or before `i`, so the decrement re-invokes
+  // the listener that just ran. Measured before the fix: ['A', 'A', 'B'].
+  //
+  // Worst possible place for it. A test asserting "called once" fails against
+  // behaviour the production bus does not have, and one merely counting calls
+  // records a phantom and passes.
+  it('does not re-invoke a listener that removed a LATER peer', () => {
+    const bus = createTestBus();
+    const calls: string[] = [];
+    const holder: { off: () => void } = { off: () => {} };
+
+    bus.on('*', () => { calls.push('A'); holder.off(); });
+    bus.on('*', () => { calls.push('B'); });
+    holder.off = bus.on('*', () => { calls.push('C'); });
+
+    bus.dispatch('thing', {});
+
+    expect(calls).toEqual(['A', 'B']);
+  });
+
+  it('emit() uses the same cursor rule as dispatch', () => {
+    const bus = createTestBus();
+    const calls: string[] = [];
+    const holder: { off: () => void } = { off: () => {} };
+
+    bus.on('*', () => { calls.push('A'); holder.off(); });
+    bus.on('*', () => { calls.push('B'); });
+    holder.off = bus.on('*', () => { calls.push('C'); });
+
+    bus.emit('evt', {});
+
+    expect(calls).toEqual(['A', 'B']);
+  });
+
+  it('still lets a listener remove itself without skipping the next one', () => {
+    const bus = createTestBus();
+    const calls: string[] = [];
+    const holder: { off: () => void } = { off: () => {} };
+
+    holder.off = bus.on('*', () => { calls.push('A'); holder.off(); });
+    bus.on('*', () => { calls.push('B'); });
+
+    bus.dispatch('thing', {});
+
+    expect(calls).toEqual(['A', 'B']);
+  });
+
   it('stubs unregistered handlers with { ok: true }', () => {
     const bus = createTestBus();
     const result = bus.dispatch('any.action', {});

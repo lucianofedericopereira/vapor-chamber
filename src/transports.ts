@@ -9,6 +9,7 @@
  */
 
 import type { Command, CommandResult, AsyncPlugin, BaseBus } from './command-bus';
+import { MAX_TIMEOUT_MS, countOption } from './bounds';
 import { matchesPattern, abortedResult, } from './command-bus';
 import { postCommand } from './http';
 import type { HttpClient } from './http';
@@ -42,12 +43,12 @@ export type HttpBridgeOptions = {
   endpoint: string;
   /**
    * CSRF token strategy:
-   *   • `false` (default) - don't attach any CSRF token
-   *   • `true` - read from DOM (meta tag, cookie, hidden input) and attach
+   *   - `false` (default) - don't attach any CSRF token
+   *   - `true` - read from DOM (meta tag, cookie, hidden input) and attach
    *     as the appropriate header. Works with any server-rendered framework
    *     that exposes a token via one of those three sources - Laravel Blade,
    *     Rails, Django, .NET MVC, custom stacks. Auto-refreshes on HTTP 419.
-   *   • `'inertia'` - defer token management to Inertia's Axios instance.
+   *   - `'inertia'` - defer token management to Inertia's Axios instance.
    *     The bridge will skip its own CSRF reading and rely on the consumer's
    *     `@inertiajs/inertia` axios setup to inject the token. Use this when
    *     vapor-chamber dispatches share an HTTP layer with Inertia routes.
@@ -81,14 +82,22 @@ export type HttpBridgeOptions = {
    */
   onSessionExpired?: (status: number) => void;
   /**
-   * Called when a backend response indicates a redirect (3xx response with
-   * `Location` header, OR a `{ redirect: '/path' }` field in the JSON body).
-   * Useful for handing 302s to Inertia's router so vapor-chamber dispatches
-   * can trigger page navigations:
+   * Called when the backend answers with a `{ redirect: '/path' }` field in
+   * its JSON body. Useful for handing a navigation to Inertia's router so a
+   * vapor-chamber dispatch can move the page:
    *
    *   onRedirect: (url) => router.visit(url)
    *
-   * If not set, redirects are surfaced as `{ ok: false, error: 'Redirect to /path' }`.
+   * If not set, the redirect is surfaced as
+   * `{ ok: false, error: 'Backend redirect to /path (no onRedirect handler configured)' }`.
+   *
+   * BODY FIELD ONLY, and this used to claim otherwise. The previous wording
+   * promised it also fired for "a 3xx response with `Location` header" - it
+   * never did, and it cannot: `fetch` defaults to `redirect: 'follow'`, so the
+   * platform resolves a 3xx and hands the bridge the FINAL response. A backend
+   * that wants this hook must say so in the body. Pinned by
+   * `tests/transports-coverage.test.ts` ("does not call onRedirect for a
+   * redirect STATUS without a body field").
    */
   onRedirect?: (url: string) => void;
   /**
@@ -241,11 +250,11 @@ export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
 export type BatchingHttpBridgeOptions = HttpBridgeOptions & {
   /**
    * How long to hold the queue open before flushing.
-   *   • `'microtask'` (default) - coalesce every dispatch issued within the
+   *   - `'microtask'` (default) - coalesce every dispatch issued within the
    *     same JS tick (`queueMicrotask`). Zero added latency: a synchronous
    *     burst of dispatches (e.g. a `formSet` immediately followed by a
    *     `submit`) becomes one HTTP round trip.
-   *   • a number (ms) - hold the queue open for a small window instead,
+   *   - a number (ms) - hold the queue open for a small window instead,
    *     catching dispatches from separate ticks (e.g. two quick, distinct
    *     user interactions) at the cost of that much added latency.
    */
@@ -431,14 +440,25 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
     url,
     actions,
     reconnect = true,
-    reconnectDelay = 1000,
-    maxReconnects = 10,
+    reconnectDelay: rawReconnectDelay = 1000,
+    maxReconnects: rawMaxReconnects = 10,
     onConnect,
     onDisconnect,
     onError,
     timeout: wsTimeout = 10_000,
-    maxQueueSize = 100,
+    maxQueueSize: rawMaxQueueSize = 100,
   } = options;
+
+  // Two refusal gates and a delay, all three defeated by the same bad number.
+  // `reconnectCount >= maxReconnects` never refuses, so the socket retries
+  // forever; `reconnectDelay * reconnectCount` is then NaN, which setTimeout
+  // treats as 0, so "forever" is also "as fast as the event loop allows" -
+  // a hot loop against the server it is meant to be backing off from. And
+  // `queue.length >= maxQueueSize` never drops, so the offline queue grows
+  // without bound the whole time.
+  const maxReconnects = countOption(rawMaxReconnects, 10);
+  const reconnectDelay = countOption(rawReconnectDelay, 1000, 0, MAX_TIMEOUT_MS);
+  const maxQueueSize = countOption(rawMaxQueueSize, 100);
 
   let ws: WebSocket | null = null;
   let reconnectCount = 0;

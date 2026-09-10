@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveBase } from '../../src/router/history';
+import { normalizeBase, resolveBase, stripBase } from '../../src/router/history';
 
 describe('resolveBase - concept: prefix?, locale?, or explicit baseurl', () => {
   const locales = ['it', 'en'];
@@ -48,5 +48,28 @@ describe('resolveBase - concept: prefix?, locale?, or explicit baseurl', () => {
     it('still lets an explicit url win without consulting the environment', () => {
       expect(resolveBase({ url: '/from-server/' })).toBe('/from-server');
     });
+  });
+});
+
+describe('one normalizer, not two', () => {
+  it('normalizeBase strips a trailing slash whether or not there is a leading one', () => {
+    // index.ts carried a private lookalike that returned `/${base}` unchanged
+    // when the base had no leading slash - so `'admin/'` normalized to
+    // `/admin/` there and `/admin` here. The memory-history fallback stripped
+    // with one and stored the other.
+    expect(normalizeBase('admin/')).toBe('/admin');
+    expect(normalizeBase('/admin/')).toBe('/admin');
+    expect(normalizeBase('admin')).toBe('/admin');
+    expect(normalizeBase('a/b/')).toBe('/a/b');
+    expect(normalizeBase('')).toBe('');
+    expect(normalizeBase(undefined)).toBe('');
+  });
+
+  it('is the base stripBase can actually match', () => {
+    // The consequence of the divergence, stated directly: the lookalike's
+    // output made stripBase answer null, and the fallback seeded '/' - an
+    // embedded preview rendering the wrong route.
+    expect(stripBase('/admin/x', normalizeBase('admin/'))).toBe('/x');
+    expect(stripBase('/admin/x', '/admin/')).toBeNull();
   });
 });

@@ -1,6 +1,14 @@
 /**
- * Tests for freeze.ts - the dev-only deep freeze both caches share
- * (http-cache.ts response entries, plugins-extra cache() results).
+ * Tests for freeze.ts - the dev-only deep freeze the shared-object stores use:
+ * http-cache.ts response entries, plugins-extra cache() results, and
+ * plugins-extra idempotent() completed results.
+ *
+ * The last of those was NOT frozen, and the reason it stayed that way is worth
+ * keeping in front of whoever reads this next: the contract was applied by hand
+ * at each call site and recorded as prose listing "both caches", so the site
+ * that was forgotten was also the site missing from the list. The final
+ * describe block below therefore tests the STORES rather than the helper - a
+ * fourth store added without freezing has somewhere obvious to fail.
  *
  * The walk rules under test, per the module header:
  *   - plain objects and arrays: frozen and descended into
@@ -11,7 +19,9 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createAsyncCommandBus } from '../src/command-bus';
 import { FREEZE_IN_DEV, freezeCached, freezeDeep } from '../src/freeze';
+import { cache, idempotent } from '../src/plugins-extra';
 
 describe('freezeDeep', () => {
   it('freezes nested plain objects and arrays at every depth', () => {
@@ -107,6 +117,53 @@ describe('freezeCached', () => {
     expect(freezeCached(7)).toBe(7);
     expect(freezeCached('x')).toBe('x');
     expect(freezeCached(null)).toBe(null);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The stores themselves. Every one of these hands the SAME object to a later
+// caller, so every one has to freeze on insert.
+// ---------------------------------------------------------------------------
+
+describe('stores that hand back a shared object freeze it', () => {
+  it('cache() - a later hit cannot be rewritten through an earlier one', async () => {
+    const bus = createAsyncCommandBus();
+    bus.use(cache({ ttl: 60_000 }));
+    bus.register('load', async () => ({ items: [1, 2, 3] }));
+
+    const first = await bus.dispatch('load', { id: 1 });
+    expect(() => {
+      (first.value as { items: number[] }).items.push(999);
+    }).toThrow(TypeError);
+
+    const second = await bus.dispatch('load', { id: 1 });
+    expect((second.value as { items: number[] }).items).toEqual([1, 2, 3]);
+  });
+
+  it('idempotent() - a later duplicate cannot be rewritten through an earlier one', async () => {
+    const bus = createAsyncCommandBus();
+    bus.use(idempotent());
+    bus.register('load', async () => ({ items: [1, 2, 3] }));
+
+    const first = await bus.dispatch('load', { id: 1 });
+    // Unfrozen, this push silently rewrote what every later duplicate read -
+    // and unlike the other two stores it did so without throwing anywhere.
+    expect(() => {
+      (first.value as { items: number[] }).items.push(999);
+    }).toThrow(TypeError);
+
+    const second = await bus.dispatch('load', { id: 1 });
+    expect((second.value as { items: number[] }).items).toEqual([1, 2, 3]);
+  });
+
+  it('idempotent() - concurrent duplicates share one frozen result', async () => {
+    const bus = createAsyncCommandBus();
+    bus.use(idempotent());
+    bus.register('load', async () => ({ items: [1] }));
+
+    const [a, b] = await Promise.all([bus.dispatch('load', { id: 2 }), bus.dispatch('load', { id: 2 })]);
+    expect(b.value).toBe(a.value); // the collapse is the point of the plugin
+    expect(Object.isFrozen(a.value)).toBe(true);
   });
 });
 

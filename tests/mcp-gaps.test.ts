@@ -340,6 +340,82 @@ describe('serveMcpStdio limits', () => {
     expect(resume).toHaveBeenCalled();
   });
 
+  // Both options are reachable from the public API and both had a value that
+  // stopped the server dead - the same class as `cache({ maxSize: -1 })`, which
+  // hung on its first eviction.
+  it('maxInFlight: 0 does not strand stdin paused forever', async () => {
+    capture();
+    const pause = vi.spyOn(process.stdin, 'pause');
+    const resume = vi.spyOn(process.stdin, 'resume');
+    stops.push(serveMcpStdio(
+      { dispatch: vi.fn(async () => ({ ok: true, value: 1 })), getSchema: () => SCHEMA },
+      { actions: ['*'], maxInFlight: 0 },
+    ));
+    pause.mockClear();
+    resume.mockClear();
+
+    process.stdin.emit('data', `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' })}\n`);
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Unclamped: inFlight rose to 1, `1 >= 0` paused, and on completion
+    // `0 < 0` was false so it never resumed - one message served, then a hang
+    // with nothing in flight. Measured: pause 1, resume 0.
+    expect(resume).toHaveBeenCalled();
+  });
+
+  // A tiny cap legitimately abandons partial lines - that is the documented
+  // behaviour, not a bug. What the clamp buys is that a NEGATIVE cap cannot
+  // exist: `buffer.length > -5` is true even for an empty buffer, and the
+  // error it reported quoted a negative length back at the client.
+  // NaN loses every comparison, so `inFlight >= maxInFlight` would never pause
+  // and the backpressure this option provides would silently not exist.
+  it('a NaN maxInFlight still applies backpressure at the default bound', async () => {
+    capture();
+    const pause = vi.spyOn(process.stdin, 'pause');
+
+    const releases: Array<() => void> = [];
+    const dispatch = vi.fn(() => new Promise<any>((resolve) => {
+      releases.push(() => resolve({ ok: true, value: 1 }));
+    }));
+    stops.push(serveMcpStdio(
+      { dispatch, getSchema: () => SCHEMA },
+      { actions: ['*'], maxInFlight: Number('nope') },
+    ));
+    pause.mockClear();
+
+    const line = (id: number) => `${JSON.stringify({
+      jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'cartAdd', arguments: { target: { id } } },
+    })}\n`;
+    for (let i = 0; i < 40; i++) process.stdin.emit('data', line(i));
+    await new Promise((r) => setTimeout(r, 0));
+
+    // Default is 32, so 40 concurrent lines must have tripped the pause.
+    expect(pause).toHaveBeenCalled();
+    for (const release of releases.splice(0)) release();
+  });
+
+  it('a negative maxLineLength is clamped and the transport keeps serving', async () => {
+    const written = capture();
+    stops.push(serveMcpStdio(
+      { dispatch: vi.fn(), getSchema: () => SCHEMA },
+      { actions: ['*'], maxLineLength: -5 },
+    ));
+
+    // A whole line in one chunk is never partial, so it is served normally.
+    process.stdin.emit('data', `${JSON.stringify({ jsonrpc: '2.0', id: 7, method: 'ping' })}\n`);
+    await new Promise((r) => setTimeout(r, 0));
+
+    const replies = written.map((w) => JSON.parse(w));
+    expect(replies).toEqual([{ jsonrpc: '2.0', id: 7, result: {} }]);
+
+    // And a partial line reports a sane cap rather than a negative one.
+    process.stdin.emit('data', 'partial with no newline');
+    await new Promise((r) => setTimeout(r, 0));
+    const last = JSON.parse(written[written.length - 1]!);
+    expect(last.error.code).toBe(-32700);
+    expect(last.error.message).toMatch(/exceeds 1 characters/);
+  });
+
   it('drops a reply whose dispatch settles after stop()', async () => {
     const written = capture();
     let release!: () => void;

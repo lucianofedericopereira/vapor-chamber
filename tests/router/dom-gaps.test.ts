@@ -141,4 +141,30 @@ describe('preheatIdle early returns', () => {
       delete (navigator as any).connection;
     }
   });
+
+  // The router RE-ARMS this on every bfcache restore (`armIdlePreheat` in
+  // src/router/index.ts), cancelling the previous run first. The adjacent line
+  // there already fixed one accumulation of exactly this shape - "it used to
+  // push a fresh entry per arming, so every bfcache restore grew `teardowns` by
+  // one closure" - so a cancel that leaves its own listeners attached puts the
+  // growth back one level down.
+  it('cancel() detaches the abort listeners it attached', () => {
+    const added: string[] = [];
+    const removed: string[] = [];
+    const addSpy = vi.spyOn(window, 'addEventListener');
+    const removeSpy = vi.spyOn(window, 'removeEventListener');
+    addSpy.mockImplementation(((type: string) => { added.push(type); }) as never);
+    removeSpy.mockImplementation(((type: string) => { removed.push(type); }) as never);
+
+    const cancel = preheatIdle([() => Promise.resolve()]);
+    const ABORT_EVENTS = ['scroll', 'click', 'keydown', 'pointerdown'];
+    expect(added.filter((t) => ABORT_EVENTS.includes(t)).sort()).toEqual([...ABORT_EVENTS].sort());
+
+    cancel();
+
+    // `{ once: true }` only removes the ONE listener that actually fires. A user
+    // who never scrolls or clicks leaves all four attached for the life of the
+    // page, once per arming.
+    expect(removed.filter((t) => ABORT_EVENTS.includes(t)).sort()).toEqual([...ABORT_EVENTS].sort());
+  });
 });

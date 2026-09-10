@@ -133,19 +133,23 @@ describe('vaporChamberHMR', () => {
       expect(plugin.apply).toBe('serve');
     });
 
-    it('emits a one-line-shift sourcemap rather than map: null', () => {
+    it('injects on the first line, so no line moves and no map is needed', () => {
+      // The predecessor of this test asserted a hand-built one-line-shift map
+      // (mappings ';AAAA;AACA;AACA'). That map was correct about lines and
+      // silently wrong about columns: it can only say "output line N came from
+      // source line N-1, COLUMN 0", and Vite chains maps, so it flattened every
+      // downstream map onto column 0. Injecting on the same line moves nothing,
+      // which makes Vite's identity default exactly right.
       const code = "import { createCommandBus } from 'vapor-chamber';\nconst bus = createCommandBus();\nbus.dispatch('x', {});";
       const result = plugin.transform(code, '/src/app.ts');
 
-      expect(result?.map).not.toBeNull();
-      expect(result.map.version).toBe(3);
-      expect(result.map.sources).toEqual(['/src/app.ts']);
-      expect(result.map.sourcesContent).toEqual([code]);
-      // Line 1 of the output is the injected import (unmapped); every original
-      // line then maps one line down, column-for-column.
-      expect(result.map.mappings).toBe(';AAAA;AACA;AACA');
-      // The output really is exactly one line longer.
-      expect(result.code.split('\n')).toHaveLength(code.split('\n').length + 1);
+      expect(result.map).toBeUndefined();
+      expect(result.code.split('\n')).toHaveLength(code.split('\n').length);
+      expect(result.code.split('\n')[0]).toBe(
+        "import 'virtual:vapor-chamber-hmr';import { createCommandBus } from 'vapor-chamber';",
+      );
+      // Every line after the first is untouched, character for character.
+      expect(result.code.split('\n').slice(1)).toEqual(code.split('\n').slice(1));
     });
 
     it('matches an import, not a passing mention of the package name', () => {
@@ -189,12 +193,45 @@ describe('vaporChamberHMR', () => {
       expect(result).toBeUndefined();
     });
 
-    it('injects HMR import into .vapor.vue files (Vue 3.6+ Vapor SFCs)', () => {
-      const result = plugin.transform(
-        "import { useCommand } from 'vapor-chamber';\nconst { dispatch } = useCommand();",
-        '/src/ProductCard.vapor.vue'
-      );
-      expect(result?.code).toContain("import 'virtual:vapor-chamber-hmr'");
+    /**
+     * SFCs are skipped, and the reason is not taste.
+     *
+     * The test that used to sit here handed the transform a bare script
+     * FRAGMENT under a `.vapor.vue` id and asserted the shim import came back.
+     * It did - and it never once reached a browser. `enforce: 'pre'` means this
+     * plugin runs before @vitejs/plugin-vue and sees the RAW SFC, where a
+     * prepended import lands outside every block and compiler-sfc drops it
+     * without a word. The fixture agreed with the code instead of with Vite,
+     * which is this repo's most expensive recurring bug shape.
+     *
+     * So this test parses a real SFC instead of trusting the transform's word:
+     * whatever the plugin does to SFC text, the compiler is the one that
+     * decides, and it decides to discard it.
+     */
+    it('skips SFCs, because compiler-sfc discards anything outside a block', async () => {
+      const { parse } = await import('@vue/compiler-sfc');
+      const sfc = [
+        '<script setup lang="ts">',
+        "import { useCommand } from 'vapor-chamber';",
+        'const { dispatch } = useCommand();',
+        '</script>',
+        '<template><button @click="dispatch()">buy</button></template>',
+      ].join('\n');
+
+      // The plugin declines both SFC shapes now.
+      expect(plugin.transform(sfc, '/src/ProductCard.vue')).toBeUndefined();
+      expect(plugin.transform(sfc, '/src/ProductCard.vapor.vue')).toBeUndefined();
+
+      // And this is why: had it prepended, the import would be in no block, so
+      // none of the compiled output would carry it.
+      const injected = `import 'virtual:vapor-chamber-hmr';\n${sfc}`;
+      const { descriptor } = parse(injected, { filename: '/src/ProductCard.vue' });
+      const blocks = [descriptor.script, descriptor.scriptSetup, descriptor.template];
+      for (const block of blocks) {
+        expect(block?.content ?? '').not.toContain('virtual:vapor-chamber-hmr');
+      }
+      // compiler-sfc does not even report it as a custom block - it is gone.
+      expect(descriptor.customBlocks).toHaveLength(0);
     });
   });
 

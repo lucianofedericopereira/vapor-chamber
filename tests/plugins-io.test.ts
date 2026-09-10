@@ -593,6 +593,54 @@ describe('retry plugin', () => {
     expect(attempts).toBe(1);
   });
 
+  // `next()` is called only inside the retry loop, so a bound under 1 meant
+  // the command never reached its handler: the plugin returned its own
+  // placeholder and every matching action failed with "No attempts made",
+  // which reads like an internal fault rather than a bad option. Measured at
+  // 0, -1 and NaN - the handler ran zero times in each case.
+  it('still dispatches once when maxAttempts is unusable', async () => {
+    for (const bound of [0, -1, Number('nope')]) {
+      const bus = createAsyncCommandBus();
+      bus.use(retry({ maxAttempts: bound, baseDelay: 0 }));
+
+      let attempts = 0;
+      bus.register('fetch', async () => { attempts++; return 'data'; });
+
+      const result = await bus.dispatch('fetch', {});
+      expect(result.ok, `maxAttempts ${bound}`).toBe(true);
+      expect(result.value).toBe('data');
+      expect(attempts, `maxAttempts ${bound}`).toBe(1); // floored to a single attempt
+    }
+  });
+
+  // setTimeout stores its delay in a signed 32-bit int; Node clamps anything
+  // larger to 1ms, so an uncapped exponential backoff INVERTS - the longest
+  // waits become the shortest, precisely when the remote is least able to take
+  // them. Measured before the cap: delays reached 53,687,091,200ms and five of
+  // thirty were over the ceiling.
+  it('caps the computed backoff at the setTimeout ceiling', async () => {
+    const MAX = 2_147_483_647;
+    const delays: number[] = [];
+    const realSetTimeout = globalThis.setTimeout;
+    (globalThis as any).setTimeout = ((fn: () => void, ms: number) => {
+      delays.push(ms);
+      return realSetTimeout(fn, 0);
+    }) as unknown as typeof globalThis.setTimeout;
+
+    try {
+      const plugin = retry({ maxAttempts: 30, baseDelay: 200 });
+      await plugin({ action: 'save', target: {}, meta: {} } as any, () =>
+        ({ ok: false, error: new Error('boom') }) as any);
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+    }
+
+    expect(delays.length).toBe(29); // one wait between each pair of attempts
+    expect(Math.max(...delays)).toBeLessThanOrEqual(MAX);
+    expect(delays[0]).toBe(200); // early backoff is untouched
+    expect(delays[10]).toBe(204_800);
+  });
+
   it('retries on failure and succeeds on 3rd attempt', async () => {
     const bus = createAsyncCommandBus();
     bus.use(retry({ maxAttempts: 3, baseDelay: 0, strategy: 'fixed' }));

@@ -26,24 +26,28 @@ The bus (`src/store.ts`) is wired with four plugins:
 ## Run
 
 ```bash
+npm install          # once, from the repo root
 cd examples/vapor-island-cart
-npm install
 npm run dev
 ```
 
 Open the printed URL (default `http://localhost:8889`).
 
-The example links to the repo's working tree via `file:../..`, so it always runs
-against your local library code. The library `dist/` builds itself: the repo root
-has a `prepare` script (runs on root `npm install` and on git installs), and this
-example's `predev`/`prebuild` hooks build it on demand if `dist/` is missing.
-No manual step.
+The examples are npm **workspaces**, so one `npm install` at the repo root
+installs all of them into a single `node_modules/` and symlinks the library into
+it - the example always runs against your working tree, with nothing to re-sync
+after an edit. The library `dist/` builds itself: the repo root has a `prepare`
+script, and this example's `predev`/`prebuild` hooks build it on demand if
+`dist/` is missing. No manual step.
 
-> **Note** - while Vue 3.6 is in beta, `@vitejs/plugin-vue` declares its peer as
-> `vue@^3.2.25`, and npm refuses to match a prerelease (`3.6.0-beta.x`) against a
-> non-prerelease range. This folder ships an `.npmrc` with `legacy-peer-deps=true`
-> so `npm install` just works. The peer warning is cosmetic - plugin-vue 6
-> fully supports Vue 3.6.
+> **Note** - `@vitejs/plugin-vue` declares its peer as `vue@^3.2.25`, and npm
+> refuses to match a prerelease (`3.6.0-rc.x`) against a non-prerelease range.
+> The root `package.json` carries an `overrides` entry pinning that one peer to
+> the root's own `vue`, which is why a root `npm install` resolves. This folder
+> also keeps an `.npmrc` with `legacy-peer-deps=true`, which is what makes a
+> STANDALONE `npm install` in this directory work - npm does not read it for a
+> workspace install from the root. Either way the warning is cosmetic:
+> plugin-vue 6 fully supports Vue 3.6.
 
 ## What to look for
 

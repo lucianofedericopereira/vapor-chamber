@@ -1,6 +1,5 @@
 import { defineConfig } from 'vite';
-import vue from '@vitejs/plugin-vue';
-import { vaporChamberHMR } from 'vapor-chamber/vite';
+import { createExampleConfig } from '../vite.base';
 
 // No `vue` alias, and no synthesized with-vapor entry. Both used to be here,
 // and both were justified by a fact that has since expired: "Vue's `vue` entry
@@ -17,12 +16,8 @@ import { vaporChamberHMR } from 'vapor-chamber/vite';
 // enumeration behind that claim is pinned by
 // tests/vue-bundler-vapor-exports.test.ts, so this can be re-checked each RC
 // instead of re-derived.
-export default defineConfig({
-  define: {
-    __VUE_OPTIONS_API__: false,
-    __VUE_PROD_DEVTOOLS__: false,
-    __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: false,
-  },
-  build: { target: 'es2022' },
-  plugins: [vue(), vaporChamberHMR({ verbose: false })],
-});
+//
+// The Vue feature flags, `build.target` and the plugin pair now come from
+// ../vite.base.ts, which documents what it shares and what it deliberately
+// leaves to each example.
+export default defineConfig(createExampleConfig());

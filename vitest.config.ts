@@ -52,8 +52,17 @@ export default defineConfig({
       //  - index.ts / plugins.ts: pure re-export aggregators
       //  - iife*.ts: thin namespace builders for `<script>` tag use; the
       //    underlying surface is covered via the regular test files
-      //  - vite-hmr.ts: Vite plugin code that exercises in a real Vite
-      //    server, not a unit test environment
+      //  (vite-hmr.ts is NO LONGER excluded. Its reason read "Vite plugin code
+      //   that exercises in a real Vite server, not a unit test environment",
+      //   which was true and was also the hole: the plugin claimed `.vue` and
+      //   `.vapor.vue` and had never once delivered a shim to either, while 24
+      //   unit tests passed, because those tests called `plugin.transform()`
+      //   with a string Vite would never pass it. An exclusion whose reason is
+      //   "the real thing is hard to mount" is a standing invitation for the
+      //   fixture to disagree with reality. tests/vite-hmr-pipeline.test.ts
+      //   mounts the real thing - `createServer`, the actual plugin container,
+      //   and one case over a real socket - in about half a second, and the
+      //   file measures 100% with it.)
       //  - testing.ts: test-only utility (createTestBus); covering it
       //    would mean tests that test the test helper
       //  - directives.ts: requires a real Vue runtime to exercise the public
@@ -79,7 +88,6 @@ export default defineConfig({
         'src/iife.ts',
         'src/iife-core.ts',
         'src/iife-elements.ts',
-        'src/vite-hmr.ts',
         'src/testing.ts',
         'src/directives.ts',
         'src/router/vapor.ts',

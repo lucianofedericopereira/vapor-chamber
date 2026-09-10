@@ -26,7 +26,14 @@ import { computed, getCurrentScope, onScopeDispose, shallowRef } from 'vue';
 import { installDomIntegration, preheatIdle, stampActiveLinks } from './dom';
 import { createEngine } from './engine';
 import { HARD_NAV_CODES, isRouterError, routerError } from './errors';
-import { type RouterHistory, canUseWebHistory, createMemoryHistory, createWebHistory, stripBase } from './history';
+import {
+  type RouterHistory,
+  canUseWebHistory,
+  createMemoryHistory,
+  createWebHistory,
+  normalizeBase,
+  stripBase,
+} from './history';
 import { ROUTER_KEY } from './keys';
 import { type LoaderHandlers, defaultAffects, runLoaders } from './loaders';
 import type { Router } from './router-type';
@@ -196,7 +203,15 @@ export function createRouter<TName extends string = string>(options: RouterOptio
       : createMemoryHistory(
           base,
           hasWindow
-            ? (stripBase(window.location.pathname, normalizeBaseSafe(base)) ?? '/') + window.location.search + window.location.hash
+            ? // The SAME normalizer `createMemoryHistory` applies to `base` on
+              // the line above. A private lookalike here disagreed with it on
+              // any base written with a trailing slash and no leading one:
+              // `'admin/'` normalized to `/admin/` for the strip and `/admin`
+              // for the history, so `stripBase('/admin/x', '/admin/')` returned
+              // null and the fallback seeded `'/'`. An embedded preview then
+              // rendered the wrong route, silently, and only in the branch that
+              // exists to keep embedded previews working.
+              (stripBase(window.location.pathname, normalizeBase(base)) ?? '/') + window.location.search + window.location.hash
             : '/',
         ));
   /**
@@ -552,7 +567,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
       // which pins Vue's virtual-DOM runtime into every consumer's bundle -
       // including Vapor apps that never render one. Import <RouterOutlet>
       // where you use it. (vue-router hit the same wall; see docs/router.md
-      // §"Why the outlet is a separate subpath".)
+      // "Why the outlet is a separate subpath".)
       void start();
     },
     destroy: () => {
@@ -564,10 +579,6 @@ export function createRouter<TName extends string = string>(options: RouterOptio
 }
 
 // ---- helpers ------------------------------------------------------------------------
-
-function normalizeBaseSafe(base: string): string {
-  return base && !base.startsWith('/') ? `/${base}` : base.replace(/\/$/, '');
-}
 
 function isComponentLike(fn: unknown): boolean {
   const candidate = fn as { render?: unknown; setup?: unknown; __vccOpts?: unknown };

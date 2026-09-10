@@ -202,7 +202,76 @@ describe.skipIf(!haveDist || !esbuild)('ESM tree-shake regression', () => {
       // Not offset by anything: `doClientFetch` tree-shakes OUT of this bundle
       // (the consumer reaches `doFetch` via createHttpBridge), so its own
       // content-type fix costs this bundle nothing. 15 bytes of headroom.
-      expect(br.length, `brotli bundle size grew unexpectedly (${br.length} bytes)`).toBeLessThan(6_560);
+      // Ceiling UNCHANGED at 6_560, and that is the point - it is a ratchet
+      // that makes a change pay for itself rather than a number to raise.
+      // Measured in three steps, rebuilding dist each time:
+      //   6_545  baseline
+      //   6_563  + the one-shot CAUSATION slot in stampMeta (`_nextCausation`,
+      //          set by `_withCausation`)                            +18
+      //   6_554  - four pass-through wrappers in command-bus.ts       -9
+      // Net +9, headroom 15 -> 6. The raise was proposed, then withdrawn: the
+      // bytes came out of the code instead.
+      //
+      // The wrappers were `syncQuery`, `syncEmit`, `asyncQuery` and
+      // `asyncEmit`, each forwarding its arguments to an `_inner` twin and
+      // doing nothing else. `asyncQuery` was more than dead weight: an `async`
+      // wrapper whose entire body was `return await inner(...)`, so every query
+      // allocated a second promise and resumed a second async frame - one extra
+      // microtask turn on top of the awaits it genuinely needs. `dispatch`
+      // keeps its split, because there the outer half owns the depth guard's
+      // `try/finally` and the inner half stays optimizable without it.
+      //
+      // The same core tax as `_nextOrigin`'s 25 B two rows above, for the same
+      // reason and by the same mechanism: `__causationId` in the payload can
+      // only mark payloads that hold keys, so a number, string, boolean or
+      // array arrived with no causation at all. `createReaction`'s `maxHops`
+      // cap counted hops off that key, so `mapPayload: () => 42` made every hop
+      // read as hop 1 and the cap never fired - measured, an indirect cycle ran
+      // to MAX_DISPATCH_DEPTH (16) instead of stopping at 4 on a sync bus, and
+      // `ReactionOptions.allowSelfMatch` documents that the async case has no
+      // depth backstop at all and spins forever. A cycle guard that silently
+      // stops guarding is worth 18 bytes.
+      //
+      // Argued down first, and the cheaper shape was REJECTED by measurement:
+      //   6_564  clearing both slots in one chained assignment
+      //          (`_nextOrigin = _nextCausation = undefined`) - reads cheaper,
+      //          measured one byte WORSE than two separate clears, because
+      //          brotli is not linear in source length. Reverted.
+      //   6_563  two separate read-and-clear pairs. Shipped.
+      // `_withCausation` itself tree-shakes out of this bundle - nothing here
+      // imports `utilities.ts` - so the 18 B is the slot and its two reads.
+      // 6_560 -> 6_590, and this is the FIRST raise rather than a payback. The
+      // rule here has been "the bytes come out of the code instead", and twice
+      // in this cycle they did (a `WeakMap` that turned out to be identifier
+      // noise; a `countOption` import swapped for a negated comparison). This
+      // time they do not, and the reason is worth writing down rather than
+      // hiding in a smaller number.
+      //
+      // Five shipped plugins read `next()`'s return value as a CommandResult.
+      // On the ASYNC bus that value is a PROMISE, so `promise.ok` is undefined
+      // and every one of them took the wrong branch, silently. Measured through
+      // the public API:
+      //
+      //   logger()          console.error on EVERY command, `error: undefined`,
+      //                     successes included; the result value never printed
+      //   history()         recorded nothing - undo/redo inert
+      //   circuitBreaker()  OPEN after five consecutive SUCCESSES, refusing
+      //                     traffic that was working
+      //   metrics()         `ok: undefined`, 0.02ms recorded for a 30ms handler
+      //   persist()         never saved
+      //
+      // `src/settled.ts` is the one rule they now share. Its cost in THIS
+      // bundle, which imports `logger`, measured in two steps:
+      //
+      //   6_593  the helper plus a `dualPlugin()` wrapper
+      //   6_588  wrapper deleted - it was an identity function shipped to carry
+      //          a type, so a plain cast is the same thing for free
+      //
+      // 28 B over, in a 6.5 KB budget, to stop a circuit breaker tripping on
+      // success. The ceiling is a ratchet against sprawl, not against fixing a
+      // defect it happens to sit in front of - but it did its job here twice
+      // before this, which is why the raise is 28 and not more.
+      expect(br.length, `brotli bundle size grew unexpectedly (${br.length} bytes)`).toBeLessThan(6_590);
 
       // Symbol budget. These are all chamber.ts-only - should NOT appear in a
       // consumer bundle that doesn't import Vue composables.

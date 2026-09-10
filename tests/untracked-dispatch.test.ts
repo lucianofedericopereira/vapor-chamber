@@ -21,10 +21,17 @@
  * built, so paying a per-dispatch runtime check for it is the wrong trade.
  *
  * The default therefore covers every path a component actually uses -
- * `useCommand`, `useCommandGroup`, `useSharedCommandState`, `useCommandQuery`
- * - at zero cost to the core and zero bytes to consumers without Vue. The one
- * gap, calling a **raw bus** from inside an effect, has a documented one-line
+ * `useCommand`, `useCommandGroup`, `useSharedCommandState`, `useCommandQuery`,
+ * and the two Vapor ones, `defineVaporCommand` and `useVaporAsyncCommand` - at
+ * zero cost to the core and zero bytes to consumers without Vue. The one gap,
+ * calling a **raw bus** from inside an effect, has a documented one-line
  * answer: wrap it in the exported `untracked()`.
+ *
+ * The list above used to stop at four, and the two it omitted were the ones in
+ * `chamber-vapor.ts` - so the claim "every path a component actually uses" was
+ * false for exactly the platform this library is named for, and the omission
+ * read as a scope statement rather than as the gap it was. Both now untrack,
+ * and both are pinned below.
  *
  * `untracked()` is backed by `@vue/reactivity`'s `pauseTracking`/
  * `resetTracking` - not `vue`, which does not expose them (verified on
@@ -43,6 +50,7 @@ import {
   useSharedCommandState,
   waitForVueDetection,
 } from '../src/chamber';
+import { defineVaporCommand, useVaporAsyncCommand } from '../src/chamber-vapor';
 
 const VUE = 'vue';
 type V = { shallowRef: any; watchEffect: any; nextTick: any; effectScope: any };
@@ -233,6 +241,58 @@ describe('composables untrack by default', () => {
     expect(observed).toBe(1);
     expect(runs).toBe(2);
     scope2.stop();
+    scope.stop();
+  });
+
+  // The two composables in chamber-vapor.ts were the gap: this file's own
+  // docblock claimed the default "covers every path a component actually uses",
+  // and named four - all of them in chamber.ts. The two it did not name are the
+  // VAPOR ones, i.e. the platform this library is named for, and the one of them
+  // documented for hot paths (`defineVaporCommand`) is the likeliest of all to
+  // be called from inside a render effect.
+  it('defineVaporCommand().dispatch does not leak handler reads', async () => {
+    const { shallowRef, watchEffect, nextTick, effectScope } = vue;
+    const bus = createCommandBus();
+    setCommandBus(bus);
+    const unrelated = shallowRef('a');
+
+    let runs = 0;
+    const scope = effectScope();
+    scope.run(() => {
+      const { dispatch } = defineVaporCommand('probe', () => unrelated.value);
+      watchEffect(() => { runs++; dispatch({}); });
+    });
+    await nextTick();
+    expect(runs).toBe(1);
+
+    unrelated.value = 'b';
+    await nextTick();
+    expect(runs).toBe(1);
+    scope.stop();
+  });
+
+  it('useVaporAsyncCommand().dispatch does not leak handler reads', async () => {
+    const { shallowRef, watchEffect, nextTick, effectScope } = vue;
+    const bus = createAsyncCommandBus();
+    setCommandBus(bus);
+    const unrelated = shallowRef('a');
+    // Read synchronously, before the first await - the synchronous entry is the
+    // whole exposure (see the test below), so that is where the leak lives.
+    bus.register('probe', async () => unrelated.value);
+
+    let runs = 0;
+    const scope = effectScope();
+    scope.run(() => {
+      const { dispatch } = useVaporAsyncCommand();
+      watchEffect(() => { runs++; void dispatch('probe', {}); });
+    });
+    await nextTick();
+    expect(runs).toBe(1);
+
+    unrelated.value = 'b';
+    await nextTick();
+    await nextTick();
+    expect(runs).toBe(1);
     scope.stop();
   });
 

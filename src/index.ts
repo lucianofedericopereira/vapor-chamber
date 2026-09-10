@@ -49,7 +49,7 @@
  *   v0.5.0 - camelCase naming, HTTP client, CDCC splits, createFormBus, schema/LLM layer
  *   v0.6.0 - onBefore, once, offAll, BaseBus, commandKey; BatchResult successCount/failCount;
  *             form async validation (isValidating, isBusy); HttpError.code; noRetry;
- *             WS maxQueueSize; LlmAdapter; 419≠401 fix; CSRF refresh error propagation;
+ *             WS maxQueueSize; LlmAdapter; 419!=401 fix; CSRF refresh error propagation;
  *             WS queue expiry on reconnect; async request dedup; directive dispatch timeout;
  *             signal detection sync probe (globalThis.__VUE__); waitForVueDetection();
  *             passthroughHandlers fix in TestBus; Vue >=3.6.0-beta.1 peer dep;
@@ -73,7 +73,7 @@
  *             TestBus.query/emit/registeredActions parity
  */
 
-// ── CORE ─────────────────────────────────────────────────────────────────────
+// -- CORE ---------------------------------------------------------------------
 export {
   createCommandBus,
   createAsyncCommandBus,
@@ -123,7 +123,7 @@ export {
 // Testing utilities (CORE - zero runtime deps, for test environments only)
 export { createTestBus, type TestBus, type RecordedDispatch } from './testing';
 
-// ── UTILITIES ────────────────────────────────────────────────────────────────
+// -- UTILITIES ----------------------------------------------------------------
 // Declarative patterns for common bus usage. Tree-shaken when unused.
 export {
   createChamber,
@@ -139,7 +139,7 @@ export {
   type Reaction,
 } from './utilities';
 
-// ── EXTRA PLUGINS ────────────────────────────────────────────────────────────
+// -- EXTRA PLUGINS ------------------------------------------------------------
 // Production-ready plugins: caching, resilience, observability. Tree-shaken.
 export {
   cache,
@@ -159,7 +159,7 @@ export {
   type SupersedeOptions,
 } from './plugins-extra';
 
-// ── OPTIONAL ──────────────────────────────────────────────────────────────────
+// -- OPTIONAL ------------------------------------------------------------------
 
 // Plugins
 export {
@@ -181,7 +181,7 @@ export {
   type SyncOptions,
 } from './plugins';
 
-// Vue composables - optional, requires Vue ≥ 3.5
+// Vue composables - optional, requires Vue >= 3.5
 export {
   signal,
   configureSignal,

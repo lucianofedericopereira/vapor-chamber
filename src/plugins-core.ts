@@ -5,6 +5,9 @@
  */
 
 import { DEV } from './dev';
+import { onSettled } from './settled';
+import { countOption } from './bounds';
+import { GLYPH_COMMAND } from './glyphs';
 import type { Command, CommandResult, Plugin, CommandBus } from './command-bus';
 import { BusError, commandKey, disposeAll } from './command-bus';
 
@@ -16,7 +19,7 @@ import { BusError, commandKey, disposeAll } from './command-bus';
  * 'warn' or 'error' to hide successful dispatches and only see failures.
  *
  * @example
- * bus.use(logger()); // ⚡ cartAdd - everything, as before
+ * bus.use(logger()); // logs every dispatch, as before
  *
  * @example
  * // Failures only, with fixed-width [  OK  ] / [ FAIL ] badges
@@ -35,12 +38,12 @@ export function logger(options: {
   // Ok results log at 'info', failures at 'error' - only 'warn'/'error' can suppress.
   const skipOk = level === 'warn' || level === 'error';
 
-  return (cmd, next) => {
+  return ((cmd: Command, next: () => CommandResult) => {
     if (filter && !filter(cmd)) return next();
 
     const log = collapsed ? console.groupCollapsed : console.group;
     const open = (ok: boolean): void => {
-      const label = `⚡ ${cmd.action}`;
+      const label = `${GLYPH_COMMAND} ${cmd.action}`;
       if (!badges) {
         log(label);
       } else {
@@ -61,19 +64,28 @@ export function logger(options: {
       return result;
     };
 
+    // AN ASYNC BUS HANDS BACK A PROMISE, and both paths below used to treat it
+    // as a CommandResult. `promise.ok` is undefined, so the ok-test failed and
+    // EVERY command - successful ones included - was logged through
+    // `console.error('error:', undefined)`, with the result value never shown
+    // at all. Measured on an async bus; see ../settled for the other four
+    // plugins that shared the mistake.
+
     // Fast path (defaults): open the group before the handler runs so nested
     // dispatch logs stay grouped - output identical to previous versions.
     if (!badges && !skipOk) {
       open(true);
-      return close(next());
+      return onSettled(next(), close);
     }
 
     // Deferred path: the badge / suppression decision needs the result first.
-    const result = next();
-    if (result.ok && skipOk) return result;
-    open(result.ok);
-    return close(result);
-  };
+    const decide = (result: CommandResult): CommandResult => {
+      if (result.ok && skipOk) return result;
+      open(result.ok);
+      return close(result);
+    };
+    return onSettled(next(), decide);
+  }) as unknown as Plugin;
 }
 
 /**
@@ -82,8 +94,16 @@ export function logger(options: {
 export function validator(rules: {
   [action: string]: (cmd: Command) => string | null;
 }): Plugin {
+  // Own entries into a Map, once. `rules[cmd.action]` looked up an
+  // action name - a string from outside - on an object inheriting from
+  // Object.prototype, so `constructor` / `toString` / `valueOf` resolved to
+  // inherited functions and ran as rules the caller never wrote (see
+  // ../dict). A Map has no prototype chain to walk and turns the per-dispatch
+  // property load into a hash lookup, the same "classify once at
+  // construction" shape as schemaValidator's `compiled`.
+  const compiled = new Map(Object.entries(rules));
   return (cmd, next) => {
-    const rule = rules[cmd.action];
+    const rule = compiled.get(cmd.action);
     if (rule) {
       const error = rule(cmd);
       if (error) {
@@ -132,14 +152,15 @@ export function history(options: {
   /** Unregister the undoAction/redoAction bus handlers (no-op if none). */
   dispose: () => void;
 } {
-  const { maxSize = 50, filter, bus, undoAction, redoAction } = options;
+  const { maxSize: rawMaxSize = 50, filter, bus, undoAction, redoAction } = options;
+  // `past.length > maxSize` gates EVICTION, so a NaN cap evicted nothing and the
+  // stack grew without bound - measured at 500 entries against a cap of 50.
+  const maxSize = countOption(rawMaxSize, 50);
   const past: Command[] = [];
   const future: Command[] = [];
   let _replaying = false; // true during redo dispatch - prevents double-recording
 
-  const plugin: Plugin = (cmd, next) => {
-    const result = next();
-
+  const plugin: Plugin = ((cmd: Command, next: () => CommandResult) => onSettled(next(), (result) => {
     if (
       !_replaying && result.ok &&
       cmd.action !== undoAction && cmd.action !== redoAction &&
@@ -151,7 +172,7 @@ export function history(options: {
     }
 
     return result;
-  };
+  })) as unknown as Plugin;
 
   const api = Object.assign(plugin, {
     getState: (): HistoryState => ({
@@ -338,8 +359,13 @@ export function optimistic(
     apply: (cmd: Command) => (() => void) | null;
   }>
 ): Plugin {
+  // Own entries into a Map - see validator() above. `handlers['constructor']`
+  // resolved to `Object`, whose `.apply` is Function.prototype.apply, so the
+  // plugin called it as the optimistic `apply` and treated the result as a
+  // rollback closure.
+  const compiled = new Map(Object.entries(handlers));
   const plugin: any = (cmd: Command, next: () => any) => {
-    const config = handlers[cmd.action];
+    const config = compiled.get(cmd.action);
     if (!config) return next();
 
     const rollback = config.apply(cmd);

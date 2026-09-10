@@ -105,11 +105,24 @@ export function observe(bus: BaseBus, pattern: string): Observable<BusObservatio
  * Returns the Subscription so you can unsubscribe; the bus dispatch is
  * fire-and-forget per emitted value.
  *
+ * "Fire-and-forget" means the RESULT is not awaited, not that a failure is
+ * dropped on the floor. On an async bus `dispatch` returns a promise, and
+ * discarding it left a rejection with no handler - an unhandled rejection,
+ * which Node terminates the process over by default. Measured: one emitted
+ * value into a bus with `onMissing: 'throw'` produced exactly that. A rejected
+ * dispatch is now reported on the same `<action>:error` channel the source's
+ * own errors use, so it is observable rather than either fatal or silent.
+ *
+ * `ssr.ts` guards the same shape on its replay path and `plugins-io.ts`'s
+ * `sync()` was fixed for it; this was the third place a promise from
+ * `BaseBus.dispatch` was allowed to float.
+ *
  * @example
  * import { interval } from 'rxjs';
  * import { dispatchFrom } from 'vapor-chamber/observable';
  *
  * dispatchFrom(bus, 'tick', interval);   // tick every 1s
+ * bus.on('tick:error', (cmd) => console.error('tick failed', cmd.target));
  */
 export function dispatchFrom<T>(
   bus: BaseBus,
@@ -117,7 +130,12 @@ export function dispatchFrom<T>(
   source: Observable<T>,
 ): Subscription {
   return source.subscribe({
-    next(value) { bus.dispatch(action, value as any); },
+    next(value) {
+      const result = bus.dispatch(action, value as any);
+      if (result != null && typeof (result as { then?: unknown }).then === 'function') {
+        (result as Promise<unknown>).catch((err) => { bus.emit(`${action}:error`, err); });
+      }
+    },
     error(err) { bus.emit(`${action}:error`, err); },
     complete() { bus.emit(`${action}:complete`, undefined); },
   });

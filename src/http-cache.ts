@@ -18,7 +18,7 @@
  * auth/header/cookie dimension, so user A's authenticated payload answered
  * user B's identical URL, and two concurrent requests for different users
  * collapsed into one in-flight promise. A fresh bus per request (whitepaper
- * §14.2) did not give a fresh HTTP cache - now a fresh client does. This is
+ * section 14.2) did not give a fresh HTTP cache - now a fresh client does. This is
  * the same factory-closure shape the bus-level `cache()` plugin already uses.
  */
 
@@ -62,7 +62,15 @@ export function createResponseCache(): ResponseCache {
       if (!entry) return null;
 
       const now = Date.now();
-      if (now >= entry.staleUntil) return null; // expired past any stale window - retained, not a hit
+      // WRITTEN AS THE NEGATED `<`, NOT `>=`, and that is the whole guard. A
+      // NaN window (`cache: { ttl: Number(badConfig) }`) makes `now + ttl` NaN,
+      // and EVERY comparison against NaN is false - so `now >= staleUntil` said
+      // "not expired" forever and the entry was served for the life of the page,
+      // never stale, never evicted. Negating a `<` inverts which way the unknown
+      // falls: an entry whose window cannot be compared is treated as expired.
+      // Cheaper than clamping at every call site, and it covers a NaN arriving
+      // from anywhere - see ../bounds for the direction rule.
+      if (!(now < entry.staleUntil)) return null; // expired past any stale window - retained, not a hit
 
       // LRU: move to end (most recently used)
       entries.delete(key);

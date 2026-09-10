@@ -34,7 +34,7 @@
  *            sibling walks, dev target validation).
  *   v1.1.0 - module added: dehydrate bus state on the server, rehydrate on client.
  *
- * Per the whitepaper (§14): commands that ran on the server to populate initial
+ * Per the whitepaper (section 14): commands that ran on the server to populate initial
  * state need to replay on the client so reactive signals reflect the same values.
  * This plugin automates the dehydrate/rehydrate pattern as a first-class plugin.
  *

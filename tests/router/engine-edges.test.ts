@@ -124,6 +124,40 @@ describe('guards', () => {
     router.destroy();
   });
 
+  // The other direction of the same correction, and the one the bus already
+  // learned the hard way (see fanOutListeners in command-bus.ts: "corrected by
+  // IDENTITY, not by length"). Removing a LATER peer shrinks the array without
+  // moving anything at or before the cursor, so a length-based `i -= shrinkage`
+  // walks the cursor BACK onto the guard that just ran and runs it twice.
+  it('does not re-run a guard that unregisters a LATER one', async () => {
+    const router = makeRouter();
+    await router.isReady();
+
+    const order: string[] = [];
+    let offC!: () => void;
+    // Three, so that a hook AFTER the cursor still remains once C is gone -
+    // otherwise the shrunken array ends the loop and hides the over-correction.
+    router.beforeEach(() => {
+      order.push('a');
+      offC(); // removes a guard AFTER this one in the list
+      return true;
+    });
+    router.beforeEach(() => {
+      order.push('b');
+      return true;
+    });
+    offC = router.beforeEach(() => {
+      order.push('c');
+      return true;
+    });
+
+    await router.push('/list');
+
+    // Length-based correction walks the cursor back onto 'a' and re-awaits it.
+    expect(order).toEqual(['a', 'b']);
+    router.destroy();
+  });
+
   it('a guard returning false aborts with a router error', async () => {
     const router = makeRouter();
     await router.isReady();
@@ -248,6 +282,57 @@ describe('setRouteData', () => {
     // Loud in dev, lenient in prod: the value lands, but nothing reads it,
     // which is a typo nobody would otherwise notice.
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('no route record by that name'));
+    router.destroy();
+  });
+});
+
+describe('afterEach hooks', () => {
+  it('does not skip the next hook when one unregisters itself mid-walk', async () => {
+    const router = makeRouter();
+    await router.isReady();
+
+    const order: string[] = [];
+    let offFirst!: () => void;
+    offFirst = router.afterEach(() => {
+      order.push('first');
+      offFirst();
+    });
+    router.afterEach(() => {
+      order.push('second');
+    });
+
+    await router.push('/list');
+
+    expect(order).toEqual(['first', 'second']);
+    router.destroy();
+  });
+
+  // Same over-correction as the guard case above, on the hook list. A one-shot
+  // `afterEach` that tears down a sibling - "scroll to top on this next
+  // navigation, and stop the analytics ping" - re-ran the hook that had just
+  // fired, so its side effect happened twice per navigation.
+  it('does not re-run a hook that unregisters a LATER one', async () => {
+    const router = makeRouter();
+    await router.isReady();
+
+    const order: string[] = [];
+    let offC!: () => void;
+    // Three, so a hook after the cursor survives the removal - with only two the
+    // shrunken array ends the loop and the over-correction is invisible.
+    router.afterEach(() => {
+      order.push('a');
+      offC();
+    });
+    router.afterEach(() => {
+      order.push('b');
+    });
+    offC = router.afterEach(() => {
+      order.push('c');
+    });
+
+    await router.push('/list');
+
+    expect(order).toEqual(['a', 'b']);
     router.destroy();
   });
 });

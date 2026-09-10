@@ -244,6 +244,54 @@ describe('item 33 - createReaction cycles', () => {
     error.mockRestore();
   });
 
+  // The hop counter rides `__reactionHops` in the payload - the same convention
+  // `__origin` was MOVED OFF for this exact reason: a primitive or an array
+  // cannot carry a key. When `mapPayload` returns one, the marker is dropped,
+  // every hop reads as hop 1, and the cap that bounds an unbounded async loop
+  // never fires. Sync bus here so the run terminates either way (depth 16
+  // backstops it) and the assertion is about which bound did the stopping.
+  it.each([
+    ['a number', () => 42],
+    ['an array', () => [1, 2]],
+    ['a string', () => 'x'],
+  ])('caps the chain at maxHops when mapPayload returns %s', (_label, mapPayload) => {
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const bus = createCommandBus();
+    let runs = 0;
+    bus.register('cartRecalculate', () => {
+      runs++;
+      return 1;
+    });
+
+    createReaction('cart*', 'cartRecalculate', {
+      allowSelfMatch: true,
+      maxHops: 3,
+      mapPayload,
+    }).install(bus);
+    bus.dispatch('cartRecalculate', {});
+
+    // Without the marker the chain runs until MAX_DISPATCH_DEPTH (16) instead.
+    expect(runs).toBeLessThanOrEqual(4); // original + 3 hops
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('maxHops'));
+    error.mockRestore();
+  });
+
+  it('propagates causation even when mapPayload returns a primitive', () => {
+    const bus = createCommandBus();
+    const seen: Array<{ causationId?: string }> = [];
+    bus.register('cartAdd', () => 1);
+    bus.register('inventoryCheck', (cmd) => {
+      seen.push({ causationId: cmd.meta?.causationId });
+      return 1;
+    });
+
+    createReaction('cartAdd', 'inventoryCheck', { mapPayload: () => 7 }).install(bus);
+    bus.dispatch('cartAdd', {});
+
+    expect(seen).toHaveLength(1);
+    expect(seen[0].causationId).toBeDefined();
+  });
+
   it('a normal (non-self-matching) reaction is unaffected', () => {
     const bus = createCommandBus();
     const dst = vi.fn(() => 1);

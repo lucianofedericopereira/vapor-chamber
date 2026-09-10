@@ -16,6 +16,7 @@
  */
 
 import type { AsyncCommandBus, AsyncPlugin, Command, CommandResult } from './command-bus';
+import { countOption } from './bounds';
 import { commandKey, matchesPattern } from './command-bus';
 import { signal } from './signal';
 import type { Signal } from './signal';
@@ -291,8 +292,26 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
     isOnline = () => (typeof navigator !== 'undefined' ? navigator.onLine : true),
     autoFlush = true,
     key: keyFn,
-    maxQueue = 200,
+    maxQueue: rawMaxQueue = 200,
   } = options;
+
+  // Clamped, and not defensively: `enforceBound` below is the same
+  // `while (length > max)` shape that `cache({ maxSize: -1 })` was found to
+  // hang on in plugins-extra. Here it did not hang, it THREW - with a negative
+  // bound the condition stays true on an empty queue, `queue.shift()` returns
+  // undefined, and the warning dereferences it:
+  // `TypeError: Cannot read properties of undefined (reading 'action')`, from
+  // one bad option on the first queued command. Clamping to a non-negative
+  // integer makes the loop's exit condition reachable, so the `!` below is
+  // sound rather than hopeful - no extra guard, and no unreachable branch to
+  // leave uncovered.
+  // `queue.length > maxQueue` gates EVICTION, so a NaN bound never fired and
+  // the cap silently vanished - measured at 300 records queued. ../bounds owns
+  // that rule now, and it falls back to the documented 200 rather than to 0:
+  // an outbox that queues nothing while offline LOSES the commands it exists
+  // to hold, which is not a louder failure than an unbounded one, just a
+  // costlier one.
+  const maxQueue = countOption(rawMaxQueue, 200);
 
   const matchesActions = makeActionFilter(actions);
   const pending = signal(0);
@@ -314,11 +333,15 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
     catch (e) { console.warn('[vapor-chamber] outbox: failed to persist queue:', e); }
   }
 
-  function enforceBound(): void {
+  /** Drops oldest-first down to the bound. Returns how many were dropped. */
+  function enforceBound(): number {
+    let count = 0;
     while (queue.length > maxQueue) {
       const dropped = queue.shift()!;
+      count++;
       console.warn(`[vapor-chamber] outbox: queue exceeded maxQueue (${maxQueue}); dropped the oldest record "${dropped.action}" (id ${dropped.id}). Raise maxQueue or flush more often.`);
     }
+    return count;
   }
 
   async function enqueue(cmd: Command): Promise<CommandResult> {
@@ -434,8 +457,15 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
     if (Array.isArray(loaded) && loaded.length > 0) {
       // Persisted records predate anything queued this session - they go first.
       queue = loaded.concat(queue);
-      enforceBound();
+      // Persist the trim. `enqueue` saves right after enforcing the bound, so a
+      // record dropped there is durably gone; hydrate did not, so a queue
+      // loaded over the bound was trimmed in memory while storage kept the
+      // full list - the same records were re-loaded and re-dropped on every
+      // startup, and the warning that said "dropped" was only true until the
+      // next reload.
+      const dropped = enforceBound();
       pending.value = queue.length;
+      if (dropped > 0) await saveQueue();
     }
   }
 

@@ -6,22 +6,22 @@
  * costs per-call CPU or memory.
  *
  * Use when:
- *   • Per-frame game tick
- *   • Trading tick data (1k-100k+ msg/sec)
- *   • Audio buffer sample handling
- *   • Scroll / mousemove / pointer sampling
- *   • Physics or simulation step
+ *   - Per-frame game tick
+ *   - Trading tick data (1k-100k+ msg/sec)
+ *   - Audio buffer sample handling
+ *   - Scroll / mousemove / pointer sampling
+ *   - Physics or simulation step
  *
  * Do NOT use for general app dispatch (cart, form, navigation, analytics).
  * Use `createCommandBus()` for those - its ergonomics are correct for
  * those use cases. The fast lane intentionally drops:
- *   • Command envelope allocation (handler receives `data` directly)
- *   • CommandResult allocation (handler returns whatever)
- *   • Plugin chain, before/after hooks
- *   • Wildcard listeners
- *   • Schema validation, batch, request/response, AbortController
- *   • meta / id / correlation / causation tracing
- *   • Auto-cleanup hooks (no Vue scope integration)
+ *   - Command envelope allocation (handler receives `data` directly)
+ *   - CommandResult allocation (handler returns whatever)
+ *   - Plugin chain, before/after hooks
+ *   - Wildcard listeners
+ *   - Schema validation, batch, request/response, AbortController
+ *   - meta / id / correlation / causation tracing
+ *   - Auto-cleanup hooks (no Vue scope integration)
  *
  * If you need any of the above on a per-call basis, use the regular bus.
  *
@@ -90,7 +90,7 @@ export type FastLaneOptions = {
    *   the hot path stays allocation-free either way.
    *
    * Opt into `'snapshot'` only when a measured fan-out hot loop says so -
-   * see docs/performance.md §Tuning.
+   * see docs/performance.md Tuning.
    */
   removal?: 'live' | 'snapshot';
 };

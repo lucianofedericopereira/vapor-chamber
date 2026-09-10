@@ -12,10 +12,10 @@
  * under the hood. This connector is for **non-Vue consumers** who want
  * the same fine-grained reactivity:
  *
- *   • SSR / Node services that don't import Vue
- *   • Web Workers / service workers
- *   • Embedded widgets shipping without Vue
- *   • Any context where you want push-pull reactivity but Vue's full
+ *   - SSR / Node services that don't import Vue
+ *   - Web Workers / service workers
+ *   - Embedded widgets shipping without Vue
+ *   - Any context where you want push-pull reactivity but Vue's full
  *     runtime is overkill
  *
  * ## No runtime dep

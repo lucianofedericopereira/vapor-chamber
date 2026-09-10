@@ -199,6 +199,80 @@ describe('createOutbox - queueing', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('maxQueue'));
   });
 
+  // Same class as `cache({ maxSize: -1 })`, which hung its eviction loop. Here
+  // the identical `while (length > max)` shape threw instead: on a negative
+  // bound the condition stays true once the queue is empty, `shift()` returns
+  // undefined, and the warning dereferenced it.
+  it('a negative maxQueue is clamped instead of throwing', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const storage = memoryStorage();
+    const outbox = createOutbox({ storage, isOnline: () => false, autoFlush: false, maxQueue: -1 });
+    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
+    outbox.install(bus);
+
+    const result = await bus.dispatch('a', { n: 1 });
+
+    // Clamped to 0: the record is queued, then immediately dropped by the
+    // bound, which is what maxQueue 0 means.
+    expect(result.ok).toBe(true);
+    expect(outbox.pending.value).toBe(0);
+  });
+
+  // NaN propagates through Math.trunc/Math.max and loses every comparison, so
+  // `queue.length > maxQueue` never fired and the bound vanished - measured at
+  // 300 records queued before this guard, which is the unbounded growth the
+  // option exists to prevent.
+  it('a NaN maxQueue queues nothing instead of unbounding', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const storage = memoryStorage();
+    const outbox = createOutbox({
+      storage, isOnline: () => false, autoFlush: false, maxQueue: Number('nope'),
+    });
+    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
+    outbox.install(bus);
+
+    for (let i = 0; i < 250; i++) await bus.dispatch('a', { i });
+
+    // Measured at 300 queued before any guard - unbounded.
+    //
+    // This asserted 0 while the clamp was `| 0`, on the argument that retaining
+    // nothing is "bounded, and loud rather than silent". That argument does not
+    // survive being written down for an OUTBOX: queueing nothing while offline
+    // DISCARDS the commands the component exists to hold, silently, which is
+    // not louder than unbounded growth - only costlier. ../bounds falls back to
+    // the documented default instead, so a bad option behaves exactly like an
+    // absent one.
+    expect(outbox.pending.value).toBe(200);
+  });
+
+  it('hydrate persists the trim when the loaded queue is over the bound', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    // A previous session persisted more records than this session allows.
+    const storage = memoryStorage(
+      [1, 2, 3, 4].map((n) => ({
+        id: String(n), action: `a${n}`, target: { n }, key: `k${n}`, queuedAt: n,
+      })),
+    );
+
+    const outbox = createOutbox({ storage, isOnline: () => false, autoFlush: false, maxQueue: 2 });
+    await outbox.hydrate();
+
+    expect(outbox.pending.value).toBe(2);
+    // Without persisting the trim, storage kept all four and the same two
+    // records were re-loaded and re-dropped on every startup.
+    expect(storage.data!.map((r) => r.action)).toEqual(['a3', 'a4']);
+  });
+
+  it('hydrate does not rewrite storage when nothing is dropped', async () => {
+    const storage = memoryStorage([{ id: '1', action: 'a1', target: { n: 1 }, key: 'k1', queuedAt: 1 }]);
+
+    const outbox = createOutbox({ storage, isOnline: () => false, autoFlush: false, maxQueue: 10 });
+    await outbox.hydrate();
+
+    expect(outbox.pending.value).toBe(1);
+    expect(storage.save).not.toHaveBeenCalled();
+  });
+
   it('clear() empties the queue and the storage', async () => {
     const storage = memoryStorage();
     const outbox = createOutbox({ storage, isOnline: () => false, autoFlush: false });

@@ -5,6 +5,8 @@
  */
 
 import { matchesPattern, RETRYABLE_CODES, _withOrigin, type Command, type CommandResult, type AsyncPlugin, type Plugin } from './command-bus';
+import { onSettled } from './settled';
+import { MAX_TIMEOUT_MS, countOption } from './bounds';
 import { DEV } from './dev';
 
 // ---------------------------------------------------------------------------
@@ -12,9 +14,16 @@ import { DEV } from './dev';
 // ---------------------------------------------------------------------------
 
 export type RetryOptions = {
-  /** Maximum number of attempts (including the first). Default: 3 */
+  /**
+   * Maximum number of attempts (including the first). Default: 3.
+   * Floored at 1, so an unusable value still dispatches once - see the note at
+   * the clamp.
+   */
   maxAttempts?: number;
-  /** Base delay in ms between retries. Default: 200 */
+  /**
+   * Base delay in ms between retries. Default: 200. The computed delay is
+   * capped at `setTimeout`'s 32-bit ceiling; past it the backoff inverts.
+   */
   baseDelay?: number;
   /**
    * Backoff strategy:
@@ -42,10 +51,24 @@ export type RetryOptions = {
   isRetryable?: (error: Error, attempt: number) => boolean;
 };
 
+/**
+ * `setTimeout` stores its delay in a signed 32-bit int. Node clamps anything
+ * larger to 1ms AND warns; browsers wrap. Either way the backoff INVERTS -
+ * the longest waits become the shortest - so the cap is on correctness, not
+ * taste. Measured with the defaults (200ms, exponential, 30 attempts): delays
+ * reached 53,687,091,200ms and five of them were over the ceiling, i.e. the
+ * final five retries fired back-to-back at the exact point the remote was
+ * least able to take them.
+ *
+ * Capping here rather than at some friendlier number like 30s on purpose: this
+ * only changes cases that were already broken, and never shortens a wait a
+ * caller could actually have received.
+ */
+
 function retryDelay(strategy: 'fixed' | 'linear' | 'exponential', base: number, attempt: number): number {
-  if (strategy === 'fixed') return base;
-  if (strategy === 'linear') return base * attempt;
-  return base * Math.pow(2, attempt - 1);
+  if (strategy === 'fixed') return Math.min(base, MAX_TIMEOUT_MS);
+  if (strategy === 'linear') return Math.min(base * attempt, MAX_TIMEOUT_MS);
+  return Math.min(base * Math.pow(2, attempt - 1), MAX_TIMEOUT_MS);
 }
 
 /** Default isRetryable: consult RETRYABLE_CODES for BusErrors, retry everything else. */
@@ -66,12 +89,24 @@ function defaultIsRetryable(error: Error): boolean {
  */
 export function retry(options: RetryOptions = {}): AsyncPlugin {
   const {
-    maxAttempts = 3,
+    maxAttempts: rawMaxAttempts = 3,
     baseDelay = 200,
     strategy = 'exponential',
     actions,
     isRetryable = defaultIsRetryable,
   } = options;
+
+  // At least one attempt, always. `next()` is called ONLY inside the loop
+  // below, so a bound under 1 meant the command never reached its handler at
+  // all: the plugin returned its `lastResult` placeholder and every matching
+  // action failed with "No attempts made", which reads like an internal fault
+  // rather than a bad option. Measured at 0, -1 and NaN - handler ran 0 times
+  // in each case, silently disabling retry-covered actions.
+  //
+  // ../bounds owns the rule now: an unusable bound falls back to the documented
+  // 3, and the floor of 1 keeps a deliberate `maxAttempts: 0` running the
+  // command once rather than not at all.
+  const maxAttempts = countOption(rawMaxAttempts, 3, 1);
 
   return async (cmd: Command, next: () => CommandResult | Promise<CommandResult>): Promise<CommandResult> => {
     if (actions?.length && !actions.some(p => matchesPattern(p, cmd.action))) return next();
@@ -221,17 +256,15 @@ export function persist<T>(options: PersistOptions<T>): Plugin & {
     queueMicrotask(() => { _saveScheduled = false; save(); });
   }
 
-  const plugin: Plugin = coalesce
-    ? (cmd, next) => {
-        const result = next();
+  const plugin: Plugin = (coalesce
+    ? (cmd: Command, next: () => CommandResult) => onSettled(next(), (result) => {
         if (result.ok && (!filter || filter(cmd))) scheduleSave();
         return result;
-      }
-    : (cmd, next) => {
-        const result = next();
+      })
+    : (cmd: Command, next: () => CommandResult) => onSettled(next(), (result) => {
         if (result.ok && (!filter || filter(cmd))) save();
         return result;
-      };
+      })) as unknown as Plugin;
 
   return Object.assign(plugin, { load, save, clear });
 }

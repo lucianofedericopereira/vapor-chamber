@@ -53,6 +53,27 @@ describe('branch mop-up - buildFullUrl', () => {
   it('leaves an absolute URL untouched by baseURL', () => {
     expect(buildFullUrl('http://other.test/x', 'http://api.test')).toBe('http://other.test/x');
   });
+
+  // "absolute" was decided by startsWith('http'), which is also true of a
+  // RELATIVE path whose first segment happens to begin with those four
+  // letters. Two different failures fell out of the same test, and the second
+  // one is the loud half of a bug whose quiet half is worse.
+  it('treats a relative path beginning with "http" as relative, not absolute', () => {
+    expect(buildFullUrl('httpbin/get', 'https://api.test')).toBe('https://api.test/httpbin/get');
+    expect(buildFullUrl('http-logs', 'https://api.test')).toBe('https://api.test/http-logs');
+  });
+
+  it('joins the baseURL before parsing, so such a path does not blow up on params', () => {
+    expect(buildFullUrl('httpbin/get', 'https://api.test', { q: 1 }))
+      .toBe('https://api.test/httpbin/get?q=1');
+  });
+
+  // startsWith is case-sensitive; the URL scheme is not.
+  it('recognises an upper-case scheme as absolute', () => {
+    expect(buildFullUrl('HTTPS://other.test/x', 'https://api.test')).toBe('HTTPS://other.test/x');
+    expect(buildFullUrl('HTTP://other.test/x', 'https://api.test', { q: 1 }))
+      .toBe('http://other.test/x?q=1');
+  });
 });
 
 // ── schema: validateFields 'any' + 'array' branches via schemaValidator ───────

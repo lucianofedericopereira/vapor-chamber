@@ -72,7 +72,15 @@ function encodeQueryPart(part: string): string {
 export function decodeQueryParam(raw: string | string[] | undefined, def: QueryParamDef): unknown {
   const type = def.type ?? 'string';
   if (type === 'array') {
-    if (raw === undefined) return def.default ?? [];
+    // `.slice()`, not the declaration's own array. `def` is a route row's query
+    // declaration, which lives in the compiled table for the router's whole
+    // life, so handing it out by reference made every absent-param read share
+    // one object with the table: a single `tags.value.push(...)` in a component
+    // rewrote the declared default, permanently, for every route and every
+    // later read. Same shape as the three shared caches this library already
+    // freezes (see ../freeze), and the cheapest possible fix - a copy of an
+    // array that is empty or near-empty by construction.
+    if (raw === undefined) return Array.isArray(def.default) ? def.default.slice() : (def.default ?? []);
     return Array.isArray(raw) ? raw : [raw];
   }
   const scalar = Array.isArray(raw) ? raw[raw.length - 1] : raw;

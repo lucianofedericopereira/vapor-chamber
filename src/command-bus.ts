@@ -587,7 +587,7 @@ type SyncState = {
   afterHooks: Hook[];
   /** Exact-match listeners - O(1) lookup on the hot path. Action-keyed. */
   exactListeners: Map<string, Listener[]>;
-  /** Wildcard listeners ('*' or 'foo*') - walked per dispatch with a precomputed prefix (§WildcardEntry). */
+  /** Wildcard listeners ('*' or 'foo*') - walked per dispatch with a precomputed prefix (WildcardEntry). */
   wildcardListeners: WildcardEntry[];
   responders: Map<string, (cmd: Command) => any | Promise<any>>;
   runner: (cmd: Command, execute: () => CommandResult) => CommandResult;
@@ -612,7 +612,7 @@ type AsyncState = {
   afterHooks: AsyncHook[];
   /** Exact-match listeners - O(1) lookup on the hot path. Action-keyed. */
   exactListeners: Map<string, Listener[]>;
-  /** Wildcard listeners ('*' or 'foo*') - walked per dispatch with a precomputed prefix (§WildcardEntry). */
+  /** Wildcard listeners ('*' or 'foo*') - walked per dispatch with a precomputed prefix (WildcardEntry). */
   wildcardListeners: WildcardEntry[];
   responders: Map<string, (cmd: Command) => any | Promise<any>>;
   runner: (cmd: Command, execute: () => Promise<CommandResult>) => Promise<CommandResult>;
@@ -641,7 +641,7 @@ type AsyncState = {
  * No `crypto.randomUUID()` syscall, no per-call `Date.now()`, no per-call
  * `Math.random()`. Re-measured on Node 24 (2026-08-17, `hrtime` medians over
  * 21x200k reps): **~12ns per call vs ~104ns for `crypto.randomUUID()`, ~8x**.
- * The figures this comment carried before ("~30-50ns vs ~1-2µs", implying
+ * The figures this comment carried before ("~30-50ns vs ~1-2us", implying
  * 20-60x) no longer describe any current runtime - modern V8/Node batch UUID
  * entropy, so `randomUUID` got ~10x cheaper while this counter stayed put.
  * The decision is unchanged and the direction still holds; only the margin is
@@ -809,6 +809,22 @@ async function tryCatchAsyncHandler(handler: AsyncHandler, cmd: Command): Promis
 let _nextOrigin: string | undefined;
 
 /**
+ * One-shot causation slot - same mechanism, same synchronous-prologue safety
+ * argument as `_nextOrigin` above, for the other `__`-key that cannot mark
+ * every payload shape.
+ *
+ * `__causationId` in the payload has exactly the limitation that moved
+ * `__origin` off it: a number, string, boolean or array has nowhere to put the
+ * key, so a dispatch carrying one arrives with no causation and any consumer
+ * counting a chain from it starts over at zero. `createReaction`'s `maxHops`
+ * cap was doing precisely that - measured, an indirect cycle whose `mapPayload`
+ * returns a scalar ran to `MAX_DISPATCH_DEPTH` on a sync bus and is unbounded on
+ * an async one, which is the failure `ReactionOptions.allowSelfMatch` documents
+ * as the reason the guard exists.
+ */
+let _nextCausation: string | undefined;
+
+/**
  * Internal - stamp `origin` on the meta of the FIRST dispatch `fn` makes
  * synchronously. Not public API; underscored like `_stampMeta`.
  *
@@ -823,6 +839,20 @@ export function _withOrigin<T>(origin: string, fn: () => T): T {
     return fn();
   } finally {
     _nextOrigin = undefined;
+  }
+}
+
+/**
+ * Internal - stamp `causationId` on the meta of the FIRST dispatch `fn` makes
+ * synchronously, for callers whose payload cannot carry `__causationId`.
+ * Same contract and same `finally` reasoning as `_withOrigin`.
+ */
+export function _withCausation<T>(causationId: string | undefined, fn: () => T): T {
+  _nextCausation = causationId;
+  try {
+    return fn();
+  } finally {
+    _nextCausation = undefined;
   }
 }
 
@@ -851,13 +881,26 @@ function stampMeta(payload: any): CommandMeta {
   // Behavior-identical; reading once also avoids a double getter invocation on exotic payloads.
   // `origin` is always present (undefined when unset) rather than conditionally
   // added - one field set, one hidden class, monomorphic dispatch preserved.
-  const causationId = payload?.__causationId;
+  // Both slots are read-and-cleared branchlessly, for the reason given at
+  // `_nextOrigin`: the store of undefined over undefined is cheaper than the
+  // branch that would avoid it, and the `??` falls back to the documented
+  // public payload key.
+  // Read-and-clear, branchless: both slots are consumed unconditionally (a
+  // store of undefined over undefined in the common case) and each `??` falls
+  // back to the documented public payload key. The obvious
+  // `if (_nextOrigin !== undefined)` form costs more bytes for no measurable
+  // speed - and this bundle's budget is a ratchet that gets argued down before
+  // it gets raised.
+  //
+  // The two clears are deliberately NOT folded into one chained assignment
+  // (`_nextOrigin = _nextCausation = undefined`). That reads as the cheaper
+  // shape and measured one byte WORSE on the tree-shake bundle - 6564 vs 6563 -
+  // because brotli is not linear in source length. Measured, then reverted;
+  // recorded so nobody re-derives it hoping for a saving.
+  const cause = _nextCausation;
+  _nextCausation = undefined; // one-shot
+  const causationId = cause ?? payload?.__causationId;
   const correlationId = payload?.__correlationId ?? causationId;
-  // Read-and-clear, branchless: the slot is consumed unconditionally (a store
-  // of undefined over undefined in the common case) and `??` falls back to the
-  // documented public `__origin` payload key. The obvious `if (_nextOrigin !==
-  // undefined)` form costs more bytes for no measurable speed - and this
-  // bundle's budget is a ratchet that gets argued down before it gets raised.
   const slot = _nextOrigin;
   _nextOrigin = undefined; // one-shot
   return { ts: _clockFn(), id: uid(), correlationId, causationId, origin: slot ?? payload?.__origin };
@@ -891,7 +934,7 @@ function isWildcardPattern(pattern: string): boolean {
 }
 
 /**
- * §WildcardEntry - a subscribed wildcard listener, with its match test already
+ * WildcardEntry - a subscribed wildcard listener, with its match test already
  * reduced to data.
  *
  * `pattern` is retained verbatim because `offAll(pattern)` and `inspectBus()`
@@ -920,7 +963,7 @@ type WildcardEntry = { pattern: string; prefix: string; listener: Listener };
 /**
  * Walk listener buckets for an action. Exact-match bucket is O(1) lookup;
  * wildcard bucket is walked with one `startsWith` against each entry's
- * precomputed prefix (§WildcardEntry). Both loops survive in-flight
+ * precomputed prefix (WildcardEntry). Both loops survive in-flight
  * unsubscribe (a listener may remove itself or peers).
  *
  * The cursor is corrected by IDENTITY, not by length. The older `if (len <
@@ -950,7 +993,7 @@ function fanOutListeners(
   for (let i = 0; i < wild.length; i++) {
     const entry = wild[i];
     // `entry.prefix` is `pattern.slice(0, -1)`, computed ONCE in `on()` - see
-    // §WildcardEntry. `'*'` slices to `''` and `''.startsWith` is always true,
+    // WildcardEntry. `'*'` slices to `''` and `''.startsWith` is always true,
     // so match-all needs no branch of its own and this loop is a single
     // `startsWith` per listener. `matchesPattern` (public API, arbitrary
     // caller-supplied patterns) still re-derives the prefix through its LRU;
@@ -1270,15 +1313,50 @@ function handleMissing(s: SyncState | AsyncState, cmd: Command, canDefer: boolea
         s.opts.onBufferOverflow?.(cmd.action, { target: expired.target, payload: expired.payload });
       }
     }
-    const limit = s.opts.bufferLimit ?? 256;
-    if (q.length >= limit) {
-      const dropped = q.shift()!; // drop oldest
+    // Clamped, and the push moved AHEAD of the eviction, because the old
+    // drop-then-push form crashed on a degenerate bound. With `bufferLimit: 0`
+    // the empty queue still satisfied `q.length >= limit`, so `q.shift()`
+    // returned undefined and the overflow callback dereferenced it:
+    // `TypeError: Cannot read properties of undefined (reading 'target')`, out
+    // of `bus.dispatch()`. It was invisible until someone passed
+    // `onBufferOverflow`, since optional-chaining a call skips evaluating its
+    // arguments - so adding the observability hook was what made the bus start
+    // throwing. A negative bound drained the queue and then crashed the same way.
+    //
+    // Evicting down to the bound AFTER the push is the same rule `cache()` and
+    // `idempotent()` use, and for a bound of 1 or more it is indistinguishable
+    // from before: the queue ends at `limit` entries and the oldest is the one
+    // reported. At 0 it now means what it says - nothing is buffered, and the
+    // arriving command is reported as dropped rather than crashing.
+    // `q.length > limit` gates EVICTION, so a NaN bound made the drop test
+    // permanently false and the queue grew without bound - measured at 500
+    // commands buffered.
+    //
+    // THE ONE SITE THAT DOES NOT USE ../bounds, and it was measured rather than
+    // assumed. Importing `countOption` here costs 50 B brotli in the minimal
+    // Blade consumer bundle that `esm-treeshake.test.ts` gates - enough to
+    // breach that ceiling on its own, because this module is the one thing
+    // every consumer pulls. `| 0` is already correct for the NaN case, which is
+    // the case that bites; what it does not do is preserve `Infinity`, which it
+    // maps to 0 - so `bufferLimit: Infinity` buffers NOTHING rather than never
+    // dropping. That is the price of the exception, stated here so it is a
+    // known trade and not a discovery. Write a large finite number instead.
+    //
+    // A negative bound needs no clamp here, because the push happens FIRST and
+    // exactly one item is pushed: the queue therefore always holds at least one
+    // entry when the test runs, so `shift()` cannot return undefined whatever
+    // the bound is. That is also why this is an `if` rather than a `while` -
+    // one push can put the queue at most one over - and why it is cheaper than
+    // the clamp-plus-loop form it replaces.
+    const limit = (s.opts.bufferLimit ?? 256) | 0;
+    q.push({ target: cmd.target, payload: cmd.payload, at: now });
+    if (q.length > limit) {
+      const dropped = q.shift()!; // push-first guarantees a non-empty queue here
       s.opts.onBufferOverflow?.(cmd.action, { target: dropped.target, payload: dropped.payload });
       if (DEV) {
         console.warn(`[vapor-chamber] onMissing:'buffer' queue for "${cmd.action}" hit bufferLimit (${limit}); dropped the oldest pending command. Register a handler, or raise bufferLimit.`);
       }
     }
-    q.push({ target: cmd.target, payload: cmd.payload, at: now });
     return okResult(undefined); // accepted; the real handler runs on register()
   }
   const err = new BusError(
@@ -1421,12 +1499,15 @@ function devWarnThenableResult(result: CommandResult, action: string): void {
   }
 }
 
-/** Read-only query - skips beforeHooks, runs handler + plugins, fires afterHooks. */
+/**
+ * Read-only query - skips beforeHooks, runs handler + plugins, fires afterHooks.
+ *
+ * One function, not a wrapper around an `_inner`. `dispatch` splits because the
+ * outer half owns the depth guard's `try/finally` and V8 keeps the inner half
+ * optimizable without it; `query` and `emit` have no guard to hoist, so their
+ * wrappers forwarded their arguments unchanged and did nothing else.
+ */
 function syncQuery(s: SyncState, action: string, target: any, payload?: any): CommandResult {
-  return _syncQueryInner(s, action, target, payload);
-}
-
-function _syncQueryInner(s: SyncState, action: string, target: any, payload?: any): CommandResult {
   if (s.opts.naming !== undefined) validateNaming(action, s.opts.naming);
   const cmd: Command = { action, target, payload, meta: stampMeta(payload) };
   // Bare-bus fast path - mirrors the one in _syncDispatchInner. Queries skip
@@ -1455,10 +1536,6 @@ function _syncQueryInner(s: SyncState, action: string, target: any, payload?: an
 
 /** Fire a domain event - notifies on() listeners, no handler required, no result. */
 function syncEmit(s: SyncState, event: string, data?: any): void {
-  _syncEmitInner(s, event, data);
-}
-
-function _syncEmitInner(s: SyncState, event: string, data?: any): void {
   // Fast path: no listeners -> return without allocating anything. Real apps
   // emit many events with no subscribers (lifecycle, debug, conditional
   // listeners) - this branch turns those into a hash lookup + length check.
@@ -1583,7 +1660,7 @@ function on(s: ListenerBucket, pattern: string, listener: Listener, opts?: Liste
   const signal = opts?.signal;
   if (isWildcardPattern(pattern)) {
     // Parse once, here, where the pattern has just been classified - see
-    // §WildcardEntry. Cold path: runs per subscription, never per dispatch.
+    // WildcardEntry. Cold path: runs per subscription, never per dispatch.
     const entry: WildcardEntry = { pattern, prefix: pattern.slice(0, -1), listener };
     s.wildcardListeners.push(entry);
     return finalizeOff(() => { const i = s.wildcardListeners.indexOf(entry); if (i !== -1) s.wildcardListeners.splice(i, 1); }, signal);
@@ -1900,12 +1977,18 @@ async function _asyncDispatchInner(s: AsyncState, action: string, target: any, p
   return result;
 }
 
-/** Async read-only query - skips beforeHooks, runs handler + plugins, fires afterHooks. */
+/**
+ * Async read-only query - skips beforeHooks, runs handler + plugins, fires
+ * afterHooks.
+ *
+ * One function, not a wrapper. This one was not merely free indirection: the
+ * wrapper was itself `async` and its whole body was `return await inner(...)`,
+ * so every query allocated a second promise and resumed a second async frame -
+ * one extra microtask turn per query, on top of the awaits it actually needs.
+ * `dispatch` keeps its split because the outer half owns the depth guard's
+ * `try/finally`; a query has no guard to hoist.
+ */
 async function asyncQuery(s: AsyncState, action: string, target: any, payload?: any): Promise<CommandResult> {
-  return await _asyncQueryInner(s, action, target, payload);
-}
-
-async function _asyncQueryInner(s: AsyncState, action: string, target: any, payload?: any): Promise<CommandResult> {
   if (s.opts.naming !== undefined) validateNaming(action, s.opts.naming);
   const cmd: Command = { action, target, payload, meta: stampMeta(payload) };
   const execute = async (): Promise<CommandResult> => {
@@ -1921,10 +2004,6 @@ async function _asyncQueryInner(s: AsyncState, action: string, target: any, payl
 
 /** Async emit - notifies on() listeners, no handler required, no result. */
 function asyncEmit(s: AsyncState, event: string, data?: any): void {
-  _asyncEmitInner(s, event, data);
-}
-
-function _asyncEmitInner(s: AsyncState, event: string, data?: any): void {
   // Same fast path + minimal-allocation strategy as syncEmit. See that
   // function's comment block for the full reasoning.
   if (!s.exactListeners.has(event) && s.wildcardListeners.length === 0) return;

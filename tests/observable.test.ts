@@ -6,7 +6,7 @@
  * emits values from a source Observable into the bus.
  */
 import { describe, it, expect, vi } from 'vitest';
-import { createCommandBus } from '../src/command-bus';
+import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { observe, dispatchFrom } from '../src/observable';
 
 describe('observe(bus, pattern)', () => {
@@ -106,6 +106,51 @@ describe('dispatchFrom(bus, action, source)', () => {
     expect(handler).toHaveBeenCalledTimes(3);
     expect(handler.mock.calls[0]![0].target).toBe(1);
     expect(handler.mock.calls[2]![0].target).toBe(3);
+  });
+
+  // "Fire-and-forget" applied to the RESULT, not to failure. On an async bus
+  // `dispatch` returns a promise, and discarding it left a rejection with no
+  // handler - an unhandled rejection, which Node terminates the process over
+  // by default. Measured before the fix: one emitted value into a bus with
+  // onMissing 'throw' produced exactly that.
+  it('reports a rejected async dispatch instead of leaving it unhandled', async () => {
+    const seen: unknown[] = [];
+    const onUnhandled = (reason: unknown) => { seen.push(reason); };
+    process.on('unhandledRejection', onUnhandled);
+
+    const bus = createAsyncCommandBus({ onMissing: 'throw' });
+    const errors: unknown[] = [];
+    bus.on('ping:error', (cmd) => { errors.push(cmd.target); });
+
+    const source = {
+      subscribe(o: any) {
+        o.next('v1');
+        return { unsubscribe() {}, closed: false };
+      },
+    };
+
+    dispatchFrom(bus, 'ping', source as any);
+    await new Promise((r) => setTimeout(r, 20));
+    process.off('unhandledRejection', onUnhandled);
+
+    expect(seen).toEqual([]); // nothing escaped
+    // ...and the failure is observable on the same channel source errors use.
+    expect(errors).toHaveLength(1);
+    expect((errors[0] as Error).message).toMatch(/No handler registered/);
+  });
+
+  it('leaves a sync bus dispatch untouched', () => {
+    const bus = createCommandBus();
+    const handler = vi.fn((cmd) => cmd.target);
+    bus.register('tick', handler);
+    const source = {
+      subscribe(o: any) { o.next(7); return { unsubscribe() {}, closed: false }; },
+    };
+
+    dispatchFrom(bus, 'tick', source as any);
+
+    // A sync result is not a thenable, so the promise branch never runs.
+    expect(handler).toHaveBeenCalledOnce();
   });
 
   it('emits :error event on source error', () => {

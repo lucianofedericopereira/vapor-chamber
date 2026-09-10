@@ -315,6 +315,53 @@ describe('createFormBus - submit() races', () => {
     expect(await first).toBe(true);
     expect(form.isSubmitting.value).toBe(false);
   });
+
+  // The test above lets the first submit REACH onSubmit before clicking again,
+  // so `isSubmitting` is already true by then and the guard is guaranteed to
+  // see it. A real double-click lands both clicks in the same turn, while the
+  // first call is still inside `await runRulesAsync` - and `isSubmitting` is
+  // not set until validation resolves. Two clicks, two onSubmit round-trips.
+  it('two clicks in the same turn run onSubmit once', async () => {
+    let calls = 0;
+    const form = createFormBus({
+      fields: { name: 'Alice' },
+      onSubmit: async () => { calls++; },
+    });
+
+    const [first, second] = await Promise.all([form.submit(), form.submit()]);
+
+    expect(calls).toBe(1);
+    expect([first, second].filter(Boolean)).toHaveLength(1);
+    expect(form.isSubmitting.value).toBe(false);
+    expect(form.isBusy.value).toBe(false);
+  });
+
+  // The same window, entered through an async validator: the refused click must
+  // not clear the validating/busy flags the live call still owns.
+  it('a click during async validation does not disturb the in-flight submit', async () => {
+    let releaseRule: (() => void) | null = null;
+    let calls = 0;
+    const form = createFormBus({
+      fields: { name: 'Alice' },
+      rules: {
+        name: () => new Promise<null>((resolve) => { releaseRule = () => resolve(null); }),
+      },
+      onSubmit: async () => { calls++; },
+    });
+
+    const first = form.submit();
+    await vi.waitFor(() => expect(releaseRule).not.toBeNull());
+    expect(form.isValidating.value).toBe(true);
+
+    expect(await form.submit()).toBe(false);
+    expect(form.isValidating.value).toBe(true); // still owned by the first call
+    expect(form.isBusy.value).toBe(true);
+
+    releaseRule?.();
+    expect(await first).toBe(true);
+    expect(calls).toBe(1);
+    expect(form.isBusy.value).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

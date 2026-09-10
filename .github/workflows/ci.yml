@@ -27,7 +27,11 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - run: npm ci
+      # Root project only. The examples are npm workspaces, so a bare `npm ci`
+      # would also install astro / vue-tsc / plugin-vue into every job - and no
+      # job here builds an example (see the note in the test job). Measured:
+      # 198M with this flag pair vs 297M without.
+      - run: npm ci --workspaces=false --include-workspace-root
       - run: npm run typecheck
       - run: npm run lint:check
 
@@ -52,7 +56,11 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      - run: npm ci
+      # Root project only. The examples are npm workspaces, so a bare `npm ci`
+      # would also install astro / vue-tsc / plugin-vue into every job - and no
+      # job here builds an example (see the note in the test job). Measured:
+      # 198M with this flag pair vs 297M without.
+      - run: npm ci --workspaces=false --include-workspace-root
       # No `npm ci --prefix examples/exo-astro` needed: tests/examples/
       # exo-astro-directives.test.ts imports that example's source directly,
       # and Vite's oxc transform resolves the nearest tsconfig - which is now
@@ -100,7 +108,11 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      - run: npm ci
+      # Root project only. The examples are npm workspaces, so a bare `npm ci`
+      # would also install astro / vue-tsc / plugin-vue into every job - and no
+      # job here builds an example (see the note in the test job). Measured:
+      # 198M with this flag pair vs 297M without.
+      - run: npm ci --workspaces=false --include-workspace-root
       - run: set -o pipefail; npx vitest bench --run tests/perf.bench.ts 2>&1 | tee bench.txt
         shell: bash
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -109,10 +121,33 @@ jobs:
           path: bench.txt
           retention-days: 14
 
+  api-docs:
+    name: docs/api freshness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+          cache: npm
+      # Root project only. The examples are npm workspaces, so a bare `npm ci`
+      # would also install astro / vue-tsc / plugin-vue into every job - and no
+      # job here builds an example (see the note in the test job). Measured:
+      # 198M with this flag pair vs 297M without.
+      - run: npm ci --workspaces=false --include-workspace-root
+
+      # The reference is COMMITTED Markdown, so this is a freshness gate rather
+      # than the thing that produces the site. A failure means the public
+      # surface moved and nobody ran `npm run docs`. That is the point of
+      # committing it: an added or changed export shows up in the pull request
+      # instead of disappearing into a gitignored build.
+      - run: npm run docs
+      - run: git diff --exit-code docs/api
+
   deploy-docs:
     name: deploy docs
     # Waits for test so the bundle-sizes auto-commit has landed before checkout.
-    needs: [test, lint]
+    needs: [test, lint, api-docs]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     environment:
@@ -124,21 +159,16 @@ jobs:
           # Explicit ref, not the triggering SHA: picks up the bundle-sizes bot
           # commit the test job may have just pushed.
           ref: main
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: '22'
-          cache: npm
-      - run: npm ci
 
-      - run: npm run docs
-
-      # Pages runs Jekyll by default, which drops paths beginning with `_`.
-      # TypeDoc emits several. Without this the API site 404s on those pages.
-      - run: touch docs/api/.nojekyll
-
+      # No install and no generate step. The site is index.html plus assets/,
+      # both committed and static, reading the committed docs/api/*.md at view
+      # time - so there is nothing to build here, and the api-docs job above has
+      # already proved the Markdown matches the source. Publishing the checkout
+      # as-is is also why `.nojekyll` is committed at the root: Jekyll would
+      # otherwise convert every .md into HTML and the pages would 404 on fetch.
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: docs/api
+          path: .
       - id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

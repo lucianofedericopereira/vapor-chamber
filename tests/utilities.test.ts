@@ -239,3 +239,70 @@ describe('createReaction', () => {
     expect(handler).toHaveBeenCalledTimes(2);
   });
 });
+
+// ---------------------------------------------------------------------------
+// createReaction - chain tracking through meta.causationId
+//
+// The hop count is keyed by the id of the command that caused the next
+// dispatch, so the chain is walked through `meta` rather than through the
+// payload (which cannot carry a key when it is a primitive or an array).
+// These three cover the edges of that walk.
+// ---------------------------------------------------------------------------
+
+describe('createReaction - chain tracking edges', () => {
+  it('starts a fresh count for a causationId this reaction never recorded', () => {
+    const bus = createCommandBus();
+    const seen: Array<number | undefined> = [];
+    bus.register('src', () => 1);
+    bus.register('dst', (cmd: any) => {
+      seen.push(cmd.payload?.__reactionHops);
+      return 1;
+    });
+
+    createReaction('src', 'dst', { maxHops: 2 }).install(bus);
+
+    // A causation id from somewhere else entirely - a prior command, an HTTP
+    // bridge, a replay. It is present but absent from this reaction's map, so
+    // the chain starts at hop 1 rather than inheriting a stranger's depth.
+    bus.dispatch('src', {}, { __causationId: 'not-from-this-reaction' });
+
+    expect(seen).toEqual([1]);
+  });
+
+  it('an emitted source has no meta, so the chain simply does not track', () => {
+    const bus = createCommandBus();
+    const handler = vi.fn((cmd: any) => cmd.payload);
+    bus.register('dst', handler);
+
+    createReaction('ping', 'dst').install(bus);
+
+    // `emit` builds `{ action, target }` with NO meta - it deliberately skips
+    // stampMeta (see _syncEmitInner). The reaction must still fire; it just has
+    // no id to key a chain by, and no causation to propagate.
+    bus.emit('ping', { x: 1 });
+
+    expect(handler).toHaveBeenCalledTimes(1);
+    expect(handler.mock.calls[0][0].payload.__causationId).toBeUndefined();
+    expect(handler.mock.calls[0][0].meta.causationId).toBeUndefined();
+  });
+
+  it('evicts the oldest chain entry rather than growing without bound', () => {
+    const bus = createCommandBus();
+    let fired = 0;
+    bus.register('src', () => 1);
+    bus.register('dst', () => {
+      fired++;
+      return 1;
+    });
+
+    createReaction('src', 'dst').install(bus);
+
+    // Each source dispatch is its own chain root, so the map gains an entry per
+    // dispatch. Past the 256 cap the oldest is dropped; the reaction keeps
+    // firing, which is the whole point - eviction degrades counting, never
+    // delivery.
+    for (let i = 0; i < 300; i++) bus.dispatch('src', i);
+
+    expect(fired).toBe(300);
+  });
+});

@@ -123,15 +123,65 @@ describe('idempotent', () => {
     expect(runs).toBe(2);
   });
 
-  it('maxKeys: 0 hits the empty-map eviction arm without evicting', async () => {
-    // Not a dead guard: with maxKeys 0 the eviction runs on an EMPTY map, so
-    // `done.keys().next().value` is undefined and the guard's false arm fires.
+  it('maxKeys: 0 remembers nothing, matching cache({ maxSize: 0 })', async () => {
+    // This used to assert the opposite - that the entry still landed and a
+    // repeat was served from cache - because eviction removed ONE oldest key
+    // before inserting, which on an empty map removed nothing. That made
+    // `maxKeys: 0` a one-entry cache while `cache({ maxSize: 0 })` stored
+    // nothing: the same word meaning opposite things in one module. Eviction
+    // now runs down to the bound after the insert, as cache() does.
     const plugin = idempotent({ maxKeys: 0 });
     const first = await plugin(cmd('orderCreate'), () => ({ ok: true, value: 1 }) as any);
     expect(first.value).toBe(1);
-    // The entry still lands; a repeat within TTL is served from cache.
     const repeat = await plugin(cmd('orderCreate'), () => ({ ok: true, value: 2 }) as any);
-    expect(repeat.value).toBe(1);
+    expect(repeat.value).toBe(2); // nothing was retained, so the handler ran again
+  });
+
+  // NaN is the sharpest form of this class: it propagates through the clamp
+  // and loses every comparison, so the bound is not merely wrong, it is
+  // absent. In cache() the same value produced the opposite failure - the
+  // eviction walk never broke, so it dropped everything and reported size 0.
+  it('a NaN maxKeys remembers nothing instead of growing unbounded', async () => {
+    const plugin = idempotent({ maxKeys: Number('nope'), ttl: 60_000 });
+    const run = (target: number, value: number) =>
+      plugin({ action: 'orderCreate', target, meta: {} } as any, () => ({ ok: true, value }) as any);
+
+    for (let i = 0; i < 20; i++) await run(i, i);
+
+    // Retention falls back to the documented 500, so the dedupe this plugin
+    // exists to provide still works. The previous rule mapped NaN to 0 and
+    // remembered nothing, which turned a bad option into DUPLICATE EXECUTION of
+    // commands declared idempotent - the one outcome worse than an unbounded
+    // key map.
+    expect((await run(0, -1)).value).toBe(0);
+    expect((await run(19, -1)).value).toBe(19);
+  });
+
+  it('a negative maxKeys is clamped, not treated as a one-entry cache', async () => {
+    // Unclamped, `done.size >= -1` was always true, so every insert evicted the
+    // previous key and the plugin quietly behaved as a 1-entry cache. cache()
+    // clamps `maxSize` for the same class of reason (there, a negative bound
+    // hung the eviction loop outright).
+    const plugin = idempotent({ maxKeys: -5 });
+    const first = await plugin(cmd('orderCreate'), () => ({ ok: true, value: 1 }) as any);
+    expect(first.value).toBe(1);
+    const repeat = await plugin(cmd('orderCreate'), () => ({ ok: true, value: 2 }) as any);
+    expect(repeat.value).toBe(2);
+  });
+
+  it('evicts oldest first down to maxKeys', async () => {
+    const plugin = idempotent({ maxKeys: 2 });
+    const run = (target: string, value: number) =>
+      plugin({ action: 'orderCreate', target, meta: {} } as any, () => ({ ok: true, value }) as any);
+
+    await run('a', 1);
+    await run('b', 2);
+    await run('c', 3); // evicts 'a'
+
+    // 'b' and 'c' are still cached; 'a' has to run again.
+    expect((await run('b', 99)).value).toBe(2);
+    expect((await run('c', 99)).value).toBe(3);
+    expect((await run('a', 99)).value).toBe(99);
   });
 
   it('clears inflight on rejection and does not cache the failure', async () => {

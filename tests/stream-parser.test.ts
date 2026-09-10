@@ -161,6 +161,40 @@ describe('StreamParser - chunked / streamed input', () => {
 
     expect(values.map((v) => v.value)).toEqual([1, 2, 3]);
   });
+
+  // A 204, a 304, a HEAD reply or a hand-built `new Response(null)` all carry
+  // a null body. That used to throw `Cannot read properties of null (reading
+  // 'getReader')` out of stream() as a rejection - the one failure in this
+  // parser that bypassed onError entirely.
+  it('treats a body-less response as an empty stream', async () => {
+    const errors: unknown[] = [];
+    let ended = false;
+    const parser = createStreamParser({
+      onError: (e) => errors.push(e),
+      onEnd: () => {
+        ended = true;
+      },
+    });
+
+    const response = new Response(null, { status: 204 });
+    expect(response.body).toBe(null);
+
+    await expect(parser.stream(response)).resolves.toBeUndefined();
+    expect(ended).toBe(true);
+    // Nothing was open, so ending is clean - same as a present but zero-chunk
+    // body, which is the behaviour this is made equivalent to.
+    expect(errors).toEqual([]);
+  });
+
+  it('still reports an unclosed structure when a body-less response ends mid-value', async () => {
+    const errors: Array<{ message: string }> = [];
+    const parser = createStreamParser({ onError: (e) => errors.push(e) });
+    parser.write('{"a":');
+
+    await parser.stream(new Response(null, { status: 204 }));
+
+    expect(errors.map((e) => e.message)).toContain('Unexpected end: unclosed structure');
+  });
 });
 
 describe('StreamParser - errors', () => {

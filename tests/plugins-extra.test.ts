@@ -127,6 +127,29 @@ describe('cache', () => {
     expect(calls).toBe(2); // ...so every query really ran
   });
 
+  // The clamp above was `Math.max(0, Math.trunc(raw))`, which PROPAGATES NaN -
+  // and every comparison against NaN is false, so `store.size <= maxSize`
+  // never broke the eviction walk and it dropped every entry it had just
+  // inserted. Measured before the guard: size 0 after 300 inserts. A cache
+  // that silently caches nothing is harder to notice than one that hangs.
+  it('a NaN maxSize caches nothing rather than defeating the bound', () => {
+    const bus = createCommandBus();
+    let calls = 0;
+    bus.register('getUser', (cmd: any) => { calls++; return cmd.target.id; });
+    const c = cache({ ttl: 60_000, maxSize: Number('not-a-number') });
+    bus.use(c);
+
+    bus.query('getUser', { id: 1 });
+    bus.query('getUser', { id: 1 }); // must be a cache hit
+
+    // Falls back to the documented default rather than to 0: a bad option now
+    // behaves like an absent one. Mapping NaN to 0 was bounded but disabled the
+    // cache outright, which is the same silent-misconfiguration failure wearing
+    // different clothes.
+    expect(c.size()).toBe(1);
+    expect(calls).toBe(1);
+  });
+
   it('evicts oldest-first and honours the bound exactly', () => {
     const bus = createCommandBus();
     bus.register('getUser', (cmd: any) => cmd.target.id);

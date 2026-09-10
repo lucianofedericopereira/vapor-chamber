@@ -516,6 +516,44 @@ describe('createHttpClient - serveStaleOnError', () => {
     expect(res.error).toBeTruthy();
   });
 
+  // Every other test in this block passes `dedupe: false`, which is exactly
+  // why this went unnoticed: the two features were only ever exercised apart.
+  // http.ts registers the RAW fetch promise for dedupe and returns a
+  // `.catch()`-wrapped one to the caller, so the leader was served stale while
+  // a follower on the same key received the untouched rejection - the opposite
+  // of what the comment on that branch promises.
+  it('serves the retained entry to a DEDUPED follower, not just the leader', async () => {
+    let attempts = 0;
+    let release: (() => void) | undefined;
+    (globalThis.fetch as any).mockImplementation(async () => {
+      attempts++;
+      if (attempts === 1) return jsonResponse(200, { v: 1 });
+      // Hold the second request open so both callers are in flight together,
+      // which is the only state in which dedupe does anything.
+      await new Promise<void>((resolve) => { release = resolve; });
+      return jsonResponse(500, { message: 'down' });
+    });
+
+    const http = createHttpClient();
+    const cache = { ttl: 1, serveStaleOnError: true };
+
+    await http.get('/api/dedupe-stale', { cache, dedupe: false });
+    await new Promise((r) => setTimeout(r, 10)); // entry expires but is retained
+
+    const leader = http.get('/api/dedupe-stale', { cache, retry: 0 });
+    const follower = http.get('/api/dedupe-stale', { cache, retry: 0 });
+
+    await new Promise((r) => setTimeout(r, 0));
+    release?.();
+
+    const [leaderRes, followerRes] = await Promise.all([leader, follower]);
+
+    expect(leaderRes.servedOnError).toBe(true);
+    expect(followerRes.servedOnError).toBe(true);
+    expect(followerRes.data).toEqual({ v: 1 });
+    expect(attempts).toBe(2); // one initial fill, one shared retry
+  });
+
   it('does NOT mask a business error (422)', async () => {
     let attempts = 0;
     (globalThis.fetch as any).mockImplementation(async () => {

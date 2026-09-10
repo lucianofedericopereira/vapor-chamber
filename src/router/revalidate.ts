@@ -89,9 +89,27 @@ export function revalidateRoutes(
   options: RevalidateOptions = {},
 ): RevalidatePlugin {
   const flag = shallowRef(false);
-  let inFlight = 0;
   let disposed = false;
-  let controller: AbortController | null = null;
+
+  /**
+   * One controller PER REFRESH, aborted only by a refresh that overlaps it.
+   *
+   * A single shared controller made every revalidation cancel every other one,
+   * whatever it was refreshing. Two commands in a row - `cartAdd` then
+   * `wishlistAdd`, mapped to different records - meant the second aborted the
+   * first, the cart's fresh data was discarded, and nothing retried it. The
+   * command had succeeded, so the page kept showing stale data with no error
+   * anywhere: the exact outcome this plugin exists to prevent.
+   *
+   * Overlap is the right test, not identity. Two refreshes of the SAME record
+   * still must not both land - the later one wins, as before - while two
+   * refreshes of disjoint records have no reason to interfere.
+   */
+  type InFlight = { controller: AbortController; names: ReadonlySet<string> };
+  const inFlight = new Set<InFlight>();
+  function syncFlag(): void {
+    flag.value = inFlight.size > 0;
+  }
 
   // `Object.hasOwn`, never `map[action]`: the keys are command patterns, which
   // are external strings, and a `{}` answers for `constructor`/`toString`. The
@@ -134,11 +152,26 @@ export function revalidateRoutes(
     }
     if (!records.length) return;
 
-    controller?.abort();
-    const own = (controller = new AbortController());
+    const names: ReadonlySet<string> = new Set(records.map((record) => record.name));
+    for (const entry of inFlight) {
+      let overlaps = false;
+      for (const name of names) {
+        if (entry.names.has(name)) {
+          overlaps = true;
+          break;
+        }
+      }
+      if (overlaps) {
+        entry.controller.abort();
+        inFlight.delete(entry);
+      }
+    }
+
+    const own = new AbortController();
+    const entry: InFlight = { controller: own, names };
+    inFlight.add(entry);
     const at = snapshot.location;
-    inFlight++;
-    flag.value = true;
+    syncFlag();
 
     void runLoaders(loaders, records, at, own.signal)
       .then((fresh) => {
@@ -155,8 +188,8 @@ export function revalidateRoutes(
         else console.error('[vapor-chamber-router] revalidateRoutes refresh failed', error);
       })
       .finally(() => {
-        inFlight--;
-        if (inFlight === 0) flag.value = false;
+        inFlight.delete(entry);
+        syncFlag();
       });
   }
 
@@ -181,8 +214,8 @@ export function revalidateRoutes(
   plugin.isRevalidating = flag;
   plugin.dispose = () => {
     disposed = true;
-    controller?.abort();
-    inFlight = 0;
+    for (const entry of inFlight) entry.controller.abort();
+    inFlight.clear();
     flag.value = false;
   };
   return plugin;

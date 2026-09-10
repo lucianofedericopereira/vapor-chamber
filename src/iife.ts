@@ -50,7 +50,7 @@ import {
   createVaporChamberApp,
   getVaporInteropPlugin,
 } from './chamber-vapor';
-import { useSharedCommandState, useCommand } from './chamber';
+import { useSharedCommandState, useCommand, configureVue } from './chamber';
 import type { AsyncPlugin, Plugin } from './command-bus';
 
 // ---------------------------------------------------------------------------
@@ -229,6 +229,16 @@ const VaporChamber = {
   useSharedCommandState,
   createVaporChamberApp,
   getVaporInteropPlugin,
+  /**
+   * Hand Vue's namespace to the library - the only channel that works on a
+   * `<script>`-tag page, since Vapor ships as `esm-browser` only and the
+   * runtime probe cannot resolve a bare specifier in a browser. See the same
+   * export in the ELEMENTS variant for the full note; it was missing from both,
+   * so `vueDetectionHint()`'s "Pass it: configureVue(Vue)" - printed on every
+   * wrapper's null path and deliberately un-gated for exactly this audience -
+   * could not be followed. Pinned by `tests/iife-bundle.test.ts`.
+   */
+  configureVue,
 } as const;
 
 // Assign to globalThis so it's accessible as window.VaporChamber in browsers

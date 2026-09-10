@@ -106,16 +106,35 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
         console.error('[vapor-chamber/test] Hook error:', e);
       }
     }
-    // once() splices itself out mid-iteration - adjust index when array shrinks
+    fanOut(cmd, result, cmd.action);
+  }
+
+  /**
+   * Listener fan-out with the cursor corrected by IDENTITY, matching
+   * `fanOutListeners` in command-bus.ts - see the reasoning there.
+   *
+   * This used the older `if (len < lenBefore) i--` shape, which handles a
+   * listener removing ITSELF but over-corrects the other way: removing a LATER
+   * peer shrinks the array without moving anything at or before `i`, so the
+   * decrement re-invoked the listener that had just run. Measured on a
+   * TestBus with three `'*'` listeners where the first removes the third:
+   * ['A', 'A', 'B'] instead of ['A', 'B'].
+   *
+   * That the real buses were already fixed and this one was not is the whole
+   * problem with it living here: a test asserting "called once" fails against
+   * behaviour the production bus does not have, and one merely counting calls
+   * records a phantom and passes.
+   */
+  function fanOut(cmd: Command, result: CommandResult, matchAgainst: string): void {
     const pl = patternListeners;
     for (let i = 0; i < pl.length; i++) {
       const entry = pl[i];
-      if (matchesPattern(entry.pattern, cmd.action)) {
+      if (matchesPattern(entry.pattern, matchAgainst)) {
         const lenBefore = pl.length;
         try { entry.listener(cmd, result); } catch (e) {
           console.error('[vapor-chamber/test] Listener error:', e);
         }
-        if (pl.length < lenBefore) i--;
+        if (pl.length < lenBefore && pl[i] !== entry) i -= lenBefore - pl.length;
       }
     }
   }
@@ -189,17 +208,9 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
   function emit(event: string, data?: any): void {
     const cmd: Command = { action: event, target: data };
     const result: CommandResult = { ok: true, value: undefined };
-    const pl = patternListeners;
-    for (let i = 0; i < pl.length; i++) {
-      const entry = pl[i];
-      if (matchesPattern(entry.pattern, event)) {
-        const lenBefore = pl.length;
-        try { entry.listener(cmd, result); } catch (e) {
-          console.error('[vapor-chamber/test] Listener error:', e);
-        }
-        if (pl.length < lenBefore) i--;
-      }
-    }
+    // Same fan-out, same cursor rule - this carried its own copy of the
+    // length-based bug and had to be fixed twice before it was one function.
+    fanOut(cmd, result, event);
   }
 
   function dispatchBatch(commands: BatchCommand[]): BatchResult {

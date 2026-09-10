@@ -62,8 +62,13 @@ function buildBaseline(): void {
   }
   const reverted = src
     .replace(SHIPPED, BASELINE_BODY)
-    .replace(/from '\.\/history'/g, "from '../../src/router/history'")
-    .replace(/from '\.\/url'/g, "from '../../src/router/url'");
+    // GENERIC, not a list of the two imports that happened to exist. It was a
+    // list, and adding one import to `router/dom.ts` broke this harness with
+    // "Failed to resolve import '../bounds'" - the same shape as every other
+    // allowlist in this repo that reported clean while missing what nobody
+    // thought of. Rewrites any relative specifier to its real location instead.
+    .replace(/from '\.\.\/([^']+)'/g, "from '../../src/$1'")
+    .replace(/from '\.\/([^']+)'/g, "from '../../src/router/$1'");
   mkdirSync(REF_DIR, { recursive: true });
   writeFileSync(BASELINE, reverted);
 }

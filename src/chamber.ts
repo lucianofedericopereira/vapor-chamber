@@ -27,6 +27,7 @@
  */
 
 import { DEV } from './dev';
+import { countOption } from './bounds';
 import { createCommandBus, disposeAll, _withOrigin, type CommandBus, type AsyncCommandBus, type Command, type CommandResult, type CommandMap, type TargetOf, type PayloadOf, type ResultOf, type Handler, type Plugin, type RegisterOptions, type Listener } from './command-bus';
 import { configureSignal, signal } from './signal';
 
@@ -394,7 +395,7 @@ function probeVue(): void {
 
   // 1. Synchronous probe. This is the only channel that can ever detect Vapor
   //    without a bundler (no-build IIFE / sprinkled-JS pages,
-  //    docs/whitepaper.md §11.6): the async probe below resolves a bare
+  //    docs/whitepaper.md section 11.6): the async probe below resolves a bare
   //    `import('vue')`, which Vue 3.6 NEVER wires to the Vapor-enabled build
   //    outside a bundler's alias magic (@vitejs/plugin-vue does this per-app
   //    when it sees `<script setup vapor>`) - Vapor is a physically separate
@@ -477,7 +478,7 @@ export function isVaporAvailable(): boolean {
  */
 export function vueDetectionHint(): string {
   // Deliberately NOT dev-gated. The audience most likely to hit this is the
-  // no-bundler `<script>`-tag page (whitepaper §11.6), which only ever runs a
+  // no-bundler `<script>`-tag page (whitepaper section 11.6), which only ever runs a
   // production IIFE - stripping the diagnosis in prod would remove it exactly
   // where it is needed. Kept as small as the three-way distinction allows:
   // one shared tail, three short causes, no helper function.
@@ -1134,7 +1135,10 @@ export function useCommandHistory(options: {
   maxSize?: number;
   filter?: (cmd: Command) => boolean;
 } = {}) {
-  const { maxSize = 50, filter } = options;
+  const { maxSize: rawMaxSize = 50, filter } = options;
+  // Same gate, same failure as plugins-core's history(): `length >= maxSize`
+  // decides whether to evict, and NaN answers no, forever.
+  const maxSize = countOption(rawMaxSize, 50);
   const bus = getCommandBus<CommandMap>();
 
   const past = signal<Command[]>([]);

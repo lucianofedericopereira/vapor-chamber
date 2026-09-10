@@ -49,6 +49,33 @@ describe('createHttpBridge redirect & error-body paths', () => {
     expect(result.error?.message).toContain('no onRedirect handler');
   });
 
+  // The boundary of the redirect contract, pinned because three docs described
+  // a wider one: the JSDoc and whitepaper both promised `onRedirect` would fire
+  // for "a 3xx response with a Location header" as well as a body field. It
+  // never did, and structurally cannot - `fetch` defaults to
+  // `redirect: 'follow'`, so a 3xx is resolved by the platform and the bridge
+  // is handed the FINAL response. A status the bridge does see (one a server
+  // returns without following, or a custom httpClient's) is an ordinary
+  // failure, not a redirect.
+  it('does not call onRedirect for a redirect STATUS without a body field', async () => {
+    const httpClient = {
+      post: vi.fn().mockResolvedValue({
+        ok: false,
+        status: 302,
+        headers: { location: '/login' },
+        data: {},
+      }),
+    } as any;
+
+    const onRedirect = vi.fn();
+    const bus = createAsyncCommandBus();
+    bus.use(createHttpBridge({ endpoint: '/api/vc', httpClient, onRedirect }));
+
+    const result = await bus.dispatch('go', {});
+    expect(onRedirect).not.toHaveBeenCalled();
+    expect(result.ok).toBe(false);
+  });
+
   it('extracts message/error from body on a !ok response via custom httpClient', async () => {
     // postCommand throws on !res.ok, so the bridge's own !res.ok branch is only
     // reachable through a custom httpClient that returns a non-ok response.

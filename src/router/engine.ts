@@ -39,15 +39,35 @@ import type {
 } from './types';
 import { parseQuery, stringifyQuery } from './url';
 
+/**
+ * The location before the first commit, and a MODULE-LEVEL SINGLETON - one
+ * object shared by every router in the process and exported publicly as a
+ * sentinel. Both of its details are load-bearing:
+ *
+ * `Object.freeze` reaches one level, so the nested `params` / `query` / `meta`
+ * stayed writable. `useRoute().value.params.id = 1` before the router was ready
+ * therefore edited a global that every other router would go on to hand out.
+ * Frozen unconditionally rather than under DEV like ../freeze: this is four
+ * empty objects frozen once at module load, so there is no per-commit cost to
+ * weigh, and a shared constant is exactly where a silent write does the most
+ * damage.
+ *
+ * `query` is a `dict()` because every OTHER query in this engine is - both arms
+ * of resolveLocation, cleanQueryPatch, and setQuery all go out of their way to
+ * stay prototype-free so that "a consumer must not have to know which branch
+ * built the query". The one query the module shipped as a literal `{}` broke
+ * that for the initial location: `route.query.constructor` answered before the
+ * first navigation and stopped answering after it.
+ */
 export const START_LOCATION: RouteLocation = Object.freeze({
   name: null,
   path: '/',
   fullPath: '/',
-  params: {},
-  query: {},
+  params: Object.freeze({}),
+  query: Object.freeze(dict<string | string[]>()),
   hash: '',
-  matched: [],
-  meta: {},
+  matched: Object.freeze([]),
+  meta: Object.freeze({}),
 });
 
 const EMPTY_DATA: ReadonlyMap<string, unknown> = new Map();
@@ -279,13 +299,21 @@ export function createEngine(ctx: EngineContext) {
       // Indexed, not for...of: a guard's unsubscribe closure splices this same
       // array, so a self-removing guard - `const off = router.beforeEach(() =>
       // { off(); ... })`, the one-shot pattern - shifts it under a live iterator
-      // and the next guard is silently skipped for this navigation. Same
-      // lesson the bus already learned in notifyListeners (lenBefore/i--);
-      // here the loop is async, so the length is compared after each await.
+      // and the next guard is silently skipped for this navigation. Same lesson
+      // the bus learned in `fanOutListeners`, INCLUDING its correction: the
+      // cursor moves by IDENTITY, not by length. A guard that removes a LATER
+      // peer shrinks the array without moving anything at or before `i`, so a
+      // bare `i -= shrinkage` walked the cursor back onto the guard that had
+      // just run and re-awaited it. `beforeGuards[i] !== guard` is the exact
+      // test for "the cursor moved". Here the loop is async, so both are
+      // compared after each await.
       for (let i = 0; i < beforeGuards.length; i++) {
         const lenBefore = beforeGuards.length;
-        const verdict = await beforeGuards[i](to, from);
-        if (beforeGuards.length < lenBefore) i -= lenBefore - beforeGuards.length;
+        const guard = beforeGuards[i];
+        const verdict = await guard(to, from);
+        if (beforeGuards.length < lenBefore && beforeGuards[i] !== guard) {
+          i -= lenBefore - beforeGuards.length;
+        }
         if (cancelled()) return revert(routerError('cancelled', `navigation to "${to.fullPath}" superseded`, { to }), opts);
         if (verdict === false) return revert(routerError('aborted', `navigation to "${to.fullPath}" refused by guard`, { to }), opts);
         if (verdict && verdict !== true) {
@@ -375,21 +403,27 @@ export function createEngine(ctx: EngineContext) {
    *   `ctx.onError`, and `revert()` the URL out from under a live snapshot.
    *   The bus's `notifyListeners` already does it this way ("listener threw
    *   (logged, not fatal)").
-   * - **Self-removal doesn't skip a neighbour.** The unsubscribe closure
-   *   splices this array, so the one-shot pattern (`const off =
-   *   router.afterEach(() => { off(); ... })` - "scroll to top on this next
-   *   navigation") shifted it under a `for...of` iterator. Same lenBefore/i--
-   *   guard as the bus.
+   * - **Self-removal doesn't skip a neighbour, and doesn't re-run one either.**
+   *   The unsubscribe closure splices this array, so the one-shot pattern
+   *   (`const off = router.afterEach(() => { off(); ... })` - "scroll to top on
+   *   this next navigation") shifted it under a `for...of` iterator. Same
+   *   correction as `fanOutListeners`: the cursor moves by IDENTITY, not by
+   *   length. A hook that tears down a LATER sibling shrinks the array without
+   *   moving anything at or before `i`, so a bare `i -= shrinkage` re-ran the
+   *   hook that had just fired - its side effect twice per navigation.
    */
   function runAfterHooks(to: RouteLocation, from: RouteLocation): void {
     for (let i = 0; i < afterHooks.length; i++) {
       const lenBefore = afterHooks.length;
+      const hook = afterHooks[i];
       try {
-        afterHooks[i](to, from);
+        hook(to, from);
       } catch (error) {
         console.error('[vapor-chamber-router] afterEach hook threw (logged, not fatal)', error);
       }
-      if (afterHooks.length < lenBefore) i -= lenBefore - afterHooks.length;
+      if (afterHooks.length < lenBefore && afterHooks[i] !== hook) {
+        i -= lenBefore - afterHooks.length;
+      }
     }
   }
 

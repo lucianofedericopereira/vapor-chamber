@@ -1,10 +1,26 @@
 /**
  * vapor-chamber - Vite HMR plugin
  *
+ * Unreleased - CODE CHANGE, and the first one this file's own tests could not
+ *           have found. The transform claimed `.vue` and `.vapor.vue` and had
+ *           never delivered a shim to either: `enforce: 'pre'` puts it ahead of
+ *           @vitejs/plugin-vue, so it prepended its import to RAW SFC text,
+ *           where the block outside every block is discarded by compiler-sfc
+ *           without a diagnostic. Proven against the real dev pipeline, not the
+ *           unit fixture: `transformRequest('/src/CartPanel.vue')` on
+ *           examples/vapor-sfc returns byte-identical output with this plugin
+ *           and without it. SFCs are now skipped, and the fixture that
+ *           "covered" them (a script fragment under a `.vapor.vue` id, which no
+ *           SFC produces) is replaced by one that runs compiler-sfc.
+ *           The same pass retired `lineShiftMap`: it fixed a one-line offset
+ *           and, unmeasured, flattened every chained downstream map onto column
+ *           zero. Injecting on the SAME line moves no line, so Vite's identity
+ *           default is correct and the map is gone. See transform() for the
+ *           three-way mappings measurement.
  * v1.17.0 - Vue 3.6.0-rc.6 HMR alignment. NO CODE CHANGE; two upstream fixes
  *           land underneath this shim and both are recorded because they change
  *           what a hot reload does to a bus, not what this plugin does.
- *           • per-render EffectScope (runtime-vapor: own each dev render
+ *           - per-render EffectScope (runtime-vapor: own each dev render
  *             generation with a render scope for HMR, 9ab65a1) - an HMR rerender
  *             now tears down child components mounted INSIDE an element, which
  *             the parent's block graph cannot reach and which previously stayed
@@ -17,7 +33,7 @@
  *             fresh bus, so it is this plugin's business even though the fix is
  *             upstream and needs nothing here.
  *             Fixture: tests/hmr-render-scope-fixture.test.ts.
- *           • hmr updating flag hygiene (hmr: cover vapor fast-path reload with
+ *           - hmr updating flag hygiene (hmr: cover vapor fast-path reload with
  *             the hmr updating flag and reset it on failed updates, 991a885) -
  *             a FAILED update now resets `isHmrUpdating` immediately instead of
  *             leaving it set forever. This corroborates the v1.5.0 decision
@@ -35,24 +51,24 @@
  *           vapor-sfc example. Non-Vue consumers unaffected (the priming module is
  *           emitted only when 'vue' resolves).
  * v1.5.0 - Vue 3.6.0-beta.14 HMR alignment:
- *           • dedupe HMR parent reloads (hmr: dedupe HMR parent reloads) - Vue now
+ *           - dedupe HMR parent reloads (hmr: dedupe HMR parent reloads) - Vue now
  *             deduplicates parent reload events at the runtime level; the dispose
  *             shim mirrors this with a per-cycle guard so the bus is persisted at
  *             most once per HMR update regardless of how many parent reload events
  *             fire.
- *           • align child/parent reload timing (hmr: align child component HMR
+ *           - align child/parent reload timing (hmr: align child component HMR
  *             reload with parent rerender) - child component HMR reload is now
  *             synchronised with the parent rerender; bus restoration happens after
  *             the full parent subtree has settled.
- *           • preserve setup effects (runtime-vapor: preserve setup effects during
+ *           - preserve setup effects (runtime-vapor: preserve setup effects during
  *             hmr rerender) - watchers and computed effects created in setup() are
  *             maintained across HMR rerenders; bus handlers registered via
  *             watchEffect inside setup() survive a hot reload without re-registration.
- *           • restore HMR context on errors (runtime-vapor: restore hmr context on
+ *           - restore HMR context on errors (runtime-vapor: restore hmr context on
  *             errors) - HMR context is recovered when an error occurs mid-reload;
  *             the shim wraps bus persistence in try/catch so a failed getCommandBus()
  *             call doesn't leave the module in an unrecoverable state.
- *           • update app instance on root reload (runtime-vapor: update app instance
+ *           - update app instance on root reload (runtime-vapor: update app instance
  *             on root hmr reload) - the app instance on the root component is
  *             refreshed after a root HMR cycle; callers of createVaporChamberApp()
  *             no longer need to re-acquire the app reference after a root reload.
@@ -67,10 +83,10 @@
  * clearing all registered handlers and registered state.
  *
  * Tested against:
- *   • Vite ≥ 7.0.0 (programmatic build API + library mode)
- *   • @vitejs/plugin-vue ≥ 5.0.0 (Vue 3.6 Vapor SFC support - earlier
+ *   - Vite >= 7.0.0 (programmatic build API + library mode)
+ *   - @vitejs/plugin-vue >= 5.0.0 (Vue 3.6 Vapor SFC support - earlier
  *     plugin-vue versions only handle 3.5 VDOM and silently skip vapor blocks)
- *   • Vue ≥ 3.5.0 (composables) or ≥ 3.6.0-beta.14 (full Vapor surface)
+ *   - Vue >= 3.5.0 (composables) or >= 3.6.0-beta.14 (full Vapor surface)
  *
  * If you're on plugin-vue v4 the HMR plugin still works for VDOM SFCs but
  * you'll miss Vapor support entirely - Vapor `<script setup vapor>` blocks
@@ -110,7 +126,7 @@ export type VaporChamberHMROptions = {
 // The global symbol used to persist the bus across HMR updates in the browser.
 const HMR_GLOBAL_KEY = '__VAPOR_CHAMBER_BUS__';
 // The slot the library reads a hand-supplied Vue namespace from. Duplicated
-// from chamber.ts §VUE_GLOBAL_KEY rather than imported: this plugin runs in
+// from chamber.ts VUE_GLOBAL_KEY rather than imported: this plugin runs in
 // Vite's Node process and must not pull the Vue-detection module (and its
 // module-load probe) into a build tool. Kept in sync by
 // tests/vite-hmr.test.ts, which asserts the emitted module names this key.
@@ -126,34 +142,6 @@ const HMR_MODE_KEY = '__VAPOR_CHAMBER_MODE__';
  */
 const IMPORTS_VAPOR_CHAMBER =
   /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s+)['"]vapor-chamber(?:\/[^'"]*)?['"]/;
-
-/**
- * Sourcemap for a transform that prepends exactly ONE line and changes nothing
- * else: every original line N maps to output line N+1, column-for-column.
- *
- * `map: null` is not "no change" to Vite - it is "no mapping information",
- * which it treats as identity, so the injected line silently shifted every
- * stack frame, breakpoint and error-overlay location by one. This plugin only
- * ever runs in dev, which is the only place those matter.
- *
- * Hand-built rather than pulled from magic-string: this is the whole VLQ
- * alphabet needed for a pure line shift - each line's single segment is
- * "output col 0 <- source 0, this line, col 0", i.e. AAAA for the first mapped
- * line and AACA (advance one source line) for every line after it.
- */
-function lineShiftMap(id: string, code: string): { version: 3; sources: string[]; sourcesContent: string[]; names: string[]; mappings: string } {
-  const lineCount = code.split('\n').length;
-  // First output line is the injected import: no mapping.
-  // Then one segment per original line, each advancing the source line by 1.
-  const mappings = `;AAAA${';AACA'.repeat(Math.max(0, lineCount - 1))}`;
-  return {
-    version: 3,
-    sources: [id],
-    sourcesContent: [code],
-    names: [],
-    mappings,
-  };
-}
 
 /**
  * vaporChamberHMR - Vite plugin for state-preserving hot reload.
@@ -187,8 +175,38 @@ export function vaporChamberHMR(options: VaporChamberHMROptions = {}): any {
       if (id === primeModuleId) return resolvedPrimeModuleId;
     },
 
+    /**
+     * The transform below can only reach an app THROUGH its own source, so an
+     * app whose entry script never names the package - every bus call living in
+     * SFCs, `main.ts` doing nothing but `createApp(App).mount()` - got no shim
+     * at all, and its bus was rebuilt from scratch on every hot reload. That was
+     * true of the SFC path in general until this release; it is now true only of
+     * this narrower case, which no amount of module matching can fix.
+     *
+     * An HTML entry can, because Vite hands it to us directly. `head-prepend`
+     * puts the tag ahead of the app's own module script, and module scripts run
+     * in document order, so the shim (and the Vue priming it imports) evaluates
+     * first - which is the ordering the whole design already depends on.
+     *
+     * `__x00__` is Vite's own encoding of the `\0` virtual-module prefix: it is
+     * character-for-character what Vite writes when it rewrites this same import
+     * inside a module, so this borrows the encoding rather than inventing one.
+     *
+     * Additive, not a replacement. An app served through Blade or any other
+     * backend template never sends its HTML through Vite, so the transform stays
+     * the general path. Double injection is free: a virtual module is a
+     * singleton in the graph and evaluates once however many importers it has.
+     */
+    transformIndexHtml() {
+      return [{
+        tag: 'script',
+        attrs: { type: 'module', src: `/@id/__x00__${virtualModuleId}` },
+        injectTo: 'head-prepend' as const,
+      }];
+    },
+
     async load(id: string) {
-      // ── Vue-priming module ──────────────────────────────────────────────
+      // -- Vue-priming module ----------------------------------------------
       // The HMR shim import is injected at the TOP of every transformed
       // module, so vapor-chamber evaluates before ANY user code - including
       // any user attempt to set globalThis.__VUE__. And in the browser the
@@ -209,7 +227,7 @@ export function vaporChamberHMR(options: VaporChamberHMROptions = {}): any {
         // boolean `true` to `__VUE__` when the first app is created, so a
         // namespace parked there is replaced on mount - and writing Vue's own
         // key means fighting Vue over the value's type for no gain. The
-        // library reads its own slot first (chamber.ts §VUE_GLOBAL_KEY).
+        // library reads its own slot first (chamber.ts VUE_GLOBAL_KEY).
         return `
 // vapor-chamber HMR shim - Vue priming (must evaluate before 'vapor-chamber')
 import * as __VC_VUE__ from 'vue';
@@ -293,23 +311,51 @@ export { getCommandBus, setCommandBus, resetCommandBus };
       if (!IMPORTS_VAPOR_CHAMBER.test(code)) return;
       if (id.includes('node_modules')) return;
       if (id.includes(resolvedVirtualModuleId)) return;
-      // Match standard Vue files + Vapor SFCs (.vapor.vue compiled by
-      // @vitejs/plugin-vue-vapor) and virtual modules from vue-vapor plugin
-      if (!id.match(/\.(ts|js|vue|tsx|jsx)$/) && !id.includes('.vapor.vue')) return;
+      // SCRIPTS ONLY. `.vue` and `.vapor.vue` used to be in this list, and the
+      // injection into them never once reached the browser: this plugin is
+      // `enforce: 'pre'`, so it runs BEFORE @vitejs/plugin-vue and sees the raw
+      // SFC text. Prepending an import there puts it outside every block, and
+      // compiler-sfc discards top-level text without a word. Verified against
+      // the real dev pipeline on examples/vapor-sfc - `transformRequest` output
+      // for CartPanel.vue is byte-identical with this plugin and without it.
+      //
+      // The test that "covered" the case handed the transform a bare script
+      // fragment under a `.vapor.vue` id, so it asserted on a string that no
+      // SFC would ever produce. Same bug class as every mocked integration in
+      // this repo's history: the fixture agreed with the code instead of with
+      // Vite. tests/vite-hmr.test.ts now runs a real SFC through plugin-vue.
+      //
+      // Nothing is lost by dropping them, because nothing was ever gained. The
+      // shim reaches the graph through the entry script, and the virtual module
+      // is a singleton, so one import anywhere is the whole mechanism.
+      if (!id.match(/\.(ts|js|tsx|jsx)$/)) return;
 
       // Avoid double-injection
       if (code.includes(virtualModuleId)) return;
 
-      // Prepend the HMR shim import, and emit the one-line offset sourcemap it
-      // implies. `map: null` told Vite "no mapping information", which it
-      // reads as identity - so every transformed file's stack traces,
-      // breakpoints and error-overlay frames were off by one line, in dev,
-      // which is the only place this plugin runs.
+      // SAME LINE, deliberately, and with no sourcemap.
+      //
+      // This prepended a whole line and returned a hand-built one-line shift
+      // map, on the correct reasoning that `map: null` means "no mapping
+      // information" to Vite, which reads it as identity - so a prepended LINE
+      // silently moved every stack frame, breakpoint and overlay location down
+      // by one. What that fix cost went unmeasured: a line-shift map can only
+      // say "output line N came from source line N-1, column 0", and Vite
+      // CHAINS maps, so every downstream map's column detail collapsed onto
+      // column 0. Measured on examples/vapor-sfc, mappings length:
+      //
+      //                          src/main.ts     src/CartPanel.vue
+      //   vue() alone               92                816
+      //   with the shift map        37                165   (columns gone)
+      //   with this               101                816   (baseline restored)
+      //
+      // Injecting on the SAME line moves no line at all, so plain identity is
+      // exactly right for every line, and for every column except those on
+      // line 1, which shift right by the length of the import. That is a
+      // strictly smaller error than the one the shift map was fixing, and it
+      // costs neither a map nor a VLQ encoder.
       const injected = `import '${virtualModuleId}';`;
-      return {
-        code: `${injected}\n${code}`,
-        map: lineShiftMap(id, code),
-      };
+      return { code: `${injected}${code}` };
     },
   };
 }

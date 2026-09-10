@@ -13,5 +13,13 @@
     "noEmit": true,
     "types": ["vite/client"]
   },
-  "include": ["src/**/*", "vite.config.ts"]
+  // `../vue-vapor-component.vue` is not part of this app - it is the standalone
+  // SFC example the README links as a full Vapor todo app, and it was checked
+  // by NOTHING. `tsconfig.patterns.json` runs plain `tsc`, which cannot read a
+  // `.vue` file at all, so 332 lines of example sat outside every gate. This
+  // example already runs `vue-tsc` in its build and already has both `vue` and
+  // `vapor-chamber` resolvable, so it is the one place that can check it for
+  // free. Listed as a file rather than a glob: adding the whole parent
+  // directory would drag in every other example.
+  "include": ["src/**/*", "vite.config.ts", "../vue-vapor-component.vue"]
 }

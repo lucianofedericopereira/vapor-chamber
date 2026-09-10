@@ -83,7 +83,7 @@ import { configureVue } from './chamber';
 // `typeof`-guarded - so this call adds the Vapor entries without disturbing the
 // 3.5-safe ones `./vue` sets, in either evaluation order.
 //
-// §WIRED SET - three of the five Vapor names `applyVueModule` reads, and the
+// WIRED SET - three of the five Vapor names `applyVueModule` reads, and the
 // omissions are measured rather than accidental. A static import is retained by
 // the consumer's bundler whether or not their app ever calls it, so "wire
 // everything" is not free: it is paid by every consumer, including the ones who

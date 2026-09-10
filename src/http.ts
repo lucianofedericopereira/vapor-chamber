@@ -215,7 +215,7 @@ function parseRetryAfter(header: string | null): number | null {
   return null;
 }
 
-/** Exponential backoff with ±200ms jitter to avoid thundering herd. */
+/** Exponential backoff with +/-200ms jitter to avoid thundering herd. */
 function backoffMs(attempt: number): number {
   return Math.min(1000 * 2 ** attempt, 30_000) + Math.random() * 200;
 }
@@ -400,7 +400,7 @@ export async function postCommand<T = unknown>(
 
         // NOTE: unlike clientRequest, a 419 that survives the refresh retry is
         // NOT escalated to session expiry here - postCommand's documented
-        // contract (whitepaper §5.7, pinned by tests) is that 419 never fires
+        // contract (whitepaper section 5.7, pinned by tests) is that 419 never fires
         // onSessionExpired; the bridge surfaces it as an HttpError instead.
 
         // Retry on retryable status codes
@@ -837,38 +837,48 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
       throw err;
     });
 
+    // cache.serveStaleOnError (opt-in): a transient failure (timeout/network/
+    // 5xx per classifyError) with ANY retained entry for this URL - even one
+    // past its stale window - resolves to { stale, servedOnError, error }
+    // instead of rejecting. Business errors (4xx) and user aborts always
+    // surface; deduped followers share this promise's outcome.
+    //
+    // This wrapper is built BEFORE the promise is registered for dedupe, and
+    // that ordering is the whole point. Registering the raw `fetchPromise`
+    // while handing the caller a `.catch()`-wrapped one gives the two callers
+    // different promises: the leader was served the retained entry while a
+    // follower on the same key received the untouched rejection - the exact
+    // opposite of the sentence above. The features were only ever tested
+    // apart, every serveStaleOnError case passing `dedupe: false`, so the
+    // disagreement never showed up.
+    const sharedPromise: Promise<HttpResponse<T>> =
+      cacheEnabled && cacheCfg.serveStaleOnError
+        ? fetchPromise.catch((error) => {
+            const aborted = (error as HttpError)?.name === 'AbortError';
+            if (!aborted && classifyError(error).transient) {
+              const retained = cache.getAny(cacheKey);
+              if (retained) {
+                return { ...(retained.data as HttpResponse<T>), stale: true, servedOnError: true, error };
+              }
+            }
+            throw error;
+          })
+        : fetchPromise;
+
     // Track in-flight GET for deduplication
     if (isIdempotent && dedupe) {
-      cache.setInflight(dedupeKey, fetchPromise);
+      cache.setInflight(dedupeKey, sharedPromise);
     }
 
     // Stale-while-revalidate: serve the stale response now; the fetch above
     // finishes in the background and setCache()s on success. `revalidation`
     // lets a caller push the fresh data into its own state when it lands.
     if (staleResponse) {
-      fetchPromise.catch(() => {}); // background failure must not surface as an unhandled rejection
+      sharedPromise.catch(() => {}); // background failure must not surface as an unhandled rejection
       return { ...staleResponse, stale: true, revalidation: fetchPromise } as HttpResponse<T>;
     }
 
-    // cache.serveStaleOnError (opt-in): a transient failure (timeout/network/
-    // 5xx per classifyError) with ANY retained entry for this URL - even one
-    // past its stale window - resolves to { stale, servedOnError, error }
-    // instead of rejecting. Business errors (4xx) and user aborts always
-    // surface; deduped followers share this promise's outcome.
-    if (cacheEnabled && cacheCfg.serveStaleOnError) {
-      return fetchPromise.catch((error) => {
-        const aborted = (error as HttpError)?.name === 'AbortError';
-        if (!aborted && classifyError(error).transient) {
-          const retained = cache.getAny(cacheKey);
-          if (retained) {
-            return { ...(retained.data as HttpResponse<T>), stale: true, servedOnError: true, error };
-          }
-        }
-        throw error;
-      });
-    }
-
-    return fetchPromise;
+    return sharedPromise;
   }
 
   // Safe mode wrapper

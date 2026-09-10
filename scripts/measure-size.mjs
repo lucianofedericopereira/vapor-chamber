@@ -25,39 +25,35 @@ const brot = (buf) => zlib.brotliCompressSync(buf, { params: { [zlib.constants.B
 const gzip = (buf) => zlib.gzipSync(buf, { level: 9 }).length;
 const kb = (n) => (n / 1024).toFixed(1);
 
-// ESM subpath exports (package.json "exports" subpath -> source entry). Measured
-// MINIFIED (comment-free) - the cost after a bundler tree-shakes + minifies them.
-const esm = [
-  ['.', 'src/index.ts'],
-  ['./transports', 'src/transports.ts'],
-  ['./directives', 'src/directives.ts'],
-  ['./transitions', 'src/transitions.ts'],
-  ['./ssr', 'src/ssr.ts'],
-  ['./vite', 'src/vite-hmr.ts'],
-  ['./fast-lane', 'src/fast-lane.ts'],
-  ['./observable', 'src/observable.ts'],
-  ['./standard-schema', 'src/plugins-schema.ts'],
-  ['./alien-signals', 'src/alien-signals.ts'],
-  ['./reactive', 'src/reactive.ts'],
-  ['./vue', 'src/vue.ts'],
-  ['./vapor', 'src/vapor.ts'],
-  ['./outbox', 'src/outbox.ts'],
-  ['./mcp', 'src/mcp.ts'],
-  // Router. `./router` is deliberately renderer-free - the outlets and blade
-  // components live behind `./router/vdom` and `./router/vapor` so a consumer
-  // pays only for the renderer it actually renders through. See
-  // tests/router/vdom-boundary.test.ts and
-  // tests/router/vapor-boundary.test.ts.
-  ['./store', 'src/store.ts'],
-  ['./router', 'src/router/index.ts'],
-  ['./router/vdom', 'src/router/vdom.ts'],
-  ['./router/vapor', 'src/router/vapor.ts'],
-  ['./router/remote', 'src/router/remote.ts'],
-  ['./router-fetch', 'src/router-fetch/index.ts'],
-  ['./iife', 'src/iife.ts'],
-  ['./iife-core', 'src/iife-core.ts'],
-  ['./iife-elements', 'src/iife-elements.ts'],
-];
+/**
+ * ESM subpath exports, DERIVED FROM `package.json` "exports" - not listed.
+ *
+ * This was a hand-kept list of 24, and by the time anyone diffed it the exports
+ * map had 26: `./devtools` and `./stream-parser` were published subpaths that a
+ * consumer could import and that `build.mjs` built, with NO size row anywhere.
+ * Never measured, never in docs/BUNDLE-SIZES.md, never tracked when they grew -
+ * and nothing could notice, because the list looked complete.
+ *
+ * Deriving it makes the table exactly as complete as the package's own
+ * promises. A subpath added to `exports` gets a row on the next run; a subpath
+ * removed loses one. `generate-api-docs.mjs` already reads the same source for
+ * the same reason (its predecessor's hand-kept list had drifted by five).
+ *
+ * The mapping is mechanical: `./dist/x/y.js` is built from `src/x/y.ts`, which
+ * is what `build.mjs`'s entry map says. Entries whose source is missing are
+ * dropped below, so a stale exports entry degrades to a missing row rather than
+ * an esbuild crash.
+ *
+ * (`./router` is deliberately renderer-free - the outlets and blade components
+ * live behind `./router/vdom` and `./router/vapor` so a consumer pays only for
+ * the renderer it renders through. See tests/router/vdom-boundary.test.ts and
+ * tests/router/vapor-boundary.test.ts.)
+ */
+const esm = Object.entries(pkg.exports ?? {}).flatMap(([subpath, value]) => {
+  const dist = typeof value === 'string' ? value : (value?.import ?? value?.default);
+  if (typeof dist !== 'string' || !dist.endsWith('.js')) return [];
+  return [[subpath, dist.replace(/^\.\/dist\//, 'src/').replace(/\.js$/, '.ts')]];
+});
 const iife = [
   ['vapor-chamber (full)', 'dist/vapor-chamber.iife.min.js'],
   ['vapor-chamber-core', 'dist/vapor-chamber-core.iife.min.js'],

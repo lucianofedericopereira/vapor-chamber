@@ -63,6 +63,25 @@ export type FormBusOptions<T extends Record<string, any>> = {
    * // formSet, formTouch, etc. now visible in setupDevtools()
    */
   bus?: CommandBus;
+  /**
+   * Action-name prefix, so two forms can share one bus. Default: `'form'`,
+   * which is exactly the names this module has always used - a single form is
+   * unchanged.
+   *
+   * REQUIRED FOR THE SECOND FORM ON A SHARED BUS, and the reason is not
+   * tidiness. The four action names are constants, so a second
+   * `createFormBus({ bus })` re-registered `formSet` over the first form's and
+   * every later `login.set(...)` wrote into the SIGNUP form's state. Measured:
+   * with a login and a signup form on one bus, `login.set('email', 'a@b.c')`
+   * left `login.values` empty and put the email in `signup.values`. The bus
+   * does warn on an overwrite, but only in dev, and only as a generic
+   * "handler already exists" - four times, once per action.
+   *
+   *   const login  = createFormBus({ fields: {...}, bus, id: 'login' });
+   *   const signup = createFormBus({ fields: {...}, bus, id: 'signup' });
+   *   // loginSet / signupSet - distinct in devtools, and no cross-writing
+   */
+  id?: string;
 };
 
 export type FormBus<T extends Record<string, any>> = {
@@ -94,6 +113,15 @@ export type FormBus<T extends Record<string, any>> = {
   use(plugin: Plugin, options?: PluginOptions): void;
   /** The underlying command bus - for advanced use (DevTools, testing). */
   bus: CommandBus;
+  /**
+   * Unregister this form's handlers from the bus and release its prefix.
+   *
+   * Only meaningful with an INJECTED bus: an isolated one is garbage with the
+   * form. Without it there was no way to take a form off a shared bus at all,
+   * so a modal form registered its handlers for the life of the page and its
+   * prefix stayed claimed.
+   */
+  dispose(): void;
 };
 
 // ---------------------------------------------------------------------------
@@ -160,11 +188,38 @@ function hasDiff<T extends Record<string, any>>(a: T, b: T): boolean {
 export function createFormBus<T extends Record<string, any>>(
   options: FormBusOptions<T>,
 ): FormBus<T> {
-  const { onSubmit, reactive: useReactive = true } = options;
+  const { onSubmit, reactive: useReactive = true, id = 'form' } = options;
   const rules = (options.rules ?? {}) as FormRules<T>;
   const initial: T = { ...options.fields };
 
   const bus = options.bus ?? createCommandBus();
+
+  // Claim the prefix on this bus, or say precisely what went wrong. An isolated
+  // bus cannot collide with anything, so only an injected one is tracked.
+  // The claim set lives ON THE BUS, not in a module-level WeakMap. Two reasons,
+  // and the second is the one that decided it: the bus is exactly the scope a
+  // claim belongs to (it dies with the bus, no registry to leak), and a
+  // module-level declaration in this file shifts esbuild identifier allocation
+  // across the whole inlined barrel - measured at one byte over the tree-shake
+  // ceiling in a consumer that never calls createFormBus. Nothing here is
+  // retained by such a consumer; the byte was pure allocation noise, and the
+  // way to not pay it is to add no module scope.
+  const holder = options.bus as unknown as { __vcFormIds?: Set<string> };
+  const claimed = options.bus ? (holder.__vcFormIds ??= new Set<string>()) : null;
+  if (claimed?.has(id)) {
+    // SHORT ON PURPOSE. This string is inlined into `dist/index.js` with the
+    // rest of the barrel, and `esm-treeshake.test.ts` measures a consumer that
+    // never calls createFormBus - the fuller wording cost a byte over that
+    // ceiling. The explanation lives in the `id` docblock, which ships in src
+    // and costs the bundle nothing.
+    throw new Error(`[vapor-chamber] form id "${id}" already on this bus - pass a distinct id.`);
+  }
+  claimed?.add(id);
+
+  const ACTION_SET = `${id}Set`;
+  const ACTION_TOUCH = `${id}Touch`;
+  const ACTION_RESET = `${id}Reset`;
+  const ACTION_VALIDATE = `${id}Validate`;
 
   // When reactive: false, use plain get/set wrappers instead of Vue signals.
   // Saves 7 signal allocations per form in headless/batch/SSR contexts.
@@ -182,13 +237,17 @@ export function createFormBus<T extends Record<string, any>>(
   const isValidating = sig(false);
   const isBusy   = sig(false);
 
+  /** True from the synchronous entry of submit() until it settles - see submit(). */
+  let submitInFlight = false;
+
   /** Update isBusy whenever isSubmitting or isValidating changes */
   function updateBusy(): void {
     isBusy.value = isSubmitting.value || isValidating.value;
   }
 
   // ---- formSet -----------------------------------------------------------
-  bus.register('formSet', (cmd) => {
+  const offs: Array<() => void> = [];
+  offs.push(bus.register(ACTION_SET, (cmd) => {
     const { field, value } = cmd.payload as { field: keyof T; value: T[keyof T] };
     const next = { ...values.value, [field]: value } as T;
     values.value  = next;
@@ -197,17 +256,17 @@ export function createFormBus<T extends Record<string, any>>(
     isDirty.value = hasDiff(initial, next);
     isValid.value = Object.keys(errs).length === 0;
     return next;
-  });
+  }));
 
   // ---- formTouch ---------------------------------------------------------
-  bus.register('formTouch', (cmd) => {
+  offs.push(bus.register(ACTION_TOUCH, (cmd) => {
     const { field } = cmd.payload as { field: keyof T };
     touched.value = { ...touched.value, [field]: true };
     return touched.value;
-  });
+  }));
 
   // ---- formReset ---------------------------------------------------------
-  bus.register('formReset', () => {
+  offs.push(bus.register(ACTION_RESET, () => {
     values.value   = { ...initial };
     errors.value   = {};
     touched.value  = {};
@@ -217,10 +276,10 @@ export function createFormBus<T extends Record<string, any>>(
     isValidating.value = false;
     isBusy.value   = false;
     return values.value;
-  });
+  }));
 
   // ---- formValidate (internal) ------------------------------------------
-  bus.register('formValidate', () => {
+  offs.push(bus.register(ACTION_VALIDATE, () => {
     // Touch all fields so errors become visible
     const allTouched: Partial<Record<keyof T, boolean>> = {};
     for (const k in initial) allTouched[k as keyof T] = true;
@@ -230,33 +289,46 @@ export function createFormBus<T extends Record<string, any>>(
     errors.value = errs;
     isValid.value = Object.keys(errs).length === 0;
     return { valid: isValid.value, errors: errs };
-  });
+  }));
 
   // ---- Public API --------------------------------------------------------
 
   function set<K extends keyof T>(field: K, value: T[K]): void {
-    bus.dispatch('formSet', {}, { field, value });
+    bus.dispatch(ACTION_SET, {}, { field, value });
   }
 
   function touch<K extends keyof T>(field: K): void {
-    bus.dispatch('formTouch', {}, { field });
+    bus.dispatch(ACTION_TOUCH, {}, { field });
   }
 
   function reset(): void {
-    bus.dispatch('formReset', {});
+    bus.dispatch(ACTION_RESET, {});
   }
 
   async function submit(): Promise<boolean> {
-    // Re-entry guard. `isSubmitting` was never checked at entry, so a
-    // double-click ran two overlapping submits: two onSubmit round-trips and
-    // two `finally` blocks fighting over isSubmitting/isValidating (the first
-    // to finish cleared the flag while the second was still in flight).
-    // First-write-wins is chosen over supersede semantics because the
-    // in-flight call may already have reached the server - cancelling the
-    // *local* half of a submit that has been sent is the more surprising of
-    // the two. Callers wanting last-write-wins have the `supersede` plugin.
-    if (isSubmitting.value) return false;
+    // Re-entry guard. First-write-wins is chosen over supersede semantics
+    // because the in-flight call may already have reached the server -
+    // cancelling the *local* half of a submit that has been sent is the more
+    // surprising of the two. Callers wanting last-write-wins have the
+    // `supersede` plugin.
+    //
+    // The latch is a plain closure boolean set SYNCHRONOUSLY on entry, not the
+    // `isSubmitting` signal. `isSubmitting` only turns true after validation
+    // resolves, and `submit()` always awaits `runRulesAsync` - so gating on it
+    // left the entire validation phase unguarded, and two clicks in the same
+    // turn (a real double-click, rather than a second click after the first
+    // reached `onSubmit`) both passed the guard: two `onSubmit` round-trips,
+    // and two `finally` blocks fighting over isSubmitting/isValidating.
+    if (submitInFlight) return false;
+    submitInFlight = true;
+    try {
+      return await runSubmit();
+    } finally {
+      submitInFlight = false;
+    }
+  }
 
+  async function runSubmit(): Promise<boolean> {
     // Touch all fields so errors become visible
     const allTouched: Partial<Record<keyof T, boolean>> = {};
     for (const k in initial) allTouched[k as keyof T] = true;
@@ -300,5 +372,11 @@ export function createFormBus<T extends Record<string, any>>(
     bus.use(plugin, pluginOptions);
   }
 
-  return { values, errors, touched, isDirty, isValid, isSubmitting, isValidating, isBusy, set, touch, submit, reset, use, bus };
+  function dispose(): void {
+    for (const off of offs) off();
+    offs.length = 0;
+    claimed?.delete(id);
+  }
+
+  return { values, errors, touched, isDirty, isValid, isSubmitting, isValidating, isBusy, set, touch, submit, reset, use, bus, dispose };
 }

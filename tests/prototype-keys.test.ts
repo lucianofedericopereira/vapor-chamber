@@ -9,8 +9,10 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { commandKey } from '../src/command-bus';
+import { commandKey, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { createFormBus } from '../src/form';
+import { optimistic, validator } from '../src/plugins-core';
+import { validateSchemas, validateSchemasAsync } from '../src/plugins-schema';
 
 describe('commandKey - an own __proto__ key must not be swallowed', () => {
   // `JSON.parse` produces an OWN `__proto__` property; an HTTP bridge handing a
@@ -34,6 +36,75 @@ describe('commandKey - an own __proto__ key must not be swallowed', () => {
     expect(commandKey('act', { q: { page: 2 } })).not.toBe(commandKey('act', { q: { page: 3 } }));
     expect(commandKey('act', 'plain')).toBe('act:plain');
     expect(commandKey('act', null)).toBe('act:null');
+  });
+});
+
+/**
+ * The plugin layer takes user-authored maps keyed by ACTION NAME and looks them
+ * up with `cmd.action` - a string that came from outside. Same rule, four more
+ * sites. `mcp.ts` (tools/call) and the router's routes payload are the realistic
+ * paths that put an arbitrary string in `cmd.action`.
+ */
+describe('plugin maps keyed by action name', () => {
+  // An action that happens to be named after an Object.prototype member. Every
+  // assertion below is about the plugin NOT reacting to a rule/schema/handler
+  // it was never given.
+  const INHERITED = ['constructor', 'toString', 'valueOf', 'hasOwnProperty'] as const;
+
+  it('validator() does not run an inherited member as a rule', () => {
+    const bus = createCommandBus();
+    bus.use(validator({ real: () => 'nope' }));
+    for (const action of INHERITED) {
+      bus.register(action, () => 'ran');
+      const result = bus.dispatch(action, {});
+      expect(result.ok, `${action} should reach its handler`).toBe(true);
+      expect(result.value).toBe('ran');
+    }
+    // the declared rule still applies
+    bus.register('real', () => 'ran');
+    expect(bus.dispatch('real', {}).ok).toBe(false);
+  });
+
+  it('optimistic() does not treat an inherited member as a handler config', () => {
+    const bus = createCommandBus();
+    bus.use(optimistic({ real: { apply: () => null } }));
+    for (const action of INHERITED) {
+      bus.register(action, () => 'ran');
+      // Pre-fix `handlers['constructor']` was `Object`, whose `.apply` is
+      // Function.prototype.apply - called as the optimistic `apply`.
+      const result = bus.dispatch(action, {});
+      expect(result.ok, `${action} should dispatch normally`).toBe(true);
+      expect(result.value).toBe('ran');
+    }
+  });
+
+  it('validateSchemas() does not validate against an inherited member', () => {
+    const bus = createCommandBus();
+    bus.use(validateSchemas({ real: { '~standard': { version: 1, vendor: 't', validate: () => ({ issues: [{ message: 'bad' }] }) } } } as never));
+    for (const action of INHERITED) {
+      bus.register(action, () => 'ran');
+      // Pre-fix `schemas['toString']` was a function, so the plugin read
+      // `fn['~standard'].validate` and THREW out of dispatch - a documented
+      // "always returns a result" contract broken by an action name.
+      const result = bus.dispatch(action, {});
+      expect(result.ok, `${action} should dispatch normally`).toBe(true);
+      expect(result.value).toBe('ran');
+    }
+    bus.register('real', () => 'ran');
+    expect(bus.dispatch('real', {}).ok).toBe(false);
+  });
+
+  it('validateSchemasAsync() does not validate against an inherited member', async () => {
+    const bus = createAsyncCommandBus();
+    bus.use(validateSchemasAsync({ real: { '~standard': { version: 1, vendor: 't', validate: () => ({ issues: [{ message: 'bad' }] }) } } } as never));
+    for (const action of INHERITED) {
+      bus.register(action, async () => 'ran');
+      const result = await bus.dispatch(action, {});
+      expect(result.ok, `${action} should dispatch normally`).toBe(true);
+      expect(result.value).toBe('ran');
+    }
+    bus.register('real', async () => 'ran');
+    expect((await bus.dispatch('real', {})).ok).toBe(false);
   });
 });
 

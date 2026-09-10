@@ -31,8 +31,20 @@
  */
 
 import type { BaseBus, CommandMap } from './command-bus';
+import { MAX_TIMEOUT_MS, countOption } from './bounds';
 import { signal as chamberSignal, getCommandBus, tryAutoCleanup } from './chamber';
 import type { Signal } from './chamber';
+import { DEV } from './dev';
+
+/**
+ * `| 0` folds NaN and Infinity to 0, which the floor of 1 then lifts, so a
+ * bad option degrades to "call done() almost immediately" rather than to the
+ * stuck element this timeout exists to prevent. Same treatment the other
+ * numeric options in this library get - see `serveMcpStdio`.
+ */
+function resolveTimeout(value: number | undefined): number {
+  return countOption(value, 30_000, 1, MAX_TIMEOUT_MS);
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -45,6 +57,16 @@ export type TransitionBridgeOptions = {
   namespace?: string;
   /** Bus to dispatch on. Required for createTransitionBridge. */
   bus?: BaseBus;
+  /**
+   * Milliseconds to wait for an async `*Enter` / `*Leave` handler before
+   * calling `done()` anyway. Default: 30_000, the same cap `directives.ts`
+   * applies to its own dispatches.
+   *
+   * Vue waits for `done()` indefinitely, so a handler that never settles
+   * leaves the element stuck mid-transition for the life of the page - see the
+   * note in `dispatchWithDone`. Clamped to at least 1ms.
+   */
+  timeout?: number;
 };
 
 export type TransitionHooks = {
@@ -128,6 +150,7 @@ function buildHooks(
   bus: BaseBus,
   namespace: string | undefined,
   phase: Signal<TransitionPhase>,
+  timeout: number,
 ): TransitionHooks {
   // Action names are built ONCE per bridge, not once per hook dispatch. Both
   // inputs are fixed here: `namespace` is captured at construction and every
@@ -161,14 +184,47 @@ function buildHooks(
     }
   }
 
-  /** Dispatch with done() callback - awaits async results before calling done(). */
+  /**
+   * Dispatch with done() callback - awaits async results before calling done().
+   *
+   * Raced against a timeout, because Vue waits for `done()` INDEFINITELY. A
+   * handler that never settles - an await on a request that never returns, a
+   * promise nobody resolves - left the element stuck in its transitioning
+   * state for the life of the page, with no error anywhere. Measured before
+   * this guard: `done()` was never called and the phase never left
+   * 'entering'/'leaving'.
+   *
+   * `directives.ts` already caps its own dispatches for the same reason and
+   * with the same default; this module simply did not, which made a hung
+   * handler a stuck animation in one place and a recovered button in the
+   * other.
+   *
+   * The timer is cleared when the dispatch wins, and `settled` makes `done()`
+   * exactly-once: calling it twice would let Vue finish a transition it had
+   * already finished.
+   */
   function dispatchWithDone(action: string, el: Element, done: () => void): void {
     const result = dispatchSafe(action, el); // dispatchSafe never throws (own try/catch)
-    if (result && typeof result.then === 'function') {
-      (result as Promise<any>).then(() => done(), () => done());
-    } else {
+    if (!result || typeof result.then !== 'function') {
       done();
+      return;
     }
+    let settled = false;
+    const finish = (timedOut: boolean): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (timedOut && DEV) {
+        console.warn(
+          `[vapor-chamber] transition "${action}" did not settle within ${timeout}ms; ` +
+            'calling done() so the element is not stuck mid-transition. Raise `timeout` ' +
+            'if the handler is legitimately slow.',
+        );
+      }
+      done();
+    };
+    const timer = setTimeout(() => finish(true), timeout);
+    (result as Promise<any>).then(() => finish(false), () => finish(false));
   }
 
   return {
@@ -300,7 +356,7 @@ export function createTransitionBridge(
     set value(v: TransitionPhase) { _phase = v; },
   };
 
-  const hooks = buildHooks(bus, namespace, phase);
+  const hooks = buildHooks(bus, namespace, phase, resolveTimeout(options.timeout));
 
   return assembleBridge(hooks, phase, () => {});
 }
@@ -333,7 +389,7 @@ export function useTransitionCommand(
 ): TransitionBridge {
   const bus = options.bus ?? getCommandBus<CommandMap>();
   const phase = chamberSignal<TransitionPhase>('idle');
-  const hooks = buildHooks(bus, options.namespace, phase);
+  const hooks = buildHooks(bus, options.namespace, phase, resolveTimeout(options.timeout));
 
   function dispose() {
     phase.value = 'idle';

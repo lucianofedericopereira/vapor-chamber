@@ -13,7 +13,7 @@ import { createCommandBus, createAsyncCommandBus, configureUid, _withOrigin } fr
 import { rehydrate, type DehydratedCommand } from '../src/ssr';
 import { persist } from '../src/plugins-io';
 import { createFastLane } from '../src/fast-lane';
-import { useCommandHistory } from '../src/chamber';
+import { resetCommandBus, setCommandBus, useCommandHistory } from '../src/chamber';
 import { createTransitionBridge } from '../src/transitions';
 import { createDirectivePlugin } from '../src/directives';
 import { stampActiveLinks } from '../src/router/dom';
@@ -34,24 +34,39 @@ const _alienFactory = alienSignalAdapter(_alienSignal as any);
 //     marked dispatch (every cross-tab receive, MCP call, and redo).
 // ---------------------------------------------------------------------------
 
+// `useCommandHistory` observes the SHARED bus and takes no bus argument, so
+// these two benches must install their bus there. They previously passed one as
+// a second argument, which JS drops and no compiler objected to (tests are not
+// in any typecheck project): the history subscribed to the shared bus while the
+// loop dispatched on a local one, so the `onAfter` hook the first bench is named
+// for never fired and the second's `undo()`/`redo()` returned undefined on an
+// empty stack. Measured: `past.length` 0 after 10 dispatches. Both numbers the
+// whitepaper's rc.6 row quotes from this group came from that shape. Pinned by
+// `tests/bench-harness.test.ts`.
 describe('origin-marker paths', () => {
   bench('dispatch with useCommandHistory installed - 10k (onAfter hook cost)', () => {
     const bus = createCommandBus();
+    setCommandBus(bus);
     bus.register('act', (cmd) => cmd.target);
-    const history = useCommandHistory({}, bus);
+    const history = useCommandHistory({});
     for (let i = 0; i < 10_000; i++) bus.dispatch('act', i, { qty: i });
     history.clear();
+    history.dispose();
+    resetCommandBus();
   });
 
   bench('undo+redo cycle x 2k (marked-dispatch path)', () => {
     const bus = createCommandBus();
+    setCommandBus(bus);
     bus.register('act', (cmd) => cmd.target);
-    const history = useCommandHistory({}, bus);
+    const history = useCommandHistory({});
     for (let i = 0; i < 2_000; i++) {
       bus.dispatch('act', i, { qty: i });
       history.undo();
       history.redo();
     }
+    history.dispose();
+    resetCommandBus();
   });
 
   bench('_withOrigin-wrapped dispatch - 10k', () => {

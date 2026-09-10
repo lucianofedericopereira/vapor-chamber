@@ -3,18 +3,18 @@
  *
  * The table already carries everything a navigation UI needs; these builders
  * only project it - nothing here is authored client-side:
- *   · `meta.menu` (an INTEGER - the server-owned menu position; row order in
+ *   . `meta.menu` (an INTEGER - the server-owned menu position; row order in
  *     the table is match-specificity order, so the menu has its own column)
  *     marks a row as a menu entry. Menu rows need `meta.title` (an i18n key -
  *     translating is the view's job) and a static path: a required `:param`
  *     has no fixed href and is rejected. Group rows may be menued too - they
  *     become href-less section nodes.
- *   · Nesting follows the parent chain: an entry's menu parent is its nearest
+ *   . Nesting follows the parent chain: an entry's menu parent is its nearest
  *     menued ancestor.
- *   · Permission filtering is the SERVER's job (visibleTo before delivery) -
+ *   . Permission filtering is the SERVER's job (visibleTo before delivery) -
  *     what the table holds is what the user may see, so the projection is
  *     permission-correct by construction.
- *   · active/exact use pathActivity - the SAME semantics as `data-active`
+ *   . active/exact use pathActivity - the SAME semantics as `data-active`
  *     stamping, so Blade menus and Vue menus always agree.
  *
  * Like table validation, the menu contract is enforced loudly in dev (and, by

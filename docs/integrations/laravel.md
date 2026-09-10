@@ -312,8 +312,17 @@ async function cancelOrder(id: number) {
 Both `csrf: 'inertia'` and `onRedirect` are **shipped** on `createHttpBridge`:
 `csrf: 'inertia'` defers token management to Inertia's Axios instance instead
 of reading the meta tag, and `onRedirect(url)` is called when the backend
-response signals a redirect - wire it to `router.visit(url)` to let Inertia
-take the navigation:
+returns a `{ redirect: '/path' }` field **in the JSON body** - wire it to
+`router.visit(url)` to let Inertia take the navigation.
+
+Note the contract: a body field, not a 302. `fetch` follows redirects itself,
+so the bridge is handed the final response and never sees the 3xx. Your action
+returns the redirect rather than issuing one:
+
+```php
+// in an action class - hand the navigation back to the client
+return ['redirect' => route('login')];
+```
 
 ```ts
 const bridge = createHttpBridge({
@@ -347,6 +356,17 @@ that gap by dispatching a real `CustomEvent` on the host element. Bubbles
 out, escapes shadow DOM (`composed: true` by default), reaches every
 listener that knows how to listen for DOM events.
 
+> **What is verified here, and what is illustration.** The primitive is tested:
+> `tests/vapor/widget-shape.test.ts` mounts a real Vapor custom element and
+> asserts the event leaves the shadow root and arrives at the host, at
+> `document`, and at `window` - the last being what Alpine's `.window` modifier
+> and Livewire's `#[On(...)]` both rely on. The four host-framework patterns
+> below are **illustrative**: Alpine, Livewire and Filament are not dependencies
+> of this repo and nothing here executes them, so treat the snippets as the
+> shape to follow rather than as tested code. The runnable Blade example that
+> does ship - [`examples/laravel-app`](../../examples/laravel-app/) - uses plain
+> DOM and no framework at all.
+
 ### Pattern 1: Blade page + Alpine.js
 
 ```html
@@ -367,19 +387,23 @@ listener that knows how to listen for DOM events.
 
   VaporChamber.defineWidget('vc-cart', {
     setup() {
-      return () => h('button', {
-        onClick: async (e) => {
-          const result = await dispatch('cartAdd', { id: 1 }, { qty: 1 });
-          if (result.ok) {
-            // Bridge widget event -> Alpine listener
-            VaporChamber.emitDOMEvent(
-              e.target.getRootNode().host,
-              'cart-added',
-              { count: result.value.count }
-            );
-          }
+      // A Vapor setup() returns a BLOCK - real DOM nodes. With no build step
+      // there is no compiler to turn a template into one, and `h` is not on
+      // the VaporChamber global in any variant, so build the node directly.
+      const button = document.createElement('button');
+      button.textContent = 'Add to cart';
+      button.addEventListener('click', async (e) => {
+        const result = await dispatch('cartAdd', { id: 1 }, { qty: 1 });
+        if (result.ok) {
+          // Bridge widget event -> Alpine listener
+          VaporChamber.emitDOMEvent(
+            e.target.getRootNode().host,
+            'cart-added',
+            { count: result.value.count }
+          );
         }
-      }, 'Add to cart');
+      });
+      return button;
     }
   });
 </script>

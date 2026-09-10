@@ -86,13 +86,29 @@ export function interpolateLoad(
   });
 }
 
+/**
+ * LONGEST prefix wins, not the first one registered.
+ *
+ * Returning the first match made overlapping prefixes resolve by object key
+ * order: register `'rows:'` and `'rows:archived:'` and every
+ * `rows:archived:...` load went to the general handler, or not, depending on
+ * which key happened to be written first. Nothing in the SPI hints that
+ * registration order is load-bearing, and the specific handler is what a caller
+ * registering a longer prefix is asking for.
+ *
+ * One pass, no sort: prefix maps hold a handful of entries and this runs per
+ * record per navigation.
+ */
 function matchPrefix(template: string, handlers: LoaderHandlers): [string, PrefixHandler] | null {
   const prefixes = handlers.prefixes;
   if (!prefixes) return null;
+  let best: [string, PrefixHandler] | null = null;
   for (const prefix of Object.keys(prefixes)) {
-    if (template.startsWith(prefix)) return [prefix, prefixes[prefix] as PrefixHandler];
+    if (template.startsWith(prefix) && (best === null || prefix.length > best[0].length)) {
+      best = [prefix, prefixes[prefix] as PrefixHandler];
+    }
   }
-  return null;
+  return best;
 }
 
 /** Run every loader in a record chain. Results keyed by record name;

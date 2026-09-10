@@ -4,9 +4,35 @@
  * cache, circuitBreaker, rateLimit, metrics
  *
  * These are optional, tree-shaken, and use only the public Plugin/AsyncPlugin types.
+ *
+ * ON THE DUPLICATION IN HERE, so it is not "cleaned up" a second time.
+ *
+ * Two pairs look extractable: the bounded eviction in `cache()` and
+ * `idempotent()`, and the "compact when more than half the buffer is dead"
+ * block in `rateLimit()` and `metrics()`. Both extractions were built and
+ * MEASURED rather than argued about, and both were rejected:
+ *
+ *   - Cost: shared `evictOldest` + `compactHead` helpers made the `.` ESM entry
+ *     +66 bytes minified / +24 gzip. The generic parameters they need - an
+ *     optional remove callback, a container object for the head buffer - cost
+ *     more than the ~15 duplicated lines they save, because a minifier already
+ *     handles small repeated patterns well. Nothing else moved: these plugins
+ *     are absent from all three IIFE variants (`plugins.ts` re-exports only
+ *     plugins-core and plugins-io), so `check-size.mjs` cannot even see them,
+ *     and the treeshake ceiling scenario does not include them either.
+ *   - Correctness: the two evictions are not the same operation. `cache()`
+ *     evicts DOWN TO the bound; `idempotent()` evicts ONE oldest entry before
+ *     inserting. Unifying them silently changed behaviour at `maxKeys: 0`, and
+ *     plugins-extra-gaps.test.ts caught it.
+ *
+ * The second point is now less sharp than it was - the two were aligned, see
+ * `idempotent`'s eviction - but the measurement stands: extracting costs bytes
+ * on the only entry that ships this code.
  */
 
 import { DEV } from './dev';
+import { onSettled } from './settled';
+import { MAX_TIMEOUT_MS, countOption } from './bounds';
 import type { Command, CommandResult, Plugin, AsyncPlugin } from './command-bus';
 import { matchesPattern, commandKey, BusError } from './command-bus';
 import { freezeCached } from './freeze';
@@ -49,13 +75,21 @@ export function cache(options: CacheOptions = {}): Plugin & {
   /** Current cache size. */
   size(): number;
 } {
-  const { ttl = 30_000, maxSize: rawMaxSize = 100, actions, key: keyFn } = options;
+  const { ttl: rawTtl = 30_000, maxSize: rawMaxSize = 100, actions, key: keyFn } = options;
+  // Fails CLOSED rather than open (`expiresAt > now` gates SERVING, so NaN just
+  // never serves), but routed through ../bounds anyway: a cache that silently
+  // stops caching is still a bad option behaving as something other than the
+  // documented default.
+  const ttl = countOption(rawTtl, 30_000, 0, MAX_TIMEOUT_MS);
   // Clamped, because it was not: a negative `maxSize` made `evictIfNeeded`'s
   // old `while (store.size > maxSize)` loop true against an EMPTY store, and
   // its `firstKey !== undefined` guard then made no progress - so
   // `cache({ maxSize: -1 })` hung the process on the first eviction instead of
   // throwing. Reachable from the public API with one bad option.
-  const maxSize = Math.max(0, Math.trunc(rawMaxSize));
+  // The NaN half of that lives in ../bounds now, along with the reason the old
+  // `| 0` was not enough: it mapped `Infinity` to 0, so asking for an unbounded
+  // cache got you one that stored nothing.
+  const maxSize = countOption(rawMaxSize, 100);
   const matchesActions = makeActionFilter(actions);
 
   // LRU-style cache: Map preserves insertion order, we move accessed entries to end
@@ -211,7 +245,13 @@ export function circuitBreaker(options: CircuitBreakerOptions = {}): Plugin & {
   /** Manually reset a circuit. */
   reset(action: string): void;
 } {
-  const { threshold = 5, resetTimeout = 30_000, actions, onOpen, onClose } = options;
+  const { threshold: rawThreshold = 5, resetTimeout: rawResetTimeout = 30_000, actions, onOpen, onClose } = options;
+  // `failCount >= threshold` gates TRIPPING, so a NaN threshold left the
+  // breaker closed through 20 consecutive failures - the guard silently absent
+  // rather than loudly misconfigured. Floor of 1: a breaker that opens before
+  // the first failure is not a breaker.
+  const threshold = countOption(rawThreshold, 5, 1);
+  const resetTimeout = countOption(rawResetTimeout, 30_000, 0, MAX_TIMEOUT_MS);
   const matchesActions = makeActionFilter(actions);
 
   // Per-action circuit state
@@ -227,7 +267,7 @@ export function circuitBreaker(options: CircuitBreakerOptions = {}): Plugin & {
     return c;
   }
 
-  const plugin: Plugin = (cmd, next) => {
+  const plugin: Plugin = ((cmd: Command, next: () => CommandResult) => {
     if (!matchesActions(cmd.action)) return next();
 
     const c = getCircuit(cmd.action);
@@ -241,8 +281,7 @@ export function circuitBreaker(options: CircuitBreakerOptions = {}): Plugin & {
       }
     }
 
-    const result = next();
-
+    return onSettled(next(), (result) => {
     if (result.ok) {
       if (c.state === 'half-open') {
         c.state = 'closed';
@@ -261,7 +300,8 @@ export function circuitBreaker(options: CircuitBreakerOptions = {}): Plugin & {
     }
 
     return result;
-  };
+  });
+  }) as unknown as Plugin;
 
   return Object.assign(plugin, {
     getState(action: string): CircuitState {
@@ -366,7 +406,9 @@ export function metrics(options: MetricsOptions = {}): Plugin & {
   /** Clear all entries. */
   clear(): void;
 } {
-  const { maxEntries = 1000, actions, onEntry } = options;
+  const { maxEntries: rawMaxEntries = 1000, actions, onEntry } = options;
+  // Measured at 1500 retained against a cap of 1000 with a NaN option.
+  const maxEntries = countOption(rawMaxEntries, 1000);
   const matchesActions = makeActionFilter(actions);
   let data: MetricsEntry[] = [];
   let head = 0; // O(1) eviction - head index tracks first live entry
@@ -379,11 +421,11 @@ export function metrics(options: MetricsOptions = {}): Plugin & {
     }
   }
 
-  const plugin: Plugin = (cmd, next) => {
+  const plugin: Plugin = ((cmd: Command, next: () => CommandResult) => {
     if (!matchesActions(cmd.action)) return next();
 
     const start = performance.now();
-    const result = next();
+    return onSettled(next(), (result) => {
     const duration = performance.now() - start;
 
     const entry: MetricsEntry = {
@@ -400,7 +442,8 @@ export function metrics(options: MetricsOptions = {}): Plugin & {
     if (onEntry) onEntry(entry);
 
     return result;
-  };
+  });
+  }) as unknown as Plugin;
 
   return Object.assign(plugin, {
     entries(): MetricsEntry[] { return data.slice(head); },
@@ -590,7 +633,21 @@ export type IdempotentOptions = {
  * // two rapid orderCreate dispatches -> one handler run, one backend write
  */
 export function idempotent(options: IdempotentOptions = {}): AsyncPlugin {
-  const { key, ttl = 60_000, actions, stampMeta = true, maxKeys = 500 } = options;
+  const { key, ttl: rawTtl = 60_000, actions, stampMeta = true, maxKeys: rawMaxKeys = 500 } = options;
+  // `now - cached.at < ttl` gates COLLAPSING a repeat, so a NaN window collapses
+  // nothing and every duplicate re-executes - the dedupe guarantee silently
+  // absent on a plugin whose entire purpose is that guarantee.
+  const ttl = countOption(rawTtl, 60_000, 0, MAX_TIMEOUT_MS);
+  // Clamped and floored exactly as `cache()` clamps `maxSize`, because the two
+  // options disagreed on what the same number means. `cache({ maxSize: 0 })`
+  // stored nothing; `idempotent({ maxKeys: 0 })` stored one entry, because it
+  // evicted a single oldest key BEFORE inserting - on an empty map that evicted
+  // nothing and the insert landed anyway. Same word, same library, opposite
+  // behaviour. A negative was likewise a silent 1-entry cache rather than an
+  // error. Eviction below now runs down to the bound after the insert, which is
+  // `cache()`'s rule, so `maxKeys: 0` remembers nothing.
+  // Bounded through ../bounds, for the same reason as cache() above.
+  const maxKeys = countOption(rawMaxKeys, 500);
   const matchesActions = makeActionFilter(actions);
   // key -> completed result (with timestamp) OR the in-flight promise.
   const done = new Map<string, { at: number; result: CommandResult }>();
@@ -620,11 +677,21 @@ export function idempotent(options: IdempotentOptions = {}): AsyncPlugin {
         // Cache only successes. A failed result (resolved errResult, ok:false)
         // is NOT cached so a genuine retry runs again.
         if (result?.ok) {
-          if (done.size >= maxKeys) {
-            const oldest = done.keys().next().value;
-            if (oldest !== undefined) done.delete(oldest);
+          // Frozen for the same reason the `cache()` plugin freezes: every
+          // later duplicate within `ttl` gets this exact object back, and the
+          // concurrent duplicates sharing `run` already share it. A consumer
+          // that sorts the list it was handed, or deletes a row optimistically,
+          // rewrites what every later dispatch reads. This site was the one the
+          // freeze contract did not cover, so it corrupted silently where the
+          // other two throw at the mutation.
+          done.set(k, { at: Date.now(), result: freezeCached(result) });
+          // Oldest first, down to the bound - `cache()`'s evictIfNeeded rule.
+          // Bounding the ITERATION rather than looping on the size is what
+          // makes a zero or negative bound terminate instead of spinning.
+          for (const oldest of done.keys()) {
+            if (done.size <= maxKeys) break;
+            done.delete(oldest);
           }
-          done.set(k, { at: Date.now(), result });
         }
         return result;
       },

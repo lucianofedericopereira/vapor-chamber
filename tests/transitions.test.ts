@@ -238,6 +238,92 @@ describe('createTransitionBridge', () => {
   });
 });
 
+// Vue waits for done() indefinitely, so a handler that never settles left the
+// element stuck in its transitioning state for the life of the page, with no
+// error anywhere. Measured before the guard: done() was never called and the
+// phase never left 'leaving'. directives.ts already capped its own dispatches
+// for exactly this reason; this module did not.
+describe('createTransitionBridge - done() timeout', () => {
+  it('calls done() when an async handler never settles', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const bus = createAsyncCommandBus();
+    bus.register('modalLeave', () => new Promise<never>(() => {})); // never settles
+
+    const t = createTransitionBridge({ bus, namespace: 'modal', timeout: 20 });
+    let doneCalled = false;
+    t.onLeave(mockEl(), () => { doneCalled = true; });
+
+    expect(doneCalled).toBe(false); // still waiting on the handler
+    await new Promise((r) => setTimeout(r, 60));
+
+    expect(doneCalled).toBe(true);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('did not settle within 20ms'));
+    warn.mockRestore();
+  });
+
+  it('does not call done() twice when the handler settles after the timeout', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    let release!: () => void;
+    const bus = createAsyncCommandBus();
+    bus.register('modalEnter', () => new Promise<void>((resolve) => { release = resolve; }));
+
+    const t = createTransitionBridge({ bus, namespace: 'modal', timeout: 10 });
+    let calls = 0;
+    t.onEnter(mockEl(), () => { calls++; });
+
+    await new Promise((r) => setTimeout(r, 40)); // timeout fires
+    release();                                   // ...then the handler lands
+    await new Promise((r) => setTimeout(r, 10));
+
+    // Calling done() twice would have Vue finish a transition it already
+    // finished, so `settled` makes it exactly-once.
+    expect(calls).toBe(1);
+    vi.restoreAllMocks();
+  });
+
+  it('clears the timer when the handler wins the race', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const bus = createAsyncCommandBus();
+    bus.register('modalEnter', async () => 'fast');
+
+    const t = createTransitionBridge({ bus, namespace: 'modal', timeout: 5 });
+    let calls = 0;
+    t.onEnter(mockEl(), () => { calls++; });
+
+    await new Promise((r) => setTimeout(r, 30)); // well past the timeout
+
+    expect(calls).toBe(1);
+    expect(warn).not.toHaveBeenCalled(); // no timeout warning: the timer was cleared
+    warn.mockRestore();
+  });
+
+  it('a NaN timeout falls back to the documented default, never to a stuck element', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const bus = createAsyncCommandBus();
+    bus.register('modalLeave', () => new Promise<never>(() => {}));
+
+    const t = createTransitionBridge({ bus, namespace: 'modal', timeout: Number('nope') });
+    let doneCalled = false;
+    t.onLeave(mockEl(), () => { doneCalled = true; });
+
+    // This asserted an immediate done(), which is what `| 0` produced by
+    // mapping NaN to 0 and letting the floor lift it to 1ms. The element was
+    // never stuck, but a leave transition that fires done() on the next tick is
+    // a transition that does not play - a bad option silently removing the
+    // animation rather than the timeout. ../bounds falls back to the documented
+    // 30s instead, which is what an ABSENT timeout already meant.
+    await vi.advanceTimersByTimeAsync(100);
+    expect(doneCalled).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(doneCalled).toBe(true);
+
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+  });
+});
+
 describe('useTransitionCommand', () => {
   beforeEach(() => {
     const bus = createCommandBus({ onMissing: 'ignore' });

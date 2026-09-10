@@ -142,16 +142,26 @@ lane.on('userUpdate', (data) => updateUI(data));
 lane.emit('userUpdate', { userId, name });
 ```
 
-On multi-listener fan-out the fast lane's `on`/`emit` is **~1.9-2.0x faster
-than mitt** (ratios below are from `npm run bench`; unlike the size and coverage
-figures they have no generator behind them, so re-run the bench before trusting
-them after a hot-path change). Against nanoevents it depends on the removal mode: the default
-(`'live'`, which matches the main bus - a listener removed mid-emit does not
-run) sits **~10-15% behind**, while `createFastLane({ removal: 'snapshot' })`
-is **at parity** (~0.9-1.0x). This paragraph previously claimed a flat "ties
-nanoevents within 5%", which predated the v1.12.0 unsub-during-emit identity
-guard that bought correctness for that margin.
+On multi-listener fan-out the fast lane's `on`/`emit` is
+**<!-- vc:benchFastLaneVsMitt -->1.83<!-- /vc:benchFastLaneVsMitt -->x mitt**.
+Against nanoevents it depends on the removal mode: the default (`'live'`, which
+matches the main bus - a listener removed mid-emit does not run) sits at
+**<!-- vc:benchFastLaneVsNano -->0.90<!-- /vc:benchFastLaneVsNano -->x**, while
+`createFastLane({ removal: 'snapshot' })` reaches
+**<!-- vc:benchFastLaneSnapshotVsNano -->1.06<!-- /vc:benchFastLaneSnapshotVsNano -->x**.
+The gap between those two modes is the price of the v1.12.0 unsub-during-emit
+identity guard, which bought correctness with it.
 
 Single-handler `compile()` dispatch is a different and much wider lead -
-**~2.1x nanoevents** - and is untouched by any of the above. Current numbers
-and the mode trade-off: [performance.md](../performance.md).
+**<!-- vc:benchCompileVsNano -->2.12<!-- /vc:benchCompileVsNano -->x nanoevents**
+- and is untouched by any of the above. The mode trade-off:
+[performance.md](../performance.md).
+
+> These four ratios are **generated**, not typed: `npm run bench` writes them
+> through `scripts/bench-ratios-reporter.mjs` and `npm run docs:stamp` publishes
+> them. This paragraph used to carry them by hand with a warning that they had
+> no generator, and two had drifted by the time anyone checked - the snapshot
+> mode was described as "at parity (~0.9-1.0x)" while measuring consistently
+> ahead of nanoevents. Ratios rather than hz on purpose: an absolute is host
+> state (rows here swing 20-30% run to run), a same-run ratio is not - though
+> even a ratio moves a little, so read the second decimal as noise.

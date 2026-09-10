@@ -24,6 +24,7 @@ import {
   getCommandBus,
   signal,
   tryAutoCleanup,
+  untracked,
   getVaporAppFn,
   getVaporInteropRef,
   getDefineVaporCustomElementFn,
@@ -220,8 +221,15 @@ export function defineVaporCommand(
   const bus = getCommandBus<CommandMap>();
   const unregister = bus.register(action, handler, options);
 
+  // `untracked`, like every other composable's dispatch. This one was the gap,
+  // and the worst place for it: a dispatch is an ACTION, not a read, and this
+  // helper is documented for hot paths in Vapor mode - i.e. the call most
+  // likely to be made from inside a render effect, where the handler's reads
+  // become that effect's dependencies and the component re-renders on state it
+  // never mentions. Pass-through when Vue is absent, so the "zero reactive
+  // overhead" claim above is unaffected for non-Vue consumers.
   function dispatch(target: any, payload?: any): CommandResult {
-    return bus.dispatch(action, target, payload);
+    return untracked(() => bus.dispatch(action, target, payload));
   }
 
   function dispose() { unregister(); }
@@ -270,7 +278,12 @@ export function useVaporAsyncCommand(asyncBus?: { dispatch: (action: string, tar
     loading.value = true;
     lastError.value = null;
     try {
-      const result = await bus.dispatch(action, target, payload);
+      // Untracked around the SYNCHRONOUS entry only - once the dispatch
+      // suspends, the caller's effect has finished and there is no subscriber
+      // left to leak into (pinned by the "synchronous entry is the whole
+      // exposure" test). Same scope as runDispatch's, one call, so the leaner
+      // hand-rolled wrapper above stays leaner.
+      const result = await untracked(() => bus.dispatch(action, target, payload));
       if (!result.ok) lastError.value = result.error ?? null;
       return result;
     } catch (e) {

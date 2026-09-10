@@ -141,3 +141,28 @@ describe('query edge cases', () => {
     expect(encodeQueryParam(undefined, {})).toBeNull();
   });
 });
+
+describe(`decodeQueryParam - the declaration is not the caller to keep`, () => {
+  it(`copies an array default instead of handing back the declaration own array`, () => {
+    // `def` lives in the compiled table for the router's whole life, so a
+    // shared reference meant one component mutating what it read rewrote the
+    // DECLARED default - permanently, for every route and every later read.
+    const def = { type: 'array' as const, default: ['a', 'b'] };
+
+    const first = decodeQueryParam(undefined, def) as string[];
+    expect(first).not.toBe(def.default);
+    first.push('mine');
+
+    expect(decodeQueryParam(undefined, def)).toEqual(['a', 'b']);
+    expect(def.default).toEqual(['a', 'b']);
+  });
+
+  it('leaves the absent-default and misdeclared-default paths as they were', () => {
+    // `??`, so a null default reads as absent and yields the empty array -
+    // unchanged by the copy, which only reaches an ARRAY default.
+    expect(decodeQueryParam(undefined, { type: 'array', default: null as never })).toEqual([]);
+    expect(decodeQueryParam(undefined, { type: 'array' })).toEqual([]);
+    // A default misdeclared as a scalar still comes back as itself.
+    expect(decodeQueryParam(undefined, { type: 'array', default: 'x' })).toBe('x');
+  });
+});

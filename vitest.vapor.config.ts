@@ -19,11 +19,17 @@ import { defineConfig } from 'vitest/config';
  * harness, not a fact about the router.
  *
  * Aliasing `vue` to the with-vapor build collapses that back to one instance,
- * which is exactly what a real Vapor app does (see `examples/vapor-sfc` and
- * `examples/vapor-island-cart`, both of which alias the same way). So this
- * config is not a test-only trick - it reproduces the supported production
- * setup, and it is the only configuration in which the router's composables can
- * be observed inside a real Vapor component at all.
+ * which is what a real Vapor app gets from its own bundler. It is the only
+ * configuration in which the router's composables can be observed inside a real
+ * Vapor component at all.
+ *
+ * This note used to add "see `examples/vapor-sfc` and `examples/vapor-island-cart`,
+ * both of which alias the same way". They no longer do, and have not since
+ * v1.17.0: Vue's own `vue.runtime.esm-bundler.js` re-exports `@vue/runtime-vapor`,
+ * so the examples' alias was reproducing what bare `vue` already resolves to and
+ * was deleted after building each one with and without it produced byte-identical
+ * output. The alias is still right HERE, because vitest's bare `vue` is not that
+ * bundler entry - but the examples are no longer evidence for it.
  *
  * The default config excludes `tests/vapor/**` so these never run unaliased,
  * where they would fail for the harness reason above.

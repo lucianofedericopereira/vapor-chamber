@@ -6,6 +6,7 @@
  */
 
 import type { Command, CommandResult, Hook } from './command-bus';
+import { GLYPH_FAIL, GLYPH_OK } from './glyphs';
 
 const INSPECTOR_ID = 'vapor-chamber';
 const LAYER_ID = 'vapor-chamber';
@@ -75,7 +76,7 @@ export function setupDevtools(bus: Observable, app: unknown): () => void {
         event: {
           time: Date.now(),
           title: cmd.action,
-          subtitle: result.ok ? '✓' : '✗ error',
+          subtitle: result.ok ? GLYPH_OK : `${GLYPH_FAIL} error`,
           data: {
             action: cmd.action,
             target: cmd.target,

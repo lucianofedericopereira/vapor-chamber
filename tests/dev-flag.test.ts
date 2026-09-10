@@ -65,3 +65,46 @@ describe('DEV - runtime fallback when no define exists', () => {
     expect(await freshDEV()).toBe(false);
   });
 });
+
+/**
+ * THE ESM ARTIFACT'S DEV, and the reason it is not the same text as above.
+ *
+ * `src/dev.ts` keeps a build define plus a runtime fallback, and the six
+ * branches of that expression are what the tests above cover. That shape is
+ * also why the ESM build never folded: a consumer's bundler cannot evaluate
+ * `typeof __VC_DEV__ !== 'undefined'`, so the ternary survived minification and
+ * carried every dev-only diagnostic string into production. Measured on a real
+ * Vite APP build consuming this package: 14,037 -> 12,764 raw, 4,453 -> 3,999
+ * brotli, about 10%.
+ *
+ * `scripts/build.mjs` therefore substitutes the resolved expression into the
+ * ESM artifact. That puts one line of behaviour in a build script, where
+ * coverage cannot see it - so it is pinned here instead: the substituted string
+ * is evaluated against the SAME four cases as the module above, and must agree
+ * with it every time.
+ */
+describe('DEV - the expression the ESM build substitutes', () => {
+  const evaluate = (source: string, processRef: unknown): boolean => {
+    const body = source.replace(/^export const DEV = /, 'return ').trim();
+    return new Function('process', body)(processRef) as boolean;
+  };
+
+  it('is a bare, foldable expression - no `__VC_DEV__`, no `typeof` on it', async () => {
+    const { DEV_ESM_SOURCE } = await import('../scripts/build.mjs');
+    expect(DEV_ESM_SOURCE).not.toContain('__VC_DEV__');
+    expect(DEV_ESM_SOURCE).toContain('process.env.NODE_ENV');
+    // The short-circuit that keeps a no-bundler ESM consumer safe.
+    expect(DEV_ESM_SOURCE).toContain("typeof process === \"undefined\"");
+  });
+
+  it('agrees with src/dev.ts on every case the module is tested for', async () => {
+    const { DEV_ESM_SOURCE } = await import('../scripts/build.mjs');
+    expect(evaluate(DEV_ESM_SOURCE, { env: { NODE_ENV: 'production' } })).toBe(false);
+    expect(evaluate(DEV_ESM_SOURCE, { env: { NODE_ENV: 'development' } })).toBe(true);
+    expect(evaluate(DEV_ESM_SOURCE, { env: {} })).toBe(true);
+    // No `process` at all: must be false, and must not throw - the whole point
+    // of the guard scripts/check-env-guards.mjs exists to enforce.
+    expect(() => evaluate(DEV_ESM_SOURCE, undefined)).not.toThrow();
+    expect(evaluate(DEV_ESM_SOURCE, undefined)).toBe(false);
+  });
+});

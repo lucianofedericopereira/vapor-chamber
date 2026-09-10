@@ -29,6 +29,8 @@
 // Codepoint constants (pre-computed, zero runtime cost)
 // ============================================================
 
+import { countOption } from './bounds';
+
 const OPEN_BRACE = 0x7b;
 const CLOSE_BRACE = 0x7d;
 const OPEN_BRACKET = 0x5b;
@@ -56,6 +58,32 @@ const SPACE = 0x20;
 const TAB = 0x09;
 const NEWLINE = 0x0a;
 const RETURN = 0x0d;
+
+const LOWER_R = 0x72;
+const LOWER_B = 0x62;
+const BACKSPACE = 0x08;
+const FORM_FEED = 0x0c;
+
+/**
+ * The two-character JSON escapes, at module scope.
+ *
+ * This table used to be an object literal built INSIDE handleEscape, so a
+ * fresh eight-entry object was allocated for every escape sequence in the
+ * stream - in a parser whose stated inputs are LLM completions and large
+ * exports, where escaped strings are the common case rather than the edge one.
+ * A Map, built once: the lookup returns the mapped unit directly, so the
+ * `in`-then-index double lookup goes too.
+ */
+const SIMPLE_ESCAPES = new Map<number, number>([
+  [LOWER_N, NEWLINE],
+  [LOWER_T, TAB],
+  [LOWER_R, RETURN],
+  [LOWER_B, BACKSPACE],
+  [LOWER_F, FORM_FEED],
+  [QUOTE, QUOTE],
+  [BACKSLASH, BACKSLASH],
+  [SLASH, SLASH],
+]);
 
 function isWhitespace(cp: number): boolean {
   return cp === SPACE || cp === TAB || cp === NEWLINE || cp === RETURN;
@@ -194,7 +222,9 @@ export class StreamParser {
   private readonly maxDepth: number;
 
   constructor(private readonly callbacks: StreamParserCallbacks = {}, options: StreamParserOptions = {}) {
-    this.maxDepth = options.maxDepth ?? 256;
+    // `parents.length >= maxDepth` gates REFUSAL, so a NaN depth accepted 5,000
+    // levels of nesting without once firing the guard that exists to stop it.
+    this.maxDepth = countOption(options.maxDepth, 256, 1);
   }
 
   /** Feed a string chunk to the parser. */
@@ -216,9 +246,26 @@ export class StreamParser {
     this.callbacks.onEnd?.();
   }
 
-  /** Stream from a fetch Response (ReadableStream body). */
+  /**
+   * Stream from a fetch Response (ReadableStream body).
+   *
+   * A body-less response (204, 304, a HEAD reply, or a hand-built
+   * `new Response(null)`) is treated as an empty stream rather than a crash.
+   * The `!` here used to assert the body away and threw
+   * `Cannot read properties of null (reading 'getReader')` - an exception that
+   * escaped as a rejection instead of reaching `onError`, unlike every other
+   * failure in this parser. Ending immediately is exactly what a present but
+   * zero-chunk body does: the read loop exits at once, the final
+   * `decoder.decode()` contributes nothing, and `end()` runs - so this is the
+   * same path, not a special case. `end()` still reports an unclosed structure
+   * if the stream stops mid-value.
+   */
   async stream(response: Response): Promise<void> {
-    const reader = response.body!.getReader();
+    if (!response.body) {
+      this.end();
+      return;
+    }
+    const reader = response.body.getReader();
     const decoder = new TextDecoder();
     for (;;) {
       const { done, value } = await reader.read();
@@ -250,7 +297,7 @@ export class StreamParser {
     this.keywordIndex = 0;
   }
 
-  // ── dispatch ──────────────────────────────────────────────
+  // -- dispatch ----------------------------------------------
 
   private codepoint(cp: number): void {
     switch (this.state) {
@@ -335,13 +382,8 @@ export class StreamParser {
 
   private handleEscape(cp: number): void {
     this.state = S_STRING;
-    const LOWER_R = 0x72;
-    const LOWER_B = 0x62;
-    const simple: Record<number, number> = {
-      [LOWER_N]: NEWLINE, [LOWER_T]: TAB, [LOWER_R]: RETURN, [LOWER_B]: 0x08, [LOWER_F]: 0x0c,
-      [QUOTE]: QUOTE, [BACKSLASH]: BACKSLASH, [SLASH]: SLASH,
-    };
-    if (cp in simple) { this.strBuf.push(simple[cp]); return; }
+    const mapped = SIMPLE_ESCAPES.get(cp);
+    if (mapped !== undefined) { this.strBuf.push(mapped); return; }
     if (cp === LOWER_U) { this.state = S_HEX; this.hexIndex = 0; return; }
     this.err(`Invalid escape: \\${String.fromCharCode(cp)}`);
   }
@@ -424,7 +466,7 @@ export class StreamParser {
     }
   }
 
-  // ── shared helpers ────────────────────────────────────────
+  // -- shared helpers ----------------------------------------
 
   private openObject(): void {
     if (this.parents.length >= this.maxDepth) { this.err('Max depth exceeded'); return; }

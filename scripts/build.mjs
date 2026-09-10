@@ -93,6 +93,44 @@ function writeLicenseManifest() {
   console.log(`✓ dist/LICENSE.txt - ${emitted.size} files`);
 }
 
+/**
+ * DEV, resolved for the ESM artifact only.
+ *
+ * `src/dev.ts` answers DEV with a build define and a RUNTIME FALLBACK, and the
+ * fallback is what the suite exercises - all six of its branches are covered by
+ * tests/dev-flag.test.ts. It is also what stopped the ESM build ever folding:
+ * a consumer's bundler cannot evaluate `typeof __VC_DEV__ !== 'undefined'`, so
+ * the ternary survived minification and carried EVERY dev-only diagnostic
+ * string into production. Measured on a real Vite APP build consuming this
+ * package: 14,037 -> 12,764 raw and 4,453 -> 3,999 brotli, about 10%.
+ *
+ * A `define` cannot fix it. It substitutes the identifier - including the one
+ * inside `typeof` - which duplicates the expression and still does not fold. So
+ * the ESM artifact gets the resolved form by SOURCE SUBSTITUTION here, and
+ * `src/dev.ts` keeps the shape its tests read. Nothing is deleted from the
+ * measured surface: the six branches stay in src, stay covered, and this string
+ * is pinned against them by tests/dev-flag.test.ts so the two cannot drift.
+ *
+ * The emitted expression is the fallback's exact semantics. `typeof process ===
+ * 'undefined'` short-circuits before anything touches `process.env`, so a
+ * no-bundler ESM consumer still evaluates it safely; and once a consumer's
+ * `process.env.NODE_ENV` define lands, both arms read false and a minifier
+ * collapses the ternary.
+ */
+export const DEV_ESM_SOURCE =
+  'export const DEV = typeof process === "undefined" ? false : process.env.NODE_ENV !== "production";\n';
+
+function resolveDevFlag() {
+  return {
+    name: 'vc-dev-flag',
+    enforce: 'pre',
+    transform(_code, id) {
+      if (!id.replace(/\\/g, '/').endsWith('/src/dev.ts')) return null;
+      return { code: DEV_ESM_SOURCE, map: null };
+    },
+  };
+}
+
 // 1. ESM multi-entry library - preserves sub-path exports defined in package.json
 await build({
   configFile: false,
@@ -162,7 +200,7 @@ await build({
     sourcemap: true,
     target: 'es2022',
   },
-  plugins: [licenseNotice({ strip: true })],
+  plugins: [resolveDevFlag(), licenseNotice({ strip: true })],
 });
 
 // 2. IIFE variants - sized for <script> tag use cases

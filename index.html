@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="color-scheme" content="light dark" />
+<title>vapor-chamber API reference</title>
+<meta name="author" content="Luciano Federico Pereira" />
+<meta name="description" content="vapor-chamber API reference - every published entry point, generated from the TypeScript compiler." />
+<meta property="og:type" content="website" />
+<meta property="og:title" content="vapor-chamber API reference" />
+<meta property="og:description" content="Lightweight command bus for Vue Vapor. Every published entry point, generated from the TypeScript compiler." />
+<meta property="og:image" content="assets/vapor-chamber.png" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+<meta name="theme-color" content="#15181c" media="(prefers-color-scheme: dark)" />
+<link rel="icon" href="assets/favicon/favicon.svg" type="image/svg+xml" />
+<link rel="icon" href="assets/favicon/favicon-96x96.png" sizes="96x96" type="image/png" />
+<link rel="shortcut icon" href="assets/favicon/favicon.ico" />
+<link rel="apple-touch-icon" href="assets/favicon/apple-touch-icon.png" sizes="180x180" />
+<link rel="manifest" href="assets/favicon/site.webmanifest" />
+<link rel="stylesheet" href="assets/docs/api.css" />
+</head>
+<body data-source="docs/api" data-repo="lucianofedericopereira/vapor-chamber">
+
+<!--
+  The shell only. Every word of the reference is fetched from docs/api/*.md at
+  view time by assets/docs/api.js - this file is committed and static, and
+  `npm run docs` never rewrites it. That split is the point: the generator's
+  only output is Markdown, which stays readable in an editor and diffable in a
+  pull request, while the presentation lives beside it as ordinary assets
+  instead of being re-emitted as hundreds of generated HTML files every run.
+-->
+
+<header class="topbar">
+  <a class="brand" href="./">
+    <img src="assets/favicon/favicon-96x96.png" alt="" width="24" height="24" />
+    <span>vapor-chamber</span>
+  </a>
+  <button id="search-trigger" class="search-trigger" type="button" aria-haspopup="dialog">
+    <span>Search the API</span>
+    <kbd>/</kbd>
+  </button>
+  <nav class="topnav">
+    <a href="https://github.com/lucianofedericopereira/vapor-chamber">Repo</a>
+    <a href="https://github.com/lucianofedericopereira/vapor-chamber/blob/main/docs/performance.md">Performance</a>
+    <a href="https://github.com/lucianofedericopereira/vapor-chamber/blob/main/ROADMAP.md">Roadmap</a>
+    <a href="https://github.com/lucianofedericopereira/vapor-chamber/blob/main/docs/integrations/laravel.md">Laravel</a>
+  </nav>
+</header>
+
+<div class="shell">
+  <aside class="sidebar">
+    <div class="sidebar-head">
+      <h2>Entry points</h2>
+      <div class="stepper">
+        <!--
+          Drawn as SVG paths rather than typed as "<" and ">". Those are
+          angle brackets, not chevrons: they carry the font's own weight and
+          proportions, sit on the text baseline rather than the button's
+          centre, and read as punctuation. A stroked path is also the only
+          form that stays ASCII under scripts/check-ascii.mjs, which bans the
+          typographic arrow set outright.
+        -->
+        <button id="prev-entry" type="button" title="Previous entry point (left arrow)"
+                aria-label="Previous entry point">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5 L8 12 L15 19" /></svg>
+        </button>
+        <button id="next-entry" type="button" title="Next entry point (right arrow)"
+                aria-label="Next entry point">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 5 L16 12 L9 19" /></svg>
+        </button>
+      </div>
+    </div>
+    <div id="nav" class="nav"></div>
+  </aside>
+  <main>
+    <article id="doc" aria-busy="true">
+      <p class="loading">Loading the reference...</p>
+    </article>
+  </main>
+  <aside class="toc" aria-label="On this page">
+    <h2>On this page</h2>
+    <div id="toc"></div>
+  </aside>
+</div>
+
+<div id="search-modal" class="search-modal" role="dialog" aria-modal="true" aria-label="Search the API" hidden>
+  <div class="search-panel">
+    <input id="search-input" type="search" placeholder="Jump to a symbol or entry point" autocomplete="off"
+           spellcheck="false" aria-controls="search-results" />
+    <div id="search-results" class="search-results"></div>
+  </div>
+</div>
+
+<noscript>
+  <p class="loading">
+    This page renders the Markdown in
+    <a href="https://github.com/lucianofedericopereira/vapor-chamber/tree/main/docs/api">docs/api/</a>,
+    which GitHub also renders directly if you would rather read it there.
+  </p>
+</noscript>
+
+<script src="assets/docs/api.js"></script>
+</body>
+</html>

@@ -213,20 +213,47 @@ export function usePagination<T = unknown>(options: PaginationOptions<T> = {}): 
   const pick = <R>(read: ((data: any) => R) | undefined, fallback: (data: any) => R): Ref<R> =>
     computed(() => (read ?? fallback)(data.value ?? {}));
 
-  const items = pick<readonly T[]>(options.items, (d) => d.items ?? d.data ?? []);
-  const total = pick<number>(options.total, (d) => d.total ?? d.meta?.total ?? items.value.length);
-  const perPage = pick<number>(options.perPage, (d) => {
-    const n = d.per_page ?? d.perPage ?? d.meta?.per_page ?? d.meta?.perPage;
-    return Number(n) || items.value.length || 1;
-  });
-  const lastPage = pick<number>(options.lastPage, (d) => {
-    const n = d.last_page ?? d.lastPage ?? d.meta?.last_page ?? d.meta?.lastPage;
-    return Number(n) || Math.max(1, Math.ceil(total.value / Math.max(1, perPage.value)));
-  });
+  /**
+   * Every number here comes from a BACKEND RESPONSE, and the extractors are
+   * overridable, so neither the value nor the reader is this library's to trust.
+   * `Math.max` and `||` do not contain a NaN: `Math.max(1, NaN)` is NaN, and NaN
+   * propagated straight through to the UI - `pageRange` rendered a literal "NaN"
+   * as a page link and `hasNext` was permanently false. A response with
+   * `total: "many"` was enough, because `total` was never coerced at all.
+   *
+   * `positive` is separate because zero means different things per field: an
+   * empty result set legitimately has `total: 0`, while `perPage: 0` and
+   * `lastPage: 0` are nonsense that used to fall through the old `||`.
+   */
+  const finite = (value: unknown, fallback: number): number => {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : fallback;
+  };
+  const positive = (value: unknown, fallback: number): number => {
+    const n = Number(value);
+    return Number.isFinite(n) && n > 0 ? n : fallback;
+  };
 
-  const current = computed(() => Math.max(1, Number(page.value) || 1));
+  const items = pick<readonly T[]>(options.items, (d) => d.items ?? d.data ?? []);
+  const total = computed(() =>
+    finite(pick<number>(options.total, (d) => d.total ?? d.meta?.total ?? items.value.length).value, items.value.length),
+  );
+  const perPage = computed(() =>
+    positive(
+      pick<number>(options.perPage, (d) => d.per_page ?? d.perPage ?? d.meta?.per_page ?? d.meta?.perPage).value,
+      items.value.length || 1,
+    ),
+  );
+  const lastPage = computed(() =>
+    positive(
+      pick<number>(options.lastPage, (d) => d.last_page ?? d.lastPage ?? d.meta?.last_page ?? d.meta?.lastPage).value,
+      Math.max(1, Math.ceil(finite(total.value, 0) / perPage.value)),
+    ),
+  );
+
+  const current = computed(() => Math.max(1, positive(page.value, 1)));
   const go = (next: number) => {
-    const target = Math.min(Math.max(1, Math.trunc(next)), lastPage.value);
+    const target = Math.min(Math.max(1, Math.trunc(positive(next, 1))), lastPage.value);
     // "`page` pushes by convention, so Back steps through pages" is a promise
     // of THIS COMPOSABLE, but the convention it relied on
     // (`resolveQueryHistory`) is keyed on the literal string 'page'. So
@@ -268,8 +295,12 @@ export function usePagination<T = unknown>(options: PaginationOptions<T> = {}): 
  * (render it as "..."). 0 is used rather than null so the array stays
  * `number[]` for `v-for` keys.
  */
-function buildPageRange(current: number, last: number, window: number): readonly number[] {
-  if (last <= window) return Array.from({ length: last }, (_, i) => i + 1);
+function buildPageRange(current: number, last: number, rawWindow: number): readonly number[] {
+  // `window` is a caller option and reaches arithmetic that Math.max cannot
+  // rescue: `Math.max(1, Math.floor(NaN))` is NaN, and the whole range then
+  // collapsed to `[1, last]` with the run in between silently empty.
+  const window = Number.isFinite(rawWindow) && rawWindow >= 1 ? Math.trunc(rawWindow) : 7;
+  if (last <= window) return Array.from({ length: Math.max(0, Math.trunc(last)) }, (_, i) => i + 1);
 
   const side = Math.max(1, Math.floor((window - 3) / 2));
   const start = Math.max(2, current - side);

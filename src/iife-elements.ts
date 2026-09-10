@@ -7,15 +7,15 @@
  * build pipeline.
  *
  * Surface:
- *   • Everything in CORE (bus + HTTP + light plugins + connect/createApp)
- *   • defineVaporCustomElement - the headline API
- *   • defineWidget() - one-line custom-element registration helper
+ *   - Everything in CORE (bus + HTTP + light plugins + connect/createApp)
+ *   - defineVaporCustomElement - the headline API
+ *   - defineWidget() - one-line custom-element registration helper
  *
  * NOT in this variant (use `vapor-chamber.iife.js` if you need them):
- *   • WebSocket / SSE - most widgets poll or use server-side push to HTTP
- *   • persist / sync / history / optimistic - stateful plugins; widgets
+ *   - WebSocket / SSE - most widgets poll or use server-side push to HTTP
+ *   - persist / sync / history / optimistic - stateful plugins; widgets
  *     usually keep state in their own custom-element instance
- *   • Vapor sync/async composables - these target SFC-based apps, not
+ *   - Vapor sync/async composables - these target SFC-based apps, not
  *     custom-element widgets
  *
  * Variant contents are not stable across major versions until v2.0; see ROADMAP.md.
@@ -36,6 +36,7 @@ import {
 } from './plugins';
 import { createHttpBridge, type HttpBridgeOptions } from './transports';
 import { defineVaporCustomElement } from './chamber-vapor';
+import { configureVue } from './chamber';
 import type { AsyncPlugin, Plugin } from './command-bus';
 
 export type CreateAppOptions = {
@@ -75,14 +76,14 @@ function connect(options: HttpBridgeOptions & { plugins?: Plugin[]; onMissing?: 
  *
  * Reasons it's the right convention here:
  *
- *   • Reads cleanly in server-rendered HTML next to Blade / Twig / ERB
+ *   - Reads cleanly in server-rendered HTML next to Blade / Twig / ERB
  *     components - a Laravel dev sees `<vc-cart/>` in a `.blade.php` file
  *     and immediately recognizes it as a vapor-chamber widget, not a
  *     framework directive.
- *   • Avoids collisions with host-page elements when the widget is
+ *   - Avoids collisions with host-page elements when the widget is
  *     embedded into a third-party site.
- *   • Searchable: `grep -r "<vc-"` finds every widget instance in one shot.
- *   • Short - two characters of overhead.
+ *   - Searchable: `grep -r "<vc-"` finds every widget instance in one shot.
+ *   - Short - two characters of overhead.
  *
  * The HTML spec requires custom-element names contain a hyphen;
  * `customElements.define()` enforces that. `vc-` satisfies it.
@@ -91,12 +92,27 @@ function connect(options: HttpBridgeOptions & { plugins?: Plugin[]; onMissing?: 
  * `<myapp-checkout/>`), keep yours - the brand convention wins. The
  * `vc-` recommendation is for projects without an existing convention.
  *
+ * ## What `setup()` returns
+ *
+ * A Vapor component returns a BLOCK - real DOM nodes - not a vnode. On a page
+ * with no build step there is no compiler to turn a template into one, so build
+ * the nodes directly. This example used to read
+ * `setup(props) { return () => h('span', ...) }`, which is wrong twice over on
+ * the page it is written for: `h` is not on the `VaporChamber` global in any
+ * variant (so the snippet threw `h is not defined`), and `h()` produces a vnode,
+ * which is the vDOM shape Vapor replaced. Pinned by
+ * `tests/vapor/widget-shape.test.ts`, which mounts a real widget.
+ *
  * @example
  * <script src=".../vapor-chamber-elements.iife.min.js"></script>
  * <script>
  *   VaporChamber.defineWidget('vc-cart', {
  *     props: { sku: String },
- *     setup(props) { return () => h('span', `SKU ${props.sku}`); }
+ *     setup(props) {
+ *       const span = document.createElement('span');
+ *       span.textContent = `SKU ${props.sku}`;
+ *       return span;
+ *     }
  *   });
  * </script>
  * <vc-cart sku="ABC-123"></vc-cart>
@@ -124,14 +140,18 @@ function defineWidget(tagName: string, options: any, extraOptions?: any): boolea
  * Pattern adapted from
  * [vue-custom-element](https://github.com/karol-f/vue-custom-element)'s
  * `customEmit` helper (Karol-F, MIT) - original predates Vue 3.6's Vapor
- * but the underlying gap (Vue emit ≠ DOM event) still exists today.
+ * but the underlying gap (Vue emit != DOM event) still exists today.
  *
  * @example Widget side
  * VaporChamber.defineWidget('vc-cart', {
  *   setup() {
- *     return () => h('button', {
- *       onClick: (e) => emitDOMEvent(e.target.getRootNode().host, 'cart-added', { sku: 'X' })
- *     }, 'Add');
+ *     const button = document.createElement('button');
+ *     button.textContent = 'Add';
+ *     button.addEventListener('click', (e) => {
+ *       const host = e.target.getRootNode().host;   // escape the shadow root
+ *       VaporChamber.emitDOMEvent(host, 'cart-added', { sku: 'X' });
+ *     });
+ *     return button;   // a BLOCK - see defineWidget above
  *   }
  * });
  *
@@ -184,6 +204,25 @@ const VaporChamber = {
   defineVaporCustomElement,
   defineWidget,
   emitDOMEvent,
+  /**
+   * Hand Vue's namespace to the library. Not optional on this variant's
+   * audience: Vue ships Vapor as `esm-browser` ONLY (there is no
+   * `vue.runtime-with-vapor.global.js`), so a classic `<script src>` page
+   * cannot obtain Vapor, and the runtime probe's bare `import('vue')` cannot
+   * resolve in a browser. A widget page therefore loads Vue as a module and
+   * passes it here.
+   *
+   * It was missing, which made `vueDetectionHint()`'s advice - printed on the
+   * wrapper's own null path, deliberately un-gated so a production IIFE shows
+   * it - impossible to follow: `VaporChamber.configureVue is not a function`.
+   * Pinned by `tests/iife-bundle.test.ts`.
+   *
+   *   <script type="module">
+   *     const Vue = await import('https://.../vue.runtime-with-vapor.esm-browser.prod.js');
+   *     VaporChamber.configureVue(Vue);
+   *   </script>
+   */
+  configureVue,
 } as const;
 
 if (typeof globalThis !== 'undefined') {

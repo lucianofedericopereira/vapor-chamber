@@ -9,6 +9,7 @@
  */
 
 import { createCommandBus, createAsyncCommandBus, } from './command-bus';
+import { GLYPH_COMMAND, GLYPH_OK, GLYPH_WARN } from './glyphs';
 import type { CommandBus, AsyncCommandBus, Plugin, CommandResult, CommandBusOptions, CommandMap, BusErrorCode, BusSeverity, BusEmitter } from './command-bus';
 
 // ---------------------------------------------------------------------------
@@ -320,17 +321,17 @@ export function schemaLogger(schema: BusSchema, options: SchemaLoggerOptions = {
     const desc = def?.description ? ` - ${def.description}` : '';
     const result = next();
     const fn = collapsed ? console.groupCollapsed : console.group;
-    fn(`⚡ ${cmd.action}${desc}`);
+    fn(`${GLYPH_COMMAND} ${cmd.action}${desc}`);
     if (def?.target && cmd.target && typeof cmd.target === 'object') {
       const errs = validateFields(def.target, cmd.target);
-      console.log('target:', cmd.target, errs.length ? `⚠ ${errs.join(', ')}` : '✓');
+      console.log('target:', cmd.target, errs.length ? `${GLYPH_WARN} ${errs.join(', ')}` : GLYPH_OK);
     } else {
       console.log('target:', cmd.target);
     }
     if (cmd.payload !== undefined) {
       if (def?.payload && typeof cmd.payload === 'object') {
         const errs = validateFields(def.payload, cmd.payload);
-        console.log('payload:', cmd.payload, errs.length ? `⚠ ${errs.join(', ')}` : '✓');
+        console.log('payload:', cmd.payload, errs.length ? `${GLYPH_WARN} ${errs.join(', ')}` : GLYPH_OK);
       } else {
         console.log('payload:', cmd.payload);
       }

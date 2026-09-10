@@ -32,24 +32,21 @@
       "vapor-chamber/*": ["../src/*"]
     }
   },
-  "include": [
-    "async-api.ts",
-    "custom-plugins.ts",
-    "feature-command-group.ts",
-    "feature-cross-tab-sync.ts",
-    "feature-error-boundary.ts",
-    "feature-persistence.ts",
-    "feature-retry.ts",
-    "feature-transitions.ts",
-    "feature-transports.ts",
-    "feature-vite-hmr.ts",
-    "form-validation.ts",
-    "pattern-2-laravel-vite.ts",
-    "pattern-3-inertia.ts",
-    "pattern-5-filament.ts",
-    "pattern-6-vapor-router.ts",
-    "realtime-search.ts",
-    "shopping-cart.ts",
-    "patterns-ambient.d.ts"
+  // A GLOB, not a list of the files that existed the day this was written.
+  // It WAS such a list, eighteen names long, and a list is how
+  // `vue-vapor-component.vue` - 332 lines, the largest single example, linked
+  // from the README as a full app - ended up checked by nothing at all, and
+  // how any .ts example added tomorrow would have joined it in silence. The
+  // exclusions below are named with their reasons, which is what separates an
+  // exception from a gap.
+  "include": ["*.ts", "patterns-ambient.d.ts"],
+  "exclude": [
+    // Needs @types/react and @types/react-dom just to PARSE its JSX - a real
+    // devDependency for one snippet that exercises the same
+    // getCommandBus()/dispatch surface every other pattern here already does.
+    "pattern-4-nextjs.tsx",
+    // Not a snippet: the shared Vite config factory, and each example's own
+    // `vue-tsc` already type-checks it during that example's build.
+    "vite.base.ts"
   ]
 }
