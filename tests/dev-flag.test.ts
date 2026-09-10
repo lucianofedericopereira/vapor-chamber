@@ -89,13 +89,16 @@ describe('DEV - the expression the ESM build substitutes', () => {
     return new Function('process', body)(processRef) as boolean;
   };
 
+  // First case in the file to import scripts/build.mjs, so it pays for pulling
+  // esbuild through the coverage transform - seconds, and not a measure of
+  // anything this asserts. The case below reuses the module cache.
   it('is a bare, foldable expression - no `__VC_DEV__`, no `typeof` on it', async () => {
     const { DEV_ESM_SOURCE } = await import('../scripts/build.mjs');
     expect(DEV_ESM_SOURCE).not.toContain('__VC_DEV__');
     expect(DEV_ESM_SOURCE).toContain('process.env.NODE_ENV');
     // The short-circuit that keeps a no-bundler ESM consumer safe.
     expect(DEV_ESM_SOURCE).toContain("typeof process === \"undefined\"");
-  });
+  }, 30000);
 
   it('agrees with src/dev.ts on every case the module is tested for', async () => {
     const { DEV_ESM_SOURCE } = await import('../scripts/build.mjs');

@@ -39,6 +39,10 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'json-summary', 'html'],
+      // Write the report even when a test fails. Off by default, which couples
+      // "one assertion wobbled" to "coverage/ does not exist" - and the
+      // docs/COVERAGE.md freshness gate then cannot be satisfied at all.
+      reportOnFailure: true,
       // Anchored, and examples explicitly excluded: `src/**/*.ts` also matches
       // nested source trees like examples/exo-astro/src/**, so example code
       // was silently counted toward the library's thresholds. The gate must

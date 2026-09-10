@@ -132,6 +132,9 @@ describe('generate-api-docs', () => {
     expect(stdout).not.toContain('package.json');
   });
 
+  // Spawns a node process that runs the real compiler over the fixture, so the
+  // default 5000ms budget is not a measure of anything - under `test:coverage`
+  // the instrumented run clears it on slower hardware while nothing is wrong.
   it('writes one page per entry point plus an index', () => {
     const { status, stdout } = run();
     expect(status).toBe(0);
@@ -145,7 +148,7 @@ describe('generate-api-docs', () => {
     // asserts there is no iife ROW rather than no mention.
     expect(index).not.toContain('](iife.md)');
     expect(index).toContain('2 entry points');
-  });
+  }, 30000);
 
   it('resolves aliases through a re-export barrel', () => {
     const page = read('index.md');
@@ -192,9 +195,10 @@ describe('generate-api-docs', () => {
     expect(page).not.toMatch(/\]\(#\w+\), \[/);
   });
 
+  // Same spawn, same reason as above.
   it('regenerates deterministically', () => {
     const first = read('index.md');
     run();
     expect(read('index.md')).toBe(first);
-  });
+  }, 30000);
 });

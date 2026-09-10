@@ -158,6 +158,7 @@
   ],
   "scripts": {
     "prepare": "npm run build",
+    "version": "npm run docs && npm run coverage:doc && npm run docs:stamp && git add docs README.md",
     "build": "tsc && node scripts/build.mjs",
     "build:types": "tsc",
     "build:js": "node scripts/build.mjs",

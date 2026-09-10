@@ -82,10 +82,16 @@ jobs:
         if: github.event_name == 'push' && matrix.os == 'ubuntu-latest' && matrix.node == '22'
         run: |
           npm run size:doc
-          if ! git diff --exit-code docs/BUNDLE-SIZES.md; then
+          # The prose QUOTES those numbers through vc:size* markers, and only
+          # stamp-docs rewrites it. Without this the bot lands a BUNDLE-SIZES.md
+          # whose markers nobody re-stamped, and the NEXT run's lint:check fails
+          # on a change CI itself made.
+          npm run docs:stamp
+          PATHS="docs README.md CONTRIBUTING.md ROADMAP.md SECURITY.md examples"
+          if ! git diff --exit-code $PATHS; then
             git config --global user.name "github-actions[bot]"
             git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add docs/BUNDLE-SIZES.md
+            git add $PATHS
             git commit -m "docs: auto-update bundle sizes [skip ci]"
             git push
           fi

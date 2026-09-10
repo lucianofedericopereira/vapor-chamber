@@ -44,7 +44,7 @@ A small core, and batteries you only pay for if you import them.
 - **Vue <!-- vc:vueAligned -->3.6.0-rc.7<!-- /vc:vueAligned --> aligned** - signals, `onScopeDispose`, `getCurrentScope`, alien-signals internals; tracked per release in the [CHANGELOG](CHANGELOG.md)
 - **One runtime dependency** (`alien-signals`); unimported modules tree-shake to zero
 - **ESM-only**, plus three IIFE `<script>` drop-ins for no-bundler pages
-- **<!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% coverage on all four axes** - statements, branches, functions and lines, across **<!-- vc:tests -->2075<!-- /vc:tests --> tests** in <!-- vc:testFiles -->138<!-- /vc:testFiles --> files ([full table](docs/COVERAGE.md)). Not a sampled figure: every branch in the measured surface is taken by a test
+- **<!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% coverage on all four axes** - statements, branches, functions and lines, across **<!-- vc:tests -->2076<!-- /vc:tests --> tests** in <!-- vc:testFiles -->138<!-- /vc:testFiles --> files ([full table](docs/COVERAGE.md)). Not a sampled figure: every branch in the measured surface is taken by a test
 
 ## Contents
 
@@ -1260,7 +1260,7 @@ optional and tree-shaken when unimported.
    form.ts · schema.ts · devtools.ts · directives.ts · vite-hmr.ts
 ```
 
-**Coverage:** <!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% statements · <!-- vc:covBranches -->100.0<!-- /vc:covBranches -->% branches · <!-- vc:covFunctions -->100.0<!-- /vc:covFunctions -->% functions · <!-- vc:covLines -->100.0<!-- /vc:covLines -->% lines across **<!-- vc:tests -->2075<!-- /vc:tests --> tests**
+**Coverage:** <!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% statements · <!-- vc:covBranches -->100.0<!-- /vc:covBranches -->% branches · <!-- vc:covFunctions -->100.0<!-- /vc:covFunctions -->% functions · <!-- vc:covLines -->100.0<!-- /vc:covLines -->% lines across **<!-- vc:tests -->2076<!-- /vc:tests --> tests**
 (<!-- vc:testFiles -->138<!-- /vc:testFiles --> files). The dispatch core is at 100% line + branch + function. Per-file table:
 [docs/COVERAGE.md](docs/COVERAGE.md); run `npm run test:coverage` for live numbers.
 
