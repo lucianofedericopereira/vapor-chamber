@@ -76,8 +76,10 @@ jobs:
       - run: node scripts/check-size.mjs
       - run: npm run loc
       
+      # Push-only: on a pull_request the checkout is a detached merge ref, so
+      # `git push` would fail outright - and a fork's token cannot write anyway.
       - name: Update bundle sizes docs
-        if: matrix.os == 'ubuntu-latest' && matrix.node == '22'
+        if: github.event_name == 'push' && matrix.os == 'ubuntu-latest' && matrix.node == '22'
         run: |
           npm run size:doc
           if ! git diff --exit-code docs/BUNDLE-SIZES.md; then
@@ -142,7 +144,9 @@ jobs:
       # committing it: an added or changed export shows up in the pull request
       # instead of disappearing into a gitignored build.
       - run: npm run docs
-      - run: git diff --exit-code docs/api
+      # `git add -N` first: a new entry point writes an untracked page, which a
+      # bare `git diff` does not see - the added export would pass unnoticed.
+      - run: git add -N docs/api && git diff --exit-code docs/api
 
   deploy-docs:
     name: deploy docs
