@@ -1150,7 +1150,7 @@ Three `<script>`-tag drop-ins. Pick by audience, not feature checklist.
 |---|---|--:|--:|--:|
 | **core** | Sprinkled JS on server-rendered pages (Blade, Rails, Django, WordPress). You dispatch user actions to a backend over HTTP. | <!-- vc:sizeIifeCoreRaw -->26.3<!-- /vc:sizeIifeCoreRaw --> KB | <!-- vc:sizeIifeCore -->7.7<!-- /vc:sizeIifeCore --> KB | <!-- vc:sizeIifeCoreGzip -->8.5<!-- /vc:sizeIifeCoreGzip --> KB |
 | **elements** | Embeddable widgets (chat bubbles, checkout buttons, third-party drop-ins). You ship a `<vc-widget>` custom element. | <!-- vc:sizeIifeElementsRaw -->28.0<!-- /vc:sizeIifeElementsRaw --> KB | <!-- vc:sizeIifeElements -->8.2<!-- /vc:sizeIifeElements --> KB | <!-- vc:sizeIifeElementsGzip -->9.1<!-- /vc:sizeIifeElementsGzip --> KB |
-| **full** | SPAs that grew big enough to want everything (realtime, undo/redo, persistence, full Vapor surface). | <!-- vc:sizeIifeFullRaw -->38.3<!-- /vc:sizeIifeFullRaw --> KB | <!-- vc:sizeIifeFull -->11.2<!-- /vc:sizeIifeFull --> KB | <!-- vc:sizeIifeFullGzip -->12.5<!-- /vc:sizeIifeFullGzip --> KB |
+| **full** | SPAs that grew big enough to want everything (realtime, undo/redo, persistence, full Vapor surface). | <!-- vc:sizeIifeFullRaw -->38.3<!-- /vc:sizeIifeFullRaw --> KB | <!-- vc:sizeIifeFull -->11.2<!-- /vc:sizeIifeFull --> KB | <!-- vc:sizeIifeFullGzip -->12.4<!-- /vc:sizeIifeFullGzip --> KB |
 
 <details>
 <summary><b>What's in each variant</b>, plus drop-in examples</summary>
