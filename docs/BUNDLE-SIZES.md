@@ -28,7 +28,7 @@ start; `on demand` is fetched only if that feature is used.** A `-` means nothin
 
 | export | min KB | gzip KB | brotli KB | first load KB | on demand KB |
 |---|--:|--:|--:|--:|--:|
-| `.` | 84.1 | 28.3 | 24.9 | 24.9 | - |
+| `.` | 84.1 | 28.4 | 24.9 | 24.9 | - |
 | `./vue` | 22.9 | 8.4 | 7.5 | 7.5 | - |
 | `./vapor` | 24.7 | 8.9 | 8.0 | 8.0 | - |
 | `./transports` | 11.9 | 4.8 | 4.3 | 4.3 | - |
@@ -40,18 +40,18 @@ start; `on demand` is fetched only if that feature is used.** A `-` means nothin
 | `./observable` | 0.5 | 0.3 | 0.3 | 0.3 | - |
 | `./standard-schema` | 1.8 | 0.8 | 0.7 | 0.7 | - |
 | `./alien-signals` | 1.0 | 0.6 | 0.5 | 0.5 | - |
-| `./reactive` | 16.4 | 6.0 | 5.3 | 5.3 | - |
+| `./reactive` | 16.4 | 5.9 | 5.3 | 5.3 | - |
 | `./outbox` | 5.3 | 2.2 | 2.0 | 2.0 | - |
 | `./mcp` | 4.5 | 2.2 | 2.0 | 2.0 | - |
 | `./devtools` | 0.1 | 0.1 | 0.1 | 0.1 | - |
-| `./stream-parser` | 6.8 | 2.1 | 2.0 | 2.0 | - |
+| `./stream-parser` | 6.8 | 2.2 | 2.0 | 2.0 | - |
 | `./store` | 1.5 | 0.8 | 0.7 | 0.7 | - |
 | `./router` | 29.6 | 11.5 | 10.4 | 10.2 | 0.2 |
 | `./router/vdom` | 0.9 | 0.5 | 0.4 | 0.4 | - |
 | `./router/vapor` | 1.0 | 0.6 | 0.5 | 0.5 | - |
 | `./router/remote` | 8.9 | 3.9 | 3.6 | 3.6 | - |
 | `./router-fetch` | 9.9 | 4.3 | 3.9 | 3.9 | 0.2 |
-| `./iife` | 40.2 | 13.7 | 12.3 | 12.3 | - |
+| `./iife` | 40.2 | 13.8 | 12.3 | 12.3 | - |
 | `./iife-core` | 26.0 | 8.7 | 7.8 | 7.8 | - |
 | `./iife-elements` | 29.4 | 10.0 | 8.9 | 8.9 | - |
 | `core: createCommandBus alone` | 13.0 | 4.6 | 4.1 | 4.1 | - |
@@ -61,6 +61,6 @@ start; `on demand` is fetched only if that feature is used.** A `-` means nothin
 
 | variant | min KB | gzip KB | brotli KB |
 |---|--:|--:|--:|
-| `vapor-chamber (full)` | 38.3 | 12.5 | 11.2 |
+| `vapor-chamber (full)` | 38.3 | 12.4 | 11.2 |
 | `vapor-chamber-core` | 26.3 | 8.5 | 7.7 |
 | `vapor-chamber-elements` | 28.0 | 9.1 | 8.2 |
