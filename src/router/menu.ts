@@ -120,7 +120,7 @@ function menuParentOf(record: TableRecord, inMenu: ReadonlySet<TableRecord>): Ta
 
 /** A menu row's target path: its static segments (optional params and splats
  *  simply drop). A required param is a table defect - menus are static
- *  navigation - loud in dev; Routes::validate rejects it at export. */
+ *  navigation - loud in dev. */
 function menuPath(record: TableRecord): string {
   let path = '';
   for (const segment of record.segments) {
@@ -140,7 +140,5 @@ function menuPath(record: TableRecord): string {
  *  current location doesn't carry yields a non-linking crumb, not an error. */
 function crumbHref(record: TableRecord, params: RouteParams, base: string): string | null {
   const rendered = renderSegments(record.segments, params);
-  // A projection, not a demand: an ancestor needing a param the current
-  // location cannot supply becomes a non-linking crumb rather than an error.
   return rendered.missing !== undefined ? null : base + rendered.path;
 }

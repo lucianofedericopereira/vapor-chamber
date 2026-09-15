@@ -42,7 +42,7 @@ const ROOT_FILES = [
   'biome.json',
   'package.json',
 ];
-const EXTENSIONS = ['.ts', '.js', '.mjs', '.md', '.json', '.vue', '.yml', '.yaml', '.html', '.css'];
+const EXTENSIONS = ['.ts', '.js', '.mjs', '.md', '.json', '.vue', '.yml', '.yaml', '.html', '.css', '.php'];
 const SKIP_DIRS = new Set(['node_modules', 'coverage', 'dist']);
 
 /**

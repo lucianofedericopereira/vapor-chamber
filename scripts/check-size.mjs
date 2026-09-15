@@ -92,9 +92,109 @@ const BUDGETS = {
   // `@vue/reactivity` const-folds away - verified: the specifier string
   // appears 0 times in all three IIFE bundles. Nobody pays for a code path
   // their build can never take.
-  'vapor-chamber.iife.min.js':          { rawMax: 39_800, brotliMax: 11_600 },
-  'vapor-chamber-core.iife.min.js':     { rawMax: 27_600, brotliMax: 8_050  },
-  'vapor-chamber-elements.iife.min.js': { rawMax: 29_100, brotliMax: 8_450  },
+  // 11_600 -> 11_700 (2026-09-14): the per-target loading feature (isLoading)
+  // adds ~200 B br; the size + perf audits gave back 268 (BusError declare,
+  // helper dedup) + 32 (shared result hidden class), so the net merged full
+  // IIFE is 11,625 - 25 over the old bar. Raised with ~75 B headroom because
+  // more features are queued. core/elements stayed under and are unchanged.
+  // 2026-09-15, one block for all three moves - full brotli 11_700 -> 11_810,
+  // full raw 39_800 -> 39_900, elements brotli 8_450 -> 8_480: the plugin-throw
+  // work. A plugin's throw or rejection becomes a VC_PLUGIN_THREW result at
+  // each plugin's boundary, and onMissing:'throw' is settled before it is
+  // re-thrown. Squeezed BEFORE this raise, every piece measured by reverting it
+  // in the minified bundle (brotli q11, full / core / elements): async runner
+  // per-level 38/42/45, pluginThrew 55/57/61 (of it the NO_HANDLER pass-through
+  // 17/19/23), sync settle + onMissing gate 24/29/29, async settle 17/21/27,
+  // sync runner try 5/3/8, chamber dedupe 7/-/-. Four squeeze variants were
+  // measured and declined (try/await per level: -45 B, and far slower - the
+  // declinedAwait arm of tests/plugin-throw-ab.test.ts; the others under 20 B
+  // or no speed gain). Measured: full 11,803 br / 39,862 raw, elements 8,449.
+  // elements moves with it rather than staying at 8,449/8,450, so the next
+  // unrelated byte there does not fail CI for someone with no context.
+  // 2026-09-15, full only - brotli 11_810 -> 11_817, raw 39_900 -> 39_933:
+  // history() recorded a redo twice on an ASYNC bus (its recorder runs when
+  // the dispatch settles, after redo()'s `finally` cleared `_replaying`) and
+  // wiped the redo stack. The redo dispatch now carries origin 'redo'
+  // (`_withOrigin`) and the recorder skips it; the flag stays for the sync
+  // bus. Every piece measured on the full IIFE, brotli (base 11,803): the
+  // wrap alone +5, the check alone +13, both +14 with the check first (+20
+  // with it after the action tests, +17 with `!=`; `cmd.meta.origin` without
+  // `?.` does not typecheck). The origin-only form the composable uses is +8
+  // but would record an undo handler's own dispatches on the sync bus -
+  // declined. The next 7 B would have to come from unrelated code. Measured:
+  // full 11,817 br / 39,933 raw. core and elements carry no history() and
+  // did not move.
+  // 2026-09-15, full brotli 11_817 -> 11_825 (raw unchanged): a sealed bus
+  // refuses clear() (VC_CORE_SEALED). seal() commits the ledger, and clear()
+  // on a sealed bus deleted the undo handlers, so history().undo() rolled back
+  // nothing. Measured on the full IIFE (base 11,817 br / 39,933 raw): the
+  // guard at both public clear() sites +10 / +44; one guard inside the shared
+  // clearState +12; the same guard as a comma expression +12; guards inside
+  // syncClear/asyncClear with dispose() calling clearState itself +22 / +95.
+  // Shipped: the first, plus assertNotSealed/addHook taking the state object
+  // instead of `s.sealed` at all twelve call sites - 11,825 / 39,907, so raw
+  // stays under its ceiling. core 7,957 and elements 8,448 stay under theirs.
+  // 2026-09-15, full brotli 11_825 -> 11_905 and raw 39_933 -> 40_261,
+  // elements brotli 8_480 -> 8_519 (core stays under, 8,020 / 27,254):
+  // dispose() settles waiting request()s as VC_CORE_ABORTED, and the sync
+  // request() honours its caller's signal (its type declared one; its body
+  // read only timeout). One cancel per waiting request, in a state field that
+  // is null until the first one; dispose() runs them. Every piece measured on
+  // the committed base, brotli full / core / elements: the field, its init
+  // and the two dispose() loops +16 / +12 / +13; the sync request() on top of
+  // that +68 / +77 / +77; the async request() on top of the field +46 / +37 /
+  // +38; all three together +89 / +81 / +83 (shared text is paid once).
+  // Squeezed, one build each: the sync path's abort listener and its dispose
+  // cancel as ONE closure -5 / -14 / -4, and one allocation fewer; `||=` for
+  // the lazy Set -4 / -4 / -8 (+1 on the Blade consumer bundle, see
+  // tests/esm-treeshake.test.ts); the dispose line as `s.waiting?.forEach`
+  // +7 / +8 / +15, declined; the listener closure always created -7 / -3 / -3
+  // but an allocation per waiting request that has no signal, declined. The
+  // first design, a bus-owned AbortController composed with the caller's
+  // signal on every request, fit here (full 11,822) and measured 1.7-1.9x on
+  // the sync waiting path and 1.24x on the async request - declined
+  // (rc-alignment-work.md s33). Measured: full 11,905 / 40,261, core 8,020 /
+  // 27,254, elements 8,519 / 29,018.
+  // Then q2/2, all three smaller: the VC_CORE_ABORTED message read "was
+  // aborted before it ran" for every abort, mid-flight ones included (a
+  // caller's abort while a request or a bridge waited, and dispose()); it
+  // reads "was aborted" now. Measured: full 11,900 / 40,247, core 8,014 /
+  // 27,240, elements 8,514 / 29,004; the full and elements budgets follow
+  // the measurement down.
+  // Then q3/1, all three larger - full brotli 11_900 -> 11_960 and raw
+  // 40_247 -> 40_503, core brotli 8_050 -> 8_084 (raw stays under 27_600),
+  // elements brotli 8_514 -> 8_582 and raw 29_100 -> 29_260: a before-hook's
+  // throw is a VC_CORE_BEFORE_CANCEL result (beforeCancel at both catch
+  // sites, exported for the TestBus), the code the union had declared since
+  // v1.0 and never produced. Measured, brotli full / core / elements: the
+  // helper and its two call sites, with an explicit severity and the stack
+  // captured, +52 / +67 / +60; then the stack-capture guard the cold path
+  // needed (a cancelled dispatch cost 2.2x with the capture, 1.05-1.09x
+  // without - tests/before-cancel-ab.test.ts), net of the dropped severity,
+  // +8 / +3 / +8. Measured: full 11,960 / 40,503, core 8,084 / 27,496,
+  // elements 8,582 / 29,260.
+  // Then cancel/1 - full brotli 11_960 -> 12_033 and raw 40_503 -> 40_878,
+  // core brotli 8_084 -> 8_170 and raw 27_600 -> 27_871, elements brotli
+  // 8_582 -> 8_661 and raw 29_260 -> 29_635: dispose() runs each installed
+  // plugin's dispose(), and retry() tracks its backoff sleeps so dispose()
+  // can end them as VC_CORE_ABORTED. Measured, brotli full / core / elements,
+  // retry included in all three: the loop as a helper with typeof and .call
+  // +82 / +99 / +97; the helper with an optional call +3 / -7 / -4 on that;
+  // the loop INLINED in both dispose functions with the optional call -9 /
+  // -13 / -18 on the first - SHIPPED; the Blade consumer bundle carries +22
+  // of it, retry not being in that bundle. Measured: full 12,033 / 40,878,
+  // core 8,170 / 27,871, elements 8,661 / 29,635.
+  // Then undo/1 - full brotli 12_033 -> 12_094 and raw 40_878 -> 40_944,
+  // core 8_170 -> 8_177 (raw 27_891), elements 8_661 -> 8_673 (raw 29_655):
+  // one rule for dispatches made inside an undo handler or a redo - a scoped
+  // origin read in stampMeta (`_withOriginScope`), the history plugin's
+  // `_replaying` flag gone, the composable scoped the same way. core and
+  // elements carry the slot read only (+7 / +12); full carries the plugin
+  // and composable changes too. Measured: full 12,094 / 40,944, core 8,177 /
+  // 27,891, elements 8,673 / 29,655.
+  'vapor-chamber.iife.min.js':          { rawMax: 40_944, brotliMax: 12_094 },
+  'vapor-chamber-core.iife.min.js':     { rawMax: 27_891, brotliMax: 8_177  },
+  'vapor-chamber-elements.iife.min.js': { rawMax: 29_655, brotliMax: 8_673  },
 };
 
 const BR_OPTS = { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } };

@@ -111,22 +111,65 @@ function writeLicenseManifest() {
  * measured surface: the six branches stay in src, stay covered, and this string
  * is pinned against them by tests/dev-flag.test.ts so the two cannot drift.
  *
- * The emitted expression is the fallback's exact semantics. `typeof process ===
- * 'undefined'` short-circuits before anything touches `process.env`, so a
- * no-bundler ESM consumer still evaluates it safely; and once a consumer's
- * `process.env.NODE_ENV` define lands, both arms read false and a minifier
- * collapses the ternary.
+ * THE EXPRESSION. Its first shape, `typeof process === "undefined" ? false :
+ * process.env.NODE_ENV !== "production"`, read false in every browser page a
+ * bundler's dev server serves: the server replaces `process.env.NODE_ENV`, but
+ * a page has no `process`, so the guard answered first (verified in a real
+ * browser, Vite 8, both with the package pre-bundled and served unbundled).
+ * The guard now also passes on `import.meta.env?.DEV`, which Vite sets in
+ * every module it serves, and the rest is unchanged:
+ *
+ *   - Node (vitest, SSR)     `process` exists; NODE_ENV decides, as before.
+ *   - Vite dev page          no `process`, `import.meta.env.DEV` true, and
+ *                            NODE_ENV already substituted, so nothing throws.
+ *   - no-bundler page        neither exists: false, and `process.env` is never
+ *                            touched, so no ReferenceError.
+ *   - production build       NODE_ENV substituted, so BOTH arms read false and
+ *                            a minifier collapses the ternary, as before.
+ *
+ * WHERE IT IS EMITTED. Once per importing module, never as a shared export. A
+ * minifier folds DEV only inside the chunk that defines it: in a code-split
+ * app, a chunk that IMPORTED the one shared constant kept every warning it
+ * guards (measured on examples/vapor-island-cart, whose Cart chunk shipped
+ * the whole probe-path hint, 4,718 -> 3,264 B raw). So every `./dev` import
+ * from src resolves to its own module, which lands in its importer's chunk,
+ * and no chunk of this build or a consumer's imports DEV from another. Both
+ * examples' production chunks are now byte-identical to a build where DEV is
+ * the literal `false` in every module; tests/dev-esm-consumers.test.ts pins
+ * that for the one-chunk and the code-split shape.
+ *
+ * WHY A PLACEHOLDER. Vite's library build statically replaces `import.meta.env`
+ * in the code it bundles (measured: the arm came out `|| false`, which bakes
+ * OUR build's answer in and silences every dev page again), so the modules
+ * carry a placeholder and the expression is written in after bundling.
  */
-export const DEV_ESM_SOURCE =
-  'export const DEV = typeof process === "undefined" ? false : process.env.NODE_ENV !== "production";\n';
+export const DEV_ESM_EXPR =
+  'typeof process !== "undefined" || import.meta.env?.DEV ? process.env.NODE_ENV !== "production" : false';
+export const DEV_ESM_SOURCE = `export const DEV = ${DEV_ESM_EXPR};\n`;
+
+const DEV_PLACEHOLDER = '__VC_DEV_ESM__';
 
 function resolveDevFlag() {
   return {
     name: 'vc-dev-flag',
     enforce: 'pre',
-    transform(_code, id) {
-      if (!id.replace(/\\/g, '/').endsWith('/src/dev.ts')) return null;
-      return { code: DEV_ESM_SOURCE, map: null };
+    resolveId(source, importer) {
+      if (!importer || !/^\.\.?\/dev$/.test(source)) return null;
+      if (!importer.replace(/\\/g, '/').includes('/src/')) return null;
+      return `\0vc-dev:${importer}`;
+    },
+    load(id) {
+      return id.startsWith('\0vc-dev:') ? `export const DEV = ${DEV_PLACEHOLDER};\n` : null;
+    },
+    generateBundle(_options, bundle) {
+      for (const file of Object.values(bundle)) {
+        if (file.type !== 'chunk') continue;
+        // An import that bypassed resolveId would bring back the shared constant.
+        if (file.moduleIds.some((m) => m.replace(/\\/g, '/').endsWith('/src/dev.ts'))) {
+          this.error(`${file.fileName} bundles src/dev.ts; every DEV must be derived per module`);
+        }
+        file.code = file.code.split(DEV_PLACEHOLDER).join(`(${DEV_ESM_EXPR})`);
+      }
     },
   };
 }

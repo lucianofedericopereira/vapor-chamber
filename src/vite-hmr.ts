@@ -1,7 +1,23 @@
 /**
- * vapor-chamber - Vite HMR plugin
+ * vapor-chamber - Vite plugins: HMR (serve) and build-time Vue wiring (build)
  *
- * Unreleased - CODE CHANGE, and the first one this file's own tests could not
+ * v1.20.0 - CHANGED (same release, later): `vaporChamberWire()` also runs under the dev server,
+ *           where it only defines `__VC_WIRED__`. chamber.ts's DEV probe-path
+ *           hint reads it, so a plugin user is no longer told to change imports
+ *           the plugin already wires in the build. The redirect stays
+ *           build-only, now on a measurement: over a pre-bundled install, a
+ *           dev-time redirect put two chamber modules in the page. See the
+ *           function's note.
+ * v1.20.0 - ADDED: `vaporChamberWire()`, a second plugin, build-only. It
+ *           resolves the bare 'vapor-chamber' specifier to a virtual module
+ *           that imports 'vapor-chamber/vue' (or '/vapor') for its side effect
+ *           and re-exports the real root, so an app importing its composables
+ *           from the root is wired in production with no import changed (H1).
+ *           Kept apart from `vaporChamberHMR`, which stays serve-only and
+ *           unchanged: one runs where the probe cannot resolve, the other
+ *           where it can. See the function's own note for the shape and why
+ *           it does not run under the dev server.
+ * v1.19.0 - CODE CHANGE, and the first one this file's own tests could not
  *           have found. The transform claimed `.vue` and `.vapor.vue` and had
  *           never delivered a shim to either: `enforce: 'pre'` puts it ahead of
  *           @vitejs/plugin-vue, so it prepended its import to RAW SFC text,
@@ -356,6 +372,127 @@ export { getCommandBus, setCommandBus, resetCommandBus };
       // costs neither a map nor a VLQ encoder.
       const injected = `import '${virtualModuleId}';`;
       return { code: `${injected}${code}` };
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// vaporChamberWire - build-time Vue wiring for apps that import the root
+// ---------------------------------------------------------------------------
+
+export type VaporChamberWireOptions = {
+  /**
+   * Which static entry wires Vue into the root. `'vue'` (the default) wires
+   * the Vue 3.5-safe primitives and the `@vue/reactivity` tracking pair, the
+   * same as importing `vapor-chamber/vue`. `'vapor'` wires that plus
+   * `createVaporApp`, `defineVaporComponent` and `defineVaporAsyncComponent`,
+   * the same as importing `vapor-chamber/vapor` - pick it when the app
+   * compiles `<script setup vapor>` SFCs.
+   *
+   * The choice is yours on purpose. The plugin does not inspect
+   * @vitejs/plugin-vue to guess it: `'vapor'` puts the Vapor runtime in the
+   * bundle, which a vDOM-only Vue 3.6 app should not pay for, and a guess
+   * would decide that cost for you.
+   */
+  entry?: 'vue' | 'vapor';
+};
+
+/**
+ * Prefix of the virtual "wired root" module. The real root's resolved id is
+ * appended, so two copies of the package in one graph (a monorepo, a linked
+ * checkout) each get their own wired root instead of sharing a guess.
+ */
+const WIRED_ROOT_PREFIX = '\0vapor-chamber:wired-root:';
+
+/**
+ * vaporChamberWire - make root imports production-correct in a Vite build.
+ *
+ * The package root must work with no Vue in the tree, so it reaches Vue
+ * through a runtime lookup that resolves under a dev server and cannot resolve
+ * in a production bundle. An app importing its composables from the root
+ * therefore ships them without reactivity, cleanup or the KeepAlive guard -
+ * which `warnUnwired()` in chamber.ts now reports once at runtime, and which
+ * `vapor-chamber/vue` / `vapor-chamber/vapor` fix by being imported instead.
+ *
+ * This plugin fixes it without changing an import. It resolves the bare
+ * `vapor-chamber` specifier - from every importer: scripts, compiled SFCs, the
+ * HMR shim - to a virtual module whose whole body is
+ *
+ *     import 'vapor-chamber/vue';            // or /vapor
+ *     export * from '<the real root>';
+ *
+ * so the static entry's wiring is in the graph wherever the root is, and the
+ * real root is reached by its resolved id (`this.resolve(..., { skipSelf })`),
+ * which is what keeps the redirect from resolving to itself.
+ *
+ * A redirect of `vapor-chamber` straight to `vapor-chamber/vue` would not
+ * work: the root also exports the bus, plugins, transports and the HTTP
+ * client, and the Vue entries deliberately do not.
+ *
+ * THE REDIRECT IS BUILD ONLY, on a measurement. Under the dev server the
+ * runtime lookup resolves by itself, so there is nothing to fix - and a
+ * redirect there splits the library. With the package installed (so Vite's
+ * optimizer pre-bundles it), the wired root's `export *` reaches the
+ * pre-bundled root while its `import 'vapor-chamber/vue'` is served
+ * unbundled: the optimizer never pre-bundles an import made from a module
+ * filed under node_modules, which a virtual module carrying the real root's
+ * path is. Two chamber modules, and the wiring lands on the one the app does
+ * not use. The documented pattern (bus from the root, composables from /vue)
+ * stays at one. tests/vite-wire-plugin.test.ts pins both counts on a real dev
+ * server.
+ *
+ * Under serve the plugin does one thing instead: it defines `__VC_WIRED__`.
+ * chamber.ts's DEV probe-path hint reads it and stays quiet, because its
+ * advice - import from `vapor-chamber/vue` - is what this plugin already does
+ * to the build. The define arrives as a GLOBAL (Vite leaves dependency code
+ * untouched in dev; its client env module assigns every define to
+ * `globalThis`, and vitest does the same in its test runtime), so it is read
+ * wherever those run. It does not reach SSR with the package externalized -
+ * measured; Node loads the dist as it is. No `apply` for that reason: Vite
+ * drops a plugin before its `config` hook runs, and the dev half lives there.
+ * `vaporChamberHMR()` is unchanged and still serve-only; the two compose.
+ *
+ * Costs nothing in the library (it runs in Vite's process and is never
+ * bundled into an app). What it adds to an app is exactly what importing the
+ * static entry adds. Pinned by tests/vite-wire-plugin.test.ts, which runs a
+ * real Vite build of a root-only consumer with and without it.
+ *
+ * @example
+ * // vite.config.ts
+ * import vue from '@vitejs/plugin-vue';
+ * import { vaporChamberWire } from 'vapor-chamber/vite';
+ *
+ * export default defineConfig({
+ *   plugins: [vue(), vaporChamberWire({ entry: 'vapor' })],
+ * });
+ */
+export function vaporChamberWire(options: VaporChamberWireOptions = {}): any {
+  const wiring = options.entry === 'vapor' ? 'vapor-chamber/vapor' : 'vapor-chamber/vue';
+  // Set by `config`, which Vite calls before any resolve hook runs.
+  let serve = false;
+
+  return {
+    name: 'vapor-chamber-wire',
+    enforce: 'pre' as const,
+
+    config(_config: unknown, env: { command: 'build' | 'serve' }) {
+      serve = env.command === 'serve';
+      return serve ? { define: { __VC_WIRED__: 'true' } } : undefined;
+    },
+
+    async resolveId(this: any, id: string, importer: string | undefined) {
+      if (serve || id !== 'vapor-chamber') return;
+      const real = await this.resolve(id, importer, { skipSelf: true });
+      // Unresolvable, or the consumer made the package external (a library
+      // build): leave it alone - there is no graph here to wire into.
+      if (!real || real.external) return;
+      return WIRED_ROOT_PREFIX + real.id;
+    },
+
+    load(id: string) {
+      if (!id.startsWith(WIRED_ROOT_PREFIX)) return;
+      const real = id.slice(WIRED_ROOT_PREFIX.length);
+      return `import '${wiring}';\nexport * from ${JSON.stringify(real)};\n`;
     },
   };
 }

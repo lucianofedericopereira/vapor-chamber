@@ -10,7 +10,7 @@
 
 import type { Command, CommandResult, AsyncPlugin, BaseBus } from './command-bus';
 import { MAX_TIMEOUT_MS, countOption } from './bounds';
-import { matchesPattern, abortedResult, } from './command-bus';
+import { matchesPattern, abortedResult, _okResult, _errResult, } from './command-bus';
 import { postCommand } from './http';
 import type { HttpClient } from './http';
 import { signal } from './signal';
@@ -195,28 +195,28 @@ export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
             csrf: csrfFlag, csrfCookieUrl, headers: reqHeaders, timeout, retry: effectiveRetry, signal: perCallSignal, onSessionExpired,
           });
 
-      // Backend redirect - either a body field or a 3xx status. Pass the URL
+      // Backend redirect - a body field only (see onRedirect). Pass the URL
       // to onRedirect (typically Inertia's `router.visit`) and resolve as a
       // failed dispatch. If onRedirect isn't set, surface as a string error.
       const redirectUrl = (res.data as any)?.redirect;
       if (redirectUrl && typeof redirectUrl === 'string') {
         if (onRedirect) {
           onRedirect(redirectUrl);
-          return { ok: false, error: new Error(`Redirected to ${redirectUrl}`) };
+          return _errResult(new Error(`Redirected to ${redirectUrl}`));
         }
-        return { ok: false, error: new Error(`Backend redirect to ${redirectUrl} (no onRedirect handler configured)`) };
+        return _errResult(new Error(`Backend redirect to ${redirectUrl} (no onRedirect handler configured)`));
       }
 
       if (!res.ok) {
         const msg = (res.data as any)?.message ?? (res.data as any)?.error ?? `HTTP ${res.status}`;
-        return { ok: false, error: new Error(msg) };
+        return _errResult(new Error(msg));
       }
 
       if (res.data?.ok === false) {
-        return { ok: false, error: new Error(res.data.error ?? 'Backend error') };
+        return _errResult(new Error(res.data.error ?? 'Backend error'));
       }
 
-      return { ok: true, value: res.data?.state };
+      return _okResult(res.data?.state);
     } catch (e) {
       // postCommand throws HttpError on non-2xx with the parsed body attached.
       // Surface the backend's own error/message (e.g. Laravel validation text)
@@ -231,9 +231,9 @@ export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
         if (src.status !== undefined) err.status = src.status;
         if (src.code !== undefined) err.code = src.code;
         err.response = src.response;
-        return { ok: false, error: err };
+        return _errResult(err);
       }
-      return { ok: false, error: src };
+      return _errResult(src);
     }
   };
 }
@@ -340,7 +340,7 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
       if (!res.ok) {
         const msg = (res.data as any)?.message ?? (res.data as any)?.error ?? `HTTP ${res.status}`;
         const err = new Error(msg);
-        for (const entry of batch) entry.resolve({ ok: false, error: err });
+        for (const entry of batch) entry.resolve(_errResult(err));
         return;
       }
 
@@ -348,11 +348,11 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
       for (const entry of batch) {
         const r = byId.get(entry.id);
         if (!r) {
-          entry.resolve({ ok: false, error: new Error(`[vapor-chamber] batch response missing a result for "${entry.cmd.action}" (id ${entry.id})`) });
+          entry.resolve(_errResult(new Error(`[vapor-chamber] batch response missing a result for "${entry.cmd.action}" (id ${entry.id})`)));
         } else if (r.ok === false) {
-          entry.resolve({ ok: false, error: new Error(r.error ?? 'Backend error') });
+          entry.resolve(_errResult(new Error(r.error ?? 'Backend error')));
         } else {
-          entry.resolve({ ok: true, value: r.state });
+          entry.resolve(_okResult(r.state));
         }
       }
     } catch (e) {
@@ -361,8 +361,22 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
       const src = e as Error & { response?: { data?: unknown }; status?: number; code?: string };
       const body = src.response?.data as { error?: unknown; message?: unknown } | null | undefined;
       const msg = body?.error ?? body?.message;
-      const err = typeof msg === 'string' && msg.length > 0 ? (new Error(msg, { cause: src }) as Error) : src;
-      for (const entry of batch) entry.resolve({ ok: false, error: err });
+      let err: Error = src;
+      if (typeof msg === 'string' && msg.length > 0) {
+        // The same fields createHttpBridge copies, and for the same reader:
+        // this used to keep the message alone, so retry()'s status rule had no
+        // status to read and a 422 batch was re-sent maxAttempts times
+        // (tests/retry-bridge-path.test.ts). Inline rather than shared with
+        // createHttpBridge, whose bundle (tests/esm-treeshake.test.ts) has two
+        // bytes of headroom.
+        const wrapped = new Error(msg, { cause: src }) as Error & { status?: number; code?: string; response?: unknown };
+        wrapped.name = src.name;
+        if (src.status !== undefined) wrapped.status = src.status;
+        if (src.code !== undefined) wrapped.code = src.code;
+        wrapped.response = src.response;
+        err = wrapped;
+      }
+      for (const entry of batch) entry.resolve(_errResult(err));
     }
   }
 
@@ -491,7 +505,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
         const req = pending.get(dropped.id)!;
         clearTimeout(req.timeoutId);
         pending.delete(dropped.id);
-        req.resolve({ ok: false, error: new Error(`WS queue overflow: "${dropped.envelope.command}" dropped`) });
+        req.resolve(_errResult(new Error(`WS queue overflow: "${dropped.envelope.command}" dropped`)));
       }
       queue.push({ id, envelope, timeout, queuedAt: Date.now() });
     }
@@ -510,7 +524,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
         const req = pending.get(id)!;
         clearTimeout(req.timeoutId);
         pending.delete(id);
-        req.resolve({ ok: false, error: new Error(`WS queued message "${envelope.command}" expired after ${elapsed}ms (timeout: ${timeout}ms)`) });
+        req.resolve(_errResult(new Error(`WS queued message "${envelope.command}" expired after ${elapsed}ms (timeout: ${timeout}ms)`)));
         continue;
       }
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -539,7 +553,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
     const reqs = Array.from(pending.values());
     pending.clear();
     for (const req of reqs) {
-      req.resolve({ ok: false, error: new Error(reason) });
+      req.resolve(_errResult(new Error(reason)));
     }
   }
 
@@ -584,9 +598,9 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
           clearTimeout(req.timeoutId);
           pending.delete(data.id);
           if (data.ok === false) {
-            req.resolve({ ok: false, error: new Error(data.error ?? 'WebSocket error') });
+            req.resolve(_errResult(new Error(data.error ?? 'WebSocket error')));
           } else {
-            req.resolve({ ok: true, value: data.state });
+            req.resolve(_okResult(data.state));
           }
         }
       } catch {
@@ -668,7 +682,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
       };
 
       const timeoutId = setTimeout(() => {
-        settle({ ok: false, error: new Error(`WS request "${cmd.action}" timed out after ${wsTimeout}ms`), value: undefined });
+        settle(_errResult(new Error(`WS request "${cmd.action}" timed out after ${wsTimeout}ms`)));
       }, wsTimeout);
 
       pending.set(id, {

@@ -401,8 +401,8 @@ export function createEngine(ctx: EngineContext) {
    * - **Each hook is contained.** One throwing analytics hook used to be
    *   enough to wrap a committed navigation as `component_load_failed`, fire
    *   `ctx.onError`, and `revert()` the URL out from under a live snapshot.
-   *   The bus's `notifyListeners` already does it this way ("listener threw
-   *   (logged, not fatal)").
+   *   The bus's `fanOutListeners` already does it this way (logs
+   *   "Listener error", not fatal).
    * - **Self-removal doesn't skip a neighbour, and doesn't re-run one either.**
    *   The unsubscribe closure splices this array, so the one-shot pattern
    *   (`const off = router.afterEach(() => { off(); ... })` - "scroll to top on

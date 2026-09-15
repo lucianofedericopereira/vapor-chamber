@@ -1,5 +1,7 @@
 import { ref } from 'vue';
-import { untracked } from 'vapor-chamber';
+// From the Vue entry, not the root: there untracked() is wired at build time.
+// From the package root it degrades to a pass-through in a production bundle.
+import { untracked } from 'vapor-chamber/vue';
 import { bus } from '../store';
 
 // Pre-binds one action + tracks its error state. Named useAction to avoid

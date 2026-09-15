@@ -42,9 +42,9 @@ node ../static-server.mjs    # -> http://localhost:3000/examples/sprinkled-blade
 node mock-server.mjs         # backend still on :3001
 ```
 
-Now the page is cross-origin: the count arrives empty and is filled by one
-`cartState` dispatch (that is the flicker server-rendering buys away), and every
-dispatch is preceded by a CORS preflight - which is why the backend's
+Now the page is cross-origin. The count arrives empty and one `cartState`
+dispatch fills it; that is the flicker server rendering removes. Every dispatch
+is also preceded by a CORS preflight, which is why the backend's
 `Access-Control-Allow-Headers` must list `X-Requested-With`, the header the
 bridge always sends.
 

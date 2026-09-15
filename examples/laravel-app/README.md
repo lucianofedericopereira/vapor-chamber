@@ -21,12 +21,12 @@ cd demo-app && php artisan serve
 # open http://127.0.0.1:8000/widget   - a Vapor widget bridging into the page
 ```
 
-`setup.sh` re-runs safely and **updates** an existing `demo-app`: it replaces its
+`setup.sh` is idempotent and **updates** an existing `demo-app`: it replaces its
 own route block rather than skipping when one is already present, so a scaffold
 made before a page was added still picks it up.
 
-Needs PHP ≥ 8.2 and Composer. `setup.sh` is idempotent and builds the
-vapor-chamber `dist/` on demand for the IIFE copy.
+Needs PHP ≥ 8.2 and Composer. `setup.sh` also builds the vapor-chamber `dist/`
+on demand for the IIFE copy.
 
 `composer create-project` always pulls the **current** Laravel skeleton - last
 verified end-to-end on **Laravel 13.21** with PHP 8.5. Nothing here pins a

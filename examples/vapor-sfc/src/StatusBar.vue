@@ -12,7 +12,9 @@
   panel x N panels.
 -->
 <script setup vapor lang="ts">
-import { useSharedCommandState } from 'vapor-chamber';
+// The Vapor entry wires Vue at build time; from the root this would work only
+// because main.ts happens to import it too.
+import { useSharedCommandState } from 'vapor-chamber/vapor';
 import { asRef } from './_reactive';
 
 // asRef: signals are Vue shallowRefs at runtime - typed as such so vue-tsc

@@ -3,10 +3,13 @@
  *
  * Builds a synthetic consumer entry that imports a typical Blade-style API
  * surface (createCommandBus + createHttpBridge + logger) and asserts:
- *   1. The bundled output stays under a brotli budget (currently 7.1 KB).
+ *   1. The minified bundle stays under a brotli ceiling (the value and its
+ *      ledger are at the assertion).
  *   2. The Vapor feature-detection registry from chamber.ts is fully tree-
  *      shaken - zero references to probeVue / applyVueModule /
- *      defineVaporCustomElement / waitForVueDetection / _vueOnScopeDispose.
+ *      defineVaporCustomElement / waitForVueDetection / _vueOnScopeDispose -
+ *      checked on an UNMINIFIED build of the same entry, since a minifier
+ *      renames module-local names (see the note at the list).
  *
  * If this test fails, something added a side-effect import that drags
  * chamber.ts back into transports/plugins consumers. Investigate the
@@ -15,6 +18,7 @@
  * Skips when dist/ hasn't been built or esbuild is unavailable.
  */
 import { describe, it, expect } from 'vitest';
+import { build as viteBuild } from 'vite';
 import { existsSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
@@ -33,10 +37,11 @@ try {
 }
 
 describe.skipIf(!haveDist || !esbuild)('ESM tree-shake regression', () => {
-  it('typical Blade consumer bundle stays under 7.1 KB brotli + drops Vapor registry', async () => {
+  it('typical Blade consumer bundle stays under its brotli ceiling + drops Vapor registry', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'vc-treeshake-'));
     const entry = join(dir, 'consumer.mjs');
     const out = join(dir, 'consumer.bundle.js');
+    const plain = join(dir, 'consumer.plain.js');
 
     writeFileSync(entry, `
       import { createCommandBus, logger } from '${dist('index.js').replace(/\\/g, '\\\\')}';
@@ -48,21 +53,38 @@ describe.skipIf(!haveDist || !esbuild)('ESM tree-shake regression', () => {
     `);
 
     try {
-      await esbuild.build({
+      const shared = {
         entryPoints: [entry],
         bundle: true,
         format: 'esm',
         platform: 'browser',
-        minify: true,
         treeShaking: true,
-        outfile: out,
         external: ['vue', '@vue/devtools-api'],
         logLevel: 'silent',
+      };
+      await esbuild.build({ ...shared, minify: true, outfile: out });
+      // The same consumer, not minified - what the symbol check below reads.
+      await esbuild.build({ ...shared, minify: false, outfile: plain });
+
+      // The SIZE ceiling is measured on a VITE production build - what a
+      // consumer actually ships. The esbuild build above omits a NODE_ENV
+      // define, so it keeps every DEV-warning branch a real app folds out; on
+      // this consumer that was ~660 B of code no one receives (esbuild 6,775 vs
+      // Vite 6,116, 2026-09-14). The esbuild bundles above stay for the
+      // symbol check below; only the number the ceiling guards moved to Vite.
+      const viteRes = await viteBuild({
+        configFile: false, root: dir, logLevel: 'silent', mode: 'production',
+        define: { 'process.env.NODE_ENV': '"production"' },
+        build: { write: false, minify: true, target: 'es2022', modulePreload: false,
+          rollupOptions: { input: entry, external: ['vue', '@vue/devtools-api'], output: { format: 'es' } } },
       });
+      const viteChunks = (Array.isArray(viteRes) ? viteRes : [viteRes]).flatMap((r) => ('output' in r ? r.output : []));
+      const viteCode = viteChunks.filter((o) => o.type === 'chunk').map((c) => c.code).join('\n');
+      const viteBr = brotliCompressSync(Buffer.from(viteCode), { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } });
 
       const buf = readFileSync(out);
       const br = brotliCompressSync(buf, { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } });
-      const src = buf.toString();
+      const src = readFileSync(plain, 'utf8');
 
       // Size budget. Locks the v1.2.0 signal-extraction win.
       // If this fails, look for a new side-effect import dragging chamber.ts in
@@ -271,10 +293,53 @@ describe.skipIf(!haveDist || !esbuild)('ESM tree-shake regression', () => {
       // success. The ceiling is a ratchet against sprawl, not against fixing a
       // defect it happens to sit in front of - but it did its job here twice
       // before this, which is why the raise is 28 and not more.
-      expect(br.length, `brotli bundle size grew unexpectedly (${br.length} bytes)`).toBeLessThan(6_590);
+      // Ceiling on the VITE production number (6,116 measured 2026-09-14);
+      // 6_300 leaves headroom for queued features. The esbuild ledger above is
+      // history: it tracked the old esbuild-no-define number, retired here.
+      // Ceiling 6_300 -> 6_310: dispose() settles waiting request()s and the
+      // sync request() honours its caller's signal (CHANGELOG v1.20.0). The
+      // queued features had used the headroom (6,240 on the base). Measured
+      // on this consumer, one build each:
+      //   6_240  base
+      //   6_247  + the `waiting` field, its init and the dispose() loop     +7
+      //   6_249  + the async request()'s cancel - the async bus is not in
+      //          this bundle; shared text moves                            +2
+      //   6_307  + the sync request(): the pre-flight abort check, the
+      //          listener add and remove, the Set add and delete          +58
+      // abortedResult was already here through the HTTP bridge, so the sync
+      // bus pays only its calls. Squeezed before this raise: one closure for
+      // the dispose cancel and the abort listener (-4 here, one allocation
+      // fewer), `||=` for the lazy Set (+1 here, -4 / -4 / -8 on the three
+      // IIFEs), a forEach dispose line (+5, declined). What remains is the
+      // feature: 3 B of headroom.
+      // 6_299 after q2/2: the VC_CORE_ABORTED message loses "before it ran",
+      // which was false for every mid-flight abort. The ceiling stays 6_310.
+      // Ceiling 6_310 -> 6_360: a before-hook's throw is a
+      // VC_CORE_BEFORE_CANCEL result (q3/1). Measured on this consumer:
+      // 6_345 with the helper and both call sites (+46), 6_351 with the
+      // stack-capture guard the cancelled path needed (+6, net of a dropped
+      // explicit severity). 9 B of headroom.
+      // Ceiling 6_360 -> 6_380: dispose() runs each installed plugin's
+      // dispose() (cancel/1). The loop inlined in both dispose functions,
+      // 6_351 -> 6_373 (+22; as a helper with typeof and .call +38, with an
+      // optional call +34). retry() is not in this bundle. 7 B of headroom.
+      // 6_376 after undo/1: the scoped-origin read in stampMeta (+3; the
+      // history code that uses it is not in this bundle). Ceiling unchanged,
+      // 4 B of headroom.
+      expect(viteBr.length, `vite production brotli grew unexpectedly (${viteBr.length} bytes)`).toBeLessThan(6_380);
 
       // Symbol budget. These are all chamber.ts-only - should NOT appear in a
       // consumer bundle that doesn't import Vue composables.
+      //
+      // Read off the UNMINIFIED build. Until batch 3 this list was checked
+      // against the minified output, where a minifier renames every
+      // module-local identifier - so `probeVue`, `applyVueModule` and
+      // `_vueOnScopeDispose` could never appear there, and three of these
+      // seven names guarded nothing. Measured on a consumer that ALSO imports
+      // `vapor-chamber/vue` (which pulls chamber.ts in): minified, it carried
+      // four of the seven (`waitForVueDetection` and the three `defineVapor*`
+      // property names); unminified, all seven, and this check fails on it.
+      // The ceiling above still reads the minified build, and did not move.
       const forbidden = [
         'probeVue',
         'applyVueModule',

@@ -4,7 +4,7 @@
  * Base-aware wrapper over the History API: all router-facing paths are
  * RELATIVE to the base ('/admin' stays a server concern); `createHref`
  * prepends it back for the DOM. `createMemoryHistory` is the same contract
- * for tests and SSR. Link handling lives in core/dom.ts, not here.
+ * for tests and SSR. Link handling lives in router/dom.ts, not here.
  */
 
 export type HistoryListener = (fullPath: string, info: { delta: number; state: unknown }) => void;

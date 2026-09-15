@@ -14,7 +14,8 @@ import { retry } from 'vapor-chamber'
 
 const httpBus = createAsyncCommandBus()
 
-httpBus.use(retry({ maxAttempts: 3, baseDelay: 300 }))
+// retry() for LOCAL work only - scoped away from the bridged 'cart*'/'order*'; HTTP retry is the bridge's `retry`.
+httpBus.use(retry({ maxAttempts: 3, baseDelay: 300, actions: ['ui*'] }))
 
 httpBus.use(createHttpBridge({
   endpoint: '/api/vc',
@@ -24,6 +25,7 @@ httpBus.use(createHttpBridge({
     'Accept-Language': navigator.language,
   },
   timeout: 15_000,                     // 15s timeout
+  retry: 2,                            // 408/429/5xx/timeouts, same Idempotency-Key
   actions: ['cart*', 'order*'],      // only these are forwarded to the server
 }))
 

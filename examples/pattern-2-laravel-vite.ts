@@ -7,14 +7,14 @@
  * resources/js/app.ts
  */
 
-import { createAsyncCommandBus, setCommandBus, retry } from 'vapor-chamber'
+import { createAsyncCommandBus, setCommandBus } from 'vapor-chamber'
 import { createHttpBridge, createSseBridge } from 'vapor-chamber/transports'
 import { createDirectivePlugin } from 'vapor-chamber/directives'
 import { createApp } from 'vue'
 import App from './App.vue'
 
-// 1. Create the bus. ASYNC bus - retry and createHttpBridge are async plugins;
-//    on a sync createCommandBus() they'd return a Promise where a result is
+// 1. Create the bus. ASYNC bus - createHttpBridge is an async plugin; on a
+//    sync createCommandBus() it would return a Promise where a result is
 //    expected and every dispatch would silently fail.
 const bus = createAsyncCommandBus()
 
@@ -25,14 +25,16 @@ bus.onAfter((cmd, result) => {
     console.log(`⚡ ${cmd.action}`, result.ok ? result.value : result.error)
   }
 })
-bus.use(retry({ maxAttempts: 3, baseDelay: 300, actions: ['api*', 'order*'] }))
 
-// 3. Install HTTP transport - all unhandled commands go to the server
+// 3. Install HTTP transport - all unhandled commands go to the server.
+//    HTTP retry lives on the bridge, not in a retry() plugin: 408/429/5xx/timeouts only.
 bus.use(createHttpBridge({
   endpoint: '/api/vc',
   csrf: true,
   headers: { 'X-App-Version': '2.0.0' },
   timeout: 15_000,
+  retry: 2,
+  noRetry: ['orderPlace', 'paymentCharge'], // non-idempotent: never re-sent
 }))
 
 // 4. Install SSE for server push (real-time notifications)
@@ -64,7 +66,9 @@ window.addEventListener('beforeunload', () => sse.teardown())
  * resources/js/components/ProductCard.vue
  * ----------------------------------------
  * <script setup lang="ts">
- * import { useCommand } from 'vapor-chamber'
+ * // Composables from the Vue entry: it wires Vue at build time. From the
+ * // package root they would lose reactivity and cleanup once built.
+ * import { useCommand } from 'vapor-chamber/vue'
  *
  * const props = defineProps<{ product: Product }>()
  * const { dispatch, loading, lastError } = useCommand()

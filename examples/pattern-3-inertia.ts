@@ -46,7 +46,9 @@ createInertiaApp({
  * No conflict, no duplication.
  *
  * <script setup lang="ts">
- * import { useCommand } from 'vapor-chamber'
+ * // Composables from the Vue entry: it wires Vue at build time. From the
+ * // package root they would lose reactivity and cleanup once built.
+ * import { useCommand } from 'vapor-chamber/vue'
  * import { router } from '@inertiajs/vue3'
  *
  * const props = defineProps<{ orders: Order[] }>()

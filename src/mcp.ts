@@ -29,7 +29,7 @@
 
 import { DEV } from './dev';
 import { countOption } from './bounds';
-import { BusError, matchesPattern, _withOrigin } from './command-bus';
+import { BusError, matchesPattern, _withOrigin, _errResult } from './command-bus';
 import type { CommandResult, Plugin } from './command-bus';
 import type { ActionSchema, BusSchema, FieldMap } from './schema';
 
@@ -174,7 +174,7 @@ export type McpHandlerOptions = {
  * advertised a version that had not existed for months. A failing test at
  * release time is the cheapest possible checklist.
  */
-export const MCP_SERVER_VERSION = '1.19.0';
+export const MCP_SERVER_VERSION = '1.20.0';
 
 /** Latest MCP protocol revision this handler speaks. */
 const MCP_PROTOCOL_VERSION = '2025-06-18';
@@ -314,7 +314,7 @@ export function createMcpHandler(
       // this promise settles.
       result = await _withOrigin('agent', () => bus.dispatch(name, target, rawPayload));
     } catch (e) {
-      result = { ok: false, error: e as Error };
+      result = _errResult(e as Error);
     }
     if (result.ok) return toolResult(JSON.stringify(result.value ?? null));
     const code = result.error instanceof BusError ? ` (${result.error.code})` : '';

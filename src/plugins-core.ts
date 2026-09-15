@@ -9,7 +9,7 @@ import { onSettled } from './settled';
 import { countOption } from './bounds';
 import { GLYPH_COMMAND } from './glyphs';
 import type { Command, CommandResult, Plugin, CommandBus } from './command-bus';
-import { BusError, commandKey, disposeAll } from './command-bus';
+import { BusError, commandKey, disposeAll, _okResult, _errResult, _withOriginScope } from './command-bus';
 
 /**
  * Logger plugin - logs all commands and results
@@ -107,7 +107,7 @@ export function validator(rules: {
     if (rule) {
       const error = rule(cmd);
       if (error) {
-        return { ok: false, error: new Error(error) };
+        return _errResult(new Error(error));
       }
     }
     return next();
@@ -158,11 +158,25 @@ export function history(options: {
   const maxSize = countOption(rawMaxSize, 50);
   const past: Command[] = [];
   const future: Command[] = [];
-  let _replaying = false; // true during redo dispatch - prevents double-recording
+  // A `_replaying` flag used to bracket the redo dispatch and the undo
+  // handler. It held only while the recorder ran INSIDE the dispatch - the
+  // sync bus. On an async bus the recorder runs when the dispatch settles,
+  // after the `finally` had cleared it, so a redo was recorded twice and the
+  // rest of the redo stack wiped; the redo dispatch then got origin 'redo'
+  // (`_withOrigin`, the useCommandHistory fix), which the recorder skips on
+  // both buses, and the flag stayed for what only it covered on the sync bus:
+  // the commands an undo handler or a redone handler dispatch themselves. On
+  // the async bus those were still recorded. Since v1.20.0 both windows are a
+  // SCOPED origin (`_withOriginScope`, read in stampMeta's synchronous
+  // prologue), which marks every dispatch made synchronously inside them on
+  // either bus, so the flag went. The origin test sits first because that
+  // order measured smallest (+14 B br on the full IIFE, against +20 after
+  // the action tests).
 
   const plugin: Plugin = ((cmd: Command, next: () => CommandResult) => onSettled(next(), (result) => {
+    const origin = cmd.meta?.origin;
     if (
-      !_replaying && result.ok &&
+      origin !== 'redo' && origin !== 'undo' && result.ok &&
       cmd.action !== undoAction && cmd.action !== redoAction &&
       (!filter || filter(cmd))
     ) {
@@ -189,10 +203,8 @@ export function history(options: {
         if (bus) {
           const undoHandler = bus.getUndoHandler(cmd.action);
           if (undoHandler) {
-            _replaying = true;
-            try { undoHandler(cmd); }
+            try { _withOriginScope('undo', () => undoHandler(cmd)); }
             catch (e) { console.error(`[vapor-chamber] Undo handler error for "${cmd.action}":`, e); }
-            finally { _replaying = false; }
           }
         }
       }
@@ -204,10 +216,8 @@ export function history(options: {
       if (cmd) {
         past.push(cmd);
         if (bus) {
-          _replaying = true;
-          try { bus.dispatch(cmd.action, cmd.target, cmd.payload); }
+          try { _withOriginScope('redo', () => bus.dispatch(cmd.action, cmd.target, cmd.payload)); }
           catch (e) { console.error(`[vapor-chamber] Redo dispatch error for "${cmd.action}":`, e); }
-          finally { _replaying = false; }
         }
       }
       return cmd;
@@ -276,7 +286,7 @@ export function debounce(
       }
     }, wait));
 
-    return { ok: true, value: { pending: true, key } };
+    return _okResult({ pending: true, key });
   };
 
   return Object.assign(plugin, {
@@ -310,7 +320,7 @@ export function throttle(
     }
 
     const retryIn = wait - (now - last);
-    return { ok: false, value: undefined, error: new BusError('VC_CORE_THROTTLED', `Action "${cmd.action}" throttled. Retry in ${retryIn}ms.`, { emitter: 'core', action: cmd.action, context: { retryIn, wait } }) };
+    return _errResult(new BusError('VC_CORE_THROTTLED', `Action "${cmd.action}" throttled. Retry in ${retryIn}ms.`, { emitter: 'core', action: cmd.action, context: { retryIn, wait } }));
   };
 
   return Object.assign(plugin, {
@@ -335,7 +345,7 @@ export function authGuard(options: {
 
     if (isProtected && !isAuthenticated()) {
       if (onUnauthenticated) onUnauthenticated(cmd);
-      return { ok: false, error: new Error(`Unauthorized: ${cmd.action} requires authentication`) };
+      return _errResult(new Error(`Unauthorized: ${cmd.action} requires authentication`));
     }
 
     return next();
@@ -473,7 +483,7 @@ export function optimisticUndo(
         }
       });
 
-      return { ok: true, value: optimisticValue };
+      return _okResult(optimisticValue);
     }
 
     // Sync path: rollback immediately if handler failed

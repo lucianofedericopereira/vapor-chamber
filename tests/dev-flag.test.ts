@@ -77,37 +77,55 @@ describe('DEV - runtime fallback when no define exists', () => {
  * Vite APP build consuming this package: 14,037 -> 12,764 raw, 4,453 -> 3,999
  * brotli, about 10%.
  *
- * `scripts/build.mjs` therefore substitutes the resolved expression into the
- * ESM artifact. That puts one line of behaviour in a build script, where
- * coverage cannot see it - so it is pinned here instead: the substituted string
- * is evaluated against the SAME four cases as the module above, and must agree
- * with it every time.
+ * `scripts/build.mjs` therefore emits a resolved expression into the ESM
+ * artifact, once per importing module. That puts one line of behaviour in a
+ * build script, where coverage cannot see it - so it is pinned here instead:
+ * evaluated against the cases the module above is tested for, plus the two a
+ * browser adds - a page under a bundler's dev server, which has
+ * `import.meta.env.DEV` and a substituted NODE_ENV but no `process`, and a
+ * no-bundler page, which has neither.
  */
-describe('DEV - the expression the ESM build substitutes', () => {
-  const evaluate = (source: string, processRef: unknown): boolean => {
-    const body = source.replace(/^export const DEV = /, 'return ').trim();
-    return new Function('process', body)(processRef) as boolean;
+describe('DEV - the expression the ESM build emits', () => {
+  // Evaluated as a function body, so `import.meta` (module-only syntax) becomes
+  // a parameter; a bundler's NODE_ENV define is applied as text, which is how
+  // it reaches the code before anything runs.
+  const evaluate = (source: string, processRef: unknown, meta: unknown, nodeEnvDefine?: string): boolean => {
+    let body = source.replace(/^export const DEV = /, 'return ').trim();
+    if (nodeEnvDefine !== undefined) body = body.split('process.env.NODE_ENV').join(JSON.stringify(nodeEnvDefine));
+    return new Function('process', 'meta', body.split('import.meta').join('meta'))(processRef, meta) as boolean;
   };
 
   // First case in the file to import scripts/build.mjs, so it pays for pulling
   // esbuild through the coverage transform - seconds, and not a measure of
-  // anything this asserts. The case below reuses the module cache.
-  it('is a bare, foldable expression - no `__VC_DEV__`, no `typeof` on it', async () => {
+  // anything this asserts. The cases below reuse the module cache.
+  it('is a bare, foldable expression - no `__VC_DEV__`, both arms false under a production define', async () => {
     const { DEV_ESM_SOURCE } = await import('../scripts/build.mjs');
     expect(DEV_ESM_SOURCE).not.toContain('__VC_DEV__');
     expect(DEV_ESM_SOURCE).toContain('process.env.NODE_ENV');
-    // The short-circuit that keeps a no-bundler ESM consumer safe.
-    expect(DEV_ESM_SOURCE).toContain("typeof process === \"undefined\"");
+    // The guard that keeps a no-bundler page safe, and the arm a dev page passes on.
+    expect(DEV_ESM_SOURCE).toContain('typeof process !== "undefined"');
+    expect(DEV_ESM_SOURCE).toContain('import.meta.env?.DEV');
+    // What a consumer's production define leaves: `cond ? false : false`.
+    const folded = DEV_ESM_SOURCE.split('process.env.NODE_ENV').join('"production"');
+    expect(folded).toMatch(/\? "production" !== "production" : false;\n$/);
   }, 30000);
 
-  it('agrees with src/dev.ts on every case the module is tested for', async () => {
+  it('agrees with src/dev.ts wherever `process` exists', async () => {
     const { DEV_ESM_SOURCE } = await import('../scripts/build.mjs');
-    expect(evaluate(DEV_ESM_SOURCE, { env: { NODE_ENV: 'production' } })).toBe(false);
-    expect(evaluate(DEV_ESM_SOURCE, { env: { NODE_ENV: 'development' } })).toBe(true);
-    expect(evaluate(DEV_ESM_SOURCE, { env: {} })).toBe(true);
-    // No `process` at all: must be false, and must not throw - the whole point
-    // of the guard scripts/check-env-guards.mjs exists to enforce.
-    expect(() => evaluate(DEV_ESM_SOURCE, undefined)).not.toThrow();
-    expect(evaluate(DEV_ESM_SOURCE, undefined)).toBe(false);
+    expect(evaluate(DEV_ESM_SOURCE, { env: { NODE_ENV: 'production' } }, {})).toBe(false);
+    expect(evaluate(DEV_ESM_SOURCE, { env: { NODE_ENV: 'development' } }, {})).toBe(true);
+    expect(evaluate(DEV_ESM_SOURCE, { env: {} }, {})).toBe(true);
+  });
+
+  it('a page with no `process`: false with no bundler, true under a dev server', async () => {
+    const { DEV_ESM_SOURCE } = await import('../scripts/build.mjs');
+    // No bundler: nothing substituted, no import.meta.env. False, and it must
+    // not throw - the whole point of scripts/check-env-guards.mjs.
+    expect(() => evaluate(DEV_ESM_SOURCE, undefined, {})).not.toThrow();
+    expect(evaluate(DEV_ESM_SOURCE, undefined, {})).toBe(false);
+    // Vite's dev server: import.meta.env.DEV true, NODE_ENV replaced in the served code.
+    expect(evaluate(DEV_ESM_SOURCE, undefined, { env: { DEV: true } }, 'development')).toBe(true);
+    // A production page: NODE_ENV replaced, DEV false.
+    expect(evaluate(DEV_ESM_SOURCE, undefined, { env: { DEV: false } }, 'production')).toBe(false);
   });
 });

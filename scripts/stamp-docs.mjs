@@ -102,12 +102,16 @@ const metrics = readJson('docs/metrics.json');
 if (metrics?.outlet) {
   VALUES.outletSaving = metrics.outlet.savedBr;
   VALUES.outletSavingRaw = metrics.outlet.savedRaw;
-  VALUES.outletMargin = metrics.outlet.margin;
-  // The accepting BAR itself, not just the result. It was hard-coded in the
-  // test and hand-copied into five documents - the exact shape this script
-  // exists to remove. Declared once at ACCEPTING_BAR_KB in
-  // tests/vapor/vapor-outlet-size.test.ts and published from there.
-  VALUES.outletBar = metrics.outlet.bar;
+  // The LIMITS themselves, not just the results. The single bar they replace
+  // was hard-coded in the test and hand-copied into five documents - the exact
+  // shape this script exists to remove - and it is now two limits, declared
+  // once each at OWN_ARM_CEILING_KB and SAVING_FLOOR_KB in
+  // tests/vapor/vapor-outlet-size.test.ts and published from there. The old
+  // `outletBar` / `outletMargin` pair went with the difference metric they
+  // described (rc.8 cycle: it fired twice on improvements).
+  VALUES.outletOwnArm = metrics.outlet.ownArm;
+  VALUES.outletOwnArmCeiling = metrics.outlet.ownArmCeiling;
+  VALUES.outletFloor = metrics.outlet.floor;
   VALUES.outletMachineryVapor = metrics.outlet.machineryVapor;
   VALUES.outletMachineryInterop = metrics.outlet.machineryInterop;
 }
@@ -187,12 +191,21 @@ if (sizes) {
   put('sizeVapor', './vapor');
   put('sizeOutbox', './outbox');
   put('sizeMcp', './mcp');
-  put('sizeStore', './store');
+  // The store guide quotes the minified size too (its design estimate was raw KB).
+  putAll('sizeStore', './store');
   put('sizeRouter', './router');
   put('sizeRouterVdom', './router/vdom');
   put('sizeRouterVapor', './router/vapor');
   put('sizeRouterRemote', './router/remote');
   put('sizeRouterFetch', './router-fetch');
+  // Vapor wiring deltas (Vue bundled) and the mitt comparison - rows of
+  // BUNDLE-SIZES since v1.20.0, so the README's "+N KB raw" and the migration
+  // guide's "~200 bytes" stop being retyped. The Raw variants carry the
+  // minified figure the README quotes.
+  putAll('sizeVaporEntry', 'vapor-chamber/vapor over that');
+  putAll('sizeVaporCustomElement', '+ defineVaporCustomElement');
+  putAll('sizeVaporInterop', '+ vaporInteropPlugin');
+  put('sizeMitt', 'mitt');
   putAll('sizeIifeFull', 'vapor-chamber (full)');
   putAll('sizeIifeCore', 'vapor-chamber-core');
   putAll('sizeIifeElements', 'vapor-chamber-elements');

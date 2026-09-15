@@ -16,15 +16,17 @@
  *
  * There is one now, and it is the same one `__VC_IIFE__` uses: whether a build
  * is for development is settled when the build runs, so it should be answered
- * by the build rather than at runtime. `scripts/build.mjs` supplies
- * `__VC_DEV__` via Vite `define`:
+ * by the build rather than at runtime. `scripts/build.mjs` answers it per
+ * artifact:
  *
- *   - IIFE bundles      -> `false`, so `if (DEV)` folds away and the strings go
- *                         with it.
- *   - the ESM build     -> the literal text `process.env.NODE_ENV !== "production"`,
+ *   - IIFE bundles      -> `__VC_DEV__` defined `false`, so `if (DEV)` folds
+ *                         away and the strings go with it.
+ *   - the ESM build     -> no define. The build emits a resolved expression in
+ *                         place of this module, once per module importing it,
  *                         so the decision is deferred to the CONSUMER's
- *                         bundler, which is the only thing that knows whether
- *                         *their* build is a dev build.
+ *                         bundler - the only thing that knows whether *their*
+ *                         build is a dev build - and folds in every chunk. The
+ *                         build script's header says why each part is there.
  *
  * The `typeof` fallback keeps this honest everywhere the define does not exist
  * - vitest, plain `tsc`, or anyone importing `src/` directly - where it

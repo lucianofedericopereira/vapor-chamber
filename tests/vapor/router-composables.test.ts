@@ -21,8 +21,10 @@
  * with-vapor build. That alias is not a convenience: the router imports `vue`
  * as a bare specifier, so without it the router and the Vapor app would be two
  * disconnected reactivity instances and `inject(ROUTER_KEY)` would miss for
- * harness reasons. Real Vapor apps alias exactly the same way - see
- * `examples/vapor-sfc`.
+ * harness reasons. Real Vapor apps no longer need an alias: Vue's bundler entry
+ * re-exports `@vue/runtime-vapor`, and the examples' alias was deleted in
+ * v1.17.0 (see the header of `vitest.vapor.config.ts`). Vitest's bare `vue` is
+ * not that bundler entry, which is why this config still aliases.
  */
 
 import { describe, expect, it } from 'vitest';

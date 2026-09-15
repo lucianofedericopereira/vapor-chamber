@@ -1,6 +1,6 @@
 <?php
 /**
- * vapor-chamber — example queued-command action.
+ * vapor-chamber - example queued-command action.
  *
  * For commands that take more than a few hundred ms, dispatch a queued job
  * and return optimistic state. The client gets an immediate response with

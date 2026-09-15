@@ -169,7 +169,7 @@ export function createFastLane(options: FastLaneOptions = {}): FastLane {
         // (the once-pattern) or a peer during its own call, and `on()`'s
         // unsub closure splices this live array - so the next listener shifts
         // into the index just consumed and is silently skipped for this emit.
-        // Same identity guard the main bus uses in notifyListeners. This
+        // Same identity guard the main bus uses in fanOutListeners. This
         // module drops envelope, results, plugins, wildcards and tracing on
         // purpose; it does not drop correctness, and the guard is
         // allocation-free, which is this file's only currency. (The guard's

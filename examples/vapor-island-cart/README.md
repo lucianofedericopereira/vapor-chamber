@@ -38,7 +38,7 @@ installs all of them into a single `node_modules/` and symlinks the library into
 it - the example always runs against your working tree, with nothing to re-sync
 after an edit. The library `dist/` builds itself: the repo root has a `prepare`
 script, and this example's `predev`/`prebuild` hooks build it on demand if
-`dist/` is missing. No manual step.
+`dist/` is missing.
 
 > **Note** - `@vitejs/plugin-vue` declares its peer as `vue@^3.2.25`, and npm
 > refuses to match a prerelease (`3.6.0-rc.x`) against a non-prerelease range.
@@ -63,9 +63,9 @@ script, and this example's `predev`/`prebuild` hooks build it on demand if
 
 ## Notes on the Vite config
 
-`vite.config.ts` aliases `vue` to `vue/dist/vue.runtime-with-vapor.esm-browser.js`. Vue's default
-runtime entry ships **no** Vapor runtime, and both the compiled Vapor SFC helpers and
-vapor-chamber's `defineVaporCustomElement` probe read off `import('vue')` - so the alias points
-`vue` at the build that actually contains Vapor. `vaporChamberHMR()` keeps bus state across HMR.
+`vite.config.ts` has no `vue` alias. It used to point `vue` at a with-vapor build; since Vue rc.5,
+`vue.runtime.esm-bundler.js` re-exports `@vue/runtime-vapor` itself, and building this example with
+and without the alias gave byte-identical output (the export list is pinned by
+`tests/vue-bundler-vapor-exports.test.ts`). `vaporChamberHMR()` keeps bus state across HMR.
 
-Aligned with Vue 3.6.0-beta.17 and vapor-chamber ≥1.6.0 (`vapor-chamber: file:../..`).
+Aligned with Vue <!-- vc:vueAligned -->3.6.0-rc.8<!-- /vc:vueAligned --> and the working-tree vapor-chamber (`vapor-chamber: file:../..`).

@@ -62,6 +62,8 @@ replaceState with the CURRENT state is side-effect-free and authoritative.
 compilePath(path: string) => { segments: Segment[]; re: RegExp; keys: string[]; }
 ```
 
+Compile one path pattern into segments + a matching RegExp.
+
 ### createMemoryHistory
 
 **Function** - [src/router/history.ts:171](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/history.ts#L171)
@@ -477,7 +479,7 @@ vapor-chamber-router - history layer.
 Base-aware wrapper over the History API: all router-facing paths are
 RELATIVE to the base ('/admin' stays a server concern); `createHref`
 prepends it back for the DOM. `createMemoryHistory` is the same contract
-for tests and SSR. Link handling lives in core/dom.ts, not here.
+for tests and SSR. Link handling lives in router/dom.ts, not here.
 
 ### IdlePreheatOptions
 

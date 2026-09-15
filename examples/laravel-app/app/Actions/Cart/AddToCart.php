@@ -1,6 +1,6 @@
 <?php
 /**
- * vapor-chamber — runnable demo action (session cart, zero migrations).
+ * vapor-chamber - runnable demo action (session cart, zero migrations).
  *
  * Unlike the drop-in companions in ../laravel-backend (which assume your
  * own Cart/Product models), this action is fully self-contained: a static
@@ -16,7 +16,7 @@ use Illuminate\Validation\Rule;
 
 class AddToCart
 {
-    /** Demo catalog — id => [name, price in cents]. */
+    /** Demo catalog - id => [name, price in cents]. */
     public const CATALOG = [
         1 => ['name' => 'Coffee',   'cents' => 400],
         2 => ['name' => 'Tea',      'cents' => 300],

@@ -26,15 +26,17 @@ becomes a real row - from the first element child, which it detaches:
 ```
 
 **An element that starts hidden must say so in the HTML** - `style="display:none"`
-next to its `v-show`. The script is a module, so it runs after parse: without
-it, the empty cart's table and buttons paint first and vanish a frame later.
-The markup owns the initial state, the directive owns every state after it.
+next to its `v-show`. The script is a module, so it runs after parse; without
+that inline style, the empty cart's table and buttons paint first and vanish a
+frame later. The markup owns the initial state; the directive owns every state
+after it.
 
 **The only write path is `v-command`** - every mutation goes through a named
-command handler. Sector A dispatches named commands into the void; Sector B
-reads reactive state from the atmosphere. Complete decoupling, and the whole
-vapor-chamber plugin pipeline (logging, validation, history, persist, sync)
-applies automatically - the bus instance is already there.
+command handler. Sector A dispatches named commands onto the bus without knowing
+who handles them; Sector B reads reactive state without knowing who wrote it.
+The two sectors are fully decoupled, and because the bus instance is already
+there, the whole vapor-chamber plugin pipeline (logging, validation, history,
+persist, sync) applies automatically.
 
 Local state is not an exception to that rule: a binding reads from the nearest
 `v-scope` that **declared** its head key and falls through to the global bus
@@ -64,10 +66,10 @@ const bus = createCommandBus({
 });
 ```
 
-Buffered commands replay in order the moment `register()` happens. `bufferTTL`
-guarantees a section that never hydrates can't pin stale clicks in memory, and
-`onBufferOverflow` makes every drop observable. This is the exact use case the
-buffer mode was built for.
+Buffered commands replay in order as soon as `register()` runs. `bufferTTL`
+keeps a section that never hydrates from pinning stale clicks in memory, and
+`onBufferOverflow` makes every drop observable. Buffer mode was built for
+exactly this case.
 
 ## Run
 
@@ -80,8 +82,8 @@ npm install
 npm run dev
 ```
 
-Astro's dev toolbar will report **"No islands detected"**. That is the point,
-not a problem: this page ships no framework component and no `client:*`
+Astro's dev toolbar will report **"No islands detected"**. That is intended:
+this page ships no framework component and no `client:*`
 directive - just static HTML plus one plain `<script>` module holding the bus
 and the scanner. The toolbar's audit only knows how to look for islands.
 

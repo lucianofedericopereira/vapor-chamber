@@ -1,15 +1,15 @@
 <?php
 /**
- * vapor-chamber — example action class.
+ * vapor-chamber - example action class.
  *
  * Drop into app/Actions/Cart/. One class per command keeps the controller
  * thin, makes commands testable in isolation, and gives validation /
  * authorization a natural home.
  *
  * Action classes have a single `__invoke($target, $payload, $user)` shape:
- *   $target  — first argument from `bus.dispatch(action, target, payload)`
- *   $payload — second (optional) argument
- *   $user    — Request::user(), or null for guests
+ *   $target  - first argument from `bus.dispatch(action, target, payload)`
+ *   $payload - second (optional) argument
+ *   $user    - Request::user(), or null for guests
  *
  * Return value becomes the client's `result.value`.
  *

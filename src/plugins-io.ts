@@ -4,10 +4,12 @@
  * retry, persist, sync
  */
 
-import { matchesPattern, RETRYABLE_CODES, _withOrigin, type Command, type CommandResult, type AsyncPlugin, type Plugin } from './command-bus';
+import { matchesPattern, RETRYABLE_CODES, _withOrigin, _errResult, abortedResult, type Command, type CommandResult, type AsyncPlugin, type Plugin } from './command-bus';
 import { onSettled } from './settled';
 import { MAX_TIMEOUT_MS, countOption } from './bounds';
 import { DEV } from './dev';
+// Type-only import from ./http inside, so this pulls no HTTP code into a bundle.
+import { isRetryableStatus } from './http-errors';
 
 // ---------------------------------------------------------------------------
 // Retry plugin
@@ -41,12 +43,30 @@ export type RetryOptions = {
   /**
    * Return true if the error is retryable.
    *
-   * Default: BusErrors (a `.code` starting with 'VC_') are retried only when
-   * the code is transient per RETRYABLE_CODES (throttled, rate-limited,
-   * timeout, circuit-open, ...) - known-permanent codes (validation, sealed
-   * bus, max depth, ...) stop retrying immediately instead of wasting
-   * attempts. All other errors are always retried. (Before v1.3 the default
-   * retried everything; behavior for plain Errors is unchanged.)
+   * Default, three rules in order, after one exclusion: a user abort (an error
+   * named 'AbortError', such as the DOMException `fetch` rejects with when the
+   * dispatch's `signal` fires) is never retried. The caller cancelled; backing
+   * off would only delay the answer (tests/retry-bridge-path.test.ts). A
+   * timeout is a `TimeoutError`, not an abort, and stays retryable.
+   *
+   * - A BusError (a `.code` starting with 'VC_') is retried only when the code
+   *   is transient per RETRYABLE_CODES (throttled, rate-limited, timeout,
+   *   circuit-open, ...) - known-permanent codes (validation, sealed bus, max
+   *   depth, ...) stop retrying immediately instead of wasting attempts.
+   * - An error carrying an HTTP status (`error.status` or
+   *   `error.response.status`, both set by the HTTP bridge and the http
+   *   client) is retried only for 408, 429 and 5xx - the set the HTTP layer
+   *   retries itself. NARROWED after v1.19.0: any status used to be retried,
+   *   so retry() in front of `createHttpBridge` re-sent a 422 write
+   *   `maxAttempts` times while `postCommand` refused to re-send it once
+   *   (tests/retry-bridge-path.test.ts). A handler that throws a 4xx-status
+   *   error and wants it re-run must now pass its own predicate.
+   * - Every other error is retried. (Before v1.3 the default retried
+   *   everything; behavior for plain Errors is unchanged.)
+   *
+   * HTTP retry belongs on the bridge's own `retry` option, which also
+   * resends the same Idempotency-Key and honours Retry-After; keep this
+   * plugin for non-HTTP async work.
    */
   isRetryable?: (error: Error, attempt: number) => boolean;
 };
@@ -71,10 +91,21 @@ function retryDelay(strategy: 'fixed' | 'linear' | 'exponential', base: number, 
   return Math.min(base * Math.pow(2, attempt - 1), MAX_TIMEOUT_MS);
 }
 
-/** Default isRetryable: consult RETRYABLE_CODES for BusErrors, retry everything else. */
+/**
+ * Default isRetryable - the three rules are stated on RetryOptions.isRetryable.
+ *
+ * The status rule is checked AFTER the `VC_` one on purpose: the bridge copies
+ * the backend's body code onto the error, and a backend code is not ours to
+ * interpret, while a `VC_` code is. A 4xx status is the HTTP layer's own
+ * verdict that re-sending cannot help, so this plugin must not overrule it.
+ */
 function defaultIsRetryable(error: Error): boolean {
-  const code = (error as { code?: unknown }).code;
-  return typeof code !== 'string' || !code.startsWith('VC_') || RETRYABLE_CODES.has(code);
+  const e = error as { name?: unknown; code?: unknown; status?: unknown; response?: { status?: unknown } };
+  const code = e.code;
+  if (typeof code === 'string' && code.startsWith('VC_')) return RETRYABLE_CODES.has(code);
+  const status = e.status ?? e.response?.status;
+  // An abort's `code` is the NUMBER 20 (DOMException), so it always lands here.
+  return e.name !== 'AbortError' && (typeof status !== 'number' || isRetryableStatus(status));
 }
 
 /**
@@ -87,7 +118,7 @@ function defaultIsRetryable(error: Error): boolean {
  * const bus = createAsyncCommandBus()
  * bus.use(retry({ maxAttempts: 3, strategy: 'exponential', baseDelay: 200 }))
  */
-export function retry(options: RetryOptions = {}): AsyncPlugin {
+export function retry(options: RetryOptions = {}): AsyncPlugin & { dispose(): void } {
   const {
     maxAttempts: rawMaxAttempts = 3,
     baseDelay = 200,
@@ -108,10 +139,18 @@ export function retry(options: RetryOptions = {}): AsyncPlugin {
   // command once rather than not at all.
   const maxAttempts = countOption(rawMaxAttempts, 3, 1);
 
-  return async (cmd: Command, next: () => CommandResult | Promise<CommandResult>): Promise<CommandResult> => {
+  // The backoff sleeps pending right now, so dispose() - which the bus's own
+  // dispose() runs since v1.20.0 - can end them. Until then these timers were
+  // untracked: a disposed bus's retry kept re-calling a chain whose handlers
+  // were gone, up to maxAttempts. Clearing a timer alone would leave that
+  // dispatch's promise pending forever, so a sleep is woken with `false` and
+  // the loop returns VC_CORE_ABORTED. A sleep that runs out removes itself.
+  const sleeping = new Set<() => void>();
+
+  const plugin = (async (cmd: Command, next: () => CommandResult | Promise<CommandResult>): Promise<CommandResult> => {
     if (actions?.length && !actions.some(p => matchesPattern(p, cmd.action))) return next();
 
-    let lastResult: CommandResult = { ok: false, error: new Error('No attempts made') };
+    let lastResult: CommandResult = _errResult(new Error('No attempts made'));
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       lastResult = await Promise.resolve(next());
@@ -122,11 +161,18 @@ export function retry(options: RetryOptions = {}): AsyncPlugin {
       if (attempt === maxAttempts || !isRetryable(error, attempt)) return lastResult;
 
       const delay = retryDelay(strategy, baseDelay, attempt);
-      await new Promise(resolve => setTimeout(resolve, delay));
+      const slept = await new Promise<boolean>((resolve) => {
+        const wake = (): void => { clearTimeout(timer); resolve(false); };
+        const timer = setTimeout(() => { sleeping.delete(wake); resolve(true); }, delay);
+        sleeping.add(wake);
+      });
+      if (!slept) return abortedResult(cmd.action);
     }
 
     return lastResult;
-  };
+  }) as AsyncPlugin & { dispose(): void };
+  plugin.dispose = (): void => { for (const wake of sleeping) wake(); sleeping.clear(); };
+  return plugin;
 }
 
 // ---------------------------------------------------------------------------
@@ -309,7 +355,7 @@ export function sync(
 
   // DEV-gated: a missing busRef is a call-site mistake fixed at build time, not
   // a runtime condition the deployed app can recover from. Unlike the persist
-  // validation warning below - which fires on real production state (a stale
+  // validation warning above - which fires on real production state (a stale
   // payload after a deploy) and therefore stays unconditional.
   if (DEV && !busRef?.dispatch) {
     console.warn('[vapor-chamber] sync() called without busRef - received messages will not be re-dispatched locally. Pass { dispatch: bus.dispatch } as the second argument.');

@@ -9,6 +9,9 @@
  *    failure whose apply() returned no rollback.
  *  - optimisticUndo(): async rollback where the undo handler itself throws -
  *    the onRollbackError arm - plus onRollback notification.
+ *  - history() redo on an ASYNC bus is recorded once, for every payload
+ *    shape; the sync wiring the island cart uses, and the flag keeping an
+ *    undo handler's own dispatches out of the ledger, are unchanged.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createCommandBus, createAsyncCommandBus } from '../src/index';
@@ -287,5 +290,95 @@ describe('optimisticUndo - arms the rollback tests skip', () => {
     expect(result.ok).toBe(true);
     expect(result.value).toBe('server-value'); // real value, not a prediction
     expect(undone).toEqual([]); // undo never ran
+  });
+});
+
+// ---------------------------------------------------------------------------
+// history on an ASYNC bus - a redo is recorded once
+// ---------------------------------------------------------------------------
+
+describe('history - redo on an async bus', () => {
+  // redo() set `_replaying`, dispatched, and cleared it in `finally`. On an
+  // async bus the recorder runs when the dispatch SETTLES - a microtask after
+  // that `finally` - so the redone command was pushed a second time and
+  // `future.length = 0` wiped the rest of the redo stack. The number payload
+  // is why the marker rides on the dispatch (`_withOrigin`), not in the
+  // payload: a primitive has nowhere to carry a key.
+  it.each([
+    ['an object payload', { qty: 1 }],
+    ['a number payload', 5],
+  ])('records the redone command once, with %s', async (_label, payload) => {
+    const bus = createAsyncCommandBus();
+    bus.register('add', async () => 'ok');
+    const h = history({ bus: bus as any });
+    bus.use(h);
+
+    await bus.dispatch('add', { id: 1 }, payload);
+    await bus.dispatch('add', { id: 2 }, payload);
+    h.undo();
+    h.undo();
+    const redone = h.redo();
+    await new Promise((r) => setTimeout(r, 0)); // the redo's dispatch settles
+
+    expect(redone?.target).toEqual({ id: 1 });
+    expect(h.getState().past.map((c) => c.target)).toEqual([{ id: 1 }]);
+    expect(h.getState().future.map((c) => c.target)).toEqual([{ id: 2 }]);
+    expect(h.redo()?.target).toEqual({ id: 2 }); // the redo stack survived
+  });
+});
+
+describe('history - sync behaviour the async redo fix must not move', () => {
+  it('island-cart wiring: count, canUndo and canRedo after every cart command', () => {
+    // Mirror of examples/vapor-island-cart/src/store.ts: triggers registered
+    // by history() itself, a filter on the one undoable command, and a cart*
+    // listener reading getState(). The listener also sees the cartAdd a redo
+    // re-dispatches from inside the cartRedo handler.
+    const bus = createCommandBus();
+    const cart = { count: 0 };
+    const h = history({ maxSize: 50, bus, filter: (cmd) => cmd.action === 'cartAdd', undoAction: 'cartUndo', redoAction: 'cartRedo' });
+    bus.use(h);
+    bus.register('cartAdd', () => { cart.count += 1; }, { undo: () => { cart.count -= 1; } });
+    const seen: Array<[string, number, boolean, boolean]> = [];
+    bus.on('cart*', (cmd) => { const s = h.getState(); seen.push([cmd.action, cart.count, s.canUndo, s.canRedo]); });
+
+    bus.dispatch('cartAdd', { id: 1 });
+    bus.dispatch('cartAdd', { id: 2 });
+    bus.dispatch('cartUndo', {});
+    bus.dispatch('cartRedo', {});
+    bus.dispatch('cartUndo', {});
+    bus.dispatch('cartUndo', {});
+    bus.dispatch('cartRedo', {});
+
+    expect(seen).toEqual([
+      ['cartAdd', 1, true, false],
+      ['cartAdd', 2, true, false],
+      ['cartUndo', 1, true, true],
+      ['cartAdd', 2, true, false], // re-dispatched by the redo
+      ['cartRedo', 2, true, false],
+      ['cartUndo', 1, true, true],
+      ['cartUndo', 0, false, true],
+      ['cartAdd', 1, true, true], // re-dispatched by the redo
+      ['cartRedo', 1, true, true],
+    ]);
+    expect(h.getState().past).toHaveLength(1);
+  });
+
+  it('a command an undo handler dispatches is not recorded (the rollback stays out of the ledger)', () => {
+    // Why `_replaying` stays beside the origin marker: on the sync bus it
+    // brackets the undo handler, so a compensating command the handler
+    // dispatches is part of the rollback, not a new entry. Recording it would
+    // push it onto the undo stack and wipe the redo stack.
+    const bus = createCommandBus();
+    const h = history({ bus });
+    bus.use(h);
+    bus.register('refund', () => 'refunded');
+    bus.register('pay', () => 'paid', { undo: () => { bus.dispatch('refund', {}); } });
+
+    bus.dispatch('pay', {});
+    h.undo();
+
+    expect(h.getState().past).toHaveLength(0);
+    expect(h.getState().future.map((c) => c.action)).toEqual(['pay']);
+    expect(h.getState().canRedo).toBe(true);
   });
 });

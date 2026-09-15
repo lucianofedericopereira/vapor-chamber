@@ -1,9 +1,9 @@
 # vapor-chamber/router
 
-A router for **Vue 3.6** over a server-owned catch-all (Laravel Blade is the
-worked example). One hard requirement by design: Vue ≥ 3.6. Ships in-box as a
-subpath of `vapor-chamber`, and reaches for its http client only if you hand it
-one - see the remote subpath below.
+A router for **Vue 3.6** over a server-owned catch-all, with Laravel Blade as
+the worked example. It requires Vue >= 3.6, by design. It ships in-box as a
+subpath of `vapor-chamber` and uses an http client only if you hand it one (see
+the remote subpath below).
 
 The server owns one catch-all (`/admin/{any?}` -> Blade shell -> one island); the
 router owns every URL inside. **Path = navigation, query = state.**
@@ -70,11 +70,12 @@ createRouter({
 });
 ```
 
-Generated route rows with no blade rows - the primary setup - need neither, and
-that is the point: the router used to construct the client for everyone, which
-put the whole thing (CSRF, interceptors, retry, cache) in every consumer's
-bundle to serve two optional features. Same reasoning as the outlet subpaths
-below, and enforced the same way, by `tests/router/remote-boundary.test.ts`.
+The primary setup, generated route rows with no blade rows, needs neither, and
+that is the point. The router used to construct the client for everyone, which
+put the whole client (CSRF, interceptors, retry, cache) in every consumer's
+bundle to serve two optional features. The outlet subpaths below follow the
+same reasoning, and `tests/router/remote-boundary.test.ts` enforces this split
+the same way.
 
 Forgetting one is a coded error, never a silent failure: `http_unconfigured`
 for a `{ url }` table, `blade_unconfigured` for a blade row.
@@ -102,12 +103,12 @@ It is not the mechanism for getting route state into a component.
 ### Refreshing data after a mutation
 
 After a command changes server state, the data behind the current route is
-stale. `revalidateRoutes` closes that loop as a bus plugin - it adds no router
-capability, it composes `runLoaders`, `currentRoute` and `setRouteData`, all
-already public, and it ships from the main `vapor-chamber/router` entry rather
-than a subpath of its own: it imports nothing the router core does not already
-have, so there is no cost for a subpath to isolate, and it tree-shakes away for
-anyone who never calls it.
+stale. `revalidateRoutes` closes that loop as a bus plugin. It adds no router
+capability: it composes `runLoaders`, `currentRoute` and `setRouteData`, all
+already public. It ships from the main `vapor-chamber/router` entry rather than
+a subpath of its own because it imports nothing the router core does not
+already have, so there is no cost for a subpath to isolate, and it tree-shakes
+away for anyone who never calls it.
 
 ```ts
 import { createRouter, revalidateRoutes } from 'vapor-chamber/router';
@@ -208,6 +209,12 @@ specifically - read it for the signature, the abort behaviour and the
 `ctx.revalidate` hand-off. It registers no `prefixes` and no `affects`, so for
 those two the example above is the reference.
 
+Core mechanics are preset-independent. Loaders run on navigation with an
+AbortController created per navigation, and **a newer navigation aborts the
+previous one's fetches at start** (vue-router data-loaders timing, verified
+from source). Results commit **atomically on the snapshot** (two-phase: a page
+never renders with the previous page's data).
+
 ### Why the outlet is a separate subpath
 
 `RouterOutlet` is a `defineComponent` + `h()` component. Anything that can
@@ -236,16 +243,9 @@ on demand, as a separate chunk, the first time it renders one.
 > **Breaking in v1.11.0:** `RouterOutlet`, `makeBladeComponent` and
 > `BladeHooks` moved from `vapor-chamber/router` to `vapor-chamber/router/vdom`,
 > and `app.use(router)` no longer registers `<RouterOutlet>` globally. Apps that
-> relied on the global registration must register it locally. Shipped in a minor
-> deliberately - the router is experimental, and keeping deprecated re-exports
-> would reinstate the static reference this change exists to remove.
-
-Core mechanics are preset-independent: loaders run on navigation with an
-AbortController created per navigation (**a newer navigation aborts the
-previous one's fetches at start** - vue-router data-loaders timing, verified
-from source), and results commit **atomically on the snapshot** (two-phase:
-a page never renders with the previous page's data). Query-only changes
-refetch only the loaders affected by the changed keys.
+> relied on the global registration must register it locally. It shipped in a
+> minor release deliberately: the router is experimental, and keeping deprecated
+> re-exports would reinstate the static reference this change exists to remove.
 
 ## Pagination, productized
 
@@ -274,10 +274,10 @@ run around the current one, and `0` where numbers were elided (render it as
 spinner without tracking request state by hand.
 
 Query-only changes commit the URL immediately (optimistic) and refetch only
-the loaders whose template depends on a changed key. Back/forward steps
-through pages. History ladder: explicit call -> route declaration ->
-convention (**`page` pushes, everything else replaces**); defaults drop from
-the URL.
+the loaders whose template depends on a changed key. Back and forward step
+through pages. Push or replace is decided by the first that applies: explicit
+call -> route declaration -> convention (**`page` pushes, everything else
+replaces**). Default values drop from the URL.
 
 ## Menus + breadcrumbs, projected: never authored twice
 
@@ -297,8 +297,7 @@ const crumbs = useBreadcrumbs(); // the matched parent chain, titled rows only,
 - **active/exact share `pathActivity()`** with `data-active` stamping - a
   Blade-rendered menu and a Vue-rendered menu can never disagree.
 - **Menu rows are static navigation**: `meta.menu` needs `meta.title` and a
-  path without required params - loud in dev, rejected by `Routes::validate`
-  at export. Group rows become href-less section nodes.
+  path without required params - loud in dev. Group rows become href-less section nodes.
 - Reactive to navigation **and** table swaps (`setRoutes` / `reload` - the
   compiled records are exposed as `router.routes`, a reactive ref).
 
@@ -379,18 +378,24 @@ import { RouterOutlet } from 'vapor-chamber/router/vapor';  // Vapor, no interop
 
 What it costs, and what it requires:
 
-- **Measured saving: <!-- vc:outletSaving -->19.91<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->60.6<!-- /vc:outletSavingRaw --> KB raw** against the same app
+- **Measured saving: <!-- vc:outletSaving -->20.42<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->64.7<!-- /vc:outletSavingRaw --> KB raw** against the same app
   rendering through the vDOM outlet plus interop - re-derived every test run by
-  `tests/vapor/vapor-outlet-size.test.ts` rather than quoted, with the baseline
-  built by the same harness so the two arms cannot differ by method. The
-  subpath's own cost is <!-- vc:sizeRouterVapor -->0.5<!-- /vc:sizeRouterVapor --> KB brotli.
+  `tests/vapor/vapor-outlet-size.test.ts` from a Vite production build rather
+  than quoted, with the baseline built by the same harness so the two arms
+  cannot differ by method. The guard holds two limits: the saving stays
+  >= <!-- vc:outletFloor -->15.0<!-- /vc:outletFloor --> KB, and the Vapor
+  outlet's own machinery over a router-without-outlet floor stays
+  <= <!-- vc:outletOwnArmCeiling -->5.0<!-- /vc:outletOwnArmCeiling --> KB
+  (measured <!-- vc:outletOwnArm -->4.23<!-- /vc:outletOwnArm --> KB). The
+  subpath's own cost is <!-- vc:sizeRouterVapor -->0.4<!-- /vc:sizeRouterVapor --> KB brotli.
 - **Route components must be `defineVaporComponent` output** (Vapor-compiled
   SFCs are). This is a real constraint, not a convention: with no interop
   installed, `createDynamicComponent` would otherwise create a vDOM component
   in Vapor mode with no error of its own. The outlet therefore checks the
   `__vapor` marker itself and throws a coded `mode_mismatch` - a loud failure
   in place of wrong-mode rendering, and deliberately not a silent fallback to
-  interop, which would restore the whole 20 KB the subpath exists to avoid.
+  interop, which would restore the whole ~20 KB brotli the subpath exists to
+  avoid.
 - **Blade rows still require the vDOM outlet.** `makeBladeComponent` is
   `defineComponent`/`h`, so a blade row reaching the Vapor outlet is the same
   `mode_mismatch` throw, with its own message pointing here. An app that mixes
@@ -501,12 +506,11 @@ Still not usable here, though the reasons differ:
   the document as fetched rather than extracting `bladeRoot` - fetching still
   works, hydrating does not.
 
-The rule applied symmetrically: an unchecked box does not mean missing (see the
-provide/inject fixture above, measured working while the box was unchecked),
-and a checked box does not mean working. Still unchecked and worth keeping in
-mind when reading anything that cites the roadmap: Vue Router, Suspense
-(VaporSuspense pending), DevTools Integration, Nuxt, VitePress, Vue Test
-Utils.
+Read the roadmap both ways: an unchecked box does not mean missing
+(provide/inject, above), and a checked box does not mean working. Still
+unchecked, and worth remembering when reading anything that cites the roadmap:
+Vue Router, Suspense (VaporSuspense pending), DevTools Integration, Nuxt,
+VitePress, Vue Test Utils.
 
 ## Navigation as a command (optional)
 

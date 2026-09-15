@@ -320,7 +320,7 @@ describe('doClientFetch - non-JSON content-type falls back to text', () => {
 });
 
 // ---------------------------------------------------------------------------
-// clientRequest - 419 CSRF retry + session expiry after retry
+// clientRequest - 419 CSRF retry (419 is CSRF expiry, never session expiry)
 // ---------------------------------------------------------------------------
 
 describe('createHttpClient - 419 CSRF retry', () => {
@@ -350,11 +350,12 @@ describe('createHttpClient - 419 CSRF retry', () => {
     expect(retryInit.headers['X-CSRF-TOKEN']).toBe('client-csrf-token');
   });
 
-  it('after CSRF retry exhausted, a second 419 routes through session-expiry handling', async () => {
+  it('a 419 that survives the refresh throws HttpError and does NOT fire onSessionExpired', async () => {
     const onSessionExpired = vi.fn();
-    // 419 -> refresh -> 419 again. Second time csrfRetried is true, so the
-    // `res.status === 419 && csrfRetried` branch fires handleSessionExpiry,
-    // then httpError is thrown (419 is not in RETRY_STATUS).
+    // 419 -> refresh -> 419 again. 419 is CSRF expiry, not session expiry
+    // (whitepaper 5.7): it is thrown as an HttpError, and only 401 fires
+    // onSessionExpired. clientRequest used to escalate here; it no longer does,
+    // matching postCommand and the contract (runWithRetry, one policy).
     (globalThis.fetch as any)
       .mockResolvedValueOnce(jsonResponse(419, { message: 'csrf' }))
       .mockResolvedValueOnce(mockResponse(200, {})) // csrf-cookie GET
@@ -366,7 +367,7 @@ describe('createHttpClient - 419 CSRF retry', () => {
       name: 'HttpError',
       status: 419,
     });
-    expect(onSessionExpired).toHaveBeenCalledWith(419);
+    expect(onSessionExpired).not.toHaveBeenCalled();
   });
 });
 

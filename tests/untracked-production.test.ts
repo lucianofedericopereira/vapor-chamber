@@ -18,7 +18,7 @@
  * statically imports the primitives and hands them to the core.
  */
 
-import { describe, expect, it, vi, afterEach } from 'vitest';
+import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
 
 /** What a browser does with `import('@vue/reactivity')` in a built bundle. */
 function makeBareSpecifierUnresolvable(): void {
@@ -55,6 +55,14 @@ function makeVueYieldNothing(): void {
 }
 
 describe('untracked() under production-bundle conditions', () => {
+  // A PAGE, every case: the probe-path hint needs a `window`, since a server
+  // resolves the probe in production too (tests/root-only-prod-fixture.test.ts).
+  // Stubbed for the cases that expect silence as well, so they stay quiet for
+  // their own reason rather than for want of a window.
+  beforeEach(() => {
+    vi.stubGlobal('window', globalThis);
+  });
+
   afterEach(() => {
     vi.doUnmock('@vue/reactivity');
     vi.doUnmock('vue');
@@ -104,6 +112,48 @@ describe('untracked() under production-bundle conditions', () => {
     chamber.untracked(() => 0);
     chamber.untracked(() => 0);
     expect(warn).toHaveBeenCalledTimes(1);
+  });
+
+  it('DEV diagnostic also fires at the FIRST COMPOSABLE CALL, before any dispatch', async () => {
+    // A component that only registers handlers or listens never dispatches,
+    // and it loses reactivity, cleanup and the KeepAlive guard in production
+    // just the same. So the warning cannot wait for untracked().
+    vi.resetModules();
+    const chamber = await import('../src/chamber');
+    const { createCommandBus } = await import('../src/command-bus');
+    await chamber.waitForVueDetection();
+    chamber.setCommandBus(createCommandBus());
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { effectScope } = await import('vue');
+    const scope = effectScope();
+    scope.run(() => chamber.useCommand()); // no dispatch anywhere
+    scope.stop();
+
+    const msgs = warn.mock.calls.map((c) => String(c[0])).filter((m) => /build time/.test(m));
+    expect(msgs).toHaveLength(1);
+    // Names all three consequences a root-only consumer loses, not only untracked().
+    expect(msgs[0]).toMatch(/reactivity/);
+    expect(msgs[0]).toMatch(/cleanup/);
+    expect(msgs[0]).toMatch(/KeepAlive/);
+    expect(msgs[0]).toMatch(/vapor-chamber\/vue/);
+  });
+
+  it('after a hand configureVue(), it claims only what is really lost: untracked()', async () => {
+    // configureVue() wires reactivity, cleanup and the KeepAlive guard in a
+    // production bundle too; only the tracking primitives are missing (they
+    // are not on the `vue` entry). The warning must not overclaim.
+    vi.resetModules();
+    const chamber = await import('../src/chamber');
+    await chamber.waitForVueDetection();
+    chamber.configureVue(await import('vue'));
+
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    chamber.untracked(() => 0);
+    expect(warn).toHaveBeenCalledTimes(1);
+    const msg = String(warn.mock.calls[0][0]);
+    expect(msg).toMatch(/untracked\(\) degrades/);
+    expect(msg).not.toMatch(/KeepAlive/);
   });
 
   it('importing the subpath silences it - that is the whole signal', async () => {

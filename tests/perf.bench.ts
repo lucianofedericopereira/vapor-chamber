@@ -194,6 +194,21 @@ describe('async dispatch throughput', () => {
       await bus.dispatch('test', i);
     }
   });
+
+  // The async counterpart of "syncDispatch - 3 plugins + 1 listener": the
+  // plugin boundary (VC_PLUGIN_THREW) sits on this path, and the per-level
+  // work it adds is paid here, not on the bare row above.
+  bench('asyncDispatch - 3 plugins + 1 listener', async () => {
+    const bus = createAsyncCommandBus();
+    bus.use((_cmd, next) => next());
+    bus.use((_cmd, next) => next());
+    bus.use((_cmd, next) => next());
+    bus.on('*', () => {});
+    bus.register('test', async (cmd) => cmd.target);
+    for (let i = 0; i < 1_000; i++) {
+      await bus.dispatch('test', i);
+    }
+  });
 });
 
 // Functional perf sanity test (always runs, not just in bench mode)

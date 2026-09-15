@@ -1,6 +1,6 @@
 <?php
 /**
- * vapor-chamber — example config file.
+ * vapor-chamber - example config file.
  *
  * Save as config/vapor-chamber.php in your Laravel project.
  *
@@ -47,7 +47,7 @@ return [
     |--------------------------------------------------------------------------
     |
     | If your VaporChamberController consults this map (you'll need to wire
-    | it in the controller — not done by default), each command can declare
+    | it in the controller - not done by default), each command can declare
     | per-user rate limits. Useful for high-frequency commands (search,
     | telemetry) where you don't want one client to overwhelm the bus.
     |

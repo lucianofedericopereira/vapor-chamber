@@ -10,14 +10,16 @@
 
 <script setup lang="ts">
 import { onUnmounted } from 'vue';
+// The bus and its plugins need no Vue, so they come from the package root.
+import { getCommandBus, validator } from 'vapor-chamber';
+// The composables come from the Vue entry, which wires Vue at build time.
+// From the root they would lose reactivity and cleanup once built.
 import {
   useCommand,
   useCommandState,
   useCommandHistory,
-  getCommandBus,
-  validator,
   signal
-} from 'vapor-chamber';
+} from 'vapor-chamber/vue';
 
 // Get shared bus and add validation
 const bus = getCommandBus();

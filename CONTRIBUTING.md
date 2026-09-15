@@ -1,6 +1,6 @@
 # Contributing to vapor-chamber
 
-Thanks for considering a contribution. This document covers what you need to get a working dev environment, run tests/benches, and submit a PR that has a good chance of landing quickly.
+Thanks for considering a contribution. This document covers setting up a dev environment, running the tests and benches, and submitting a PR that is likely to land quickly.
 
 ---
 
@@ -14,12 +14,12 @@ Requirements:
 git clone https://github.com/lucianofedericopereira/vapor-chamber.git
 cd vapor-chamber
 npm install
-npm run test:run    # full test suite, ~4s
+npm run test:run    # default vitest project; `npm test` runs both projects
 npm run build       # tsc + Vite library build + IIFE variants
 ```
 
-If `npm install` produces lockfile drift, that's expected on a fresh clone -
-commit the resulting `package-lock.json` with your PR.
+Lockfile drift from `npm install` is expected on a fresh clone; commit the
+resulting `package-lock.json` with your PR.
 
 ---
 
@@ -43,7 +43,7 @@ src/
   form.ts              Reactive form state
   testing.ts           createTestBus + snapshot/time-travel
   devtools.ts          @vue/devtools-api integration
-  directives.ts        v-vc:command directive (VDOM-only)
+  directives.ts        v-vc:command directive (vDOM plugin + vcCommandVapor)
   transitions.ts       <Transition> hook -> bus dispatch bridge
   ssr.ts               SSR dehydrate/rehydrate
   vite-hmr.ts          Vite HMR plugin
@@ -82,18 +82,32 @@ ROADMAP.md             RC tracking, version policy, feature matrix
 ### Before opening a PR
 
 ```bash
-npm run typecheck     # tsc --noEmit
-npm run lint:check    # biome + the prose guards (see below)
-npm run test:run      # default vitest project
-npm run build         # produces dist/ + prints sizes
-npm run test:vapor    # second project, `vue` aliased to the with-vapor dist
-npm run size:check    # fails if any IIFE variant exceeds its brotli budget
+npm run typecheck      # tsc --noEmit
+npm run build          # produces dist/ + prints sizes - BEFORE any test run
+npm run test:run       # default vitest project
+npm run test:vapor     # second project, `vue` aliased to the with-vapor dist
+npm run size:check     # fails if any IIFE variant exceeds its brotli budget
+npm run lint:check     # biome + the prose guards (see below)
+npm run test:coverage  # 100% statements / branches / functions / lines
 ```
 
-All six must pass.
+All seven must pass, and the order is part of the gate:
 
-`lint:check` runs more than biome. Four guards check things a test cannot,
-because they check what the source *says* rather than what it does:
+- **Build before the test runs.** The size, boundary and Vite-plugin guards read
+  `dist/` and skip themselves (`describe.skipIf(!haveDist)`) when it is absent, so a
+  test run without a build is a partial run that can still print green. One suite
+  also reads a file that only `tsc` emits (`dist/router/index.d.ts`).
+- **After any change under `src/`, comments included, run `npm run docs`** and
+  commit `docs/api/` with the change. The API reference carries source line
+  anchors, so a comment that moves a line moves them. Run `npm run size:doc` too
+  when a change can move a size row; both must regenerate with no diff.
+- **After adding or removing tests, run `npm run docs:stamp` after
+  `test:coverage`.** The test-count markers publish only from a built run with
+  coverage on, so the `stamp-docs --check` inside `lint:check`, which follows a plain
+  `test:run`, cannot see a stale count.
+
+`lint:check` runs more than biome. Four guards check what the source *says*
+rather than what it does, which a test cannot:
 `check-env-guards` (no unguarded `process.env`), `check-line-citations` (no
 source-line numbers in test titles), `check-doc-claims` (no docblock attached to
 nothing, no documented default whose value is absent from the file, no release
@@ -102,13 +116,13 @@ ASCII, including invisible characters). `stamp-docs --check` fails on a stale
 generated number. CI runs the same set on Node 22 and 24, on Linux and macOS.
 
 `test:run` is not the whole suite: `tests/vapor/**` runs only under
-`vitest.vapor.config.ts` (it needs `vue` aliased to a build that has Vapor in
-it - the config header explains why), and that is where the router/vapor
-outlet's acceptance guards live. `npm test` runs both projects back to back.
+`vitest.vapor.config.ts` (it needs `vue` aliased to a build that includes
+Vapor; the config header explains why), and the router/vapor outlet's
+acceptance guards live there. `npm test` runs both projects back to back.
 Run `test:vapor` after `build`, since its size guard measures a real production
 bundle.
 
-The `examples/` workspaces are not part of that gate - they build against the
+The `examples/` workspaces sit outside that gate; they build against the
 working tree on demand. `examples/exo-astro` needs Node ≥ 22.12 (Astro 7's own
 floor); its directive scanner is covered by the repo suite, so `npm test` from
 the root does exercise that example's code.
@@ -120,23 +134,23 @@ If your change is in a hot path (`command-bus.ts`, `transports.ts`, `chamber.ts`
 1. Add a bench to [tests/perf.bench.ts](./tests/perf.bench.ts) **before** changing
    the code, and capture the baseline numbers.
 2. Make your change.
-3. Re-run the bench. Document the win/regression in the PR description.
-4. **Do not ship a "performance" change that doesn't show up in a bench.**
-   The project's rule is: only keep changes that benches confirm.
+3. Re-run the bench and report the win or regression in the PR description.
+4. **Keep a "performance" change only if a bench confirms it.** That is the
+   project's rule.
 
 If your change might shift bundle size:
 
 1. Run `npm run build` and note the printed sizes.
-2. If the size budget guard fails, decide: is the increase intentional? If
-   yes, update `BUDGETS` in [scripts/check-size.mjs](./scripts/check-size.mjs)
-   and explain in the PR description.
+2. If the size budget guard (`npm run size:check`) fails and the increase is
+   intentional, update `BUDGETS` in [scripts/check-size.mjs](./scripts/check-size.mjs)
+   and explain why in the PR description.
 
 ### Code style
 
 - Biome handles linting. Run `npm run lint` to auto-fix; CI runs `lint:check`.
 - TypeScript strict mode is on. No `any` leaks at the public API boundary; internal `any` is fine where the alternative is verbose generics.
 - Comments are sparse by design - write them when the *why* is non-obvious (a hidden constraint, an invariant, a workaround for a specific bug). Don't paraphrase the code.
-- No emojis in source files. Sparingly in CHANGELOG / docs if explicitly asked.
+- No emojis in source files. In CHANGELOG and docs, use them sparingly and only when explicitly asked.
 - Tests live next to the module they exercise (`src/foo.ts` <-> `tests/foo.test.ts`). Cross-cutting concerns get their own file.
 
 ### Module discipline
@@ -147,11 +161,11 @@ the expensive way:
 - **A subpath is named for what it costs.** It gets its own measured row in
   `docs/BUNDLE-SIZES.md` and a boundary fixture in the `vdom-boundary.test.ts`
   shape. A subpath that imports nothing the core lacks isolates nothing and
-  should not exist - minting one also adds a build entry, which re-chunks shared
+  should not exist. Minting one also adds a build entry, which re-chunks shared
   code and has moved an unrelated size guard.
 - **Cleanup is `onScopeDispose` only**, gated on `hasInjectionContext()` where a
-  gate is needed. `getCurrentInstance()` returns null in Vapor by design, which
-  upstream has confirmed is permanent, so it is never the thing to branch on.
+  gate is needed. `getCurrentInstance()` returns null in Vapor by design, and
+  upstream has confirmed that is permanent, so never branch on it.
 - **Errors are coded taxonomies per module**, and tests switch on `code`, never
   on message text.
 - **Performance claims are interleaved A/B on the real path**, with derived
@@ -174,16 +188,17 @@ the expensive way:
 2. Bump `version` in [package.json](./package.json).
 3. Commit: `release: vX.Y.Z`.
 4. Tag: `git tag vX.Y.Z && git push --tags`.
-5. `npm publish` (the `prepublishOnly` script runs typecheck, lint, both test projects, build, and size guard - all must pass).
+5. `npm publish`. The `prepublishOnly` script runs the seven gates of "Before opening a PR"
+   in that order (build before either test project, coverage last), and all must pass.
 6. GitHub release notes copy the CHANGELOG section verbatim.
 
-Breaking changes only land in major versions. Variant *contents* of the IIFE bundles are explicitly not under semver before v2.0 - see [ROADMAP.md](./ROADMAP.md). ESM consumers (the main entry) obey strict semver.
+A breaking change to a surface documented as stable needs a major; before Vue 3.6 stable, experimental surfaces take breaking changes in minors (ROADMAP, "Version policy before 3.6 stable"). Variant *contents* of the IIFE bundles are explicitly not under semver before v2.0; see [ROADMAP.md](./ROADMAP.md). The ESM main entry follows strict semver.
 
 ---
 
 ## Reporting bugs
 
-- Reproduction case as a minimal failing test in `tests/`. PRs welcome that add the failing test even without a fix - that's a useful contribution by itself.
+- A reproduction as a minimal failing test in `tests/`. A PR that adds the failing test, even without a fix, is a useful contribution by itself.
 - Vue version, Node version, OS, and which IIFE variant (if applicable).
 - Browser if the issue is browser-specific.
 
@@ -196,11 +211,11 @@ issue.
 
 See [ROADMAP.md](./ROADMAP.md) for the strategic plan. Concrete near-term items where help is appreciated:
 
-- Comparative benchmarks vs `mitt`, `nano-events`, RxJS Subject, Pinia.
-- Real-world integration examples in `examples/` (Rails, Django, Laravel).
+- Comparative benchmarks vs RxJS Subject, Pinia.
+- Real-world integration examples in `examples/` (Rails, Django).
 - Additional `examples/` for the IIFE variants - embeddable widget, CDN-only Blade page.
 - TypeDoc -> static API reference site (target: `vapor-chamber.dev` or similar).
-- Migration guides from `mitt` / `event-emitter` / Vuex.
+- A migration guide from Vuex.
 
 ---
 

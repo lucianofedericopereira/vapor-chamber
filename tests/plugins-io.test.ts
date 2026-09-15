@@ -297,18 +297,18 @@ describe('sync plugin', () => {
     // `{ ok: false }` (covered above), so only a REJECTED dispatch - a
     // downstream plugin or transport failing outright - reaches it. Without
     // the catch this would also surface as an unhandled rejection.
+    // Since VC_PLUGIN_THREW a rejecting downstream plugin is converted to a
+    // result, so the rejection here is onMissing:'throw', the one that
+    // crosses the chain by contract.
     const mockBc = makeMockBroadcastChannel();
     vi.stubGlobal('BroadcastChannel', makeBcConstructor(mockBc));
 
-    const bus = createAsyncCommandBus();
-    bus.register('cartAdd', async () => 'added');
+    const bus = createAsyncCommandBus({ onMissing: 'throw' });
 
     const tabSync = sync({ channel: 'test' }, { dispatch: bus.dispatch.bind(bus) });
     bus.use(tabSync, { priority: 100 });
-    // Lower priority = INSIDE sync, so this is what sync's `next()` returns.
-    bus.use(() => Promise.reject(new Error('transport down')) as any, { priority: 50 });
 
-    await expect(bus.dispatch('cartAdd', { id: 1 }, { qty: 2 })).rejects.toThrow('transport down');
+    await expect(bus.dispatch('cartAdd', { id: 1 }, { qty: 2 })).rejects.toThrow('No handler');
     await Promise.resolve(); // let the plugin's own .then/.catch settle
 
     expect(mockBc.postMessage).not.toHaveBeenCalled();
@@ -759,6 +759,20 @@ describe('retry plugin', () => {
     const result = await bus.dispatch('call', {});
     expect(result.ok).toBe(false);
     expect(attempts).toBe(3); // transient code - retried to maxAttempts
+  });
+
+  it('default predicate does not re-run a VC_PLUGIN_THREW (a plugin bug throws again)', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const bus = createAsyncCommandBus();
+    bus.use(retry({ maxAttempts: 4, baseDelay: 0 }), { priority: 10 });
+    let calls = 0;
+    bus.use(() => { calls++; throw new Error('plugin bug'); }, { priority: 1 });
+    bus.register('call', async () => 'never');
+
+    const result = await bus.dispatch('call', {});
+    expect((result.error as { code?: string }).code).toBe('VC_PLUGIN_THREW');
+    expect(calls).toBe(1); // not in RETRYABLE_CODES - one attempt, no backoff
+    errSpy.mockRestore();
   });
 
   it('default predicate still retries plain (non-Bus) errors, even with a code field', async () => {

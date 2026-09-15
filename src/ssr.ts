@@ -81,6 +81,7 @@
 
 import { DEV } from './dev';
 import type { Command, CommandResult, Plugin, BaseBus } from './command-bus';
+import { _errResult } from './command-bus';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -267,7 +268,7 @@ export function rehydrate(
       }
       results.push(result);
     } catch (e) {
-      results.push({ ok: false, error: e as Error });
+      results.push(_errResult(e as Error));
     }
   }
 
@@ -302,7 +303,7 @@ export async function rehydrateAsync(
     try {
       results.push(await bus.dispatch(cmd.action, cmd.target, cmd.payload));
     } catch (e) {
-      results.push({ ok: false, error: e as Error });
+      results.push(_errResult(e as Error));
     }
   }
 

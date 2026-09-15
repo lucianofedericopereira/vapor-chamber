@@ -247,6 +247,14 @@ export {
   type InterceptorManager,
 } from './http';
 
+// The two named HTTP failure rules (see http-errors.ts): what may be re-sent,
+// and what a cached response may stand in for. Zero cost when unimported.
+export {
+  classifyError,
+  isRetryableStatus,
+  type ErrorClassification,
+} from './http-errors';
+
 // Transport plugins - optional; prefer 'vapor-chamber/transports' to avoid pulling http.ts
 export {
   createHttpBridge,

@@ -1294,13 +1294,17 @@ describe("async bus onMissing extended", () => {
 
 describe('syncRequest with throwing plugin', () => {
   it('resolves { ok: false } when plugin throws during request', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const bus = createCommandBus();
     bus.respond('qa', () => 'answer');
     bus.use(() => { throw new Error('plugin-kaboom'); });
 
     const result = await bus.request('qa', {});
     expect(result.ok).toBe(false);
-    expect(result.error?.message).toBe('plugin-kaboom');
+    // Converted at the plugin boundary (tests/plugin-throw-fixture.test.ts).
+    expect((result.error as any)?.code).toBe('VC_PLUGIN_THREW');
+    expect(((result.error as Error).cause as Error).message).toBe('plugin-kaboom');
+    errSpy.mockRestore();
   });
 });
 
@@ -2235,9 +2239,14 @@ describe('TestBus seal()', () => {
     expect(() => bus.use((_cmd, next) => next())).toThrow(/sealed/i);
   });
 
-  it('clear resets sealed state', () => {
+  // Was 'clear resets sealed state': the TestBus unsealed on clear(), which the
+  // real buses never did. Aligned in v1.20.0 (tests/seal-clear.test.ts): a
+  // sealed bus refuses clear(), and unsealBus() is the way to reopen it.
+  it('clear no longer resets sealed state - unsealBus() does', () => {
     const bus = createTestBus();
     bus.seal();
+    expect(() => bus.clear()).toThrow(/sealed/i);
+    unsealBus(bus);
     bus.clear();
     expect(bus.isSealed()).toBe(false);
     bus.register('a', () => 1); // should not throw
@@ -2702,7 +2711,9 @@ describe('core dispatch - query, rollback, buffer & error defaults', () => {
   });
 
   it('unsealBus is a safe no-op on a bus without the internal unseal symbol', () => {
-    const bus = createTestBus({ passthroughHandlers: true });
+    // Was a TestBus. The TestBus carries the symbol since v1.20.0 (unsealBus()
+    // reopens it like a real bus), so a bare object is the bus without one.
+    const bus = { isSealed: () => true } as any;
     expect(() => unsealBus(bus)).not.toThrow();
   });
 

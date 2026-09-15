@@ -22,8 +22,8 @@ panels, Reverb realtime, queued commands).
 - **One action class per command.** Keeps the controller thin, makes
   commands testable, gives validation/authorization a natural home.
 - **`__invoke($target, $payload, $user)` signature.** `$target` is the
-  first arg from `bus.dispatch(action, target, payload)`; `$payload` is the
-  optional second arg; `$user` is the authenticated user (or null).
+  `target` argument of `bus.dispatch(action, target, payload)`; `$payload` is
+  the optional `payload` argument; `$user` is the authenticated user (or null).
 - **Return any JSON-serializable shape** - it becomes the client's
   `result.value`.
 - **Throw framework exceptions** for failure paths. The controller maps:
@@ -35,12 +35,12 @@ panels, Reverb realtime, queued commands).
 
 ## Idempotency (double-submit protection)
 
-When the JS side enables the `idempotent()` plugin, retried/replayed commands
-carry an `Idempotency-Key` header. The controller honors it with a short-TTL
-cache: a second POST with the same key replays the cached response instead of
-running the action again - so a network retry can't create a duplicate order.
-No setup needed beyond a working Laravel cache store; the TTL (60s) matches the
-JS plugin's default.
+When the JS side enables the `idempotent()` plugin, retried or replayed commands
+carry an `Idempotency-Key` header. The controller honors it with a short-lived
+cache (TTL 60s, matching the JS plugin's default): a second POST with the same
+key replays the cached response instead of running the action again, so a
+network retry can't create a duplicate order. No setup is needed beyond a
+working Laravel cache store.
 
 ## Smoke test
 

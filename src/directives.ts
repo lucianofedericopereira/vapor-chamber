@@ -3,6 +3,10 @@
  *
  * Vue alignment history (one line per version - full per-item detail lives in
  * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table):
+ *   v1.20.0 - LIB-SIDE: `vcCommandVapor`, v-vc:command's Vapor registration -
+ *          the function shape `withVaporDirectives` calls, over the same
+ *          buildHandler. The install-time "not ported to Vapor" warning is
+ *          gone with it.
  *   rc.5 - pass-through. Two upstream commits independently reached rules this
  *          file already applied (direct listeners, per-Document delegation).
  *   rc.2 - pass-through; Vue's compiled `@click` delegation flips to opt-in
@@ -40,8 +44,9 @@
  */
 
 import { DEV } from './dev';
-import { getCommandBus, isVaporAvailable } from './chamber';
-import type { Command, CommandMap } from './command-bus';
+import { getCommandBus } from './chamber';
+import type { Command, CommandMap, CommandResult } from './command-bus';
+import { _errResult } from './command-bus';
 
 // ---------------------------------------------------------------------------
 // Internal state per element (stored via WeakMap)
@@ -52,6 +57,8 @@ const DEFAULT_DISPATCH_TIMEOUT = 30_000;
 
 type DirectiveState = {
   action: string;
+  /** Vapor only: the binding's getter, read at dispatch time - see vcCommandVapor. */
+  actionOf?: () => unknown;
   payload?: any;
   target?: any;
   optimisticFn?: (cmd: Command) => (() => void) | null;
@@ -149,7 +156,7 @@ function delegatedClickHandler(event: Event): void {
 }
 
 function addDelegatedElement(el: Element): Document {
-  const doc = el.ownerDocument ?? document;
+  const doc = el.ownerDocument; // Element.ownerDocument is non-null (lib.dom)
   const count = delegatedDocs.get(doc) ?? 0;
   if (count === 0) doc.addEventListener('click', delegatedClickHandler);
   delegatedDocs.set(doc, count + 1);
@@ -225,6 +232,10 @@ function buildHandler(el: Element, state: DirectiveState): (event: Event) => voi
     if ((el as Partial<HTMLButtonElement>).disabled === true) return;
     if (typeof el.getAttribute === 'function' && el.getAttribute('aria-disabled') === 'true') return;
 
+    // Vapor: the binding is a getter and there is no `updated` hook, so the
+    // action is read here, at dispatch time - see vcCommandVapor.
+    if (state.actionOf) state.action = String(state.actionOf());
+
     const bus = getCommandBus<CommandMap>();
 
     state.loading = true;
@@ -249,7 +260,7 @@ function buildHandler(el: Element, state: DirectiveState): (event: Event) => voi
       try {
         result = bus.dispatch(state.action, target, payload);
       } catch (e) {
-        result = { ok: false, error: e as Error };
+        result = _errResult(e as Error);
       }
 
       // Handle result (may be a Promise if using async bus shim)
@@ -258,9 +269,9 @@ function buildHandler(el: Element, state: DirectiveState): (event: Event) => voi
         // timer when the dispatch wins the race - otherwise every click leaves
         // a live timer (default 30s) pinning this closure.
         let timeoutId: ReturnType<typeof setTimeout> | undefined;
-        const timeoutPromise = new Promise<{ ok: false; error: Error }>((resolve) => {
+        const timeoutPromise = new Promise<CommandResult>((resolve) => {
           timeoutId = setTimeout(
-            () => resolve({ ok: false, error: new Error(`Directive dispatch "${state.action}" timed out after ${state.timeout}ms`) }),
+            () => resolve(_errResult(new Error(`Directive dispatch "${state.action}" timed out after ${state.timeout}ms`))),
             state.timeout
           );
         });
@@ -273,7 +284,7 @@ function buildHandler(el: Element, state: DirectiveState): (event: Event) => voi
         resolved = result;
       }
     } catch (e) {
-      resolved = { ok: false, error: e as Error };
+      resolved = _errResult(e as Error);
     } finally {
       // Always reset loading state - prevents stuck buttons
       state.loading = false;
@@ -282,13 +293,146 @@ function buildHandler(el: Element, state: DirectiveState): (event: Event) => voi
     }
 
     if (!resolved.ok) {
-      state.error = resolved.error ?? null;
+      state.error = resolved.error ?? null; // undefined -> null for state.error (Error | null); the branch is type-required
       el.classList.add(ERROR_CLASS);
       if (rollback) {
         try { rollback(); } catch { /* ignore */ }
       }
     }
   };
+}
+
+/**
+ * Attach v-vc:command to `el` - the part the vDOM and Vapor registrations
+ * share. `actionOf` is the Vapor binding's getter (see vcCommandVapor); the
+ * vDOM path passes the action itself and keeps it current from `updated`.
+ */
+function mountCommand(
+  el: Element,
+  action: string,
+  modifiers: Record<string, boolean> | undefined,
+  actionOf?: () => unknown,
+): void {
+  // One v-vc:command per element: the state is keyed by element. A render
+  // function can list the directive twice (a template cannot), and a second
+  // mount used to overwrite the first's state and strand its listener - so
+  // detach whatever the element carries first, and the last binding wins.
+  unmountCommand(el);
+
+  const mods: Record<string, boolean> =
+    (modifiers && typeof modifiers === 'object') ? modifiers : {};
+
+  const timeout = parseInt(Object.keys(mods).find(k => /^\d+$/.test(k)) ?? '', 10) || DEFAULT_DISPATCH_TIMEOUT;
+
+  const buttons: number[] = [];
+  if (mods.left) buttons.push(0);
+  if (mods.middle) buttons.push(1);
+  if (mods.right) buttons.push(2);
+
+  // .delegate shares one document-level listener, so it has nowhere to
+  // hang per-element addEventListener options. Mirrors Vue's own
+  // compiler-vapor warning for the same incompatible combo (#15127):
+  // "delegate modifier is not supported... the listener will be
+  // attached directly."
+  let delegate = !!mods.delegate;
+  if (delegate && (mods.capture || mods.once || mods.passive)) {
+    if (DEV) {
+      console.warn(
+        '[vapor-chamber] v-vc:command.delegate is incompatible with ' +
+        '.capture/.once/.passive (delegation shares one document-level ' +
+        'listener with no per-element options). Attaching a direct ' +
+        'listener instead.'
+      );
+    }
+    delegate = false;
+  }
+
+  const state: DirectiveState = {
+    action,
+    actionOf,
+    loading: false,
+    error: null,
+    handler: () => {},
+    timeout,
+    stop: !!mods.stop,
+    prevent: !!mods.prevent,
+    self: !!mods.self,
+    buttons,
+    capture: !!mods.capture,
+    delegate,
+  };
+
+  state.handler = buildHandler(el, state);
+  stateMap.set(el, state);
+
+  if (delegate) {
+    state.delegatedDoc = addDelegatedElement(el);
+    return;
+  }
+
+  const listenerOpts: AddEventListenerOptions = {};
+  if (mods.capture) listenerOpts.capture = true;
+  if (mods.once) listenerOpts.once = true;
+  if (mods.passive) listenerOpts.passive = true;
+  el.addEventListener('click', state.handler, listenerOpts);
+}
+
+/** Detach what mountCommand attached: the listener (or the delegated count) and the state. */
+function unmountCommand(el: Element): void {
+  const state = stateMap.get(el);
+  if (!state) return;
+  if (state.delegate) {
+    removeDelegatedElement(state.delegatedDoc ?? null);
+  } else {
+    el.removeEventListener('click', state.handler, state.capture ? { capture: true } : undefined);
+  }
+  stateMap.delete(el);
+}
+
+// ---------------------------------------------------------------------------
+// Vapor registration
+// ---------------------------------------------------------------------------
+
+/**
+ * vcCommandVapor - v-vc:command for Vapor components.
+ *
+ * The same directive as the vDOM plugin's - same `buildHandler`, modifiers,
+ * CSS classes, `data-vc-payload` / `data-vc-target`, `.delegate` - in the
+ * shape Vapor's `withVaporDirectives` calls: `(el, value, argument, modifiers)
+ * => cleanup`, run once per element inside a detached scope that runs the
+ * returned cleanup on unmount.
+ *
+ * Vapor has no `updated` hook and hands the binding over as a GETTER, so the
+ * action is read from it at dispatch time: a changed binding re-targets the
+ * next click without the directive re-running
+ * (tests/vapor-directives-fixture.test.ts pins that it does not). The getter is
+ * read rather than tracked with an effect on purpose: tracking needs
+ * `renderEffect`, which exists only in Vue's Vapor build, and a static import
+ * of it would break this subpath for every Vue 3.5 consumer of the vDOM
+ * plugin.
+ *
+ * `v-vc:payload` and `v-vc:optimistic` remain vDOM registrations; in Vapor the
+ * payload travels as `data-vc-payload`.
+ *
+ * @example
+ * <script setup vapor>
+ * import { vcCommandVapor as vVc } from 'vapor-chamber/directives';
+ * </script>
+ * <template>
+ *   <button v-vc:command.stop="'cartAdd'" data-vc-payload='{"id":1}'>Add</button>
+ * </template>
+ *
+ * // or app-wide: createVaporApp(App).directive('vc', vcCommandVapor)
+ */
+export function vcCommandVapor(
+  el: Element,
+  value: () => unknown,
+  argument?: string,
+  modifiers?: Record<string, boolean>,
+): (() => void) | undefined {
+  if (argument !== 'command') return;
+  mountCommand(el, String(value()), modifiers, value);
+  return () => unmountCommand(el);
 }
 
 // ---------------------------------------------------------------------------
@@ -299,43 +443,16 @@ function buildHandler(el: Element, state: DirectiveState): (event: Event) => voi
  * createDirectivePlugin - installs v-vc:command and v-vc:optimistic directives.
  *
  * Opt-in: import and use this plugin only when you need template directives.
- * Zero cost when not imported.
+ * Zero cost when not imported. In Vapor components use {@link vcCommandVapor}.
  */
 export function createDirectivePlugin(): { install(app: any): void } {
   return {
     install(app: any) {
-      // THIS DIRECTIVE is VDOM-only. Vapor custom directives are NOT.
-      //
-      // The warning here used to say "directives remain a VDOM-only feature
-      // tied to the VDOM patch lifecycle", which was wrong, and wrong from the
-      // start: `withVaporDirectives` is a public export of the with-vapor
-      // build and ships in every Vue version this project has tracked
-      // (verified by unpacking the published @vue/runtime-vapor dist for
-      // 3.6.0-alpha.3 through rc.3 - present in all of them; rc.3 only
-      // hardened it, #15258/#15167/#15158). Measured in
-      // tests/vapor-directives-fixture.test.ts.
-      //
-      // What is genuinely blocking is the SHAPE this plugin registers. Vue
-      // wants two different things under one name:
-      //   VDOM   { mounted(el, binding), updated(el, binding), beforeUnmount(el) }
-      //   Vapor  (el, value, argument, modifiers) => cleanup | void
-      // and there is no `updated` hook in the Vapor form at all - the value
-      // arrives as a getter and a directive that must react opens its own
-      // effect. So `app.directive('vc', ...)` cannot serve both from one
-      // registration, and porting is real work rather than a rename. Until
-      // that lands, the practical advice below is unchanged; only the reason
-      // is now accurate.
-      if (isVaporAvailable()) {
-        console.warn(
-          '[vapor-chamber] v-vc:command is implemented with VDOM directive hooks, ' +
-          'so it will not run inside <script setup vapor> components. (Vapor DOES ' +
-          'support custom directives - via a different, function-shaped API this ' +
-          'directive has not been ported to yet.) Use useCommand() or ' +
-          'defineVaporCommand() for Vapor components. For async operations under ' +
-          'Suspense, use useVaporAsyncCommand(). This directive still works in VDOM ' +
-          'components within mixed Vapor/VDOM trees (interop plugin required).'
-        );
-      }
+      // The vDOM registration. One `app.directive('vc', ...)` cannot serve
+      // both renderers - Vapor wants a plain function and has no `updated`
+      // hook - so Vapor has its own export, `vcCommandVapor`, over the same
+      // handler. The install-time warning that stood here (the port did not
+      // exist) is gone with it.
 
       /**
        * v-vc:command="'actionName'"
@@ -346,62 +463,7 @@ export function createDirectivePlugin(): { install(app: any): void } {
       app.directive('vc', {
         mounted(el: Element, binding: { arg?: string; value: any; modifiers: Record<string, boolean> }) {
           if (binding.arg !== 'command') return;
-
-          const mods: Record<string, boolean> =
-            (binding.modifiers && typeof binding.modifiers === 'object') ? binding.modifiers : {};
-
-          const timeout = parseInt(Object.keys(mods).find(k => /^\d+$/.test(k)) ?? '', 10) || DEFAULT_DISPATCH_TIMEOUT;
-
-          const buttons: number[] = [];
-          if (mods.left) buttons.push(0);
-          if (mods.middle) buttons.push(1);
-          if (mods.right) buttons.push(2);
-
-          // .delegate shares one document-level listener, so it has nowhere to
-          // hang per-element addEventListener options. Mirrors Vue's own
-          // compiler-vapor warning for the same incompatible combo (#15127):
-          // "delegate modifier is not supported... the listener will be
-          // attached directly."
-          let delegate = !!mods.delegate;
-          if (delegate && (mods.capture || mods.once || mods.passive)) {
-            if (DEV) {
-              console.warn(
-                '[vapor-chamber] v-vc:command.delegate is incompatible with ' +
-                '.capture/.once/.passive (delegation shares one document-level ' +
-                'listener with no per-element options). Attaching a direct ' +
-                'listener instead.'
-              );
-            }
-            delegate = false;
-          }
-
-          const state: DirectiveState = {
-            action: binding.value as string,
-            loading: false,
-            error: null,
-            handler: () => {},
-            timeout,
-            stop: !!mods.stop,
-            prevent: !!mods.prevent,
-            self: !!mods.self,
-            buttons,
-            capture: !!mods.capture,
-            delegate,
-          };
-
-          state.handler = buildHandler(el, state);
-          stateMap.set(el, state);
-
-          if (delegate) {
-            state.delegatedDoc = addDelegatedElement(el);
-            return;
-          }
-
-          const listenerOpts: AddEventListenerOptions = {};
-          if (mods.capture) listenerOpts.capture = true;
-          if (mods.once) listenerOpts.once = true;
-          if (mods.passive) listenerOpts.passive = true;
-          el.addEventListener('click', state.handler, listenerOpts);
+          mountCommand(el, binding.value as string, binding.modifiers);
         },
 
         updated(el: Element, binding: { arg?: string; value: any }) {
@@ -414,15 +476,7 @@ export function createDirectivePlugin(): { install(app: any): void } {
 
         beforeUnmount(el: Element, binding: { arg?: string }) {
           if (binding.arg !== 'command') return;
-          const state = stateMap.get(el);
-          if (state) {
-            if (state.delegate) {
-              removeDelegatedElement(state.delegatedDoc ?? null);
-            } else {
-              el.removeEventListener('click', state.handler, state.capture ? { capture: true } : undefined);
-            }
-            stateMap.delete(el);
-          }
+          unmountCommand(el);
         },
       });
 

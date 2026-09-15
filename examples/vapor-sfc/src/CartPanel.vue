@@ -5,7 +5,9 @@
   button disables only that button while the dispatch is in flight.
 -->
 <script setup vapor lang="ts">
-import { useCommand, signal } from 'vapor-chamber';
+// The Vapor entry wires Vue at build time; from the root this would work only
+// because main.ts happens to import it too.
+import { useCommand, signal } from 'vapor-chamber/vapor';
 import { asRef } from './_reactive';
 
 // asRef: vapor-chamber signals are Vue shallowRefs at runtime - typed as such here

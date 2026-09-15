@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <meta name="csrf-token" content="{{ csrf_token() }}" />
-  <title>vapor-chamber — Laravel widget bridge</title>
+  <title>vapor-chamber - Laravel widget bridge</title>
   <style>
     body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
     .panel { border: 1px solid #ccc; border-radius: 8px; padding: 1rem 1.25rem; margin: 1rem 0; }
@@ -37,13 +37,13 @@
        @cart-added.window="count = $event.detail.count; last = $event.detail.lastAdded">
     <h2>Alpine listener</h2>
     <div class="row"><span>Items</span><strong x-text="count"></strong></div>
-    <div class="row"><span>Last added</span><span x-text="last || '—'"></span></div>
+    <div class="row"><span>Last added</span><span x-text="last || '-'"></span></div>
   </div>
 
   <div class="panel">
     <h2>Plain-DOM listener</h2>
     <div class="row"><span>Events seen</span><strong id="seen">0</strong></div>
-    <pre id="log">(add something…)</pre>
+    <pre id="log">(add something...)</pre>
   </div>
 
   {{-- 1. Alpine, from CDN. Not vendored: it is a host-page framework this demo
@@ -70,7 +70,7 @@
        makes its regex run to the NEXT close in the file and swallow whatever
        lies between - which is exactly what happened to this span while it was
        being written.) --}}
-  <span id="vc-vue-version" hidden><!-- vc:vueAligned -->3.6.0-rc.7<!-- /vc:vueAligned --></span>
+  <span id="vc-vue-version" hidden><!-- vc:vueAligned -->3.6.0-rc.8<!-- /vc:vueAligned --></span>
 
   {{-- 3. Vue, as a MODULE. Vapor ships only as `esm-browser` - there is no
           `vue.runtime-with-vapor.global.js` - so a classic <script src> tag
@@ -123,7 +123,7 @@
     document.addEventListener('cart-added', (e) => {
       seen++;
       document.getElementById('seen').textContent = String(seen);
-      lines.unshift(`cart-added → count ${e.detail.count} (${e.detail.lastAdded})`);
+      lines.unshift(`cart-added -> count ${e.detail.count} (${e.detail.lastAdded})`);
       document.getElementById('log').textContent = lines.slice(0, 8).join('\n');
     });
   </script>

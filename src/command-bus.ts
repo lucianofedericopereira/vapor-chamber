@@ -66,6 +66,7 @@ export type BusErrorCode =
   // Plugins
   | 'VC_PLUGIN_CIRCUIT_OPEN'      // Circuit breaker is open
   | 'VC_PLUGIN_RATE_LIMITED'      // Rate limit exceeded
+  | 'VC_PLUGIN_THREW'             // A plugin threw or rejected in its own body (a pipeline bug; not retryable)
   | 'VC_PLUGIN_CACHE_MISS'        // Cache miss (info-level, not an error)
   | 'VC_VALIDATION_FAILED'        // Schema / per-action validation rejected the dispatch
   // Workflow
@@ -95,15 +96,15 @@ export type BusErrorCode =
  */
 export class BusError extends Error {
   /** Machine-readable error code for switch/lookup. */
-  readonly code: BusErrorCode;
+  declare readonly code: BusErrorCode;
   /** Severity: error, warn, or info. */
-  readonly severity: BusSeverity;
+  declare readonly severity: BusSeverity;
   /** Which subsystem produced this error. */
-  readonly emitter: BusEmitter;
+  declare readonly emitter: BusEmitter;
   /** The action name involved (if applicable). */
-  readonly action?: string;
+  declare readonly action?: string;
   /** Additional context (e.g. retryIn for throttle, threshold for circuit breaker). */
-  readonly context?: Record<string, unknown>;
+  declare readonly context?: Record<string, unknown>;
 
   constructor(
     code: BusErrorCode,
@@ -117,12 +118,12 @@ export class BusError extends Error {
     } = {},
   ) {
     super(message, opts.cause ? { cause: opts.cause } : undefined);
-    this.name = 'BusError';
     this.code = code;
     this.severity = opts.severity ?? 'error';
     this.emitter = opts.emitter ?? 'core';
     this.action = opts.action;
     this.context = opts.context;
+    this.name = 'BusError';
   }
 }
 
@@ -177,11 +178,6 @@ export type CommandMeta = {
    * cache and is not a consequence of it. For real timing use
    * `performance.now()` in a plugin; on a hot loop use `createFastLane()`,
    * which stamps no meta at all.
-   *
-   * Note this is a wall clock, not an ordering key: two commands in the same
-   * millisecond share a `ts`. For order use `meta.id`, whose default generator
-   * is a monotonic counter. To stamp an exact time, do it in a plugin - see the
-   * note above `_configureClock`.
    */
   ts: number;
   /**
@@ -214,7 +210,11 @@ export type CommandMeta = {
    * everything marked `'agent'`).
    *
    * Well-known values: `'user'`, `'remote'`, `'sync'`, `'replay'`, `'agent'` -
-   * but any string is accepted for custom origins.
+   * but any string is accepted for custom origins. Since v1.20.0 the core does
+   * stamp two of its own: `'undo'` on every dispatch made synchronously inside
+   * an undo handler and `'redo'` on a redo and what its handler dispatches
+   * (`_withOriginScope`); the history plugin and `useCommandHistory` record
+   * neither.
    *
    * @example
    * bus.use((cmd, next) => {
@@ -222,7 +222,7 @@ export type CommandMeta = {
    *   return next();
    * });
    */
-  origin?: 'user' | 'remote' | 'sync' | 'replay' | 'agent' | (string & {});
+  origin?: 'user' | 'remote' | 'sync' | 'replay' | 'agent' | 'undo' | 'redo' | (string & {});
 };
 
 export type Command<A extends string = string, T = any, P = any> = {
@@ -262,13 +262,18 @@ export type CommandResult<V = any> =
 
 export type Handler<T = any, P = any, R = any> = (cmd: Command<string, T, P>) => R;
 export type AsyncHandler<T = any, P = any, R = any> = (cmd: Command<string, T, P>) => Promise<R>;
-export type Plugin = (cmd: Command, next: () => CommandResult) => CommandResult;
-export type AsyncPlugin = (cmd: Command, next: () => CommandResult | Promise<CommandResult>) => CommandResult | Promise<CommandResult>;
+/** A plugin that owns timers or connections may carry `dispose()`: the bus's dispose() runs it
+ *  (since v1.20.0; debounce, throttle and retry do). */
+export type Plugin = ((cmd: Command, next: () => CommandResult) => CommandResult) & { dispose?: () => void };
+export type AsyncPlugin = ((cmd: Command, next: () => CommandResult | Promise<CommandResult>) => CommandResult | Promise<CommandResult>) & { dispose?: () => void };
 export type Hook = (cmd: Command, result: CommandResult) => void;
 export type AsyncHook = (cmd: Command, result: CommandResult) => void | Promise<void>;
-/** Fires before the handler runs. Throw to cancel the dispatch (returns `{ ok: false }`). */
+/** Fires before the handler runs. Throw to cancel the dispatch (returns `{ ok: false }`).
+ *  Since v1.20.0 the error is a `VC_CORE_BEFORE_CANCEL` BusError with your throw as `cause`
+ *  and as its message; a thrown BusError passes through as itself. */
 export type BeforeHook = (cmd: Command) => void;
-/** Fires before the handler runs on an async bus. Throw or reject to cancel. */
+/** Fires before the handler runs on an async bus. Throw or reject to cancel.
+ *  The error is a `VC_CORE_BEFORE_CANCEL` BusError as for `BeforeHook`. */
 export type AsyncBeforeHook = (cmd: Command) => void | Promise<void>;
 
 /** Options for plugin registration. Higher priority runs first (outermost). Default: 0. */
@@ -434,7 +439,8 @@ export interface BaseBus {
   emit(event: string, data?: any): void;
   register(action: string, handler: any, options?: RegisterOptions): () => void;
   use(plugin: any, options?: PluginOptions): () => void;
-  /** Subscribe before dispatch. Throw to cancel (returns `{ ok: false }`). */
+  /** Subscribe before dispatch. Throw to cancel (returns `{ ok: false }`, its error a
+   *  `VC_CORE_BEFORE_CANCEL` BusError carrying the throw as `cause` since v1.20.0). */
   onBefore(hook: any): () => void;
   onAfter(hook: any): () => void;
   on(pattern: string, listener: Listener, options?: ListenerOptions): () => void;
@@ -445,7 +451,14 @@ export interface BaseBus {
   /** Returns all registered action names. Useful for introspection and DevTools. */
   registeredActions(): string[];
   clear(): void;
-  /** Full teardown - calls clear() and cancels all pending timers/requests. Use in SSR or component-scoped buses. */
+  /**
+   * Full teardown - calls clear() and cancels all pending timers/requests. Use in SSR or component-scoped buses.
+   * Since v1.20.0 "requests" holds: a request() still waiting on its responder settles at once as
+   * VC_CORE_ABORTED with its timer cleared; the responder is not told (only the caller's own signal
+   * reaches cmd.signal, on the async bus). There is no disposed state - the bus stays usable - and
+   * dispose() works on a sealed bus, which stays sealed. It also runs each installed plugin's
+   * `dispose()` first (debounce, throttle and retry own timers), before the plugins are dropped.
+   */
   dispose(): void;
   /**
    * Seal the bus - prevents further register(), use(), onBefore(), onAfter(), respond() calls.
@@ -453,6 +466,10 @@ export interface BaseBus {
    * not the observation layer. Listeners via on()/once() can still subscribe after seal.
    * Call after app initialization to lock down the graph in production. Throws BusError
    * with code 'VC_CORE_SEALED' on any mutation attempt. Cleared by clear() for HMR compat.
+   * (Superseded in v1.20.0: clear() is a mutation too and throws on a sealed bus, since it
+   * would delete the undo handlers and plugins the seal commits. For HMR, call unsealBus()
+   * first, then clear(), as unsealBus's example shows. dispose() still works on a sealed
+   * bus and leaves it sealed.)
    */
   seal(): void;
   /** Returns true if the bus has been sealed. */
@@ -486,6 +503,12 @@ export interface CommandBus<M extends CommandMap = CommandMap> extends BaseBus {
   /** Subscribe to the first matching command only; auto-unsubscribes after it fires. */
   once(pattern: string, listener: Listener, options?: ListenerOptions): () => void;
   offAll(pattern?: string): void;
+  /**
+   * Request/response: a responder answers, a timeout (default 5000 ms) bounds the wait, and
+   * `signal` settles the request - before the responder runs if already aborted, at once if
+   * aborted while waiting. The sync command carries no signal (see Command.signal), so the
+   * responder is not told; without a responder this is a dispatch.
+   */
   request<A extends keyof M & string>(action: A, target: TargetOf<M, A>, payload?: PayloadOf<M, A>, options?: { timeout?: number; signal?: AbortSignal }): Promise<CommandResult<ResultOf<M, A>>>;
   respond(action: string, handler: (cmd: Command) => any | Promise<any>): () => void;
   /** Returns true if a handler is registered for the given action. */
@@ -504,7 +527,11 @@ export interface CommandBus<M extends CommandMap = CommandMap> extends BaseBus {
   seal(): void;
   /** Returns true if the bus is sealed. */
   isSealed(): boolean;
-  /** Clean teardown - clears state, cancels timers, marks bus as disposed. */
+  /**
+   * Clean teardown - clears state, cancels timers, marks bus as disposed.
+   * (Superseded in v1.20.0: there is no disposed state - the bus stays usable after dispose().
+   * It cancels throttle timers and settles pending request()s as VC_CORE_ABORTED.)
+   */
   dispose(): void;
 }
 
@@ -536,6 +563,11 @@ export interface AsyncCommandBus<M extends CommandMap = CommandMap> extends Base
   /** Subscribe to the first matching command only; auto-unsubscribes after it fires. */
   once(pattern: string, listener: Listener, options?: ListenerOptions): () => void;
   offAll(pattern?: string): void;
+  /**
+   * Request/response: a responder answers, a timeout (default 5000 ms) bounds the wait, identical
+   * in-flight requests share one promise, and `signal` settles the request and reaches the
+   * responder on cmd.signal; without a responder this is a dispatch.
+   */
   request<A extends keyof M & string>(action: A, target: TargetOf<M, A>, payload?: PayloadOf<M, A>, options?: { timeout?: number; signal?: AbortSignal }): Promise<CommandResult<ResultOf<M, A>>>;
   respond(action: string, handler: (cmd: Command) => any | Promise<any>): () => void;
   /** Returns true if a handler is registered for the given action. */
@@ -554,7 +586,11 @@ export interface AsyncCommandBus<M extends CommandMap = CommandMap> extends Base
   seal(): void;
   /** Returns true if the bus is sealed. */
   isSealed(): boolean;
-  /** Clean teardown - clears state, cancels timers, marks bus as disposed. */
+  /**
+   * Clean teardown - clears state, cancels timers, marks bus as disposed.
+   * (Superseded in v1.20.0: there is no disposed state - the bus stays usable after dispose().
+   * It cancels throttle timers and settles pending request()s as VC_CORE_ABORTED.)
+   */
   dispose(): void;
 }
 
@@ -567,15 +603,20 @@ const MAX_DISPATCH_DEPTH = 16;
 
 
 
-/** @internal Symbol used by unsealBus() - not on the public interface. */
-const _UNSEAL = Symbol('vapor-chamber:unseal');
+/**
+ * @internal Symbol used by unsealBus() - not on the public interface.
+ * Exported, underscored like `_stampMeta`, so createTestBus carries it too:
+ * unsealBus() reopens a sealed TestBus as it reopens a real bus. No package
+ * entry re-exports it.
+ */
+export const _UNSEAL = Symbol('vapor-chamber:unseal');
 
 /** @internal Symbol used by inspectBus() - not on the public interface. */
 const _INSPECT = Symbol('vapor-chamber:inspect');
 
 /** Guard: throw if the bus is sealed. */
-function assertNotSealed(sealed: boolean, method: string): void {
-  if (sealed) throw new BusError('VC_CORE_SEALED', `Cannot call ${method}() on a sealed bus. The bus was sealed with bus.seal() to prevent runtime mutations.`, { emitter: 'core' });
+function assertNotSealed(s: { sealed: boolean }, method: string): void {
+  if (s.sealed) throw new BusError('VC_CORE_SEALED', `Cannot call ${method}() on a sealed bus. The bus was sealed with bus.seal() to prevent runtime mutations.`, { emitter: 'core' });
 }
 
 type SyncState = {
@@ -601,6 +642,11 @@ type SyncState = {
    *  register(). Lazily null unless onMissing:'buffer' is configured, so non-buffer
    *  buses don't allocate it. */
   deferred: Map<string, Array<{ target: any; payload: any; at: number }>> | null;
+  /** One cancel per request() still waiting on its responder. dispose() runs them, so
+   *  each settles at once as VC_CORE_ABORTED with its timer cleared, and polices nothing
+   *  afterwards - no disposed state, as Vue 3.6 rc.8's EffectScope.stop() has none.
+   *  Lazily null until the first such request, like `deferred`. */
+  waiting: Set<() => void> | null;
 };
 
 type AsyncState = {
@@ -628,6 +674,11 @@ type AsyncState = {
    *  register(). Lazily null unless onMissing:'buffer' is configured, so non-buffer
    *  buses don't allocate it. */
   deferred: Map<string, Array<{ target: any; payload: any; at: number }>> | null;
+  /** One cancel per request() still waiting on its responder. dispose() runs them, so
+   *  each settles at once as VC_CORE_ABORTED with its timer cleared, and polices nothing
+   *  afterwards - no disposed state, as Vue 3.6 rc.8's EffectScope.stop() has none.
+   *  Lazily null until the first such request, like `deferred`. */
+  waiting: Set<() => void> | null;
 };
 
 // ---------------------------------------------------------------------------
@@ -703,17 +754,10 @@ let _uidFn: () => string = () => _uidPrefix + '-' + (++_uidCounter).toString(36)
 // Consumers who need exact per-command wall clock stamp it themselves - see the
 // note on `CommandMeta.ts`.
 //
-// `ts` is a WALL CLOCK, not an ordering key. Two commands dispatched in the
-// same millisecond share a value, and `Date.now()` is not monotonic - an NTP
-// correction or an operator setting the clock moves it, backwards included - so
-// a `ts` delta was never a sound duration measurement, cache or no cache.
-//
-// For ORDER use `meta.id`: the default generator is a monotonic counter
-// (`(++_uidCounter).toString`). For real durations read `performance.now()`
-// in a plugin. On a hot loop use `createFastLane()`, which stamps no meta at
-// all. If an exact wall clock is ever genuinely needed, the cheap door is a
-// `clock?: () => number` bus option - one branch, no build step, and addable
-// later without breaking anyone.
+// What `ts` is and is not - a wall clock, not an ordering key, not a duration
+// source - is on `CommandMeta.ts`. If an exact wall clock is ever genuinely
+// needed, the cheap door is a `clock?: () => number` bus option - one branch,
+// no build step, and addable later without breaking anyone.
 
 // A boolean rather than a `0` sentinel. `_clockNow === 0` meaning "re-read me"
 // reads as safe - `Date.now()` cannot return 0, that is 1970 - but it is only
@@ -767,6 +811,14 @@ export function _configureClock(fn?: () => number): void { _clockFn = fn ?? CACH
 function okResult(value: any): CommandResult { return { ok: true, value, error: undefined }; }
 function errResult(error: Error): CommandResult { return { ok: false, value: undefined, error }; }
 
+/** The sync and async buses share these two failures' wording. */
+function maxDepthResult(action: string): CommandResult {
+  return errResult(new BusError('VC_CORE_MAX_DEPTH', `Maximum dispatch depth (${MAX_DISPATCH_DEPTH}) exceeded for "${action}". This usually means a listener or reaction is re-dispatching in an infinite loop.`, { emitter: 'core', action }));
+}
+function requestTimeoutResult(action: string, timeout: number): CommandResult {
+  return errResult(new BusError('VC_CORE_REQUEST_TIMEOUT', `Request "${action}" timed out after ${timeout}ms. Increase timeout or check if a respond() handler is registered.`, { emitter: 'core', action, context: { timeout } }));
+}
+
 /**
  * Singleton "successful empty" result used by `bus.emit()`. emit is fire-and-
  * forget - no value is computed, the result is constant. Reusing one frozen
@@ -790,7 +842,7 @@ async function tryCatchAsyncHandler(handler: AsyncHandler, cmd: Command): Promis
  * One-shot origin slot - consumed by the NEXT `stampMeta` call.
  *
  * Why a module slot is safe here when it was the original bug everywhere else:
- * the four flags this file's docblock indicts (`_mcpDispatching`, `receiving`,
+ * the four flags `stampMeta`'s docblock indicts (`_mcpDispatching`, `receiving`,
  * `paused`, the reaction guard) all had to survive until a dispatch SETTLED,
  * which on an async bus means past a microtask - so `finally` cleared them
  * early. This slot only has to survive into `stampMeta`, which every dispatch
@@ -823,6 +875,30 @@ let _nextOrigin: string | undefined;
  * as the reason the guard exists.
  */
 let _nextCausation: string | undefined;
+
+/**
+ * Scoped origin - every dispatch made synchronously inside `_withOriginScope`
+ * carries it, where `_withOrigin` marks only the next one. History's undo and
+ * redo need the scope: an undo handler that dispatches two compensations, or
+ * a redone handler that dispatches a child, are rollback steps and none of
+ * them may be recorded. The one-shot slot stays one-shot on purpose (a nested
+ * dispatch must not inherit 'sync' and lose its own broadcast); a rollback
+ * window is the case where inheriting IS the point. The read sits in
+ * stampMeta, so it holds on the async bus too - a recorder there runs at
+ * settle, after a flag would have been cleared, which is how the history
+ * plugin recorded an undo handler's compensations on the async bus and wiped
+ * the redo stack. The flag's old limit remains: a dispatch an ASYNC undo
+ * handler makes after an await is outside the window. Measured on the
+ * dispatch hot path: tests/origin-scope-ab.test.ts.
+ */
+let _originScope: string | undefined;
+
+/** Internal - `origin` on every dispatch `fn` makes synchronously; nests, restores on exit. */
+export function _withOriginScope<T>(origin: string, fn: () => T): T {
+  const outer = _originScope;
+  _originScope = origin;
+  try { return fn(); } finally { _originScope = outer; }
+}
 
 /**
  * Internal - stamp `origin` on the meta of the FIRST dispatch `fn` makes
@@ -881,10 +957,6 @@ function stampMeta(payload: any): CommandMeta {
   // Behavior-identical; reading once also avoids a double getter invocation on exotic payloads.
   // `origin` is always present (undefined when unset) rather than conditionally
   // added - one field set, one hidden class, monomorphic dispatch preserved.
-  // Both slots are read-and-cleared branchlessly, for the reason given at
-  // `_nextOrigin`: the store of undefined over undefined is cheaper than the
-  // branch that would avoid it, and the `??` falls back to the documented
-  // public payload key.
   // Read-and-clear, branchless: both slots are consumed unconditionally (a
   // store of undefined over undefined in the common case) and each `??` falls
   // back to the documented public payload key. The obvious
@@ -903,7 +975,9 @@ function stampMeta(payload: any): CommandMeta {
   const correlationId = payload?.__correlationId ?? causationId;
   const slot = _nextOrigin;
   _nextOrigin = undefined; // one-shot
-  return { ts: _clockFn(), id: uid(), correlationId, causationId, origin: slot ?? payload?.__origin };
+  // The scope slot reads between the one-shot and the payload key: a dispatch
+  // marked one-shot inside a scope keeps its own origin.
+  return { ts: _clockFn(), id: uid(), correlationId, causationId, origin: slot ?? _originScope ?? payload?.__origin };
 }
 
 /**
@@ -913,6 +987,16 @@ function stampMeta(payload: any): CommandMeta {
  * drifts from the thing it doubles.
  */
 export { stampMeta as _stampMeta };
+
+/**
+ * Internal - the two result factories, for modules that build a
+ * `CommandResult` outside the bus (transports, composables, plugins). A
+ * hand-written `{ ok: false, error }` literal has a different hidden class from
+ * `errResult`'s three-field one, so every `result.ok` site that sees both goes
+ * polymorphic; tests/v8-shapes.test.ts pins the shared map. Underscored: not
+ * public API, not in the barrel.
+ */
+export { okResult as _okResult, errResult as _errResult };
 
 function validateNaming(action: string, naming?: NamingConvention): void {
   if (!naming) return;
@@ -1093,10 +1177,8 @@ export function commandKey(action: string, target: any): string {
  * then pass those values to `bus.dispatch(cmd.action, cmd.target, cmd.payload)`.
  * The bus will create its own internal command with proper metadata.
  *
- * Thread-safety note: single-threaded JS means no locking required.
- *
  * @example
- * const pool = createCommandPool;
+ * const pool = createCommandPool();
  * const cmd = pool.acquire('cartAdd', cart, { id: 1 });
  * bus.dispatch(cmd.action, cmd.target, cmd.payload); // bus stamps its own meta
  *
@@ -1131,7 +1213,7 @@ export function createCommandPool(size: number = 64): CommandPool {
     cmd.action = action;
     cmd.target = target;
     cmd.payload = payload;
-    cmd.meta = undefined; // reset meta - dispatch will stamp it
+    cmd.meta = undefined; // pooled commands carry no meta - dispatch stamps its own
     cursor = (cursor + 1) % size;
     totalAcquired++;
     return cmd;
@@ -1215,11 +1297,74 @@ export function buildRunner(plugins: Plugin[]) {
   return function run(cmd: Command, execute: () => CommandResult): CommandResult {
     function nextFrom(idx: number): CommandResult {
       const plugin = plugins[idx];
-      return plugin ? plugin(cmd, () => nextFrom(idx + 1)) : execute();
+      if (!plugin) return execute();
+      // The boundary (see pluginThrew), inline so this runner keeps its OWN
+      // plugin call site - tests/plugin-throw-ab.test.ts.
+      try { return plugin(cmd, () => nextFrom(idx + 1)); }
+      catch (e) { return pluginThrew(e, cmd, plugin, idx); }
     }
     return nextFrom(0);
   };
 }
+
+/**
+ * A plugin that throws, or returns a rejected promise, becomes a
+ * `VC_PLUGIN_THREW` result - converted at the invocation boundary of EACH
+ * plugin, not once at the top. So the plugin above the one that threw receives
+ * it through `next()` like any other failure and its cleanup runs, and the
+ * settle still fires for after-hooks, `on('*')`, the shared error observer and
+ * `isLoading`. Before, the throw escaped the runner past all of them and into
+ * the caller, breaking "dispatch always returns a result" for every consumer
+ * built on it.
+ *
+ * One error passes through as itself: `onMissing: 'throw'` throws (on the
+ * async bus, rejects) from `execute()` BELOW the chain by contract, so every
+ * boundary it crosses hands it on unchanged rather than relabeling it.
+ *
+ * Not in RETRYABLE_CODES - a plugin bug throws again - and circuitBreaker does
+ * not count it. DEV logs it so the conversion never hides the bug. There is
+ * deliberately no "throw in dev, errResult in prod" split: tests would then
+ * run a different pipeline from production.
+ * Pinned by tests/plugin-throw-fixture.test.ts.
+ */
+function pluginThrew(e: unknown, cmd: Command, plugin: Function, index: number): CommandResult {
+  if (e instanceof BusError && e.code === 'VC_CORE_NO_HANDLER') throw e;
+  if (DEV) {
+    console.error(`[vapor-chamber] Plugin "${plugin.name || 'anonymous'}" (#${index} in the chain, 0 = outermost) threw on "${cmd.action}"; the dispatch returns VC_PLUGIN_THREW. Fix the plugin: return next() or an errResult instead of throwing.`, e);
+  }
+  // The plugin's identity is `context.index`, its place in the chain (0 =
+  // outermost); the DEV log above adds its name. The name is not carried in
+  // production: `plugin: fn.name` measured 19 B brotli in the full IIFE, and
+  // is '' for the anonymous arrows most plugins are.
+  return errResult(new BusError('VC_PLUGIN_THREW', `Plugin threw on "${cmd.action}".`, { emitter: 'plugin', action: cmd.action, context: { index }, cause: e as Error }));
+}
+
+/**
+ * A before-hook's throw becomes a `VC_CORE_BEFORE_CANCEL` result - the code
+ * the union has declared since v1.0 and never produced: the raw thrown value
+ * was returned. The message is the thrown error's own, so a hook that throws
+ * `new Error('blocked')` still reads "blocked"; the original is `cause`. A
+ * thrown BusError passes through as itself, so a hook that already speaks in
+ * codes keeps its code. Emitter 'hook' as ERROR_CODE_REGISTRY declares;
+ * severity 'error', what BusSeverity defines for a failed dispatch (the
+ * registry said 'warn' while the code was never emitted); not retryable, the
+ * hook would throw again. Both catch sites are cold; tests/before-cancel-ab.test.ts
+ * measures the dispatch paths around them. Exported underscored for
+ * testing.ts, so the TestBus cancels the way a real bus does.
+ */
+function beforeCancel(e: unknown, action: string): BusError {
+  if (e instanceof BusError) return e;
+  // The cause carries the hook's own stack and this frame's is the caller's
+  // own dispatch, so the capture buys nothing: skipped, as wrapThrottle skips
+  // it for the same reason - a cancel is expected control flow. Measured
+  // (tests/before-cancel-ab.test.ts): with the capture a cancelled dispatch
+  // cost 2.2x its former time on both buses.
+  const savedLimit = (Error as any).stackTraceLimit;
+  (Error as any).stackTraceLimit = 0;
+  try { return new BusError('VC_CORE_BEFORE_CANCEL', e instanceof Error ? e.message : String(e), { emitter: 'hook', action, cause: e as Error }); }
+  finally { (Error as any).stackTraceLimit = savedLimit; }
+}
+export { beforeCancel as _beforeCancel };
 
 // ---------------------------------------------------------------------------
 // Module-level sync bus operations (state threaded explicitly)
@@ -1229,7 +1374,7 @@ export function buildRunner(plugins: Plugin[]) {
 // Shared helpers for both sync and async buses
 // ---------------------------------------------------------------------------
 
-/** Reusable priority comparator - avoids 4 inline arrow-function copies. */
+/** Reusable priority comparator - avoids 3 inline arrow-function copies. */
 const byPriority = (a: { priority: number }, b: { priority: number }) => b.priority - a.priority;
 
 /**
@@ -1237,7 +1382,7 @@ const byPriority = (a: { priority: number }, b: { priority: number }) => b.prior
  * carry the same fields here, so one implementation covers both.
  */
 function register(s: SyncState | AsyncState, action: string, handler: any, opts: RegisterOptions = {}): () => void {
-  assertNotSealed(s.sealed, 'register');
+  assertNotSealed(s, 'register');
   validateNaming(action, s.opts.naming);
   // DEV-gated: overwriting a handler is a wiring mistake only the developer can
   // fix, so the message is worth bytes in dev and none in prod. `DEV` folds to
@@ -1361,7 +1506,14 @@ function handleMissing(s: SyncState | AsyncState, cmd: Command, canDefer: boolea
   }
   const err = new BusError(
     'VC_CORE_NO_HANDLER',
-    `No handler registered for "${cmd.action}". Call bus.register("${cmd.action}", handler) first.`,
+    `No handler registered for "${cmd.action}". Call bus.register("${cmd.action}", handler) first.` +
+      // DEV only, and only with a plugin installed: a transport forwards just
+      // the actions its `actions` filter matches, and any other falls through
+      // next() to here, where "register a handler" is the wrong fix. The
+      // production string is unchanged - this folds away with DEV.
+      (DEV && s.pluginEntries.length !== 0
+        ? " Or a transport plugin's `actions` filter did not match this action."
+        : ''),
     { emitter: 'core', action: cmd.action },
   );
   if (mode === 'throw') throw err;
@@ -1370,6 +1522,17 @@ function handleMissing(s: SyncState | AsyncState, cmd: Command, canDefer: boolea
     catch (e) { return errResult(e as Error); }
   }
   return errResult(err);
+}
+
+/**
+ * `handleMissing` behind an async frame, for the async bus's `execute`. That
+ * closure returns `tryCatchAsyncHandler`'s promise directly instead of being
+ * `async` itself (an `async` body that returns a promise adds a frame, a
+ * promise and two resolve ticks per dispatch); this keeps `onMissing: 'throw'`
+ * a rejection rather than a synchronous throw into the plugin chain.
+ */
+async function asyncMissing(s: AsyncState, cmd: Command, canDefer: boolean): Promise<CommandResult> {
+  return handleMissing(s, cmd, canDefer);
 }
 
 /**
@@ -1407,9 +1570,25 @@ function syncRunHooks(s: SyncState, cmd: Command, result: CommandResult): void {
   fanOutListeners(s.exactListeners, s.wildcardListeners, cmd.action, cmd, result);
 }
 
+/**
+ * The runner, for dispatch: a throw that escapes it is SETTLED first - the
+ * after-hooks and listeners see it as an errResult - and then re-thrown. A
+ * caller that chose `onMissing: 'throw'` still gets its throw, and every
+ * observer that saw the start (a before-hook, `isLoading`) also sees the end;
+ * before, that key stayed true. Only onMissing's NO_HANDLER can escape the
+ * runner now (a plugin's throw is already a result, see pluginThrew). A
+ * function of its own, like tryCatchHandler, so `_syncDispatchInner` stays
+ * free of try - see syncQuery's note on why dispatch splits.
+ * Pinned by tests/command-loading-fixture.test.ts and tests/plugin-throw-fixture.test.ts.
+ */
+function syncRunSettling(s: SyncState, cmd: Command, execute: () => CommandResult): CommandResult {
+  try { return s.runner(cmd, execute); }
+  catch (e) { syncRunHooks(s, cmd, errResult(e as Error)); throw e; }
+}
+
 function syncDispatch(s: SyncState, action: string, target: any, payload?: any, executeOverride?: () => CommandResult): CommandResult {
   if (s.dispatchDepth >= MAX_DISPATCH_DEPTH) {
-    return errResult(new BusError('VC_CORE_MAX_DEPTH', `Maximum dispatch depth (${MAX_DISPATCH_DEPTH}) exceeded for "${action}". This usually means a listener or reaction is re-dispatching in an infinite loop.`, { emitter: 'core', action }));
+    return maxDepthResult(action);
   }
   s.dispatchDepth++;
   try { return _syncDispatchInner(s, action, target, payload, executeOverride); }
@@ -1454,7 +1633,7 @@ function _syncDispatchInner(s: SyncState, action: string, target: any, payload?:
   for (let i = 0, len = bh.length; i < len; i++) {
     try { bh[i](cmd); }
     catch (e) {
-      const result = errResult(e as Error);
+      const result = errResult(beforeCancel(e, action));
       syncRunHooks(s, cmd, result);
       return result;
     }
@@ -1464,7 +1643,10 @@ function _syncDispatchInner(s: SyncState, action: string, target: any, payload?:
     if (!handler) return handleMissing(s, cmd, true);
     return tryCatchHandler(handler, cmd);
   });
-  const result = s.runner(cmd, execute);
+  // Only an `onMissing: 'throw'` bus can have a throw escape the runner, so
+  // only that bus pays syncRunSettling's frame; every other bus keeps the
+  // bare call it had (speed over size - the check costs bytes, not time).
+  const result = s.opts.onMissing === 'throw' ? syncRunSettling(s, cmd, execute) : s.runner(cmd, execute);
   devWarnThenableResult(result, action);
   syncRunHooks(s, cmd, result);
   return result;
@@ -1485,10 +1667,15 @@ function _syncDispatchInner(s: SyncState, action: string, target: any, payload?:
 // the `__VC_DEV__` define, and the IIFE builds fold it to `false` outright,
 // which is what finally drops the warning STRINGS from production rather than
 // just the branch.
-const _thenableWarned = new Set<string>();
+//
+// The once-per-action set is allocated on first use INSIDE the DEV branch, so
+// a production build - where DEV folds to false - neither allocates it at
+// module load nor keeps it. Vue 3.6.0-rc.8 (commit 24) moved its own dev-only
+// fallthrough bookkeeping behind __DEV__ the same way.
+let _thenableWarned: Set<string> | undefined;
 function devWarnThenableResult(result: CommandResult, action: string): void {
   if (DEV) {
-    if (result && typeof (result as unknown as PromiseLike<unknown>).then === 'function' && !_thenableWarned.has(action)) {
+    if (result && typeof (result as unknown as PromiseLike<unknown>).then === 'function' && !(_thenableWarned ||= new Set()).has(action)) {
       _thenableWarned.add(action);
       console.warn(
         `[vapor-chamber] dispatch("${action}") on a SYNC bus returned a Promise - an async plugin ` +
@@ -1595,9 +1782,9 @@ function syncRollback(s: SyncState, commands: BatchCommand[], results: CommandRe
   const rollbacks: CommandResult[] = [];
   for (let j = failedAt - 1; j >= 0; j--) {
     /* v8 ignore next -- defensive: batch halts at first failure, so every j < failedAt is ok */
-    if (!results[j].ok) continue; // skip already-failed commands
+    if (!results[j].ok) continue;
     const undo = s.undoHandlers.get(commands[j].action);
-    if (!undo) continue; // no undo registered - skip
+    if (!undo) continue;
     const cmd: Command = { action: commands[j].action, target: commands[j].target, payload: commands[j].payload, meta: stampMeta(commands[j].payload) };
     try { rollbacks.push(okResult(undo(cmd))); }
     catch (e) { rollbacks.push(errResult(e as Error)); }
@@ -1607,7 +1794,7 @@ function syncRollback(s: SyncState, commands: BatchCommand[], results: CommandRe
 
 
 function syncUse(s: SyncState, plugin: Plugin, opts: PluginOptions = {}): () => void {
-  assertNotSealed(s.sealed, 'use');
+  assertNotSealed(s, 'use');
   // DEV-gated for the same reason as the register() overwrite warning: a
   // build-time wiring mistake, not a runtime condition. Gating `DEV` first also
   // skips the isAsyncFn() probe entirely in production.
@@ -1701,53 +1888,67 @@ function offAll(s: ListenerBucket, pattern?: string): void {
   }
 }
 
-function addHook<H>(sealed: boolean, hooks: H[], hook: H, method: string): () => void {
-  assertNotSealed(sealed, method);
+function addHook<H>(s: { sealed: boolean }, hooks: H[], hook: H, method: string): () => void {
+  assertNotSealed(s, method);
   hooks.push(hook);
   return () => { const i = hooks.indexOf(hook); if (i !== -1) hooks.splice(i, 1); };
 }
 
-function syncRequest(s: SyncState, action: string, target: any, payload?: any, reqOpts: { timeout?: number } = {}): Promise<CommandResult> {
+function syncRequest(s: SyncState, action: string, target: any, payload?: any, reqOpts: { timeout?: number; signal?: AbortSignal } = {}): Promise<CommandResult> {
   const timeout = reqOpts.timeout ?? 5000;
+  const signal = reqOpts.signal;
   const responder = s.responders.get(action);
+  // Pre-flight abort, as on the async bus. The signal was in this function's
+  // type and ignored by its body until v1.20.0.
+  if (signal && signal.aborted) return Promise.resolve(abortedResult(action, signal));
   if (!responder) return Promise.resolve(syncDispatch(s, action, target, payload));
 
+  // Route through the plugin chain with responder as the execute function
+  const cmd: Command = { action, target, payload, meta: stampMeta(payload) };
+  const execute = (): CommandResult => {
+    try { return okResult(responder(cmd)); }
+    catch (e) { return errResult(e as Error); }
+  };
+
+  // No try/catch: a throwing plugin is a VC_PLUGIN_THREW result now (see
+  // pluginThrew), and `execute` is the responder, never onMissing.
+  const pluginResult = s.runner(cmd, execute);
+
+  syncRunHooks(s, cmd, pluginResult);
+
+  // Unwrap async responder value if needed
+  const maybeAsync = pluginResult.value;
+  // Only a pending value can time out or be cancelled, so only it takes the
+  // timer and the cancel below; every other result settles as it is. Until
+  // v1.20.0 every request armed the timer first, inside a Promise executor,
+  // and cleared it on the way out - the sync-responder row of
+  // tests/request-dispose-ab.test.ts measures the difference.
+  if (!pluginResult.ok || !maybeAsync || typeof maybeAsync.then !== 'function') return Promise.resolve(pluginResult);
+
+  // `cmd` keeps the four fields every sync command has: the caller's signal
+  // settles THIS promise and never reaches the responder (see Command.signal
+  // and the shape note in docs/performance.md). One closure serves both
+  // dispose(), which runs it (see SyncState.waiting), and the caller's abort:
+  // abortedResult reads a reason only off an aborted signal, so from
+  // dispose() it is the plain VC_CORE_ABORTED either way.
+  const pending = (s.waiting ||= new Set());
   return new Promise((resolve) => {
-    const timeoutId = setTimeout(
-      () => resolve(errResult(new BusError('VC_CORE_REQUEST_TIMEOUT', `Request "${action}" timed out after ${timeout}ms. Increase timeout or check if a respond() handler is registered.`, { emitter: 'core', action, context: { timeout } }))),
-      timeout
-    );
-
-    // Route through the plugin chain with responder as the execute function
-    const cmd: Command = { action, target, payload, meta: stampMeta(payload) };
-    const execute = (): CommandResult => {
-      try { return okResult(responder(cmd)); }
-      catch (e) { return errResult(e as Error); }
-    };
-
-    let pluginResult: CommandResult;
-    try { pluginResult = s.runner(cmd, execute); }
-    catch (e) { clearTimeout(timeoutId); resolve(errResult(e as Error)); return; }
-
-    syncRunHooks(s, cmd, pluginResult);
-
-    if (!pluginResult.ok) { clearTimeout(timeoutId); resolve(pluginResult); return; }
-
-    // Unwrap async responder value if needed
-    const maybeAsync = pluginResult.value;
-    if (maybeAsync && typeof maybeAsync.then === 'function') {
-      maybeAsync
-        .then((v: any) => { clearTimeout(timeoutId); resolve(okResult(v)); })
-        .catch((e: Error) => { clearTimeout(timeoutId); resolve(errResult(e)); });
-    } else {
+    const done = (r: CommandResult): void => {
       clearTimeout(timeoutId);
-      resolve(pluginResult);
-    }
+      pending.delete(cancel);
+      if (signal) signal.removeEventListener('abort', cancel);
+      resolve(r);
+    };
+    const cancel = (): void => done(abortedResult(action, signal));
+    const timeoutId = setTimeout(() => done(requestTimeoutResult(action, timeout)), timeout);
+    pending.add(cancel);
+    if (signal) signal.addEventListener('abort', cancel);
+    maybeAsync.then((v: any) => done(okResult(v)), (e: Error) => done(errResult(e)));
   });
 }
 
 function syncRespond(s: SyncState, action: string, handler: (cmd: Command) => any | Promise<any>): () => void {
-  assertNotSealed(s.sealed, 'respond');
+  assertNotSealed(s, 'respond');
   validateNaming(action, s.opts.naming);
   s.responders.set(action, handler);
   return () => s.responders.delete(action);
@@ -1759,9 +1960,14 @@ function syncClear(s: SyncState): void {
 }
 
 function syncDispose(s: SyncState): void {
+  // Plugin dispose() first, before clear() drops the entries: debounce and
+  // throttle cancel their timers, retry ends its backoff sleeps. Cold path.
+  for (let i = s.pluginEntries.length - 1; i >= 0; i--) s.pluginEntries[i].plugin.dispose?.();
   syncClear(s);
   for (const timer of s.throttleTimers) clearTimeout(timer);
   s.throttleTimers.clear();
+  // Each cancel settles its request, which removes itself (see syncRequest).
+  if (s.waiting) for (const cancel of s.waiting) cancel();
 }
 
 // ---------------------------------------------------------------------------
@@ -1808,6 +2014,7 @@ export function createCommandBus<M extends CommandMap = CommandMap>(options: Com
     // Lazily allocated on the first buffered command (handleMissing), not here -
     // a buffer-mode bus whose handlers always beat its dispatches allocates nothing.
     deferred: null,
+    waiting: null,
   };
   const bus: CommandBus<M> = {
     // Sync bus accepts the options arg for type compatibility with BaseBus,
@@ -1818,8 +2025,8 @@ export function createCommandBus<M extends CommandMap = CommandMap>(options: Com
     dispatchBatch:     (cmds, o)       => syncDispatchBatch(s, cmds, o),
     register:          (a, h, o)       => register(s, a as string, h as Handler, o),
     use:               (p, o)          => syncUse(s, p, o),
-    onBefore:          (h)             => addHook(s.sealed, s.beforeHooks, h, 'onBefore'),
-    onAfter:           (h)             => addHook(s.sealed, s.afterHooks, h, 'onAfter'),
+    onBefore:          (h)             => addHook(s, s.beforeHooks, h, 'onBefore'),
+    onAfter:           (h)             => addHook(s, s.afterHooks, h, 'onAfter'),
     on:                (pat, l, o)      => on(s, pat, l, o),
     once:              (pat, l, o)      => once(s, pat, l, o),
     offAll:            (pat)           => offAll(s, pat),
@@ -1828,7 +2035,7 @@ export function createCommandBus<M extends CommandMap = CommandMap>(options: Com
     hasHandler:        (a)             => s.handlers.has(a),
     registeredActions: ()              => Array.from(s.handlers.keys()),
     getUndoHandler:    (a)             => s.undoHandlers.get(a),
-    clear:             ()              => syncClear(s),
+    clear:             ()              => { assertNotSealed(s, 'clear'); syncClear(s); },
     dispose:           ()              => syncDispose(s),
     seal:              ()              => { s.sealed = true; },
     isSealed:          ()              => s.sealed,
@@ -1856,9 +2063,26 @@ export function createCommandBus<M extends CommandMap = CommandMap>(options: Com
 // per-level closure does not register here.
 function buildAsyncRunner(plugins: AsyncPlugin[]) {
   return function run(cmd: Command, execute: () => Promise<CommandResult>): Promise<CommandResult> {
+    // What the most recent level returned. The async boundary (see
+    // pluginThrew) has two ways to fail: a synchronous throw from the plugin's
+    // body, and a rejection of the promise it returns, caught on THIS level's
+    // promise so the plugin above sees a resolved errResult from `next()`.
+    // Except when the plugin returned exactly `last` - the value its `next()`
+    // produced, a pass-through. That value comes converted from the level
+    // below (or is execute's, which rejects only with onMissing's NO_HANDLER,
+    // which pluginThrew hands on unchanged anyway), so wrapping it again
+    // changes nothing but costs a promise and a microtask per level - the
+    // declinedWrapEvery arm of tests/plugin-throw-ab.test.ts measures it.
+    let last: unknown;
     function nextFrom(idx: number): CommandResult | Promise<CommandResult> {
       const plugin = plugins[idx];
-      return plugin ? plugin(cmd, () => nextFrom(idx + 1)) : execute();
+      if (!plugin) return (last = execute());
+      let r: CommandResult | Promise<CommandResult>;
+      try { r = plugin(cmd, () => nextFrom(idx + 1)); }
+      catch (e) { return pluginThrew(e, cmd, plugin, idx); }
+      return (last = r !== last && r != null && typeof (r as PromiseLike<CommandResult>).then === 'function'
+        ? (r as Promise<CommandResult>).then(undefined, (e: unknown) => pluginThrew(e, cmd, plugin, idx))
+        : r);
     }
     return Promise.resolve(nextFrom(0));
   };
@@ -1899,7 +2123,7 @@ async function asyncRunAfterHooks(s: AsyncState, cmd: Command, result: CommandRe
 
 async function asyncDispatch(s: AsyncState, action: string, target: any, payload?: any, executeOverride?: () => Promise<CommandResult>, signal?: AbortSignal): Promise<CommandResult> {
   if (s.dispatchDepth >= MAX_DISPATCH_DEPTH) {
-    return errResult(new BusError('VC_CORE_MAX_DEPTH', `Maximum dispatch depth (${MAX_DISPATCH_DEPTH}) exceeded for "${action}". This usually means a listener or reaction is re-dispatching in an infinite loop.`, { emitter: 'core', action }));
+    return maxDepthResult(action);
   }
   s.dispatchDepth++;
   try { return await _asyncDispatchInner(s, action, target, payload, executeOverride, signal); }
@@ -1914,15 +2138,17 @@ async function asyncDispatch(s: AsyncState, action: string, target: any, payload
  *
  * After-hooks still fire from the caller, so observability is intact.
  *
+ * `signal` is optional since v1.20.0: dispose() settles a waiting request() with
+ * none, and gets the BusError.
  * @internal - also used by transports.ts for mid-flight signal handling.
  */
-export function abortedResult(action: string, signal: AbortSignal): CommandResult {
-  const reason = (signal as any).reason;
+export function abortedResult(action: string, signal?: AbortSignal): CommandResult {
+  const reason = signal && (signal as any).reason;
   // Default DOMException (name: 'AbortError') is what `ac.abort()` produces
   // with no arg; substitute our BusError so the code field is queryable.
   const isDefaultAbort = reason && reason.name === 'AbortError' && reason.constructor !== BusError;
   if (reason instanceof Error && !isDefaultAbort) return errResult(reason);
-  return errResult(new BusError('VC_CORE_ABORTED', `Dispatch "${action}" was aborted before it ran.`, { emitter: 'core', action }));
+  return errResult(new BusError('VC_CORE_ABORTED', `Dispatch "${action}" was aborted.`, { emitter: 'core', action }));
 }
 
 async function _asyncDispatchInner(s: AsyncState, action: string, target: any, payload?: any, executeOverride?: () => Promise<CommandResult>, signal?: AbortSignal): Promise<CommandResult> {
@@ -1960,18 +2186,22 @@ async function _asyncDispatchInner(s: AsyncState, action: string, target: any, p
       if (r && typeof (r as PromiseLike<void>).then === 'function') await r;
     }
     catch (e) {
-      const result = errResult(e as Error);
+      const result = errResult(beforeCancel(e, action));
       const h = asyncRunHooks(s, cmd, result);
       if (h) await h;
       return result;
     }
   }
-  const execute = executeOverride ?? (async (): Promise<CommandResult> => {
+  const execute = executeOverride ?? ((): Promise<CommandResult> => {
     const handler = s.handlers.get(action);
-    if (!handler) return handleMissing(s, cmd, true);
-    return tryCatchAsyncHandler(handler, cmd);
+    return handler ? tryCatchAsyncHandler(handler, cmd) : asyncMissing(s, cmd, true);
   });
-  const result = await s.runner(cmd, execute);
+  // Settle, then re-throw - the async side of syncRunSettling. This function
+  // is already async with a try in the before-hook loop above, so it gains
+  // no frame and no promise for it.
+  let result: CommandResult;
+  try { result = await s.runner(cmd, execute); }
+  catch (e) { const h = asyncRunHooks(s, cmd, errResult(e as Error)); if (h) await h; throw e; }
   const h = asyncRunHooks(s, cmd, result);
   if (h) await h;
   return result;
@@ -1991,10 +2221,9 @@ async function _asyncDispatchInner(s: AsyncState, action: string, target: any, p
 async function asyncQuery(s: AsyncState, action: string, target: any, payload?: any): Promise<CommandResult> {
   if (s.opts.naming !== undefined) validateNaming(action, s.opts.naming);
   const cmd: Command = { action, target, payload, meta: stampMeta(payload) };
-  const execute = async (): Promise<CommandResult> => {
+  const execute = (): Promise<CommandResult> => {
     const handler = s.handlers.get(action);
-    if (!handler) return handleMissing(s, cmd, false);
-    return tryCatchAsyncHandler(handler, cmd);
+    return handler ? tryCatchAsyncHandler(handler, cmd) : asyncMissing(s, cmd, false);
   };
   const result = await s.runner(cmd, execute);
   const h = asyncRunHooks(s, cmd, result);
@@ -2073,7 +2302,7 @@ async function asyncRollback(s: AsyncState, commands: BatchCommand[], results: C
 }
 
 function asyncUse(s: AsyncState, plugin: AsyncPlugin, opts: PluginOptions = {}): () => void {
-  assertNotSealed(s.sealed, 'use');
+  assertNotSealed(s, 'use');
   const entry = { plugin, priority: opts.priority ?? 0 };
   s.pluginEntries.push(entry);
   asyncRebuildRunner(s);
@@ -2107,12 +2336,17 @@ async function asyncRequest(s: AsyncState, action: string, target: any, payload?
 
   const dispatchPromise = asyncDispatch(s, action, target, payload, executeOverride, signal);
 
+  const pending = (s.waiting ||= new Set());
   let timeoutId: ReturnType<typeof setTimeout>;
+  let cancel!: () => void;
   const timeoutPromise = new Promise<CommandResult>((resolve) => {
     timeoutId = setTimeout(
-      () => resolve(errResult(new BusError('VC_CORE_REQUEST_TIMEOUT', `Request "${action}" timed out after ${timeout}ms. Increase timeout or check if a respond() handler is registered.`, { emitter: 'core', action, context: { timeout } }))),
+      () => resolve(requestTimeoutResult(action, timeout)),
       timeout
     );
+    // What dispose() runs (see AsyncState.waiting): it settles the race through
+    // the promise the timer already owns, so it adds no promise and no listener.
+    pending.add(cancel = () => resolve(abortedResult(action)));
   });
 
   // Mid-flight abort - race against dispatchPromise and timeoutPromise so the
@@ -2133,6 +2367,7 @@ async function asyncRequest(s: AsyncState, action: string, target: any, payload?
 
   const racePromise = Promise.race(competitors).finally(() => {
     s.pendingRequests.delete(dedupKey);
+    pending.delete(cancel);
     if (abortHandler && signal) signal.removeEventListener('abort', abortHandler);
     clearTimeout(timeoutId!);
   });
@@ -2142,7 +2377,7 @@ async function asyncRequest(s: AsyncState, action: string, target: any, payload?
 }
 
 function asyncRespond(s: AsyncState, action: string, handler: (cmd: Command) => any | Promise<any>): () => void {
-  assertNotSealed(s.sealed, 'respond');
+  assertNotSealed(s, 'respond');
   validateNaming(action, s.opts.naming);
   s.responders.set(action, handler);
   return () => s.responders.delete(action);
@@ -2155,9 +2390,14 @@ function asyncClear(s: AsyncState): void {
 }
 
 function asyncDispose(s: AsyncState): void {
+  // Plugin dispose() first, before clear() drops the entries: debounce and
+  // throttle cancel their timers, retry ends its backoff sleeps. Cold path.
+  for (let i = s.pluginEntries.length - 1; i >= 0; i--) s.pluginEntries[i].plugin.dispose?.();
   asyncClear(s);
   for (const timer of s.throttleTimers) clearTimeout(timer);
   s.throttleTimers.clear();
+  // Each cancel settles its request's race, whose finally removes it (see asyncRequest).
+  if (s.waiting) for (const cancel of s.waiting) cancel();
 }
 
 // ---------------------------------------------------------------------------
@@ -2191,6 +2431,7 @@ export function createAsyncCommandBus<M extends CommandMap = CommandMap>(options
     // Lazily allocated on the first buffered command (handleMissing), not here -
     // a buffer-mode bus whose handlers always beat its dispatches allocates nothing.
     deferred: null,
+    waiting: null,
   };
   const bus: AsyncCommandBus<M> = {
     dispatch:          (a, t, p, o)  => asyncDispatch(s, a as string, t, p, undefined, o?.signal),
@@ -2199,8 +2440,8 @@ export function createAsyncCommandBus<M extends CommandMap = CommandMap>(options
     dispatchBatch:     (cmds, o)     => asyncDispatchBatch(s, cmds, o),
     register:          (a, h, o)     => register(s, a as string, h as AsyncHandler, o),
     use:               (p, o)        => asyncUse(s, p, o),
-    onBefore:          (h)           => addHook(s.sealed, s.beforeHooks, h, 'onBefore'),
-    onAfter:           (h)           => addHook(s.sealed, s.afterHooks, h, 'onAfter'),
+    onBefore:          (h)           => addHook(s, s.beforeHooks, h, 'onBefore'),
+    onAfter:           (h)           => addHook(s, s.afterHooks, h, 'onAfter'),
     on:                (pat, l, o)    => on(s, pat, l, o),
     once:              (pat, l, o)    => once(s, pat, l, o),
     offAll:            (pat)         => offAll(s, pat),
@@ -2209,7 +2450,7 @@ export function createAsyncCommandBus<M extends CommandMap = CommandMap>(options
     hasHandler:        (a)           => s.handlers.has(a),
     registeredActions: ()            => Array.from(s.handlers.keys()),
     getUndoHandler:    (a)           => s.undoHandlers.get(a),
-    clear:             ()            => asyncClear(s),
+    clear:             ()            => { assertNotSealed(s, 'clear'); asyncClear(s); },
     dispose:           ()            => asyncDispose(s),
     seal:              ()            => { s.sealed = true; },
     isSealed:          ()            => s.sealed,

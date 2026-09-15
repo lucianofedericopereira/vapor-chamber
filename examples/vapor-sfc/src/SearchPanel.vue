@@ -8,7 +8,8 @@
   The local `query` signal is a plain Vue ref for the input value.
 -->
 <script setup vapor lang="ts">
-import { defineVaporCommand, signal } from 'vapor-chamber';
+// The Vapor entry wires Vue at build time, so `query` is a real ref once built.
+import { defineVaporCommand, signal } from 'vapor-chamber/vapor';
 
 const query = signal('');
 

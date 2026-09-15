@@ -1,15 +1,15 @@
 # Examples
 
-Runnable demos and copy-paste snippets for vapor-chamber. The full-project apps
-each have their own README; the single-file snippets are self-contained. The apps
+Runnable demos and copy-paste snippets for vapor-chamber. Each full-project app
+has its own README; each single-file snippet is self-contained. The apps
 consume the library via `file:../..` and auto-build `dist/` on demand. Aligned with
-**Vue 3.6.0-rc.1**.
+**Vue <!-- vc:vueAligned -->3.6.0-rc.8<!-- /vc:vueAligned -->**.
 
 Two shared helpers sit here rather than in each example:
 
 | Helper | Role |
 |--------|------|
-| [`ensure-lib.mjs`](./ensure-lib.mjs) | Run by every app's `predev`/`prebuild`. A `file:` dep with a `prepare` script is installed as a **frozen copy**, not a symlink - this mirrors the freshly built `dist/` into it and drops Vite's pre-bundle cache, so an example can never run stale library code. |
+| [`ensure-lib.mjs`](./ensure-lib.mjs) | Run by every app's `predev`/`prebuild`. A `file:` dep with a `prepare` script is installed as a **frozen copy**, not a symlink - this mirrors the freshly built `dist/` into it and drops Vite's pre-bundle cache, so an example can never run stale library code. Under the root workspace install the entry is a symlink to the working tree, and there is nothing to mirror. |
 | [`static-server.mjs`](./static-server.mjs) | Static host for the no-build pages (serves the repo root so `../../dist/...` resolves), with `Cache-Control: no-store` and a mock `POST /api/vc` so a dispatching page actually completes. |
 
 ## Full-project apps (runnable)

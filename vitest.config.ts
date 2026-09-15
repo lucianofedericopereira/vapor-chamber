@@ -69,9 +69,34 @@ export default defineConfig({
       //   file measures 100% with it.)
       //  - testing.ts: test-only utility (createTestBus); covering it
       //    would mean tests that test the test helper
-      //  - directives.ts: requires a real Vue runtime to exercise the public
-      //    surface. Covered indirectly by integration in consumer projects and
-      //    by examples/feature-directives.html; not easily unit-testable.
+      //  - directives.ts: NOT for want of a real runtime any more.
+      //    tests/directives-vapor-fixture.test.ts mounts real Vapor and real
+      //    vDOM apps from the with-vapor build, so Vue calls every hook, and
+      //    with this line removed the file measures 98.78 / 95.2 / 95.65 / 100
+      //    (statements / branches / functions / lines, full suite, batch 4;
+      //    98.17 / 94.4 in batch 3, 76.2 / 74.4 / 69.6 / 82.3 before real
+      //    mounts). What no real mount reaches is defensive code: the
+      //    `handler: () => {}` placeholder, overwritten before anything can
+      //    call it; `el.ownerDocument ?? document` (an Element always has one);
+      //    `if (!doc)` / `delegatedDoc ?? null` and `count === undefined` (a
+      //    delegated element records its document, and the count lives while
+      //    it is mounted); `resolved.error ?? null` (every failed CommandResult
+      //    carries an error); `if (state)` in updated (a v-vc:command binding
+      //    has state from its mount to its unmount). The `if (!state)` in
+      //    unmount is reached now: every mount first detaches what the element
+      //    carries, which is the fix for two bindings on one element. 100%
+      //    means deleting the remaining guards - the order the thresholds note
+      //    below prefers - which is a change to directives.ts, so the
+      //    exclusion stays until that is decided. Batch 5 removed the one
+      //    genuinely dead branch (`el.ownerDocument ?? document`; an Element's
+      //    ownerDocument is non-null). The rest measured that pass: one init
+      //    placeholder (`handler: () => {}`, overwritten before any call) and
+      //    null-guards that MATCH their own signatures - `resolved.error ??
+      //    null` (Error | undefined -> Error | null, type-required),
+      //    removeDelegatedElement's `if (!doc)` / `count === undefined` on a
+      //    `Document | null` param and a `Map.get` result. Those are real
+      //    safety, not useless code, so they and the exclusion stay (owner
+      //    2026-09-14: keep guards that are real safety).
       //  - router/vapor.ts: this project CANNOT IMPORT IT AT ALL. Its named
       //    imports (createDynamicComponent, createSlot, defineVaporComponent)
       //    do not exist on the `vue` build a bare specifier resolves to here,

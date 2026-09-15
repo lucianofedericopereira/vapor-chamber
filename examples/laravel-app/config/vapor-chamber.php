@@ -1,6 +1,6 @@
 <?php
 /**
- * vapor-chamber — demo command registry.
+ * vapor-chamber - demo command registry.
  *
  * Maps every command name (the first arg of `bus.dispatch(...)` on the
  * client) to the action class that handles it. The controller resolves the

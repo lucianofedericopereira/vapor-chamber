@@ -83,6 +83,9 @@ drawer.onEnter(el, () => console.log('Drawer enter done() - Vue can proceed'))
 
 /*
  * <script setup>
+ * // Any import from the Vue entry wires Vue at build time, so `phase` stays a
+ * // reactive signal once built. Without it, in a production bundle it is not.
+ * import 'vapor-chamber/vue'
  * import { useTransitionCommand } from 'vapor-chamber/transitions'
  *
  * // Bind all 8 hooks to the bus with 'notification' namespace
@@ -109,7 +112,8 @@ drawer.onEnter(el, () => console.log('Drawer enter done() - Vue can proceed'))
 /*
  * <script setup vapor>
  * import { useTransitionCommand } from 'vapor-chamber/transitions'
- * import { defineVaporCommand } from 'vapor-chamber'
+ * // The Vapor entry: wires Vue and its Vapor APIs at build time.
+ * import { defineVaporCommand } from 'vapor-chamber/vapor'
  *
  * // Forward animation events to whatever telemetry sink you use
  * defineVaporCommand('panelEnter', (cmd) => {

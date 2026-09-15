@@ -375,7 +375,10 @@ describe('createOutbox - flush', () => {
   // that catch is reachable. It is not hypothetical - any plugin installed
   // downstream of the outbox (transport, auth, serializer) can throw on a
   // replay that happens minutes after the command was queued.
-  it('survives a replay whose dispatch REJECTS, treating it as a failed record', async () => {
+  // Since VC_PLUGIN_THREW the runner converts that throw into a result, so
+  // this replay resolves `{ ok: false }` and fails the record the same way;
+  // the rejection path is now `onMissing: 'throw'`, tested next.
+  it('survives a replay through a THROWING downstream plugin, treating it as a failed record', async () => {
     const storage = memoryStorage();
     let online = false;
     const outbox = createOutbox({ storage, isOnline: () => online, autoFlush: false });
@@ -402,7 +405,8 @@ describe('createOutbox - flush', () => {
     const first = await outbox.flush();
 
     // The rejection was caught and turned into a failed record - the flush
-    // returned a summary instead of rejecting, and nothing was lost.
+    // returned a summary instead of rejecting, and nothing was lost. (A
+    // VC_PLUGIN_THREW result now, not a rejection - the outcome is the same.)
     expect(first).toEqual({ replayed: 0, failed: 1 });
     expect(runs).toEqual([]); // the handler never ran; the plugin threw first
     expect(outbox.pending.value).toBe(2);
@@ -416,25 +420,48 @@ describe('createOutbox - flush', () => {
     expect(outbox.pending.value).toBe(0);
   });
 
+  it('survives a replay whose dispatch REJECTS, treating it as a failed record', async () => {
+    // runFlush's `try/catch` around `bus.dispatch`. On a real bus the one
+    // rejection left is `onMissing: 'throw'` (a plugin's throw is converted),
+    // and it is reachable on a replay: the record was queued offline, and its
+    // handler is not registered yet when the flush runs.
+    const storage = memoryStorage();
+    let online = false;
+    const outbox = createOutbox({ storage, isOnline: () => online, autoFlush: false });
+    const bus = createAsyncCommandBus({ onMissing: 'throw' });
+    outbox.install(bus);
+
+    await bus.dispatch('a', { n: 1 }); // offline: queued, no handler needed
+    online = true;
+    expect(await outbox.flush()).toEqual({ replayed: 0, failed: 1 });
+    expect(storage.data!.map((r) => r.action)).toEqual(['a']); // kept
+
+    bus.register('a', async () => 'ok-a');
+    expect(await outbox.flush()).toEqual({ replayed: 1, failed: 0 });
+  });
+
   it('wraps a non-Error rejection value in an Error rather than storing it raw', async () => {
     // `e instanceof Error ? e : new Error(String(e))` - the else arm. A plugin
     // that rejects with a string (or a framework that throws a plain object)
     // must not put a non-Error into the failure path.
+    // A real bus no longer rejects with a non-Error - a plugin's rejection
+    // becomes a VC_PLUGIN_THREW result - but flush(bus) takes any
+    // AsyncCommandBus, so the value comes from a foreign bus below.
     const storage = memoryStorage();
     let online = false;
     const outbox = createOutbox({ storage, isOnline: () => online, autoFlush: false });
     const bus = createAsyncCommandBus();
     outbox.install(bus);
-
-    // Rejecting (rather than throwing) with a bare string: same non-Error
-    // rejection value, no throw-a-literal lint suppression needed.
-    bus.use(() => Promise.reject('a bare string, not an Error') as any, { priority: 100 });
     bus.register('a', async () => 'ok-a');
 
     await bus.dispatch('a', { n: 1 });
     online = true;
 
-    const summary = await outbox.flush();
+    // Rejecting (rather than throwing) with a bare string: same non-Error
+    // rejection value, no throw-a-literal lint suppression needed. Here it is
+    // a foreign bus: the real one, with a dispatch that rejects.
+    const foreign = { ...bus, dispatch: () => Promise.reject('a bare string, not an Error') } as any;
+    const summary = await outbox.flush(foreign);
     expect(summary).toEqual({ replayed: 0, failed: 1 });
     // Record survives the non-Error rejection intact.
     expect(outbox.pending.value).toBe(1);

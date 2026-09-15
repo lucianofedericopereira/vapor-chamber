@@ -16,9 +16,11 @@
   node_modules so the page works offline; a real page would point the import
   map at a CDN, or just bundle like every other example here.
 
-  IMPORTANT: these directives are VDOM-only. Inside <script setup vapor> use
-  useCommand() / defineVaporCommand() instead - the plugin warns if it detects
-  Vapor. That boundary is deliberate, not a gap.
+  This page uses the vDOM plugin. In a <script setup vapor> component the same
+  v-vc:command is `vcCommandVapor` from vapor-chamber/directives (import it as
+  vVc, or register it app-wide with app.directive('vc', vcCommandVapor)).
+  v-vc-payload and v-vc-optimistic stay vDOM registrations; in Vapor, pass the
+  payload as data-vc-payload.
 -->
 <!DOCTYPE html>
 <html lang="en">

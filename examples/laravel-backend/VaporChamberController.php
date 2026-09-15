@@ -1,17 +1,17 @@
 <?php
 /**
- * vapor-chamber — Laravel controller companion.
+ * vapor-chamber - Laravel controller companion.
  *
  * Drop into app/Http/Controllers/. Adapt the namespace to your project.
  *
- * The controller is intentionally thin — it dispatches to action classes
+ * The controller is intentionally thin - it dispatches to action classes
  * registered in config/vapor-chamber.php and converts exceptions into the
  * lib's response shape ({ ok, state | error, code? }). Laravel's own
  * ValidationException/AuthorizationException/ModelNotFoundException are
  * recognized by type; anything else that declares its own render() (any
  * RFC 9457-shaped exception from a package or the host app) has its
  * status/detail read from there instead of collapsing onto a generic
- * 500 — the controller never needs to know a package-specific exception
+ * 500 - the controller never needs to know a package-specific exception
  * type exists.
  *
  * Wire it up:
@@ -19,7 +19,7 @@
  *   Route::post('/api/vc', VaporChamberController::class)->middleware(['web']);
  *   Route::post('/api/vc/batch', [VaporChamberController::class, 'batch'])->middleware(['web']);
  *
- *   // OR routes/api.php  (Sanctum SPA case) — api.php routes are auto-prefixed
+ *   // OR routes/api.php  (Sanctum SPA case) - api.php routes are auto-prefixed
  *   // with `api`, so use '/vc' (NOT '/api/vc', which would become /api/api/vc):
  *   Route::post('/vc', VaporChamberController::class)->middleware(['auth:sanctum']);
  *   Route::post('/vc/batch', [VaporChamberController::class, 'batch'])->middleware(['auth:sanctum']);
@@ -59,14 +59,14 @@ class VaporChamberController extends Controller
     }
 
     /**
-     * Batch endpoint for `createBatchingHttpBridge` — the JS side coalesces
+     * Batch endpoint for `createBatchingHttpBridge` - the JS side coalesces
      * every command dispatched in one microtask into a single POST here:
      *
      *   { commands: [{ id, command, target, payload, idempotencyKey? }, ...] }
      *
      * Each command runs through the exact same dispatch path as __invoke()
      * (same handler resolution, same idempotency replay, same exception
-     * mapping) — only the request/response envelope differs. One command's
+     * mapping) - only the request/response envelope differs. One command's
      * failure never aborts its siblings; each result is reported by `id`.
      *
      *   { results: [{ id, ok, state?, error?, code? }, ...] }
@@ -98,7 +98,7 @@ class VaporChamberController extends Controller
     /**
      * The single-command dispatch path, shared by __invoke() and batch() so
      * a batched command behaves identically to a solo one: same handler
-     * resolution, same Idempotency-Key replay/caching, same exception →
+     * resolution, same Idempotency-Key replay/caching, same exception ->
      * response-shape mapping.
      *
      * @return array{body: array<string, mixed>, status: int}
@@ -119,11 +119,24 @@ class VaporChamberController extends Controller
         // Replay the cached response for a key we've already processed so a
         // network retry can't double-write (e.g. duplicate orders).
         $cacheKey = $idempotencyKey ? "vc:idem:{$command}:{$idempotencyKey}" : null;
-        if ($cacheKey && ($cached = Cache::get($cacheKey)) !== null) {
-            return ['body' => $cached, 'status' => 200];
+
+        // The cache alone does not make a key land once: nothing is stored
+        // until the action SUCCEEDS, so a retry arriving while the first
+        // attempt is still running (a client timeout on a slow write) misses
+        // the cache and runs the action a second time, concurrently. The lock
+        // is taken BEFORE the cache read and held for the whole run; a request
+        // that cannot get it is answered 409, a 4xx the bridge never retries,
+        // so the client sees one outcome. 30s bounds a crashed holder.
+        $lock = $cacheKey ? Cache::lock("vc:idem:lock:{$command}:{$idempotencyKey}", 30) : null;
+        if ($lock && !$lock->get()) {
+            return $this->fail('A request with this Idempotency-Key is still running', 409, 'in_progress');
         }
 
         try {
+            if ($cacheKey && ($cached = Cache::get($cacheKey)) !== null) {
+                return ['body' => $cached, 'status' => 200];
+            }
+
             $state = app($handler)($target, $payload, $user);
             $body = ['ok' => true, 'state' => $state];
             if ($cacheKey) {
@@ -140,7 +153,7 @@ class VaporChamberController extends Controller
             // Any exception that declares its own render() (a package's own
             // domain exception, or the host app's) gets its status/detail
             // read from there instead
-            // of collapsing onto a generic 500 — the controller stays
+            // of collapsing onto a generic 500 - the controller stays
             // ignorant of specific exception types by design, the same way
             // Laravel's own handler would dispatch to render() if this
             // exception weren't already caught here first.
@@ -155,6 +168,8 @@ class VaporChamberController extends Controller
 
             report($e);
             return $this->fail('Internal error', 500, 'internal_error');
+        } finally {
+            $lock?->release();
         }
     }
 

@@ -17,7 +17,7 @@
 
 import type { AsyncCommandBus, AsyncPlugin, Command, CommandResult } from './command-bus';
 import { countOption } from './bounds';
-import { commandKey, matchesPattern } from './command-bus';
+import { commandKey, matchesPattern, _okResult, _errResult } from './command-bus';
 import { signal } from './signal';
 import type { Signal } from './signal';
 
@@ -371,7 +371,7 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
     // must not happen quietly on a queued write.
     cmd.meta!.idempotencyKey = record.key;
     busRef?.emit('outboxQueued', record);
-    return { ok: true, value: { queued: true, id: record.id } };
+    return _okResult({ queued: true, id: record.id });
   }
 
   const plugin: AsyncPlugin = (cmd, next) => {
@@ -414,7 +414,7 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
       try {
         result = await bus.dispatch(record.action, record.target, record.payload);
       } catch (e) {
-        result = { ok: false, error: e instanceof Error ? e : new Error(String(e)) };
+        result = _errResult(e instanceof Error ? e : new Error(String(e)));
       } finally {
         currentReplay = null;
       }

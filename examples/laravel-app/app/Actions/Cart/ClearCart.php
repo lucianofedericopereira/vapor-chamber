@@ -1,6 +1,6 @@
 <?php
 /**
- * vapor-chamber — runnable demo action (session cart).
+ * vapor-chamber - runnable demo action (session cart).
  *
  * Registered in config/vapor-chamber.php as:
  *   'cartClear' => \App\Actions\Cart\ClearCart::class,

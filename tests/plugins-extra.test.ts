@@ -299,6 +299,55 @@ describe('circuitBreaker', () => {
     expect(r.ok).toBe(true); // circuit bypassed - 'safe' not in actions list
     expect(cb.getState('op')).toBe('open');
   });
+
+  // VC_PLUGIN_THREW is a pipeline bug, not the server failing: three plugin
+  // bugs must not lock an action out. It neither counts nor resets the
+  // consecutive-failure run (tests/plugin-throw-fixture.test.ts has the
+  // conversion itself).
+  it('does not count a VC_PLUGIN_THREW from a plugin inside it', () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const bus = createCommandBus();
+    bus.register('op', () => 'ok');
+    const cb = circuitBreaker({ threshold: 2 });
+    bus.use(cb, { priority: 10 });
+    bus.use(() => { throw new Error('plugin bug'); }, { priority: 1 });
+
+    for (let i = 0; i < 5; i++) expect((bus.dispatch('op', {}).error as { code?: string }).code).toBe('VC_PLUGIN_THREW');
+    expect(cb.getState('op')).toBe('closed');
+    errSpy.mockRestore();
+  });
+
+  it('a VC_PLUGIN_THREW does not reset a run of real failures either', () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const bus = createCommandBus();
+    bus.register('op', () => { throw new Error('server down'); });
+    const cb = circuitBreaker({ threshold: 2 });
+    bus.use(cb, { priority: 10 });
+    let pluginBug = false;
+    bus.use((_c, next) => { if (pluginBug) throw new Error('plugin bug'); return next(); }, { priority: 1 });
+
+    bus.dispatch('op', {}); // real failure 1
+    pluginBug = true;
+    bus.dispatch('op', {}); // a plugin bug: neither counts nor resets
+    pluginBug = false;
+    expect(cb.getState('op')).toBe('closed');
+    bus.dispatch('op', {}); // real failure 2 -> opens
+    expect(cb.getState('op')).toBe('open');
+    errSpy.mockRestore();
+  });
+
+  it('async bus: a rejecting plugin inside it is not counted', async () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const bus = createAsyncCommandBus();
+    bus.register('op', async () => 'ok');
+    const cb = circuitBreaker({ threshold: 2 });
+    bus.use(cb as any, { priority: 10 });
+    bus.use(() => Promise.reject(new Error('plugin bug')), { priority: 1 });
+
+    for (let i = 0; i < 4; i++) expect(((await bus.dispatch('op', {})).error as { code?: string }).code).toBe('VC_PLUGIN_THREW');
+    expect(cb.getState('op')).toBe('closed');
+    errSpy.mockRestore();
+  });
 });
 
 // ---------------------------------------------------------------------------

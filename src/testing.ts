@@ -7,6 +7,7 @@
  *
  * v0.4.3: Added snapshot assertions and time-travel through dispatch history.
  * v0.3.0: Added on(), request(), respond(), getUndoHandler() stubs.
+ * (request() and respond() are real since v1.20.0 - see request() below.)
  *
  * @example
  * const bus = createTestBus();
@@ -31,7 +32,7 @@ import type {
   PluginOptions, BatchCommand, BatchResult, CommandBus,
   Listener, RegisterOptions, BusInspection,
 } from './command-bus';
-import { buildRunner, matchesPattern, BusError, _stampMeta } from './command-bus';
+import { buildRunner, matchesPattern, abortedResult, BusError, _beforeCancel, _errResult, _okResult, _stampMeta, _UNSEAL } from './command-bus';
 
 export interface RecordedDispatch {
   cmd: Command;
@@ -82,6 +83,7 @@ export interface TestBus extends CommandBus<any> {
 export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): TestBus {
   const handlers = new Map<string, Handler>();
   const undoHandlers = new Map<string, Handler>();
+  const responders = new Map<string, (cmd: Command) => any>();
   const plugins: Array<{ plugin: Plugin; priority: number }> = [];
   const beforeHooks: BeforeHook[] = [];
   const afterHooks: Hook[] = [];
@@ -162,7 +164,8 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
     for (let i = 0, len = bh.length; i < len; i++) {
       try { bh[i](cmd); }
       catch (e) {
-        const result: CommandResult = { ok: false, error: e as Error };
+        // The same VC_CORE_BEFORE_CANCEL result a real bus builds (v1.20.0).
+        const result: CommandResult = { ok: false, error: _beforeCancel(e, action) };
         recorded.push({ cmd, result });
         runAfterHooksAndListeners(cmd, result);
         return result;
@@ -283,12 +286,36 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
     }
   }
 
-  function request(action: string, target: any): Promise<CommandResult> {
-    return Promise.resolve(dispatch(action, target));
+  /**
+   * request() and respond() were stubs until v1.20.0: respond() dropped the
+   * handler and request() resolved dispatch(), so a consumer's request path
+   * could not be tested against this double. Now, as on a real bus: a
+   * responder answers through the plugin chain and the after-hooks, its value
+   * is awaited when it is a thenable, an already-aborted signal settles
+   * VC_CORE_ABORTED before the responder runs, and no responder falls back to
+   * dispatch(). Not mirrored: the timeout and dispose() settling a waiting
+   * request - a double records, it does not wait.
+   */
+  function request(action: string, target: any, payload?: any, opts: { timeout?: number; signal?: AbortSignal } = {}): Promise<CommandResult> {
+    if (opts.signal?.aborted) return Promise.resolve(abortedResult(action, opts.signal));
+    const responder = responders.get(action);
+    if (!responder) return Promise.resolve(dispatch(action, target, payload));
+    const cmd: Command = { action, target, payload, meta: _stampMeta(payload) };
+    const result = runner(cmd, () => {
+      try { return _okResult(responder(cmd)); }
+      catch (e) { return _errResult(e as Error); }
+    });
+    recorded.push({ cmd, result });
+    runAfterHooksAndListeners(cmd, result);
+    const v = result.value;
+    if (result.ok && v && typeof v.then === 'function') return v.then(_okResult, _errResult);
+    return Promise.resolve(result);
   }
 
-  function respond(_action: string, _handler: (cmd: Command) => any): () => void {
-    return () => {};
+  function respond(action: string, handler: (cmd: Command) => any): () => void {
+    if (sealed) throw new BusError('VC_CORE_SEALED', `Cannot call respond() on a sealed bus.`, { emitter: 'test' });
+    responders.set(action, handler);
+    return () => { responders.delete(action); };
   }
 
   function getUndoHandler(action: string): Handler | undefined {
@@ -333,10 +360,22 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
     recorded,
     wasDispatched: (action: string) => recorded.some(r => r.cmd.action === action),
     getDispatched: (action: string) => recorded.filter(r => r.cmd.action === action),
-    clear: () => { recorded.splice(0); patternListeners.length = 0; beforeHooks.length = 0; sealed = false; },
-    dispose: () => { recorded.splice(0); patternListeners.length = 0; beforeHooks.length = 0; afterHooks.length = 0; handlers.clear(); undoHandlers.clear(); plugins.length = 0; sealed = false; },
+    // A sealed bus refuses clear() and dispose() leaves it sealed, as on the
+    // real buses; unsealBus() reopens it through the same symbol. Both used to
+    // reset `sealed`, so a test could pass here and throw VC_CORE_SEALED
+    // against the real bus.
+    clear: () => {
+      if (sealed) throw new BusError('VC_CORE_SEALED', `Cannot call clear() on a sealed bus.`, { emitter: 'test' });
+      recorded.splice(0); patternListeners.length = 0; beforeHooks.length = 0;
+    },
+    dispose: () => {
+      // Plugin dispose() first, as a real bus's dispose() does (v1.20.0).
+      for (let i = plugins.length - 1; i >= 0; i--) plugins[i].plugin.dispose?.();
+      recorded.splice(0); patternListeners.length = 0; beforeHooks.length = 0; afterHooks.length = 0; handlers.clear(); undoHandlers.clear(); responders.clear(); plugins.length = 0;
+    },
     seal: () => { sealed = true; },
     isSealed: () => sealed,
+    [_UNSEAL]: () => { sealed = false; },
     inspect: (): BusInspection => ({
       actions: Array.from(handlers.keys()),
       undoActions: Array.from(undoHandlers.keys()),

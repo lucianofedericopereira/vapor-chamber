@@ -25,7 +25,7 @@ general-purpose bus.
 | `emitter.removeAllListeners()`                  | `bus.offAll()` (no arg removes everything)                 |
 | `emitter.emit('foo', a, b, c)`                  | `bus.emit('foo', { a, b, c })` *(single-arg payload)*      |
 | `emitter.listeners('foo')`                      | Inspect via `inspectBus(bus).listenerPatterns`             |
-| `emitter.listenerCount('foo')`                  | Same                                                       |
+| `emitter.listenerCount('foo')`                  | No per-pattern count - `listenerPatterns` lists patterns   |
 | `setMaxListeners(n)`                            | No equivalent - vapor-chamber doesn't cap listener count   |
 
 ## Multi-argument emit -> single-payload emit
@@ -58,8 +58,8 @@ onArgs('userUpdate', (userId, oldName, newName) => {});
 
 EventEmitter listeners receive the emitted args directly. vapor-chamber
 listeners receive `(cmd, result)` - `cmd.target` is the payload, `result`
-is `{ ok, value, error }`. For pure pub/sub use cases the second arg
-doesn't matter (emit always uses a singleton ok-result).
+is `{ ok, value, error }`. For pure pub/sub the second argument doesn't
+matter: emit always uses a singleton ok-result.
 
 ## Class-based vs functional
 
@@ -86,7 +86,7 @@ those services emit/listen on. They're complementary.
 ## Beyond what EventEmitter does
 
 You probably reached for vapor-chamber because you needed something
-EventEmitter doesn't have. Here's the surface:
+EventEmitter lacks. Here is the surface:
 
 ```ts
 // Handlers with results - emit doesn't have a return path
@@ -112,11 +112,10 @@ const tools = toAnthropicTools(busSchema);
 
 ## Memory leaks: listener cleanup
 
-EventEmitter's `setMaxListeners(n)` warns if you accumulate too many
-listeners; this is a leak detector. vapor-chamber doesn't have an
-equivalent because the lib's composables (`useCommand`,
-`useSharedCommandState`) auto-cleanup via `tryAutoCleanup` (Vue scope /
-component disposal).
+EventEmitter's `setMaxListeners(n)` is a leak detector: it warns if you
+accumulate too many listeners. vapor-chamber has no equivalent because the
+lib's composables (`useCommand`, `useSharedCommandState`) clean up
+automatically via `tryAutoCleanup`, on Vue scope or component disposal.
 
 For non-Vue code, capture the unsubscribe closure:
 ```ts
@@ -124,8 +123,9 @@ const off = bus.on('cartAdd', handler);
 // later: off();
 ```
 
-If you're seeing listener leaks, run `inspectBus(bus).listenerPatterns`
-and check whether the count grows without bound.
+`inspectBus(bus).listenerPatterns` lists patterns, not subscriptions, so a
+leak of repeated `on('cartAdd')` does not grow it. Check instead that each
+`on()` has its unsubscribe called.
 
 ## When NOT to migrate
 
@@ -143,25 +143,25 @@ lane.emit('userUpdate', { userId, name });
 ```
 
 On multi-listener fan-out the fast lane's `on`/`emit` is
-**<!-- vc:benchFastLaneVsMitt -->1.83<!-- /vc:benchFastLaneVsMitt -->x mitt**.
+**<!-- vc:benchFastLaneVsMitt -->1.99<!-- /vc:benchFastLaneVsMitt -->x mitt**.
 Against nanoevents it depends on the removal mode: the default (`'live'`, which
 matches the main bus - a listener removed mid-emit does not run) sits at
-**<!-- vc:benchFastLaneVsNano -->0.90<!-- /vc:benchFastLaneVsNano -->x**, while
+**<!-- vc:benchFastLaneVsNano -->0.94<!-- /vc:benchFastLaneVsNano -->x**, while
 `createFastLane({ removal: 'snapshot' })` reaches
-**<!-- vc:benchFastLaneSnapshotVsNano -->1.06<!-- /vc:benchFastLaneSnapshotVsNano -->x**.
+**<!-- vc:benchFastLaneSnapshotVsNano -->1.08<!-- /vc:benchFastLaneSnapshotVsNano -->x**.
 The gap between those two modes is the price of the v1.12.0 unsub-during-emit
-identity guard, which bought correctness with it.
+identity guard, and the guard bought correctness.
 
-Single-handler `compile()` dispatch is a different and much wider lead -
-**<!-- vc:benchCompileVsNano -->2.12<!-- /vc:benchCompileVsNano -->x nanoevents**
-- and is untouched by any of the above. The mode trade-off:
+Single-handler `compile()` dispatch holds a different and much wider lead,
+**<!-- vc:benchCompileVsNano -->2.12<!-- /vc:benchCompileVsNano -->x nanoevents**,
+and nothing above affects it. For the mode trade-off, see
 [performance.md](../performance.md).
 
 > These four ratios are **generated**, not typed: `npm run bench` writes them
-> through `scripts/bench-ratios-reporter.mjs` and `npm run docs:stamp` publishes
-> them. This paragraph used to carry them by hand with a warning that they had
-> no generator, and two had drifted by the time anyone checked - the snapshot
-> mode was described as "at parity (~0.9-1.0x)" while measuring consistently
-> ahead of nanoevents. Ratios rather than hz on purpose: an absolute is host
-> state (rows here swing 20-30% run to run), a same-run ratio is not - though
-> even a ratio moves a little, so read the second decimal as noise.
+> through `scripts/bench-ratios-reporter.mjs`, and `npm run docs:stamp` publishes
+> them. This paragraph used to carry them by hand, with a warning that they had
+> no generator, and by the time anyone checked two had drifted: it described the
+> snapshot mode as "at parity (~0.9-1.0x)" while that mode measured consistently
+> ahead of nanoevents. Ratios rather than hz on purpose: an absolute hz figure is
+> host state (rows here swing 20-30% run to run) and a same-run ratio is not.
+> Even a ratio moves a little, so read the second decimal as noise.

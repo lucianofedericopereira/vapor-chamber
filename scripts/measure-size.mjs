@@ -1,12 +1,17 @@
 /**
  * measure-size - honest shipped-size table for every published entry.
  *
- * The size that matters is brotli of the CODE - comment-free. ESM subpath exports
- * ship unminified (comments included), but the consumer's bundler strips comments
- * and minifies, so measuring the raw dist file would count comment bytes that never
- * reach production. So we esbuild-bundle each export from source, MINIFY (drops
- * comments), externalize vue, then gzip/brotli that - the real over-the-wire cost.
- * IIFE variants already ship minified, so we read the built .min.js directly.
+ * The size that matters is brotli of the CODE a consumer ships. Since v1.20.0
+ * every ESM row is a VITE PRODUCTION BUILD of the built export in `dist/` -
+ * `process.env.NODE_ENV` defined, minified, `vue` external - which is what a
+ * consumer's bundler emits: comments gone, and the dev-only diagnostics folded
+ * away. Until then the rows were esbuild bundles of the source with no define,
+ * and that build keeps every DEV-only branch a production build drops, so
+ * every row read about 10% high (the consumer row: 6,971 esbuild against
+ * 6,230 Vite, measured 2026-09-15). tests/esm-treeshake.test.ts and
+ * tests/vapor/vapor-outlet-size.test.ts had already moved their ceilings to
+ * the Vite number; this table now measures the same artifact they gate.
+ * IIFE variants ship minified, so we read the built .min.js directly.
  *
  * Run: node scripts/measure-size.mjs            human table (default)
  *      node scripts/measure-size.mjs --json      machine-readable
@@ -14,16 +19,18 @@
  *
  * `npm run size:doc` writes --md to docs/BUNDLE-SIZES.md; CI regenerates and
  * `git diff --exit-code`s it, so the published numbers can never drift from reality.
+ * Needs `npm run build` first: every row reads `dist/`.
  */
 import { readFileSync, statSync, existsSync } from 'node:fs';
-import { relative, sep } from 'node:path';
+import { resolve } from 'node:path';
 import zlib from 'node:zlib';
-import { build } from 'esbuild';
+import { build as viteBuild } from 'vite';
 
 const pkg = JSON.parse(readFileSync('./package.json', 'utf8'));
 const brot = (buf) => zlib.brotliCompressSync(buf, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11 } }).length;
 const gzip = (buf) => zlib.gzipSync(buf, { level: 9 }).length;
 const kb = (n) => (n / 1024).toFixed(1);
+const dist = (f) => resolve(process.cwd(), 'dist', f);
 
 /**
  * ESM subpath exports, DERIVED FROM `package.json` "exports" - not listed.
@@ -39,10 +46,8 @@ const kb = (n) => (n / 1024).toFixed(1);
  * removed loses one. `generate-api-docs.mjs` already reads the same source for
  * the same reason (its predecessor's hand-kept list had drifted by five).
  *
- * The mapping is mechanical: `./dist/x/y.js` is built from `src/x/y.ts`, which
- * is what `build.mjs`'s entry map says. Entries whose source is missing are
- * dropped below, so a stale exports entry degrades to a missing row rather than
- * an esbuild crash.
+ * Each row is the built file `exports` points at, so a stale exports entry
+ * degrades to a missing row rather than a crash.
  *
  * (`./router` is deliberately renderer-free - the outlets and blade components
  * live behind `./router/vdom` and `./router/vapor` so a consumer pays only for
@@ -50,9 +55,9 @@ const kb = (n) => (n / 1024).toFixed(1);
  * tests/router/vapor-boundary.test.ts.)
  */
 const esm = Object.entries(pkg.exports ?? {}).flatMap(([subpath, value]) => {
-  const dist = typeof value === 'string' ? value : (value?.import ?? value?.default);
-  if (typeof dist !== 'string' || !dist.endsWith('.js')) return [];
-  return [[subpath, dist.replace(/^\.\/dist\//, 'src/').replace(/\.js$/, '.ts')]];
+  const file = typeof value === 'string' ? value : (value?.import ?? value?.default);
+  if (typeof file !== 'string' || !file.endsWith('.js')) return [];
+  return [[subpath, resolve(process.cwd(), file)]];
 });
 const iife = [
   ['vapor-chamber (full)', 'dist/vapor-chamber.iife.min.js'],
@@ -60,139 +65,179 @@ const iife = [
   ['vapor-chamber-elements', 'dist/vapor-chamber-elements.iife.min.js'],
 ];
 
+const EXTERNAL = ['vue', '@vue/devtools-api', '@vue/reactivity'];
+let entrySeq = 0;
+
 /**
- * TWO passes, because one number cannot answer both questions.
+ * One Vite production build, in memory. `input` is either a file (an export's
+ * built entry, which keeps every export of that module - the import-everything
+ * measurement) or a virtual module carrying `code` (the consumer-shaped rows
+ * below; a virtual entry resolves its bare imports from the repo root, so
+ * `vue` and `mitt` are found without a file on disk).
  *
- * Pass 1 (`min`/`gz`/`br`) bundles with NO code splitting, which is the
- * original measurement and stays untouched so every published figure remains
- * comparable to its history.
- *
- * Pass 2 exists because pass 1 has a blind spot that was actively misleading.
- * Without `splitting`, esbuild cannot emit a second chunk, so it INLINES every
- * internal `import()` and adds a `Promise.resolve().then()` wrapper on top - a
- * module deferred off the startup path is counted in full, plus overhead. The
- * metric therefore charged a penalty for the one technique that removes bytes
- * from a real consumer: measured on `./router`, moving the http client behind
- * an on-demand import read as +0.5 KB here while cutting 3.2 KB from an app's
- * first load. Two sites are affected today - the http client and `./blade`,
- * both in the router. (The `import()` calls in `chamber.ts` and `devtools.ts`
- * hold their specifier in a variable behind `@vite-ignore`, so esbuild leaves
- * them external and neither pass sees them.)
- *
- * So pass 2 rebuilds with `splitting: true` and reports what an app's bundler
- * actually produces: `first` is the entry chunk, `lazy` is everything deferred
- * into sibling chunks, fetched only if the feature is used. A row where the
- * two agree has nothing deferred, which is most of them.
+ * ONE build answers both questions the table asks. Rollup splits every
+ * `import()` into its own chunk, so `first` is the chunks reachable from the
+ * entry through STATIC imports - what a consumer downloads to start - and
+ * `lazy` is the rest, fetched only if the feature is used. `min` / `gz` / `br`
+ * join every chunk, the historical single-file measurement. Reachability, not
+ * the entry flag: a chunk split out for a dynamic import is not startup cost,
+ * and a chunk without the flag can be shared code the entry imports statically,
+ * which is how `./router-fetch` reaches the http client.
  */
-async function esmRow(name, entry) {
-  const shared = {
-    entryPoints: [entry], bundle: true, minify: true, format: 'esm', target: 'es2022',
-    external: ['vue', '@vue/devtools-api'], write: false, logLevel: 'silent', legalComments: 'none',
-  };
-  const r = await build(shared);
-  const buf = Buffer.from(r.outputFiles[0].contents);
-
-  // `outdir` is required by esbuild whenever splitting is on; nothing is
-  // written, since `write: false` keeps the result in memory.
-  const split = await build({ ...shared, splitting: true, outdir: 'size-probe', metafile: true });
-  const outputs = split.metafile.outputs;
-  const keyOf = (file) => relative(process.cwd(), file.path).split(sep).join('/');
-
-  // Reachability, NOT the `entryPoint` field. esbuild stamps an `entryPoint` on
-  // the chunk it splits out for a dynamic import too, so testing that flag
-  // counts a deferred module as part of the startup cost - the exact inversion
-  // of what this pass is for. And a chunk WITHOUT one is not necessarily lazy:
-  // it can be shared code the entry imports statically, which is how
-  // `./router-fetch` reaches the http client. So walk `import-statement` edges
-  // from the entry chunk; whatever that closure reaches is downloaded to
-  // start, and whatever it does not is fetched only on demand.
-  const entryKey = Object.keys(outputs).find((k) => outputs[k].entryPoint === entry);
+async function bundle(input, code, { bundleVue = false } = {}) {
+  const id = code === undefined ? input : `\0vc-size-entry-${++entrySeq}`;
+  const res = await viteBuild({
+    configFile: false, root: process.cwd(), logLevel: 'silent', mode: 'production',
+    define: { 'process.env.NODE_ENV': '"production"' },
+    plugins: code === undefined ? [] : [{
+      name: 'vc-size-entry',
+      resolveId: (source) => (source === input ? id : null),
+      load: (source) => (source === id ? code : null),
+    }],
+    build: {
+      write: false, minify: true, target: 'es2022', modulePreload: false,
+      rollupOptions: {
+        input,
+        external: bundleVue ? EXTERNAL.filter((e) => e === '@vue/devtools-api') : EXTERNAL,
+        output: { format: 'es' },
+        // An app build drops an entry's unused exports; a library row IS its
+        // exports (measured: every ESM row read 0.0 without this).
+        preserveEntrySignatures: 'strict',
+      },
+    },
+  });
+  const chunks = (Array.isArray(res) ? res : [res]).flatMap((r) => ('output' in r ? r.output : [])).filter((o) => o.type === 'chunk');
+  const byName = new Map(chunks.map((c) => [c.fileName, c]));
   const eager = new Set();
-  for (const queue = entryKey ? [entryKey] : []; queue.length; ) {
-    const key = queue.pop();
-    if (!key || eager.has(key) || !outputs[key]) continue;
-    eager.add(key);
-    for (const imp of outputs[key].imports ?? []) {
-      if (imp.kind === 'import-statement' && outputs[imp.path]) queue.push(imp.path);
-    }
+  for (const queue = chunks.filter((c) => c.isEntry).map((c) => c.fileName); queue.length; ) {
+    const name = queue.pop();
+    if (eager.has(name) || !byName.has(name)) continue;
+    eager.add(name);
+    queue.push(...byName.get(name).imports);
   }
+  const join = (list) => Buffer.from(list.map((c) => c.code).join('\n'));
+  const all = join(chunks);
+  const lazyChunks = chunks.filter((c) => !eager.has(c.fileName));
+  return {
+    min: all.length, gz: gzip(all), br: brot(all),
+    first: brot(join(chunks.filter((c) => eager.has(c.fileName)))),
+    lazy: lazyChunks.length ? brot(join(lazyChunks)) : 0,
+  };
+}
 
-  let first = 0;
-  let lazy = 0;
-  for (const file of split.outputFiles) {
-    const size = brot(Buffer.from(file.contents));
-    if (eager.has(keyOf(file))) first += size;
-    else lazy += size;
-  }
-  return { name, min: buf.length, gz: gzip(buf), br: brot(buf), first, lazy };
+async function esmRow(name, entry) {
+  return { name, ...(await bundle(entry)) };
 }
 
 /**
  * The "typical Blade consumer" bundle - the shape docs/performance.md quotes.
  *
- * Measured from `dist/`, not `src/`, deliberately: that is what a consumer
- * actually installs, and it makes this row describe the SAME artifact
- * `tests/esm-treeshake.test.ts` builds and gates. The doc used to carry a
- * hand-typed "5.5 KB brotli" here, which had drifted ~18% low by the time
- * anyone re-measured. A number that appears in prose comes from this script.
+ * The same entry text as tests/esm-treeshake.test.ts builds and gates, kept
+ * global name included, so this row IS that test's number. The doc used to
+ * carry a hand-typed "5.5 KB brotli" here, which had drifted ~18% low by the
+ * time anyone re-measured. A number that appears in prose comes from this
+ * script.
  */
 async function consumerRow() {
-  const entry = 'dist/index.js';
-  if (!existsSync(entry) || !existsSync('dist/transports.js')) return null;
-  const r = await build({
-    stdin: {
-      contents: [
-        `import { createCommandBus, logger } from './dist/index.js';`,
-        `import { createHttpBridge } from './dist/transports.js';`,
-        `const bus = createCommandBus();`,
-        `bus.use(logger());`,
-        `bus.use(createHttpBridge({ endpoint: '/api' }));`,
-        `globalThis.__vc_size_probe = bus;`,
-      ].join('\n'),
-      resolveDir: process.cwd(),
-      loader: 'js',
-    },
-    bundle: true, minify: true, format: 'esm', target: 'es2022', platform: 'browser',
-    external: ['vue', '@vue/devtools-api'], write: false, logLevel: 'silent', legalComments: 'none',
-  });
-  const buf = Buffer.from(r.outputFiles[0].contents);
-  return { name: 'consumer: createCommandBus + logger + createHttpBridge', min: buf.length, gz: gzip(buf), br: brot(buf) };
+  if (!existsSync(dist('index.js')) || !existsSync(dist('transports.js'))) return null;
+  const code = [
+    `import { createCommandBus, logger } from '${dist('index.js')}';`,
+    `import { createHttpBridge } from '${dist('transports.js')}';`,
+    `const bus = createCommandBus();`,
+    `bus.use(logger());`,
+    `bus.use(createHttpBridge({ endpoint: '/api' }));`,
+    `globalThis.__vc_test = bus;`,
+  ].join('\n');
+  return { name: 'consumer: createCommandBus + logger + createHttpBridge', ...(await bundle('vc:consumer', code)) };
 }
 
 /**
  * The dispatch core ALONE - `createCommandBus` and nothing else.
  *
- * This is the "~3.6 KB brotli core" the README leads with, and until v1.17.0 it
- * was hand-typed in three separate places with no generator behind it. Same
- * rule as `consumerRow` above, and the same reason: a number that appears in
- * prose comes from this script, or it drifts. Measured from `dist/` because
- * that is what a consumer installs and tree-shakes.
+ * This is the "KB brotli core" the README leads with, and until v1.17.0 it was
+ * hand-typed in three separate places with no generator behind it. Same rule
+ * as `consumerRow` above, and the same reason: a number that appears in prose
+ * comes from this script, or it drifts.
  */
 async function coreRow() {
-  const entry = 'dist/index.js';
-  if (!existsSync(entry)) return null;
-  const r = await build({
-    stdin: {
-      contents: [
-        `import { createCommandBus } from './dist/index.js';`,
-        `globalThis.__vc_size_probe = createCommandBus();`,
-      ].join('\n'),
-      resolveDir: process.cwd(),
-      loader: 'js',
-    },
-    bundle: true, minify: true, format: 'esm', target: 'es2022', platform: 'browser',
-    external: ['vue', '@vue/devtools-api'], write: false, logLevel: 'silent', legalComments: 'none',
-  });
-  const buf = Buffer.from(r.outputFiles[0].contents);
-  return { name: 'core: createCommandBus alone', min: buf.length, gz: gzip(buf), br: brot(buf) };
+  if (!existsSync(dist('index.js'))) return null;
+  const code = [
+    `import { createCommandBus } from '${dist('index.js')}';`,
+    `globalThis.__vc_size_probe = createCommandBus();`,
+  ].join('\n');
+  return { name: 'core: createCommandBus alone', ...(await bundle('vc:core', code)) };
 }
 
-const esmRows = await Promise.all(esm.filter(([, e]) => existsSync(e)).map(([n, e]) => esmRow(n, e)));
+/**
+ * Vapor wiring, Vue BUNDLED (the only rows where it is), so the cost of a
+ * static Vue import shows. `vapor-chamber/vapor` wires three of the five
+ * Vapor names `configureVue` reads and leaves two out; src/vapor.ts carries
+ * the measurement that decided the split, taken on the vapor-sfc example at
+ * rc.6, and the README quotes the deltas. These rows re-take them on every
+ * run, from `dist/`: the first row is a hand-wired minimum (`createVaporApp`
+ * alone, the composables from `vapor-chamber/vue`), each row after it is the
+ * DIFFERENCE from the row above - the columns are deltas, not sizes.
+ */
+async function vaporWiringRows() {
+  if (!existsSync(dist('vapor.js')) || !existsSync(dist('vue.js'))) return [];
+  const opts = { bundleVue: true };
+  const steps = [
+    ['Vapor wiring: hand-wired createVaporApp', [
+      `import '${dist('vue.js')}';`,
+      `import { createVaporApp } from 'vue';`,
+      `import { configureVue } from '${dist('index.js')}';`,
+      `configureVue({ createVaporApp });`,
+      `globalThis.__vc_wiring = createVaporApp;`,
+    ]],
+    ['vapor-chamber/vapor over that', [
+      `import '${dist('vapor.js')}';`,
+      `globalThis.__vc_wiring = 1;`,
+    ]],
+    ['+ defineVaporCustomElement', [
+      `import { configureVue } from '${dist('vapor.js')}';`,
+      `import { defineVaporCustomElement } from 'vue';`,
+      `configureVue({ defineVaporCustomElement });`,
+      `globalThis.__vc_wiring = 1;`,
+    ]],
+    ['+ vaporInteropPlugin', [
+      `import { configureVue } from '${dist('vapor.js')}';`,
+      `import { defineVaporCustomElement, vaporInteropPlugin } from 'vue';`,
+      `configureVue({ defineVaporCustomElement, vaporInteropPlugin });`,
+      `globalThis.__vc_wiring = 1;`,
+    ]],
+  ];
+  const rows = [];
+  let prev = null;
+  for (const [name, lines] of steps) {
+    const r = await bundle(`vc:wiring-${rows.length}`, lines.join('\n'), opts);
+    rows.push(prev ? { name, min: r.min - prev.min, gz: r.gz - prev.gz, br: r.br - prev.br } : { name, min: r.min, gz: r.gz, br: r.br });
+    prev = r;
+  }
+  return rows;
+}
+
+/**
+ * mitt, for the migration guide's comparison - bundled the same way, from the
+ * devDependency, so "~200 bytes" is a measurement rather than a memory.
+ */
+async function mittRow() {
+  try {
+    return { name: 'mitt', ...(await bundle('vc:mitt', `import mitt from 'mitt';\nglobalThis.__vc_mitt = mitt();`)) };
+  } catch {
+    return null;
+  }
+}
+
+const esmRows = [];
+for (const [n, e] of esm.filter(([, e]) => existsSync(e))) esmRows.push(await esmRow(n, e));
 const core = await coreRow();
 if (core) esmRows.push(core);
 const consumer = await consumerRow();
 if (consumer) esmRows.push(consumer);
-const iifeRows = iife.filter(([, f]) => existsSync(f)).map(([name, f]) => {
+const wiringRows = await vaporWiringRows();
+const mitt = await mittRow();
+const iifeRows = iife.filter(([, f]) => existsSync(f)).map((name_f) => {
+  const [name, f] = name_f;
   const buf = readFileSync(f);
   return { name, min: statSync(f).size, gz: gzip(buf), br: brot(buf) };
 });
@@ -236,37 +281,55 @@ function mdTable(label, rs, split = false) {
 }
 
 if (process.argv.includes('--json')) {
-  console.log(JSON.stringify({ esm: esmRows, iife: iifeRows }, null, 2));
+  console.log(JSON.stringify({ esm: esmRows, wiring: wiringRows, mitt, iife: iifeRows }, null, 2));
 } else if (process.argv.includes('--md')) {
+  const coreKb = kb(core?.br ?? 0);
   console.log(`<!-- GENERATED by \`npm run size:doc\` (scripts/measure-size.mjs) - do not edit by hand. -->
 # Bundle sizes: vapor-chamber v${pkg.version}
 
-All numbers are **minified, comment-free brotli/gzip** - esbuild \`--minify\` for the ESM
-exports (so comments never count), the pre-minified \`.min.js\` for IIFE, then brotli q=11 /
-gzip level 9. This is the real over-the-wire cost of the *code*, not the commented source.
-Regenerated by \`npm run size:doc\`, verified fresh in CI. **Hard ceilings apply to the IIFE
-variants only** (\`scripts/check-size.mjs\` budgets those three files); the ESM rows below are
-measured and published every run, but nothing fails a build when one grows. This line used to
-promise ceilings over the whole document.
+All numbers are **minified, comment-free brotli/gzip** of what a consumer ships: a Vite production
+build of each built export (\`process.env.NODE_ENV\` defined, minified, \`vue\` external - so dev-only
+diagnostics fold away as they do in an app build), the pre-minified \`.min.js\` for IIFE, then
+brotli q=11 / gzip level 9. Until v1.20.0 the ESM rows were esbuild bundles of the source with no
+define, which kept the DEV-only branches a production build drops: about 10% high. Regenerated by
+\`npm run size:doc\`, verified fresh in CI. **Hard ceilings apply to the IIFE variants only**
+(\`scripts/check-size.mjs\` budgets those three files); the ESM rows below are measured and published
+every run, but nothing fails a build when one grows. This line used to promise ceilings over the
+whole document.
 
 ## ESM subpath exports
 
 Each row is the cost of importing **only that export**, bundled self-contained with \`vue\`
-external. **Read this carefully:** the shared command-bus core (~3.6 KB brotli on its own) is
+external. **Read this carefully:** the shared command-bus core (${coreKb} KB brotli on its own) is
 included in *every* row, so the rows are **not additive** - importing two exports does not cost
 their sum (the core is shared once). \`.\` is the full main barrel measured *import-everything*;
 your app's tree-shaking drops whatever you don't use (e.g. importing just \`createCommandBus\`
-from it is ~3.6 KB brotli, not ${kb(esmRows[0]?.br ?? 0)} KB).
+from it is ${coreKb} KB brotli, not ${kb(esmRows[0]?.br ?? 0)} KB).
 
-**brotli vs first load.** \`brotli\` bundles each export into ONE file, which is the
-historical measurement and the one to compare against older releases. \`first load\` and
-\`on demand\` come from a second pass with code splitting enabled - what an app's bundler
-actually emits. Where a module is deferred behind an \`import()\`, the single-file pass has
-to inline it *and* add the async wrapper, so it reports a feature nobody uses as slightly
-*more* expensive than shipping it eagerly. **\`first load\` is what a consumer downloads to
-start; \`on demand\` is fetched only if that feature is used.** ${deferredNote(esmRows)} No row here is budgeted - see the note above.
+**brotli vs first load.** \`brotli\` joins every chunk of the build into one measurement, the
+historical figure and the one to compare against older releases. \`first load\` and \`on demand\`
+split the same chunks by reachability: a module behind an \`import()\` is its own chunk, and only
+the chunks the entry reaches through static imports count as startup cost. **\`first load\` is
+what a consumer downloads to start; \`on demand\` is fetched only if that feature is used.**
+${deferredNote(esmRows)} No row here is budgeted - see the note above.
 
 ${mdTable('export', esmRows, true)}
+
+## Vapor wiring, Vue bundled
+
+The only rows with \`vue\` **bundled**, so a static Vue import shows its cost. The first row is a
+hand-wired minimum: \`createVaporApp\` from \`vue\`, handed to \`configureVue\`, with the composables
+from \`vapor-chamber/vue\`. Each row after it is the **difference from the row above** - what
+\`vapor-chamber/vapor\` adds over hand-wiring (it wires \`defineVaporComponent\` and
+\`defineVaporAsyncComponent\` as well), then each of the two names it leaves out, wired by hand.
+The split was decided on the same measurement taken on the vapor-sfc example at rc.6
+(src/vapor.ts); these rows re-take it from \`dist/\` on every run.
+
+${mdTable('step (rows after the first are deltas)', wiringRows)}
+
+## For comparison
+
+${mitt ? mdTable('library', [mitt]) : '(mitt not installed)'}
 
 ## IIFE variants (\`<script>\` drop-ins)
 
@@ -274,10 +337,10 @@ ${mdTable('variant', iifeRows)}`);
 } else {
   const pad = (s, n) => String(s).padEnd(n);
   const padl = (s, n) => String(s).padStart(n);
-  const line = (a, b, c, d, e) => `${pad(a, 26)}${padl(b, 9)}${padl(c, 9)}${padl(d, 10)}${padl(e, 11)}`;
+  const line = (a, b, c, d, e) => `${pad(a, 44)}${padl(b, 9)}${padl(c, 9)}${padl(d, 10)}${padl(e, 11)}`;
   console.log(line('entry (minified)', 'min KB', 'gzip KB', 'brotli KB', 'first load'));
-  console.log('-'.repeat(65));
-  for (const r of [...esmRows, ...iifeRows]) {
+  console.log('-'.repeat(83));
+  for (const r of [...esmRows, ...wiringRows, ...(mitt ? [mitt] : []), ...iifeRows]) {
     console.log(line(r.name, kb(r.min), kb(r.gz), kb(r.br), r.lazy ? `${kb(r.first)} +${kb(r.lazy)}` : '-'));
   }
 }

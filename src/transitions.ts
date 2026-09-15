@@ -3,6 +3,11 @@
  *
  * Vue alignment history (one line per version - full per-item detail lives in
  * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table):
+ *   rc.8 - pass-through, and a composition that did not work now does:
+ *          VaporTransition's declared `on*` props merge across sources, so
+ *          `<Transition v-bind="t" @enter="mine">` runs both hooks. rc.7 kept
+ *          only the later-written source, which in that order dropped the
+ *          bridge's onEnter. tests/transition-bind-merge-fixture.test.ts.
  *   rc.5 - pass-through; the only module rc.5 reaches at all (TransitionGroup
  *          internals). Idempotent here by construction - see `buildHooks`.
  *   rc.2 - pass-through; unblocks a prior failure mode (#15133).
@@ -383,6 +388,11 @@ export function createTransitionBridge(
  *   </Transition>
  *   <p v-if="modal.phase.value === 'entering'">Opening...</p>
  * </template>
+ *
+ * Your own hooks compose with the spread: `<Transition v-bind="modal"
+ * @enter="mine">` runs both, in Vapor from Vue 3.6.0-rc.8 and in vDOM always.
+ * Vue still waits for `done` when any merged handler takes two arguments, and
+ * the bridge's `onEnter` / `onLeave` do.
  */
 export function useTransitionCommand(
   options: TransitionBridgeOptions = {},

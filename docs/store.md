@@ -42,7 +42,7 @@ with no store-specific code.
 ```ts
 const bus = createCommandBus();
 bus.use(history());
-bus.use(persist({ keys: ['cartAdd', 'cartClear'] }));
+bus.use(persist({ key: 'vc:cart', getState: () => cart.state.value }));
 
 const cart = useCart(bus);
 cart.add(1);
@@ -52,13 +52,13 @@ cart.add(1);
 Pinia reaches a fraction of that by growing a roughly 70-line bus inside itself
 (`action()` / `$onAction`), because no bus exists underneath it. Here one does,
 so the store is the thin part. See `docs/whitepaper.md` section 6 for why this
-package now ships a state layer at all, and what about that decision did not
+package now ships a state layer at all, and which parts of that decision did not
 change.
 
 ## The bus is a required argument
 
 `useStore(bus)`, never `useStore()`. There is no fallback to the shared bus,
-and the omission is deliberate twice over:
+for two deliberate reasons:
 
 - **The probe.** Reaching for `getCommandBus()` imports `chamber.ts`, whose
   top-level `probeVue()` then runs on any `vapor-chamber/store` import. That
@@ -72,9 +72,11 @@ and the omission is deliberate twice over:
   defaulting to it would hand every request the same state.
 
 The first draft defaulted the argument and paid both costs while claiming not
-to. It measured 16.7 KB raw against a 1-2 KB design estimate; required, it is
-1.4 KB. `tests/chamber-store.test.ts` asserts the built entry's import list is
-exactly `['vue']`.
+to: it measured 16.7 KB raw against a design estimate of 1-2 KB. With the
+argument required, it is <!-- vc:sizeStoreRaw -->1.5<!-- /vc:sizeStoreRaw --> KB minified
+(<!-- vc:sizeStore -->0.7<!-- /vc:sizeStore --> KB brotli), the `./store` row of
+[BUNDLE-SIZES.md](./BUNDLE-SIZES.md). `tests/chamber-store.test.ts` asserts the
+built entry's import list is exactly `['vue']`.
 
 ## State is shallow and replaced wholesale
 
@@ -148,5 +150,5 @@ Carried forward deliberately rather than answered early:
   could serve that root, where Pinia structurally cannot. It would be this
   module's second genuine differentiator after the bus, and it is not decided.
 - **The SSR shape.** Stores are already keyed per bus, so a per-request bus
-  gets per-request state and the isolation exists. What is not yet written down
-  is one documented story for hydration and for the server-side warning class.
+  gets per-request state and the isolation exists. What is missing is one
+  documented story for hydration and for the server-side warning class.

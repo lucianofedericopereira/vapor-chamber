@@ -33,6 +33,7 @@ import {
   vueDetectionHint,
 } from './chamber';
 import type { Handler, RegisterOptions, CommandResult, CommandMap } from './command-bus';
+import { _errResult } from './command-bus';
 import { DEV } from './dev';
 
 /**
@@ -127,7 +128,13 @@ export function getVaporInteropPlugin(): any | null {
  * import { defineVaporCustomElement } from 'vapor-chamber';
  * const MyEl = defineVaporCustomElement({
  *   props: { label: String },
- *   setup(props) { return () => h('span', props.label); }
+ *   // A Vapor setup() returns a BLOCK - real DOM nodes - not a render
+ *   // function or h() output. An SFC's compiler builds this from its template.
+ *   setup(props) {
+ *     const span = document.createElement('span');
+ *     span.textContent = String(props.label);
+ *     return span;
+ *   }
  * });
  * if (MyEl) customElements.define('vc-greeting', MyEl);
  */
@@ -156,7 +163,12 @@ export function defineVaporCustomElement<T = any>(options: object, extraOptions?
  * const Comp = defineVaporComponent({
  *   props: { count: Number },
  *   emits: ['change'],
- *   setup(props) { return () => h('div', `Count: ${props.count}`); }
+ *   // Returns DOM nodes (a block), not h(): see defineVaporCustomElement above.
+ *   setup(props) {
+ *     const div = document.createElement('div');
+ *     div.textContent = `Count: ${props.count}`;
+ *     return div;
+ *   }
  * });
  */
 export function defineVaporComponent<T = any>(options: object): T | null {
@@ -258,6 +270,13 @@ export function defineVaporCommand(
  * AsyncCommandBus interface. Use this when your commands hit async transports
  * (HTTP bridge, WS bridge) and you need awaitable results.
  *
+ * Vue 3.6.0-rc.8: an awaiting `<script setup vapor>` compiles to an
+ * `async setup()` that uses runtime-core's `withAsyncContext` and returns its
+ * template as a render closure, and it registers with the NEAREST `<Suspense>`.
+ * Composables called after the `await` - this one, `useCommand()` - arm their
+ * cleanup on the restored component scope, including when the app unmounts
+ * during the await. Pinned by tests/async-vapor-setup-fixture.test.ts.
+ *
  * @example
  * // In a <script setup vapor> component under <Suspense>:
  * import { useVaporAsyncCommand } from 'vapor-chamber';
@@ -289,7 +308,7 @@ export function useVaporAsyncCommand(asyncBus?: { dispatch: (action: string, tar
     } catch (e) {
       const error = e as Error;
       lastError.value = error;
-      return { ok: false, error };
+      return _errResult(error);
     } finally {
       loading.value = false;
     }

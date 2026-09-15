@@ -1,6 +1,6 @@
 <?php
 /**
- * vapor-chamber — example action class with authorization.
+ * vapor-chamber - example action class with authorization.
  *
  * Demonstrates Gate-based authorization, ModelNotFoundException handling,
  * and a return shape that signals state transitions to the client.
@@ -23,11 +23,11 @@ class CancelOrder
             'id' => 'required|integer',
         ])->validate();
 
-        // findOrFail throws ModelNotFoundException → controller maps to 404.
+        // findOrFail throws ModelNotFoundException -> controller maps to 404.
         $order = Order::findOrFail($target['id']);
 
         // Policy-based authorization. The 'cancel' ability lives in
-        // App\Policies\OrderPolicy. Throws AuthorizationException → 403.
+        // App\Policies\OrderPolicy. Throws AuthorizationException -> 403.
         Gate::forUser($user)->authorize('cancel', $order);
 
         $order->cancel();

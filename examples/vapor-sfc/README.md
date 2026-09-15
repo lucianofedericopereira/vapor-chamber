@@ -28,7 +28,7 @@ installs all of them into a single `node_modules/` and symlinks the library into
 it - the example always runs against your working tree, with nothing to
 re-sync after an edit. The library `dist/` builds itself: the repo root has a
 `prepare` script, and this example's `predev`/`prebuild` hooks build it on demand
-if `dist/` is missing. No manual step.
+if `dist/` is missing.
 
 CI installs the root project alone (`npm ci --workspaces=false
 --include-workspace-root`), since no CI job builds an example.
@@ -37,18 +37,18 @@ CI installs the root project alone (`npm ci --workspaces=false
 
 - **CartPanel** - the loading button disables only itself, not the whole page.
   Each `useCommand` instance has its own `loading` signal.
-- **SearchPanel** - type 2+ characters; watch the browser console for
+- **SearchPanel** - type at least 2 characters; watch the browser console for
   `[searchExecute]` lines. No reactive overhead per keystroke.
 - **StatusBar** - observes both. The "loading..." indicator shows whenever any
   dispatch is in flight on the bus, regardless of which component triggered
-  it. Erroring out (clicking "Add invalid product") populates the shared
+  it. A failed dispatch (click "Add invalid product") populates the shared
   error list.
 
 ## Files
 
 ```
 examples/vapor-sfc/
-├── package.json          # workspace member - vue@<!-- vc:vueAligned -->3.6.0-rc.7<!-- /vc:vueAligned -->, vite@^8
+├── package.json          # workspace member - vue@<!-- vc:vueAligned -->3.6.0-rc.8<!-- /vc:vueAligned -->, vite@^8
 ├── vite.config.ts        # @vitejs/plugin-vue + vaporChamberHMR
 ├── tsconfig.json         # strict TS, ES2022, vue:client types
 ├── index.html            # mount point + minimal styles
@@ -71,9 +71,9 @@ npm run preview    # serve the production build locally
 
 - This example uses the **local checkout** of vapor-chamber via
   `"file:../.."` in `package.json`. To run against a published version,
-  swap to `"vapor-chamber": "^<!-- vc:version -->1.19.0<!-- /vc:version -->"`.
+  swap to `"vapor-chamber": "^<!-- vc:version -->1.20.0<!-- /vc:version -->"`.
 - Vue 3.6 is in **release candidate**. The example pins the RC the library is
-  aligned to, `^<!-- vc:vueAligned -->3.6.0-rc.7<!-- /vc:vueAligned -->`, and
+  aligned to, `^<!-- vc:vueAligned -->3.6.0-rc.8<!-- /vc:vueAligned -->`, and
   that pin is owned by the root `devDependencies.vue` - `npm run docs:stamp`
   rewrites it, and `lint:check` fails when the two disagree. When Vue 3.6 ships
   stable, bump the root and re-stamp. Nothing here is retyped by hand.

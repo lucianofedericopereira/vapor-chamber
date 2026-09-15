@@ -2,6 +2,747 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.20.0 - 2026-09-15: Vue 3.6.0-rc.8 alignment
+
+### `vaporChamberWire()` under the dev server: the redirect stays build-only, measured
+
+The first cut of this release kept the plugin's redirect out of the dev server on an argument - it
+would pair a pre-bundled copy of the library with an unbundled one - and left
+one wart: in dev, chamber.ts's DEV probe-path hint still told a plugin user to
+import from `vapor-chamber/vue`, which the plugin already does to the build.
+
+**The argument is now a measurement, and it held, with the pairing the other
+way round.** On a real Vite 8 dev server, app root outside `node_modules` and
+the package installed as npm leaves it, so the dependency optimizer
+pre-bundles it:
+
+| arm | chamber modules in the page |
+| --- | ---: |
+| root import, redirect forced to run under serve | 2 |
+| bus from the root, composables from `/vue` (the documented pattern) | 1 |
+| root import, plugin as shipped | 1 |
+
+The wired root's `export *` reached the PRE-BUNDLED root, while its
+`import 'vapor-chamber/vue'` was served unbundled - Vite never pre-bundles an
+import made from a module filed under `node_modules`, and the virtual module
+carries the real root's path - so the wiring landed on a registry the app does
+not read. With the package linked (a workspace symlink) every arm reads one.
+
+**What changed:** the plugin also runs under serve, where it does one thing:
+it defines `__VC_WIRED__`, and the DEV hint stays quiet when it is set. The
+define arrives as a global - Vite leaves dependency code untouched in dev and
+assigns defines to `globalThis` from its client env module; vitest does the
+same in its test runtime - and does not reach SSR with the package
+externalized (measured). The redirect and every build output are unchanged.
+`tests/vite-wire-plugin.test.ts` runs the three arms on a real dev server and
+checks the hint with the global set and unset; the three new assertions fail
+against that first cut.
+
+Found while measuring: in a browser served by Vite's dev server the ESM build's
+DEV read false - it guarded on `typeof process`, which a page does not have -
+so none of the library's DEV warnings showed there, this hint included (a real
+browser, Vite 8, package pre-bundled; the same page showed `__VC_WIRED__`
+arriving as `true`). Fixed in this release, next section.
+
+### The ESM build's DEV: on in a dev-server page, folded in every production chunk
+
+Two defects in one line of `scripts/build.mjs`, both measured.
+
+**A page under a bundler's dev server never saw a DEV warning.** The ESM
+build's DEV was `typeof process === "undefined" ? false : process.env.NODE_ENV
+!== "production"`. A dev server replaces `process.env.NODE_ENV`, but a page has
+no `process`, so the guard answered false first: every dev-only diagnostic in
+the library was silent exactly where a developer looks. The guard now also
+passes on `import.meta.env?.DEV`, which Vite sets in every module it serves.
+Verified in a real browser on Vite 8, with the package pre-bundled and served
+unbundled: the probe-path hint and the out-of-scope heads-up both show, where
+before neither did. Node (vitest, SSR) still reads NODE_ENV. A page with no
+bundler reads false and never touches `process.env`: all 22 ESM entries import
+with no error through an import map served by `examples/static-server.mjs`.
+
+**A code-split app shipped DEV-only strings.** v1.19.0's fold worked per chunk:
+a minifier folds a constant only inside the chunk that defines it, and the
+build exported ONE shared DEV. In `examples/vapor-island-cart` the store chunk
+defined it and the Cart chunk imported it, so Cart shipped the whole
+probe-path hint, dead at runtime. The build now derives DEV once per importing
+module, so no chunk imports it from another. Both examples' production chunks
+are byte-identical to a build where DEV is the literal `false` in every module
+(raw / brotli, B):
+
+| example | chunk | before | after |
+| --- | --- | ---: | ---: |
+| vapor-island-cart | Cart | 4,718 / 1,857 | 3,264 / 1,221 |
+| vapor-island-cart | store | 16,815 / 5,357 | 16,797 / 5,369 |
+| vapor-island-cart | index | 61,118 / 20,495 | 61,118 / 20,477 |
+| vapor-sfc | index | 79,196 / 25,373 | 79,188 / 25,386 |
+
+The one-chunk app also carried a DEV-only 8-byte tail on an error message.
+`tests/dev-esm-consumers.test.ts` builds both shapes with Vite in production
+and fails against the old build on the island chunk; `tests/dev-flag.test.ts`
+evaluates the expression for Node, a dev-server page and a no-bundler page.
+The IIFEs are byte-identical (they fold on `__VC_DEV__` at build). In the ESM
+dist, `directives.js`, `ssr.js` and `transitions.js` became re-export facades
+over a shared chunk: same exports.
+
+Cost, recorded and not absorbed: the esm-treeshake Blade consumer, built with
+no NODE_ENV define on purpose so its DEV code stays, grows 6,586 -> 6,625 B
+brotli, past its 6,590 ceiling - the `import.meta.env` arm (+22) and one copy
+of the expression per module (+17). The ceiling is left for a separate size
+decision.
+
+**The probe-path hint no longer fires on a server.** It tells a page that its
+production bundle cannot resolve the bare `import('vue')`, and on a server that
+is false: measured on Node with the package externalized, a root composable
+gets a real Vue ref under `NODE_ENV=production` too. So it now needs a
+`window`, and SSR dev stays quiet instead of advising an import change that
+fixes nothing there. `tests/root-only-prod-fixture.test.ts` pins both sides
+and the premise.
+
+### The release proper
+
+Peer range narrows to `>=3.5.0 || >=3.6.0-rc.8` for `vue` and
+`@vue/reactivity`. One behaviour NARROWING (`retry()`, below), taken as a minor
+under the pre-stable version policy; everything else is additive or internal.
+Per-commit detail is the rc.8 row in the whitepaper's alignment log (s9).
+
+### Vue 3.6.0-rc.8: adopted, retired, copied
+
+25 commits, all read at source - the release notes list 14; the other 11 are
+refactors, CI, a build change and the release. `packages/reactivity` source is
+untouched. Its dist does differ (61,126 -> 60,493 B), from rc.8's build change
+that inlines enum members imported under an alias (commit 22), so
+`npm run ab:vue` has nothing to measure, by that harness's own rule: diff the
+dists first.
+
+**Adopted.** Upstream fixes that reach this library's own behaviour, each now
+pinned by a fixture that mounts the real with-vapor build and FAILS on rc.7
+(run with every `@vue/*` package that follows `vue`'s version, eleven of them, at rc.7 together):
+
+- **A component created but never mounted is now disposed** (commit 12,
+  `efa2eae`). When a render error follows a child's creation, the child never
+  mounts, and before rc.8 `unmountComponent` stopped only mounted scopes - so
+  the child's `onScopeDispose` cleanups, where every composable here hangs its
+  teardown, never ran, and a `useCommand().on()` listener outlived
+  `app.unmount()`. `tests/never-mounted-disposal-fixture.test.ts`.
+- **Declared event props merge across sources** (commits 02 and 10).
+  `VaporTransition` declares its hooks as props, and rc.7 resolved one fed by
+  both `v-bind="t"` and a written `@enter` by keeping ONE source, the
+  later-written. In the order the docs write it,
+  `<Transition v-bind="t" @enter="mine">`, that dropped the BRIDGE's `onEnter`:
+  no `<ns>Enter` dispatch. rc.8 runs both in raw-key order, as vDOM's
+  `mergeProps` always has, and `done` stays correct because Vue waits when any
+  merged handler takes two arguments.
+  `tests/transition-bind-merge-fixture.test.ts`, both attribute orders.
+- **Client-render bundles drop the hydration-boundary closure** (commits 13,
+  19, 21). The two Vapor examples, rebuilt on each RC against the same library
+  dist, clean trees:
+
+  | example | rc.7 raw / brotli B | rc.8 raw / brotli B |
+  | --- | ---: | ---: |
+  | vapor-sfc | 79,805 / 25,672 | 79,198 / 25,373 |
+  | vapor-island-cart | 83,894 / 28,210 | 83,298 / 28,046 |
+
+  An earlier reading of -14.6 KB raw / -1.6 KB brotli came from a mixed tree
+  (`vue` swapped, `@vue/reactivity` left on rc.8 by its own caret range) and is
+  withdrawn.
+
+Docs only: an awaiting `<script setup vapor>` now compiles to an
+`async setup()` using runtime-core's `withAsyncContext` and returning its
+template as a render closure (commit 20), and registers with the NEAREST
+`<Suspense>` (commit 11). `useCommand()` after the await arms its cleanup,
+including when the app unmounts during the await - pinned by
+`tests/async-vapor-setup-fixture.test.ts`, which compiles the SFC at test time.
+It passes on rc.7 as well: the shape changed, the behaviour here did not.
+
+**Retired: nothing.** Each guard rc.8 could have made redundant was re-checked:
+the `router/vapor` mode guard (without interop, `createDynamicComponent` still
+creates any object in Vapor mode with no diagnostic), the KeepAlive gate on
+`hasInjectionContext()` (permanent upstream), and the transition bridge's
+`settled` latch (Vue now once-guards `done`, but the latch also arbitrates the
+timeout against the promise, and Vue 3.5 has no such guard).
+
+**Copied.** Vue's CI now fails a Vapor client bundle that carries hydration
+code, checked with Vue's own bundler (commit 21). The outlet guard below takes
+the same stance: a size claim about consumers is measured with the bundler
+consumers ship with.
+
+N/A, verified by reading: the runtime-vapor `withAsyncContext` removal (nothing
+here imports either name), the v-once rework (`withOnce`), `is="vue:X"`, the
+SVG/MathML fallback namespace, and keyed `<component :is>` - `router/vapor`
+calls `createDynamicComponent(getter)` with no key and no props, and a
+component object is its own branch key.
+
+### The Vapor outlet size guard measures with Vite, and holds two limits
+
+`tests/vapor/vapor-outlet-size.test.ts` failed on rc.8 (19.43 KB against its
+19.5 bar), and the failure was the bundler's, not Vue's. rc.8 moved hydration
+into top-level functions that esbuild keeps behind an `isHydrating` check and
+rolldown shakes, so on clean trees the two disagree in sign: esbuild read the
+saving 20.06 -> 19.40 KB, Vite 8 / rolldown 18.85 -> 20.42. The guard now
+builds its four arms with Vite's build API, the bundler consumers use, and
+measures the entry chunk.
+
+It also stopped measuring a difference. Interop minus Vapor fired twice on
+improvements - v1.19.0's DEV folding, and rc.8's interop arm moving - because
+the other arm is Vue's to change. Two limits replace it: the Vapor outlet's own
+machinery over a router-without-outlet floor stays <= 5.0 KB brotli (4.23 on
+rc.8), and the saving stays >= 15 KB (20.42). Both are stamped
+(`vc:outletOwnArm`, `vc:outletOwnArmCeiling`, `vc:outletFloor`);
+`vc:outletBar` and `vc:outletMargin` are gone. The v1.19.0 stamp of 19.91 was an
+esbuild number on a toolchain that cannot be recovered - this copy's lockfile
+was regenerated, and a clean rc.7 tree on it reads 20.06 under esbuild - so it
+is not carried forward.
+
+### Added: `vaporChamberWire()` - build-time Vue wiring for apps that import the root
+
+The package root reaches Vue through a runtime lookup that resolves under a
+dev server and cannot resolve in a production bundle, so an app importing its
+composables from the root ships them without reactivity, cleanup or the
+KeepAlive guard (the batch of fixes before this release made that loud with
+one production warning; the static entries `vapor-chamber/vue` and `/vapor`
+fix it by being imported instead). `vaporChamberWire()`, a second plugin from
+`vapor-chamber/vite`, fixes it with no import changed: it resolves the bare
+`vapor-chamber` specifier - from scripts and compiled SFCs alike - to a virtual
+module that imports `vapor-chamber/vue` (or `/vapor`, with
+`{ entry: 'vapor' }`) for its side effect and re-exports the real root, found
+with `this.resolve(..., { skipSelf: true })`.
+
+- **What it costs:** nothing in any app-facing library file - it runs in
+  Vite's process; `dist/vite-hmr.js` grows 5,600 -> 6,320 B raw
+  (1,910 -> 2,124 brotli), and the IIFEs are byte-identical. In the app it adds
+  exactly what importing the subpath adds: on the fixture's root-only consumer
+  (`vue` external), 33,742 -> 34,296 B raw, 8,459 -> 8,604 B brotli.
+- **What it buys:** that consumer's production bundle goes from importing
+  nothing from `vue` to importing the eight names `vapor-chamber/vue` hands to
+  `configureVue()` plus `pauseTracking` / `resetTracking` from
+  `@vue/reactivity`, with the wiring call present.
+- **The fixture:** `tests/vite-wire-plugin.test.ts` runs Vite's build API on a
+  temp project whose entry imports `useCommand` from the root and calls it on a
+  live path, with and without the plugin (the control imports nothing from
+  `vue`), plus `{ entry: 'vapor' }`.
+- **Build only.** Under the dev server the runtime lookup resolves by itself,
+  and redirecting the root there would pair the pre-bundled copy of
+  `vapor-chamber/vue` with an unbundled root - two chamber modules. The
+  `'vapor'` choice is the consumer's: the plugin does not inspect
+  `@vitejs/plugin-vue`. `vaporChamberHMR()` is unchanged.
+
+### Added: `vcCommandVapor` - `v-vc:command` in Vapor components
+
+The one place this library diverged from a Vue capability: Vapor has had
+custom directives (`withVaporDirectives`) since 3.6.0-alpha.3, and
+`v-vc:command` still warned at install that it had not been ported. It now has
+a Vapor registration, `vcCommandVapor` from `vapor-chamber/directives` - the
+same `buildHandler`, modifiers, CSS classes, `data-vc-payload` /
+`data-vc-target` and `.delegate` as the vDOM plugin, in the shape Vapor calls:
+`(el, value, argument, modifiers) => cleanup`. Import it as `vVc` in a
+`<script setup vapor>`, or register it app-wide with
+`app.directive('vc', vcCommandVapor)`.
+
+- **What it costs:** `dist/directives.js` gets SMALLER, 7,213 -> 6,831 B raw
+  (1,894 -> 1,790 brotli): the port shares the vDOM path's mount and unmount
+  code, and the install-time warning it retires was a long string. The IIFEs
+  and the Blade consumer bundle are byte-identical (neither carries the
+  directives).
+- **What it buys:** the documented directive works in Vapor, with no
+  `useCommand()` rewrite of a template that already uses it.
+- **The fixture:** `tests/directives-vapor-fixture.test.ts` mounts a real Vapor
+  app with the tuples compiler-vapor emits (`vVc` in scope, and
+  `resolveDirective('vc')` for app-wide registration): a click dispatches,
+  `.stop` stops, a changed binding re-targets the next click while the
+  directive function runs once, unmount removes the listener, and `.delegate`
+  drops the shared document listener. All seven fail against the previous
+  module (`vcCommandVapor is not a function`).
+- **One design choice, stated:** Vapor has no `updated` hook and passes the
+  binding as a getter, so the action is read from it at dispatch time instead
+  of being tracked by an effect. Tracking would need `renderEffect`, which only
+  Vue's Vapor build exports; a static import of it would break this subpath
+  for every Vue 3.5 consumer of the vDOM plugin. `v-vc:payload` and
+  `v-vc:optimistic` stay vDOM registrations - in Vapor the payload travels as
+  `data-vc-payload`.
+
+### Added: `useSharedCommandState().isLoading(action, target?)` - per-target loading
+
+`inFlight` / `isAnyLoading` answer "is anything in flight?", never "is THIS
+service restarting?", so a panel had to hand-roll that per target.
+`isLoading(action, target?)` returns a reactive boolean for one
+`commandKey(action, target)`, bus-wide: any dispatch of that key counts, not
+only the composable's own. The existing return is unchanged.
+
+- **Atomic:** one signal per key, written only on 0 <-> 1, so a reader re-runs
+  on its key's transitions and no other's; two concurrent dispatches of a key
+  keep it true until the last settles.
+- **Paired by Command:** a before-hook starts, the existing `on('*')` observer
+  settles, matched by the Command object - so a settle without a start (a
+  pre-flight abort, a query, a before-hook that threw ahead of ours) cannot
+  clear another dispatch's flag.
+- **What it costs:** the full IIFE 11,731 -> 11,931 B brotli; core, elements
+  and the Blade consumer bundle byte-identical. Nothing per dispatch until the
+  first `isLoading()` call on a bus installs the before-hook.
+- **Limits, stated:** the two exits that started without settling - a plugin
+  that throws or rejects, and `onMissing: 'throw'` - used to leave their key
+  true; both settle now (`VC_PLUGIN_THREW` below, and the `onMissing` line under
+  "Also"). The first call on a sealed bus throws
+  `VC_CORE_SEALED`; a dispatch already in flight when tracking starts is not
+  counted.
+- **The fixture:** `tests/command-loading-fixture.test.ts` mounts a real Vapor
+  component reading keys in sync effects over real sync and async buses; all
+  twelve cases fail against the previous module (`isLoading is not a
+  function`).
+
+### A plugin that throws is a result, not an escape: `VC_PLUGIN_THREW`
+
+The bus's contract is that `dispatch()` returns a result. A plugin that threw
+in its own body, or returned a rejected promise, broke it: the throw escaped
+`buildRunner` / `buildAsyncRunner` before the settle, so after-hooks,
+`on('*')`, `useSharedCommandState`'s error observer and `isLoading` all missed
+it, and the exception landed in a caller (a click handler, a read gate) that
+had been told not to wrap the call in try/catch.
+
+- **Converted at each plugin's boundary**, sync throw and rejected promise
+  alike, into a `BusError('VC_PLUGIN_THREW')` result with the original as
+  `cause` and the plugin's place in the chain as `context.index` (0 =
+  outermost); the DEV log names the function. The plugin above receives it
+  through `next()` like any failure, so its cleanup runs - the contract the
+  `Plugin` type (`next: () => CommandResult`) and the README's plugin example
+  already promise.
+- **`context` is `{ index }` - no function name.** A first cut carried
+  `{ plugin: fn.name, index }`; the name is not on production errors, because
+  it measured 19 B brotli on the full IIFE (11 core, 14 elements) and is `''`
+  for the anonymous arrows most plugins are. `index` (0 = outermost) still
+  identifies the plugin, and the DEV `console.error` prints the name.
+- **One pipeline everywhere.** Development does not throw where production
+  returns; DEV adds a `console.error` naming the plugin, so the conversion
+  never hides the bug.
+- **Not retryable** (absent from `RETRYABLE_CODES`, `retryable: false` in the
+  registry): a plugin bug throws again. **Not counted by `circuitBreaker`**,
+  and it does not reset a run of real failures either: the breaker protects a
+  failing server, and three plugin bugs must not lock an action out.
+- **Passed through unchanged:** `onMissing: 'throw'` still throws (sync) or
+  rejects (async) as `VC_CORE_NO_HANDLER` through any plugins - the caller
+  asked for the throw.
+- **Resolves the isLoading limit** above: a throwing plugin now settles, so
+  its key returns to false.
+- **What it costs in speed**, measured by `tests/plugin-throw-ab.test.ts`
+  (three arms - a baseline derived by reverting the change, a byte-identical
+  self-control copy, the shipped source - production, gc, three runs; time
+  ratios, above 1.00 is slower): shipped vs baseline, "3 plugins + 1
+  listener", sync 1.004 / 1.023 / 1.007 and async 1.017 / 0.983 / 0.977,
+  against self-control bands of 0.987-0.999 and 0.964-0.984; the no-plugin
+  rows are unchanged. Each runner keeps its own plugin call site (an inline
+  try), and the async runner does not re-wrap a plugin that returned its
+  `next()` value unchanged.
+- **Declined, and kept as arms of that test so the reason stays
+  reproducible:** `try { return await plugin(...) } catch` per level -
+  1.494-1.541x on async "3 plugins + 1 listener" and 1.111-1.220x with no
+  plugins at all, an async frame per level; `.then` on every async level,
+  pass-through or not - 1.180-1.217x.
+- **What it costs in size:** full IIFE 11,625 -> 11,803 B brotli (39,862
+  raw), core 7,788 -> 7,954, elements 8,294 -> 8,449, the Blade consumer (Vite)
+  6,118 -> 6,225 - this and the `onMissing` settle below together. Budgets in
+  `scripts/check-size.mjs`, raised after a measured squeeze and justified
+  there per piece: full 11,700 -> 11,810 brotli and 39,800 -> 39,900 raw,
+  elements 8,450 -> 8,480.
+- **The fixture:** `tests/plugin-throw-fixture.test.ts` - real sync and async
+  buses, the TestBus, and `useSharedCommandState` on the with-vapor dist; 13
+  of its first 15 cases fail against the previous runners (the throw
+  escapes), and the two `onMissing: 'throw'` pass-through guards pass on both.
+
+### Also
+
+- **`onMissing: 'throw'` settles before it throws.** A dispatch on such a bus
+  started - before-hooks ran, `isLoading` counted the key - and never settled:
+  the throw left the handler step below the plugin chain and skipped
+  after-hooks and `on('*')`, so the key stayed true. Now after-hooks and
+  listeners see the failure first, then the caller gets the throw it asked
+  for. Only an `onMissing: 'throw'` sync bus takes the extra frame; measured by
+  the same test (settle vs no-settle, "3 plugins + 1 listener"): sync 0.974 /
+  1.015 / 0.983, async 0.993 / 0.982 / 1.007 - inside the self-control band.
+  Pinned by `tests/command-loading-fixture.test.ts` and
+  `tests/plugin-throw-fixture.test.ts` (one settle; a plugin that recovers the
+  throw settles with its own result instead).
+
+- **docs/performance.md no longer claims "no per-dispatch closure
+  allocation" for the plugin chain.** That stopped being true when the runners
+  became re-entrant - each plugin level allocates one `next` closure per
+  dispatch, which is what lets `retry()` and deferred continuations re-enter
+  the chain correctly; `buildRunner`'s PERF NOTE records the cost. Rewritten in
+  place, with the old wording quoted.
+
+- **Docs checked against the code and corrected.** README: `onMissing` lists
+  `'buffer'`; the subpath list and size table match `package.json` exports
+  (`./store` added, `./vite` also exports `vaporChamberWire()`); `alien-signals`
+  is a declared dependency that the library never imports, not "zero runtime
+  dependencies". Laravel guide: a 419 that survives the retry never calls
+  `onSessionExpired`, and with `csrfCookieUrl: ''` the retry re-reads the
+  `XSRF-TOKEN` cookie Laravel sets on every response. `docs/store.md`'s
+  `persist` example and a Laravel snippet no longer call an option and a route
+  that do not exist; whitepaper 5.2 no longer says the plugin chain allocates
+  nothing per dispatch. The Markdown prose also had one pass for concision
+  (Strunk and White) and for how numbers are reported (Miller, *The Chicago
+  Guide to Writing about Numbers*). Record: rc-alignment-work.md s31-s32.
+
+- **Bench ratios in the docs are stamped, not typed.** Twelve ratios in
+  docs/performance.md and ROADMAP.md now come from
+  `scripts/bench-ratios-reporter.mjs`, like the migration guides' ratios. The
+  typed ones had drifted: the fast-lane table said a direct call runs 207x
+  `bus.dispatch`; the latest run says 144x.
+
+- **The HTTP client's 419 policy now matches the documented contract.**
+  `createHttpClient` (`http.get/post/...`) used to escalate a 419 that survived
+  the one CSRF refresh to `onSessionExpired`; `postCommand`/`createHttpBridge`
+  never did. Whitepaper 5.7 states one rule - 419 is CSRF expiry (refresh, retry
+  once), only 401 is session expiry - so the client was the outlier. A surviving
+  419 now throws an `HttpError` with `status: 419` and does NOT fire
+  `onSessionExpired`, on both paths. Pre-1.0, no compat shim. The two
+  near-identical request loops are now one `runWithRetry` helper (source -34
+  lines; the shared loop makes the single policy explicit instead of a comment).
+
+- **CSRF 419 refresh now recovers a stale meta token.** `<meta name="csrf-token">`
+  is rendered once, so a page open past the CSRF lifetime kept retrying the
+  dead token and 419ing (worst on a long-open panel). On a 419 the token is
+  now re-read from the fresh `XSRF-TOKEN` cookie FIRST (the refresh fetch makes
+  the backend set it), and it is sent as the ONLY csrf header - the stale
+  `X-CSRF-TOKEN` is cleared, because Laravel's `getTokenFromRequest` reads it
+  before `X-XSRF-TOKEN` (verified at source, 13.x) and would otherwise still
+  win. The refresh re-read is also `document`-guarded, so a 419 on a server no
+  longer risks a `document.querySelector` crash. `tests/csrf-419-refresh.test.ts`.
+  This adds a few bytes to the HTTP path; the IIFE and Blade sizes are over
+  budget pending the size pass (no budget moved to accommodate a correctness fix).
+
+- **Size: `BusError`'s fields are `declare`d, which drops a class-field helper
+  from every IIFE.** The IIFE target (Safari 13) has no class fields, so the
+  five field declarations were lowered to `defineProperty` calls through a
+  ~0.6 KB helper chain (`_defineProperty` / `toPropertyKey` / `typeof`), then
+  overwritten by the constructor's own assignments. With `declare` only the
+  assignments remain; `name` is assigned last so own-key order is unchanged.
+  Brotli, full / core / elements: 11,731 / 8,058 / 8,561 -> 11,463 / 7,792 /
+  8,303 B, all three back under budget with no budget moved. Blade consumer
+  6,791 -> 6,778. Less work per construction, not more.
+  Also, the MAX_DEPTH and REQUEST_TIMEOUT results were each written out in
+  both buses; each is now one function (same wording): 11,439 / 7,791 / 8,286
+  B, Blade 6,777. An interleaved A/B on the real dispatch path (sync, query,
+  plugins + listener, async; base / candidate / identical-copy control) reads
+  0.974-1.015x against a 0.967-1.000x control band: not slower.
+
+- **`history()` records a redo once on an async bus.** Its redo set a flag,
+  dispatched, and cleared the flag in `finally`. On an async bus the recorder
+  runs when the dispatch settles, after that `finally`, so the redone command
+  was recorded twice (undo took two steps to walk back one redo) and the rest
+  of the redo stack was wiped. The redo dispatch now carries
+  `meta.origin: 'redo'`, the mechanism `useCommandHistory` already uses, which
+  marks every payload shape, and the recorder skips it. The flag stays, so the
+  sync bus records exactly what it did before - the island cart's Undo and Redo
+  buttons included - and commands an undo handler dispatches stay out of the
+  history. One observable change: a redone command's `meta.origin` is `'redo'`
+  where it was `undefined`. Full IIFE +14 B brotli / +71 B raw, budgets
+  11,810 -> 11,817 and 39,900 -> 39,933 (core and elements do not carry
+  `history()`); an ESM app that imports `history()` +44 B brotli, one that does
+  not, 0. Pinned in `tests/plugins-core-gaps.test.ts`.
+
+- **A sealed bus refuses `clear()`. Behaviour change.** `seal()` commits the
+  bus: the command ledger (dispatch is the "do", the undo handler the
+  rollback) and the plugins, authGuard included, stay as they are. `clear()` on
+  a sealed bus used to succeed and leave the bus sealed: it deleted the undo
+  handlers and every plugin, nothing could be put back until `unsealBus()`,
+  and `history().undo()` then reported an undo that rolled back nothing. It now
+  throws `VC_CORE_SEALED`, as the README and whitepaper already said
+  ("rejects register/use/clear"). For HMR, call `unsealBus()` first, then
+  `clear()` - the order the `unsealBus` example already shows. `dispose()`
+  still tears a sealed bus down and leaves it sealed. The TestBus matches: it
+  used to unseal on `clear()` and `dispose()`, so a test could pass against it
+  and throw against the real bus, and `unsealBus()` now reopens it. Full IIFE
+  +8 B brotli (budget 11,817 -> 11,825) and 26 B smaller raw: the seal guards
+  now take the bus state instead of `s.sealed`. Pinned in
+  `tests/seal-clear.test.ts`.
+
+- **`dispose()` settles waiting `request()`s, and the sync `request()`
+  honours its caller's `signal`. Behaviour change.** A request still waiting
+  on its responder kept its timer after `dispose()` - 5 s by default, holding
+  a Node process open in SSR, `dispose()`'s named use case - and then resolved
+  as `VC_CORE_REQUEST_TIMEOUT`, which the registry marks retryable, inviting a
+  retry against a bus whose responders were gone. Now each bus keeps one
+  cancel per waiting request, in a field that stays `null` until the first
+  one, as `deferred` does; `dispose()` runs them, so every waiting request
+  settles at once as `VC_CORE_ABORTED` (not retryable) with its timer
+  cleared, and the next `request()` works. There is no disposed state, as
+  Vue 3.6 rc.8's `EffectScope.stop()` polices nothing after stopping. The
+  responder is not told: only the caller's own signal reaches `cmd.signal`,
+  and only on the async bus, whose request keeps its abort race. The sync
+  bus's `request()` read only `timeout` from an options type that also
+  declared `signal`; it now settles before the responder runs when the signal
+  is already aborted and at once when it aborts while waiting, and its
+  command keeps the four fields every sync command has (pinned with V8's own
+  map check). A sync responder that answers at once no longer takes a timer.
+  Three-arm A/B on the real path (`tests/request-dispose-ab.test.ts`, three
+  runs, time ratios against the reverted baseline): a sync request with a
+  sync responder 0.39-0.41x; one waiting on an async responder 1.06-1.09x,
+  the Set add and delete, at the edge of a self-control band whose maxima
+  read 1.05-1.13x; an async request 1.01-1.04x, inside its band; both
+  dispatch controls inside or below their band, so the field costs a
+  dispatch nothing. The first design, a bus-owned signal composed with the
+  caller's on every request, measured 1.7-1.9x on the sync waiting path and
+  1.24x on the async request and was declined. Bytes, brotli: full IIFE
+  11,825 -> 11,905 (raw 39,907 -> 40,261), core 7,957 -> 8,020, elements
+  8,448 -> 8,519, the Blade consumer bundle 6,240 -> 6,307 - every piece in
+  the ledgers of `scripts/check-size.mjs` and `tests/esm-treeshake.test.ts`.
+  `abortedResult`'s signal parameter is optional now. Pinned in
+  `tests/request-dispose.test.ts`. The README's request example passed its
+  options as the payload, so it had never set a timeout; corrected.
+
+- The `VC_CORE_ABORTED` message read "was aborted before it ran" for every
+  abort, the mid-flight ones included: a caller's abort while a request or a
+  bridge waited, and now `dispose()`. It reads "was aborted". The code, the
+  registry entry and `error.action` are unchanged; tests switch on the code.
+  5 B brotli smaller in each IIFE.
+
+- `npm run coverage:doc` stamped nine tests and eight files low. It ran the
+  coverage through `npm run test:coverage`, and the eight A/B files skip
+  under that script name (timing arms have no place in a coverage run). It
+  calls vitest directly now, so the counts it publishes are the ones
+  `npx vitest run --coverage` reports; `test:coverage` itself still skips
+  the A/B files, as CI's coverage job and `prepublishOnly` expect.
+
+- `alien-signals` is an optional peer dependency, no longer a dependency.
+  The library never imports it: the `vapor-chamber/alien-signals` connector
+  takes the `signal` factory as an argument, so an app that uses the
+  connector installs `alien-signals` itself, as it already had to under
+  pnpm. Every other install gets one package fewer, and the whitepaper's
+  "zero runtime dependencies" line is true again. The manifest is not a
+  stable surface under the version policy.
+
+- Every ESM size row is a Vite production build of the built export now,
+  `process.env.NODE_ENV` defined and minified - what a consumer's bundler
+  emits - instead of an esbuild bundle of the source with no define, which
+  kept the dev-only branches a production build folds away. Every row reads
+  about 10% lower (the barrel 25.6 -> 23.0 KB brotli, `createCommandBus`
+  alone 4.5 -> 3.8 KB, the Blade consumer 6.9 -> 6.2 KB): a measurement
+  change, not an optimisation, and the consumer row is now byte for byte the
+  number `tests/esm-treeshake.test.ts` gates. Two tables join it so three
+  more figures stop being retyped: the Vapor wiring deltas with Vue bundled
+  (the README's "+N KB raw" for the `vapor-chamber/vapor` entry,
+  `defineVaporCustomElement` and `vaporInteropPlugin`, re-taken from `dist/`
+  on every run - +4.8 / +6.8 / +81.7 KB minified in that build, against the
+  +1.8 / +9.2 / +78 measured on the vapor-sfc example at rc.6, which
+  src/vapor.ts keeps as the measurement that decided the split), and mitt
+  beside our rows for the migration guide. The store guide's "1.4 KB" reads
+  the `./store` row.
+
+- **A before-hook's throw is a `VC_CORE_BEFORE_CANCEL` result. Behaviour
+  change.** The code has been in the `BusErrorCode` union, the `BusError`
+  JSDoc's switch example and `ERROR_CODE_REGISTRY` since v1.0 and was never
+  produced: both buses returned the raw thrown value, so a caller switching
+  on codes, the documented pattern, could not tell a cancelled dispatch from
+  a handler's throw. Now the throw is wrapped as a plugin's is
+  (`VC_PLUGIN_THREW`): `error.code` is `VC_CORE_BEFORE_CANCEL`, `error.cause`
+  is what the hook threw and `error.message` is its message, so a hook that
+  throws `new Error('blocked')` still reads "blocked"; a thrown `BusError`
+  passes through as itself; emitter `hook`, severity `error` (the registry
+  said `warn` while nothing emitted it; `BusSeverity` defines `error` as a
+  failed dispatch), not retryable. No stack is captured for the wrapper,
+  the cause carries the hook's, as `wrapThrottle` does for a throttle
+  rejection: with the capture a cancelled dispatch measured 2.2x its former
+  time on both buses, without it 1.05-1.09x, and dispatches whose hooks do
+  not throw sit inside the self-control band (`tests/before-cancel-ab.test.ts`,
+  three runs). The `TestBus` cancels the same way. A caller that compared
+  `result.error` to the object it threw now reads `result.error.cause`.
+  Bytes, brotli: full IIFE 11,900 -> 11,960, core 8,014 -> 8,084, elements
+  8,514 -> 8,582, the Blade consumer 6,299 -> 6,351; ledgers in
+  `scripts/check-size.mjs` and `tests/esm-treeshake.test.ts`. Pinned in
+  `tests/before-cancel.test.ts`.
+
+- **`dispose()` runs each installed plugin's `dispose()`, and `retry()` has
+  one.** The JSDoc promised "cancels all pending timers/requests"; the bus
+  cancelled its own throttle timers and, since this release, its waiting
+  requests, while `debounce()` and `throttle()` exposed a `dispose()` that
+  nothing on the bus called and `retry()`'s backoff sleeps were untracked
+  timers that re-called a chain whose handlers were gone, up to
+  `maxAttempts`. Now `Plugin` and `AsyncPlugin` may carry `dispose()`, both
+  buses run every installed one before the plugins are dropped, and a retry
+  woken by `dispose()` mid-backoff settles as `VC_CORE_ABORTED` at once (a
+  cleared timer alone would have left the dispatch pending forever). Cold
+  path. Bytes, brotli: full IIFE 11,960 -> 12,033, core 8,084 -> 8,170,
+  elements 8,582 -> 8,661, the Blade consumer 6,351 -> 6,373 (the loop;
+  retry is not in it). The `TestBus`'s `request()` and `respond()` were stubs
+  and are real now: a responder answers through the chain and the hooks and
+  is recorded, a thenable value is awaited, an already-aborted signal settles
+  `VC_CORE_ABORTED` before it runs, and no responder falls back to
+  `dispatch()`; not mirrored, the timeout and `dispose()` settling a waiting
+  request. Pinned in `tests/dispose-plugins.test.ts` and
+  `tests/testbus-request.test.ts`.
+
+- **One rule for what an undo handler or a redo dispatches: rollback steps,
+  never recorded.** Every dispatch made synchronously inside an undo handler
+  carries `meta.origin` `'undo'`, a redo and what its handler dispatches
+  carry `'redo'`, and both the `history()` plugin and `useCommandHistory`
+  skip them, on both buses. Before, the plugin held a `_replaying` flag that
+  covered the sync bus only (on the async bus the recorder runs at settle,
+  after the flag was cleared, so an undo handler's compensations were
+  recorded and wiped the redo stack), and the composable suppressed the redo
+  dispatch alone. The mechanism is a scoped origin read in `stampMeta`'s
+  synchronous prologue (`_withOriginScope`, internal), beside the one-shot
+  `_withOrigin`, which stays one-shot: a nested dispatch must not inherit
+  `'sync'`. The flag's old limit remains: what an async undo handler
+  dispatches after an await is outside the window. Cost on the dispatch hot
+  path, one slot read: the sync rows of `tests/origin-scope-ab.test.ts` read
+  parity with the self-control across three runs. Bytes, brotli: full IIFE
+  12,033 -> 12,094, core 8,170 -> 8,177, elements 8,661 -> 8,673, the Blade
+  consumer 6,373 -> 6,376. Pinned in `tests/undo-origin.test.ts`.
+
+- `v-vc:command` listed twice on one element (a render function's
+  `withDirectives` can; a template cannot) stranded the first binding's
+  listener: the directive's state is per element, so the second mount
+  overwrote the first's while both listeners stayed attached - a click
+  dispatched both, an update never reached the first, and unmount removed
+  only the second. A mount now detaches what the element already carries, so
+  the last binding wins and nothing outlives unmount. Reproduced on a real
+  vDOM mount first; pinned in `tests/directives-vapor-fixture.test.ts`.
+- `VC_CORE_NO_HANDLER` in DEV names the other cause when the bus has a plugin
+  installed: a transport plugin's `actions` filter did not match the action,
+  so the dispatch fell through `next()` to the handler lookup, where "register
+  a handler" was the wrong fix. The production message is unchanged and the
+  IIFEs are byte-identical (11,581 / 7,919 / 8,416 B brotli). The esm-treeshake
+  Blade consumer, built with no NODE_ENV define so its DEV code stays, grows
+  6,625 -> 6,675 B brotli, part of the same deferred ceiling decision as the
+  DEV section above. Pinned with the real HTTP bridge in
+  `tests/missing-handler-hint.test.ts`.
+- ROADMAP: the "next minor" version row and two feature-matrix rows described
+  v1.18.0 (`router/vapor`, `router/remote`, `store`) and now say so.
+- `command-bus.ts`: the dev-only once-per-action set behind the sync-bus
+  "returned a Promise" warning is allocated on first use inside the DEV branch
+  instead of at module load - the pattern of rc.8's commit 24, which moved
+  Vue's own dev-only fallthrough bookkeeping behind `__DEV__`. No behaviour
+  change; IIFEs byte-identical, Blade consumer bundle 6,587 -> 6,586 B (a
+  first shape with a nested `if` measured 6,593 and was rewritten).
+- New guard, `tests/vapor/vapor-consumer-markers.test.ts`, the stance of rc.8's
+  commit 21 applied to this library's own Vapor audience: a consumer of
+  `vapor-chamber/vapor` + `router/vapor`, built with Vite, must import no vDOM
+  name from `vue` (`vaporInteropPlugin`, `defineComponent`, `createApp`, `h`,
+  ...) and must carry ONE chamber module - its runtime probe, one
+  `import("vue")`. It also pins the premise the static entries and
+  `vaporChamberWire()` rest on: with Vue bundled, that probe stays a bare
+  specifier the bundler does not resolve. Armed by injection (a consumer that
+  installs `vaporInteropPlugin` fails it).
+- **Measured and declined:** collapsing `chamber.ts`'s thirteen Vue registry
+  slots into one fixed-shape object plus a key list, the shape of rc.8's
+  `RenderContext` (commit 18), which would have let the fixtures derive the
+  `configureVue()` name list instead of copying it. Not slower - an
+  interleaved A/B inside a real Vapor `setup()`, GC forced between rounds,
+  read 0.92-1.03x against a 0.90-1.04x spread for identical code - but
+  larger: full IIFE +71 B brotli (past its 11,600 budget), elements +66,
+  because a minifier renames module slots and cannot rename property names.
+  The hand-kept list in `src/vue.ts` stays, pinned as before by
+  `tests/vue-subpath-wiring-fixture.test.ts`.
+- Sizes: IIFE 11,581 / 7,919 / 8,416 B brotli (full / core / elements),
+  unchanged by every item in this release; Blade consumer bundle 6,587 ->
+  6,586 B (the `_thenableWarned` change below). `docs/BUNDLE-SIZES.md`
+  regenerated - it was one release behind.
+
+### retry(): an error carrying an HTTP status is retried only for 408, 429 and 5xx
+
+**Behaviour change, narrowing.** `retry()`'s default predicate retried every
+error whose `code` did not start with `VC_`. The HTTP bridge reports a failed
+request as `{ ok: false, error }` with the BACKEND's body code and
+`error.status`, so `retry()` stacked in front of `createHttpBridge` - the stack
+the whitepaper (11.7) and two examples recommended - re-sent a 422 write
+`maxAttempts` times, while `postCommand` itself refuses to re-send a 4xx.
+Measured through the real bridge with only `fetch` stubbed: 3 requests for one
+dispatch (`tests/retry-bridge-path.test.ts`).
+
+The default now reads `error.status` / `error.response.status` and retries only
+408, 429 and 5xx, the set the HTTP layer retries. `VC_` codes still consult
+`RETRYABLE_CODES`; every other error is retried as before. A handler that
+throws an error with a 4xx `status` and relied on `retry()` re-running it must
+now pass its own `isRetryable`.
+
+`createBatchingHttpBridge` had the same hole from the other side: its error
+kept the backend message but dropped `status`, `code` and `response`, so the
+status rule had nothing to read and a 422 batch was still POSTed three times.
+It now copies the same fields `createHttpBridge` does.
+
+The three recipes now put HTTP retry on the bridge's own `retry` option
+(`Retry-After` honoured, `noRetry` respected, same `Idempotency-Key` per
+attempt) and keep `retry()` for non-HTTP work. Whitepaper 11.7 also moves from
+`createCommandBus()` to `createAsyncCommandBus()`: the bridge is an async
+plugin, and on a sync bus every dispatch returned a Promise.
+
+### retry(): a user abort is no longer retried with backoff
+
+A request cancelled mid-flight through the dispatch's `signal` reaches
+`retry()` as a DOMException `AbortError`, whose `code` is the number 20 - so
+the default predicate called it retryable and scheduled its backoff sleeps.
+Nothing was re-sent (`postCommand` throws on an aborted signal before
+fetching), but the dispatch settled only after every sleep had run. The
+default now treats an error named `AbortError` as not retryable; a
+`TimeoutError` still is. Pinned with fake timers: one request, no pending
+timer once the dispatch settles.
+
+### HTTP `timeout`: NaN and Infinity no longer abort every request at once
+
+`postCommand` and the `createHttpClient` loop handed `timeout` straight to
+`setTimeout`, which fires a delay it cannot hold immediately: NaN reads as 0,
+and past 2_147_483_647 ms Node clamps to 1 ms. So `timeout: NaN` (a failed
+`Number(config.x)`) and `timeout: Infinity` threw a `TimeoutError` at 0 ms,
+measured with fake timers (`tests/http-timeout-bounds.test.ts`). Now a value
+that does not compare as a number takes that path's documented default
+(10_000 for `postCommand`, 30_000 for a client), anything above the ceiling
+is capped there, and 0 and negatives are unchanged. Three shapes measured in
+the Blade consumer bundle / full IIFE (brotli): inline typeof check
+6_592 / 11_612, `countOption()` 6_635 / 11_601, two comparisons 6_589 /
+11_607 (shipped), from 6_561 / 11_589.
+
+### HTTP error classification: one owner, two named rules, both exported
+
+`http.ts` retried on a local `[408, 429, 500, 502, 503, 504]` while
+`http-errors.ts` described itself as the single rule and said 429 was never
+retried; the README stated both. Now `http-errors.ts` owns two named rules:
+`isRetryableStatus(status)` (408, 429, every 5xx - what may be re-sent; both
+request loops and `retry()`'s default use it) and `classifyError(error)`
+(timeout, no response, 5xx - what a cached response may stand in for, i.e.
+`serveStaleOnError`; semantics unchanged). No behaviour change: 501 and 505+
+were already retried through the catch path with the same backoff. Both are
+exported from the package root; `classifyError` was documented in the README
+but not exported. Sharing the rule with `retry()` also recovered the bytes
+item 4 added, so neither size budget was raised: Blade consumer 6_587 (<6_590),
+full IIFE 11_592 (<= 11_600).
+
+### Every CommandResult shares one hidden class (V8 alignment)
+
+`okResult`/`errResult` build `{ ok, value, error }`, and docs/performance.md
+promised that shape at every `result.ok` site. About 30 sites outside the bus
+built their own literal instead - `{ ok: false, error }`, `{ ok: true, value }`,
+or `{ ok: false, error, value }` - each a different map: `validator`,
+`authGuard`, `debounce`, async `optimisticUndo`, `retry`'s initial result,
+every HTTP/WebSocket bridge result, the
+outbox, the `runDispatch` and `useSharedCommandState` error paths, `v-vc:command`, SSR, MCP,
+schema and workflow step results. V8's `%HaveSameMap` confirmed the split. They
+now call the bus's factories (`_okResult`/`_errResult`, internal, not in the
+barrel). No behaviour change - the result objects gain an explicit
+`value: undefined` / `error: undefined` slot. Smaller, not larger: full IIFE
+40,123 -> 39,828 raw / 11,731 -> 11,699 br, core 8,058 -> 8,048 br, elements
+8,561 -> 8,538 br, Blade consumer 6,791 -> 6,788 br. Pinned by
+`tests/v8-shapes.test.ts` (map identity, plus a scan that fails on a new
+hand-built result literal in `src/`).
+
+### Async dispatch and query: one async frame fewer per command (~13%)
+
+The async bus's `execute` closure was `async () => { ...; return
+tryCatchAsyncHandler(handler, cmd); }` - an async function returning a
+promise it already had, which costs its own promise, its own frame and two
+resolve ticks per command. It is now a plain arrow returning that promise;
+the missing-handler path goes through a small `async` helper so
+`onMissing: 'throw'` still reaches plugins as a rejection. Measured through
+the real bus, three arms (shipped baseline, byte-identical self copy,
+candidate), `gc()` per segment, seven separate processes: async bare dispatch
+0.834-0.902x (self band 0.961-1.078), async query 0.744-0.864x (self band
+0.968-1.117); the 3-plugin row leaned faster (0.839-0.977) but overlapped
+its band and is not claimed. Sync paths untouched. Bytes: full IIFE
+11,699 -> 11,706 br (+7), core 8,048 -> 8,052 (+4), elements 8,538 -> 8,548
+(+10), Blade consumer 6,788 -> 6,787 (the async bus is shaken out there) -
+a size cost for a speed gain, so it is the owner's call; together with the
+entry above every IIFE is still smaller than before this audit. Pinned by
+`tests/async-execute-ab.test.ts` (derived-baseline A/B, equivalence across
+all `onMissing` modes) and `tests/async-missing-rejects.test.ts`.
+
 ## v1.19.0 - 2026-09-09: Vue 3.6.0-rc.7 alignment, and reading every module in src
 
 Twenty-three defects, each reproduced before it was fixed. Grouped by what they

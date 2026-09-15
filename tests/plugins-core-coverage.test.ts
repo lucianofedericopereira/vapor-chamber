@@ -63,13 +63,15 @@ describe('plugins-core coverage - debounce', () => {
   it('catches a throwing debounced execution', () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.useFakeTimers();
-    const bus = createCommandBus();
+    // A throwing inner PLUGIN no longer reaches this catch - the runner converts
+    // it to VC_PLUGIN_THREW at its boundary. onMissing:'throw' is the throw that
+    // still crosses the chain by contract, so it is what exercises the catch.
+    const bus = createCommandBus({ onMissing: 'throw' });
     bus.use(debounce(['act'], 100), { priority: 10 });                       // outer: defers next()
-    bus.use((_cmd, _next) => { throw new Error('downstream boom'); }, { priority: 1 }); // inner throws when the timer fires
-    bus.register('act', () => 'ok');
+    // no handler registered for 'act'
 
     bus.dispatch('act', {});       // schedules the debounce timer, stores `next`
-    vi.advanceTimersByTime(100);   // timer fires -> currentNext() -> inner plugin throws -> caught
+    vi.advanceTimersByTime(100);   // timer fires -> currentNext() -> NO_HANDLER throws -> caught
 
     expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('Debounced execution error'), expect.anything());
   });

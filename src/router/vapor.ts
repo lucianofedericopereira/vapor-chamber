@@ -19,9 +19,15 @@
  * decides a swap), rendered through Vapor's own helpers instead of
  * `defineComponent` + `h()`. A pure-Vapor app therefore mounts no vnode and
  * needs no `vaporInteropPlugin`, which is the whole cost this module exists to
- * drop: >= 20 KB brotli, re-measured every run by
- * `tests/vapor/vapor-outlet-size.test.ts` against a baseline derived with the
- * same harness.
+ * drop: roughly 20 KB brotli - not a fixed number, so it is not written here.
+ * `tests/vapor/vapor-outlet-size.test.ts` re-measures it every run with Vite's
+ * build API, the bundler consumers ship with, against a baseline derived by
+ * the same harness; the stamped values live in docs/router.md
+ * (`vc:outletSaving`, `vc:outletOwnArm`). Since the rc.8 cycle it asserts this
+ * module's OWN cost over a router-without-outlet floor as well as a coarse
+ * floor on the saving. esbuild, its previous bundler, keeps the hydration code
+ * rc.8 moved to top level, and read the saving falling under 19.5 KB while
+ * rolldown read it rising to 20.42.
  *
  * WHAT IT DELIBERATELY DOES NOT DO
  *

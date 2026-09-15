@@ -6,7 +6,7 @@
  * These use only the public BaseBus interface. They are optional and tree-shaken.
  */
 
-import { _withCausation, disposeAll, matchesPattern } from './command-bus';
+import { _withCausation, disposeAll, matchesPattern, _errResult } from './command-bus';
 import type { BaseBus, Command, CommandResult, Handler, RegisterOptions, } from './command-bus';
 
 // ---------------------------------------------------------------------------
@@ -140,7 +140,7 @@ export function createWorkflow(steps: WorkflowStep[]): Workflow {
           ? await dispatched
           : dispatched;
       } catch (e) {
-        result = { ok: false, error: e as Error };
+        result = _errResult(e as Error);
       }
 
       results.push(result);
@@ -155,7 +155,7 @@ export function createWorkflow(steps: WorkflowStep[]): Workflow {
             const compResult = comp && typeof comp.then === 'function' ? await comp : comp;
             compensations.push(compResult);
           } catch (e) {
-            compensations.push({ ok: false, error: e as Error });
+            compensations.push(_errResult(e as Error));
           }
         }
         return { ok: false, results, failedAt: i, error: result.error, compensations };

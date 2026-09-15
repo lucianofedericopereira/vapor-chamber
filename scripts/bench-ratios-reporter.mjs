@@ -56,6 +56,57 @@ const RATIOS = {
     'vapor-chamber fast-lane compile + dispatch',
     'nanoevents (closest peer - emit fires listeners, no return)',
   ],
+  // The ratios below were hand-typed in docs/performance.md and ROADMAP.md,
+  // and drifted (the floor table still said 207x after v1.16 moved dispatch
+  // to ~140x). Each is two rows of the same run, so it follows the bench.
+  benchCompileVsMitt: [
+    'vapor-chamber fast-lane compile + dispatch',
+    'mitt (closest peer - emit fires listeners, no return)',
+  ],
+  benchCompileVsDispatch: [
+    'vapor-chamber fast-lane compile + dispatch',
+    'vapor-chamber bus.dispatch (general-purpose, for comparison)',
+  ],
+  benchFloorVsCompile: [
+    'direct function call (theoretical floor)',
+    'vapor-chamber fast-lane compile + dispatch',
+  ],
+  benchFloorVsNano: [
+    'direct function call (theoretical floor)',
+    'nanoevents (closest peer - emit fires listeners, no return)',
+  ],
+  benchFloorVsMitt: [
+    'direct function call (theoretical floor)',
+    'mitt (closest peer - emit fires listeners, no return)',
+  ],
+  benchFloorVsDispatch: [
+    'direct function call (theoretical floor)',
+    'vapor-chamber bus.dispatch (general-purpose, for comparison)',
+  ],
+  benchEmitNoListenersVsMitt: [
+    'vapor-chamber bus.emit with NO listeners (10k)',
+    'mitt with NO listeners (10k)',
+  ],
+  benchNanoVsEmitNoListeners: [
+    'nanoevents with NO listeners (10k)',
+    'vapor-chamber bus.emit with NO listeners (10k)',
+  ],
+  benchNanoVsMittNoListeners: [
+    'nanoevents with NO listeners (10k)',
+    'mitt with NO listeners (10k)',
+  ],
+  benchEmitVsDispatchFanout: [
+    'emit with 50 exact-match listeners + 5 wildcards',
+    'dispatch with 50 exact-match listeners + 5 wildcards',
+  ],
+  benchUidCounterVsUuid: [
+    'dispatch - default counter-based uid',
+    'dispatch - crypto.randomUUID via configureUid',
+  ],
+  benchPersistCoalesce: [
+    '100 rapid dispatches with persist enabled + coalesce (50-item array state)',
+    '100 rapid dispatches with persist enabled (50-item array state)',
+  ],
 };
 
 /**

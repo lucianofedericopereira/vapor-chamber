@@ -3,10 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  {{-- Real Laravel CSRF — VaporChamber.connect({ csrf: true }) reads this
+  {{-- Real Laravel CSRF - VaporChamber.connect({ csrf: true }) reads this
        meta tag and attaches X-CSRF-TOKEN to every dispatch. --}}
   <meta name="csrf-token" content="{{ csrf_token() }}" />
-  <title>vapor-chamber — Laravel demo</title>
+  <title>vapor-chamber - Laravel demo</title>
   <style>
     body { font-family: system-ui, sans-serif; max-width: 640px; margin: 2rem auto; padding: 0 1rem; }
     .panel { border: 1px solid #ccc; border-radius: 8px; padding: 1rem 1.25rem; margin: 1rem 0; }
@@ -27,23 +27,23 @@
 
   <div class="panel">
     <h2>Menu</h2>
-    <div class="row"><span>Coffee — $4.00</span><button data-add="1">Add</button></div>
-    <div class="row"><span>Tea — $3.00</span><button data-add="2">Add</button></div>
-    <div class="row"><span>Espresso — $5.00</span><button data-add="3">Add</button></div>
+    <div class="row"><span>Coffee - $4.00</span><button data-add="1">Add</button></div>
+    <div class="row"><span>Tea - $3.00</span><button data-add="2">Add</button></div>
+    <div class="row"><span>Espresso - $5.00</span><button data-add="3">Add</button></div>
   </div>
 
   <div class="panel">
-    <h2>Cart <small>(server session — survives reload)</small></h2>
+    <h2>Cart <small>(server session - survives reload)</small></h2>
     <div class="row"><span>Items</span><strong id="count">{{ session('vc.cart.count', 0) }}</strong></div>
     <div class="row"><span>Total</span><strong>$<span id="total">{{ number_format(session('vc.cart.cents', 0) / 100, 2) }}</span></strong></div>
-    <div class="row"><span>Last added</span><span id="last">{{ session('vc.cart.last', '—') }}</span></div>
+    <div class="row"><span>Last added</span><span id="last">{{ session('vc.cart.last', '-') }}</span></div>
     <button id="clear">Clear cart</button>
     <p id="status"></p>
   </div>
 
   <div class="panel">
     <h2>Wire log</h2>
-    <pre id="log">(dispatch something…)</pre>
+    <pre id="log">(dispatch something...)</pre>
   </div>
 
   <script src="/js/vapor-chamber-core.iife.min.js"></script>
@@ -54,14 +54,14 @@
     const $ = (id) => document.getElementById(id);
     const lines = [];
     bus.on('*', (cmd, result) => {
-      lines.unshift(`${cmd.action} → ${result.ok ? 'ok' : 'fail: ' + result.error?.message}`);
+      lines.unshift(`${cmd.action} -> ${result.ok ? 'ok' : 'fail: ' + result.error?.message}`);
       $('log').textContent = lines.slice(0, 8).join('\n');
     });
 
     function render(state) {
       $('count').textContent = state.count;
       $('total').textContent = state.total.toFixed(2);
-      $('last').textContent = state.lastAdded || '—';
+      $('last').textContent = state.lastAdded || '-';
     }
 
     document.querySelectorAll('[data-add]').forEach((btn) => {

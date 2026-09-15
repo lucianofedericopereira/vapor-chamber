@@ -5,7 +5,7 @@
  * TypeScript rewrite aligned with vapor-chamber conventions and CDCC thresholds.
  *
  * Improvements over the original:
- *  - Full TypeScript types (no `any` casts)
+ *  - Full TypeScript types
  *  - CDCC-compliant function sizes
  *  - `AbortSignal.any` with manual fallback for older environments
  *  - Jitter on exponential backoff (avoids thundering herd)
@@ -28,6 +28,12 @@ export type HttpConfig = {
    * **10_000 through `postCommand`, 30_000 through a client** (a command POST
    * and a general-purpose GET have different patience). Stating only the first
    * made this tooltip wrong for every `http.get()` caller.
+   *
+   * Bounds: a value that does not compare as a number (NaN, a non-numeric
+   * string) takes that default; anything above
+   * 2_147_483_647 ms (`setTimeout`'s ceiling, where it would fire at once)
+   * is capped there, so `Infinity` means "as long as a timer can wait"; 0 or
+   * a negative value times out immediately.
    */
   timeout?: number;
   /**
@@ -93,7 +99,6 @@ export type HttpError = Error & {
 // Constants
 // ---------------------------------------------------------------------------
 
-const RETRY_STATUS = [408, 429, 500, 502, 503, 504];
 const RETRY_AFTER_STATUS = [429, 503];
 const SESSION_EXPIRED_STATUS = [401]; // 419 is CSRF expiry, not session expiry
 const MAX_RETRY_AFTER_MS = 30_000;
@@ -121,6 +126,35 @@ export function readCsrfToken(): CsrfResult | null {
   return result;
 }
 
+/** Every CSRF header this library may set - both are cleared before a refresh
+ *  attaches the fresh one, so a stale header cannot outrank it (Laravel reads
+ *  X-CSRF-TOKEN before X-XSRF-TOKEN; getTokenFromRequest, verified at source). */
+const CSRF_HEADER_NAMES = ['X-CSRF-TOKEN', 'X-XSRF-TOKEN'] as const;
+
+/** Set `token` as the ONLY csrf header - clears the other name first. */
+function setCsrfHeader(headers: Record<string, string>, result: CsrfResult): void {
+  for (const name of CSRF_HEADER_NAMES) delete headers[name];
+  headers[result.headerName] = result.token;
+}
+
+/**
+ * The `XSRF-TOKEN` cookie only. Split out of `readCsrfFromDom` because the
+ * post-refresh re-read needs it FIRST (see `readCsrfAfterRefresh`). The cookie
+ * name comes from `<meta name="xsrf-cookie">` or defaults to `XSRF-TOKEN`.
+ */
+function readCsrfFromCookie(): CsrfResult | null {
+  if (typeof document === 'undefined') return null;
+  const q = typeof document.querySelector === 'function'
+    ? (sel: string) => document.querySelector(sel)
+    : null;
+  const cookieNameMeta = q?.('meta[name="xsrf-cookie"]') as HTMLMetaElement | null;
+  const cookieName = cookieNameMeta?.content || 'XSRF-TOKEN';
+  const escaped = cookieName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const cookieMatch = document.cookie?.match(new RegExp(`(?:^|;\\s*)${escaped}=([^;]+)`));
+  if (cookieMatch) return { token: decodeURIComponent(cookieMatch[1]), headerName: 'X-XSRF-TOKEN' };
+  return null;
+}
+
 function readCsrfFromDom(): CsrfResult | null {
   const q = typeof document.querySelector === 'function'
     ? (sel: string) => document.querySelector(sel)
@@ -133,13 +167,9 @@ function readCsrfFromDom(): CsrfResult | null {
     if (meta?.content) return { token: meta.content, headerName: 'X-CSRF-TOKEN' };
   }
 
-  // 2. Cookie - read cookie name from `<meta name="xsrf-cookie">` or default
-  //    to `XSRF-TOKEN` (the de-facto SPA convention shared across frameworks).
-  const cookieNameMeta = q?.('meta[name="xsrf-cookie"]') as HTMLMetaElement | null;
-  const cookieName = cookieNameMeta?.content || 'XSRF-TOKEN';
-  const escaped = cookieName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  const cookieMatch = document.cookie?.match(new RegExp(`(?:^|;\\s*)${escaped}=([^;]+)`));
-  if (cookieMatch) return { token: decodeURIComponent(cookieMatch[1]), headerName: 'X-XSRF-TOKEN' };
+  // 2. Cookie - `XSRF-TOKEN` (or the name in `<meta name="xsrf-cookie">`).
+  const fromCookie = readCsrfFromCookie();
+  if (fromCookie) return fromCookie;
 
   // 3. Hidden input - `<input name="_token">`. Emitted by Laravel's `@csrf`
   //    Blade directive, also appears in Rails forms and other stacks.
@@ -149,6 +179,30 @@ function readCsrfFromDom(): CsrfResult | null {
   }
 
   return null;
+}
+
+/**
+ * Re-read the token AFTER a 419 refresh, cookie FIRST.
+ *
+ * The initial read prefers the `<meta name="csrf-token">` tag. But a 419 means
+ * that token expired, and the meta tag is rendered ONCE per page load, so it
+ * stays stale for the life of the page - re-reading it would retry with the
+ * same dead token and 419 again (a long-open panel hit exactly this). The
+ * refresh fetch makes the backend set a fresh `XSRF-TOKEN` cookie (Laravel's
+ * CSRF middleware sets it on every response), so after a refresh the cookie is
+ * the live source. Fall back to the full DOM read for a page with no cookie
+ * (a `@csrf` hidden-input form), so this is a superset of the old behaviour.
+ */
+function readCsrfAfterRefresh(): CsrfResult | null {
+  const fromCookie = readCsrfFromCookie();
+  if (fromCookie) {
+    _csrfCache = { ...fromCookie, expiresAt: Date.now() + CSRF_TTL_MS };
+    return fromCookie;
+  }
+  // No cookie: fall back to `readCsrfToken`, NOT `readCsrfFromDom` directly -
+  // readCsrfToken guards `typeof document` (a 419 refresh can run on a server,
+  // where document is undefined) and caches its own result.
+  return readCsrfToken();
 }
 
 /** Invalidate the CSRF token cache (e.g. after logout). */
@@ -184,7 +238,10 @@ function refreshCsrfOnce(cookieUrl: string): Promise<CsrfResult> {
         try { await fetch(cookieUrl, { method: 'GET', credentials: 'same-origin' }); } catch { /* ignore network errors */ }
       }
       invalidateCsrfCache();
-      const freshToken = readCsrfToken(); // re-read DOM / cookie after fetch
+      // Cookie FIRST here: the fetch above just made the backend set a fresh
+      // XSRF-TOKEN cookie, while the meta tag is still the stale one the page
+      // was rendered with. See readCsrfAfterRefresh.
+      const freshToken = readCsrfAfterRefresh();
       if (!freshToken) {
         throw new Error('[vapor-chamber] CSRF refresh failed: no token found in DOM after refresh');
       }
@@ -215,7 +272,7 @@ function parseRetryAfter(header: string | null): number | null {
   return null;
 }
 
-/** Exponential backoff with +/-200ms jitter to avoid thundering herd. */
+/** Exponential backoff plus 0-200ms of jitter to avoid thundering herd. */
 function backoffMs(attempt: number): number {
   return Math.min(1000 * 2 ** attempt, 30_000) + Math.random() * 200;
 }
@@ -352,25 +409,36 @@ async function doFetch<T>(url: string, serialized: string, headers: Record<strin
   return { data, status: raw.status, headers: resHeaders, ok: raw.ok };
 }
 
-export async function postCommand<T = unknown>(
-  url: string,
-  body: unknown,
-  config: HttpConfig = {},
+/**
+ * The retry / timeout / CSRF-refresh / session-expiry loop, shared by
+ * `postCommand` and `clientRequest`. The only per-caller difference is the
+ * fetch itself (passed as `doRequest`) and whether thrown errors are stamped
+ * `silent`. The two used to carry a near-identical copy of this loop.
+ *
+ * ONE policy, correct for both (whitepaper 5.7): 401 = session expiry, fires
+ * `onSessionExpired`; 419 = CSRF expiry, refreshed and retried ONCE and NEVER
+ * escalated to session expiry. `clientRequest` previously escalated a 419 that
+ * survived the refresh - that contradicted both the contract and `postCommand`,
+ * and is gone (pre-1.0, no compat shim).
+ *
+ * `headers` is the object the request sends; on a 419 the fresh token replaces
+ * the stale one on it via `setCsrfHeader`, which clears the other csrf header
+ * name so Laravel's `X-CSRF-TOKEN`-first read cannot keep the dead one.
+ */
+async function runWithRetry<T>(
+  doRequest: (signal: AbortSignal) => Promise<HttpResponse<T>>,
+  headers: Record<string, string>,
+  opts: {
+    retry: number;
+    timeout: number;
+    userSignal?: AbortSignal;
+    csrfCookieUrl: string;
+    onSessionExpired?: (status: number) => void;
+    url: string;
+    silent?: boolean;
+  },
 ): Promise<HttpResponse<T>> {
-  const { timeout = 10_000, retry = 0, signal: userSignal, csrf = false, csrfCookieUrl = DEFAULT_CSRF_COOKIE_URL, headers: extra = {}, onSessionExpired, silent = false } = config;
-
-  const headers: Record<string, string> = {
-    'Content-Type': 'application/json',
-    'X-Requested-With': 'XMLHttpRequest',
-    ...extra,
-  };
-
-  if (csrf) {
-    const token = readCsrfToken();
-    if (token) headers[token.headerName] = token.token;
-  }
-
-  const serialized = JSON.stringify(body);
+  const { retry, timeout, userSignal, csrfCookieUrl, onSessionExpired, url, silent = false } = opts;
   let csrfRetried = false;
 
   for (let attempt = 0; attempt <= retry; attempt++) {
@@ -382,29 +450,24 @@ export async function postCommand<T = unknown>(
     const signal = combined ? combined.signal : timeoutCtrl.signal;
 
     try {
-      const res = await doFetch<T>(url, serialized, headers, signal);
+      const res = await doRequest(signal);
       clearTimeout(timeoutId);
       combined?.detach();
 
       if (!res.ok) {
         if (SESSION_EXPIRED_STATUS.includes(res.status)) handleSessionExpiry(res.status, url, onSessionExpired);
 
-        // 419: CSRF expired - fetch fresh cookie, refresh once, doesn't count against retry budget
+        // 419 = CSRF expiry: refresh once (off the retry budget), then retry.
+        // It NEVER fires onSessionExpired - that is 401's job (whitepaper 5.7).
         if (res.status === 419 && !csrfRetried) {
           csrfRetried = true;
-          const fresh = await refreshCsrfOnce(csrfCookieUrl);
-          headers[fresh.headerName] = fresh.token;
+          setCsrfHeader(headers, await refreshCsrfOnce(csrfCookieUrl));
           attempt--;
           continue;
         }
 
-        // NOTE: unlike clientRequest, a 419 that survives the refresh retry is
-        // NOT escalated to session expiry here - postCommand's documented
-        // contract (whitepaper section 5.7, pinned by tests) is that 419 never fires
-        // onSessionExpired; the bridge surfaces it as an HttpError instead.
-
-        // Retry on retryable status codes
-        if (RETRY_STATUS.includes(res.status) && attempt < retry) {
+        // Retry on a retryable status - the one rule (http-errors.ts): 408/429/5xx.
+        if (isRetryableStatus(res.status) && attempt < retry) {
           const retryAfter = res.headers['retry-after'] ?? res.headers['x-ratelimit-reset'] ?? null;
           const wait = RETRY_AFTER_STATUS.includes(res.status)
             ? (parseRetryAfter(retryAfter) ?? backoffMs(attempt))
@@ -424,15 +487,12 @@ export async function postCommand<T = unknown>(
       combined?.detach();
       const err = e as HttpError;
       if (err.name === 'AbortError' && userSignal?.aborted) throw err;
-      // A timeout-triggered abort is a transient failure, not a user cancel -
-      // it must compete for the same retry budget as a 5xx/429/408 response
-      // instead of always throwing on the first attempt regardless of `retry`.
+      // A timeout-triggered abort is transient: it competes for the retry
+      // budget like a 5xx/429/408 instead of throwing on the first attempt.
       const failure = err.name === 'AbortError' ? timeoutError(url, timeout) : err;
-      // A non-transient response thrown above (`throw failed`) lands here too,
-      // and this catch used to retry everything that wasn't a user abort - so
-      // a 422 validation failure re-sent the mutation `retry` times. Re-throw
-      // anything that carries a response classifyError calls permanent; the
-      // RETRY_STATUS `continue` above still owns the transient statuses.
+      // A non-transient response thrown above re-enters here; do not retry it
+      // (a 422 must not re-send a mutation). isRetryableStatus above owns the
+      // retryable statuses.
       if (failure.response && !classifyError(failure).transient) {
         if (silent) failure.silent = true;
         throw failure;
@@ -446,6 +506,43 @@ export async function postCommand<T = unknown>(
   }
 
   throw new Error('unreachable');
+}
+
+export async function postCommand<T = unknown>(
+  url: string,
+  body: unknown,
+  config: HttpConfig = {},
+): Promise<HttpResponse<T>> {
+  const { timeout: rawTimeout = 10_000, retry = 0, signal: userSignal, csrf = false, csrfCookieUrl = DEFAULT_CSRF_COOKIE_URL, headers: extra = {}, onSessionExpired, silent = false } = config;
+  // setTimeout fires a delay it cannot hold AT ONCE: NaN reads as 0, and past
+  // MAX_TIMEOUT_MS Node clamps to 1ms and browsers wrap. So `timeout: NaN`
+  // (a failed `Number(config.x)`) and `timeout: Infinity` ("no timeout")
+  // aborted every request as it started. Two comparisons: NaN (or anything
+  // that does not compare as a number) fails both and takes the default,
+  // Infinity fails the first and is capped at the ceiling, and 0 and
+  // negatives pass through as an explicit "fire now". Chosen over an inline
+  // typeof check and over countOption() by measurement - smallest in the
+  // Blade bundle (tests/esm-treeshake.test.ts). Pinned by
+  // tests/http-timeout-bounds.test.ts.
+  const timeout = rawTimeout < MAX_TIMEOUT_MS ? rawTimeout : rawTimeout > 0 ? MAX_TIMEOUT_MS : 10_000;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    'X-Requested-With': 'XMLHttpRequest',
+    ...extra,
+  };
+
+  if (csrf) {
+    const token = readCsrfToken();
+    if (token) headers[token.headerName] = token.token;
+  }
+
+  const serialized = JSON.stringify(body);
+  return runWithRetry<T>(
+    (signal) => doFetch<T>(url, serialized, headers, signal),
+    headers,
+    { retry, timeout, userSignal, csrfCookieUrl, onSessionExpired, url, silent },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -558,8 +655,9 @@ function createInterceptorManager<T>(): InterceptorManager<T> & { forEach(fn: (h
 // Imports from internal helpers
 // ---------------------------------------------------------------------------
 
+import { MAX_TIMEOUT_MS } from './bounds';
 import { createResponseCache, CACHE_DEFAULT_TTL } from './http-cache';
-import { classifyError } from './http-errors';
+import { classifyError, isRetryableStatus } from './http-errors';
 import { buildFullUrl } from './http-query';
 
 // ---------------------------------------------------------------------------
@@ -598,13 +696,9 @@ async function doClientFetch<T>(
   } else {
     // json (default) - graceful fallback for non-JSON responses.
     //
-    // `?.` rather than the `resHeaders` snapshot above, deliberately.
-    // `Headers.get()` is case-INSENSITIVE by spec; a plain object lookup is
-    // not, so reading `resHeaders['content-type']` would silently miss against
-    // any implementation whose `entries()` yields `Content-Type` - and a miss
-    // here does not throw, it falls through to `raw.text()` and hands the
-    // caller a STRING where they asked for JSON. Loud crash traded for silent
-    // wrong data. Delegating to the platform keeps that impossible.
+    // `?.get()` rather than the `resHeaders` snapshot above, deliberately: the
+    // rationale is on the snapshot helper's docblock (case-insensitive by
+    // spec; a miss here hands the caller a string where they asked for JSON).
     const contentType = raw.headers?.get('content-type') || '';
     if (contentType.includes('application/json')) {
       const text = await raw.text();
@@ -630,77 +724,17 @@ async function clientRequest<T>(
   csrfCookieUrl: string,
   onSessionExpired?: (status: number) => void,
 ): Promise<HttpResponse<T>> {
-  let csrfRetried = false;
-
   // Attach CSRF for mutation methods
   if (csrf && MUTATION_METHODS.includes(method)) {
     const token = readCsrfToken();
     if (token) headersObj[token.headerName] = token.token;
   }
 
-  for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    if (userSignal?.aborted) throw new DOMException('Aborted', 'AbortError');
-
-    const timeoutCtrl = new AbortController();
-    const timeoutId = setTimeout(() => timeoutCtrl.abort(), timeout);
-    const combined = userSignal ? combineSignals(userSignal, timeoutCtrl.signal) : null;
-    const signal = combined ? combined.signal : timeoutCtrl.signal;
-
-    try {
-      const res = await doClientFetch<T>(fullUrl, method, headersObj, body, responseType, signal);
-      clearTimeout(timeoutId);
-      combined?.detach();
-
-      if (!res.ok) {
-        if (SESSION_EXPIRED_STATUS.includes(res.status)) handleSessionExpiry(res.status, fullUrl, onSessionExpired);
-
-        // 419 CSRF refresh - once, doesn't count against retry budget
-        if (res.status === 419 && !csrfRetried) {
-          csrfRetried = true;
-          const fresh = await refreshCsrfOnce(csrfCookieUrl);
-          headersObj[fresh.headerName] = fresh.token;
-          attempt--;
-          continue;
-        }
-
-        // CSRF expiry that survived the refresh retry is effectively a dead
-        // session too. 401 already notified above via SESSION_EXPIRED_STATUS.
-        if (res.status === 419 && csrfRetried) {
-          handleSessionExpiry(res.status, fullUrl, onSessionExpired);
-        }
-
-        if (RETRY_STATUS.includes(res.status) && attempt < maxRetries) {
-          const retryAfter = res.headers['retry-after'] ?? res.headers['x-ratelimit-reset'] ?? null;
-          const wait = RETRY_AFTER_STATUS.includes(res.status)
-            ? (parseRetryAfter(retryAfter) ?? backoffMs(attempt))
-            : backoffMs(attempt);
-          await sleepMs(wait, userSignal);
-          continue;
-        }
-
-        throw httpError(`HTTP ${res.status}`, res);
-      }
-
-      return res;
-    } catch (e) {
-      clearTimeout(timeoutId);
-      combined?.detach();
-      const err = e as Error;
-      if (err.name === 'AbortError' && userSignal?.aborted) throw err;
-      // Same rule as postCommand: a timeout must retry like any other
-      // transient failure instead of always throwing on the first attempt.
-      const failure = err.name === 'AbortError' ? timeoutError(fullUrl, timeout) : err;
-      // Same guard as postCommand: `throw httpError(...)` above re-enters this
-      // catch, and retrying it re-sends the request. Only responses
-      // classifyError calls transient (5xx / no response / timeout) may retry;
-      // 4xx - 404, 403, and above all 422 on a mutation - surface immediately.
-      if ((failure as HttpError).response && !classifyError(failure).transient) throw failure;
-      if (attempt >= maxRetries) throw failure;
-      await sleepMs(backoffMs(attempt), userSignal);
-    }
-  }
-
-  throw new Error('unreachable');
+  return runWithRetry<T>(
+    (signal) => doClientFetch<T>(fullUrl, method, headersObj, body, responseType, signal),
+    headersObj,
+    { retry: maxRetries, timeout, userSignal, csrfCookieUrl, onSessionExpired, url: fullUrl },
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -763,7 +797,9 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
     });
 
     const method: HttpMethod = (config.method ?? 'GET') as HttpMethod;
-    const timeout = config.timeout ?? DEFAULT_CLIENT_TIMEOUT;
+    // Same bounds as postCommand's, normalized once before clientRequest's loop.
+    const rawTimeout = config.timeout as number;
+    const timeout = rawTimeout < MAX_TIMEOUT_MS ? rawTimeout : rawTimeout > 0 ? MAX_TIMEOUT_MS : DEFAULT_CLIENT_TIMEOUT;
     const isIdempotent = IDEMPOTENT_METHODS.includes(method);
     const maxRetries = config.retry ?? (isIdempotent ? DEFAULT_GET_RETRY : DEFAULT_MUTATION_RETRY);
     const responseType: ResponseType = config.responseType ?? 'json';
@@ -871,7 +907,7 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
     }
 
     // Stale-while-revalidate: serve the stale response now; the fetch above
-    // finishes in the background and setCache()s on success. `revalidation`
+    // finishes in the background and is cached (cache.set) on success. `revalidation`
     // lets a caller push the fresh data into its own state when it lands.
     if (staleResponse) {
       sharedPromise.catch(() => {}); // background failure must not surface as an unhandled rejection

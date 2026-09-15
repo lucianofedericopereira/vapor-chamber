@@ -34,7 +34,7 @@ import { DEV } from './dev';
 import { onSettled } from './settled';
 import { MAX_TIMEOUT_MS, countOption } from './bounds';
 import type { Command, CommandResult, Plugin, AsyncPlugin } from './command-bus';
-import { matchesPattern, commandKey, BusError } from './command-bus';
+import { matchesPattern, commandKey, BusError, _errResult } from './command-bus';
 import { freezeCached } from './freeze';
 
 function makeActionFilter(patterns: string[] | undefined): (action: string) => boolean {
@@ -160,7 +160,6 @@ export function cache(options: CacheOptions = {}): Plugin & {
       return cached.result;
     }
 
-    // Cache miss or expired
     dropKey(k);
     const result = next();
 
@@ -254,7 +253,6 @@ export function circuitBreaker(options: CircuitBreakerOptions = {}): Plugin & {
   const resetTimeout = countOption(rawResetTimeout, 30_000, 0, MAX_TIMEOUT_MS);
   const matchesActions = makeActionFilter(actions);
 
-  // Per-action circuit state
   const circuits = new Map<string, {
     state: CircuitState;
     failCount: number;
@@ -277,7 +275,7 @@ export function circuitBreaker(options: CircuitBreakerOptions = {}): Plugin & {
       if (Date.now() - c.openedAt >= resetTimeout) {
         c.state = 'half-open';
       } else {
-        return { ok: false, value: undefined, error: new BusError('VC_PLUGIN_CIRCUIT_OPEN', `Circuit breaker is open for "${cmd.action}". Will retry after resetTimeout (${resetTimeout}ms).`, { emitter: 'plugin', severity: 'error', action: cmd.action, context: { resetTimeout, failCount: c.failCount } }) };
+        return _errResult(new BusError('VC_PLUGIN_CIRCUIT_OPEN', `Circuit breaker is open for "${cmd.action}". Will retry after resetTimeout (${resetTimeout}ms).`, { emitter: 'plugin', severity: 'error', action: cmd.action, context: { resetTimeout, failCount: c.failCount } }));
       }
     }
 
@@ -290,7 +288,11 @@ export function circuitBreaker(options: CircuitBreakerOptions = {}): Plugin & {
       } else {
         c.failCount = 0;
       }
-    } else {
+    } else if ((result.error as { code?: unknown }).code !== 'VC_PLUGIN_THREW') {
+      // A plugin that threw (converted by the runner) is a pipeline bug, not
+      // the server failing - a redeploy fixes it, and letting three of them
+      // lock the action out is the wrong failure mode. It neither counts nor
+      // resets the run of real failures.
       c.failCount++;
       if (c.failCount >= threshold && c.state === 'closed') {
         c.state = 'open';
@@ -328,8 +330,9 @@ export type RateLimitOptions = {
 
 /**
  * rateLimit - per-action sliding window rate limiter.
- * Unlike throttle (which delays execution), rateLimit rejects immediately
- * when the limit is exceeded.
+ * Unlike throttle (one run per `wait` per action+target, the rest rejected
+ * until it ends), rateLimit allows `max` per sliding window per action and
+ * rejects the excess immediately.
  *
  * @example
  * bus.use(rateLimit({ max: 5, window: 1000, actions: ['api*'] }));
@@ -360,7 +363,7 @@ export function rateLimit(options: RateLimitOptions = {}): Plugin {
 
     const activeCount = win.ts.length - win.head;
     if (activeCount >= max) {
-      return { ok: false, value: undefined, error: new BusError('VC_PLUGIN_RATE_LIMITED', `Rate limit exceeded for "${cmd.action}": ${max} per ${windowMs}ms.`, { emitter: 'plugin', severity: 'error', action: cmd.action, context: { max, windowMs, currentCount: activeCount } }) };
+      return _errResult(new BusError('VC_PLUGIN_RATE_LIMITED', `Rate limit exceeded for "${cmd.action}": ${max} per ${windowMs}ms.`, { emitter: 'plugin', severity: 'error', action: cmd.action, context: { max, windowMs, currentCount: activeCount } }));
     }
 
     win.ts.push(now);
@@ -649,7 +652,7 @@ export function idempotent(options: IdempotentOptions = {}): AsyncPlugin {
   // Bounded through ../bounds, for the same reason as cache() above.
   const maxKeys = countOption(rawMaxKeys, 500);
   const matchesActions = makeActionFilter(actions);
-  // key -> completed result (with timestamp) OR the in-flight promise.
+  // key -> completed result (with timestamp); in-flight promises are in `inflight`.
   const done = new Map<string, { at: number; result: CommandResult }>();
   const inflight = new Map<string, Promise<CommandResult>>();
 

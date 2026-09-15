@@ -8,7 +8,7 @@
  *   - synthesize(): natural language -> dispatch via LLM tool use
  */
 
-import { createCommandBus, createAsyncCommandBus, } from './command-bus';
+import { createCommandBus, createAsyncCommandBus, _errResult, } from './command-bus';
 import { GLYPH_COMMAND, GLYPH_OK, GLYPH_WARN } from './glyphs';
 import type { CommandBus, AsyncCommandBus, Plugin, CommandResult, CommandBusOptions, CommandMap, BusErrorCode, BusSeverity, BusEmitter } from './command-bus';
 
@@ -393,11 +393,11 @@ export async function synthesize(
   options: SynthesizeOptions = {},
 ): Promise<CommandResult> {
   if (!options.adapter) {
-    return { ok: false, error: new Error('synthesize: adapter is required. Pass an LlmAdapter function that calls your LLM provider.') };
+    return _errResult(new Error('synthesize: adapter is required. Pass an LlmAdapter function that calls your LLM provider.'));
   }
   let toolUse: ToolCallInput;
   try { toolUse = await options.adapter(toAnthropicTools(schema), text, options); }
-  catch (e) { return { ok: false, error: e as Error }; }
+  catch (e) { return _errResult(e as Error); }
   const { target = {}, payload } = toolUse.input ?? {};
   return Promise.resolve((bus as CommandBus).dispatch(toolUse.name, target, payload));
 }
@@ -583,7 +583,7 @@ export const ERROR_CODE_REGISTRY: readonly ErrorCodeEntry[] = /* @__PURE__ */ Ob
   // Core
   { code: 'VC_CORE_NO_HANDLER',       severity: 'error', emitter: 'core',     retryable: false, category: 'internal',   message: 'No handler registered for action',                  fix: 'Register a handler with bus.register(action, handler) before dispatching.' },
   { code: 'VC_CORE_HANDLER_THREW',     severity: 'error', emitter: 'core',     retryable: true,  category: 'general',    message: 'Handler threw an exception during execution',       fix: 'Add try/catch in your handler or check the error in result.error.' },
-  { code: 'VC_CORE_BEFORE_CANCEL',     severity: 'warn',  emitter: 'hook',     retryable: false, category: 'logic',      message: 'A beforeHook threw to cancel the dispatch',         fix: 'This is intentional cancellation. Check the beforeHook logic or remove the hook.' },
+  { code: 'VC_CORE_BEFORE_CANCEL',     severity: 'error', emitter: 'hook',     retryable: false, category: 'logic',      message: 'A beforeHook threw to cancel the dispatch',         fix: 'This is intentional cancellation. Check the beforeHook logic or remove the hook.' },
   { code: 'VC_CORE_NAMING_VIOLATION',  severity: 'warn',  emitter: 'core',     retryable: false, category: 'validation', message: 'Action name does not match the naming pattern',     fix: 'Rename the action to match the pattern or adjust naming config in createCommandBus().' },
   { code: 'VC_CORE_HANDLER_OVERWRITE', severity: 'info',  emitter: 'core',     retryable: false, category: 'internal',   message: 'A handler was overwritten without unregistering',   fix: 'Call the unregister function returned by register() before re-registering.' },
   { code: 'VC_CORE_REQUEST_TIMEOUT',   severity: 'error', emitter: 'core',     retryable: true,  category: 'network',    message: 'request() timed out waiting for a response',        fix: 'Increase the timeout option or check that respond() is registered for this action.' },
@@ -594,6 +594,7 @@ export const ERROR_CODE_REGISTRY: readonly ErrorCodeEntry[] = /* @__PURE__ */ Ob
   { code: 'VC_PLUGIN_CIRCUIT_OPEN',    severity: 'error', emitter: 'plugin',   retryable: true,  category: 'network',    message: 'Circuit breaker is open due to consecutive failures', fix: 'Wait for resetTimeout to elapse. The circuit will transition to half-open and retry.' },
   { code: 'VC_PLUGIN_RATE_LIMITED',    severity: 'error', emitter: 'plugin',   retryable: true,  category: 'general',    message: 'Rate limit exceeded for this action',               fix: 'Reduce call frequency or increase the max/window in rateLimit() options.' },
   { code: 'VC_PLUGIN_CACHE_MISS',      severity: 'info',  emitter: 'plugin',   retryable: false, category: 'general',    message: 'Cache miss - handler will be called',               fix: 'This is informational. Increase TTL or warm the cache if needed.' },
+  { code: 'VC_PLUGIN_THREW',           severity: 'error', emitter: 'plugin',   retryable: false, category: 'internal',   message: 'A plugin threw or rejected in its own body',        fix: 'A pipeline bug, not a server failure: error.cause is the original and context.index is the plugin\'s place in the chain (0 = outermost). Make it return next() or an errResult instead of throwing.' },
   // Workflow
   { code: 'VC_WORKFLOW_STEP_FAILED',       severity: 'error', emitter: 'workflow', retryable: false, category: 'logic',    message: 'A workflow step failed, running compensations',  fix: 'Check the step handler. Compensations run automatically for previous steps.' },
   { code: 'VC_WORKFLOW_COMPENSATE_FAILED', severity: 'error', emitter: 'workflow', retryable: false, category: 'internal', message: 'A compensation step also failed',               fix: 'Manual intervention needed. Check the compensation handler for errors.' },

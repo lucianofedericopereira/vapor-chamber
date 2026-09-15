@@ -26,7 +26,6 @@ export type RouteTable = {
 
 const PARAM_RE = /^:([A-Za-z_][A-Za-z0-9_]*)(\(([^)]+)\))?(\?)?$/;
 
-/** Compile one path pattern into segments + a matching RegExp. */
 /**
  * Render a compiled record's segments into a path, or report the first
  * required param the caller failed to supply.
@@ -63,6 +62,7 @@ export function renderSegments(
   return { path: path || '/' };
 }
 
+/** Compile one path pattern into segments + a matching RegExp. */
 export function compilePath(path: string): {
   segments: Segment[];
   re: RegExp;
