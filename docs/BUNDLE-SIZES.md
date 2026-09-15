@@ -29,7 +29,7 @@ A `-` means nothing is deferred, which is every export except `./router`. No row
 
 | export | min KB | gzip KB | brotli KB | first load KB | on demand KB |
 |---|--:|--:|--:|--:|--:|
-| `.` | 81.9 | 26.6 | 23.2 | 23.2 | - |
+| `.` | 81.9 | 26.5 | 23.2 | 23.2 | - |
 | `./vue` | 22.2 | 7.8 | 7.1 | 7.1 | - |
 | `./vapor` | 23.5 | 8.2 | 7.4 | 7.4 | - |
 | `./transports` | 12.2 | 4.8 | 4.3 | 4.3 | - |
@@ -40,14 +40,14 @@ A `-` means nothing is deferred, which is every export except `./router`. No row
 | `./fast-lane` | 0.9 | 0.4 | 0.4 | 0.4 | - |
 | `./observable` | 0.5 | 0.3 | 0.3 | 0.3 | - |
 | `./standard-schema` | 1.7 | 0.8 | 0.7 | 0.7 | - |
-| `./alien-signals` | 0.2 | 0.2 | 0.1 | 0.1 | - |
+| `./alien-signals` | 0.2 | 0.1 | 0.1 | 0.1 | - |
 | `./reactive` | 16.5 | 5.9 | 5.3 | 5.3 | - |
 | `./outbox` | 5.3 | 2.2 | 1.9 | 1.9 | - |
 | `./mcp` | 4.1 | 1.9 | 1.7 | 1.7 | - |
 | `./devtools` | 0.1 | 0.1 | 0.1 | 0.1 | - |
 | `./stream-parser` | 6.7 | 2.0 | 1.9 | 1.9 | - |
 | `./store` | 1.5 | 0.8 | 0.7 | 0.7 | - |
-| `./router` | 28.2 | 10.5 | 9.5 | 9.3 | 0.3 |
+| `./router` | 28.2 | 10.4 | 9.5 | 9.3 | 0.3 |
 | `./router/vdom` | 0.9 | 0.5 | 0.4 | 0.4 | - |
 | `./router/vapor` | 0.8 | 0.5 | 0.4 | 0.4 | - |
 | `./router/remote` | 8.8 | 3.7 | 3.4 | 3.4 | - |
