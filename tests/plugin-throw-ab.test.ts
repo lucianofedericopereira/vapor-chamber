@@ -28,7 +28,7 @@
  *
  * HOW THE ARMS ARE BUILT, per the house rule (tests/wildcard-prefix-ab.test.ts):
  * the shipped src/command-bus.ts with named groups of text transformed -
- * reverted, or for the declined arm rewritten - written to tests/__ref/ and
+ * reverted, or for the declined arm rewritten - written to tests/__ref/plugin-throw/ and
  * imported as real modules. If a target stops matching, the transform throws
  * rather than measuring one arm twice.
  *
@@ -60,7 +60,8 @@ import { afterAll, describe, expect, it, vi } from 'vitest';
 import * as shippedMod from '../src/command-bus';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REF_DIR = resolve(HERE, '__ref');
+// Per-file subdir: the whole dir is removed in afterAll, so it must be ours alone.
+const REF_DIR = resolve(HERE, '__ref', 'plugin-throw');
 
 const SHIPPED_ASYNC_NEXT = `      if (!plugin) return (last = execute());
       let r: CommandResult | Promise<CommandResult>;
@@ -143,7 +144,7 @@ function derive(groups: string[]): string {
       src = src.replace(shipped, replacement);
     }
   }
-  return src.replace(/from '\.\/dev'/g, "from '../../src/dev'").replace(/from '\.\/dict'/g, "from '../../src/dict'");
+  return src.replace(/from '\.\/dev'/g, "from '../../../src/dev'").replace(/from '\.\/dict'/g, "from '../../../src/dict'");
 }
 
 afterAll(() => {

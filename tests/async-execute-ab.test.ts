@@ -15,7 +15,7 @@
  * HOW THE BASELINE IS BUILT, per the house rule (see
  * tests/wildcard-prefix-ab.test.ts): derived from the shipped source at run
  * time, the two closures reverted to their previous `async` form, written to
- * tests/__ref/ and imported as a real module. If a revert target stops
+ * tests/__ref/async-execute/ and imported as a real module. If a revert target stops
  * matching, the transform throws rather than measuring one arm twice.
  *
  * NO TIMING THRESHOLD IS ASSERTED; the printed table is the evidence. The
@@ -29,7 +29,8 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REF_DIR = resolve(HERE, '__ref');
+// Per-file subdir: the whole dir is removed in afterAll, so it must be ours alone.
+const REF_DIR = resolve(HERE, '__ref', 'async-execute');
 const BASELINE = resolve(REF_DIR, 'command-bus-async-execute-baseline.ts');
 
 const REVERTS: Array<[string, string]> = [
@@ -68,7 +69,7 @@ function buildBaseline(): void {
     }
     src = src.replace(shipped, baseline);
   }
-  src = src.replace(/from '\.\/dev'/g, "from '../../src/dev'").replace(/from '\.\/dict'/g, "from '../../src/dict'");
+  src = src.replace(/from '\.\/dev'/g, "from '../../../src/dev'").replace(/from '\.\/dict'/g, "from '../../../src/dict'");
   mkdirSync(REF_DIR, { recursive: true });
   writeFileSync(BASELINE, src);
 }

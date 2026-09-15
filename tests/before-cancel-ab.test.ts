@@ -33,7 +33,8 @@ import { afterAll, describe, expect, it } from 'vitest';
 import type * as ShippedMod from '../src/command-bus';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REF_DIR = resolve(HERE, '__ref');
+// Per-file subdir: the whole dir is removed in afterAll, so it must be ours alone.
+const REF_DIR = resolve(HERE, '__ref', 'before-cancel');
 
 /** [shipped text, baseline text, expected occurrences] */
 const REVERTS: Array<[string, string, number]> = [
@@ -51,12 +52,11 @@ function derive(revert: boolean): string {
       src = parts.join(baseline);
     }
   }
-  return src.replace(/from '\.\/([\w-]+)'/g, "from '../../src/$1'");
+  return src.replace(/from '\.\/([\w-]+)'/g, "from '../../../src/$1'");
 }
 
-const written: string[] = [];
 afterAll(() => {
-  for (const f of written) if (existsSync(f)) rmSync(f, { force: true });
+  if (existsSync(REF_DIR)) rmSync(REF_DIR, { recursive: true, force: true });
 });
 
 type Mod = typeof ShippedMod;
@@ -102,7 +102,6 @@ describe('VC_CORE_BEFORE_CANCEL - real path A/B', () => {
     const load = async (name: string, revert: boolean) => {
       const file = resolve(REF_DIR, `before-cancel-${name}.ts`);
       writeFileSync(file, derive(revert));
-      written.push(file);
       arms[name] = await import(/* @vite-ignore */ file);
     };
     await load('pre', true);

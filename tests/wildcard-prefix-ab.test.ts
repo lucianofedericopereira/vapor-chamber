@@ -30,7 +30,7 @@
  * a hand-written imitation of it, or the measurement compares this file's
  * transcription skills rather than the two implementations. So the baseline is
  * DERIVED from the shipped source at run time: `src/command-bus.ts` is copied
- * into `tests/__ref/` with the fan-out line reverted to its previous
+ * into `tests/__ref/wildcard-prefix/` with the fan-out line reverted to its previous
  * `matchesPattern(...)` form and its two sibling imports repointed. That copy
  * exports a real `createCommandBus`, so arm A is the genuine old dispatch path.
  * `tests/__ref/` is the same scratch location `ab-vue.mjs` uses; it is never
@@ -52,7 +52,8 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REF_DIR = resolve(HERE, '__ref');
+// Per-file subdir: the whole dir is removed in afterAll, so it must be ours alone.
+const REF_DIR = resolve(HERE, '__ref', 'wildcard-prefix');
 const BASELINE = resolve(REF_DIR, 'command-bus-wildcard-baseline.ts');
 
 /** The line this change introduced, and the line it replaced. */
@@ -71,8 +72,8 @@ function buildBaseline(): void {
   }
   const reverted = src
     .replace(SHIPPED_LINE, BASELINE_LINE)
-    .replace(/from '\.\/dev'/g, "from '../../src/dev'")
-    .replace(/from '\.\/dict'/g, "from '../../src/dict'");
+    .replace(/from '\.\/dev'/g, "from '../../../src/dev'")
+    .replace(/from '\.\/dict'/g, "from '../../../src/dict'");
   mkdirSync(REF_DIR, { recursive: true });
   writeFileSync(BASELINE, reverted);
 }

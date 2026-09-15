@@ -38,7 +38,8 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { stampActiveLinks } from '../src/router/dom';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REF_DIR = resolve(HERE, '__ref');
+// Per-file subdir: the whole dir is removed in afterAll, so it must be ours alone.
+const REF_DIR = resolve(HERE, '__ref', 'router-stamp');
 const BASELINE = resolve(REF_DIR, 'router-dom-baseline.ts');
 
 /** The memo lookup this change introduced, and what it replaced. */
@@ -67,8 +68,8 @@ function buildBaseline(): void {
     // "Failed to resolve import '../bounds'" - the same shape as every other
     // allowlist in this repo that reported clean while missing what nobody
     // thought of. Rewrites any relative specifier to its real location instead.
-    .replace(/from '\.\.\/([^']+)'/g, "from '../../src/$1'")
-    .replace(/from '\.\/([^']+)'/g, "from '../../src/router/$1'");
+    .replace(/from '\.\.\/([^']+)'/g, "from '../../../src/$1'")
+    .replace(/from '\.\/([^']+)'/g, "from '../../../src/router/$1'");
   mkdirSync(REF_DIR, { recursive: true });
   writeFileSync(BASELINE, reverted);
 }

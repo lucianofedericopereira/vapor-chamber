@@ -31,7 +31,8 @@ import { createCommandBus, createAsyncCommandBus } from '../src/command-bus';
 import type * as ShippedMod from '../src/plugins-core';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const REF_DIR = resolve(HERE, '__ref');
+// Per-file subdir: the whole dir is removed in afterAll, so it must be ours alone.
+const REF_DIR = resolve(HERE, '__ref', 'history-redo');
 
 /**
  * [shipped text, replacement]: the fix, reverted - the recorder back on a
@@ -69,14 +70,11 @@ function derive(revert: boolean): string {
       src = src.replace(shipped, replacement);
     }
   }
-  return src.replace(/from '\.\/([\w-]+)'/g, "from '../../src/$1'");
+  return src.replace(/from '\.\/([\w-]+)'/g, "from '../../../src/$1'");
 }
 
-// Only the files this A/B wrote: other A/B files share tests/__ref and may be
-// running in a parallel worker.
-const written: string[] = [];
 afterAll(() => {
-  for (const f of written) if (existsSync(f)) rmSync(f, { force: true });
+  if (existsSync(REF_DIR)) rmSync(REF_DIR, { recursive: true, force: true });
 });
 
 type Mod = typeof ShippedMod;
@@ -131,7 +129,6 @@ describe('history() async-redo fix - real path A/B', () => {
     const load = async (name: string, revert: boolean) => {
       const file = resolve(REF_DIR, `history-redo-${name}.ts`);
       writeFileSync(file, derive(revert));
-      written.push(file);
       arms[name] = await import(/* @vite-ignore */ file);
     };
     await load('pre', true);
