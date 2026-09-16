@@ -1900,7 +1900,8 @@ function syncRequest(s: SyncState, action: string, target: any, payload?: any, r
   const responder = s.responders.get(action);
   // Pre-flight abort, as on the async bus. The signal was in this function's
   // type and ignored by its body until v1.20.0.
-  if (signal?.aborted) return Promise.resolve(abortedResult(action, signal));
+  // biome-ignore lint/complexity/useOptionalChain: the IIFE target includes safari13, so `?.` downlevels to `signal != null && signal.aborted` - 6 B raw in each of the three bundles, all of which sit at their ceiling.
+  if (signal && signal.aborted) return Promise.resolve(abortedResult(action, signal));
   if (!responder) return Promise.resolve(syncDispatch(s, action, target, payload));
 
   // Route through the plugin chain with responder as the execute function
