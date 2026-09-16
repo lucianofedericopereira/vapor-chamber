@@ -188,7 +188,7 @@ createVaporChamberApp(App).mount('#app');
 
 ### createAsyncCommandBus
 
-**Function** - [src/command-bus.ts:2419](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L2419)
+**Function** - [src/command-bus.ts:2420](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L2420)
 
 ```ts
 createAsyncCommandBus<M extends CommandMap = CommandMap>(options?: CommandBusOptions) => AsyncCommandBus<M>
@@ -281,7 +281,7 @@ const uninstall = cart.install(bus);
 
 ### createCommandBus
 
-**Function** - [src/command-bus.ts:2003](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L2003)
+**Function** - [src/command-bus.ts:2004](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L2004)
 
 ```ts
 createCommandBus<M extends CommandMap = CommandMap>(options?: CommandBusOptions) => CommandBus<M>
@@ -910,7 +910,7 @@ bus.use(createHttpBridge({ endpoint: '/commands', csrf: true }));
 
 ### inspectBus
 
-**Function** - [src/command-bus.ts:2543](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L2543)
+**Function** - [src/command-bus.ts:2544](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L2544)
 
 ```ts
 inspectBus(bus: BaseBus) => BusInspection
@@ -1383,7 +1383,7 @@ toTools(schema: BusSchema, provider?: "anthropic" | "openai") => AnthropicTool[]
 
 ### unsealBus
 
-**Function** - [src/command-bus.ts:2482](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L2482)
+**Function** - [src/command-bus.ts:2483](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L2483)
 
 ```ts
 unsealBus(bus: BaseBus) => void
@@ -2350,7 +2350,7 @@ if (result.error instanceof BusError) {
 
 ### BusInspection
 
-**Type alias** - [src/command-bus.ts:2503](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L2503)
+**Type alias** - [src/command-bus.ts:2504](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L2504)
 
 ```ts
 export type BusInspection = {
