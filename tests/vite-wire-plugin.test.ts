@@ -135,7 +135,7 @@ describe.skipIf(!haveDist)('vaporChamberWire in a real Vite production build', (
     expect(code).toContain('function useCommand(');
     expect(importsFrom(code, 'vue')).toEqual([]);
     expect(importsFrom(code, '@vue/reactivity')).toEqual([]);
-  }, 60_000);
+  });
 
   it('wires the tracking pair and the eight configureVue names from the root, no import changed', async () => {
     const [control, wired] = await Promise.all([bundle([]), bundle([vaporChamberWire()])]);
@@ -152,13 +152,13 @@ describe.skipIf(!haveDist)('vaporChamberWire in a real Vite production build', (
       `  wire: control ${control.length} B raw / ${br(control)} B br, ` +
         `wired ${wired.length} B raw / ${br(wired)} B br (vue external)`,
     );
-  }, 60_000);
+  });
 
   it("entry: 'vapor' also wires the three Vapor names", async () => {
     const wired = await bundle([vaporChamberWire({ entry: 'vapor' })]);
     expect(importsFrom(wired, '@vue/reactivity')).toEqual(expect.arrayContaining(TRACKING));
     expect(importsFrom(wired, 'vue')).toEqual(expect.arrayContaining([...VUE_NAMES, ...VAPOR_NAMES]));
-  }, 60_000);
+  });
 });
 
 describe('vaporChamberWire - the plugin object', () => {
@@ -303,7 +303,7 @@ describe.skipIf(!haveDist)('vaporChamberWire under a real Vite dev server, packa
     } finally {
       await server.close();
     }
-  }, 60_000);
+  });
 
   it('control: the documented pattern - bus from the root, composables from /vue - has one', async () => {
     const server = await devServer([], 'documented');
@@ -314,7 +314,7 @@ describe.skipIf(!haveDist)('vaporChamberWire under a real Vite dev server, packa
     } finally {
       await server.close();
     }
-  }, 60_000);
+  });
 
   it('as shipped: no redirect under serve, one chamber module, and __VC_WIRED__ reaches the page', async () => {
     const server = await devServer([vaporChamberWire()], 'shipped');
@@ -328,7 +328,7 @@ describe.skipIf(!haveDist)('vaporChamberWire under a real Vite dev server, packa
     } finally {
       await server.close();
     }
-  }, 60_000);
+  });
 });
 
 describe('the DEV probe-path hint reads __VC_WIRED__', () => {

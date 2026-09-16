@@ -22,10 +22,11 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { setFlagsFromString } from 'node:v8';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, vi } from 'vitest';
 import { createAsyncCommandBus, createCommandBus, type CommandResult } from '../src/command-bus';
 import { authGuard, debounce, optimisticUndo, throttle, validator } from '../src/plugins-core';
 import { createHttpBridge } from '../src/transports';
+import { it } from '../src/vitest';
 
 setFlagsFromString('--allow-natives-syntax');
 const haveSameMap = new Function('a', 'b', 'return %HaveSameMap(a, b)') as (a: object, b: object) => boolean;
@@ -46,8 +47,7 @@ function bridged(data: unknown, ok = true, status = 200): Promise<CommandResult>
 describe('CommandResult hidden class', () => {
   const ref = busResult();
 
-  it('the bus\'s own ok and error results share one map', () => {
-    const bus = createCommandBus();
+  it('the bus\'s own ok and error results share one map', ({ bus }) => {
     expect(haveSameMap(ref, bus.dispatch('missing', 1))).toBe(true);
   });
 
@@ -90,12 +90,11 @@ describe('CommandResult hidden class', () => {
     expect(haveSameMap(ref, await bridged({ redirect: '/x' }))).toBe(true);
   });
 
-  it('the sync bus builds one command map across dispatch, query and request', async () => {
+  it('the sync bus builds one command map across dispatch, query and request', async ({ bus }) => {
     // The async bus adds `signal` and is its own map by design (the shape
     // note in docs/performance.md). On the sync bus a request()'s signal
     // settles the request's promise and never reaches the command, so the
     // responder sees the map every handler sees.
-    const bus = createCommandBus();
     const seen: object[] = [];
     bus.register('t', (cmd) => { seen.push(cmd); return 1; });
     bus.respond('q', (cmd) => { seen.push(cmd); return 1; });

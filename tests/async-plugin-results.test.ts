@@ -9,11 +9,12 @@
  *
  * The measurements in each test are what the plugin did BEFORE src/settled.ts.
  */
-import { describe, expect, it, vi } from 'vitest';
-import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';
+import { describe, expect, vi } from 'vitest';
+import { createAsyncCommandBus } from '../src/command-bus';
 import { history, logger } from '../src/plugins-core';
 import { circuitBreaker, metrics } from '../src/plugins-extra';
 import { persist } from '../src/plugins-io';
+import { it } from '../src/vitest';
 
 describe('plugins on an async bus', () => {
   it('logger reports a success as a success, not as `error: undefined`', async () => {
@@ -31,7 +32,6 @@ describe('plugins on an async bus', () => {
 
     expect(errors).toHaveLength(0);
     expect(logs).toContainEqual(['result:', 'fine']);
-    vi.restoreAllMocks();
   });
 
   it('logger still reports a real failure', async () => {
@@ -48,11 +48,9 @@ describe('plugins on an async bus', () => {
 
     expect(errors).toHaveLength(1);
     expect((errors[0]?.[1] as Error)?.message).toBe('boom');
-    vi.restoreAllMocks();
   });
 
-  it('history records, so undo/redo is not inert (measured: 0 of 2 recorded)', async () => {
-    const bus = createAsyncCommandBus();
+  it('history records, so undo/redo is not inert (measured: 0 of 2 recorded)', async ({ asyncBus: bus }) => {
     bus.register('add', async () => 'ok');
     const h = history({});
     bus.use(h);
@@ -61,8 +59,7 @@ describe('plugins on an async bus', () => {
     expect(h.getState().past).toHaveLength(2);
   });
 
-  it('circuitBreaker does not trip on SUCCESS (measured: open after 5 successes)', async () => {
-    const bus = createAsyncCommandBus();
+  it('circuitBreaker does not trip on SUCCESS (measured: open after 5 successes)', async ({ asyncBus: bus }) => {
     bus.register('ok', async () => 'fine');
     const cb = circuitBreaker({ threshold: 3, actions: ['ok'] });
     bus.use(cb);
@@ -70,8 +67,7 @@ describe('plugins on an async bus', () => {
     expect(cb.getState('ok')).toBe('closed');
   });
 
-  it('circuitBreaker still trips on real failures', async () => {
-    const bus = createAsyncCommandBus();
+  it('circuitBreaker still trips on real failures', async ({ asyncBus: bus }) => {
     bus.register('bad', async () => { throw new Error('boom'); });
     const cb = circuitBreaker({ threshold: 3, actions: ['bad'] });
     bus.use(cb);
@@ -79,15 +75,17 @@ describe('plugins on an async bus', () => {
     expect(cb.getState('bad')).toBe('open');
   });
 
-  it('metrics times the settlement, not the promise (measured: 0.02ms for a 30ms handler)', async () => {
-    const bus = createAsyncCommandBus();
-    bus.register('slow', async () => { await new Promise((r) => setTimeout(r, 30)); return 'x'; });
+  it('metrics times the settlement, not the promise (measured: 0.02ms for a 30ms handler)', async ({ asyncBus: bus }) => {
+    const SLEEP_MS = 30;
+    bus.register('slow', async () => { await new Promise((r) => setTimeout(r, SLEEP_MS)); return 'x'; });
     const m = metrics({});
     bus.use(m);
     await bus.dispatch('slow', {});
     const entry = m.entries()[0];
     expect(entry?.ok).toBe(true);
-    expect(entry?.durationMs).toBeGreaterThan(10);
+    // A fraction of the sleep it is measuring, so the two cannot drift apart.
+    // A slow machine only makes this MORE true; no ceiling is asserted.
+    expect(entry?.durationMs).toBeGreaterThan(SLEEP_MS / 3);
   });
 
   it('persist saves (measured: 0 writes)', async () => {
@@ -100,10 +98,9 @@ describe('plugins on an async bus', () => {
     expect(writes).toEqual(['k']);
   });
 
-  it('the sync bus is byte-for-byte unaffected', () => {
+  it('the sync bus is byte-for-byte unaffected', ({ bus }) => {
     // onSettled preserves sync-ness: a sync next() is never wrapped in a
     // promise, so a sync plugin behaves exactly as before.
-    const bus = createCommandBus();
     bus.register('add', () => 'ok');
     const h = history({});
     const m = metrics({});

@@ -65,7 +65,10 @@ const iife = [
   ['vapor-chamber-elements', 'dist/vapor-chamber-elements.iife.min.js'],
 ];
 
-const EXTERNAL = ['vue', '@vue/devtools-api', '@vue/reactivity'];
+// `vitest` is the test entry's peer, external like Vue: the `./vitest` row is
+// what the entry adds to a test run, not Vitest itself.
+// The `./vitest/mcp` row runs in Node: its Vitest API and Node's built-ins are not what it adds.
+const EXTERNAL = ['vue', '@vue/devtools-api', '@vue/reactivity', 'vitest', 'vitest/node', /^node:/];
 let entrySeq = 0;
 
 /**

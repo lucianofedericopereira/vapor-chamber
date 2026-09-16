@@ -38,6 +38,12 @@ jobs:
   test:
     name: test (Node ${{ matrix.node }} / ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    # The ONLY hang guard in this project. Per-test millisecond ceilings were
+    # removed (see vitest.config.ts): they assert machine speed, and every one
+    # the suite carried eventually failed on slower hardware while nothing was
+    # wrong. A job-level limit is stated once, is not a claim about any test,
+    # and cannot fire early on a slow runner the way a per-test ceiling does.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -110,6 +116,8 @@ jobs:
   bench:
     name: bench smoke (no regression vs baseline)
     runs-on: ubuntu-latest
+    # Hang guard - see the note on the test job.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -121,7 +129,10 @@ jobs:
       # job here builds an example (see the note in the test job). Measured:
       # 198M with this flag pair vs 297M without.
       - run: npm ci --workspaces=false --include-workspace-root
-      - run: set -o pipefail; npx vitest bench --run tests/perf.bench.ts 2>&1 | tee bench.txt
+      # `--reporter=default` is required on Vitest 5: it removed
+      # `benchmark.reporters`, so a bench run takes vitest.config.ts's `dot`
+      # reporter and bench.txt would hold a row of dots and no numbers.
+      - run: set -o pipefail; npx vitest bench --run tests/perf.bench.ts --reporter=default 2>&1 | tee bench.txt
         shell: bash
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

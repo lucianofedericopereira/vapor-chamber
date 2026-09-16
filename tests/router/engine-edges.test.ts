@@ -12,7 +12,7 @@
  * successful navigation into a rejected one after the URL had already changed.
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createMemoryHistory } from '../../src/router/history';
 import { createRouter } from '../../src/router/index';
 import { isRouterError } from '../../src/router/errors';
@@ -39,7 +39,6 @@ function makeRouter(opts: Record<string, unknown> = {}) {
   });
 }
 
-afterEach(() => vi.restoreAllMocks());
 
 describe('resolve() shapes', () => {
   it('throws not_ready before the table is loaded', () => {

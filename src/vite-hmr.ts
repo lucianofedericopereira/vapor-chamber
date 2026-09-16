@@ -496,3 +496,171 @@ export function vaporChamberWire(options: VaporChamberWireOptions = {}): any {
     },
   };
 }
+
+// ---------------------------------------------------------------------------
+// vaporChamberTest - the Vitest plugin
+// ---------------------------------------------------------------------------
+
+export type VaporChamberTestOptions = {
+  /**
+   * The shared-bus lifecycle `vapor-chamber/vitest` runs before each test.
+   * `exclude` lists test files, as globs relative to the project root (`*`,
+   * `**` and `?`), that it leaves alone: a file asserting the library's own
+   * one-shot Vue detection from a clean start needs nothing to have imported
+   * the library first.
+   */
+  sharedBus?: { exclude?: string[] };
+  /**
+   * The island project: files named `*.island.test.*` / `*.island.spec.*`, or
+   * under `test/islands/` or `tests/islands/`, run in a project of their own
+   * with a DOM environment, and the other files keep the project they had. It
+   * inherits the rest of your config - aliases, setup files, plugins - which
+   * is Vitest 5's default for projects. `false` injects nothing.
+   * Default environment: 'happy-dom'.
+   */
+  islands?: false | { environment?: string };
+};
+
+/** The setup file, by package specifier: Vitest resolves setupFiles as paths from the root, never through plugins. */
+const TEST_SETUP = 'vapor-chamber/vitest';
+// The key the setup file reads with inject(). Duplicated in src/vitest.ts;
+// tests/vitest-plugin.test.ts keeps the two equal.
+const TEST_PROVIDED = 'vaporChamber';
+/** Name of the injected project, which is also how the plugin recognises it when the project inherits it. */
+const ISLAND_PROJECT = 'vapor-chamber-islands';
+const ISLAND_INCLUDE = ['**/*.island.{test,spec}.*', '{test,tests}/islands/**'];
+/** The Vitest majors this release was verified against. */
+const VITEST_MAJORS = ['5'];
+// The VC_TEST_VITEST_MAJOR diagnostic, as src/vitest-pure.ts's VcTestError
+// would print it. Duplicated for the same reason as TEST_PROVIDED, and kept
+// equal by the same test file.
+const vitestMajorWarning = (version: string) =>
+  '[vapor-chamber/vitest] VC_TEST_VITEST_MAJOR: vapor-chamber/vitest was released against Vitest 5 and is running ' +
+  `on a major it does not know (Vitest ${version})\n  fix: nothing if the suite passes; report the break if it does not\n` +
+  '  docs: https://github.com/lucianofedericopereira/vapor-chamber/blob/main/docs/api/vitest-pure.md#vctestdiagnostic';
+
+// ---------------------------------------------------------------------------
+// The vc-vitest-plugin line: vapor-chamber's mark on top of a run
+// ---------------------------------------------------------------------------
+
+/** Built-in reporters that print Vitest's own banner (its BaseReporter family). The line shows only beside that banner. */
+const BANNER_REPORTERS = ['default', 'minimal', 'agent', 'verbose', 'dot', 'tree'];
+// Vue's brand colors, 24-bit and as the nearest xterm-256 index (nearest by
+// RGB distance over the 6x6x6 cube and the gray ramp): green #42B883, slate #35495E.
+const VUE_GREEN = { rgb: '66;184;131', xterm: '72' };
+const VUE_SLATE = { rgb: '53;73;94', xterm: '239' };
+// Vitest instances that already printed it: once per run, whatever the number
+// of projects, and whether one plugin instance or several (the island project
+// re-reads the config file) see the run.
+const branded = new WeakSet<object>();
+
+/**
+ * The line, colored when Vitest colors its own output. The rules are those of
+ * tinyrainbow, Vitest's color library, read from the environment:
+ * NO_COLOR wins; else FORCE_COLOR, CI, or a terminal that is not dumb (unless
+ * FORCE_TTY=false). 24-bit where COLORTERM says so, xterm-256 otherwise.
+ * The mark `\\//` is Vue's nested V: green outside, white inside, on slate.
+ */
+function brandLine(): string {
+  const env = process.env;
+  const on = !('NO_COLOR' in env) && ('FORCE_COLOR' in env || 'CI' in env || (env.FORCE_TTY !== 'false' && env.TERM !== 'dumb'));
+  if (!on) return ' \\\\//  powered by vc-vitest-plugin';
+  const deep = env.COLORTERM === 'truecolor' || env.COLORTERM === '24bit';
+  const fg = (c: typeof VUE_GREEN) => `\x1b[${deep ? `38;2;${c.rgb}` : `38;5;${c.xterm}`}m`;
+  const bg = (c: typeof VUE_SLATE) => `\x1b[${deep ? `48;2;${c.rgb}` : `48;5;${c.xterm}`}m`;
+  const green = fg(VUE_GREEN);
+  const badge = `${bg(VUE_SLATE)}\x1b[1m ${green}\\\x1b[97m\\/${green}/ \x1b[0m`;
+  return `${badge} \x1b[2mpowered by\x1b[22m ${green}\x1b[1mvc-vitest-plugin\x1b[0m`;
+}
+
+/** A root-relative glob as a RegExp source matching the absolute path Vitest gives a test file. */
+function globToSource(root: string, glob: string): string {
+  const escapeRegExp = (s: string) => s.replace(/[.+^${}()|[\]\\]/g, '\\$&');
+  const body = escapeRegExp(glob).replace(/\*\*\/|\*\*|\*|\?/g, (t) => (t === '**/' ? '(?:.*/)?' : t === '**' ? '.*' : t === '*' ? '[^/]*' : '[^/]'));
+  return `^${escapeRegExp(root.replace(/\/$/, ''))}/${body}$`;
+}
+
+/**
+ * vaporChamberTest - `vapor-chamber/vitest` with configuration.
+ *
+ * The setup file alone (`setupFiles: ['vapor-chamber/vitest']`) is the whole
+ * integration for most suites. The plugin adds what needs config:
+ *
+ * - it puts that setup file FIRST in `test.setupFiles`, once, keeping yours - a
+ *   string is kept too, where Vite's own merge would have left ours last;
+ * - `sharedBus.exclude`, handed to the setup file with `provide`;
+ * - the island project (see `islands`);
+ * - a one-time warning, `VC_TEST_VITEST_MAJOR`, on a Vitest major this release
+ *   does not know. A warning, never a failure.
+ * - one line on top of a run, `\\//  powered by vc-vitest-plugin`, in Vue's
+ *   green and slate where the terminal has colors: on stderr, once per run,
+ *   and only beside Vitest's own banner (not with json, junit or tap alone).
+ *
+ * The public type stays structural and names no `vitest` module, like the two
+ * plugins above: this declaration file is what every `vapor-chamber/vite` user
+ * loads, most of them without Vitest.
+ *
+ * @example
+ * // vitest.config.ts
+ * import { defineConfig } from 'vitest/config';
+ * import { vaporChamberTest } from 'vapor-chamber/vite';
+ *
+ * export default defineConfig({
+ *   plugins: [vaporChamberTest({ sharedBus: { exclude: ['tests/vue-detection.test.ts'] } })],
+ * });
+ */
+export function vaporChamberTest(options: VaporChamberTestOptions = {}): any {
+  const exclude = options.sharedBus?.exclude ?? [];
+  const islands = options.islands;
+  let warned = false;
+
+  return {
+    name: 'vapor-chamber-test',
+
+    config(config: {
+      test?: { setupFiles?: string | string[]; name?: string; include?: string[]; benchmark?: { include?: string[] } };
+    }) {
+      const test = (config.test ??= {});
+      const theirs = test.setupFiles === undefined ? [] : ([] as string[]).concat(test.setupFiles);
+      test.setupFiles = [TEST_SETUP, ...theirs.filter((file) => file !== TEST_SETUP)];
+      // The island project inherits the declaring config file, and Vitest merges
+      // a project's options into it with Vite's merge, which EXTENDS arrays: a
+      // suite with its own `include` ran every test file twice, once in the DOM
+      // environment (measured on this repository: 348 file runs for 174, and 5
+      // Node-arm tests failed). This hook runs inside that project too, so it
+      // replaces the include there.
+      // Benchmark files have their own include, inherited the same way, and
+      // `vitest bench` ran each one again in this project: measured on this
+      // repository, tests/perf.bench.ts twice and the CI bench job 89s -> 179s.
+      // The island project runs no benchmarks; emptying the include is how.
+      if (test.name === ISLAND_PROJECT) {
+        test.include = [...ISLAND_INCLUDE];
+        test.benchmark = { ...test.benchmark, include: [] };
+      }
+    },
+
+    async configureVitest({ vitest, project, injectTestProjects }: any) {
+      // configureVitest runs before Vitest creates its reporters, so this is the
+      // first line of the run. On stderr: a JSON report or `vitest list --json`
+      // written to stdout stays parseable.
+      if (!branded.has(vitest) && vitest.config.reporters.some((r: unknown) => Array.isArray(r) && BANNER_REPORTERS.includes(r[0]))) {
+        branded.add(vitest);
+        vitest.logger.error(brandLine());
+      }
+      if (!warned && !VITEST_MAJORS.includes(String(vitest.version).split('.')[0])) {
+        warned = true;
+        vitest.logger.warn(vitestMajorWarning(vitest.version));
+      }
+      project.provide(TEST_PROVIDED, { exclude: exclude.map((glob) => globToSource(project.config.root, glob)) });
+
+      if (islands === false || project.name === ISLAND_PROJECT) return;
+      // A new array, not a push: the injected project's resolved `exclude` is
+      // this same array object, so pushing excluded every island file from the
+      // island project too (measured: it ran none).
+      project.config.exclude = [...project.config.exclude, ...ISLAND_INCLUDE];
+      await injectTestProjects({
+        test: { name: ISLAND_PROJECT, include: [...ISLAND_INCLUDE], environment: islands?.environment ?? 'happy-dom' },
+      });
+    },
+  };
+}

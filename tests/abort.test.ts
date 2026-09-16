@@ -13,13 +13,20 @@
  *   - bus.dispatchBatch() with per-command AbortSignal.any() composition.
  *   - Auto-derived child signals from parent dispatches.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { createAsyncCommandBus, createCommandBus, BusError, type Command } from '../src/command-bus';
+import { describe, expect, vi, beforeEach, afterEach } from 'vitest';
+import { createAsyncCommandBus, BusError, type Command } from '../src/command-bus';
 import { createHttpBridge, createWsBridge } from '../src/transports';
+import { it } from '../src/vitest';
+
+/**
+ * The ws bridge timeout the mid-flight abort test races against. Named so the
+ * assertion below can be expressed as a fraction of it rather than as a
+ * literal that drifts the moment this number changes.
+ */
+const WS_TIMEOUT = 10_000;
 
 describe('AbortController - async dispatch', () => {
-  it('pre-aborted signal short-circuits with VC_CORE_ABORTED, handler is NOT called', async () => {
-    const bus = createAsyncCommandBus();
+  it('pre-aborted signal short-circuits with VC_CORE_ABORTED, handler is NOT called', async ({ asyncBus: bus }) => {
     const handler = vi.fn(async () => 'never');
     bus.register('hot', handler);
 
@@ -28,14 +35,12 @@ describe('AbortController - async dispatch', () => {
 
     const result = await bus.dispatch('hot', null, undefined, { signal: ac.signal });
 
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('VC_CORE_ABORTED');
     expect(handler).not.toHaveBeenCalled();
     expect(result.error).toBeInstanceOf(BusError);
-    expect((result.error as BusError).code).toBe('VC_CORE_ABORTED');
   });
 
-  it('pre-aborted with custom reason surfaces the reason as the error', async () => {
-    const bus = createAsyncCommandBus();
+  it('pre-aborted with custom reason surfaces the reason as the error', async ({ asyncBus: bus }) => {
     bus.register('hot', async () => 'ok');
 
     const ac = new AbortController();
@@ -48,13 +53,20 @@ describe('AbortController - async dispatch', () => {
     expect(result.error).toBe(reason);
   });
 
-  it('handler can observe cmd.signal mid-flight and react to abort', async () => {
-    const bus = createAsyncCommandBus();
+  it('handler can observe cmd.signal mid-flight and react to abort', async ({ asyncBus: bus }) => {
     let observedSignal: AbortSignal | undefined;
     let abortObserved = false;
+    // Resolved by the handler once it holds the signal. The test awaits THIS
+    // rather than sleeping: a sleep only guesses that the handler has started,
+    // and under coverage instrumentation the guess loses - a 5 ms sleep landed
+    // after the 200 ms safety net below, so the handler returned 'completed'
+    // and this test failed on a slow machine with nothing wrong with the code.
+    let handlerStarted!: () => void;
+    const started = new Promise<void>((r) => { handlerStarted = r; });
 
     bus.register('long', async (cmd) => {
       observedSignal = cmd.signal;
+      handlerStarted();
       // Simulate a handler that polls cmd.signal.aborted.
       await new Promise<void>((resolve) => {
         const t = setInterval(() => {
@@ -64,7 +76,9 @@ describe('AbortController - async dispatch', () => {
             resolve();
           }
         }, 1);
-        // Safety net - never hang the test if abort never fires.
+        // Safety net - never hang the test if abort never fires. It can no
+        // longer pre-empt a slow abort: `await started` above means the abort
+        // is issued once the handler is provably running, not after a guess.
         setTimeout(() => { clearInterval(t); resolve(); }, 200);
       });
       return 'completed';
@@ -73,8 +87,8 @@ describe('AbortController - async dispatch', () => {
     const ac = new AbortController();
     const dispatchPromise = bus.dispatch('long', null, undefined, { signal: ac.signal });
 
-    // Let the handler start, then abort.
-    await new Promise(r => setTimeout(r, 5));
+    // The handler is provably running, so the abort cannot arrive before it.
+    await started;
     ac.abort();
 
     await dispatchPromise;
@@ -82,8 +96,7 @@ describe('AbortController - async dispatch', () => {
     expect(abortObserved).toBe(true);
   });
 
-  it('after-hooks fire for aborted dispatches (observability stays intact)', async () => {
-    const bus = createAsyncCommandBus();
+  it('after-hooks fire for aborted dispatches (observability stays intact)', async ({ asyncBus: bus }) => {
     bus.register('hot', async () => 'ok');
 
     const afterHook = vi.fn();
@@ -97,11 +110,10 @@ describe('AbortController - async dispatch', () => {
     expect(afterHook).toHaveBeenCalledOnce();
     const [cmd, result] = afterHook.mock.calls[0]!;
     expect(cmd.action).toBe('hot');
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('VC_CORE_ABORTED');
   });
 
-  it('cmd.signal is undefined when no options.signal is passed (no leak from prior dispatch)', async () => {
-    const bus = createAsyncCommandBus();
+  it('cmd.signal is undefined when no options.signal is passed (no leak from prior dispatch)', async ({ asyncBus: bus }) => {
     let captured: Command | undefined;
     bus.register('plain', async (cmd) => { captured = cmd; return 'ok'; });
 
@@ -117,15 +129,13 @@ describe('AbortController - async dispatch', () => {
     expect(captured?.signal).toBeUndefined();
   });
 
-  it('non-aborted dispatch with a signal completes normally', async () => {
-    const bus = createAsyncCommandBus();
+  it('non-aborted dispatch with a signal completes normally', async ({ asyncBus: bus }) => {
     bus.register('hot', async (cmd) => cmd.target);
 
     const ac = new AbortController();
     const result = await bus.dispatch('hot', 42, undefined, { signal: ac.signal });
 
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe(42);
+    expect(result).toSucceedWith(42);
   });
 });
 
@@ -158,8 +168,7 @@ describe('AbortController - HTTP bridge auto-propagation', () => {
 });
 
 describe('AbortController - sync bus accepts but ignores signal', () => {
-  it('sync dispatch with { signal } runs the handler regardless (signal is ignored)', () => {
-    const bus = createCommandBus();
+  it('sync dispatch with { signal } runs the handler regardless (signal is ignored)', ({ bus }) => {
     const handler = vi.fn(() => 'ok');
     bus.register('hot', handler);
 
@@ -176,8 +185,7 @@ describe('AbortController - sync bus accepts but ignores signal', () => {
 });
 
 describe('AbortController - bus.request() with signal', () => {
-  it('pre-aborted signal short-circuits with VC_CORE_ABORTED, responder NOT called', async () => {
-    const bus = createAsyncCommandBus();
+  it('pre-aborted signal short-circuits with VC_CORE_ABORTED, responder NOT called', async ({ asyncBus: bus }) => {
     const responder = vi.fn(async () => 'never');
     bus.respond('q', responder);
 
@@ -186,44 +194,47 @@ describe('AbortController - bus.request() with signal', () => {
 
     const result = await bus.request('q', { id: 1 }, undefined, { signal: ac.signal });
 
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('VC_CORE_ABORTED');
     expect(responder).not.toHaveBeenCalled();
     expect(result.error).toBeInstanceOf(BusError);
-    expect((result.error as BusError).code).toBe('VC_CORE_ABORTED');
   });
 
-  it('mid-flight abort wins the race against responder + timeout', async () => {
-    const bus = createAsyncCommandBus();
+  it('mid-flight abort wins the race against responder + timeout', async ({ asyncBus: bus }) => {
+    // Abort once the responder is provably running, not after a 10 ms guess.
+    // The guess lost under full-suite load - the responder's 200 ms timer was
+    // serviced before the abort's 10 ms one, and the request returned
+    // 'too late'. Ordering that a test asserts has to be established, not timed.
+    let responderStarted!: () => void;
+    const started = new Promise<void>((r) => { responderStarted = r; });
+
     bus.respond('slow', async () => {
+      responderStarted();
       await new Promise(r => setTimeout(r, 200));
       return 'too late';
     });
 
     const ac = new AbortController();
-    setTimeout(() => ac.abort(), 10);
+    const pending = bus.request('slow', null, undefined, { timeout: 5000, signal: ac.signal });
+    await started;
+    ac.abort();
+    const result = await pending;
 
-    const result = await bus.request('slow', null, undefined, { timeout: 5000, signal: ac.signal });
-
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('VC_CORE_ABORTED');
     expect(result.error).toBeInstanceOf(BusError);
-    expect((result.error as BusError).code).toBe('VC_CORE_ABORTED');
   });
 
-  it('non-aborted request completes normally', async () => {
-    const bus = createAsyncCommandBus();
+  it('non-aborted request completes normally', async ({ asyncBus: bus }) => {
     bus.respond('q', async (cmd) => cmd.target);
 
     const ac = new AbortController();
     const result = await bus.request('q', 'hello', undefined, { signal: ac.signal });
 
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe('hello');
+    expect(result).toSucceedWith('hello');
   });
 });
 
 describe('AbortController - bus.dispatchBatch() with signal', () => {
-  it('pre-aborted batch returns immediately with empty results', async () => {
-    const bus = createAsyncCommandBus();
+  it('pre-aborted batch returns immediately with empty results', async ({ asyncBus: bus }) => {
     const handler = vi.fn(async () => 'ok');
     bus.register('a', handler);
     bus.register('b', handler);
@@ -236,27 +247,31 @@ describe('AbortController - bus.dispatchBatch() with signal', () => {
       { signal: ac.signal },
     );
 
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('VC_CORE_ABORTED');
     expect(result.results).toHaveLength(0);
     expect(handler).not.toHaveBeenCalled();
     expect(result.error).toBeInstanceOf(BusError);
-    expect((result.error as BusError).code).toBe('VC_CORE_ABORTED');
   });
 
-  it('mid-batch abort stops further dispatches; partial results preserved', async () => {
-    const bus = createAsyncCommandBus();
+  it('mid-batch abort stops further dispatches; partial results preserved', async ({ asyncBus: bus }) => {
     let calls = 0;
+    // The assertions below need the abort to land AFTER the first command has
+    // completed and BEFORE the fourth starts. A 12 ms timer against four 5 ms
+    // commands encodes that as arithmetic; firing on the first completion
+    // states it directly, and holds however slowly the commands run.
+    let firstDone!: () => void;
+    const afterFirst = new Promise<void>((r) => { firstDone = r; });
+
     bus.register('step', async (cmd) => {
       calls++;
       // Simulate work - abort triggers between commands
       await new Promise(r => setTimeout(r, 5));
+      if (calls === 1) firstDone();
       return cmd.target;
     });
 
     const ac = new AbortController();
-    setTimeout(() => ac.abort(), 12);
-
-    const result = await bus.dispatchBatch(
+    const pending = bus.dispatchBatch(
       [
         { action: 'step', target: 1 },
         { action: 'step', target: 2 },
@@ -265,17 +280,18 @@ describe('AbortController - bus.dispatchBatch() with signal', () => {
       ],
       { continueOnError: true, signal: ac.signal },
     );
+    await afterFirst;
+    ac.abort();
+    const result = await pending;
 
-    expect(result.ok).toBe(false);
-    expect((result.error as BusError).code).toBe('VC_CORE_ABORTED');
+    expect(result).toFailWith('VC_CORE_ABORTED');
     // At least one command should have completed before abort fired.
     expect(result.results.length).toBeGreaterThanOrEqual(1);
     // Not all four should have run (abort stopped further dispatch).
     expect(calls).toBeLessThan(4);
   });
 
-  it('non-aborted batch completes normally', async () => {
-    const bus = createAsyncCommandBus();
+  it('non-aborted batch completes normally', async ({ asyncBus: bus }) => {
     bus.register('a', async (cmd) => cmd.target);
     bus.register('b', async (cmd) => cmd.target);
 
@@ -312,8 +328,7 @@ describe('AbortController - WS bridge propagation', () => {
   beforeEach(() => { originalWS = (globalThis as any).WebSocket; (globalThis as any).WebSocket = FakeWebSocket; });
   afterEach(() => { (globalThis as any).WebSocket = originalWS; });
 
-  it('pre-aborted signal short-circuits - message is NOT sent', async () => {
-    const bus = createAsyncCommandBus();
+  it('pre-aborted signal short-circuits - message is NOT sent', async ({ asyncBus: bus }) => {
     const ws = createWsBridge({ url: 'ws://test' });
     ws.connect();
     bus.use(ws);
@@ -324,14 +339,12 @@ describe('AbortController - WS bridge propagation', () => {
 
     const result = await bus.dispatch('cartAdd', { id: 1 }, undefined, { signal: ac.signal });
 
-    expect(result.ok).toBe(false);
-    expect((result.error as BusError).code).toBe('VC_CORE_ABORTED');
+    expect(result).toFailWith('VC_CORE_ABORTED');
     ws.disconnect();
   });
 
-  it('mid-flight abort settles the pending request without waiting for server', async () => {
-    const bus = createAsyncCommandBus();
-    const ws = createWsBridge({ url: 'ws://test', timeout: 10_000 });
+  it('mid-flight abort settles the pending request without waiting for server', async ({ asyncBus: bus }) => {
+    const ws = createWsBridge({ url: 'ws://test', timeout: WS_TIMEOUT });
     ws.connect();
     bus.use(ws);
     await new Promise(r => queueMicrotask(() => r(null)));
@@ -339,26 +352,40 @@ describe('AbortController - WS bridge propagation', () => {
     const ac = new AbortController();
     const dispatchPromise = bus.dispatch('cartAdd', { id: 1 }, undefined, { signal: ac.signal });
 
-    // No server -> without abort, this would wait the full 10s timeout.
+    // No server -> without abort, this would wait the full 10s timeout. Left
+    // as a timer, unlike the three handshakes elsewhere in this file: there is
+    // no event to await (nothing ever answers), and the only competitor is
+    // WS_TIMEOUT, so the margin is 5 ms against 10 s. Making it deterministic
+    // would mean aborting before the request is registered, which the bridge
+    // would then miss - and with no per-test ceiling that is a hang, not a
+    // failure. A 2000x margin is the safer trade here.
     setTimeout(() => ac.abort(), 5);
 
     const start = Date.now();
     const result = await dispatchPromise;
     const elapsed = Date.now() - start;
 
-    expect(result.ok).toBe(false);
-    expect(elapsed).toBeLessThan(500); // Way faster than the 10s timeout
-    expect((result.error as BusError).code).toBe('VC_CORE_ABORTED');
+    expect(result).toFailWith('VC_CORE_ABORTED');
+    // Relative to the timeout under test, not a literal: the claim is "the
+    // abort short-circuited" and a quarter of the ceiling proves it on any
+    // machine. A fixed 500 ms proved it only on a fast one.
+    expect(elapsed).toBeLessThan(WS_TIMEOUT / 4);
     ws.disconnect();
   });
 });
 
 describe('AbortController - child signal propagation pattern', () => {
-  it('handler can pass cmd.signal to nested dispatches for explicit propagation', async () => {
-    const bus = createAsyncCommandBus();
+  it('handler can pass cmd.signal to nested dispatches for explicit propagation', async ({ asyncBus: bus }) => {
     let childSawAbort = false;
 
+    // Abort once the child is provably running rather than hoping 5 ms beats
+    // its 30 ms wait - the same ordering-by-arithmetic that failed elsewhere
+    // in this file under load.
+    let childStarted!: () => void;
+    const started = new Promise<void>((r) => { childStarted = r; });
+
     bus.register('child', async (cmd) => {
+      childStarted();
       // Wait long enough that parent abort can trigger
       await new Promise(r => setTimeout(r, 30));
       childSawAbort = cmd.signal?.aborted ?? false;
@@ -373,7 +400,8 @@ describe('AbortController - child signal propagation pattern', () => {
     const ac = new AbortController();
     const dispatchPromise = bus.dispatch('parent', null, undefined, { signal: ac.signal });
 
-    setTimeout(() => ac.abort(), 5);
+    await started;
+    ac.abort();
     await dispatchPromise;
 
     expect(childSawAbort).toBe(true);

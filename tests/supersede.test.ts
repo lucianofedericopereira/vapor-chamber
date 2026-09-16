@@ -3,15 +3,14 @@
  * dispatch for the same key, so a rapid second dispatch (search-as-you-type,
  * a filter changing mid-fetch) cancels the stale one instead of racing it.
  */
-import { describe, it, expect } from 'vitest';
-import { createAsyncCommandBus } from '../src/command-bus';
+import { describe, expect } from 'vitest';
 import { supersede } from '../src/plugins-extra';
+import { it } from '../src/vitest';
 
 const tick = (ms = 0) => new Promise<void>((r) => setTimeout(r, ms));
 
 describe('supersede plugin', () => {
-  it('aborts the previous in-flight dispatch for the same key', async () => {
-    const bus = createAsyncCommandBus();
+  it('aborts the previous in-flight dispatch for the same key', async ({ asyncBus: bus }) => {
     const abortedTerms: string[] = [];
     bus.use(supersede());
     bus.register('search', async (cmd) => {
@@ -31,8 +30,7 @@ describe('supersede plugin', () => {
     expect(r2.ok && r2.value).toBe('ab');
   });
 
-  it('different keys race independently - no cross-cancellation', async () => {
-    const bus = createAsyncCommandBus();
+  it('different keys race independently - no cross-cancellation', async ({ asyncBus: bus }) => {
     const aborted: string[] = [];
     bus.use(supersede());
     bus.register('search', async (cmd) => {
@@ -51,8 +49,7 @@ describe('supersede plugin', () => {
     expect(b.ok && b.value).toBe('email');
   });
 
-  it('distinct actions never collide, even with the same target - actions are never dropped', async () => {
-    const bus = createAsyncCommandBus();
+  it('distinct actions never collide, even with the same target - actions are never dropped', async ({ asyncBus: bus }) => {
     bus.use(supersede());
     bus.register('search', async () => { await tick(5); return 'searched'; });
     bus.register('save', async () => { await tick(5); return 'saved'; });
@@ -67,8 +64,7 @@ describe('supersede plugin', () => {
     expect(b.ok && b.value).toBe('saved');
   });
 
-  it('honors a custom key and skips superseding on a null key', async () => {
-    const bus = createAsyncCommandBus();
+  it('honors a custom key and skips superseding on a null key', async ({ asyncBus: bus }) => {
     let aborts = 0;
     bus.use(supersede({ key: (cmd) => (cmd.target as any).lane ?? null }));
     bus.register('act', async (cmd) => {
@@ -91,8 +87,7 @@ describe('supersede plugin', () => {
     expect(aborts).toBe(0);
   });
 
-  it('actions filter scopes which commands are superseded', async () => {
-    const bus = createAsyncCommandBus();
+  it('actions filter scopes which commands are superseded', async ({ asyncBus: bus }) => {
     let aborts = 0;
     bus.use(supersede({ actions: ['search*'] }));
     bus.register('ping', async (cmd) => {
@@ -108,8 +103,7 @@ describe('supersede plugin', () => {
     expect(aborts).toBe(0); // 'ping' not in scope -> not superseded
   });
 
-  it('merges with a caller-supplied signal - either source can abort', async () => {
-    const bus = createAsyncCommandBus();
+  it('merges with a caller-supplied signal - either source can abort', async ({ asyncBus: bus }) => {
     let sawAbort = false;
     bus.use(supersede());
     bus.register('search', async (cmd) => {
@@ -126,8 +120,7 @@ describe('supersede plugin', () => {
     expect(sawAbort).toBe(true);
   });
 
-  it('a third dispatch after two supersedes still lands cleanly', async () => {
-    const bus = createAsyncCommandBus();
+  it('a third dispatch after two supersedes still lands cleanly', async ({ asyncBus: bus }) => {
     bus.use(supersede());
     bus.register('search', async (cmd) => {
       await tick(5);

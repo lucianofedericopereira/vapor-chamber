@@ -27,7 +27,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, sep } from 'node:path';
 
-const ROOTS = ['src', 'tests', 'scripts', 'docs', 'examples', '.github', 'assets'];
+const ROOTS = ['src', 'tests', 'scripts', 'bin', 'docs', 'examples', '.github', 'assets'];
 const ROOT_FILES = [
   'index.html',
   'README.md',

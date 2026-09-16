@@ -53,7 +53,7 @@ describe('retry() in front of the real HTTP bridge', () => {
     const result = await stack().dispatch('orderPlace', { id: 1 });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('validation_failed');
     // The shape the default predicate now reads: the backend's code, the status.
     const err = result.error as Error & { status?: number; code?: string };
     expect(err.message).toBe('Invalid');
@@ -75,7 +75,7 @@ describe('retry() in front of the real HTTP bridge', () => {
     const result = await bus.dispatch('orderPlace', { id: 1 });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('validation_failed');
     const err = result.error as Error & { status?: number; code?: string; response?: unknown };
     expect(err.message).toBe('Invalid');
     expect(err.name).toBe('HttpError');
@@ -111,8 +111,7 @@ describe('retry() in front of the real HTTP bridge', () => {
     const result = await stack({ maxAttempts: 3, baseDelay: 0 }).dispatch('orderPlace', { id: 1 });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(result.ok).toBe(true);
-    expect(result.value).toEqual({ id: 1 });
+    expect(result).toSucceedWith({ id: 1 });
   });
 
   it('reads the status from error.response.status too, and still retries a status-less error', async () => {

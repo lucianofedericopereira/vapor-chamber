@@ -615,7 +615,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     controller.abort();
     const result = await bus.dispatch('cartAdd', { id: 1 }, undefined, { signal: controller.signal });
 
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('VC_CORE_ABORTED');
     expect(sockets[0].sent.length).toBe(0); // never sent - aborted before dispatch
     ws.disconnect();
   });

@@ -51,7 +51,7 @@ describe('createHttpBridge error re-wrap', () => {
 
     const result = await bus.dispatch('save', {});
     const err = result.error as Error & { status?: number; code?: string; response?: unknown };
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('VALIDATION');
     expect(err.message).toBe('email is taken');
     expect(err.name).toBe('HttpError');
     expect(err.status).toBe(422);
@@ -191,7 +191,7 @@ describe('createBatchingHttpBridge', () => {
     const plugin = createBatchingHttpBridge({ endpoint: '/api/vc/batch', httpClient });
     const result = await callPlugin(plugin, { action: 'save', signal: ac.signal });
 
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('VC_CORE_ABORTED');
     expect(httpClient.post).not.toHaveBeenCalled();
   });
 
@@ -227,7 +227,7 @@ describe('createWsBridge guards', () => {
     const ws = createWsBridge({ url: 'ws://localhost' });
     const result = await callPlugin(ws, { action: 'save', signal: ac.signal });
 
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('VC_CORE_ABORTED');
     expect(ctor).not.toHaveBeenCalled();
   });
 });

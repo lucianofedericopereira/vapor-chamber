@@ -29,6 +29,7 @@
  */
 import { afterAll, describe, expect, it } from 'vitest';
 import { _configureClock, createCommandBus } from '../src/command-bus';
+import { underCoverage } from './under-coverage';
 
 const REAL_NOW = Date.now;
 afterAll(() => { _configureClock(); });
@@ -128,8 +129,6 @@ function median(xs: number[]): number {
 }
 
 describe('meta.ts clock source - real dispatch path A/B', () => {
-  const underCoverage = process.env.npm_lifecycle_event === 'test:coverage';
-
   it.skipIf(underCoverage)('measures what Date.now() costs inside a real dispatch', () => {
     const cached = makeCachedClock();
     const N = 2_000;
@@ -205,5 +204,5 @@ describe('meta.ts clock source - real dispatch path A/B', () => {
       expect(r.real).toBeGreaterThan(0);
       expect(r.cached).toBeGreaterThan(0);
     }
-  }, 60_000);
+  });
 });

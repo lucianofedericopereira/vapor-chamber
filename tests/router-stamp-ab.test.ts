@@ -36,6 +36,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { stampActiveLinks } from '../src/router/dom';
+import { underCoverage } from './under-coverage';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // Per-file subdir: the whole dir is removed in afterAll, so it must be ours alone.
@@ -106,8 +107,6 @@ function secondsFor(fn: Stamp, host: HTMLElement, iters: number): number {
 }
 
 describe('stampActiveLinks - per-anchor memo, real function A/B', () => {
-  const underCoverage = process.env.npm_lifecycle_event === 'test:coverage';
-
   it.skipIf(underCoverage)('matches the baseline exactly, and measures the difference', async () => {
     buildBaseline();
     const base = (await import(/* @vite-ignore */ BASELINE)) as { stampActiveLinks: Stamp };
@@ -196,5 +195,5 @@ describe('stampActiveLinks - per-anchor memo, real function A/B', () => {
       expect(r.oldUs).toBeGreaterThan(0);
       expect(r.newUs).toBeGreaterThan(0);
     }
-  }, 120_000);
+  });
 });

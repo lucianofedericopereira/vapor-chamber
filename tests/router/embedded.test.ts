@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { canUseWebHistory, createMemoryHistory } from '../../src/router/history';
 import { createRouter } from '../../src/router/index';
 
@@ -10,7 +10,6 @@ import { createRouter } from '../../src/router/index';
  * crashing at boot.
  */
 describe('embedded-context history guard', () => {
-  afterEach(() => vi.unstubAllGlobals());
 
   it('no window -> not usable (SSR/node)', () => {
     expect(canUseWebHistory()).toBe(false);

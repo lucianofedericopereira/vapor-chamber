@@ -18,6 +18,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMemoryHistory, createWebHistory } from '../../src/router/history';
 import { createRouter } from '../../src/router/index';
 import type { RouteRecord } from '../../src/router/types';
+import { stubGlobal } from '../../src/vitest-pure';
 
 const ROWS: RouteRecord[] = [
   { name: 'shell', path: '/', parent: null },
@@ -36,7 +37,6 @@ function makeRouter(opts: Record<string, unknown> = {}) {
 
 afterEach(() => {
   document.body.innerHTML = '';
-  vi.restoreAllMocks();
 });
 
 describe('scroll on commit', () => {
@@ -123,7 +123,7 @@ describe('inline routes payload', () => {
     // Inline routes are the one routes source that cannot work without a DOM,
     // so an SSR render that reaches it must say why. Without the guard this is
     // a ReferenceError from deep inside the constructor.
-    vi.stubGlobal('document', undefined);
+    using _document = stubGlobal('document', undefined);
     const router = createRouter({
       history: createMemoryHistory('/'),
       routes: { inline: '#routes' } as never,
@@ -131,7 +131,6 @@ describe('inline routes payload', () => {
     });
     await expect(router.isReady()).rejects.toThrow(/inline routes need a DOM/);
     router.destroy();
-    vi.unstubAllGlobals();
   });
 
   it('surfaces inline_routes_missing at start(), not at construction', async () => {

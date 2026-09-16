@@ -50,12 +50,28 @@ export default defineConfig({
     globals: true,
     environment: 'happy-dom',
     reporters: [
-      'dot',
+      'tree',
       // Writes docs/metrics.json - the source stamp-docs derives the
       // README/whitepaper test counts from, so they cannot drift.
       ['./scripts/test-counts-reporter.mjs', { key: 'vapor' }],
     ],
     silent: 'passed-only',
+    // Same two settings as vitest.config.ts - see the notes there.
+    onConsoleLog(log) {
+      if (log.includes('You are running a development build of Vue')) return false;
+      if (log.includes('Make sure to use the production build')) return false;
+      return undefined;
+    },
+    // No per-test wall-clock ceiling - see the note in vitest.config.ts.
+    testTimeout: 0,
+    hookTimeout: 0,
+    // See the note in vitest.config.ts.
+    fsModuleCache: true,
+    // Same cleanup options as vitest.config.ts - see the note there.
+    clearMocks: false,
+    restoreMocks: true,
+    unstubGlobals: true,
+    unstubEnvs: true,
     include: ['tests/vapor/**/*.test.ts'],
   },
 });

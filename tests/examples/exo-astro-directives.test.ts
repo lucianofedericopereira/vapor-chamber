@@ -9,7 +9,7 @@
  * scan idempotence across a client-side page swap, and the example's headline
  * claim - clicks dispatched before handlers hydrate are replayed in order.
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, expect, beforeEach, vi } from 'vitest';
 import {
   reactive,
   addEffect,
@@ -19,6 +19,7 @@ import {
   mountExo,
 } from '../../examples/exo-astro/src/directives/index';
 import { createCommandBus } from '../../src/command-bus';
+import { it } from '../../src/vitest';
 
 /** busState is a module singleton - wipe it between tests. */
 function resetBusState(): void {
@@ -138,8 +139,7 @@ describe('v-show', () => {
 });
 
 describe('v-command', () => {
-  it('dispatches the named command with v-target and v-payload as JSON', () => {
-    const bus = createCommandBus();
+  it('dispatches the named command with v-target and v-payload as JSON', ({ bus }) => {
     const seen: Array<{ target: any; payload: any }> = [];
     bus.register('cart.add', (cmd) => { seen.push({ target: cmd.target, payload: cmd.payload }); });
 
@@ -152,8 +152,7 @@ describe('v-command', () => {
     expect(seen).toEqual([{ target: { name: 'Tea', price: 3 }, payload: { qty: 2 } }]);
   });
 
-  it('defaults target to {} and payload to undefined when the attrs are absent', () => {
-    const bus = createCommandBus();
+  it('defaults target to {} and payload to undefined when the attrs are absent', ({ bus }) => {
     const seen: Array<{ target: any; payload: any }> = [];
     bus.register('cart.clear', (cmd) => { seen.push({ target: cmd.target, payload: cmd.payload }); });
 
@@ -164,8 +163,7 @@ describe('v-command', () => {
     expect(seen).toEqual([{ target: {}, payload: undefined }]);
   });
 
-  it('treats malformed JSON as absent rather than throwing at click time', () => {
-    const bus = createCommandBus();
+  it('treats malformed JSON as absent rather than throwing at click time', ({ bus }) => {
     const seen: any[] = [];
     bus.register('x', (cmd) => { seen.push(cmd.target); });
 
@@ -229,8 +227,7 @@ describe('v-scope', () => {
     expect($(root, 'span').textContent).toBe('9'); // nothing declared => atmosphere
   });
 
-  it('a bus handler writes local scope state through scopeOf - the click site never does', () => {
-    const bus = createCommandBus();
+  it('a bus handler writes local scope state through scopeOf - the click site never does', ({ bus }) => {
     const root = mount(`
       <div id="panel" v-scope='{"open":false}'>
         <button v-command="ui.toggle">Details</button>
@@ -330,8 +327,7 @@ describe('v-each', () => {
     expect(rows(root)).toEqual([]);
   });
 
-  it('wires v-command inside a row, dispatching that row\'s data', () => {
-    const bus = createCommandBus();
+  it('wires v-command inside a row, dispatching that row\'s data', ({ bus }) => {
     const removed: any[] = [];
     bus.register('cart.remove', (cmd) => { removed.push(cmd.target); });
     busState.items = [{ name: 'Tea' }, { name: 'Coffee' }];
@@ -371,8 +367,7 @@ describe('v-each', () => {
 });
 
 describe('scan idempotence (client-side page swaps)', () => {
-  it('re-scanning does not double-bind clicks or stack duplicate effects', () => {
-    const bus = createCommandBus();
+  it('re-scanning does not double-bind clicks or stack duplicate effects', ({ bus }) => {
     const dispatches: any[] = [];
     bus.register('cart.add', (cmd) => { dispatches.push(cmd.target); });
     busState.count = 0;
@@ -457,8 +452,7 @@ describe('the headline: dispatch before hydration', () => {
 });
 
 describe('mountExo', () => {
-  it('scans immediately when the document is already interactive', () => {
-    const bus = createCommandBus();
+  it('scans immediately when the document is already interactive', ({ bus }) => {
     const seen: any[] = [];
     bus.register('go', (cmd) => { seen.push(cmd.target); });
     const root = mount('<button v-command="go">go</button>');
@@ -470,15 +464,15 @@ describe('mountExo', () => {
     expect(state).toBe(busState);
   });
 
-  it('defers the scan to DOMContentLoaded while the document is still loading', () => {
-    const bus = createCommandBus();
+  it('defers the scan to DOMContentLoaded while the document is still loading', ({ bus }) => {
     const seen: any[] = [];
     bus.register('go', (cmd) => { seen.push(cmd.target); });
     const root = mount('<button v-command="go">go</button>');
 
-    const readyState = vi.spyOn(document, 'readyState', 'get').mockReturnValue('loading');
-    mountExo(bus, root);
-    readyState.mockRestore();
+    {
+      using _readyState = vi.spyOn(document, 'readyState', 'get').mockReturnValue('loading');
+      mountExo(bus, root);
+    }
 
     $(root, 'button').click();
     expect(seen).toHaveLength(0); // not wired yet

@@ -10,14 +10,12 @@
  *  - rehydrateAsync(): ordered replay, filter skip, unhandled skip
  *, and a rejecting dispatch becoming { ok:false }.
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, expect, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/index';
 import { rehydrate, rehydrateAsync } from '../src/ssr';
 import type { BaseBus } from '../src/command-bus';
+import { it } from '../src/vitest';
 
-afterEach(() => {
-  vi.restoreAllMocks();
-});
 
 describe('rehydrate - async bus misuse', () => {
   it('reports each pending dispatch as a failure and warns once', () => {
@@ -52,8 +50,7 @@ describe('rehydrate - async bus misuse', () => {
 });
 
 describe('rehydrateAsync', () => {
-  it('replays commands in order and returns their results', async () => {
-    const bus = createAsyncCommandBus();
+  it('replays commands in order and returns their results', async ({ asyncBus: bus }) => {
     const seen: number[] = [];
     bus.register('cartAdd', async (cmd: { target: { id: number } }) => { seen.push(cmd.target.id); return cmd.target.id; });
 
@@ -67,8 +64,7 @@ describe('rehydrateAsync', () => {
     expect(results.map(r => r.value)).toEqual([1, 2]);
   });
 
-  it('skips commands rejected by the filter', async () => {
-    const bus = createAsyncCommandBus();
+  it('skips commands rejected by the filter', async ({ asyncBus: bus }) => {
     const seen: string[] = [];
     bus.register('a', async () => { seen.push('a'); });
     bus.register('b', async () => { seen.push('b'); });

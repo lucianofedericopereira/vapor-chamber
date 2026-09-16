@@ -10,14 +10,14 @@
  * Each of these is a real operating condition for an offline queue, not a
  * synthetic edge: an outbox exists precisely because the network is unreliable.
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, expect, vi, afterEach } from 'vitest';
 import { createAsyncCommandBus } from '../src/index';
 import { createOutbox } from '../src/outbox';
 import type { OutboxRecord, OutboxStorage } from '../src/outbox';
+import { it } from '../src/vitest';
 
 afterEach(() => {
   vi.restoreAllMocks();
-  vi.unstubAllGlobals();
 });
 
 /** In-memory storage so nothing here depends on localStorage or IndexedDB. */
@@ -71,8 +71,7 @@ describe('outbox - flush re-entrancy', () => {
 });
 
 describe('outbox - failure and interruption during flush', () => {
-  it('a handler that THROWS is captured as a failed result, not an unhandled rejection', async () => {
-    const bus = createAsyncCommandBus();
+  it('a handler that THROWS is captured as a failed result, not an unhandled rejection', async ({ asyncBus: bus }) => {
     bus.register('sync', async () => { throw new Error('backend exploded'); });
 
     let online = false;
@@ -92,8 +91,7 @@ describe('outbox - failure and interruption during flush', () => {
     expect(outbox.pending.value).toBe(1);
   });
 
-  it('going offline mid-flush leaves the remaining records queued', async () => {
-    const bus = createAsyncCommandBus();
+  it('going offline mid-flush leaves the remaining records queued', async ({ asyncBus: bus }) => {
     let online = false;
     let handled = 0;
 

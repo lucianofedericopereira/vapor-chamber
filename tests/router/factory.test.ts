@@ -135,7 +135,6 @@ describe('createRouter - public methods', () => {
     expect(onErr).not.toHaveBeenCalled(); // no phantom failure reported
     expect(second).toHaveBeenCalled(); // containment is per hook
     expect(error).toHaveBeenCalledWith(expect.stringContaining('afterEach hook threw'), expect.anything());
-    error.mockRestore();
   });
 
   it('a one-shot afterEach does not skip the next hook', async () => {
@@ -196,31 +195,32 @@ describe('createRouter - public methods', () => {
 
     const real = document.querySelectorAll.bind(document);
     let walks = 0;
-    const spy = vi.spyOn(document, 'querySelectorAll').mockImplementation((selector: string) => {
-      if (selector === 'a[href]') walks++;
-      return real(selector);
-    });
-    const after = vi.fn();
-    router.afterEach(after);
+    {
+      using _spy = vi.spyOn(document, 'querySelectorAll').mockImplementation((selector: string) => {
+        if (selector === 'a[href]') walks++;
+        return real(selector);
+      });
+      const after = vi.fn();
+      router.afterEach(after);
 
-    router.setQuery({ q: 'sh' });
-    router.setQuery({ q: 'sho' });
-    await new Promise((r) => setTimeout(r, 20));
-    await router.push('/list?q=shoe'); // query-only via push() takes the same fast path
+      router.setQuery({ q: 'sh' });
+      router.setQuery({ q: 'sho' });
+      await new Promise((r) => setTimeout(r, 20));
+      await router.push('/list?q=shoe'); // query-only via push() takes the same fast path
 
-    expect(router.currentRoute.value.location.query.q).toBe('shoe'); // the commits happened
-    expect(after).not.toHaveBeenCalled();
-    expect(walks).toBe(0);
+      expect(router.currentRoute.value.location.query.q).toBe('shoe'); // the commits happened
+      expect(after).not.toHaveBeenCalled();
+      expect(walks).toBe(0);
 
-    await router.push('/'); // a real path change
-    expect(after).toHaveBeenCalledTimes(1);
-    expect(walks).toBe(1);
+      await router.push('/'); // a real path change
+      expect(after).toHaveBeenCalledTimes(1);
+      expect(walks).toBe(1);
 
-    // ...and the stamps are right, which is why skipping query commits is safe.
-    const list = document.querySelector('a[href="/admin/list"]') as HTMLAnchorElement;
-    expect(list.hasAttribute('data-active')).toBe(false);
+      // ...and the stamps are right, which is why skipping query commits is safe.
+      const list = document.querySelector('a[href="/admin/list"]') as HTMLAnchorElement;
+      expect(list.hasAttribute('data-active')).toBe(false);
+    }
 
-    spy.mockRestore();
     router.destroy();
     document.body.innerHTML = '';
   });
@@ -372,34 +372,26 @@ describe('route table delivery - error paths', () => {
   it('remote: warns when the payload declares a base the router cannot adopt', async () => {
     // A fetched payload arrives after the history exists, so its `base` can
     // never apply. Silence here is what made this class of bug invisible.
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      const router = createRouter({
-        routes: { url: '/routes.json' },
-        http: { get: async () => ({ data: { base: '/admin', routes: ROWS } }) } as never,
-      });
-      await router.isReady();
-      expect(warn).toHaveBeenCalledWith(expect.stringContaining('declares base "/admin"'));
-      router.destroy();
-    } finally {
-      warn.mockRestore();
-    }
+    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const router = createRouter({
+      routes: { url: '/routes.json' },
+      http: { get: async () => ({ data: { base: '/admin', routes: ROWS } }) } as never,
+    });
+    await router.isReady();
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('declares base "/admin"'));
+    router.destroy();
   });
 
   it('remote: stays quiet when an explicit base was given', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    try {
-      const router = createRouter({
-        base: '/admin',
-        routes: { url: '/routes.json' },
-        http: { get: async () => ({ data: { base: '/admin', routes: ROWS } }) } as never,
-      });
-      await router.isReady();
-      expect(warn).not.toHaveBeenCalled();
-      router.destroy();
-    } finally {
-      warn.mockRestore();
-    }
+    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const router = createRouter({
+      base: '/admin',
+      routes: { url: '/routes.json' },
+      http: { get: async () => ({ data: { base: '/admin', routes: ROWS } }) } as never,
+    });
+    await router.isReady();
+    expect(warn).not.toHaveBeenCalled();
+    router.destroy();
   });
 
   it('remote: a failing fetch surfaces as routes_load_failed', async () => {

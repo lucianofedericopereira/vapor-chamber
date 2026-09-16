@@ -2,9 +2,10 @@
  * Tests for the transport layer: createHttpBridge, createWsBridge, createSseBridge
  */
 
-import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
+import { describe, expect, vi, afterEach, beforeEach } from 'vitest';
 import { createAsyncCommandBus, createCommandBus, invalidateCsrfCache } from '../src/index';
 import { createHttpBridge, createBatchingHttpBridge, createWsBridge, createSseBridge } from '../src/transports';
+import { it } from '../src/vitest';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -25,8 +26,7 @@ describe('createHttpBridge', () => {
 
     const result = await bus.dispatch('cartAdd', { id: 1 }, { quantity: 2 });
 
-    expect(result.ok).toBe(true);
-    expect(result.value).toEqual({ count: 3 });
+    expect(result).toSucceedWith({ count: 3 });
 
     const [url, init] = fetchMock.mock.calls[0];
     expect(url).toBe('/api/vc');
@@ -173,10 +173,8 @@ describe('createBatchingHttpBridge', () => {
     expect(body.commands[0].target).toEqual({ id: 1 });
     expect(body.commands[1].command).toBe('formSet');
 
-    expect(a.ok).toBe(true);
-    expect(a.value).toEqual({ count: 1 });
-    expect(b.ok).toBe(true);
-    expect(b.value).toEqual({ formOk: true });
+    expect(a).toSucceedWith({ count: 1 });
+    expect(b).toSucceedWith({ formOk: true });
   });
 
   it('does not batch dispatches from separate ticks - each flush is its own POST', async () => {
@@ -356,8 +354,7 @@ describe('createWsBridge', () => {
     lastWs.receive({ id: msg.id, ok: true, state: { added: true } });
 
     const result = await promise;
-    expect(result.ok).toBe(true);
-    expect(result.value).toEqual({ added: true });
+    expect(result).toSucceedWith({ added: true });
   });
 
   it('resolves { ok: false } when server returns ok: false', async () => {
@@ -585,12 +582,11 @@ describe('createSseBridge', () => {
     vi.unstubAllGlobals();
   });
 
-  it('reconnect:false closes the stream on error, and the default leaves it open', () => {
+  it('reconnect:false closes the stream on error, and the default leaves it open', ({ bus }) => {
     // `reconnect` was declared, typed and documented with a default of true -
     // and never read. Setting it to false did nothing at all, while the doc
     // said it controlled reconnection. EventSource only stops retrying if the
     // stream is closed, so that is what the option now means.
-    const bus = createCommandBus();
 
     const off = createSseBridge({ url: '/api/stream', onEvent: () => {}, reconnect: false });
     off.install(bus);
@@ -624,8 +620,7 @@ describe('createSseBridge', () => {
     expect(received).toEqual(['hello', 'world']);
   });
 
-  it('teardown closes the EventSource', () => {
-    const bus = createCommandBus();
+  it('teardown closes the EventSource', ({ bus }) => {
     const sse = createSseBridge({ url: '/api/stream', onEvent: () => {} });
 
     sse.install(bus);
@@ -637,7 +632,7 @@ describe('createSseBridge', () => {
   });
 
   it('onEvent errors are caught and logged', () => {
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    using consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const bus = createCommandBus();
     const sse = createSseBridge({
       url: '/api/stream',
@@ -648,7 +643,6 @@ describe('createSseBridge', () => {
     lastEs.onmessage?.({ data: '{}' } as MessageEvent);
 
     expect(consoleError).toHaveBeenCalledWith(expect.stringContaining('SSE'), expect.any(Error));
-    consoleError.mockRestore();
   });
 
   it('does nothing when EventSource is unavailable', () => {

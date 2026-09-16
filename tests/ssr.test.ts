@@ -2,9 +2,10 @@
  * Tests for ssr.ts - createSSRPlugin + rehydrate
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createAsyncCommandBus, createCommandBus, setCommandBus, resetCommandBus } from '../src';
 import { createSSRPlugin, rehydrate, rehydrateAsync } from '../src/ssr';
+import { it } from '../src/vitest';
 
 describe('createSSRPlugin', () => {
   let bus: ReturnType<typeof createCommandBus>;
@@ -159,7 +160,7 @@ describe('rehydrate', () => {
     const results = rehydrate(bus, commands, { ignoreUnhandled: false });
     expect(results).toHaveLength(2);
     expect(results[0].ok).toBe(true);
-    expect(results[1].ok).toBe(false); // no handler -> error
+    expect(results[1]).toFailWith('VC_CORE_NO_HANDLER'); // no handler -> error
   });
 
   it('filter option skips matching commands', () => {
@@ -220,8 +221,7 @@ describe('rehydrate on an async bus', () => {
     await vi.waitFor(() => expect(ran).toBe(1)); // the dispatch itself still ran
   });
 
-  it('rehydrateAsync replays in order and resolves real results', async () => {
-    const bus = createAsyncCommandBus();
+  it('rehydrateAsync replays in order and resolves real results', async ({ asyncBus: bus }) => {
     const order: string[] = [];
     bus.register('first', async () => {
       await new Promise((r) => setTimeout(r, 5));
@@ -243,8 +243,7 @@ describe('rehydrate on an async bus', () => {
     expect(results.map((r) => r.value)).toEqual([1, 2]);
   });
 
-  it('rehydrateAsync turns a rejected replay into { ok: false }, not an unhandled rejection', async () => {
-    const bus = createAsyncCommandBus();
+  it('rehydrateAsync turns a rejected replay into { ok: false }, not an unhandled rejection', async ({ asyncBus: bus }) => {
     bus.register('boom', async () => {
       throw new Error('transport down');
     });
@@ -264,7 +263,7 @@ describe('rehydrate on an async bus', () => {
 
 describe('createSSRPlugin - maxCommands truncation', () => {
   it('warns once and counts what it dropped', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createCommandBus();
     const ssr = createSSRPlugin({ maxCommands: 2 });
     bus.use(ssr.plugin);
@@ -277,11 +276,9 @@ describe('createSSRPlugin - maxCommands truncation', () => {
     expect(ssr.dropped()).toBe(3);
     expect(warn).toHaveBeenCalledTimes(1); // once, not once per dropped command
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('maxCommands'));
-    warn.mockRestore();
   });
 
-  it('dropped() is 0 under the cap, and clear() resets it', () => {
-    const bus = createCommandBus();
+  it('dropped() is 0 under the cap, and clear() resets it', ({ bus }) => {
     const ssr = createSSRPlugin({ maxCommands: 10 });
     bus.use(ssr.plugin);
     bus.register('inc', () => 'ok');

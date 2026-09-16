@@ -3,12 +3,13 @@
  * (no fetch/WS/storage mocks). Targets the leftover ternary/condition sides in
  * retryDelay, buildFullUrl, validateFields, and the Standard Schema validator.
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
-import { createCommandBus, createAsyncCommandBus } from '../src/command-bus';
+import { describe, expect, vi, afterEach } from 'vitest';
+import { createAsyncCommandBus } from '../src/command-bus';
 import { retry } from '../src/plugins-io';
 import { buildFullUrl } from '../src/http-query';
 import { schemaValidator } from '../src/schema';
 import { validateSchemasAsync, type StandardSchemaV1 } from '../src/plugins-schema';
+import { it } from '../src/vitest';
 
 afterEach(() => { vi.useRealTimers(); });
 
@@ -29,8 +30,7 @@ describe('branch mop-up - retry plugin', () => {
     expect(calls).toBe(2); // retried once -> the linear delay ran between attempts
   });
 
-  it('falls back to a generic error when a failed result carries no error field', async () => {
-    const bus = createAsyncCommandBus();
+  it('falls back to a generic error when a failed result carries no error field', async ({ asyncBus: bus }) => {
     bus.use(retry({ maxAttempts: 1 }), { priority: 10 });
     // Inner plugin returns a failed result WITHOUT an `error`, so retry hits
     // `lastResult.error ?? new Error('Unknown error')` (plugins-io.ts:67).
@@ -78,8 +78,7 @@ describe('branch mop-up - buildFullUrl', () => {
 
 // ── schema: validateFields 'any' + 'array' branches via schemaValidator ───────
 describe('branch mop-up - schemaValidator field validation', () => {
-  it("skips 'any' fields and flags an 'array' field given a non-array", () => {
-    const bus = createCommandBus();
+  it("skips 'any' fields and flags an 'array' field given a non-array", ({ bus }) => {
     bus.register('save', () => 'ok');
     bus.use(schemaValidator({ save: { target: { tags: 'array', meta: 'any' } } }));
 
@@ -121,21 +120,18 @@ describe('branch mop-up - Standard Schema validator', () => {
     expect((await busB.dispatch('a', { t: 1 }, { p: 2 })).ok).toBe(true);
   });
 
-  it('renders object-keyed issue paths in the error message', async () => {
-    const bus = createAsyncCommandBus();
+  it('renders object-keyed issue paths in the error message', async ({ asyncBus: bus }) => {
     bus.register('a', async () => 'ok');
     bus.use(validateSchemasAsync({ a: failingObjectPath() }));
     const r = await bus.dispatch('a', { x: 1 });
-    expect(r.ok).toBe(false);
+    expect(r).toFailWith('VC_VALIDATION_FAILED');
     expect(r.error?.message).toContain('field.sub');
   });
 
-  it('passes through actions that have no schema in the map', async () => {
-    const bus = createAsyncCommandBus();
+  it('passes through actions that have no schema in the map', async ({ asyncBus: bus }) => {
     bus.register('other', async () => 'o');
     bus.use(validateSchemasAsync({ known: passing() }));
     const r = await bus.dispatch('other', {});
-    expect(r.ok).toBe(true);
-    expect(r.value).toBe('o');
+    expect(r).toSucceedWith('o');
   });
 });

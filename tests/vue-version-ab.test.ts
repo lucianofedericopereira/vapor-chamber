@@ -410,5 +410,5 @@ describe.skipIf(!BASELINE)('Vue version A/B (same process, interleaved)', () => 
     // to read during an alignment cycle; only a ratio far outside the noise
     // band (flagged above) means anything.
     expect(lines.length).toBe(Object.keys(WORKLOADS).length);
-  }, 600_000);
+  });
 });

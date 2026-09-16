@@ -319,5 +319,5 @@ describe.skipIf(!haveDist)('Vapor outlet - size', () => {
     // is: OWN_ARM_CEILING_KB and SAVING_FLOOR_KB above.
     expect(ownArm).toBeLessThanOrEqual(OWN_ARM_CEILING_KB);
     expect(saved).toBeGreaterThanOrEqual(SAVING_FLOOR_KB);
-  }, 120_000);
+  });
 });

@@ -12,12 +12,12 @@
  * existed, not reasoned about.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect } from 'vitest';
 import { MAX_TIMEOUT_MS, countOption } from '../src/bounds';
-import { createCommandBus } from '../src/command-bus';
 import { history } from '../src/plugins-core';
 import { circuitBreaker, metrics } from '../src/plugins-extra';
 import { StreamParser } from '../src/stream-parser';
+import { it } from '../src/vitest';
 
 const NAN = Number('nope');
 
@@ -59,8 +59,7 @@ describe('countOption', () => {
 });
 
 describe('the bounds that had silently ceased to exist', () => {
-  it('history keeps its cap under a NaN maxSize (measured: 500 kept against 50)', () => {
-    const bus = createCommandBus();
+  it('history keeps its cap under a NaN maxSize (measured: 500 kept against 50)', ({ bus }) => {
     bus.register('x', () => 'ok');
     const h = history({ maxSize: NAN });
     bus.use(h);
@@ -68,8 +67,7 @@ describe('the bounds that had silently ceased to exist', () => {
     expect(h.getState().past.length).toBe(50);
   });
 
-  it('metrics keeps its cap under a NaN maxEntries (measured: 1500 kept against 1000)', () => {
-    const bus = createCommandBus();
+  it('metrics keeps its cap under a NaN maxEntries (measured: 1500 kept against 1000)', ({ bus }) => {
     bus.register('x', () => 'ok');
     const m = metrics({ maxEntries: NAN });
     bus.use(m);
@@ -77,8 +75,7 @@ describe('the bounds that had silently ceased to exist', () => {
     expect(m.entries().length).toBe(1000);
   });
 
-  it('circuitBreaker still trips under a NaN threshold (measured: closed through 20 failures)', () => {
-    const bus = createCommandBus();
+  it('circuitBreaker still trips under a NaN threshold (measured: closed through 20 failures)', ({ bus }) => {
     bus.register('fail', () => {
       throw new Error('nope');
     });

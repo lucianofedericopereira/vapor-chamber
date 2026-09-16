@@ -1,14 +1,13 @@
-import { describe, it, expect, vi } from 'vitest';
-import { createCommandBus } from '../src/command-bus';
+import { describe, expect, vi } from 'vitest';
 import { createChamber, createWorkflow, createReaction } from '../src/utilities';
+import { it } from '../src/vitest';
 
 // ---------------------------------------------------------------------------
 // createChamber
 // ---------------------------------------------------------------------------
 
 describe('createChamber', () => {
-  it('installs handlers with namespace prefix', () => {
-    const bus = createCommandBus();
+  it('installs handlers with namespace prefix', ({ bus }) => {
     const chamber = createChamber('cart', {
       add:   (cmd) => `added:${cmd.target.id}`,
       clear: () => 'cleared',
@@ -31,18 +30,16 @@ describe('createChamber', () => {
     expect(chamber.namespace).toBe('user');
   });
 
-  it('install returns cleanup that unregisters all handlers', () => {
-    const bus = createCommandBus();
+  it('install returns cleanup that unregisters all handlers', ({ bus }) => {
     const chamber = createChamber('cart', { add: () => 1 });
     const uninstall = chamber.install(bus);
 
     expect(bus.dispatch('cartAdd', {}).ok).toBe(true);
     uninstall();
-    expect(bus.dispatch('cartAdd', {}).ok).toBe(false);
+    expect(bus.dispatch('cartAdd', {})).toFailWith('VC_CORE_NO_HANDLER');
   });
 
-  it('forwards RegisterOptions (undo) to bus.register', () => {
-    const bus = createCommandBus();
+  it('forwards RegisterOptions (undo) to bus.register', ({ bus }) => {
     const undo = vi.fn();
     const chamber = createChamber(
       'cart',
@@ -56,8 +53,7 @@ describe('createChamber', () => {
     expect(typeof undoFn).toBe('function');
   });
 
-  it('two chambers with different namespaces do not collide', () => {
-    const bus = createCommandBus();
+  it('two chambers with different namespaces do not collide', ({ bus }) => {
     createChamber('cart',  { add: () => 'cart' }).install(bus);
     createChamber('order', { add: () => 'order' }).install(bus);
 
@@ -71,8 +67,7 @@ describe('createChamber', () => {
 // ---------------------------------------------------------------------------
 
 describe('createWorkflow', () => {
-  it('runs all steps in order and returns combined results', async () => {
-    const bus = createCommandBus();
+  it('runs all steps in order and returns combined results', async ({ bus }) => {
     const order: string[] = [];
     bus.register('stepA', () => { order.push('A'); return 'a'; });
     bus.register('stepB', () => { order.push('B'); return 'b'; });
@@ -91,8 +86,7 @@ describe('createWorkflow', () => {
     expect(result.results).toHaveLength(3);
   });
 
-  it('stops on failure and compensates previous steps in reverse', async () => {
-    const bus = createCommandBus();
+  it('stops on failure and compensates previous steps in reverse', async ({ bus }) => {
     const log: string[] = [];
     bus.register('reserve',  () => { log.push('reserve'); return 'ok'; });
     bus.register('charge',   () => { log.push('charge'); throw new Error('card declined'); });
@@ -112,8 +106,7 @@ describe('createWorkflow', () => {
     expect(result.compensations![0].ok).toBe(true);
   });
 
-  it('mapTarget and mapPayload reshape step inputs', async () => {
-    const bus = createCommandBus();
+  it('mapTarget and mapPayload reshape step inputs', async ({ bus }) => {
     const captured: any[] = [];
     bus.register('step', (cmd) => { captured.push({ t: cmd.target, p: cmd.payload }); return 1; });
 
@@ -135,8 +128,7 @@ describe('createWorkflow', () => {
     expect(() => (wf.steps as any).push({ action: 'c' })).toThrow();
   });
 
-  it('returns ok:true with empty compensations when all steps pass', async () => {
-    const bus = createCommandBus();
+  it('returns ok:true with empty compensations when all steps pass', async ({ bus }) => {
     bus.register('a', () => 1);
     const result = await createWorkflow([{ action: 'a' }]).run(bus, {});
     expect(result.ok).toBe(true);
@@ -149,8 +141,7 @@ describe('createWorkflow', () => {
 // ---------------------------------------------------------------------------
 
 describe('createReaction', () => {
-  it('dispatches target action after source succeeds', () => {
-    const bus = createCommandBus();
+  it('dispatches target action after source succeeds', ({ bus }) => {
     bus.register('cartAdd',       (cmd) => cmd.target);
     bus.register('inventoryCheck', vi.fn(() => 'checked'));
 
@@ -161,8 +152,7 @@ describe('createReaction', () => {
     expect(bus.hasHandler('inventoryCheck')).toBe(true);
   });
 
-  it('does not fire when when predicate returns false', () => {
-    const bus = createCommandBus();
+  it('does not fire when when predicate returns false', ({ bus }) => {
     bus.register('a', () => 1);
     const handler = vi.fn(() => 1);
     bus.register('b', handler);
@@ -173,8 +163,7 @@ describe('createReaction', () => {
     expect(handler).not.toHaveBeenCalled();
   });
 
-  it('map transforms the target passed to the reaction', () => {
-    const bus = createCommandBus();
+  it('map transforms the target passed to the reaction', ({ bus }) => {
     bus.register('src', () => 1);
     const handler = vi.fn((cmd: any) => cmd.target);
     bus.register('dst', handler);
@@ -189,8 +178,7 @@ describe('createReaction', () => {
     }));
   });
 
-  it('mapPayload sets the reaction payload', () => {
-    const bus = createCommandBus();
+  it('mapPayload sets the reaction payload', ({ bus }) => {
     bus.register('src', () => 1);
     const handler = vi.fn((cmd: any) => cmd.payload);
     bus.register('dst', handler);
@@ -207,8 +195,7 @@ describe('createReaction', () => {
     }));
   });
 
-  it('install returns cleanup that stops the reaction', () => {
-    const bus = createCommandBus();
+  it('install returns cleanup that stops the reaction', ({ bus }) => {
     bus.register('src', () => 1);
     const handler = vi.fn(() => 1);
     bus.register('dst', handler);
@@ -222,8 +209,7 @@ describe('createReaction', () => {
     expect(handler).toHaveBeenCalledTimes(1); // no second call
   });
 
-  it('supports wildcard source pattern', () => {
-    const bus = createCommandBus();
+  it('supports wildcard source pattern', ({ bus }) => {
     bus.register('cartAdd',    () => 1);
     bus.register('cartRemove', () => 2);
     const handler = vi.fn(() => 1);
@@ -250,8 +236,7 @@ describe('createReaction', () => {
 // ---------------------------------------------------------------------------
 
 describe('createReaction - chain tracking edges', () => {
-  it('starts a fresh count for a causationId this reaction never recorded', () => {
-    const bus = createCommandBus();
+  it('starts a fresh count for a causationId this reaction never recorded', ({ bus }) => {
     const seen: Array<number | undefined> = [];
     bus.register('src', () => 1);
     bus.register('dst', (cmd: any) => {
@@ -269,8 +254,7 @@ describe('createReaction - chain tracking edges', () => {
     expect(seen).toEqual([1]);
   });
 
-  it('an emitted source has no meta, so the chain simply does not track', () => {
-    const bus = createCommandBus();
+  it('an emitted source has no meta, so the chain simply does not track', ({ bus }) => {
     const handler = vi.fn((cmd: any) => cmd.payload);
     bus.register('dst', handler);
 
@@ -286,8 +270,7 @@ describe('createReaction - chain tracking edges', () => {
     expect(handler.mock.calls[0][0].meta.causationId).toBeUndefined();
   });
 
-  it('evicts the oldest chain entry rather than growing without bound', () => {
-    const bus = createCommandBus();
+  it('evicts the oldest chain entry rather than growing without bound', ({ bus }) => {
     let fired = 0;
     bus.register('src', () => 1);
     bus.register('dst', () => {

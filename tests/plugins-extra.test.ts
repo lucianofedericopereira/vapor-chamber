@@ -1,14 +1,15 @@
-import { describe, it, expect, vi, } from 'vitest';
+import { describe, expect, vi } from 'vitest';
 import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { cache, circuitBreaker, rateLimit, metrics } from '../src/plugins-extra';
+import { stubEnv } from '../src/vitest-pure';
+import { it } from '../src/vitest';
 
 // ---------------------------------------------------------------------------
 // cache
 // ---------------------------------------------------------------------------
 
 describe('cache', () => {
-  it('calls handler on miss, returns cached result on hit', () => {
-    const bus = createCommandBus();
+  it('calls handler on miss, returns cached result on hit', ({ bus }) => {
     const handler = vi.fn((cmd: any) => cmd.target.id * 10);
     bus.register('getUser', handler);
     bus.use(cache({ ttl: 60_000 }));
@@ -16,14 +17,12 @@ describe('cache', () => {
     const r1 = bus.query('getUser', { id: 1 });
     const r2 = bus.query('getUser', { id: 1 });
 
-    expect(r1.ok).toBe(true);
-    expect(r1.value).toBe(10);
+    expect(r1).toSucceedWith(10);
     expect(r2.value).toBe(10);
     expect(handler).toHaveBeenCalledTimes(1); // second call hit cache
   });
 
-  it('misses cache for different targets', () => {
-    const bus = createCommandBus();
+  it('misses cache for different targets', ({ bus }) => {
     const handler = vi.fn((cmd: any) => cmd.target.id);
     bus.register('getUser', handler);
     bus.use(cache({ ttl: 60_000 }));
@@ -34,8 +33,7 @@ describe('cache', () => {
     expect(handler).toHaveBeenCalledTimes(2);
   });
 
-  it('does not cache failed results', () => {
-    const bus = createCommandBus();
+  it('does not cache failed results', ({ bus }) => {
     let calls = 0;
     bus.register('flaky', () => { calls++; throw new Error('fail'); });
     bus.use(cache({ ttl: 60_000 }));
@@ -46,8 +44,7 @@ describe('cache', () => {
     expect(calls).toBe(2);
   });
 
-  it('invalidate(action, target) removes specific entry', () => {
-    const bus = createCommandBus();
+  it('invalidate(action, target) removes specific entry', ({ bus }) => {
     const handler = vi.fn(() => 42);
     bus.register('get', handler);
     const c = cache({ ttl: 60_000 });
@@ -60,8 +57,7 @@ describe('cache', () => {
     expect(handler).toHaveBeenCalledTimes(2);
   });
 
-  it('invalidate(action) removes all entries for that action', () => {
-    const bus = createCommandBus();
+  it('invalidate(action) removes all entries for that action', ({ bus }) => {
     const handler = vi.fn(() => 1);
     bus.register('get', handler);
     const c = cache({ ttl: 60_000 });
@@ -76,8 +72,7 @@ describe('cache', () => {
     expect(handler).toHaveBeenCalledTimes(4);
   });
 
-  it('clear() empties the cache', () => {
-    const bus = createCommandBus();
+  it('clear() empties the cache', ({ bus }) => {
     const handler = vi.fn(() => 1);
     bus.register('get', handler);
     const c = cache({ ttl: 60_000 });
@@ -91,8 +86,7 @@ describe('cache', () => {
     expect(handler).toHaveBeenCalledTimes(2);
   });
 
-  it('respects maxSize with LRU eviction', () => {
-    const bus = createCommandBus();
+  it('respects maxSize with LRU eviction', ({ bus }) => {
     const handler = vi.fn((cmd: any) => cmd.target.id);
     bus.register('get', handler);
     const c = cache({ ttl: 60_000, maxSize: 2 });
@@ -105,14 +99,13 @@ describe('cache', () => {
     expect(c.size()).toBe(2);
   });
 
-  it('does not hang on a negative maxSize, and caches nothing', () => {
+  it('does not hang on a negative maxSize, and caches nothing', ({ bus }) => {
     // Regression: `maxSize` was unvalidated. `evictIfNeeded` looped
     // `while (store.size > maxSize)` and only deleted when
     // `store.keys().next().value !== undefined` - so with a negative bound the
     // condition stayed true against an EMPTY store and the guard deleted
     // nothing: an infinite loop on the first eviction, from one bad option.
     // Measured before the fix: 500k iterations with store.size 0, no progress.
-    const bus = createCommandBus();
     let calls = 0;
     bus.register('getUser', (cmd: any) => { calls++; return cmd.target.id; });
     const c = cache({ ttl: 60_000, maxSize: -1 });
@@ -132,8 +125,7 @@ describe('cache', () => {
   // never broke the eviction walk and it dropped every entry it had just
   // inserted. Measured before the guard: size 0 after 300 inserts. A cache
   // that silently caches nothing is harder to notice than one that hangs.
-  it('a NaN maxSize caches nothing rather than defeating the bound', () => {
-    const bus = createCommandBus();
+  it('a NaN maxSize caches nothing rather than defeating the bound', ({ bus }) => {
     let calls = 0;
     bus.register('getUser', (cmd: any) => { calls++; return cmd.target.id; });
     const c = cache({ ttl: 60_000, maxSize: Number('not-a-number') });
@@ -150,8 +142,7 @@ describe('cache', () => {
     expect(calls).toBe(1);
   });
 
-  it('evicts oldest-first and honours the bound exactly', () => {
-    const bus = createCommandBus();
+  it('evicts oldest-first and honours the bound exactly', ({ bus }) => {
     bus.register('getUser', (cmd: any) => cmd.target.id);
     const c = cache({ ttl: 60_000, maxSize: 2 });
     bus.use(c);
@@ -162,8 +153,7 @@ describe('cache', () => {
     expect(c.size()).toBe(2);
   });
 
-  it('filters actions when actions option is set', () => {
-    const bus = createCommandBus();
+  it('filters actions when actions option is set', ({ bus }) => {
     const handler = vi.fn(() => 1);
     bus.register('getUser', handler);
     bus.register('getPost', handler);
@@ -183,18 +173,15 @@ describe('cache', () => {
 // ---------------------------------------------------------------------------
 
 describe('circuitBreaker', () => {
-  it('passes through when closed', () => {
-    const bus = createCommandBus();
+  it('passes through when closed', ({ bus }) => {
     bus.register('op', () => 'ok');
     bus.use(circuitBreaker({ threshold: 3 }));
 
     const r = bus.dispatch('op', {});
-    expect(r.ok).toBe(true);
-    expect(r.value).toBe('ok');
+    expect(r).toSucceedWith('ok');
   });
 
-  it('opens after threshold consecutive failures', () => {
-    const bus = createCommandBus();
+  it('opens after threshold consecutive failures', ({ bus }) => {
     bus.register('op', () => { throw new Error('fail'); });
     const cb = circuitBreaker({ threshold: 3 });
     bus.use(cb);
@@ -206,8 +193,7 @@ describe('circuitBreaker', () => {
     expect(cb.getState('op')).toBe('open');
   });
 
-  it('rejects fast when open', () => {
-    const bus = createCommandBus();
+  it('rejects fast when open', ({ bus }) => {
     const handler = vi.fn(() => { throw new Error('fail'); });
     bus.register('op', handler);
     const cb = circuitBreaker({ threshold: 2 });
@@ -217,13 +203,12 @@ describe('circuitBreaker', () => {
     bus.dispatch('op', {}); // trips
 
     const r = bus.dispatch('op', {});
-    expect(r.ok).toBe(false);
+    expect(r).toFailWith('VC_PLUGIN_CIRCUIT_OPEN');
     expect(r.error?.message).toContain('Circuit breaker is open');
     expect(handler).toHaveBeenCalledTimes(2); // not called when open
   });
 
-  it('resets to closed after manual reset', () => {
-    const bus = createCommandBus();
+  it('resets to closed after manual reset', ({ bus }) => {
     bus.register('op', () => { throw new Error('fail'); });
     const cb = circuitBreaker({ threshold: 2 });
     bus.use(cb);
@@ -266,11 +251,10 @@ describe('circuitBreaker', () => {
     expect(cb.getState('op')).toBe('closed');
   });
 
-  it('recovers from half-open with no onClose callback configured', () => {
+  it('recovers from half-open with no onClose callback configured', ({ bus }) => {
     // `if (onClose)` - the false arm. The test above always supplies the
     // callback, so the optional-callback path (the default configuration) was
     // never exercised: a breaker with no observer must still close.
-    const bus = createCommandBus();
     let shouldFail = true;
     bus.register('op', () => { if (shouldFail) throw new Error('fail'); return 'ok'; });
     const cb = circuitBreaker({ threshold: 2, resetTimeout: 0 }); // no onClose
@@ -287,8 +271,7 @@ describe('circuitBreaker', () => {
     expect(cb.getState('op')).toBe('closed');
   });
 
-  it('filters by actions option', () => {
-    const bus = createCommandBus();
+  it('filters by actions option', ({ bus }) => {
     bus.register('op', () => { throw new Error('fail'); });
     bus.register('safe', () => 'ok');
     const cb = circuitBreaker({ threshold: 1, actions: ['op'] });
@@ -314,7 +297,6 @@ describe('circuitBreaker', () => {
 
     for (let i = 0; i < 5; i++) expect((bus.dispatch('op', {}).error as { code?: string }).code).toBe('VC_PLUGIN_THREW');
     expect(cb.getState('op')).toBe('closed');
-    errSpy.mockRestore();
   });
 
   it('a VC_PLUGIN_THREW does not reset a run of real failures either', () => {
@@ -333,7 +315,6 @@ describe('circuitBreaker', () => {
     expect(cb.getState('op')).toBe('closed');
     bus.dispatch('op', {}); // real failure 2 -> opens
     expect(cb.getState('op')).toBe('open');
-    errSpy.mockRestore();
   });
 
   it('async bus: a rejecting plugin inside it is not counted', async () => {
@@ -346,7 +327,6 @@ describe('circuitBreaker', () => {
 
     for (let i = 0; i < 4; i++) expect(((await bus.dispatch('op', {})).error as { code?: string }).code).toBe('VC_PLUGIN_THREW');
     expect(cb.getState('op')).toBe('closed');
-    errSpy.mockRestore();
   });
 });
 
@@ -355,8 +335,7 @@ describe('circuitBreaker', () => {
 // ---------------------------------------------------------------------------
 
 describe('rateLimit', () => {
-  it('allows dispatches under the limit', () => {
-    const bus = createCommandBus();
+  it('allows dispatches under the limit', ({ bus }) => {
     bus.register('op', () => 'ok');
     bus.use(rateLimit({ max: 3, window: 1000 }));
 
@@ -365,8 +344,7 @@ describe('rateLimit', () => {
     expect(bus.dispatch('op', {}).ok).toBe(true);
   });
 
-  it('rejects when limit is exceeded', () => {
-    const bus = createCommandBus();
+  it('rejects when limit is exceeded', ({ bus }) => {
     bus.register('op', () => 'ok');
     bus.use(rateLimit({ max: 2, window: 1000 }));
 
@@ -374,29 +352,27 @@ describe('rateLimit', () => {
     bus.dispatch('op', {});
     const r = bus.dispatch('op', {});
 
-    expect(r.ok).toBe(false);
+    expect(r).toFailWith('VC_PLUGIN_RATE_LIMITED');
     expect(r.error?.message).toContain('Rate limit exceeded');
   });
 
-  it('tracks limits per action independently', () => {
-    const bus = createCommandBus();
+  it('tracks limits per action independently', ({ bus }) => {
     bus.register('a', () => 1);
     bus.register('b', () => 2);
     bus.use(rateLimit({ max: 1, window: 1000 }));
 
     expect(bus.dispatch('a', {}).ok).toBe(true);
-    expect(bus.dispatch('a', {}).ok).toBe(false); // over limit
+    expect(bus.dispatch('a', {})).toFailWith('VC_PLUGIN_RATE_LIMITED'); // over limit
     expect(bus.dispatch('b', {}).ok).toBe(true);  // separate counter
   });
 
-  it('filters by actions option', () => {
-    const bus = createCommandBus();
+  it('filters by actions option', ({ bus }) => {
     bus.register('protected', () => 1);
     bus.register('free', () => 2);
     bus.use(rateLimit({ max: 1, window: 1000, actions: ['protected'] }));
 
     bus.dispatch('protected', {});
-    expect(bus.dispatch('protected', {}).ok).toBe(false);
+    expect(bus.dispatch('protected', {})).toFailWith('VC_PLUGIN_RATE_LIMITED');
     expect(bus.dispatch('free', {}).ok).toBe(true);
     expect(bus.dispatch('free', {}).ok).toBe(true);
   });
@@ -407,8 +383,7 @@ describe('rateLimit', () => {
 // ---------------------------------------------------------------------------
 
 describe('metrics', () => {
-  it('records successful dispatch', () => {
-    const bus = createCommandBus();
+  it('records successful dispatch', ({ bus }) => {
     bus.register('op', () => 42);
     const m = metrics();
     bus.use(m);
@@ -422,8 +397,7 @@ describe('metrics', () => {
     expect(typeof entries[0].durationMs).toBe('number');
   });
 
-  it('records failed dispatch', () => {
-    const bus = createCommandBus();
+  it('records failed dispatch', ({ bus }) => {
     bus.register('op', () => { throw new Error('fail'); });
     const m = metrics();
     bus.use(m);
@@ -433,8 +407,7 @@ describe('metrics', () => {
     expect(m.entries()[0].ok).toBe(false);
   });
 
-  it('summary aggregates count, avgMs, errorRate', () => {
-    const bus = createCommandBus();
+  it('summary aggregates count, avgMs, errorRate', ({ bus }) => {
     let fail = false;
     bus.register('op', () => { if (fail) throw new Error('x'); return 1; });
     const m = metrics();
@@ -450,8 +423,7 @@ describe('metrics', () => {
     expect(s.op.errorRate).toBeCloseTo(0.333, 2);
   });
 
-  it('clear() resets all entries', () => {
-    const bus = createCommandBus();
+  it('clear() resets all entries', ({ bus }) => {
     bus.register('op', () => 1);
     const m = metrics();
     bus.use(m);
@@ -463,8 +435,7 @@ describe('metrics', () => {
     expect(m.summary()).toEqual({});
   });
 
-  it('respects maxEntries with O(1) eviction', () => {
-    const bus = createCommandBus();
+  it('respects maxEntries with O(1) eviction', ({ bus }) => {
     bus.register('op', () => 1);
     const m = metrics({ maxEntries: 3 });
     bus.use(m);
@@ -474,8 +445,7 @@ describe('metrics', () => {
     expect(m.entries()).toHaveLength(3);
   });
 
-  it('onEntry callback fires per dispatch', () => {
-    const bus = createCommandBus();
+  it('onEntry callback fires per dispatch', ({ bus }) => {
     bus.register('op', () => 1);
     const onEntry = vi.fn();
     bus.use(metrics({ onEntry }));
@@ -486,8 +456,7 @@ describe('metrics', () => {
     expect(onEntry).toHaveBeenCalledTimes(2);
   });
 
-  it('filters by actions option', () => {
-    const bus = createCommandBus();
+  it('filters by actions option', ({ bus }) => {
     bus.register('tracked', () => 1);
     bus.register('ignored', () => 2);
     const m = metrics({ actions: ['tracked'] });
@@ -506,8 +475,7 @@ describe('metrics', () => {
 // ---------------------------------------------------------------------------
 
 describe('cache - key derivation and invalidation', () => {
-  it('uses a supplied key() instead of commandKey', () => {
-    const bus = createCommandBus();
+  it('uses a supplied key() instead of commandKey', ({ bus }) => {
     const handler = vi.fn((cmd: any) => cmd.target.id);
     bus.register('getUser', handler);
     // Keyed by id ONLY, so two different targets that share an id are one entry.
@@ -537,15 +505,14 @@ describe('cache - key derivation and invalidation', () => {
     // Action-wide invalidation is index-driven and still works for any key shape.
     c.invalidate('getUser');
     expect(c.size()).toBe(0);
-    warn.mockRestore();
   });
 
   it('stays silent about custom-key invalidation in production (DEV=false)', async () => {
     // The `if (DEV)` FALSE arm of the warning above. The diagnostic is a
     // build-time aid; in production the call must be a quiet no-op for the
     // targeted form while action-wide invalidation keeps working.
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    vi.stubEnv('NODE_ENV', 'production');
+    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using _NODE_ENV = stubEnv('NODE_ENV', 'production');
     vi.resetModules();
     const { cache: prodCache } = await import('../src/plugins-extra');
     const { createCommandBus: prodBus } = await import('../src/command-bus');
@@ -565,8 +532,6 @@ describe('cache - key derivation and invalidation', () => {
     c.invalidate('getUser'); // action-wide still works
     expect(c.size()).toBe(0);
 
-    warn.mockRestore();
-    vi.unstubAllEnvs();
     vi.resetModules();
   });
 
@@ -576,8 +541,7 @@ describe('cache - key derivation and invalidation', () => {
     expect(c.size()).toBe(0);
   });
 
-  it('drops the action index once its last key is invalidated', () => {
-    const bus = createCommandBus();
+  it('drops the action index once its last key is invalidated', ({ bus }) => {
     bus.register('getUser', (cmd: any) => cmd.target.id);
     const c = cache({ ttl: 60_000 });
     bus.use(c);
@@ -596,8 +560,7 @@ describe('cache - key derivation and invalidation', () => {
 });
 
 describe('cache - async bus', () => {
-  it('caches a resolved async result and serves the next call from it', async () => {
-    const bus = createAsyncCommandBus();
+  it('caches a resolved async result and serves the next call from it', async ({ asyncBus: bus }) => {
     const handler = vi.fn(async (cmd: any) => cmd.target.id * 2);
     bus.register('getUser', handler);
     bus.use(cache({ ttl: 60_000 }));
@@ -612,8 +575,7 @@ describe('cache - async bus', () => {
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
-  it('does not cache a rejected async result', async () => {
-    const bus = createAsyncCommandBus();
+  it('does not cache a rejected async result', async ({ asyncBus: bus }) => {
     let fail = true;
     const handler = vi.fn(async () => {
       if (fail) throw new Error('upstream down');
@@ -628,8 +590,7 @@ describe('cache - async bus', () => {
     // Caching a failure would pin the outage for the whole ttl.
     fail = false;
     const good = await bus.query('getUser', { id: 1 });
-    expect(good.ok).toBe(true);
-    expect(good.value).toBe('recovered');
+    expect(good).toSucceedWith('recovered');
     expect(handler).toHaveBeenCalledTimes(2);
   });
 });

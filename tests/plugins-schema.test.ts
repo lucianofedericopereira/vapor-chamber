@@ -5,8 +5,8 @@
  * lib stays schema-lib-agnostic and the test doesn't depend on any of
  * those packages being installed.
  */
-import { describe, it, expect } from 'vitest';
-import { createCommandBus, createAsyncCommandBus, BusError } from '../src/command-bus';
+import { describe, expect } from 'vitest';
+import { BusError } from '../src/command-bus';
 import { validateSchemas, validateSchemasAsync, type StandardSchemaV1 } from '../src/plugins-schema';
 
 // Minimal Standard-Schema-shaped fake. Real schemas (Zod, Valibot, ...)
@@ -36,8 +36,7 @@ const isObjectWithId = (v: unknown): v is { id: number } =>
   typeof v === 'object' && v !== null && typeof (v as any).id === 'number';
 
 describe('validateSchemas - sync', () => {
-  it('rejects dispatches whose target fails the schema', () => {
-    const bus = createCommandBus();
+  it('rejects dispatches whose target fails the schema', ({ bus }) => {
     bus.register('inc', () => 'ok');
     bus.use(validateSchemas({ inc: fakeSync(isPositiveNumber, 'must be positive') }));
 
@@ -45,14 +44,12 @@ describe('validateSchemas - sync', () => {
     expect(ok.ok).toBe(true);
 
     const bad = bus.dispatch('inc', -1);
-    expect(bad.ok).toBe(false);
+    expect(bad).toFailWith('VC_VALIDATION_FAILED');
     expect(bad.error).toBeInstanceOf(BusError);
-    expect((bad.error as BusError).code).toBe('VC_VALIDATION_FAILED');
     expect(bad.error?.message).toMatch(/must be positive/);
   });
 
-  it('actions without a schema pass through untouched', () => {
-    const bus = createCommandBus();
+  it('actions without a schema pass through untouched', ({ bus }) => {
     bus.register('checked', () => 'a');
     bus.register('unchecked', () => 'b');
     bus.use(validateSchemas({ checked: fakeSync(isPositiveNumber, 'fail') }));
@@ -60,8 +57,7 @@ describe('validateSchemas - sync', () => {
     expect(bus.dispatch('unchecked', 'anything').ok).toBe(true);
   });
 
-  it('"warn" mode logs but lets the dispatch through', () => {
-    const bus = createCommandBus();
+  it('"warn" mode logs but lets the dispatch through', ({ bus }) => {
     let calledHandler = false;
     bus.register('inc', () => { calledHandler = true; return 'ok'; });
     bus.use(validateSchemas(
@@ -74,11 +70,9 @@ describe('validateSchemas - sync', () => {
     expect(result.ok).toBe(true);
     expect(calledHandler).toBe(true);
     expect(warn).toHaveBeenCalledOnce();
-    warn.mockRestore();
   });
 
-  it('field: "payload" validates cmd.payload instead of cmd.target', () => {
-    const bus = createCommandBus();
+  it('field: "payload" validates cmd.payload instead of cmd.target', ({ bus }) => {
     bus.register('act', () => 'ok');
     bus.use(validateSchemas(
       { act: fakeSync(isObjectWithId, 'needs id') },
@@ -89,11 +83,10 @@ describe('validateSchemas - sync', () => {
     expect(r.ok).toBe(true);
 
     const bad = bus.dispatch('act', 'whatever-target', { not: 'id' });
-    expect(bad.ok).toBe(false);
+    expect(bad).toFailWith('VC_VALIDATION_FAILED');
   });
 
-  it('field: custom function extracts a slice', () => {
-    const bus = createCommandBus();
+  it('field: custom function extracts a slice', ({ bus }) => {
     bus.register('act', () => 'ok');
     bus.use(validateSchemas(
       { act: fakeSync(isPositiveNumber, 'positive') },
@@ -101,37 +94,34 @@ describe('validateSchemas - sync', () => {
     ));
 
     expect(bus.dispatch('act', { count: 5 }).ok).toBe(true);
-    expect(bus.dispatch('act', { count: -1 }).ok).toBe(false);
+    expect(bus.dispatch('act', { count: -1 })).toFailWith('VC_VALIDATION_FAILED');
   });
 
-  it('rejects with a clear error when given an async schema on the sync plugin', () => {
-    const bus = createCommandBus();
+  it('rejects with a clear error when given an async schema on the sync plugin', ({ bus }) => {
     bus.register('act', () => 'ok');
     bus.use(validateSchemas({
       act: fakeAsync(isPositiveNumber, 'positive'),
     }));
 
     const r = bus.dispatch('act', 5);
-    expect(r.ok).toBe(false);
+    expect(r).toFailWith('VC_VALIDATION_FAILED');
     expect(r.error?.message).toMatch(/async schema/);
   });
 });
 
 describe('validateSchemasAsync - async bus', () => {
-  it('awaits async schemas and rejects on failure', async () => {
-    const bus = createAsyncCommandBus();
+  it('awaits async schemas and rejects on failure', async ({ asyncBus: bus }) => {
     bus.register('act', async (cmd) => cmd.target);
     bus.use(validateSchemasAsync({ act: fakeAsync(isPositiveNumber, 'positive') }));
 
     const ok = await bus.dispatch('act', 7);
-    expect(ok.ok).toBe(true);
-    expect(ok.value).toBe(7);
+    expect(ok).toSucceedWith(7);
 
     const bad = await bus.dispatch('act', -1);
-    expect(bad.ok).toBe(false);
-    expect((bad.error as BusError).code).toBe('VC_VALIDATION_FAILED');
+    expect(bad).toFailWith('VC_VALIDATION_FAILED');
   });
 });
 
 // Pull vi for the warn spy
 import { vi } from 'vitest';
+import { it } from '../src/vitest';

@@ -1,16 +1,95 @@
+import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
+import { vaporChamberTest } from './src/vite-hmr.ts';
 
 export default defineConfig({
+  plugins: [
+    // The shared-bus lifecycle skips these two files. Each asserts the
+    // library's one-shot Vue detection from a clean start, and the lazy import
+    // in beforeEach has already run it: alone, 3 of 8 and 1 of 1 fail, in 10
+    // of 10 runs. Under full-suite load the async detection lands late and
+    // both pass, so a green suite is not evidence they are safe.
+    vaporChamberTest({ sharedBus: { exclude: ['tests/chamber-vapor-available.test.ts', 'tests/signal-race-warning.test.ts'] } }),
+    {
+      // The plugin names its setup file by package specifier, which resolves
+      // here through the workspace self-link to dist/. The suite measures src/,
+      // through tests/setup-vitest-entry.ts (see that file for why a wrapper).
+      name: 'vapor-chamber-test-from-src',
+      enforce: 'post',
+      config(config: { test?: { setupFiles?: string[] } }) {
+        const files = config.test?.setupFiles ?? [];
+        const at = files.indexOf('vapor-chamber/vitest');
+        // Loud, not `files[-1] = ...`: without the entry the suite ran with no
+        // matchers and no tap, and failed far from the cause ("Invalid Chai
+        // property: toSucceedWith") or not at all.
+        if (at === -1) throw new Error('vapor-chamber-test-from-src: vaporChamberTest() did not put vapor-chamber/vitest in setupFiles');
+        files[at] = './tests/setup-vitest-entry.ts';
+      },
+    },
+  ],
+  resolve: {
+    alias: [
+      // src/vitest.ts imports the library lazily by its package name. Here that
+      // name resolves through the workspace self-link to dist/, a second module
+      // instance beside the src/ the tests import; the suite measures src/.
+      { find: /^vapor-chamber$/, replacement: fileURLToPath(new URL('./src/index.ts', import.meta.url)) },
+      // src/vitest-mcp.ts imports serveMcpStdio by package name too, for the same reason.
+      { find: /^vapor-chamber\/mcp$/, replacement: fileURLToPath(new URL('./src/mcp.ts', import.meta.url)) },
+    ],
+  },
   test: {
     globals: true,
     environment: 'node',
     reporters: [
-      'dot',
+      'tree',
       // Writes docs/metrics.json - the source stamp-docs derives the
       // README/whitepaper test counts from, so they cannot drift.
       ['./scripts/test-counts-reporter.mjs', { key: 'default' }],
     ],
     silent: 'passed-only',
+    // Vue's esm-browser DEV build prints this on import. Several *-fixture
+    // tests load it deliberately - the dev build is the one with the HMR and
+    // devtools hooks they assert on - so the notice is expected, unactionable,
+    // and printed once per such file. Dropped here rather than per test, and
+    // matched on both of its lines so an unrelated Vue warning still reaches
+    // the console.
+    onConsoleLog(log) {
+      if (log.includes('You are running a development build of Vue')) return false;
+      if (log.includes('Make sure to use the production build')) return false;
+      return undefined;
+    },
+    // NO PER-TEST WALL-CLOCK CEILING. A millisecond ceiling on a test asserts
+    // how fast the machine is, which is not a property of this library. Every
+    // number the suite carried was eventually wrong: 5 000 for a large dynamic
+    // import and two esbuild builds, 20 000 for a cost test that measures 24 s
+    // of real work, 60 000 and 120 000 for A/B files. Raising them just moved
+    // which one failed next - a different file every run.
+    //
+    // The work here is bounded by ITERATION COUNTS, not by time: the A/B files
+    // run a fixed number of reps, the fixtures mount a fixed number of apps. A
+    // genuine hang is a different failure, and it belongs to a job-level limit
+    // (.github/workflows/ci.yml, `timeout-minutes`) which is stated once rather
+    // than guessed per test. Cancellation that must be enforced INSIDE a test
+    // is a watchdog the test owns - see mcpOverStdio in tests/vitest-consumer
+    // - not a ceiling on the test itself.
+    testTimeout: 0,
+    hookTimeout: 0,
+    // Persist transformed modules between runs. Measured on this suite:
+    // transforming took 11.10 s, 25% of tracked time, and was redone on every
+    // run. The cache lives inside node_modules at the workspace root, so it is
+    // already ignored by git and is invalidated by reinstalling dependencies -
+    // there is no stale-cache failure mode to manage by hand.
+    fsModuleCache: true,
+    // Cleanup Vitest does after every test, so a test cannot leak a spy, a
+    // stubbed global or a stubbed env var into the next one. The suite had
+    // made 215 of these calls by hand (mockRestore, restoreAllMocks,
+    // unstubAllGlobals, unstubAllEnvs); those are now redundant and harmless.
+    // `clearMocks: false` pins Vitest 4's behaviour through the 5.0 bump, where
+    // the default flipped to true; flipping it is a separate decision.
+    clearMocks: false,
+    restoreMocks: true,
+    unstubGlobals: true,
+    unstubEnvs: true,
     // tests/router/dom.test.ts has several cases that deliberately let a
     // click fall through to "let the browser handle it" (that's the behavior
     // under test). Without this, happy-dom's default BrowserFrameValidator

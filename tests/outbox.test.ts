@@ -9,7 +9,6 @@ import type { OutboxRecord, OutboxStorage } from '../src/outbox';
 
 afterEach(() => {
   vi.restoreAllMocks();
-  vi.unstubAllGlobals();
 });
 
 /** In-memory OutboxStorage with spy-able methods and inspectable data. */
@@ -73,8 +72,7 @@ describe('createOutbox - queueing', () => {
 
     const result = await bus.dispatch('userLogin', { user: 'a' });
 
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe('logged-in');
+    expect(result).toSucceedWith('logged-in');
     expect(handler).toHaveBeenCalledOnce();
     expect(outbox.pending.value).toBe(0);
     expect(storage.save).not.toHaveBeenCalled();
@@ -89,8 +87,7 @@ describe('createOutbox - queueing', () => {
 
     const result = await bus.dispatch('cartAdd', { id: 1 });
 
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe('handled');
+    expect(result).toSucceedWith('handled');
     expect(outbox.pending.value).toBe(0);
   });
 
@@ -178,8 +175,7 @@ describe('createOutbox - queueing', () => {
 
     const result = await bus.dispatch('cartAdd', { id: 1 });
 
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe('handled'); // passed through, not queued
+    expect(result).toSucceedWith('handled'); // passed through, not queued
     expect(outbox.pending.value).toBe(0);
   });
 
@@ -707,7 +703,7 @@ describe('indexedDbOutbox', () => {
     // fallback. A failed open normally carries a DOMException, but private
     // browsing / quota refusals can fire onerror with `error` still null, and
     // rejecting with `null` would surface as an unreadable failure downstream.
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     vi.stubGlobal('indexedDB', {
       open: () => {
         const req: any = { onupgradeneeded: null, onsuccess: null, onerror: null, error: null };
@@ -722,7 +718,6 @@ describe('indexedDbOutbox', () => {
     expect(warn).toHaveBeenCalled();
     const reported = warn.mock.calls.flat().find((a) => a instanceof Error) as Error | undefined;
     expect(reported?.message).toBe('indexedDB open failed');
-    warn.mockRestore();
   });
 
   it('is SSR-safe: no indexedDB -> load() resolves null, save/clear warn but do not throw', async () => {

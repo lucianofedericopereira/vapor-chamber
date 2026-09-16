@@ -35,6 +35,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import type * as ShippedMod from '../src/command-bus';
+import { underCoverage } from './under-coverage';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // Per-file subdir: the whole dir is removed in afterAll, so it must be ours alone.
@@ -212,8 +213,6 @@ const ROWS: Array<[string, (m: Mod) => number | Promise<number>]> = [
 const ROUNDS = 11;
 
 describe('request() / dispose() - real path A/B', () => {
-  const underCoverage = process.env.npm_lifecycle_event === 'test:coverage';
-
   it.skipIf(underCoverage)('agrees on every settled result and the sync command shape, differs where intended, and measures request()', async () => {
     mkdirSync(REF_DIR, { recursive: true });
     const arms: Record<string, Mod> = {};
@@ -304,5 +303,5 @@ describe('request() / dispose() - real path A/B', () => {
       }
     }
     console.log(`\n  request() / dispose() - real path, ${ROUNDS} rotated rounds, gc=${!!gc}, NODE_ENV=${process.env.NODE_ENV}; time ratios, >1 slower\n${lines.join('\n')}\n`);
-  }, 600_000);
+  });
 });

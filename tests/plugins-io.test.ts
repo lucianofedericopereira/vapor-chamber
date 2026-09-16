@@ -2,9 +2,10 @@
  * Tests for I/O plugins: retry, persist, sync
  */
 
-import { describe, it, expect, beforeEach, vi, } from 'vitest';
+import { describe, expect, beforeEach, vi } from 'vitest';
 import { createCommandBus, createAsyncCommandBus, resetCommandBus, retry, BusError } from '../src/index';
 import { persist, sync } from '../src/plugins';
+import { it } from '../src/vitest';
 
 // ---------------------------------------------------------------------------
 // persist plugin
@@ -23,8 +24,7 @@ describe('persist plugin', () => {
     };
   });
 
-  it('saves state after each successful command', () => {
-    const bus = createCommandBus();
+  it('saves state after each successful command', ({ bus }) => {
     let count = 0;
 
     bus.register('inc', () => { count++; });
@@ -43,8 +43,7 @@ describe('persist plugin', () => {
     expect(mockStorage.data.test).toBe(JSON.stringify({ count: 2 }));
   });
 
-  it('does not save after failed commands', () => {
-    const bus = createCommandBus();
+  it('does not save after failed commands', ({ bus }) => {
     bus.register('fail', () => { throw new Error('boom'); });
 
     const p = persist({ key: 'test', getState: () => ({ x: 1 }), storage: mockStorage });
@@ -86,8 +85,7 @@ describe('persist plugin', () => {
     expect(JSON.parse(mockStorage.data.manual)).toEqual({ val: 99 });
   });
 
-  it('filter prevents save for non-matching commands', () => {
-    const bus = createCommandBus();
+  it('filter prevents save for non-matching commands', ({ bus }) => {
     bus.register('cartAdd', () => {});
     bus.register('analyticsTrack', () => {});
 
@@ -106,8 +104,7 @@ describe('persist plugin', () => {
     expect(mockStorage.data.filtered).toBeDefined();
   });
 
-  it('custom serialize/deserialize', () => {
-    const bus = createCommandBus();
+  it('custom serialize/deserialize', ({ bus }) => {
     bus.register('cmd', () => {});
 
     const p = persist({
@@ -165,7 +162,6 @@ describe('persist plugin', () => {
       expect.stringContaining('validation failed for key "cart"'),
     );
 
-    warnSpy.mockRestore();
   });
 
   it('validate option rejects completely wrong shape', () => {
@@ -272,7 +268,6 @@ describe('sync plugin', () => {
       payload: { qty: 2 },
     });
 
-    vi.unstubAllGlobals();
   });
 
   it('does not broadcast failed dispatches', () => {
@@ -288,7 +283,6 @@ describe('sync plugin', () => {
     bus.dispatch('fail', {});
     expect(mockBc.postMessage).not.toHaveBeenCalled();
 
-    vi.unstubAllGlobals();
   });
 
   it('does not broadcast when an ASYNC dispatch rejects', async () => {
@@ -313,7 +307,6 @@ describe('sync plugin', () => {
 
     expect(mockBc.postMessage).not.toHaveBeenCalled();
 
-    vi.unstubAllGlobals();
   });
 
   it('does not broadcast an ASYNC dispatch that settles ok:false', async () => {
@@ -342,7 +335,6 @@ describe('sync plugin', () => {
     await Promise.resolve();
     expect(mockBc.postMessage).toHaveBeenCalledOnce();
 
-    vi.unstubAllGlobals();
   });
 
   it('re-dispatches received messages locally', () => {
@@ -361,7 +353,6 @@ describe('sync plugin', () => {
 
     expect(received).toContain('from-tab-b');
 
-    vi.unstubAllGlobals();
   });
 
   it('delivers a received payload untouched and attributes it via meta.origin', () => {
@@ -400,7 +391,6 @@ describe('sync plugin', () => {
     // ...and every one of them is attributed, which is what suppresses the echo.
     expect(origins).toEqual(['sync', 'sync', 'sync', 'sync']);
 
-    vi.unstubAllGlobals();
   });
 
   it('suppresses the echo for EVERY payload shape, not just markable ones', () => {
@@ -446,7 +436,6 @@ describe('sync plugin', () => {
     expect(mockBc.posted).toHaveLength(1);
     expect(mockBc.posted[0]).toMatchObject({ action: 'remote', payload: 99 });
 
-    vi.unstubAllGlobals();
   });
 
   it('suppresses the echo for unmarkable payloads on an ASYNC bus too', async () => {
@@ -475,7 +464,6 @@ describe('sync plugin', () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(mockBc.posted).toHaveLength(1);
 
-    vi.unstubAllGlobals();
   });
 
   it('does not re-broadcast received messages (no echo)', () => {
@@ -493,7 +481,6 @@ describe('sync plugin', () => {
     // The re-dispatch of the received message should NOT be re-broadcast
     expect(mockBc.postMessage).not.toHaveBeenCalled();
 
-    vi.unstubAllGlobals();
   });
 
   it('filter limits which actions are broadcast', () => {
@@ -516,7 +503,6 @@ describe('sync plugin', () => {
     bus.dispatch('cartAdd', { id: 1 });
     expect(mockBc.postMessage).toHaveBeenCalledOnce();
 
-    vi.unstubAllGlobals();
   });
 
   it('close() closes the BroadcastChannel', () => {
@@ -531,7 +517,6 @@ describe('sync plugin', () => {
     expect(mockBc.close).toHaveBeenCalled();
     expect(tabSync.isOpen()).toBe(false);
 
-    vi.unstubAllGlobals();
   });
 
   it('ignores non-vc messages', () => {
@@ -552,7 +537,6 @@ describe('sync plugin', () => {
 
     expect(seen).toHaveLength(0);
 
-    vi.unstubAllGlobals();
   });
 
   it('is a no-op when BroadcastChannel is not available', () => {
@@ -568,7 +552,6 @@ describe('sync plugin', () => {
     expect(() => bus.dispatch('cmd', {})).not.toThrow();
     expect(tabSync.isOpen()).toBe(false);
 
-    vi.unstubAllGlobals();
   });
 });
 
@@ -577,8 +560,7 @@ describe('sync plugin', () => {
 // ---------------------------------------------------------------------------
 
 describe('retry plugin', () => {
-  it('returns success immediately if first attempt succeeds', async () => {
-    const bus = createAsyncCommandBus();
+  it('returns success immediately if first attempt succeeds', async ({ asyncBus: bus }) => {
     bus.use(retry({ maxAttempts: 3 }));
 
     let attempts = 0;
@@ -588,8 +570,7 @@ describe('retry plugin', () => {
     });
 
     const result = await bus.dispatch('fetch', {});
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe('data');
+    expect(result).toSucceedWith('data');
     expect(attempts).toBe(1);
   });
 
@@ -641,8 +622,7 @@ describe('retry plugin', () => {
     expect(delays[10]).toBe(204_800);
   });
 
-  it('retries on failure and succeeds on 3rd attempt', async () => {
-    const bus = createAsyncCommandBus();
+  it('retries on failure and succeeds on 3rd attempt', async ({ asyncBus: bus }) => {
     bus.use(retry({ maxAttempts: 3, baseDelay: 0, strategy: 'fixed' }));
 
     let attempts = 0;
@@ -657,8 +637,7 @@ describe('retry plugin', () => {
     expect(attempts).toBe(3);
   });
 
-  it('returns last error after exhausting maxAttempts', async () => {
-    const bus = createAsyncCommandBus();
+  it('returns last error after exhausting maxAttempts', async ({ asyncBus: bus }) => {
     bus.use(retry({ maxAttempts: 2, baseDelay: 0 }));
 
     let attempts = 0;
@@ -673,8 +652,7 @@ describe('retry plugin', () => {
     expect(attempts).toBe(2);
   });
 
-  it('respects actions filter - skips retry for unmatched actions', async () => {
-    const bus = createAsyncCommandBus();
+  it('respects actions filter - skips retry for unmatched actions', async ({ asyncBus: bus }) => {
     bus.use(retry({ maxAttempts: 3, baseDelay: 0, actions: ['api*'] }));
 
     let attempts = 0;
@@ -688,8 +666,7 @@ describe('retry plugin', () => {
     expect(attempts).toBe(1); // no retry
   });
 
-  it('isRetryable can stop early', async () => {
-    const bus = createAsyncCommandBus();
+  it('isRetryable can stop early', async ({ asyncBus: bus }) => {
     bus.use(retry({
       maxAttempts: 5,
       baseDelay: 0,
@@ -731,8 +708,7 @@ describe('retry plugin', () => {
     });
   });
 
-  it('default predicate stops immediately on a non-retryable BusError', async () => {
-    const bus = createAsyncCommandBus();
+  it('default predicate stops immediately on a non-retryable BusError', async ({ asyncBus: bus }) => {
     bus.use(retry({ maxAttempts: 4, baseDelay: 0 }));
 
     let attempts = 0;
@@ -742,12 +718,11 @@ describe('retry plugin', () => {
     });
 
     const result = await bus.dispatch('save', {});
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('VC_VALIDATION_FAILED');
     expect(attempts).toBe(1); // permanent code - no retries wasted
   });
 
-  it('default predicate keeps retrying retryable BusError codes', async () => {
-    const bus = createAsyncCommandBus();
+  it('default predicate keeps retrying retryable BusError codes', async ({ asyncBus: bus }) => {
     bus.use(retry({ maxAttempts: 3, baseDelay: 0 }));
 
     let attempts = 0;
@@ -757,7 +732,7 @@ describe('retry plugin', () => {
     });
 
     const result = await bus.dispatch('call', {});
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('VC_CORE_REQUEST_TIMEOUT');
     expect(attempts).toBe(3); // transient code - retried to maxAttempts
   });
 
@@ -772,11 +747,9 @@ describe('retry plugin', () => {
     const result = await bus.dispatch('call', {});
     expect((result.error as { code?: string }).code).toBe('VC_PLUGIN_THREW');
     expect(calls).toBe(1); // not in RETRYABLE_CODES - one attempt, no backoff
-    errSpy.mockRestore();
   });
 
-  it('default predicate still retries plain (non-Bus) errors, even with a code field', async () => {
-    const bus = createAsyncCommandBus();
+  it('default predicate still retries plain (non-Bus) errors, even with a code field', async ({ asyncBus: bus }) => {
     bus.use(retry({ maxAttempts: 3, baseDelay: 0 }));
 
     let attempts = 0;
@@ -788,7 +761,7 @@ describe('retry plugin', () => {
     });
 
     const result = await bus.dispatch('read', {});
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('ENOENT');
     expect(attempts).toBe(3); // unchanged pre-v1.3 behavior for plain errors
   });
 
@@ -796,8 +769,7 @@ describe('retry plugin', () => {
   // `next()` lands on `execute()` and accidentally works. Composition is the
   // real contract: retry calls `next()` once per attempt, so every plugin
   // downstream of it must run on every attempt.
-  it('runs downstream plugins on every attempt, not just the first', async () => {
-    const bus = createAsyncCommandBus();
+  it('runs downstream plugins on every attempt, not just the first', async ({ asyncBus: bus }) => {
     const seen: number[] = [];
     bus.use(retry({ maxAttempts: 3, baseDelay: 0, strategy: 'fixed' }));
     bus.use(async (_cmd, next) => {
@@ -818,12 +790,11 @@ describe('retry plugin', () => {
     expect(seen).toHaveLength(3); // was 1 - attempts 2+ skipped the whole tail
   });
 
-  it('reaches a downstream transport on the retried attempt', async () => {
+  it('reaches a downstream transport on the retried attempt', async ({ asyncBus: bus }) => {
     // The canonical pairing: retry() outer, createHttpBridge inner. With a
     // shared cursor, attempt 2 skipped the bridge and resolved against the
     // local handler instead - the retry reported an outcome the server never
     // saw. Modelled here with a mock bridge that never calls next().
-    const bus = createAsyncCommandBus();
     let bridgeCalls = 0;
     bus.use(retry({ maxAttempts: 3, baseDelay: 0, strategy: 'fixed' }));
     bus.use(async () => {

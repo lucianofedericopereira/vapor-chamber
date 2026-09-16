@@ -4,13 +4,13 @@
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { busToMcpTools, createMcpHandler, agentOrigin, serveMcpStdio, MCP_SERVER_VERSION } from '../src/mcp';
 import type { McpTool } from '../src/mcp';
 import { createSchemaCommandBus, createAsyncSchemaCommandBus } from '../src/schema';
 import type { BusSchema } from '../src/schema';
+import { mcpClient } from '../src/vitest-pure';
 
-afterEach(() => vi.restoreAllMocks());
 
 const cartSchema: BusSchema = {
   cartAdd: {
@@ -110,21 +110,15 @@ describe('createMcpHandler - protocol', () => {
   });
 
   it('tools/list returns all schema actions by default', async () => {
-    const handle = createMcpHandler(makeBus());
+    const mcp = mcpClient(createMcpHandler(makeBus()));
 
-    const reply: any = await handle({ jsonrpc: '2.0', id: 3, method: 'tools/list' });
-
-    const names = reply.result.tools.map((t: McpTool) => t.name);
-    expect(names).toEqual(['cartAdd', 'cartClear', 'ping']);
+    expect(await mcp.toolNames()).toEqual(['cartAdd', 'cartClear', 'ping']);
   });
 
   it('tools/list respects the actions whitelist (glob patterns)', async () => {
-    const handle = createMcpHandler(makeBus(), { actions: ['cart*'] });
+    const mcp = mcpClient(createMcpHandler(makeBus(), { actions: ['cart*'] }));
 
-    const reply: any = await handle({ jsonrpc: '2.0', id: 4, method: 'tools/list' });
-
-    const names = reply.result.tools.map((t: McpTool) => t.name);
-    expect(names).toEqual(['cartAdd', 'cartClear']);
+    expect(await mcp.toolNames()).toEqual(['cartAdd', 'cartClear']);
   });
 
   it('notifications (no id) get null - including notifications/initialized', async () => {
@@ -167,18 +161,12 @@ describe('createMcpHandler - protocol', () => {
 
 describe('createMcpHandler - tools/call', () => {
   it('dispatches on a real schema bus and returns the value as JSON text', async () => {
-    const handle = createMcpHandler(makeBus());
+    const mcp = mcpClient(createMcpHandler(makeBus()));
 
-    const reply: any = await handle({
-      jsonrpc: '2.0',
-      id: 10,
-      method: 'tools/call',
-      params: { name: 'cartAdd', arguments: { target: { id: 5 }, payload: { qty: 2 } } },
-    });
+    const result = await mcp.call('cartAdd', { target: { id: 5 }, payload: { qty: 2 } });
 
-    expect(reply.id).toBe(10);
-    expect(reply.result.isError).toBeUndefined();
-    expect(reply.result.content).toEqual([{ type: 'text', text: JSON.stringify({ count: 2, id: 5 }) }]);
+    expect(result).toBeToolResult({ count: 2, id: 5 });
+    expect(result).toEqual({ content: [{ type: 'text', text: JSON.stringify({ count: 2, id: 5 }) }] });
   });
 
   it('never lets an MCP dispatch reach a handler unattributed', async () => {
@@ -197,27 +185,19 @@ describe('createMcpHandler - tools/call', () => {
       seen.push({ action: cmd.action, origin: cmd.meta?.origin });
       return { cleared: true };
     });
-    const handle = createMcpHandler(bus);
+    const mcp = mcpClient(createMcpHandler(bus));
 
-    const call = (payloadArgs: object) =>
-      handle({
-        jsonrpc: '2.0',
-        id: 12,
-        method: 'tools/call',
-        params: { name: 'cartClear', arguments: { target: { force: true }, ...payloadArgs } },
-      } as any) as Promise<any>;
+    const call = (payloadArgs: object) => mcp.call('cartClear', { target: { force: true }, ...payloadArgs });
 
     // Markable shapes still dispatch, and carry the marker.
-    expect((await call({ payload: { a: 1 } })).result.isError).toBeUndefined();
-    expect((await call({})).result.isError).toBeUndefined();
+    expect(await call({ payload: { a: 1 } })).toBeToolResult();
+    expect(await call({})).toBeToolResult();
 
     // Unmarkable shapes are refused at the boundary rather than dispatched
     // without attribution. `payload` is only ever advertised as
     // `{ type: 'object' }`, so none of these were ever on-contract.
     for (const bad of ['bare-string', 42, true, ['a', 'b']]) {
-      const reply = await call({ payload: bad });
-      expect(reply.result.isError).toBe(true);
-      expect(reply.result.content[0].text).toMatch(/payload must be an object/);
+      expect(await call({ payload: bad })).toBeToolError(/payload must be an object/);
     }
 
     // The invariant: every command that DID reach a handler is attributed.
@@ -228,31 +208,20 @@ describe('createMcpHandler - tools/call', () => {
   it('works with an async bus (awaits thenable dispatch results)', async () => {
     const bus = createAsyncSchemaCommandBus(cartSchema);
     bus.register('cartClear', async () => ({ cleared: true }));
-    const handle = createMcpHandler(bus);
+    const mcp = mcpClient(createMcpHandler(bus));
 
-    const reply: any = await handle({
-      jsonrpc: '2.0',
-      id: 11,
-      method: 'tools/call',
-      params: { name: 'cartClear', arguments: { target: { force: true } } },
-    });
-
-    expect(JSON.parse(reply.result.content[0].text)).toEqual({ cleared: true });
+    expect(await mcp.call('cartClear', { target: { force: true } })).toBeToolResult({ cleared: true });
   });
 
   it('serializes a void success as null', async () => {
     const bus = makeBus();
     bus.register('ping', () => undefined);
-    const handle = createMcpHandler(bus);
+    const mcp = mcpClient(createMcpHandler(bus));
 
-    const reply: any = await handle({
-      jsonrpc: '2.0',
-      id: 12,
-      method: 'tools/call',
-      params: { name: 'ping', arguments: {} },
-    });
+    const result = await mcp.call('ping');
 
-    expect(reply.result.content[0].text).toBe('null');
+    expect(result).toBeToolResult(null);
+    expect(result.content[0].text).toBe('null');
   });
 
   it('failing handler -> isError result with the error message (not a protocol error)', async () => {
@@ -260,73 +229,40 @@ describe('createMcpHandler - tools/call', () => {
     bus.register('cartClear', () => {
       throw new Error('cart is locked');
     });
-    const handle = createMcpHandler(bus);
+    const mcp = mcpClient(createMcpHandler(bus));
 
-    const reply: any = await handle({
-      jsonrpc: '2.0',
-      id: 13,
-      method: 'tools/call',
-      params: { name: 'cartClear', arguments: { target: { force: true } } },
-    });
-
-    expect(reply.error).toBeUndefined();
-    expect(reply.result.isError).toBe(true);
-    expect(reply.result.content[0].text).toContain('cart is locked');
+    // call() throws on a protocol error, so a returned result is not one.
+    expect(await mcp.call('cartClear', { target: { force: true } })).toBeToolError('cart is locked');
   });
 
   it('unhandled action -> isError result including the BusError code', async () => {
     const bus = createSchemaCommandBus(cartSchema); // no handlers registered
-    const handle = createMcpHandler(bus);
+    const mcp = mcpClient(createMcpHandler(bus));
 
-    const reply: any = await handle({
-      jsonrpc: '2.0',
-      id: 14,
-      method: 'tools/call',
-      params: { name: 'cartAdd', arguments: { target: { id: 1 }, payload: { qty: 1 } } },
-    });
-
-    expect(reply.result.isError).toBe(true);
-    expect(reply.result.content[0].text).toContain('VC_CORE_NO_HANDLER');
+    expect(await mcp.call('cartAdd', { target: { id: 1 }, payload: { qty: 1 } })).toBeToolError('VC_CORE_NO_HANDLER');
   });
 
   it('non-whitelisted action -> isError, and the handler is never invoked', async () => {
     const bus = makeBus();
     const spy = vi.fn();
     bus.on('*', spy);
-    const handle = createMcpHandler(bus, { actions: ['cartClear'] });
+    const mcp = mcpClient(createMcpHandler(bus, { actions: ['cartClear'] }));
 
-    const reply: any = await handle({
-      jsonrpc: '2.0',
-      id: 15,
-      method: 'tools/call',
-      params: { name: 'cartAdd', arguments: { target: { id: 1 }, payload: { qty: 1 } } },
-    });
-
-    expect(reply.result.isError).toBe(true);
-    expect(reply.result.content[0].text).toContain('unknown or not permitted');
+    expect(await mcp.call('cartAdd', { target: { id: 1 }, payload: { qty: 1 } })).toBeToolError('unknown or not permitted');
     expect(spy).not.toHaveBeenCalled();
   });
 
   it('unknown tool name -> isError', async () => {
-    const handle = createMcpHandler(makeBus());
+    const mcp = mcpClient(createMcpHandler(makeBus()));
 
-    const reply: any = await handle({
-      jsonrpc: '2.0',
-      id: 16,
-      method: 'tools/call',
-      params: { name: 'notATool', arguments: {} },
-    });
-
-    expect(reply.result.isError).toBe(true);
-    expect(reply.result.content[0].text).toContain('unknown or not permitted');
+    expect(await mcp.call('notATool')).toBeToolError('unknown or not permitted');
   });
 
   it('missing tool name -> isError', async () => {
-    const handle = createMcpHandler(makeBus());
+    const mcp = mcpClient(createMcpHandler(makeBus()));
 
-    const reply: any = await handle({ jsonrpc: '2.0', id: 17, method: 'tools/call', params: {} });
-
-    expect(reply.result.isError).toBe(true);
+    // No `name` at all, which call() cannot send: the raw request.
+    expect((await mcp.request('tools/call', {})).result).toBeToolError();
   });
 });
 
@@ -340,17 +276,12 @@ describe('agentOrigin', () => {
     bus.use(agentOrigin(), { priority: 150 });
     const origins: Array<string | undefined> = [];
     bus.on('cartAdd', (cmd) => origins.push(cmd.meta?.origin));
-    const handle = createMcpHandler(bus);
+    const mcp = mcpClient(createMcpHandler(bus));
 
     // Direct dispatch - no stamp.
     bus.dispatch('cartAdd', { id: 1 }, { qty: 1 });
     // MCP-driven dispatch - stamped.
-    await handle({
-      jsonrpc: '2.0',
-      id: 20,
-      method: 'tools/call',
-      params: { name: 'cartAdd', arguments: { target: { id: 2 }, payload: { qty: 2 } } },
-    });
+    await mcp.call('cartAdd', { target: { id: 2 }, payload: { qty: 2 } });
     // Direct dispatch after the MCP call - flag was cleared, no stamp.
     bus.dispatch('cartAdd', { id: 3 }, { qty: 3 });
 
@@ -363,14 +294,9 @@ describe('agentOrigin', () => {
     bus.register('cartClear', () => {
       throw new Error('boom');
     });
-    const handle = createMcpHandler(bus);
+    const mcp = mcpClient(createMcpHandler(bus));
 
-    await handle({
-      jsonrpc: '2.0',
-      id: 21,
-      method: 'tools/call',
-      params: { name: 'cartClear', arguments: { target: { force: true } } },
-    });
+    await mcp.call('cartClear', { target: { force: true } });
     const origins: Array<string | undefined> = [];
     bus.on('cartAdd', (cmd) => origins.push(cmd.meta?.origin));
     bus.dispatch('cartAdd', { id: 1 }, { qty: 1 });
@@ -436,20 +362,18 @@ describe('createMcpHandler defaults', () => {
   });
 
   it('warns when `actions` is omitted, naming what it exposed', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     createMcpHandler(makeBus());
 
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('cartAdd'));
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('writes included'));
-    warn.mockRestore();
   });
 
   it("does not warn when exposure is declared - including the explicit ['*']", () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     createMcpHandler(makeBus(), { actions: ['cartAdd'] });
     createMcpHandler(makeBus(), { actions: ['*'] });
 
     expect(warn).not.toHaveBeenCalled();
-    warn.mockRestore();
   });
 });

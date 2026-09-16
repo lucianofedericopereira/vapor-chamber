@@ -16,17 +16,17 @@
  * 'redo'. The limit is the flag's old limit: a dispatch an ASYNC undo handler
  * makes after an await is outside the window.
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, expect, beforeEach, afterEach } from 'vitest';
 import { createCommandBus, createAsyncCommandBus, _withOriginScope, type Command, type CommandBus } from '../src/command-bus';
 import { history } from '../src/plugins-core';
 import { useCommandHistory, setCommandBus, resetCommandBus } from '../src/chamber';
+import { it } from '../src/vitest';
 
 const tick = () => new Promise((r) => setTimeout(r, 0));
 const actions = (cmds: Command[]) => cmds.map((c) => c.action);
 
 describe('history() plugin: dispatches inside an undo handler or a redo are not recorded', () => {
-  it('sync bus: an undo handler that dispatches two compensations', () => {
-    const bus = createCommandBus();
+  it('sync bus: an undo handler that dispatches two compensations', ({ bus }) => {
     const h = history({ bus });
     bus.use(h);
     bus.register('comp', () => 'compensated');
@@ -42,8 +42,7 @@ describe('history() plugin: dispatches inside an undo handler or a redo are not 
     expect(s.canRedo).toBe(true);
   });
 
-  it('async bus: the same, where the flag used to be cleared before the recorder ran', async () => {
-    const bus = createAsyncCommandBus();
+  it('async bus: the same, where the flag used to be cleared before the recorder ran', async ({ asyncBus: bus }) => {
     const h = history({ bus: bus as unknown as CommandBus });
     bus.use(h as any);
     bus.register('comp', async () => 'compensated');
@@ -77,8 +76,7 @@ describe('history() plugin: dispatches inside an undo handler or a redo are not 
     }
   });
 
-  it('listeners see the origin: undo for the compensations, redo for the replay', () => {
-    const bus = createCommandBus();
+  it('listeners see the origin: undo for the compensations, redo for the replay', ({ bus }) => {
     const h = history({ bus });
     bus.use(h);
     const seen: Array<[string, unknown]> = [];
@@ -116,8 +114,7 @@ describe('useCommandHistory: the same rule', () => {
 });
 
 describe('_withOriginScope', () => {
-  it('marks every dispatch made synchronously inside the callback and restores the outer scope', () => {
-    const bus = createCommandBus();
+  it('marks every dispatch made synchronously inside the callback and restores the outer scope', ({ bus }) => {
     const seen: unknown[] = [];
     bus.register('t', (c) => { seen.push(c.meta?.origin); return 1; });
     _withOriginScope('undo', () => {
@@ -129,8 +126,7 @@ describe('_withOriginScope', () => {
     expect(seen).toEqual(['undo', 'redo', 'undo', undefined]);
   });
 
-  it('restores the scope when the callback throws', () => {
-    const bus = createCommandBus();
+  it('restores the scope when the callback throws', ({ bus }) => {
     const seen: unknown[] = [];
     bus.register('t', (c) => { seen.push(c.meta?.origin); return 1; });
     expect(() => _withOriginScope('undo', () => { throw new Error('x'); })).toThrow('x');

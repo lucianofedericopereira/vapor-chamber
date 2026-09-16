@@ -16,7 +16,6 @@ afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   vi.resetModules();
-  vi.restoreAllMocks();
 });
 
 const ROWS = [{ name: 'home', path: '/', component: 'Home' }];

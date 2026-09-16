@@ -206,12 +206,11 @@ describe('installDomIntegration - bfcache restore (onRestore)', () => {
   });
 
   it('registers no pageshow listener at all when onRestore is not provided', () => {
-    const addSpy = vi.spyOn(window, 'addEventListener');
+    using addSpy = vi.spyOn(window, 'addEventListener');
     const teardown = installDomIntegration({ base: '/admin', canHandle: () => true, navigate: vi.fn() });
 
     expect(addSpy).not.toHaveBeenCalledWith('pageshow', expect.anything());
     teardown();
-    addSpy.mockRestore();
   });
 });
 

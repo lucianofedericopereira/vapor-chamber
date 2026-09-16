@@ -19,7 +19,7 @@ describe('tryAutoCleanup - dev warning dedup', () => {
 
   it('warns at most once per session when used outside a Vue scope', async () => {
     await waitForVueDetection(); // ensure onScopeDispose is detected (warning path active)
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     // Three composable calls outside any effectScope - each hits the no-scope path.
     for (let i = 0; i < 3; i++) {
@@ -30,7 +30,6 @@ describe('tryAutoCleanup - dev warning dedup', () => {
       String(c[0]).includes('Heads-up (not an error)') &&
       String(c[0]).includes('ran outside a Vue'),
     );
-    warn.mockRestore();
 
     expect(scopeWarnings.length).toBe(1); // fired once, then suppressed
   });

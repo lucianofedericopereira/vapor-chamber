@@ -47,8 +47,7 @@ describe('VC_CORE_NO_HANDLER message', () => {
     const { result, fetchStub } = await bridgedMiss();
     // Harness guard: the filter really let it through to the handler lookup.
     expect(fetchStub).not.toHaveBeenCalled();
-    expect(result.ok).toBe(false);
-    expect((result.error as { code?: string }).code).toBe('VC_CORE_NO_HANDLER');
+    expect(result).toFailWith('VC_CORE_NO_HANDLER');
     expect(result.error?.message.startsWith(SHIPPED)).toBe(true);
     expect(result.error?.message).toContain(HINT);
   });

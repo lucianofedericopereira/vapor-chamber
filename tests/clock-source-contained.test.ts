@@ -22,6 +22,20 @@ import { cache, idempotent } from '../src/plugins-extra';
 /** A deliberately FROZEN clock - the worst case for anything that expires. */
 const FROZEN = 1_000_000;
 
+/**
+ * The TTL handed to the plugins in the two expiry tests below, and the wait
+ * derived from it.
+ *
+ * Both run under FAKE timers, so no real time passes and the exact value is
+ * immaterial - these are names, not tuned numbers. They used to be `10` and
+ * `25` against a real `setTimeout`, which asserted a cache HIT on the statement
+ * immediately after the write: on a loaded machine a scheduling hiccup between
+ * those two adjacent statements outlived the 10 ms TTL, the entry expired
+ * early, and the test failed with nothing wrong with the cache.
+ */
+const EXPIRY_TTL = 10;
+const PAST_EXPIRY = EXPIRY_TTL * 3;
+
 afterEach(() => {
   // `_configureClock()` with no argument restores the default. Restoring with
   // `_configureClock(Date.now)` looks equivalent and is not: it pins the
@@ -52,32 +66,40 @@ describe('_configureClock - containment', () => {
   });
 
   it('does NOT freeze cache TTL expiry', async () => {
+    // Fake timers move Date.now(), which is what cache() reads, while the
+    // injected clock stays FROZEN - so this still proves the two are separate,
+    // and proves it deterministically instead of racing a real sleep.
+    vi.useFakeTimers();
     _configureClock(() => FROZEN);
     let calls = 0;
     const bus = createCommandBus();
     bus.register('read', () => ++calls);
-    bus.use(cache({ ttl: 10 }));
+    bus.use(cache({ ttl: EXPIRY_TTL }));
 
     expect(bus.query('read', { id: 1 }).value).toBe(1);
     expect(bus.query('read', { id: 1 }).value).toBe(1); // cached
 
-    await new Promise((r) => setTimeout(r, 25)); // real time passes
+    await vi.advanceTimersByTimeAsync(PAST_EXPIRY); // system time passes
 
     // If cache read the injectable clock, this would still be a hit forever.
     expect(bus.query('read', { id: 1 }).value).toBe(2);
   });
 
   it('does NOT freeze idempotent TTL expiry', async () => {
+    // Same reasoning as the cache test above: fake time is deterministic, a
+    // real sleep is a race. The handler settles on a microtask, which fake
+    // timers do not touch, so the awaits below still resolve normally.
+    vi.useFakeTimers();
     _configureClock(() => FROZEN);
     let calls = 0;
     const bus = createAsyncCommandBus();
     bus.register('write', async () => ++calls);
-    bus.use(idempotent({ ttl: 10 }));
+    bus.use(idempotent({ ttl: EXPIRY_TTL }));
 
     expect((await bus.dispatch('write', { id: 1 })).value).toBe(1);
     expect((await bus.dispatch('write', { id: 1 })).value).toBe(1); // deduped
 
-    await new Promise((r) => setTimeout(r, 25));
+    await vi.advanceTimersByTimeAsync(PAST_EXPIRY);
 
     expect((await bus.dispatch('write', { id: 1 })).value).toBe(2);
   });

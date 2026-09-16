@@ -19,6 +19,7 @@ import { createMemoryHistory } from '../../src/router/history';
 import { bladeFetcher } from '../../src/router/remote';
 import { createRouter, unwrapRoutesPayload } from '../../src/router/index';
 import type { RouteRecord } from '../../src/router/types';
+import { stubGlobal } from '../../src/vitest-pure';
 
 const ROWS: RouteRecord[] = [
   { name: 'shell', path: '/', parent: null },
@@ -28,7 +29,6 @@ const ROWS: RouteRecord[] = [
 
 afterEach(() => {
   document.body.innerHTML = '';
-  vi.restoreAllMocks();
 });
 
 // ---------------------------------------------------------------------------
@@ -399,7 +399,7 @@ describe('preheat failure and idle arming', () => {
     // The existing test arms idle preheat with NOTHING flagged, so the thunk
     // handed to preheatIdle was never built or called. requestIdleCallback is
     // stubbed to fire inline so the schedule is deterministic.
-    vi.stubGlobal('requestIdleCallback', (cb: () => void) => { cb(); });
+    using _requestIdleCallback = stubGlobal('requestIdleCallback', (cb: () => void) => { cb(); });
     const heavy = vi.fn(async () => ({ name: 'Heavy' }));
     const router = createRouter({
       history: createMemoryHistory('/'),
@@ -414,7 +414,6 @@ describe('preheat failure and idle arming', () => {
 
     expect(heavy).toHaveBeenCalled(); // loaded without ever navigating there
     router.destroy();
-    vi.unstubAllGlobals();
   });
 });
 
@@ -459,22 +458,18 @@ describe('bladeFetcher', () => {
     // with, so the whole response is handed through unparsed.
     const raw = '<html><body><main id="m">parsed?</main></body></html>';
     const http = htmlClient(raw);
-    vi.stubGlobal('DOMParser', undefined);
-    try {
-      const router = createRouter({
-        history: createMemoryHistory('/'),
-        routes: BLADE_ROWS,
-        components: { Home: { name: 'Home' } },
-        fetchBlade: bladeFetcher({ http }),
-      } as any);
-      await router.isReady();
+    using _DOMParser = stubGlobal('DOMParser', undefined);
+    const router = createRouter({
+      history: createMemoryHistory('/'),
+      routes: BLADE_ROWS,
+      components: { Home: { name: 'Home' } },
+      fetchBlade: bladeFetcher({ http }),
+    } as any);
+    await router.isReady();
 
-      await router.push('/legacy');
-      expect(http.get).toHaveBeenCalled();
-      expect(router.currentRoute.value.location.name).toBe('legacy');
-      router.destroy();
-    } finally {
-      vi.unstubAllGlobals();
-    }
+    await router.push('/legacy');
+    expect(http.get).toHaveBeenCalled();
+    expect(router.currentRoute.value.location.name).toBe('legacy');
+    router.destroy();
   });
 });

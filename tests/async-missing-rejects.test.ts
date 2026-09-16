@@ -20,7 +20,7 @@ describe("async bus, onMissing: 'throw' - the plugin chain sees a rejection", ()
     const bus = createAsyncCommandBus({ onMissing: 'throw' });
     bus.use(recover);
     const r = await bus.dispatch('no.handler', {});
-    expect(r.ok).toBe(false);
+    expect(r).toFailWith('VC_CORE_NO_HANDLER');
     expect(r.error?.message).toContain('No handler');
   });
 
@@ -28,7 +28,7 @@ describe("async bus, onMissing: 'throw' - the plugin chain sees a rejection", ()
     const bus = createAsyncCommandBus({ onMissing: 'throw' });
     bus.use(recover);
     const r = await bus.query('no.handler', {});
-    expect(r.ok).toBe(false);
+    expect(r).toFailWith('VC_CORE_NO_HANDLER');
     expect(r.error?.message).toContain('No handler');
   });
 

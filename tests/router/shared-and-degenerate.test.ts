@@ -55,7 +55,6 @@ describe('route meta is the table declaration, not the caller to keep', () => {
     const prod = await import('../../src/router/table');
     const record = prod.createRouteTable(rows()).getRecord('p');
     expect(Object.isFrozen(record?.meta)).toBe(false);
-    vi.unstubAllEnvs();
   });
 });
 

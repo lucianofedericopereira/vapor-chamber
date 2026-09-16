@@ -29,7 +29,7 @@
  * coverage exclusion list - see vitest.config.ts for why it stays on it.
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { getCommandBus, resetCommandBus, setCommandBus } from '../src/chamber';
 import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { createDirectivePlugin, vcCommandVapor } from '../src/directives';
@@ -75,6 +75,16 @@ const settle = () => new Promise((r) => setTimeout(r, 0));
 
 describe('v-vc:command on a real Vapor app (vcCommandVapor)', () => {
   const seen: string[] = [];
+
+  // Pays for the with-vapor Vue build ONCE, in a hook, before any test is
+  // timed. It used to be paid inside whichever test ran first, against the 5 s
+  // default: on a slow machine that test timed out, and because a timeout does
+  // not cancel the async body, its `button.click()` ran later and pushed a
+  // stray action into the NEXT test's `seen` - failing a second test that was
+  // never broken. Warming here removes the timeout, and with it the leak.
+  beforeAll(async () => {
+    await vapor();
+  });
 
   beforeEach(() => {
     resetCommandBus();

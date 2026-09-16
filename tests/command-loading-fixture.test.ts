@@ -26,9 +26,10 @@
  * cases at the end pin that every start settles (tests/plugin-throw-fixture.test.ts).
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, vi } from 'vitest';
 import { configureVue, useSharedCommandState } from '../src/chamber';
 import { createAsyncCommandBus, createCommandBus, type CommandBus } from '../src/command-bus';
+import { it } from '../src/vitest';
 
 const WITH_VAPOR = 'vue/dist/vue.runtime-with-vapor.esm-browser.js';
 type VaporApi = any;
@@ -135,7 +136,7 @@ describe('isLoading - async bus', () => {
     const ac = new AbortController();
     ac.abort();
     const aborted = await (bus as any).dispatch('svcRestart', 'httpd', undefined, { signal: ac.signal });
-    expect(aborted.ok).toBe(false);
+    expect(aborted).toFailWith('VC_CORE_ABORTED');
     expect(p.seen['svcRestart:httpd']).toEqual([false, true]);
 
     gate.resolve('up');
@@ -160,8 +161,7 @@ describe('isLoading - async bus', () => {
 });
 
 describe('isLoading - sync bus', () => {
-  it('true inside the handler, false after; another target never re-runs', () => {
-    const bus = createCommandBus();
+  it('true inside the handler, false after; another target never re-runs', ({ bus }) => {
     let during: boolean | undefined;
     const p = mountPanel(bus, [['svcRestart', 'httpd'], ['svcRestart', 'nginx']]);
     bus.register('svcRestart', () => { during = p.shared.isLoading('svcRestart', 'httpd').value; return 'up'; });
@@ -179,8 +179,7 @@ describe('isLoading - sync bus', () => {
     p.unmount();
   });
 
-  it('tracking starts at the first isLoading() on the bus: a dispatch already in flight is not counted', () => {
-    const bus = createCommandBus();
+  it('tracking starts at the first isLoading() on the bus: a dispatch already in flight is not counted', ({ bus }) => {
     const s = useSharedCommandState({ bus });
     let during: boolean | undefined;
     bus.register('svcRestart', () => { during = s.isLoading('svcRestart', 'httpd').value; });
@@ -192,15 +191,14 @@ describe('isLoading - sync bus', () => {
     s.dispose();
   });
 
-  it('a before-hook that throws AHEAD of ours: nothing started, nothing stuck, nothing stolen', () => {
-    const bus = createCommandBus();
+  it('a before-hook that throws AHEAD of ours: nothing started, nothing stuck, nothing stolen', ({ bus }) => {
     // Registered before the panel, so it runs before our before-hook.
     bus.onBefore((cmd) => { if (cmd.payload === 'deny') throw new Error('denied'); });
     bus.register('svcRestart', () => 'up');
     const p = mountPanel(bus, [['svcRestart', 'httpd']]);
 
     const r = bus.dispatch('svcRestart', 'httpd', 'deny');
-    expect(r.ok).toBe(false);
+    expect(r).toFailWith('VC_CORE_BEFORE_CANCEL');
     expect(p.seen['svcRestart:httpd']).toEqual([false]);
 
     bus.dispatch('svcRestart', 'httpd');
@@ -208,8 +206,7 @@ describe('isLoading - sync bus', () => {
     p.unmount();
   });
 
-  it('a query of the same key (no before-hooks) does not clear it', () => {
-    const bus = createCommandBus();
+  it('a query of the same key (no before-hooks) does not clear it', ({ bus }) => {
     let observed: boolean | undefined;
     const p = mountPanel(bus, [['svcRestart', 'httpd']]);
     bus.register('svcStatus', () => 'up');
@@ -227,8 +224,7 @@ describe('isLoading - sync bus', () => {
 });
 
 describe('isLoading - keys', () => {
-  it('object targets key by value (commandKey), not identity', () => {
-    const bus = createCommandBus();
+  it('object targets key by value (commandKey), not identity', ({ bus }) => {
     let during: boolean | undefined;
     const p = mountPanel(bus, [['svcRestart', { host: 'a', svc: 'httpd' }]]);
     bus.register('svcRestart', () => { during = p.shared.isLoading('svcRestart', { host: 'a', svc: 'httpd' }).value; });
@@ -237,8 +233,7 @@ describe('isLoading - keys', () => {
     p.unmount();
   });
 
-  it('isLoading(action) with no target is the exact key (action, undefined), not "any target"', () => {
-    const bus = createCommandBus();
+  it('isLoading(action) with no target is the exact key (action, undefined), not "any target"', ({ bus }) => {
     const obs: Array<[boolean, boolean]> = [];
     const p = mountPanel(bus, [['cacheFlush', undefined], ['cacheFlush', 'eu']]);
     bus.register('cacheFlush', () => {
@@ -250,8 +245,7 @@ describe('isLoading - keys', () => {
     p.unmount();
   });
 
-  it('the same signal comes back for one key, from any subscriber on the bus', () => {
-    const bus = createCommandBus();
+  it('the same signal comes back for one key, from any subscriber on the bus', ({ bus }) => {
     const a = useSharedCommandState({ bus });
     const b = useSharedCommandState({ bus });
     expect(a.isLoading('svcRestart', 'httpd')).toBe(b.isLoading('svcRestart', 'httpd'));
@@ -261,8 +255,7 @@ describe('isLoading - keys', () => {
 });
 
 describe('isLoading - lifecycle', () => {
-  it('the last dispose unhooks the before-hook: later dispatches no longer write the key', () => {
-    const bus = createCommandBus();
+  it('the last dispose unhooks the before-hook: later dispatches no longer write the key', ({ bus }) => {
     bus.register('svcRestart', () => 'up');
     const p = mountPanel(bus, [['svcRestart', 'httpd']]);
     const flag = p.shared.isLoading('svcRestart', 'httpd');
@@ -286,7 +279,6 @@ describe('isLoading - lifecycle', () => {
     expect((r.error as any)?.code).toBe('VC_PLUGIN_THREW');
     expect(p.seen['svcRestart:httpd']).toEqual([false, true, false]);
     p.unmount();
-    errSpy.mockRestore();
   });
 
   it("onMissing: 'throw' settles before it throws - the caller still gets the throw, the key returns to false", () => {

@@ -1,10 +1,10 @@
 /**
  * Tests for all Track A bug fixes (A1-A7)
  */
-import { describe, it, expect, vi, } from 'vitest';
+import { describe, expect, vi } from 'vitest';
 import { createTestBus } from '../src/testing';
-import { createAsyncCommandBus } from '../src/command-bus';
 import { createFormBus } from '../src/form';
+import { it } from '../src/vitest';
 
 // ---------------------------------------------------------------------------
 // A1: testing.ts - passthroughHandlers fix
@@ -32,8 +32,7 @@ describe('A1: createTestBus passthroughHandlers', () => {
   it('default mode: returns { ok: true, value: undefined } for unregistered actions', () => {
     const bus = createTestBus();
     const result = bus.dispatch('nonexistent', {});
-    expect(result.ok).toBe(true);
-    expect(result.value).toBeUndefined();
+    expect(result).toSucceedWith(undefined);
   });
 
   it('passthroughHandlers: true executes the real handler', () => {
@@ -41,8 +40,7 @@ describe('A1: createTestBus passthroughHandlers', () => {
     const bus = createTestBus({ passthroughHandlers: true });
     bus.register('test', handler);
     const result = bus.dispatch('test', {});
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe(42);
+    expect(result).toSucceedWith(42);
     expect(handler).toHaveBeenCalledOnce();
   });
 
@@ -57,8 +55,7 @@ describe('A1: createTestBus passthroughHandlers', () => {
   it('passthroughHandlers: true still stubs when no handler registered', () => {
     const bus = createTestBus({ passthroughHandlers: true });
     const result = bus.dispatch('unknown', {});
-    expect(result.ok).toBe(true);
-    expect(result.value).toBeUndefined();
+    expect(result).toSucceedWith(undefined);
   });
 });
 
@@ -67,8 +64,7 @@ describe('A1: createTestBus passthroughHandlers', () => {
 // ---------------------------------------------------------------------------
 
 describe('A2: asyncRequest deduplication', () => {
-  it('concurrent requests to same action+target return the same Promise', async () => {
-    const bus = createAsyncCommandBus();
+  it('concurrent requests to same action+target return the same Promise', async ({ asyncBus: bus }) => {
     let callCount = 0;
     bus.register('slow', async () => {
       callCount++;
@@ -88,8 +84,7 @@ describe('A2: asyncRequest deduplication', () => {
     expect(callCount).toBe(1);
   });
 
-  it('requests with different targets are NOT deduped', async () => {
-    const bus = createAsyncCommandBus();
+  it('requests with different targets are NOT deduped', async ({ asyncBus: bus }) => {
     let callCount = 0;
     bus.register('fetch', async () => {
       callCount++;
@@ -106,8 +101,7 @@ describe('A2: asyncRequest deduplication', () => {
     expect(callCount).toBe(2); // Different targets = separate calls
   });
 
-  it('dedup entry is cleaned up after resolution', async () => {
-    const bus = createAsyncCommandBus();
+  it('dedup entry is cleaned up after resolution', async ({ asyncBus: bus }) => {
     let callCount = 0;
     bus.register('counter', async () => ++callCount);
 

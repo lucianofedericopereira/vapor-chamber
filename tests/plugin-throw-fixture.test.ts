@@ -20,7 +20,7 @@
  * via `configureVue()` - the same setup as command-loading-fixture.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, vi } from 'vitest';
 import { configureVue, useSharedCommandState } from '../src/chamber';
 import {
   BusError,
@@ -31,6 +31,8 @@ import {
   type Plugin,
 } from '../src/command-bus';
 import { createTestBus } from '../src/testing';
+import { stubEnv } from '../src/vitest-pure';
+import { it } from '../src/vitest';
 
 const WITH_VAPOR = 'vue/dist/vue.runtime-with-vapor.esm-browser.js';
 
@@ -44,7 +46,7 @@ afterEach(() => { errSpy.mockRestore(); });
 const boom = new Error('plugin blew up');
 
 function expectThrew(r: CommandResult, action: string, cause: unknown = boom): void {
-  expect(r.ok).toBe(false);
+  expect(r).toFailWith('VC_PLUGIN_THREW');
   expect(r.error).toBeInstanceOf(BusError);
   const e = r.error as BusError;
   expect(e.code).toBe('VC_PLUGIN_THREW');
@@ -108,8 +110,7 @@ describe('sync bus - a throwing plugin', () => {
     expectThrew(bus.dispatch('act', 1), 'act', 'a string');
   });
 
-  it('DEV: console.error names the throw, so the conversion does not hide the bug', () => {
-    const bus = createCommandBus();
+  it('DEV: console.error names the throw, so the conversion does not hide the bug', ({ bus }) => {
     bus.register('act', () => 'ok');
     bus.use(() => { throw boom; });
     bus.dispatch('act', 1);
@@ -118,7 +119,7 @@ describe('sync bus - a throwing plugin', () => {
   });
 
   it('production (DEV off): the same result, and nothing logged', async () => {
-    vi.stubEnv('NODE_ENV', 'production');
+    using _NODE_ENV = stubEnv('NODE_ENV', 'production');
     vi.resetModules();
     const fresh = await import('../src/command-bus');
     const bus = fresh.createCommandBus();
@@ -128,7 +129,6 @@ describe('sync bus - a throwing plugin', () => {
     expect((r.error as { code?: string }).code).toBe('VC_PLUGIN_THREW');
     expect(r.error?.cause).toBe(boom);
     expect(errSpy).not.toHaveBeenCalled();
-    vi.unstubAllEnvs();
     vi.resetModules();
   });
 

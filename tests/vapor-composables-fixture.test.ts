@@ -179,7 +179,7 @@ describe('composables inside a real Vapor component', () => {
 
     unmount();
     const after = bus.dispatch('cartAdd', 3);
-    expect((after as any).ok).toBe(false); // handler unregistered with the scope
+    expect((after as any)).toFailWith('VC_CORE_NO_HANDLER'); // handler unregistered with the scope
     expect(calls).toBe(2);
   });
 
@@ -213,7 +213,7 @@ describe('composables inside a real Vapor component', () => {
 
     unmount();
     const after = bus.dispatch('telemetry', { name: 'after' });
-    expect((after as any).ok).toBe(false); // handler released with the scope
+    expect((after as any)).toFailWith('VC_CORE_NO_HANDLER'); // handler released with the scope
     expect(handled).toBe(1);
   });
 });

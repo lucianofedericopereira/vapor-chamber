@@ -117,7 +117,6 @@ describe('createEchoBridge', () => {
 
     createEchoBridge({ echo, channels: [{ name: 'c', events: ['Boom'] }] }).install(bus);
     expect(() => echo._channels.c._fire('Boom', {})).not.toThrow();
-    err.mockRestore();
   });
 
   it('teardown leaves every joined channel', () => {

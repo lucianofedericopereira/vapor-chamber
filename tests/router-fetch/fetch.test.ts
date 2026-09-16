@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHttpClient } from '../../src/index';
 import { createMemoryHistory, createRouter, isRouterError } from '../../src/router/index';
 import { fetchLoaders } from '../../src/router-fetch/index';
@@ -30,9 +30,6 @@ beforeEach(() => {
   vi.stubGlobal('fetch', vi.fn());
 });
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
 
 describe('fetchLoaders', () => {
   it('interpolates, fetches through vapor-chamber\'s HttpClient, returns bare JSON - no envelope games', async () => {

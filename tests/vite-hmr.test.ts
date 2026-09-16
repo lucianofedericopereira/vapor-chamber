@@ -1,7 +1,7 @@
 /**
  * Tests for src/vite-hmr.ts - Vite HMR plugin
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { vaporChamberHMR } from '../src/vite-hmr';
 
 describe('vaporChamberHMR', () => {
@@ -88,9 +88,6 @@ describe('vaporChamberHMR', () => {
       vi.stubGlobal('process', { env: { NODE_ENV: 'development' } });
     });
 
-    afterEach(() => {
-      vi.unstubAllGlobals();
-    });
 
     it('injects HMR import into files that use vapor-chamber', () => {
       const result = plugin.transform(

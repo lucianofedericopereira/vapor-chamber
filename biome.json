@@ -5,6 +5,7 @@
 			"**/src/**/*.ts",
 			"**/tests/**/*.ts",
 			"**/scripts/**/*.mjs",
+			"**/bin/**/*.mjs",
 			"!**/dist",
 			"!**/node_modules",
 			"!**/*.d.ts"

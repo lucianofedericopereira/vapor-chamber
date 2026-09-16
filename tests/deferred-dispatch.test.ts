@@ -4,8 +4,9 @@
  * command can be dispatched before its handler exists: the command is queued
  * per-action and replayed, in order, the moment a handler registers.
  */
-import { describe, it, expect, vi } from 'vitest';
+import { describe, expect, vi } from 'vitest';
 import { createCommandBus, createAsyncCommandBus } from '../src/command-bus';
+import { it } from '../src/vitest';
 
 const tick = () => new Promise<void>((r) => setTimeout(r, 0));
 
@@ -20,8 +21,7 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
     bus.dispatch('open', 3);
 
     expect(seen).toEqual([]);            // nothing ran yet
-    expect(r1.ok).toBe(true);           // accepted (deferred)
-    expect(r1.value).toBeUndefined();
+    expect(r1).toSucceedWith(undefined);           // accepted (deferred)
 
     // handler arrives -> buffered commands replay in order
     bus.register('open', (cmd) => { seen.push(cmd.target as number); });
@@ -64,29 +64,25 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
   });
 
   it('bufferLimit drops the oldest and warns', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using _warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createCommandBus({ onMissing: 'buffer', bufferLimit: 2 });
     bus.dispatch('q', 1);
     bus.dispatch('q', 2);
     bus.dispatch('q', 3); // overflow -> drops oldest (1)
     const seen: number[] = [];
     bus.register('q', (cmd) => seen.push(cmd.target as number));
-    warn.mockRestore();
     expect(seen).toEqual([2, 3]);
   });
 
   it('query never buffers - it falls back to error', () => {
     const bus = createCommandBus({ onMissing: 'buffer' });
     const r = bus.query('missing', {});
-    expect(r.ok).toBe(false);
-    expect(r.error?.code).toBe('VC_CORE_NO_HANDLER');
+    expect(r).toFailWith('VC_CORE_NO_HANDLER');
   });
 
-  it('default onMissing is unchanged (errors, no buffering)', () => {
-    const bus = createCommandBus();
+  it('default onMissing is unchanged (errors, no buffering)', ({ bus }) => {
     const r = bus.dispatch('nope', {});
-    expect(r.ok).toBe(false);
-    expect(r.error?.code).toBe('VC_CORE_NO_HANDLER');
+    expect(r).toFailWith('VC_CORE_NO_HANDLER');
   });
 
   it('async bus buffers and replays on register', async () => {
@@ -101,7 +97,7 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
   });
 
   it('onBufferOverflow fires when bufferLimit drops the oldest', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using _warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const dropped: Array<{ action: string; target: any }> = [];
     const bus = createCommandBus({
       onMissing: 'buffer',
@@ -111,7 +107,6 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
     bus.dispatch('q', 1);
     bus.dispatch('q', 2);
     bus.dispatch('q', 3); // drops 1
-    warn.mockRestore();
     expect(dropped).toEqual([{ action: 'q', target: 1 }]);
   });
 
@@ -147,14 +142,13 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
   // NaN is false - so `q.length > limit` never fired and the bound silently
   // vanished. A `bufferLimit: Number(badConfigValue)` is all it takes.
   it('a NaN bufferLimit buffers nothing instead of unbounding the queue', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using _warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createCommandBus({ onMissing: 'buffer', bufferLimit: Number('not-a-number') });
 
     for (let i = 0; i < 300; i++) bus.dispatch('q', i);
 
     let replayed = 0;
     bus.register('q', () => { replayed++; return { ok: true }; });
-    warn.mockRestore();
 
     // Measured at 300 buffered before the guard - unbounded growth. `| 0` maps
     // NaN to 0, so a bad bound now buffers nothing: still bounded, and loud,
@@ -164,7 +158,7 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
   });
 
   it('a negative bufferLimit is clamped rather than draining into a crash', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using _warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const dropped: unknown[] = [];
     const bus = createCommandBus({
       onMissing: 'buffer',
@@ -174,7 +168,6 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
 
     expect(bus.dispatch('q', 1).ok).toBe(true);
     expect(bus.dispatch('q', 2).ok).toBe(true);
-    warn.mockRestore();
 
     expect(dropped).toEqual([1, 2]);
   });

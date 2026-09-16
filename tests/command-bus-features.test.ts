@@ -1,14 +1,15 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import { describe, expect, beforeEach, vi, afterEach } from 'vitest';
 import { createCommandBus, createAsyncCommandBus, createCommandPool, commandKey, unsealBus, inspectBus, BusError, matchesPattern, disposeAll } from '../src/command-bus';
 import { optimisticUndo } from '../src/plugins-core';
 import { createTestBus } from '../src/testing';
 import { getCommandBus, setCommandBus, resetCommandBus } from '../src/chamber';
+import { stubEnv, stubGlobal } from '../src/vitest-pure';
+import { it } from '../src/vitest';
 
 // ─── dispatchBatch ────────────────────────────────────────────────────────────
 
 describe('dispatchBatch (sync)', () => {
-  it('should return ok:true and all results when all commands succeed', () => {
-    const bus = createCommandBus();
+  it('should return ok:true and all results when all commands succeed', ({ bus }) => {
     bus.register('a', () => 1);
     bus.register('b', () => 2);
 
@@ -23,8 +24,7 @@ describe('dispatchBatch (sync)', () => {
     expect(result.results[1].value).toBe(2);
   });
 
-  it('should stop on first failure and return ok:false', () => {
-    const bus = createCommandBus();
+  it('should stop on first failure and return ok:false', ({ bus }) => {
     bus.register('a', () => 1);
     bus.register('b', () => { throw new Error('boom'); });
     bus.register('c', () => 3);
@@ -42,8 +42,7 @@ describe('dispatchBatch (sync)', () => {
     expect(result.results[1].ok).toBe(false);
   });
 
-  it('should pass payload to handlers', () => {
-    const bus = createCommandBus();
+  it('should pass payload to handlers', ({ bus }) => {
     bus.register('add', (cmd) => cmd.target.x + cmd.payload.y);
 
     const result = bus.dispatchBatch([
@@ -56,8 +55,7 @@ describe('dispatchBatch (sync)', () => {
 });
 
 describe('dispatchBatch (async)', () => {
-  it('should resolve ok:true when all commands succeed', async () => {
-    const bus = createAsyncCommandBus();
+  it('should resolve ok:true when all commands succeed', async ({ asyncBus: bus }) => {
     bus.register('a', async () => 'x');
     bus.register('b', async () => 'y');
 
@@ -71,8 +69,7 @@ describe('dispatchBatch (async)', () => {
     expect(result.results[1].value).toBe('y');
   });
 
-  it('should stop on first failure', async () => {
-    const bus = createAsyncCommandBus();
+  it('should stop on first failure', async ({ asyncBus: bus }) => {
     bus.register('a', async () => { throw new Error('async-fail'); });
 
     const result = await bus.dispatchBatch([{ action: 'a', target: {} }]);
@@ -85,11 +82,10 @@ describe('dispatchBatch (async)', () => {
 // ─── onMissing (dead letter handling) ────────────────────────────────────────
 
 describe('onMissing option', () => {
-  it("defaults to 'error' - returns { ok: false, error }", () => {
-    const bus = createCommandBus();
+  it("defaults to 'error' - returns { ok: false, error }", ({ bus }) => {
     const result = bus.dispatch('no.handler', {});
 
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('VC_CORE_NO_HANDLER');
     expect(result.error?.message).toContain('No handler');
   });
 
@@ -103,8 +99,7 @@ describe('onMissing option', () => {
     const bus = createCommandBus({ onMissing: 'ignore' });
     const result = bus.dispatch('no.handler', {});
 
-    expect(result.ok).toBe(true);
-    expect(result.value).toBeUndefined();
+    expect(result).toSucceedWith(undefined);
   });
 
   it('custom function - uses its return value', () => {
@@ -114,8 +109,7 @@ describe('onMissing option', () => {
 
     const result = bus.dispatch('no.handler', {});
 
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe('fallback:no.handler');
+    expect(result).toSucceedWith('fallback:no.handler');
   });
 
   it("async bus: 'throw' works the same", async () => {
@@ -128,8 +122,7 @@ describe('onMissing option', () => {
 // ─── Plugin priority ──────────────────────────────────────────────────────────
 
 describe('plugin priority', () => {
-  it('higher priority plugin runs first regardless of registration order', () => {
-    const bus = createCommandBus();
+  it('higher priority plugin runs first regardless of registration order', ({ bus }) => {
     const order: string[] = [];
 
     bus.use((_cmd, next) => { order.push('low'); return next(); }, { priority: 1 });
@@ -141,8 +134,7 @@ describe('plugin priority', () => {
     expect(order).toEqual(['high', 'low']);
   });
 
-  it('equal priority preserves registration order', () => {
-    const bus = createCommandBus();
+  it('equal priority preserves registration order', ({ bus }) => {
     const order: string[] = [];
 
     bus.use((_cmd, next) => { order.push('first'); return next(); }, { priority: 5 });
@@ -154,8 +146,7 @@ describe('plugin priority', () => {
     expect(order).toEqual(['first', 'second']);
   });
 
-  it('default priority (0) runs after explicitly prioritized plugins', () => {
-    const bus = createCommandBus();
+  it('default priority (0) runs after explicitly prioritized plugins', ({ bus }) => {
     const order: string[] = [];
 
     bus.use((_cmd, next) => { order.push('default'); return next(); });
@@ -167,8 +158,7 @@ describe('plugin priority', () => {
     expect(order).toEqual(['priority', 'default']);
   });
 
-  it('unsubscribing a prioritized plugin works correctly', () => {
-    const bus = createCommandBus();
+  it('unsubscribing a prioritized plugin works correctly', ({ bus }) => {
     const order: string[] = [];
 
     const unsub = bus.use((_cmd, next) => { order.push('high'); return next(); }, { priority: 10 });
@@ -248,8 +238,7 @@ describe('createTestBus', () => {
     const bus = createTestBus();
     const result = bus.dispatch('any.action', {});
 
-    expect(result.ok).toBe(true);
-    expect(result.value).toBeUndefined();
+    expect(result).toSucceedWith(undefined);
   });
 
   it('wasDispatched returns true after matching dispatch', () => {
@@ -287,8 +276,7 @@ describe('createTestBus', () => {
 
     const result = bus.dispatch('cart.add', { id: 5 });
 
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe(50);
+    expect(result).toSucceedWith(50);
     expect(bus.wasDispatched('cart.add')).toBe(true);
   });
 
@@ -328,7 +316,7 @@ describe('resetCommandBus', () => {
 
     // Old handler should not exist on new bus
     const result = bus2.dispatch('test', {});
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('VC_CORE_NO_HANDLER');
   });
 });
 
@@ -336,7 +324,7 @@ describe('resetCommandBus', () => {
 
 describe('naming convention', () => {
   it('warns on invalid action names', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createCommandBus({
       naming: {
         pattern: /^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)+$/,
@@ -346,8 +334,6 @@ describe('naming convention', () => {
 
     bus.register('cart.add', () => 'result'); // dots not allowed
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('cart.add'));
-
-    warn.mockRestore();
   });
 
   it('throws on invalid action names when configured', () => {
@@ -373,7 +359,7 @@ describe('naming convention', () => {
   });
 
   it('validates at dispatch time too', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createCommandBus({
       naming: {
         pattern: /^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)+$/,
@@ -383,52 +369,43 @@ describe('naming convention', () => {
 
     bus.dispatch('InvalidName', {});
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('InvalidName'));
-
-    warn.mockRestore();
   });
 
   it('validates at query time too', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createCommandBus({
       naming: { pattern: /^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)+$/, onViolation: 'warn' },
     });
 
     bus.query('InvalidQuery', {});
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('InvalidQuery'));
-
-    warn.mockRestore();
   });
 
   it('validates async dispatch action names', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createAsyncCommandBus({
       naming: { pattern: /^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)+$/, onViolation: 'warn' },
     });
 
     await bus.dispatch('InvalidAsyncDispatch', {});
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('InvalidAsyncDispatch'));
-
-    warn.mockRestore();
   });
 
   it('validates async query action names', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createAsyncCommandBus({
       naming: { pattern: /^[a-z][a-z0-9]*(_[a-z][a-z0-9]*)+$/, onViolation: 'warn' },
     });
 
     await bus.query('InvalidAsyncQuery', {});
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('InvalidAsyncQuery'));
-
-    warn.mockRestore();
   });
 });
 
 // ─── Wildcard / pattern listeners ─────────────────────────────────────────────
 
 describe('on() pattern listeners', () => {
-  it('wildcard * listens to all actions', () => {
-    const bus = createCommandBus();
+  it('wildcard * listens to all actions', ({ bus }) => {
     const heard: string[] = [];
 
     bus.on('*', (cmd) => heard.push(cmd.action));
@@ -441,8 +418,7 @@ describe('on() pattern listeners', () => {
     expect(heard).toEqual(['shopCartAdd', 'uiToast']);
   });
 
-  it('prefix* matches namespace', () => {
-    const bus = createCommandBus();
+  it('prefix* matches namespace', ({ bus }) => {
     const heard: string[] = [];
 
     bus.on('shop*', (cmd) => heard.push(cmd.action));
@@ -457,8 +433,7 @@ describe('on() pattern listeners', () => {
     expect(heard).toEqual(['shopCartAdd', 'shopFilterApplied']);
   });
 
-  it('exact match works', () => {
-    const bus = createCommandBus();
+  it('exact match works', ({ bus }) => {
     const heard: string[] = [];
 
     bus.on('shopCartAdd', (cmd) => heard.push(cmd.action));
@@ -471,8 +446,7 @@ describe('on() pattern listeners', () => {
     expect(heard).toEqual(['shopCartAdd']);
   });
 
-  it('unsubscribe stops listening', () => {
-    const bus = createCommandBus();
+  it('unsubscribe stops listening', ({ bus }) => {
     const heard: string[] = [];
 
     const unsub = bus.on('*', (cmd) => heard.push(cmd.action));
@@ -489,8 +463,7 @@ describe('on() pattern listeners', () => {
 // ─── once() ───────────────────────────────────────────────────────────────────
 
 describe('once() - sync bus', () => {
-  it('fires exactly once and then auto-unsubscribes', () => {
-    const bus = createCommandBus();
+  it('fires exactly once and then auto-unsubscribes', ({ bus }) => {
     bus.register('ping', () => null);
     const heard: string[] = [];
 
@@ -504,8 +477,7 @@ describe('once() - sync bus', () => {
     expect(heard[0]).toBe('ping');
   });
 
-  it('returned unsub cancels before it fires', () => {
-    const bus = createCommandBus();
+  it('returned unsub cancels before it fires', ({ bus }) => {
     bus.register('ping', () => null);
     const heard: string[] = [];
 
@@ -516,8 +488,7 @@ describe('once() - sync bus', () => {
     expect(heard).toHaveLength(0);
   });
 
-  it('wildcard once fires only on the first matching action', () => {
-    const bus = createCommandBus();
+  it('wildcard once fires only on the first matching action', ({ bus }) => {
     bus.register('cartAdd', () => null);
     bus.register('cartRemove', () => null);
     const heard: string[] = [];
@@ -533,8 +504,7 @@ describe('once() - sync bus', () => {
 });
 
 describe('once() - async bus', () => {
-  it('fires exactly once on async bus', async () => {
-    const bus = createAsyncCommandBus();
+  it('fires exactly once on async bus', async ({ asyncBus: bus }) => {
     bus.register('ping', async () => null);
     const heard: string[] = [];
 
@@ -548,8 +518,7 @@ describe('once() - async bus', () => {
 });
 
 describe('once() - mutation-during-iteration safety', () => {
-  it('does not skip the next listener when multiple once() share the same pattern', () => {
-    const bus = createCommandBus();
+  it('does not skip the next listener when multiple once() share the same pattern', ({ bus }) => {
     bus.register('ping', () => null);
     const heard: number[] = [];
 
@@ -604,8 +573,7 @@ describe('once() - mutation-during-iteration safety', () => {
 // ─── Request / Response ───────────────────────────────────────────────────────
 
 describe('request/respond', () => {
-  it('request gets response from responder', async () => {
-    const bus = createCommandBus();
+  it('request gets response from responder', async ({ bus }) => {
 
     bus.respond('paymentGetToken', (cmd) => {
       return { token: 'tok_123', amount: cmd.target.amount };
@@ -617,30 +585,26 @@ describe('request/respond', () => {
     expect(result.value.token).toBe('tok_123');
   });
 
-  it('request falls back to dispatch when no responder', async () => {
-    const bus = createCommandBus();
+  it('request falls back to dispatch when no responder', async ({ bus }) => {
     bus.register('testAction', (cmd) => cmd.target.value * 2);
 
     const result = await bus.request('testAction', { value: 5 });
 
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe(10);
+    expect(result).toSucceedWith(10);
   });
 
-  it('request times out', async () => {
-    const bus = createCommandBus();
+  it('request times out', async ({ bus }) => {
 
     bus.respond('slowAction', async () => {
       return new Promise((resolve) => setTimeout(() => resolve('done'), 200));
     });
 
     const result = await bus.request('slowAction', {}, undefined, { timeout: 50 });
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('VC_CORE_REQUEST_TIMEOUT');
     expect(result.error?.message).toContain('timed out');
   });
 
-  it('respond can be unsubscribed', async () => {
-    const bus = createCommandBus();
+  it('respond can be unsubscribed', async ({ bus }) => {
     bus.register('testAction', () => 'from_handler');
 
     const unsub = bus.respond('testAction', () => 'from_responder');
@@ -658,8 +622,7 @@ describe('request/respond', () => {
 // ─── Undo handlers ────────────────────────────────────────────────────────────
 
 describe('register with undo handler', () => {
-  it('stores and retrieves undo handler', () => {
-    const bus = createCommandBus();
+  it('stores and retrieves undo handler', ({ bus }) => {
     const undoFn = vi.fn();
 
     bus.register('cartAdd', () => 'added', { undo: undoFn });
@@ -668,8 +631,7 @@ describe('register with undo handler', () => {
     expect(handler).toBe(undoFn);
   });
 
-  it('undo handler removed on unregister', () => {
-    const bus = createCommandBus();
+  it('undo handler removed on unregister', ({ bus }) => {
 
     const unsub = bus.register('cartAdd', () => 'added', { undo: () => {} });
     unsub();
@@ -684,8 +646,7 @@ describe('per-command throttle at register time', () => {
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.useRealTimers(); });
 
-  it('throttles handler execution', () => {
-    const bus = createCommandBus();
+  it('throttles handler execution', ({ bus }) => {
     const handler = vi.fn(() => 'result');
 
     bus.register('fastAction', handler, { throttle: 100 });
@@ -696,7 +657,7 @@ describe('per-command throttle at register time', () => {
 
     const r2 = bus.dispatch('fastAction', { id: 1 });
     expect(handler).toHaveBeenCalledTimes(1);
-    expect(r2.ok).toBe(false);
+    expect(r2).toFailWith('VC_CORE_THROTTLED');
     expect(r2.error?.message).toContain('throttled');
     expect((r2.error as any)?.context?.retryIn).toBeGreaterThan(0);
 
@@ -845,26 +806,22 @@ describe('createTestBus snapshot and time-travel', () => {
 // ─── hasHandler ───────────────────────────────────────────────────────────────
 
 describe('bus.hasHandler', () => {
-  it('returns false before register', () => {
-    const bus = createCommandBus();
+  it('returns false before register', ({ bus }) => {
     expect(bus.hasHandler('foo')).toBe(false);
   });
 
-  it('returns true after register', () => {
-    const bus = createCommandBus();
+  it('returns true after register', ({ bus }) => {
     bus.register('foo', () => null);
     expect(bus.hasHandler('foo')).toBe(true);
   });
 
-  it('returns false after unregister', () => {
-    const bus = createCommandBus();
+  it('returns false after unregister', ({ bus }) => {
     const unsub = bus.register('foo', () => null);
     unsub();
     expect(bus.hasHandler('foo')).toBe(false);
   });
 
-  it('works on async bus', async () => {
-    const bus = createAsyncCommandBus();
+  it('works on async bus', async ({ asyncBus: bus }) => {
     expect(bus.hasHandler('bar')).toBe(false);
     bus.register('bar', async () => null);
     expect(bus.hasHandler('bar')).toBe(true);
@@ -874,8 +831,7 @@ describe('bus.hasHandler', () => {
 // ─── dispatchBatch continueOnError ────────────────────────────────────────────
 
 describe('dispatchBatch continueOnError', () => {
-  it('processes all commands even when some fail', () => {
-    const bus = createCommandBus();
+  it('processes all commands even when some fail', ({ bus }) => {
     bus.register('a', () => 1);
     bus.register('b', () => { throw new Error('boom'); });
     bus.register('c', () => 3);
@@ -893,8 +849,7 @@ describe('dispatchBatch continueOnError', () => {
     expect(result.error?.message).toBe('boom');
   });
 
-  it('async bus continueOnError processes all commands', async () => {
-    const bus = createAsyncCommandBus();
+  it('async bus continueOnError processes all commands', async ({ asyncBus: bus }) => {
     bus.register('x', async () => 'ok');
     bus.register('y', async () => { throw new Error('fail'); });
     bus.register('z', async () => 'done');
@@ -914,40 +869,36 @@ describe('dispatchBatch continueOnError', () => {
 
 describe('register overwrite warning', () => {
   it('warns when registering the same action twice', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createCommandBus();
 
     bus.register('someAction', () => 'first');
     bus.register('someAction', () => 'second');
 
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('someAction'));
-    warn.mockRestore();
   });
 
   it('does not warn on first registration', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createCommandBus();
 
     bus.register('freshAction', () => null);
     expect(warn).not.toHaveBeenCalled();
-    warn.mockRestore();
   });
 });
 
 // ─── bus.clear() ──────────────────────────────────────────────────────────────
 
 describe('bus.clear() (sync)', () => {
-  it('removes all handlers', () => {
-    const bus = createCommandBus();
+  it('removes all handlers', ({ bus }) => {
     bus.register('a', () => 1);
     bus.clear();
 
     const result = bus.dispatch('a', {});
-    expect(result.ok).toBe(false); // no handler -> dead letter
+    expect(result).toFailWith('VC_CORE_NO_HANDLER'); // no handler -> dead letter
   });
 
-  it('removes plugins', () => {
-    const bus = createCommandBus();
+  it('removes plugins', ({ bus }) => {
     const seen: string[] = [];
     bus.use((cmd, next) => { seen.push(cmd.action); return next(); });
     bus.register('a', () => null);
@@ -958,8 +909,7 @@ describe('bus.clear() (sync)', () => {
     expect(seen).toHaveLength(0);
   });
 
-  it('removes onAfter hooks', () => {
-    const bus = createCommandBus();
+  it('removes onAfter hooks', ({ bus }) => {
     const fired: string[] = [];
     bus.onAfter((cmd) => fired.push(cmd.action));
     bus.register('a', () => null);
@@ -970,8 +920,7 @@ describe('bus.clear() (sync)', () => {
     expect(fired).toHaveLength(0);
   });
 
-  it('removes pattern listeners', () => {
-    const bus = createCommandBus();
+  it('removes pattern listeners', ({ bus }) => {
     const heard: string[] = [];
     bus.on('*', (cmd) => heard.push(cmd.action));
     bus.register('a', () => null);
@@ -984,8 +933,7 @@ describe('bus.clear() (sync)', () => {
 });
 
 describe('bus.clear() (async)', () => {
-  it('removes all handlers and plugins', async () => {
-    const bus = createAsyncCommandBus();
+  it('removes all handlers and plugins', async ({ asyncBus: bus }) => {
     const seen: string[] = [];
     bus.use(async (cmd, next) => { seen.push(cmd.action); return next(); });
     bus.register('a', async () => 1);
@@ -1001,8 +949,7 @@ describe('bus.clear() (async)', () => {
 // ─── async bus on / request / respond ─────────────────────────────────────────
 
 describe('async bus - on() pattern listeners', () => {
-  it('wildcard * receives all dispatches', async () => {
-    const bus = createAsyncCommandBus();
+  it('wildcard * receives all dispatches', async ({ asyncBus: bus }) => {
     const heard: string[] = [];
 
     bus.on('*', (cmd) => heard.push(cmd.action));
@@ -1015,8 +962,7 @@ describe('async bus - on() pattern listeners', () => {
     expect(heard).toEqual(['taskRun', 'taskCancel']);
   });
 
-  it('prefix* matches namespace on async bus', async () => {
-    const bus = createAsyncCommandBus();
+  it('prefix* matches namespace on async bus', async ({ asyncBus: bus }) => {
     const heard: string[] = [];
 
     bus.on('task*', (cmd) => heard.push(cmd.action));
@@ -1029,8 +975,7 @@ describe('async bus - on() pattern listeners', () => {
     expect(heard).toEqual(['taskRun']);
   });
 
-  it('unsubscribe stops async listener', async () => {
-    const bus = createAsyncCommandBus();
+  it('unsubscribe stops async listener', async ({ asyncBus: bus }) => {
     const heard: string[] = [];
 
     const unsub = bus.on('*', (cmd) => heard.push(cmd.action));
@@ -1045,8 +990,7 @@ describe('async bus - on() pattern listeners', () => {
 });
 
 describe('async bus - request/respond', () => {
-  it('gets response from async responder', async () => {
-    const bus = createAsyncCommandBus();
+  it('gets response from async responder', async ({ asyncBus: bus }) => {
 
     bus.respond('dataFetch', async (cmd) => ({ rows: cmd.target.limit }));
 
@@ -1055,17 +999,14 @@ describe('async bus - request/respond', () => {
     expect(result.value.rows).toBe(10);
   });
 
-  it('falls back to dispatch when no responder on async bus', async () => {
-    const bus = createAsyncCommandBus();
+  it('falls back to dispatch when no responder on async bus', async ({ asyncBus: bus }) => {
     bus.register('ping', async () => 'pong');
 
     const result = await bus.request('ping', {});
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe('pong');
+    expect(result).toSucceedWith('pong');
   });
 
-  it('respond can be unsubscribed on async bus', async () => {
-    const bus = createAsyncCommandBus();
+  it('respond can be unsubscribed on async bus', async ({ asyncBus: bus }) => {
     bus.register('ping', async () => 'handler');
 
     const unsub = bus.respond('ping', async () => 'responder');
@@ -1078,12 +1019,11 @@ describe('async bus - request/respond', () => {
     expect(result.value).toBe('handler');
   });
 
-  it('request times out on async bus', async () => {
-    const bus = createAsyncCommandBus();
+  it('request times out on async bus', async ({ asyncBus: bus }) => {
     bus.respond('slow', async () => new Promise((resolve) => setTimeout(() => resolve('done'), 500)));
 
     const result = await bus.request('slow', {}, undefined, { timeout: 50 });
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('VC_CORE_REQUEST_TIMEOUT');
     expect(result.error?.message).toContain('timed out');
   });
 });
@@ -1145,8 +1085,7 @@ describe('createTestBus - plugin and hook support', () => {
     bus.register('ping', () => 'pong');
 
     const result = await bus.request('ping', {});
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe('pong');
+    expect(result).toSucceedWith('pong');
   });
 
   it('respond() stub returns unsubscribe without throwing', () => {
@@ -1188,8 +1127,7 @@ describe('createTestBus - plugin and hook support', () => {
     const bus = createTestBus({ passthroughHandlers: true });
     bus.register('ping', () => 'pong');
     const result = bus.dispatch('ping', {});
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe('pong');
+    expect(result).toSucceedWith('pong');
   });
 
   it('dispatchBatch stops on first failure and returns error', () => {
@@ -1213,13 +1151,12 @@ describe('createTestBus - plugin and hook support', () => {
 
 describe('naming convention onViolation defaults to warn', () => {
   it("warns when onViolation is omitted (defaults to 'warn')", () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createCommandBus({
       naming: { pattern: /^[a-z]+$/ }, // no onViolation - should default to 'warn'
     });
     bus.dispatch('INVALID', {});
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('INVALID'));
-    warn.mockRestore();
   });
 });
 
@@ -1227,14 +1164,13 @@ describe('naming convention onViolation defaults to warn', () => {
 
 describe("naming convention onViolation: 'ignore'", () => {
   it('silently allows invalid names without warning or throwing', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createCommandBus({
       naming: { pattern: /^[a-z]+$/, onViolation: 'ignore' },
     });
 
     expect(() => bus.register('INVALID_NAME', () => null)).not.toThrow();
     expect(warn).not.toHaveBeenCalled();
-    warn.mockRestore();
   });
 });
 
@@ -1244,8 +1180,7 @@ describe('wrapThrottle circular-ref target', () => {
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.useRealTimers(); });
 
-  it('handles circular-reference target without throwing', () => {
-    const bus = createCommandBus();
+  it('handles circular-reference target without throwing', ({ bus }) => {
     const handler = vi.fn(() => 'ok');
     bus.register('circAction', handler, { throttle: 100 });
 
@@ -1256,7 +1191,7 @@ describe('wrapThrottle circular-ref target', () => {
     expect(r1.ok).toBe(true);
 
     const r2 = bus.dispatch('circAction', circular);
-    expect(r2.ok).toBe(false);
+    expect(r2).toFailWith('VC_CORE_THROTTLED');
     expect(r2.error?.message).toContain('throttled');
   });
 });
@@ -1267,8 +1202,7 @@ describe("async bus onMissing extended", () => {
   it("'ignore' returns { ok: true } on async bus", async () => {
     const bus = createAsyncCommandBus({ onMissing: 'ignore' });
     const result = await bus.dispatch('noop', {});
-    expect(result.ok).toBe(true);
-    expect(result.value).toBeUndefined();
+    expect(result).toSucceedWith(undefined);
   });
 
   it('custom function used as fallback on async bus', async () => {
@@ -1276,8 +1210,7 @@ describe("async bus onMissing extended", () => {
       onMissing: (cmd) => ({ ok: true, value: `fallback:${cmd.action}` }),
     });
     const result = await bus.dispatch('missing', {});
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe('fallback:missing');
+    expect(result).toSucceedWith('fallback:missing');
   });
 
   it('custom function that throws is caught on async bus', async () => {
@@ -1294,17 +1227,15 @@ describe("async bus onMissing extended", () => {
 
 describe('syncRequest with throwing plugin', () => {
   it('resolves { ok: false } when plugin throws during request', async () => {
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    using _errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const bus = createCommandBus();
     bus.respond('qa', () => 'answer');
     bus.use(() => { throw new Error('plugin-kaboom'); });
 
     const result = await bus.request('qa', {});
-    expect(result.ok).toBe(false);
     // Converted at the plugin boundary (tests/plugin-throw-fixture.test.ts).
-    expect((result.error as any)?.code).toBe('VC_PLUGIN_THREW');
+    expect(result).toFailWith('VC_PLUGIN_THREW');
     expect(((result.error as Error).cause as Error).message).toBe('plugin-kaboom');
-    errSpy.mockRestore();
   });
 });
 
@@ -1312,11 +1243,10 @@ describe('syncRequest with throwing plugin', () => {
 
 describe('syncUse async plugin warning', () => {
   it('warns when async function installed on sync bus', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createCommandBus();
     bus.use(async (_cmd, next) => next());
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('Async plugin'));
-    warn.mockRestore();
   });
 });
 
@@ -1326,7 +1256,7 @@ describe('async bus default onMissing', () => {
   it("returns { ok: false } when no handler and no onMissing option", async () => {
     const bus = createAsyncCommandBus(); // default = 'error'
     const result = await bus.dispatch('neverRegistered', {});
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('VC_CORE_NO_HANDLER');
     expect(result.error?.message).toContain('No handler');
   });
 });
@@ -1335,20 +1265,18 @@ describe('async bus default onMissing', () => {
 
 describe('async register overwrite warning', () => {
   it('warns when registering the same action twice on async bus', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createAsyncCommandBus();
     bus.register('ping', async () => 'first');
     bus.register('ping', async () => 'second');
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('ping'));
-    warn.mockRestore();
   });
 });
 
 // ─── async request: responder that throws (line 494) ─────────────────────────
 
 describe('async request with throwing responder', () => {
-  it('returns { ok: false } when async responder throws', async () => {
-    const bus = createAsyncCommandBus();
+  it('returns { ok: false } when async responder throws', async ({ asyncBus: bus }) => {
     bus.respond('boom', async () => { throw new Error('responder-boom'); });
     const result = await bus.request('boom', {});
     expect(result.ok).toBe(false);
@@ -1359,15 +1287,13 @@ describe('async request with throwing responder', () => {
 // ─── async bus getUndoHandler (line 551) ──────────────────────────────────────
 
 describe('async bus getUndoHandler', () => {
-  it('stores and retrieves undo handler on async bus', () => {
-    const bus = createAsyncCommandBus();
+  it('stores and retrieves undo handler on async bus', ({ asyncBus: bus }) => {
     const undoFn = vi.fn();
     bus.register('cartAdd', async () => 'added', { undo: undoFn });
     expect(bus.getUndoHandler('cartAdd')).toBe(undoFn);
   });
 
-  it('returns undefined when no undo handler on async bus', () => {
-    const bus = createAsyncCommandBus();
+  it('returns undefined when no undo handler on async bus', ({ asyncBus: bus }) => {
     bus.register('cartAdd', async () => 'added');
     expect(bus.getUndoHandler('cartAdd')).toBeUndefined();
   });
@@ -1389,7 +1315,7 @@ describe('createTestBus passthroughHandlers error path', () => {
 
 describe('createTestBus afterHook silent catch', () => {
   it('catches hook errors and logs them without interrupting dispatch', () => {
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    using consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const bus = createTestBus();
     bus.onAfter(() => { throw new Error('hook-boom'); });
     const result = bus.dispatch('ping', {});
@@ -1398,7 +1324,6 @@ describe('createTestBus afterHook silent catch', () => {
       expect.stringContaining('[vapor-chamber/test]'),
       expect.any(Error),
     );
-    consoleError.mockRestore();
   });
 });
 
@@ -1436,8 +1361,7 @@ describe('sync onMissing function catch', () => {
 // ─── syncRequest: responder that throws (line 322) ───────────────────────────
 
 describe('syncRequest responder catch', () => {
-  it('returns { ok: false } when responder throws synchronously', async () => {
-    const bus = createCommandBus();
+  it('returns { ok: false } when responder throws synchronously', async ({ bus }) => {
     bus.respond('qa', () => { throw new Error('responder-throw'); });
     const result = await bus.request('qa', {});
     expect(result.ok).toBe(false);
@@ -1448,8 +1372,7 @@ describe('syncRequest responder catch', () => {
 // ─── sync dispatchBatch: multiple failures with continueOnError (line 268) ────
 
 describe('sync dispatchBatch continueOnError multiple failures', () => {
-  it('only records the first error when multiple commands fail', () => {
-    const bus = createCommandBus();
+  it('only records the first error when multiple commands fail', ({ bus }) => {
     bus.register('a', () => { throw new Error('first-fail'); });
     bus.register('b', () => { throw new Error('second-fail'); });
     bus.register('c', () => 'ok');
@@ -1469,22 +1392,19 @@ describe('sync dispatchBatch continueOnError multiple failures', () => {
 // ─── sync bus double-unsub guard (lines 293-304) ─────────────────────────────
 
 describe('sync bus double-unsub is a no-op', () => {
-  it('use() unsub called twice does not throw', () => {
-    const bus = createCommandBus();
+  it('use() unsub called twice does not throw', ({ bus }) => {
     const unsub = bus.use((_cmd, next) => next());
     unsub();
     expect(() => unsub()).not.toThrow();
   });
 
-  it('onAfter() unsub called twice does not throw', () => {
-    const bus = createCommandBus();
+  it('onAfter() unsub called twice does not throw', ({ bus }) => {
     const unsub = bus.onAfter(() => {});
     unsub();
     expect(() => unsub()).not.toThrow();
   });
 
-  it('on() unsub called twice does not throw', () => {
-    const bus = createCommandBus();
+  it('on() unsub called twice does not throw', ({ bus }) => {
     const unsub = bus.on('*', () => {});
     unsub();
     expect(() => unsub()).not.toThrow();
@@ -1494,8 +1414,7 @@ describe('sync bus double-unsub is a no-op', () => {
 // ─── async dispatchBatch: multiple failures with continueOnError (line 451) ───
 
 describe('async dispatchBatch continueOnError multiple failures', () => {
-  it('only records the first error when multiple commands fail', async () => {
-    const bus = createAsyncCommandBus();
+  it('only records the first error when multiple commands fail', async ({ asyncBus: bus }) => {
     bus.register('a', async () => { throw new Error('first-fail'); });
     bus.register('b', async () => { throw new Error('second-fail'); });
     bus.register('c', async () => 'ok');
@@ -1518,8 +1437,7 @@ describe('async register with throttle option', () => {
   beforeEach(() => { vi.useFakeTimers(); });
   afterEach(() => { vi.useRealTimers(); });
 
-  it('throttles handler on async bus', async () => {
-    const bus = createAsyncCommandBus();
+  it('throttles handler on async bus', async ({ asyncBus: bus }) => {
     const handler = vi.fn(async () => 'result');
     bus.register('fastAsync', handler, { throttle: 100 });
 
@@ -1527,7 +1445,7 @@ describe('async register with throttle option', () => {
     expect(r1.ok).toBe(true);
 
     const r2 = await bus.dispatch('fastAsync', { id: 1 });
-    expect(r2.ok).toBe(false);
+    expect(r2).toFailWith('VC_CORE_THROTTLED');
     expect(r2.error?.message).toContain('throttled');
   });
 });
@@ -1535,22 +1453,19 @@ describe('async register with throttle option', () => {
 // ─── async bus double-unsub guard (lines 473-484) ────────────────────────────
 
 describe('async bus double-unsub is a no-op', () => {
-  it('use() unsub called twice does not throw', async () => {
-    const bus = createAsyncCommandBus();
+  it('use() unsub called twice does not throw', async ({ asyncBus: bus }) => {
     const unsub = bus.use(async (_cmd, next) => next());
     unsub();
     expect(() => unsub()).not.toThrow();
   });
 
-  it('onAfter() unsub called twice does not throw', async () => {
-    const bus = createAsyncCommandBus();
+  it('onAfter() unsub called twice does not throw', async ({ asyncBus: bus }) => {
     const unsub = bus.onAfter(async () => {});
     unsub();
     expect(() => unsub()).not.toThrow();
   });
 
-  it('on() unsub called twice does not throw', async () => {
-    const bus = createAsyncCommandBus();
+  it('on() unsub called twice does not throw', async ({ asyncBus: bus }) => {
     const unsub = bus.on('*', () => {});
     unsub();
     expect(() => unsub()).not.toThrow();
@@ -1560,16 +1475,13 @@ describe('async bus double-unsub is a no-op', () => {
 // ─── syncRequest: async responder .then / .catch (lines 337-338) ─────────────
 
 describe('syncRequest async responder', () => {
-  it('resolves with value when async responder resolves', async () => {
-    const bus = createCommandBus();
+  it('resolves with value when async responder resolves', async ({ bus }) => {
     bus.respond('async', () => Promise.resolve('async-result'));
     const result = await bus.request('async', {});
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe('async-result');
+    expect(result).toSucceedWith('async-result');
   });
 
-  it('returns { ok: false } when async responder rejects', async () => {
-    const bus = createCommandBus();
+  it('returns { ok: false } when async responder rejects', async ({ bus }) => {
     bus.respond('async', () => Promise.reject(new Error('async-reject')));
     const result = await bus.request('async', {});
     expect(result.ok).toBe(false);
@@ -1580,8 +1492,7 @@ describe('syncRequest async responder', () => {
 // ─── Command.meta ──────────────────────────────────────────────────────────────
 
 describe('Command.meta - auto-stamped metadata', () => {
-  it('stamps meta.ts and meta.id on every dispatch', () => {
-    const bus = createCommandBus();
+  it('stamps meta.ts and meta.id on every dispatch', ({ bus }) => {
     let captured: any;
     bus.register('test', (cmd) => { captured = cmd; return 'ok'; });
     bus.dispatch('test', { id: 1 });
@@ -1591,8 +1502,7 @@ describe('Command.meta - auto-stamped metadata', () => {
     expect(captured.meta.id.length).toBeGreaterThan(0);
   });
 
-  it('each dispatch gets a unique meta.id', () => {
-    const bus = createCommandBus();
+  it('each dispatch gets a unique meta.id', ({ bus }) => {
     const ids: string[] = [];
     bus.register('test', (cmd) => { ids.push(cmd.meta!.id); });
     bus.dispatch('test', {});
@@ -1600,8 +1510,7 @@ describe('Command.meta - auto-stamped metadata', () => {
     expect(ids[0]).not.toBe(ids[1]);
   });
 
-  it('propagates __correlationId and __causationId from payload', () => {
-    const bus = createCommandBus();
+  it('propagates __correlationId and __causationId from payload', ({ bus }) => {
     let captured: any;
     bus.register('test', (cmd) => { captured = cmd; });
     bus.dispatch('test', {}, { __correlationId: 'corr-1', __causationId: 'cause-1' });
@@ -1609,8 +1518,7 @@ describe('Command.meta - auto-stamped metadata', () => {
     expect(captured.meta.causationId).toBe('cause-1');
   });
 
-  it('stamps meta on async dispatch', async () => {
-    const bus = createAsyncCommandBus();
+  it('stamps meta on async dispatch', async ({ asyncBus: bus }) => {
     let captured: any;
     bus.register('test', async (cmd) => { captured = cmd; return 'ok'; });
     await bus.dispatch('test', {});
@@ -1623,16 +1531,13 @@ describe('Command.meta - auto-stamped metadata', () => {
 // ─── bus.query() ─────────────────────────────────────────────────────────────
 
 describe('bus.query() - read-only dispatch', () => {
-  it('executes handler and returns result', () => {
-    const bus = createCommandBus();
+  it('executes handler and returns result', ({ bus }) => {
     bus.register('getUser', (cmd) => ({ name: 'Dev', id: cmd.target.id }));
     const result = bus.query('getUser', { id: 42 });
-    expect(result.ok).toBe(true);
-    expect(result.value).toEqual({ name: 'Dev', id: 42 });
+    expect(result).toSucceedWith({ name: 'Dev', id: 42 });
   });
 
-  it('skips beforeHooks (no mutation gating)', () => {
-    const bus = createCommandBus();
+  it('skips beforeHooks (no mutation gating)', ({ bus }) => {
     const beforeCalls: string[] = [];
     bus.onBefore((cmd) => { beforeCalls.push(cmd.action); });
     bus.register('getUser', () => 'data');
@@ -1640,8 +1545,7 @@ describe('bus.query() - read-only dispatch', () => {
     expect(beforeCalls).toEqual([]); // beforeHook NOT called
   });
 
-  it('still fires afterHooks and on() listeners', () => {
-    const bus = createCommandBus();
+  it('still fires afterHooks and on() listeners', ({ bus }) => {
     const afterCalls: string[] = [];
     const onCalls: string[] = [];
     bus.onAfter((cmd) => { afterCalls.push(cmd.action); });
@@ -1652,8 +1556,7 @@ describe('bus.query() - read-only dispatch', () => {
     expect(onCalls).toEqual(['getUser']);
   });
 
-  it('runs through plugin pipeline', () => {
-    const bus = createCommandBus();
+  it('runs through plugin pipeline', ({ bus }) => {
     const pluginCalls: string[] = [];
     bus.use((cmd, next) => { pluginCalls.push(cmd.action); return next(); });
     bus.register('getUser', () => 'data');
@@ -1661,16 +1564,13 @@ describe('bus.query() - read-only dispatch', () => {
     expect(pluginCalls).toEqual(['getUser']);
   });
 
-  it('works on async bus', async () => {
-    const bus = createAsyncCommandBus();
+  it('works on async bus', async ({ asyncBus: bus }) => {
     bus.register('getUser', async () => 'async-data');
     const result = await bus.query('getUser', {});
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe('async-data');
+    expect(result).toSucceedWith('async-data');
   });
 
-  it('async query skips beforeHooks', async () => {
-    const bus = createAsyncCommandBus();
+  it('async query skips beforeHooks', async ({ asyncBus: bus }) => {
     const beforeCalls: string[] = [];
     bus.onBefore(async (cmd) => { beforeCalls.push(cmd.action); });
     bus.register('getUser', async () => 'data');
@@ -1678,8 +1578,7 @@ describe('bus.query() - read-only dispatch', () => {
     expect(beforeCalls).toEqual([]);
   });
 
-  it('async query still awaits after-hooks (mirrors the sync-bus "still fires" test above)', async () => {
-    const bus = createAsyncCommandBus();
+  it('async query still awaits after-hooks (mirrors the sync-bus "still fires" test above)', async ({ asyncBus: bus }) => {
     const afterCalls: string[] = [];
     bus.onAfter(async (cmd) => {
       await new Promise((r) => setTimeout(r, 5));
@@ -1698,16 +1597,14 @@ describe('bus.query() - read-only dispatch', () => {
 // ─── bus.emit() ─────────────────────────────────────────────────────────────
 
 describe('bus.emit() - domain events', () => {
-  it('notifies on() listeners without requiring a handler', () => {
-    const bus = createCommandBus();
+  it('notifies on() listeners without requiring a handler', ({ bus }) => {
     const events: string[] = [];
     bus.on('orderCreated', (cmd) => { events.push(cmd.action); });
     bus.emit('orderCreated', { orderId: 42 });
     expect(events).toEqual(['orderCreated']);
   });
 
-  it('notifies wildcard listeners', () => {
-    const bus = createCommandBus();
+  it('notifies wildcard listeners', ({ bus }) => {
     const events: string[] = [];
     bus.on('order*', (cmd) => { events.push(cmd.action); });
     bus.emit('orderCreated', { orderId: 1 });
@@ -1715,21 +1612,18 @@ describe('bus.emit() - domain events', () => {
     expect(events).toEqual(['orderCreated', 'orderShipped']);
   });
 
-  it('passes data as cmd.target', () => {
-    const bus = createCommandBus();
+  it('passes data as cmd.target', ({ bus }) => {
     let captured: any;
     bus.on('orderCreated', (cmd) => { captured = cmd.target; });
     bus.emit('orderCreated', { orderId: 42, total: 99 });
     expect(captured).toEqual({ orderId: 42, total: 99 });
   });
 
-  it('does not throw when no listeners registered', () => {
-    const bus = createCommandBus();
+  it('does not throw when no listeners registered', ({ bus }) => {
     expect(() => bus.emit('noListeners', {})).not.toThrow();
   });
 
-  it('works on async bus', () => {
-    const bus = createAsyncCommandBus();
+  it('works on async bus', ({ asyncBus: bus }) => {
     const events: string[] = [];
     bus.on('test', (cmd) => { events.push(cmd.action); });
     bus.emit('test', {});
@@ -1740,13 +1634,11 @@ describe('bus.emit() - domain events', () => {
 // ─── bus.registeredActions() ─────────────────────────────────────────────────
 
 describe('bus.registeredActions() - introspection', () => {
-  it('returns empty array when no handlers registered', () => {
-    const bus = createCommandBus();
+  it('returns empty array when no handlers registered', ({ bus }) => {
     expect(bus.registeredActions()).toEqual([]);
   });
 
-  it('returns all registered action names', () => {
-    const bus = createCommandBus();
+  it('returns all registered action names', ({ bus }) => {
     bus.register('cartAdd', () => {});
     bus.register('cartRemove', () => {});
     bus.register('orderCreate', () => {});
@@ -1757,16 +1649,14 @@ describe('bus.registeredActions() - introspection', () => {
     expect(actions.length).toBe(3);
   });
 
-  it('reflects unregister', () => {
-    const bus = createCommandBus();
+  it('reflects unregister', ({ bus }) => {
     const unsub = bus.register('temp', () => {});
     expect(bus.registeredActions()).toContain('temp');
     unsub();
     expect(bus.registeredActions()).not.toContain('temp');
   });
 
-  it('works on async bus', () => {
-    const bus = createAsyncCommandBus();
+  it('works on async bus', ({ asyncBus: bus }) => {
     bus.register('asyncAction', async () => {});
     expect(bus.registeredActions()).toEqual(['asyncAction']);
   });
@@ -1787,7 +1677,7 @@ describe('TestBus.onBefore - real implementation', () => {
     const bus = createTestBus();
     bus.onBefore(() => { throw new Error('blocked'); });
     const result = bus.dispatch('test', {});
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('VC_CORE_BEFORE_CANCEL');
     expect(result.error?.message).toBe('blocked');
   });
 
@@ -1834,49 +1724,41 @@ describe('TestBus - query, emit, registeredActions', () => {
 // ─── seal() ────────────────────────────────────────────────────────────────────
 
 describe('seal() - freeze bus topology', () => {
-  it('seal() prevents register() after sealing', () => {
-    const bus = createCommandBus();
+  it('seal() prevents register() after sealing', ({ bus }) => {
     bus.register('a', () => 1);
     bus.seal();
     expect(bus.isSealed()).toBe(true);
     expect(() => bus.register('b', () => 2)).toThrow(/sealed/i);
   });
 
-  it('seal() prevents use() after sealing', () => {
-    const bus = createCommandBus();
+  it('seal() prevents use() after sealing', ({ bus }) => {
     bus.seal();
     expect(() => bus.use((_cmd, next) => next())).toThrow(/sealed/i);
   });
 
-  it('seal() prevents onBefore() after sealing', () => {
-    const bus = createCommandBus();
+  it('seal() prevents onBefore() after sealing', ({ bus }) => {
     bus.seal();
     expect(() => bus.onBefore(() => {})).toThrow(/sealed/i);
   });
 
-  it('seal() prevents onAfter() after sealing', () => {
-    const bus = createCommandBus();
+  it('seal() prevents onAfter() after sealing', ({ bus }) => {
     bus.seal();
     expect(() => bus.onAfter(() => {})).toThrow(/sealed/i);
   });
 
-  it('seal() prevents respond() after sealing', () => {
-    const bus = createCommandBus();
+  it('seal() prevents respond() after sealing', ({ bus }) => {
     bus.seal();
     expect(() => bus.respond('x', () => 42)).toThrow(/sealed/i);
   });
 
-  it('dispatch still works after sealing', () => {
-    const bus = createCommandBus();
+  it('dispatch still works after sealing', ({ bus }) => {
     bus.register('a', () => 99);
     bus.seal();
     const result = bus.dispatch('a', {});
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe(99);
+    expect(result).toSucceedWith(99);
   });
 
-  it('on() and once() still work after sealing (listeners are not topology)', () => {
-    const bus = createCommandBus();
+  it('on() and once() still work after sealing (listeners are not topology)', ({ bus }) => {
     bus.register('a', () => 1);
     bus.seal();
     const events: string[] = [];
@@ -1885,8 +1767,7 @@ describe('seal() - freeze bus topology', () => {
     expect(events).toEqual(['heard']);
   });
 
-  it('isSealed() returns false before sealing', () => {
-    const bus = createCommandBus();
+  it('isSealed() returns false before sealing', ({ bus }) => {
     expect(bus.isSealed()).toBe(false);
   });
 
@@ -1904,20 +1785,17 @@ describe('seal() - freeze bus topology', () => {
 });
 
 describe('seal() - async bus', () => {
-  it('seal() prevents register() on async bus', () => {
-    const bus = createAsyncCommandBus();
+  it('seal() prevents register() on async bus', ({ asyncBus: bus }) => {
     bus.seal();
     expect(bus.isSealed()).toBe(true);
     expect(() => bus.register('a', async () => 1)).toThrow(/sealed/i);
   });
 
-  it('dispatch still works after sealing on async bus', async () => {
-    const bus = createAsyncCommandBus();
+  it('dispatch still works after sealing on async bus', async ({ asyncBus: bus }) => {
     bus.register('a', async () => 42);
     bus.seal();
     const result = await bus.dispatch('a', {});
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe(42);
+    expect(result).toSucceedWith(42);
   });
 });
 
@@ -2001,8 +1879,7 @@ describe('createCommandPool - zero-GC circular buffer', () => {
     expect(pool.size).toBe(64);
   });
 
-  it('works with bus.dispatch using pooled commands', () => {
-    const bus = createCommandBus();
+  it('works with bus.dispatch using pooled commands', ({ bus }) => {
     const pool = createCommandPool(4);
     const results: number[] = [];
     bus.register('test', (cmd) => {
@@ -2022,8 +1899,7 @@ describe('createCommandPool - zero-GC circular buffer', () => {
 // ─── dispose() ─────────────────────────────────────────────────────────────────
 
 describe('dispose() - full teardown', () => {
-  it('clears handlers, hooks, listeners, and plugins', () => {
-    const bus = createCommandBus();
+  it('clears handlers, hooks, listeners, and plugins', ({ bus }) => {
     bus.register('a', () => 1);
     bus.onBefore(() => {});
     bus.onAfter(() => {});
@@ -2041,11 +1917,10 @@ describe('dispose() - full teardown', () => {
     bus.register('a', () => 1);
     bus.dispose();
     const result = bus.dispatch('a', {});
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('VC_CORE_NO_HANDLER');
   });
 
-  it('dispose on async bus clears everything', async () => {
-    const bus = createAsyncCommandBus();
+  it('dispose on async bus clears everything', async ({ asyncBus: bus }) => {
     bus.register('a', async () => 1);
     bus.dispose();
     expect(bus.hasHandler('a')).toBe(false);
@@ -2055,8 +1930,7 @@ describe('dispose() - full teardown', () => {
 // ─── Recursion depth guard ─────────────────────────────────────────────────────
 
 describe('recursion depth guard', () => {
-  it('stops infinite dispatch loops (sync)', () => {
-    const bus = createCommandBus();
+  it('stops infinite dispatch loops (sync)', ({ bus }) => {
     let count = 0;
     bus.register('loop', (cmd) => {
       count++;
@@ -2071,8 +1945,7 @@ describe('recursion depth guard', () => {
     expect(result.ok).toBe(true);
   });
 
-  it('stops infinite dispatch loops (async)', async () => {
-    const bus = createAsyncCommandBus();
+  it('stops infinite dispatch loops (async)', async ({ asyncBus: bus }) => {
     let count = 0;
     bus.register('loop', async (cmd) => {
       count++;
@@ -2082,8 +1955,7 @@ describe('recursion depth guard', () => {
     expect(count).toBe(16);
   });
 
-  it('depth resets after normal dispatch completes', () => {
-    const bus = createCommandBus();
+  it('depth resets after normal dispatch completes', ({ bus }) => {
     let depth1Count = 0;
     let depth2Count = 0;
 
@@ -2104,8 +1976,7 @@ describe('recursion depth guard', () => {
     expect(depth2Count).toBe(2);
   });
 
-  it('deep error result contains VC_CORE_MAX_DEPTH code', () => {
-    const bus = createCommandBus();
+  it('deep error result contains VC_CORE_MAX_DEPTH code', ({ bus }) => {
     let deepResult: any;
     bus.register('loop', (cmd) => {
       const r = bus.dispatch('loop', cmd.target);
@@ -2114,8 +1985,7 @@ describe('recursion depth guard', () => {
     });
     bus.dispatch('loop', {});
     expect(deepResult).toBeDefined();
-    expect(deepResult.ok).toBe(false);
-    expect((deepResult.error as BusError).code).toBe('VC_CORE_MAX_DEPTH');
+    expect(deepResult).toFailWith('VC_CORE_MAX_DEPTH');
   });
 });
 
@@ -2158,8 +2028,7 @@ describe('unsealBus()', () => {
     expect(bus.hasHandler('a')).toBe(true);
   });
 
-  it('is a no-op on an already unsealed bus', () => {
-    const bus = createCommandBus();
+  it('is a no-op on an already unsealed bus', ({ bus }) => {
     unsealBus(bus); // should not throw
     expect(bus.isSealed()).toBe(false);
   });
@@ -2216,7 +2085,7 @@ describe('per-instance throttle timers', () => {
 
     // Bus2 should still have its throttle active
     const r3 = bus2.dispatch('a', {});
-    expect(r3.ok).toBe(false);
+    expect(r3).toFailWith('VC_CORE_THROTTLED');
     expect(r3.error?.message).toContain('throttled');
 
     bus2.dispose();
@@ -2269,8 +2138,7 @@ describe('TestBus depth guard', () => {
 // ─── transactional dispatchBatch ──────────────────────────────────────────────
 
 describe('transactional dispatchBatch (sync)', () => {
-  it('rolls back succeeded commands when a later command fails', () => {
-    const bus = createCommandBus();
+  it('rolls back succeeded commands when a later command fails', ({ bus }) => {
     const undoCalls: string[] = [];
     bus.register('reserve', (cmd) => `reserved-${cmd.target.id}`, { undo: (cmd) => { undoCalls.push(`undo-reserve-${cmd.target.id}`); } });
     bus.register('charge', () => { throw new Error('payment-declined'); }, { undo: () => { undoCalls.push('undo-charge'); } });
@@ -2289,8 +2157,7 @@ describe('transactional dispatchBatch (sync)', () => {
     expect(undoCalls).toEqual(['undo-reserve-1']);
   });
 
-  it('returns no rollbacks when first command fails', () => {
-    const bus = createCommandBus();
+  it('returns no rollbacks when first command fails', ({ bus }) => {
     bus.register('fail', () => { throw new Error('first-fail'); });
 
     const result = bus.dispatchBatch([
@@ -2301,8 +2168,7 @@ describe('transactional dispatchBatch (sync)', () => {
     expect(result.rollbacks).toHaveLength(0);
   });
 
-  it('skips commands without undo handlers during rollback', () => {
-    const bus = createCommandBus();
+  it('skips commands without undo handlers during rollback', ({ bus }) => {
     const undoCalls: string[] = [];
     bus.register('a', () => 'ok-a'); // no undo
     bus.register('b', () => 'ok-b', { undo: () => { undoCalls.push('undo-b'); } });
@@ -2319,8 +2185,7 @@ describe('transactional dispatchBatch (sync)', () => {
     expect(result.rollbacks).toHaveLength(1);
   });
 
-  it('all succeed - no rollbacks field', () => {
-    const bus = createCommandBus();
+  it('all succeed - no rollbacks field', ({ bus }) => {
     bus.register('a', () => 1, { undo: () => {} });
     bus.register('b', () => 2, { undo: () => {} });
 
@@ -2333,8 +2198,7 @@ describe('transactional dispatchBatch (sync)', () => {
     expect(result.rollbacks).toBeUndefined();
   });
 
-  it('captures undo handler errors in rollback results', () => {
-    const bus = createCommandBus();
+  it('captures undo handler errors in rollback results', ({ bus }) => {
     bus.register('a', () => 'ok', { undo: () => { throw new Error('undo-broke'); } });
     bus.register('b', () => { throw new Error('b-fail'); });
 
@@ -2351,8 +2215,7 @@ describe('transactional dispatchBatch (sync)', () => {
 });
 
 describe('transactional dispatchBatch (async)', () => {
-  it('rolls back succeeded commands when a later command fails', async () => {
-    const bus = createAsyncCommandBus();
+  it('rolls back succeeded commands when a later command fails', async ({ asyncBus: bus }) => {
     const undoCalls: string[] = [];
     bus.register('reserve', async (cmd) => `reserved-${cmd.target.id}`, { undo: (cmd) => { undoCalls.push(`undo-reserve-${cmd.target.id}`); } });
     bus.register('charge', async () => { throw new Error('payment-declined'); });
@@ -2368,8 +2231,7 @@ describe('transactional dispatchBatch (async)', () => {
     expect(undoCalls).toEqual(['undo-reserve-1']);
   });
 
-  it('runs rollback in reverse order across multiple succeeded commands', async () => {
-    const bus = createAsyncCommandBus();
+  it('runs rollback in reverse order across multiple succeeded commands', async ({ asyncBus: bus }) => {
     const undoCalls: string[] = [];
     bus.register('step1', async () => 'ok1', { undo: () => { undoCalls.push('undo-1'); } });
     bus.register('step2', async () => 'ok2', { undo: () => { undoCalls.push('undo-2'); } });
@@ -2392,28 +2254,23 @@ describe('transactional dispatchBatch (async)', () => {
 // ─── optimisticUndo plugin ────────────────────────────────────────────────────
 
 describe('optimisticUndo (sync bus)', () => {
-  it('passes through actions without undo handlers', () => {
-    const bus = createCommandBus();
+  it('passes through actions without undo handlers', ({ bus }) => {
     bus.register('plain', () => 'real-result');
     bus.use(optimisticUndo(bus, ['plain']));
 
     const result = bus.dispatch('plain', {});
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe('real-result');
+    expect(result).toSucceedWith('real-result');
   });
 
-  it('passes through actions not in the action list', () => {
-    const bus = createCommandBus();
+  it('passes through actions not in the action list', ({ bus }) => {
     bus.register('other', () => 'other-result');
     bus.use(optimisticUndo(bus, ['cartAdd']));
 
     const result = bus.dispatch('other', {});
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe('other-result');
+    expect(result).toSucceedWith('other-result');
   });
 
-  it('calls undo handler on sync failure and fires onRollback', () => {
-    const bus = createCommandBus();
+  it('calls undo handler on sync failure and fires onRollback', ({ bus }) => {
     const undoCalls: any[] = [];
     const rollbackCalls: any[] = [];
     bus.register('cartAdd', () => { throw new Error('out-of-stock'); }, {
@@ -2429,8 +2286,7 @@ describe('optimisticUndo (sync bus)', () => {
     expect(rollbackCalls).toEqual([{ action: 'cartAdd', msg: 'out-of-stock' }]);
   });
 
-  it('returns predicted value on async bus', async () => {
-    const bus = createAsyncCommandBus();
+  it('returns predicted value on async bus', async ({ asyncBus: bus }) => {
     bus.register('cartAdd', async () => 'real-value', {
       undo: () => {},
     });
@@ -2440,12 +2296,10 @@ describe('optimisticUndo (sync bus)', () => {
 
     const result = await bus.dispatch('cartAdd', { id: 42 }, { qty: 1 });
     // optimisticUndo intercepts and returns predicted result synchronously
-    expect(result.ok).toBe(true);
-    expect(result.value).toEqual({ predicted: true, id: 42 });
+    expect(result).toSucceedWith({ predicted: true, id: 42 });
   });
 
-  it('fires onRollbackError when undo handler throws on sync bus', () => {
-    const bus = createCommandBus();
+  it('fires onRollbackError when undo handler throws on sync bus', ({ bus }) => {
     const errors: any[] = [];
     bus.register('cartAdd', () => { throw new Error('handler-fail'); }, {
       undo: () => { throw new Error('undo-fail'); },
@@ -2553,28 +2407,26 @@ describe('TestBus.inspect()', () => {
 // async transactional abort/rollback paths, and the inspectBus fallback.
 
 describe('core dispatch - error & edge branches', () => {
-  it('real sync bus: a throwing onBefore hook cancels dispatch and returns errResult', () => {
-    const bus = createCommandBus();
+  it('real sync bus: a throwing onBefore hook cancels dispatch and returns errResult', ({ bus }) => {
     let handlerRan = false;
     bus.register('act', () => { handlerRan = true; return 1; });
     bus.onBefore(() => { throw new Error('blocked-by-hook'); });
 
     const result = bus.dispatch('act', {});
 
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('VC_CORE_BEFORE_CANCEL');
     expect(result.error?.message).toBe('blocked-by-hook');
     expect(handlerRan).toBe(false); // handler never runs - hook short-circuits
   });
 
-  it('real async bus: a throwing onBefore hook cancels dispatch and returns errResult', async () => {
-    const bus = createAsyncCommandBus();
+  it('real async bus: a throwing onBefore hook cancels dispatch and returns errResult', async ({ asyncBus: bus }) => {
     let handlerRan = false;
     bus.register('act', async () => { handlerRan = true; return 1; });
     bus.onBefore(async () => { throw new Error('async-blocked'); });
 
     const result = await bus.dispatch('act', {});
 
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('VC_CORE_BEFORE_CANCEL');
     expect(result.error?.message).toBe('async-blocked');
     expect(handlerRan).toBe(false);
   });
@@ -2618,15 +2470,14 @@ describe('core dispatch - error & edge branches', () => {
       { action: 'second', target: {} },
     ], { transactional: true, signal: ac.signal });
 
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('VC_CORE_ABORTED');
     expect(result.error).toBeDefined();
     expect(result.successCount).toBe(0); // rolled back -> reported as 0
     expect(result.rollbacks).toHaveLength(1);
     expect(undoCalls).toEqual(['undo-first']);
   });
 
-  it('async transactional rollback captures a throwing undo handler', async () => {
-    const bus = createAsyncCommandBus();
+  it('async transactional rollback captures a throwing undo handler', async ({ asyncBus: bus }) => {
     bus.register('a', async () => 'ok', { undo: () => { throw new Error('async-undo-broke'); } });
     bus.register('b', async () => { throw new Error('b-fail'); });
 
@@ -2658,27 +2509,25 @@ describe('core dispatch - error & edge branches', () => {
 });
 
 describe('core dispatch - query, rollback, buffer & error defaults', () => {
-  it('sync query() on a missing handler routes through the plugin runner', () => {
-    const bus = createCommandBus();
+  it('sync query() on a missing handler routes through the plugin runner', ({ bus }) => {
     bus.use((_cmd, next) => next()); // installing a plugin forces the runner path
     const r = bus.query('nope', {});
-    expect(r.ok).toBe(false);
+    expect(r).toFailWith('VC_CORE_NO_HANDLER');
     expect(r.error?.message).toContain('No handler');
   });
 
   it('async query() on a missing handler - bare and plugin-runner paths', async () => {
     const bare = createAsyncCommandBus();
     const r1 = await bare.query('nope', {});
-    expect(r1.ok).toBe(false);
+    expect(r1).toFailWith('VC_CORE_NO_HANDLER');
 
     const withPlugin = createAsyncCommandBus();
     withPlugin.use((_cmd, next) => next());
     const r2 = await withPlugin.query('nope', {});
-    expect(r2.ok).toBe(false);
+    expect(r2).toFailWith('VC_CORE_NO_HANDLER');
   });
 
-  it('async transactional rollback skips commands without an undo handler', async () => {
-    const bus = createAsyncCommandBus();
+  it('async transactional rollback skips commands without an undo handler', async ({ asyncBus: bus }) => {
     const undoCalls: string[] = [];
     bus.register('a', async () => 'ok-a'); // no undo
     bus.register('b', async () => 'ok-b', { undo: () => { undoCalls.push('undo-b'); } });
@@ -2697,13 +2546,14 @@ describe('core dispatch - query, rollback, buffer & error defaults', () => {
 
   it("onMissing:'buffer' drops the oldest and warns when bufferLimit is exceeded", () => {
     const bus = createCommandBus({ onMissing: 'buffer', bufferLimit: 2 });
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    {
+      using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
-    bus.dispatch('later', { id: 1 });
-    bus.dispatch('later', { id: 2 });
-    bus.dispatch('later', { id: 3 }); // exceeds limit -> drop oldest (id 1) + warn
-    expect(warn).toHaveBeenCalledTimes(1);
-    warn.mockRestore();
+      bus.dispatch('later', { id: 1 });
+      bus.dispatch('later', { id: 2 });
+      bus.dispatch('later', { id: 3 }); // exceeds limit -> drop oldest (id 1) + warn
+      expect(warn).toHaveBeenCalledTimes(1);
+    }
 
     const seen: number[] = [];
     bus.register('later', (cmd) => { seen.push(cmd.target.id); });
@@ -2729,8 +2579,7 @@ describe('core dispatch - query, rollback, buffer & error defaults', () => {
     expect(e2.emitter).toBe('plugin');
   });
 
-  it('exact-listener unsubscribe is safe after offAll() cleared the bucket', () => {
-    const bus = createCommandBus();
+  it('exact-listener unsubscribe is safe after offAll() cleared the bucket', ({ bus }) => {
     const un = bus.on('exactOnly', () => {}); // no wildcard -> exact listener
     bus.offAll(); // clears the exact-listener map
     expect(() => un()).not.toThrow(); // bucket now undefined -> early return
@@ -2750,8 +2599,7 @@ describe('core dispatch - query, rollback, buffer & error defaults', () => {
     expect(aSeen).toEqual([1]);
   });
 
-  it('exact-listener unsubscribe is idempotent when called twice', () => {
-    const bus = createCommandBus();
+  it('exact-listener unsubscribe is idempotent when called twice', ({ bus }) => {
     const a = () => {};
     const unA = bus.on('evt', a);
     bus.on('evt', () => {}); // second listener keeps the bucket alive after unA
@@ -2769,19 +2617,17 @@ describe('core dispatch - query, rollback, buffer & error defaults', () => {
     //
     // So set the env FIRST and re-import, which is also a truer model of
     // production: the value is fixed before any of this code runs.
-    vi.stubEnv('NODE_ENV', 'production');
+    using _NODE_ENV = stubEnv('NODE_ENV', 'production');
     vi.resetModules();
     const { createCommandBus: freshBus } = await import('../src/command-bus');
 
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = freshBus({ onMissing: 'buffer', bufferLimit: 1 });
 
     bus.dispatch('x', { id: 1 });
     bus.dispatch('x', { id: 2 }); // overflow, but DEV === false -> no warn
 
     expect(warn).not.toHaveBeenCalled();
-    warn.mockRestore();
-    vi.unstubAllEnvs();
     vi.resetModules();
   });
 
@@ -2790,19 +2636,17 @@ describe('core dispatch - query, rollback, buffer & error defaults', () => {
     // second resolution path - the direct __VC_DEV__ build define used by
     // scripts/build.mjs for the IIFE bundles - and that path was untested
     // for this warning site.
-    vi.stubGlobal('__VC_DEV__', false);
+    using _VC_DEV = stubGlobal('__VC_DEV__', false);
     vi.resetModules();
     const { createCommandBus: freshBus } = await import('../src/command-bus');
 
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = freshBus({ onMissing: 'buffer', bufferLimit: 1 });
 
     bus.dispatch('x', { id: 1 });
     bus.dispatch('x', { id: 2 }); // overflow, but DEV === false -> no warn
 
     expect(warn).not.toHaveBeenCalled();
-    warn.mockRestore();
-    vi.unstubAllGlobals();
     vi.resetModules();
   });
 
@@ -2817,8 +2661,7 @@ describe('core dispatch - query, rollback, buffer & error defaults', () => {
     expect(matchesPattern('finalEvt.*', 'nope.x')).toBe(false);
   });
 
-  it('async rollback awaits an undo handler that returns a promise', async () => {
-    const bus = createAsyncCommandBus();
+  it('async rollback awaits an undo handler that returns a promise', async ({ asyncBus: bus }) => {
     const undone: string[] = [];
     bus.register('a', async () => 'ok', { undo: async () => { undone.push('async-undo'); } });
     bus.register('b', async () => { throw new Error('b-fail'); });
@@ -2881,8 +2724,7 @@ describe('commandKey - canonical serialization', () => {
 // ─── request() in-flight dedup now uses the canonical commandKey ─────────────────
 
 describe('request() dedup keys on canonical commandKey', () => {
-  it('dedups identical requests regardless of target key order', async () => {
-    const bus = createAsyncCommandBus();
+  it('dedups identical requests regardless of target key order', async ({ asyncBus: bus }) => {
     let calls = 0;
     bus.respond('act', async () => { calls++; await new Promise(r => setTimeout(r, 10)); return calls; });
     const [r1, r2] = await Promise.all([
@@ -2893,8 +2735,7 @@ describe('request() dedup keys on canonical commandKey', () => {
     expect(r1.value).toBe(r2.value);
   });
 
-  it('keeps nested-different requests separate - no false-dedup', async () => {
-    const bus = createAsyncCommandBus();
+  it('keeps nested-different requests separate - no false-dedup', async ({ asyncBus: bus }) => {
     let calls = 0;
     bus.respond('act', async () => { calls++; await new Promise(r => setTimeout(r, 10)); return calls; });
     await Promise.all([

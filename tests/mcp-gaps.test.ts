@@ -17,6 +17,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createMcpHandler, busToMcpTools, serveMcpStdio, agentOrigin } from '../src/mcp';
 import type { BusSchema } from '../src/schema';
+import { mcpClient } from '../src/vitest-pure';
 
 const SCHEMA = {
   cartAdd: { description: 'Add an item', target: { id: 'number' }, payload: { qty: 'number' } },
@@ -28,12 +29,8 @@ function makeHandler(overrides: { dispatch?: any; schema?: BusSchema; actions?: 
     { dispatch, getSchema: () => overrides.schema ?? SCHEMA },
     { actions: overrides.actions ?? ['*'] },
   );
-  return { handle, dispatch };
+  return { handle, mcp: mcpClient(handle), dispatch };
 }
-
-const call = (name: string, args?: unknown) => ({
-  jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name, arguments: args },
-});
 
 /** Detached in afterEach so a failing assertion cannot leak a stdin listener
  *  into the next test (it would answer that test's input through its spy). */
@@ -42,7 +39,6 @@ const stops: Array<() => void> = [];
 afterEach(() => {
   for (const stop of stops.splice(0)) stop();
   vi.unstubAllGlobals();
-  vi.restoreAllMocks();
 });
 
 // ---------------------------------------------------------------------------
@@ -53,30 +49,24 @@ describe('tools/call rejects inherited Object.prototype keys', () => {
   it.each(['constructor', '__proto__', 'toString', 'hasOwnProperty', 'valueOf'])(
     'refuses "%s" and never dispatches it',
     async (name) => {
-      const { handle, dispatch } = makeHandler();
+      const { mcp, dispatch } = makeHandler();
 
-      const reply: any = await handle(call(name, {}));
-      expect(reply.result.isError).toBe(true);
-      expect(reply.result.content[0].text).toContain('unknown or not permitted');
+      expect(await mcp.call(name, {})).toBeToolError('unknown or not permitted');
       expect(dispatch).not.toHaveBeenCalled();
     },
   );
 
   it('keeps dispatching real own-key tools', async () => {
-    const { handle, dispatch } = makeHandler();
-    const reply: any = await handle(call('cartAdd', { target: { id: 1 }, payload: { qty: 2 } }));
-    expect(reply.result.isError).toBeUndefined();
+    const { mcp, dispatch } = makeHandler();
+    expect(await mcp.call('cartAdd', { target: { id: 1 }, payload: { qty: 2 } })).toBeToolResult();
     expect(dispatch).toHaveBeenCalledTimes(1);
   });
 
   it('is consistent with tools/list - an unlisted name is uncallable', async () => {
-    const { handle } = makeHandler();
-    const listed: any = await handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
-    const names = listed.result.tools.map((t: any) => t.name);
-    expect(names).toEqual(['cartAdd']);
+    const { mcp } = makeHandler();
+    expect(await mcp.toolNames()).toEqual(['cartAdd']);
 
-    const reply: any = await handle(call('constructor', {}));
-    expect(reply.result.isError).toBe(true);
+    expect(await mcp.call('constructor', {})).toBeToolError();
   });
 });
 
@@ -87,13 +77,11 @@ describe('tools/call rejects inherited Object.prototype keys', () => {
 describe('callTool', () => {
   it('turns a throwing dispatch into an error result, not a protocol error', async () => {
     const dispatch = vi.fn(() => { throw new Error('handler exploded'); });
-    const { handle } = makeHandler({ dispatch });
+    const { mcp } = makeHandler({ dispatch });
 
-    const reply: any = await handle(call('cartAdd', { target: { id: 1 } }));
-    expect(reply.jsonrpc).toBe('2.0');
-    expect(reply.error).toBeUndefined(); // tool failures are results
-    expect(reply.result.isError).toBe(true);
-    expect(reply.result.content[0].text).toContain('handler exploded');
+    // call() throws on a protocol error, so a returned result is not one.
+    // tool failures are results
+    expect(await mcp.call('cartAdd', { target: { id: 1 } })).toBeToolError('handler exploded');
   });
 
   it('refuses a non-object payload instead of dispatching it unattributed', async () => {
@@ -107,12 +95,10 @@ describe('callTool', () => {
     // array, so those agent commands were indistinguishable from local ones.
     // See the end-to-end assertion in tests/mcp.test.ts.
     const dispatch = vi.fn(async () => ({ ok: true, value: 1 }));
-    const { handle } = makeHandler({ dispatch });
+    const { mcp } = makeHandler({ dispatch });
 
     for (const bad of ['a bare string', [1, 2], 42, true]) {
-      const reply: any = await handle(call('cartAdd', { target: { id: 1 }, payload: bad }));
-      expect(reply.result.isError).toBe(true);
-      expect(reply.result.content[0].text).toMatch(/payload must be an object/);
+      expect(await mcp.call('cartAdd', { target: { id: 1 }, payload: bad })).toBeToolError(/payload must be an object/);
     }
     // Refused at the boundary - the bus is never reached at all.
     expect(dispatch).not.toHaveBeenCalled();
@@ -130,21 +116,20 @@ describe('callTool', () => {
     // against a REAL bus in tests/mcp.test.ts ("never lets an MCP dispatch
     // reach a handler unattributed").
     const dispatch = vi.fn(async () => ({ ok: true, value: 1 }));
-    const { handle } = makeHandler({ dispatch });
+    const { mcp } = makeHandler({ dispatch });
 
     const sent = { qty: 2 };
-    await handle(call('cartAdd', { target: { id: 1 }, payload: sent }));
+    await mcp.call('cartAdd', { target: { id: 1 }, payload: sent });
     expect(dispatch.mock.calls[0]![2]).toBe(sent); // same object, not a copy
     expect(dispatch.mock.calls[0]![2]).toEqual({ qty: 2 }); // no marker key
 
-    await handle(call('cartAdd', { target: { id: 1 } }));
+    await mcp.call('cartAdd', { target: { id: 1 } });
     expect(dispatch.mock.calls[1]![2]).toBeUndefined(); // absent stays absent
   });
 
   it('rejects a missing tool name', async () => {
-    const { handle, dispatch } = makeHandler();
-    const reply: any = await handle(call('' as string, {}));
-    expect(reply.result.isError).toBe(true);
+    const { mcp, dispatch } = makeHandler();
+    expect(await mcp.call('', {})).toBeToolError();
     expect(dispatch).not.toHaveBeenCalled();
   });
 });

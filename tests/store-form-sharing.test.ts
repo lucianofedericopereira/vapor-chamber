@@ -7,11 +7,12 @@
  * being fixed, and both are the NORMAL usage of the feature - a store exists to
  * be shared, and `bus` is a documented form option.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, vi } from 'vitest';
 import { effectScope } from 'vue';
 import { createCommandBus } from '../src/command-bus';
 import { createFormBus } from '../src/form';
 import { defineChamberStore } from '../src/store';
+import { it } from '../src/vitest';
 
 describe('a store shared by two component scopes', () => {
   const makeStore = () =>
@@ -56,7 +57,7 @@ describe('a store shared by two component scopes', () => {
 
     scopeA.stop();
     scopeB.stop();
-    expect((b.add(1) as { ok: boolean }).ok).toBe(false);
+    expect((b.add(1) as { ok: boolean })).toFailWith('VC_CORE_NO_HANDLER');
 
     // A fresh scope gets a fresh store, not the disposed one.
     const scopeC = effectScope();
@@ -73,7 +74,7 @@ describe('a store shared by two component scopes', () => {
     const store = useCart(bus);
     expect((store.add(1) as { ok: boolean }).ok).toBe(true);
     store.$dispose();
-    expect((store.add(2) as { ok: boolean }).ok).toBe(false);
+    expect((store.add(2) as { ok: boolean })).toFailWith('VC_CORE_NO_HANDLER');
   });
 });
 
@@ -87,11 +88,9 @@ describe('two forms on one injected bus', () => {
     createFormBus({ fields: { email: '' }, bus });
 
     expect(() => createFormBus({ fields: { nickname: '' }, bus })).toThrow(/already on this bus/);
-    vi.restoreAllMocks();
   });
 
-  it('keeps two ids isolated, writes and all', () => {
-    const bus = createCommandBus();
+  it('keeps two ids isolated, writes and all', ({ bus }) => {
     const login = createFormBus({ fields: { email: '' }, bus, id: 'login' });
     const signup = createFormBus({ fields: { nickname: '' }, bus, id: 'signup' });
 
@@ -102,10 +101,9 @@ describe('two forms on one injected bus', () => {
     expect(signup.values.value).toEqual({ nickname: 'luciano' });
   });
 
-  it('keeps the historical action names for a single form', () => {
+  it('keeps the historical action names for a single form', ({ bus }) => {
     // The default id is 'form', so a lone form dispatches exactly what it
     // always did - devtools, metrics and logger see no rename.
-    const bus = createCommandBus();
     const seen: string[] = [];
     bus.onAfter((cmd) => { seen.push(cmd.action); });
     const form = createFormBus({ fields: { email: '' }, bus });
@@ -115,8 +113,7 @@ describe('two forms on one injected bus', () => {
     expect(seen).toEqual(['formSet', 'formTouch', 'formReset']);
   });
 
-  it('dispose() frees the prefix so a later form can claim it', () => {
-    const bus = createCommandBus();
+  it('dispose() frees the prefix so a later form can claim it', ({ bus }) => {
     const first = createFormBus({ fields: { email: '' }, bus });
     first.dispose();
     expect(() => createFormBus({ fields: { email: '' }, bus })).not.toThrow();

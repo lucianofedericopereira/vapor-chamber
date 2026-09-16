@@ -104,7 +104,7 @@ describe.skipIf(!haveDist)('DEV folds in every production chunk (Vite build API)
     expect(code[0]).toMatch(PROBE);
     expect(code[0]).not.toContain(HINT);
     for (const s of UNFOLDED) expect(code[0]).not.toContain(s);
-  }, 60_000);
+  });
 
   it('code-split islands sharing a store (the vapor-island-cart shape)', async () => {
     const code = await chunks('split.js');
@@ -117,7 +117,7 @@ describe.skipIf(!haveDist)('DEV folds in every production chunk (Vite build API)
       expect(c).not.toContain(HINT);
       for (const s of UNFOLDED) expect(c).not.toContain(s);
     }
-  }, 60_000);
+  });
 });
 
 /** Every ESM chunk this package ships, IIFEs excluded. */

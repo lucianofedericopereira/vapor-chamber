@@ -9,7 +9,7 @@
  *   - 472-507 getErrorEntry, describeErrorCodes, busApiSchema
  */
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, expect, vi } from 'vitest';
 import {
   schemaLogger,
   describeSchema,
@@ -21,9 +21,8 @@ import {
   ERROR_CODE_REGISTRY,
   type BusSchema,
 } from '../src/schema';
-import { createCommandBus } from '../src/command-bus';
+import { it } from '../src/vitest';
 
-afterEach(() => vi.restoreAllMocks());
 
 // ---------------------------------------------------------------------------
 // toCamel - leading-uppercase branch (line 90), reached via normalizeSchema
@@ -43,13 +42,12 @@ describe('toCamel leading-uppercase normalization', () => {
   });
 
   it('combines separator and leading-uppercase normalization', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using _warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     // 'Cart_Add' exercises both the separator replace and the leading-uppercase replace.
     const bus = createSchemaCommandBus({ Cart_Add: { description: 'Add' } });
 
     expect(bus.getSchema()).toHaveProperty('cartAdd');
-    warn.mockRestore();
   });
 });
 
@@ -58,8 +56,7 @@ describe('toCamel leading-uppercase normalization', () => {
 // ---------------------------------------------------------------------------
 
 describe('schemaLogger else branches', () => {
-  it('logs raw target without a checkmark when the action has no schema def (line 201)', () => {
-    const bus = createCommandBus();
+  it('logs raw target without a checkmark when the action has no schema def (line 201)', ({ bus }) => {
     vi.spyOn(console, 'groupCollapsed').mockImplementation(() => {});
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'groupEnd').mockImplementation(() => {});
@@ -76,8 +73,7 @@ describe('schemaLogger else branches', () => {
     expect(targetCall?.[1]).toEqual({ anything: true });
   });
 
-  it('logs raw payload without a checkmark when the action has no payload schema (line 208)', () => {
-    const bus = createCommandBus();
+  it('logs raw payload without a checkmark when the action has no payload schema (line 208)', ({ bus }) => {
     vi.spyOn(console, 'groupCollapsed').mockImplementation(() => {});
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'groupEnd').mockImplementation(() => {});

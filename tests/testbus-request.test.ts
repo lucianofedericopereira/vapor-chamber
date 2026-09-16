@@ -29,8 +29,7 @@ describe('TestBus request()/respond()', () => {
 
     const r = await bus.request('q', 42, { p: 1 });
 
-    expect(r.ok).toBe(true);
-    expect(r.value).toBe('answer for 42');
+    expect(r).toSucceedWith('answer for 42');
     expect(bus.wasDispatched('q')).toBe(true);
     expect(bus.getDispatched('q')[0].cmd.payload).toEqual({ p: 1 });
     expect((bus.getDispatched('q')[0].cmd as any).seenByPlugin).toBe(true);

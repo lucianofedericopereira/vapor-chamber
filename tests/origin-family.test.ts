@@ -9,7 +9,7 @@
  * `try`, so the flag holds. On an async bus the plugin chain runs a microtask
  * later, after `finally` already fired.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, expect, vi, beforeEach, afterEach } from 'vitest';
 import {
   createAsyncCommandBus,
   createCommandBus,
@@ -23,14 +23,14 @@ import { createTestBus } from '../src/testing';
 import { idempotent } from '../src/plugins-extra';
 import { useCommandHistory } from '../src/chamber';
 import { createMcpHandler } from '../src/mcp';
+import { it } from '../src/vitest';
 
 // ---------------------------------------------------------------------------
 // 18 - agentOrigin across an await
 // ---------------------------------------------------------------------------
 
 describe('item 18 - MCP origin attribution on an async bus', () => {
-  it('stamps the MCP dispatch and only the MCP dispatch', async () => {
-    const bus = createAsyncCommandBus();
+  it('stamps the MCP dispatch and only the MCP dispatch', async ({ asyncBus: bus }) => {
     const origins: Array<{ action: string; origin: unknown }> = [];
     bus.use(async (cmd, next) => {
       origins.push({ action: cmd.action, origin: cmd.meta?.origin });
@@ -141,8 +141,7 @@ describe('item 24 - sync() on an async bus does not loop', () => {
 describe('item 28 - redo() on an async bus records once', () => {
   afterEach(() => resetCommandBus());
 
-  it('past contains the redone command exactly once', async () => {
-    const bus = createAsyncCommandBus();
+  it('past contains the redone command exactly once', async ({ asyncBus: bus }) => {
     setCommandBus(bus as never);
     bus.register('add', async () => 'ok', { undo: () => {} });
 
@@ -160,11 +159,10 @@ describe('item 28 - redo() on an async bus records once', () => {
     expect(history.canRedo.value).toBe(false);
   });
 
-  it('a PRIMITIVE payload (which cannot carry __origin) still records once - identity fallback', async () => {
+  it('a PRIMITIVE payload (which cannot carry __origin) still records once - identity fallback', async ({ asyncBus: bus }) => {
     // The marker rides the payload object; a primitive payload has nowhere
     // to put it. redo() arms a one-shot identity match instead. Without it,
     // the hook records the redo a second time on BOTH bus types.
-    const bus = createAsyncCommandBus();
     setCommandBus(bus as never);
     bus.register('setCount', async () => 'ok', { undo: () => {} });
 
@@ -182,8 +180,7 @@ describe('item 28 - redo() on an async bus records once', () => {
     expect(history.canRedo.value).toBe(false);
   });
 
-  it('the identity fallback is one-shot - a later identical dispatch records normally', async () => {
-    const bus = createAsyncCommandBus();
+  it('the identity fallback is one-shot - a later identical dispatch records normally', async ({ asyncBus: bus }) => {
     setCommandBus(bus as never);
     const target = { id: 1 };
     bus.register('setCount', async () => 'ok', { undo: () => {} });
@@ -210,7 +207,7 @@ describe('item 28 - redo() on an async bus records once', () => {
 
 describe('item 33 - createReaction cycles', () => {
   it('refuses a directly self-matching reaction at install', () => {
-    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    using error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const bus = createCommandBus();
     let runs = 0;
     bus.register('cartRecalculate', () => {
@@ -223,11 +220,10 @@ describe('item 33 - createReaction cycles', () => {
 
     expect(error).toHaveBeenCalledWith(expect.stringContaining('matches its own target'));
     expect(runs).toBe(1); // the dispatch itself, with no reaction feedback
-    error.mockRestore();
   });
 
   it('allowSelfMatch still caps the chain at maxHops on an async bus', async () => {
-    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    using error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const bus = createAsyncCommandBus();
     let runs = 0;
     bus.register('cartRecalculate', async () => {
@@ -241,7 +237,6 @@ describe('item 33 - createReaction cycles', () => {
 
     expect(runs).toBeLessThanOrEqual(4); // original + 3 hops
     expect(error).toHaveBeenCalledWith(expect.stringContaining('maxHops'));
-    error.mockRestore();
   });
 
   // The hop counter rides `__reactionHops` in the payload - the same convention
@@ -255,7 +250,7 @@ describe('item 33 - createReaction cycles', () => {
     ['an array', () => [1, 2]],
     ['a string', () => 'x'],
   ])('caps the chain at maxHops when mapPayload returns %s', (_label, mapPayload) => {
-    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    using error = vi.spyOn(console, 'error').mockImplementation(() => {});
     const bus = createCommandBus();
     let runs = 0;
     bus.register('cartRecalculate', () => {
@@ -273,11 +268,9 @@ describe('item 33 - createReaction cycles', () => {
     // Without the marker the chain runs until MAX_DISPATCH_DEPTH (16) instead.
     expect(runs).toBeLessThanOrEqual(4); // original + 3 hops
     expect(error).toHaveBeenCalledWith(expect.stringContaining('maxHops'));
-    error.mockRestore();
   });
 
-  it('propagates causation even when mapPayload returns a primitive', () => {
-    const bus = createCommandBus();
+  it('propagates causation even when mapPayload returns a primitive', ({ bus }) => {
     const seen: Array<{ causationId?: string }> = [];
     bus.register('cartAdd', () => 1);
     bus.register('inventoryCheck', (cmd) => {
@@ -292,8 +285,7 @@ describe('item 33 - createReaction cycles', () => {
     expect(seen[0].causationId).toBeDefined();
   });
 
-  it('a normal (non-self-matching) reaction is unaffected', () => {
-    const bus = createCommandBus();
+  it('a normal (non-self-matching) reaction is unaffected', ({ bus }) => {
     const dst = vi.fn(() => 1);
     bus.register('cartAdd', () => 1);
     bus.register('inventoryCheck', dst);
@@ -355,8 +347,7 @@ describe('item 19 - TestBus commands carry meta', () => {
 // ---------------------------------------------------------------------------
 
 describe('_withOrigin - slot discipline', () => {
-  it('is one-shot: only the FIRST dispatch inside the callback is marked', () => {
-    const bus = createCommandBus();
+  it('is one-shot: only the FIRST dispatch inside the callback is marked', ({ bus }) => {
     const origins: unknown[] = [];
     bus.register('a', (cmd: any) => { origins.push(cmd.meta?.origin); return 1; });
 
@@ -386,8 +377,7 @@ describe('_withOrigin - slot discipline', () => {
     expect(origins).toEqual([undefined]);
   });
 
-  it('survives an await: the slot is consumed in the synchronous prologue', async () => {
-    const bus = createAsyncCommandBus();
+  it('survives an await: the slot is consumed in the synchronous prologue', async ({ asyncBus: bus }) => {
     const origins: unknown[] = [];
     bus.register('a', async (cmd: any) => { origins.push(cmd.meta?.origin); return 1; });
 
@@ -398,8 +388,7 @@ describe('_withOrigin - slot discipline', () => {
     expect(origins).toEqual(['agent', undefined]);
   });
 
-  it('an explicit __origin payload key still works (public convention)', () => {
-    const bus = createCommandBus();
+  it('an explicit __origin payload key still works (public convention)', ({ bus }) => {
     const origins: unknown[] = [];
     bus.register('a', (cmd: any) => { origins.push(cmd.meta?.origin); return 1; });
 

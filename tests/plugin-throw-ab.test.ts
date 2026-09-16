@@ -58,6 +58,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import * as shippedMod from '../src/command-bus';
+import { underCoverage } from './under-coverage';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // Per-file subdir: the whole dir is removed in afterAll, so it must be ours alone.
@@ -203,8 +204,6 @@ const ROWS: Array<[string, (m: Mod) => number | Promise<number>]> = [
 const ROUNDS = 11;
 
 describe('plugin-throw work on the bus - real path A/B', () => {
-  const underCoverage = process.env.npm_lifecycle_event === 'test:coverage';
-
   it.skipIf(underCoverage)('agrees where it must, differs where intended, and measures the cost', async () => {
     mkdirSync(REF_DIR, { recursive: true });
     // EVERY timed arm is a derived copy written and loaded the same way -
@@ -223,45 +222,46 @@ describe('plugin-throw work on the bus - real path A/B', () => {
     for (const [name, groups] of Object.entries(ARMS)) await load(name, groups);
     await load('self', ARMS[names[0]]);
     await load('shipped', []);
-    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    {
+      using _errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-    // --- equivalence: neither change touches a path that does not throw -------
-    const shape = (r: any) => ({ ok: r.ok, value: r.value, msg: r.error?.message });
-    for (const other of [arms.bare, arms.preSettle]) {
-      for (const onMissing of ['error', 'ignore'] as const) {
-        for (const plugins of [0, 3]) {
-          const a = shippedMod.createCommandBus({ onMissing });
-          const b = other.createCommandBus({ onMissing });
-          const aa = shippedMod.createAsyncCommandBus({ onMissing });
-          const ab = other.createAsyncCommandBus({ onMissing });
-          for (const bus of [a, b, aa, ab] as any[]) {
-            for (let p = 0; p < plugins; p++) bus.use(SYNC_PLUGINS[p]);
-            bus.on('*', noop);
-            bus.register('t', (c: any) => c.target);
-            bus.register('bad', () => { throw new Error('boom'); });
-          }
-          for (const action of ['t', 'bad', 'missing']) {
-            expect(shape(a.dispatch(action, 1))).toEqual(shape(b.dispatch(action, 1)));
-            expect(shape(await aa.dispatch(action, 1))).toEqual(shape(await ab.dispatch(action, 1)));
+      // --- equivalence: neither change touches a path that does not throw -------
+      const shape = (r: any) => ({ ok: r.ok, value: r.value, msg: r.error?.message });
+      for (const other of [arms.bare, arms.preSettle]) {
+        for (const onMissing of ['error', 'ignore'] as const) {
+          for (const plugins of [0, 3]) {
+            const a = shippedMod.createCommandBus({ onMissing });
+            const b = other.createCommandBus({ onMissing });
+            const aa = shippedMod.createAsyncCommandBus({ onMissing });
+            const ab = other.createAsyncCommandBus({ onMissing });
+            for (const bus of [a, b, aa, ab] as any[]) {
+              for (let p = 0; p < plugins; p++) bus.use(SYNC_PLUGINS[p]);
+              bus.on('*', noop);
+              bus.register('t', (c: any) => c.target);
+              bus.register('bad', () => { throw new Error('boom'); });
+            }
+            for (const action of ['t', 'bad', 'missing']) {
+              expect(shape(a.dispatch(action, 1))).toEqual(shape(b.dispatch(action, 1)));
+              expect(shape(await aa.dispatch(action, 1))).toEqual(shape(await ab.dispatch(action, 1)));
+            }
           }
         }
       }
+      // --- intended difference 1: a throwing plugin is a result, not an escape ---
+      const thrower = () => { throw new Error('plugin bug'); };
+      const s0 = arms.bare.createCommandBus(); s0.use(thrower); s0.register('t', () => 1);
+      const s1 = shippedMod.createCommandBus(); s1.use(thrower); s1.register('t', () => 1);
+      expect(() => s0.dispatch('t', 1)).toThrow('plugin bug');
+      expect((s1.dispatch('t', 1).error as any).code).toBe('VC_PLUGIN_THREW');
+      // --- intended difference 2: onMissing 'throw' settles before it throws ----
+      for (const [m, expected] of [[arms.preSettle, 0], [shippedMod, 1]] as const) {
+        const bus = m.createCommandBus({ onMissing: 'throw' });
+        let settled = 0;
+        bus.on('*', () => { settled++; });
+        expect(() => bus.dispatch('nobody', 1)).toThrow('No handler');
+        expect(settled).toBe(expected);
+      }
     }
-    // --- intended difference 1: a throwing plugin is a result, not an escape ---
-    const thrower = () => { throw new Error('plugin bug'); };
-    const s0 = arms.bare.createCommandBus(); s0.use(thrower); s0.register('t', () => 1);
-    const s1 = shippedMod.createCommandBus(); s1.use(thrower); s1.register('t', () => 1);
-    expect(() => s0.dispatch('t', 1)).toThrow('plugin bug');
-    expect((s1.dispatch('t', 1).error as any).code).toBe('VC_PLUGIN_THREW');
-    // --- intended difference 2: onMissing 'throw' settles before it throws ----
-    for (const [m, expected] of [[arms.preSettle, 0], [shippedMod, 1]] as const) {
-      const bus = m.createCommandBus({ onMissing: 'throw' });
-      let settled = 0;
-      bus.on('*', () => { settled++; });
-      expect(() => bus.dispatch('nobody', 1)).toThrow('No handler');
-      expect(settled).toBe(expected);
-    }
-    errSpy.mockRestore();
 
     // --- measurement --------------------------------------------------------
     const order = Object.keys(arms);
@@ -282,5 +282,5 @@ describe('plugin-throw work on the bus - real path A/B', () => {
       }
     }
     console.log(`\n  plugin-throw work - real path, ${ROUNDS} rotated rounds, gc=${!!gc}, NODE_ENV=${process.env.NODE_ENV}; time ratios, >1 slower\n${lines.join('\n')}\n`);
-  }, 600_000);
+  });
 });

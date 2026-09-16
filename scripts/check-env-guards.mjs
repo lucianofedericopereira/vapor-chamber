@@ -25,8 +25,12 @@ const SRC = join(ROOT, 'src');
  * - command-bus.ts / devtools.ts - bundler-only surfaces where the bare
  *   literal is load-bearing for dead-code elimination (commented at the site).
  * - vite-hmr.ts - a Vite plugin; it only ever executes inside Node.
+ * - vitest-pure.ts - test tooling, never delivered to a page; `stubEnv` writes
+ *   the `process.env` a Vitest Node worker reads `import.meta.env` from.
+ * - vitest-mcp.ts - an MCP server that runs in Node; it passes its environment,
+ *   less Vitest's worker variables, to the coverage run it starts.
  */
-const ALLOWLIST = new Set(['src/command-bus.ts', 'src/devtools.ts', 'src/vite-hmr.ts']);
+const ALLOWLIST = new Set(['src/command-bus.ts', 'src/devtools.ts', 'src/vite-hmr.ts', 'src/vitest-pure.ts', 'src/vitest-mcp.ts']);
 
 const TYPEOF_GUARD = /typeof\s+process\s*!==\s*['"]undefined['"]/;
 const READ = /\bprocess\.env\b/;

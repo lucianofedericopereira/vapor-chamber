@@ -56,13 +56,14 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { describe, expect } from 'vitest';
 import { effectScope } from 'vue';
 import { createCommandBus, inspectBus } from '../src/command-bus';
 import { defineChamberStore } from '../src/store';
 import { getCommandBus, resetCommandBus, setCommandBus, signal } from '../src/chamber';
 import { history } from '../src/plugins-core';
 import { persist } from '../src/plugins-io';
+import { it } from '../src/vitest';
 
 /**
  * The surface the store will compose. Real assertions today: each one is a
@@ -173,8 +174,7 @@ const useCart = defineChamberStore('cart', {
 
 describe('defineChamberStore - behaviour', () => {
 
-  it('replaces state wholesale and never hands back a deep proxy', () => {
-    const bus = createCommandBus();
+  it('replaces state wholesale and never hands back a deep proxy', ({ bus }) => {
     const cart = useCart(bus);
     const before = cart.state.value;
     cart.add(1);
@@ -185,8 +185,7 @@ describe('defineChamberStore - behaviour', () => {
     bus.dispose();
   });
 
-  it('mutates ONLY through a dispatch - state has no setter', () => {
-    const bus = createCommandBus();
+  it('mutates ONLY through a dispatch - state has no setter', ({ bus }) => {
     const cart = useCart(bus);
     // The bus is the only mutation channel. A direct write must not be a
     // second one, so `state` is a getter and assignment throws under ESM
@@ -211,8 +210,7 @@ describe('defineChamberStore - behaviour', () => {
     bus.dispose();
   });
 
-  it('returns the same instance for one id and an independent one for another', () => {
-    const bus = createCommandBus();
+  it('returns the same instance for one id and an independent one for another', ({ bus }) => {
     const useOther = defineChamberStore('wish', { state: () => ({ items: [] as number[] }), actions: { add: (s, id: number) => ({ items: [...s.items, id] }) } });
     expect(useCart(bus)).toBe(useCart(bus));
     useCart(bus).add(1);
@@ -236,8 +234,7 @@ describe('defineChamberStore - behaviour', () => {
     b.dispose();
   });
 
-  it('$reset builds a fresh state, never reusing a nested reference', () => {
-    const bus = createCommandBus();
+  it('$reset builds a fresh state, never reusing a nested reference', ({ bus }) => {
     const cart = useCart(bus);
     cart.add(1);
     const dirty = cart.state.value;
@@ -272,8 +269,7 @@ describe('defineChamberStore - behaviour', () => {
     bus.dispose();
   });
 
-  it('the existing plugins apply to store actions with no store-specific code', () => {
-    const bus = createCommandBus();
+  it('the existing plugins apply to store actions with no store-specific code', ({ bus }) => {
     const cart = useCart(bus);
     const hist = history({ maxSize: 10, bus });
     bus.use(hist);
@@ -294,8 +290,7 @@ describe('defineChamberStore - behaviour', () => {
     bus.dispose();
   });
 
-  it('reads the registry with a Map, so a store id cannot collide with Object.prototype', () => {
-    const bus = createCommandBus();
+  it('reads the registry with a Map, so a store id cannot collide with Object.prototype', ({ bus }) => {
     const useCtor = defineChamberStore('constructor', { state: () => ({ n: 0 }), actions: { bump: (s) => ({ n: s.n + 1 }) } });
     const store = useCtor(bus);
     store.bump();
@@ -325,8 +320,7 @@ describe('URL-backed fields - pattern 4B', () => {
     };
   }
 
-  it('reads a url field through the router and owns no signal for it', () => {
-    const bus = createCommandBus();
+  it('reads a url field through the router and owns no signal for it', ({ bus }) => {
     const router = fakeRouter();
     router.currentRoute.value.location.query.page = '3';
     const catalog = useCatalog(bus, router as never);
@@ -338,8 +332,7 @@ describe('URL-backed fields - pattern 4B', () => {
     bus.dispose();
   });
 
-  it('writes a url field through setQuery, so the router stays the single writer', () => {
-    const bus = createCommandBus();
+  it('writes a url field through setQuery, so the router stays the single writer', ({ bus }) => {
     const router = fakeRouter();
     const catalog = useCatalog(bus, router as never);
 
@@ -350,8 +343,7 @@ describe('URL-backed fields - pattern 4B', () => {
     bus.dispose();
   });
 
-  it('takes the first value when the query key repeats', () => {
-    const bus = createCommandBus();
+  it('takes the first value when the query key repeats', ({ bus }) => {
     const router = fakeRouter();
     router.currentRoute.value.location.query.page = ['2', '5'];
     const catalog = useCatalog(bus, router as never);
@@ -360,14 +352,12 @@ describe('URL-backed fields - pattern 4B', () => {
     bus.dispose();
   });
 
-  it('refuses url fields with no router, loudly and by name', () => {
-    const bus = createCommandBus();
+  it('refuses url fields with no router, loudly and by name', ({ bus }) => {
     expect(() => useCatalog(bus)).toThrow(/declares url fields \(page\).*no router was passed/s);
     bus.dispose();
   });
 
-  it('a store with no url fields needs no router at all', () => {
-    const bus = createCommandBus();
+  it('a store with no url fields needs no router at all', ({ bus }) => {
     const plain = useCart(bus);
     expect(plain.url).toEqual({});
     plain.$dispose();

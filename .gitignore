@@ -10,6 +10,11 @@ coverage/
 # Bench-run outputs
 bench.txt
 
+# A/B test baselines: each tests/*-ab.test.ts writes tests/__ref/<name>/ during
+# a run and removes it in afterAll, so a commit made while the suite runs
+# would pick them up.
+tests/__ref/
+
 # Test/coverage counts for stamp-docs (scripts/test-counts-reporter.mjs).
 # Deliberately not committed: the counts depend on what else has run (8 files
 # skip without dist/, 2 more tests skip under coverage), so the file would churn

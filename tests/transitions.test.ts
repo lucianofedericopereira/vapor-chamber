@@ -245,7 +245,7 @@ describe('createTransitionBridge', () => {
 // for exactly this reason; this module did not.
 describe('createTransitionBridge - done() timeout', () => {
   it('calls done() when an async handler never settles', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createAsyncCommandBus();
     bus.register('modalLeave', () => new Promise<never>(() => {})); // never settles
 
@@ -258,11 +258,10 @@ describe('createTransitionBridge - done() timeout', () => {
 
     expect(doneCalled).toBe(true);
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('did not settle within 20ms'));
-    warn.mockRestore();
   });
 
   it('does not call done() twice when the handler settles after the timeout', async () => {
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using _warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     let release!: () => void;
     const bus = createAsyncCommandBus();
     bus.register('modalEnter', () => new Promise<void>((resolve) => { release = resolve; }));
@@ -278,11 +277,10 @@ describe('createTransitionBridge - done() timeout', () => {
     // Calling done() twice would have Vue finish a transition it already
     // finished, so `settled` makes it exactly-once.
     expect(calls).toBe(1);
-    vi.restoreAllMocks();
   });
 
   it('clears the timer when the handler wins the race', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createAsyncCommandBus();
     bus.register('modalEnter', async () => 'fast');
 
@@ -294,12 +292,11 @@ describe('createTransitionBridge - done() timeout', () => {
 
     expect(calls).toBe(1);
     expect(warn).not.toHaveBeenCalled(); // no timeout warning: the timer was cleared
-    warn.mockRestore();
   });
 
   it('a NaN timeout falls back to the documented default, never to a stuck element', async () => {
     vi.useFakeTimers();
-    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using _warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createAsyncCommandBus();
     bus.register('modalLeave', () => new Promise<never>(() => {}));
 
@@ -319,7 +316,6 @@ describe('createTransitionBridge - done() timeout', () => {
     await vi.advanceTimersByTimeAsync(30_000);
     expect(doneCalled).toBe(true);
 
-    vi.restoreAllMocks();
     vi.useRealTimers();
   });
 });

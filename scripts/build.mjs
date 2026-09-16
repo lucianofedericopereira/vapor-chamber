@@ -202,6 +202,9 @@ await build({
         'transitions':'src/transitions.ts',
         'ssr':        'src/ssr.ts',
         'vite-hmr':   'src/vite-hmr.ts',
+        'vitest':     'src/vitest.ts',
+        'vitest-pure': 'src/vitest-pure.ts',
+        'vitest-mcp': 'src/vitest-mcp.ts',
         'fast-lane':  'src/fast-lane.ts',
         'observable': 'src/observable.ts',
         'plugins-schema': 'src/plugins-schema.ts',
@@ -226,7 +229,13 @@ await build({
       formats: ['es'],
     },
     rollupOptions: {
-      external: ['vue', '@vue/devtools-api', '@vue/reactivity'],
+      // `vitest` is the test entry's peer. `vapor-chamber` is that entry's lazy
+      // import of this package by name: bundled, it would resolve through the
+      // self-link to a second copy of the library or a chunk shared with the
+      // root, where the setup file and the tests must share one instance.
+      // The MCP server entry runs in Node: `vitest/node` is the peer, `vapor-chamber/mcp`
+      // the package itself, as above, and Node's built-ins are never bundled.
+      external: ['vue', '@vue/devtools-api', '@vue/reactivity', 'vitest', 'vapor-chamber', 'vitest/node', 'vapor-chamber/mcp', /^node:/],
       output: {
         preserveModules: false,
         // Stable shared-chunk names, not `chamber-T4ImeORN.js`. Content hashes

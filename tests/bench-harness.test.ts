@@ -25,15 +25,15 @@
  * the contract that makes that the only correct shape.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
 import { getCommandBus, resetCommandBus, setCommandBus, useCommandHistory } from '../src/chamber';
+import { it } from '../src/vitest';
 
 afterEach(() => resetCommandBus());
 
 describe('useCommandHistory bus selection', () => {
-  it('observes the shared bus, so a bench must install its bus there', () => {
-    const bus = createCommandBus();
+  it('observes the shared bus, so a bench must install its bus there', ({ bus }) => {
     setCommandBus(bus);
     bus.register('act', (cmd) => cmd.target);
     const history = useCommandHistory({});
@@ -43,8 +43,7 @@ describe('useCommandHistory bus selection', () => {
     expect(history.past.value).toHaveLength(10);
   });
 
-  it('undo + redo reach the marked-dispatch path on that bus', () => {
-    const bus = createCommandBus();
+  it('undo + redo reach the marked-dispatch path on that bus', ({ bus }) => {
     setCommandBus(bus);
     let runs = 0;
     bus.register('act', (cmd) => {

@@ -50,6 +50,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
+import { underCoverage } from './under-coverage';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // Per-file subdir: the whole dir is removed in afterAll, so it must be ours alone.
@@ -107,8 +108,6 @@ function opsPerSec(factory: Factory, wilds: string[], n: number, iters: number):
 }
 
 describe('wildcard listener prefix - real dispatch path A/B', () => {
-  const underCoverage = process.env.npm_lifecycle_event === 'test:coverage';
-
   it.skipIf(underCoverage)('matches the baseline exactly, and measures the difference', async () => {
     buildBaseline();
     const base = (await import(/* @vite-ignore */ BASELINE)) as { createCommandBus: Factory };
@@ -196,5 +195,5 @@ describe('wildcard listener prefix - real dispatch path A/B', () => {
       expect(r.old).toBeGreaterThan(0);
       expect(r.neu).toBeGreaterThan(0);
     }
-  }, 120_000);
+  });
 });

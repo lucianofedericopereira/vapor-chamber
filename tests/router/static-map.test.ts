@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createRouteTable } from '../../src/router/table';
 import type { RouteRecord } from '../../src/router/types';
+import { underCoverage } from '../under-coverage';
 
 describe('static fast path - correctness', () => {
   it('does not let a static row jump ahead of an earlier parameterised row', () => {
@@ -57,7 +58,6 @@ describe('static fast path - cost', () => {
   // assertion, was the source of the flake. (It used to say "there is no
   // assertion" - and there was not, only `expect(true).toBe(true)`. It now
   // asserts the resolves it already performs, so the reporter can fail.)
-  const underCoverage = process.env.npm_lifecycle_event === 'test:coverage';
   it.skipIf(underCoverage)('measures build and resolve', () => {
     const rows: RouteRecord[] = [{ name: 'shell', path: '/', parent: null }];
     for (let i = 0; i < 300; i++) {
@@ -92,5 +92,9 @@ describe('static fast path - cost', () => {
     // casts it. Asserting the cast was my first guess and it was wrong.
     expect(table.resolve('/thing/9')?.params.id).toBe('9');
     expect(table.resolve('/nope/nope')).toBeNull();
-  }, 20000);
+    // A cost test, so it gets the measurement budget rather than the suite
+    // default: 20 000 ms was authored against a machine where this work took a
+    // second or two. Under full-suite load it reported `param 11292 ms, miss
+    // 13010 ms` - 24 s of real measurement - and was killed mid-run.
+  });
 });

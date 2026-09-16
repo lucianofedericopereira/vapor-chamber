@@ -8,11 +8,12 @@
  * Both assertions below were verified to FAIL against the pre-fix code.
  */
 
-import { describe, expect, it } from 'vitest';
-import { commandKey, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
+import { describe, expect } from 'vitest';
+import { commandKey } from '../src/command-bus';
 import { createFormBus } from '../src/form';
 import { optimistic, validator } from '../src/plugins-core';
 import { validateSchemas, validateSchemasAsync } from '../src/plugins-schema';
+import { it } from '../src/vitest';
 
 describe('commandKey - an own __proto__ key must not be swallowed', () => {
   // `JSON.parse` produces an OWN `__proto__` property; an HTTP bridge handing a
@@ -51,8 +52,7 @@ describe('plugin maps keyed by action name', () => {
   // it was never given.
   const INHERITED = ['constructor', 'toString', 'valueOf', 'hasOwnProperty'] as const;
 
-  it('validator() does not run an inherited member as a rule', () => {
-    const bus = createCommandBus();
+  it('validator() does not run an inherited member as a rule', ({ bus }) => {
     bus.use(validator({ real: () => 'nope' }));
     for (const action of INHERITED) {
       bus.register(action, () => 'ran');
@@ -65,8 +65,7 @@ describe('plugin maps keyed by action name', () => {
     expect(bus.dispatch('real', {}).ok).toBe(false);
   });
 
-  it('optimistic() does not treat an inherited member as a handler config', () => {
-    const bus = createCommandBus();
+  it('optimistic() does not treat an inherited member as a handler config', ({ bus }) => {
     bus.use(optimistic({ real: { apply: () => null } }));
     for (const action of INHERITED) {
       bus.register(action, () => 'ran');
@@ -78,8 +77,7 @@ describe('plugin maps keyed by action name', () => {
     }
   });
 
-  it('validateSchemas() does not validate against an inherited member', () => {
-    const bus = createCommandBus();
+  it('validateSchemas() does not validate against an inherited member', ({ bus }) => {
     bus.use(validateSchemas({ real: { '~standard': { version: 1, vendor: 't', validate: () => ({ issues: [{ message: 'bad' }] }) } } } as never));
     for (const action of INHERITED) {
       bus.register(action, () => 'ran');
@@ -91,11 +89,10 @@ describe('plugin maps keyed by action name', () => {
       expect(result.value).toBe('ran');
     }
     bus.register('real', () => 'ran');
-    expect(bus.dispatch('real', {}).ok).toBe(false);
+    expect(bus.dispatch('real', {})).toFailWith('VC_VALIDATION_FAILED');
   });
 
-  it('validateSchemasAsync() does not validate against an inherited member', async () => {
-    const bus = createAsyncCommandBus();
+  it('validateSchemasAsync() does not validate against an inherited member', async ({ asyncBus: bus }) => {
     bus.use(validateSchemasAsync({ real: { '~standard': { version: 1, vendor: 't', validate: () => ({ issues: [{ message: 'bad' }] }) } } } as never));
     for (const action of INHERITED) {
       bus.register(action, async () => 'ran');
@@ -104,7 +101,7 @@ describe('plugin maps keyed by action name', () => {
       expect(result.value).toBe('ran');
     }
     bus.register('real', async () => 'ran');
-    expect((await bus.dispatch('real', {})).ok).toBe(false);
+    expect((await bus.dispatch('real', {}))).toFailWith('VC_VALIDATION_FAILED');
   });
 });
 

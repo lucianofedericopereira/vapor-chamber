@@ -25,8 +25,9 @@
  * accepted one and its body ignored it. Pre-aborted, it settles before the
  * responder runs; aborted while waiting, at once, timer cleared.
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, expect, vi, afterEach } from 'vitest';
 import { createCommandBus, createAsyncCommandBus, type BusError, type Command, type CommandResult } from '../src/command-bus';
+import { it } from '../src/vitest';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -76,8 +77,7 @@ describe.each([
     bus.dispose();
     bus.respond('q', () => 'second');
     const r: CommandResult = await bus.request('q', {});
-    expect(r.ok).toBe(true);
-    expect(r.value).toBe('second');
+    expect(r).toSucceedWith('second');
   });
 
   it('a request that settled on its own leaves nothing for dispose()', async () => {
@@ -98,8 +98,7 @@ describe.each([
 });
 
 describe('sync bus: request() honours the caller signal', () => {
-  it('an already-aborted signal settles before the responder runs', async () => {
-    const bus = createCommandBus();
+  it('an already-aborted signal settles before the responder runs', async ({ bus }) => {
     const responder = vi.fn(() => 'answer');
     bus.respond('q', responder);
     const caller = new AbortController();
@@ -142,9 +141,8 @@ describe('sync bus: request() honours the caller signal', () => {
     expect(result?.value).toBe('late'); // settled once; the abort reached nothing
   });
 
-  it('the sync command carries no signal - the four fields every sync command has', async () => {
+  it('the sync command carries no signal - the four fields every sync command has', async ({ bus }) => {
     // The engine's own map check for this sits in tests/v8-shapes.test.ts.
-    const bus = createCommandBus();
     let requested: Command | undefined;
     bus.respond('q', (cmd) => { requested = cmd; return 'answer'; });
     const caller = new AbortController();
@@ -157,8 +155,7 @@ describe('sync bus: request() honours the caller signal', () => {
 });
 
 describe('async bus: the caller signal still reaches the responder', () => {
-  it('on cmd.signal, as before', async () => {
-    const bus = createAsyncCommandBus();
+  it('on cmd.signal, as before', async ({ asyncBus: bus }) => {
     let seen: AbortSignal | undefined;
     bus.respond('q', async (cmd) => { seen = cmd.signal; return 'answer'; });
     const caller = new AbortController();

@@ -4,9 +4,10 @@
  * distinct same-key commands (as opposed to the in-flight dedup the bus already
  * has, which collapses *identical* requests).
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, expect, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
 import { serialize } from '../src/plugins-extra';
+import { it } from '../src/vitest';
 
 const tick = (ms = 0) => new Promise<void>((r) => setTimeout(r, ms));
 
@@ -70,8 +71,7 @@ describe('serialize plugin', () => {
     expect(accounts.a).toBe(3); // applied strictly in order
   });
 
-  it('CONTROL: without serialize the same race loses updates', async () => {
-    const bus = createAsyncCommandBus();
+  it('CONTROL: without serialize the same race loses updates', async ({ asyncBus: bus }) => {
     const accounts: Record<string, number> = { a: 0 };
     // Barrier: all three READ, then wait until all three have read before any
     // WRITE - deterministically forces the lost-update race (no timer reliance).
@@ -91,8 +91,7 @@ describe('serialize plugin', () => {
     expect(accounts.a).toBe(1); // lost updates - proves the gap is real
   });
 
-  it('different keys run concurrently (no false serialization)', async () => {
-    const bus = createAsyncCommandBus();
+  it('different keys run concurrently (no false serialization)', async ({ asyncBus: bus }) => {
     const done: string[] = [];
     bus.use(serialize({ key: (cmd) => (cmd.target as any).id }));
     // Both must arrive before either finishes. If different keys were wrongly
@@ -112,8 +111,7 @@ describe('serialize plugin', () => {
     expect(done.sort()).toEqual(['x', 'y']);
   });
 
-  it('a failed command does not stall its lane', async () => {
-    const bus = createAsyncCommandBus();
+  it('a failed command does not stall its lane', async ({ asyncBus: bus }) => {
     const completed: number[] = [];
     bus.use(serialize({ key: () => 'shared' }));
     let n = 0;
@@ -133,8 +131,7 @@ describe('serialize plugin', () => {
     expect(completed).toEqual([2, 3]);
   });
 
-  it('key() returning null skips serialization for that command', async () => {
-    const bus = createAsyncCommandBus();
+  it('key() returning null skips serialization for that command', async ({ asyncBus: bus }) => {
     const done: string[] = [];
     bus.use(serialize({ key: () => null })); // null => never serialized
     const arrive = barrier(2);
@@ -147,8 +144,7 @@ describe('serialize plugin', () => {
     expect(done.sort()).toEqual(['a', 'b']);
   });
 
-  it('actions filter scopes serialization to matching actions only', async () => {
-    const bus = createAsyncCommandBus();
+  it('actions filter scopes serialization to matching actions only', async ({ asyncBus: bus }) => {
     const done: string[] = [];
     // only 'locked*' is serialized; 'free' is not -> 'free' dispatches run concurrently
     bus.use(serialize({ key: () => 'shared', actions: ['locked*'] }));
@@ -162,8 +158,7 @@ describe('serialize plugin', () => {
     expect(done.sort()).toEqual(['a', 'b']);
   });
 
-  it('default key serializes each action against itself', async () => {
-    const bus = createAsyncCommandBus();
+  it('default key serializes each action against itself', async ({ asyncBus: bus }) => {
     const order: string[] = [];
     bus.use(serialize()); // no key -> defaults to cmd.action
     bus.register('save', async (cmd) => {
@@ -178,7 +173,6 @@ describe('serialize plugin', () => {
   });
 
   describe('scope: cross-tab (Web Locks)', () => {
-    afterEach(() => vi.unstubAllGlobals());
 
     it('serializes through navigator.locks with the right lock names', async () => {
       const calls = stubWebLocks();

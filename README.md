@@ -45,7 +45,7 @@ A small core, and batteries you only pay for if you import them.
 - **Vue <!-- vc:vueAligned -->3.6.0-rc.8<!-- /vc:vueAligned --> aligned** - signals, `onScopeDispose`, `getCurrentScope`, alien-signals internals; tracked per release in the [CHANGELOG](CHANGELOG.md)
 - **No runtime dependency**; `alien-signals` is an optional peer, installed only by apps that use the `vapor-chamber/alien-signals` connector; unimported modules tree-shake to zero
 - **ESM-only**, plus three IIFE `<script>` drop-ins for no-bundler pages
-- **<!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% coverage on all four axes** - statements, branches, functions and lines, across **<!-- vc:tests -->2267<!-- /vc:tests --> tests** in <!-- vc:testFiles -->169<!-- /vc:testFiles --> files ([full table](docs/COVERAGE.md)). Not a sampled figure: every branch in the measured surface is taken by a test
+- **<!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% coverage on all four axes** - statements, branches, functions and lines, across **<!-- vc:tests -->2420<!-- /vc:tests --> tests** in <!-- vc:testFiles -->167<!-- /vc:testFiles --> files ([full table](docs/COVERAGE.md)). Not a sampled figure: every branch in the measured surface is taken by a test
 
 ## Contents
 
@@ -73,7 +73,13 @@ classic `<script>` tags use the [IIFE variants](#iife--cdn-variants).
 > stable today and what is transitional.
 
 <details>
-<summary><b>Other integrations</b> - Laravel, Astro, performance tuning, API docs</summary>
+<summary><b>Other integrations</b> - Vitest, Laravel, Astro, performance tuning, API docs</summary>
+
+- **Vitest** - [docs/integrations/vitest.md](docs/integrations/vitest.md): one setup-file line
+  gives matchers in Vitest's spy vocabulary (`toHaveBeenDispatchedWith`), a recorded shared bus,
+  `bus` / `asyncBus` fixtures, stubs restored by `using`, and an MCP client for testing what an
+  agent can reach. `vaporChamberTest()` adds the configurable parts, and `npx vc-vitest-mcp`
+  lets an agent run the suite and read its coverage gaps.
 
 - **Laravel** - [docs/integrations/laravel.md](docs/integrations/laravel.md) covers the backend
   deliverables (route, controller, action classes, CSRF flows, Sanctum, Inertia coexistence,
@@ -1319,11 +1325,15 @@ optional and tree-shaken when unimported.
    form.ts · schema.ts · devtools.ts · directives.ts · vite-hmr.ts
 ```
 
-**Coverage:** <!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% statements · <!-- vc:covBranches -->100.0<!-- /vc:covBranches -->% branches · <!-- vc:covFunctions -->100.0<!-- /vc:covFunctions -->% functions · <!-- vc:covLines -->100.0<!-- /vc:covLines -->% lines across **<!-- vc:tests -->2267<!-- /vc:tests --> tests**
-(<!-- vc:testFiles -->169<!-- /vc:testFiles --> files). Per-file table:
+**Coverage:** <!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% statements · <!-- vc:covBranches -->100.0<!-- /vc:covBranches -->% branches · <!-- vc:covFunctions -->100.0<!-- /vc:covFunctions -->% functions · <!-- vc:covLines -->100.0<!-- /vc:covLines -->% lines across **<!-- vc:tests -->2420<!-- /vc:tests --> tests**
+(<!-- vc:testFiles -->167<!-- /vc:testFiles --> files). Per-file table:
 [docs/COVERAGE.md](docs/COVERAGE.md); run `npm run test:coverage` for live numbers.
 
 ## Testing
+
+On Vitest 5, `setupFiles: ['vapor-chamber/vitest']` tests the real bus with matchers such as
+`expect(bus).toHaveBeenDispatchedWith('cartAdd', { qty: 1 })`; see
+[docs/integrations/vitest.md](docs/integrations/vitest.md).
 
 `createTestBus()` records all dispatched commands without executing real handlers.
 

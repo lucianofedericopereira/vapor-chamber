@@ -3,7 +3,7 @@
  * tests miss: runDispatch (sync-throw + async success/error), useSharedCommandState
  * error recording, and undo/redo handler error handling.
  */
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   useCommand,
   useSharedCommandState,
@@ -12,6 +12,7 @@ import {
   resetCommandBus,
 } from '../src/chamber';
 import { createCommandBus, createAsyncCommandBus } from '../src/command-bus';
+import { it } from '../src/vitest';
 
 afterEach(() => resetCommandBus());
 
@@ -20,7 +21,7 @@ describe('runDispatch (via useCommand)', () => {
     setCommandBus(createCommandBus({ onMissing: 'throw' })); // dispatch throws on miss
     const { dispatch, loading, lastError } = useCommand();
     const r = dispatch('missing', {}) as any;
-    expect(r.ok).toBe(false);
+    expect(r).toFailWith('VC_CORE_NO_HANDLER');
     expect(loading.value).toBe(false);
     expect(lastError.value).toBeInstanceOf(Error);
   });
@@ -37,8 +38,7 @@ describe('runDispatch (via useCommand)', () => {
     expect(lastError.value).toBeNull();
   });
 
-  it('async failed result is recorded in lastError', async () => {
-    const bus = createAsyncCommandBus();
+  it('async failed result is recorded in lastError', async ({ asyncBus: bus }) => {
     setCommandBus(bus);
     bus.register('boom', async () => { throw new Error('handler failed'); });
     const { dispatch, loading, lastError } = useCommand();
@@ -55,15 +55,14 @@ describe('useSharedCommandState - error recording', () => {
   it('records a synchronously-thrown dispatch and decrements in-flight', () => {
     const shared = useSharedCommandState();
     const r = shared.dispatch('missing', {}) as any;
-    expect(r.ok).toBe(false);
+    expect(r).toFailWith('VC_CORE_NO_HANDLER');
     expect(shared.errorCount.value).toBeGreaterThan(0);
     expect(shared.lastError.value).toBeInstanceOf(Error);
     expect(shared.inFlight.value).toBe(0);     // decrement ran in the catch
     expect(shared.isAnyLoading.value).toBe(false);
   });
 
-  it('async failed result is recorded', async () => {
-    const bus = createAsyncCommandBus();
+  it('async failed result is recorded', async ({ asyncBus: bus }) => {
     setCommandBus(bus);
     bus.register('boom', async () => { throw new Error('x'); });
     const shared = useSharedCommandState();
@@ -75,22 +74,20 @@ describe('useSharedCommandState - error recording', () => {
 });
 
 describe('useCommandHistory - undo/redo error handling', () => {
-  it('catches a throwing undo handler (does not propagate)', () => {
-    const bus = createCommandBus();
+  it('catches a throwing undo handler (does not propagate)', ({ bus }) => {
     setCommandBus(bus);
-    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    using _err = vi.spyOn(console, 'error').mockImplementation(() => {});
     bus.register('act', () => 1, { undo: () => { throw new Error('undo blew up'); } });
 
     const history = useCommandHistory({});
     bus.dispatch('act', {});                 // tracked
     expect(() => history.undo()).not.toThrow(); // throwing undo handler is caught
-    err.mockRestore();
   });
 
   it('catches a throwing redo dispatch (does not propagate)', () => {
     const bus = createCommandBus({ onMissing: 'throw' });
     setCommandBus(bus);
-    const err = vi.spyOn(console, 'error').mockImplementation(() => {});
+    using _err = vi.spyOn(console, 'error').mockImplementation(() => {});
     const unregister = bus.register('act', () => 1);
 
     const history = useCommandHistory({});
@@ -99,6 +96,5 @@ describe('useCommandHistory - undo/redo error handling', () => {
     unregister();             // remove handler -> redo's dispatch will throw (onMissing:'throw')
 
     expect(() => history.redo()).not.toThrow(); // redo's bus.dispatch throw is caught
-    err.mockRestore();
   });
 });

@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   getCommandBus,
   setCommandBus,
@@ -14,6 +14,7 @@ import {
 } from '../src/chamber';
 import { createCommandBus, createAsyncCommandBus } from '../src/command-bus';
 import { isShallow, isReactive, effectScope, watchEffect } from 'vue';
+import { it } from '../src/vitest';
 
 describe('getCommandBus / setCommandBus', () => {
   beforeEach(() => {
@@ -72,8 +73,7 @@ describe('useCommand', () => {
     const { dispatch } = useCommand();
     const result = dispatch('testAction', { value: 42 });
 
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe(42);
+    expect(result).toSucceedWith(42);
   });
 
   it('should track loading state', () => {
@@ -195,7 +195,7 @@ describe('useCommandState', () => {
 
     // After dispose, handler is unregistered
     const result = bus.dispatch('counterIncrement', {});
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('VC_CORE_NO_HANDLER');
   });
 });
 
@@ -453,8 +453,7 @@ describe('useCommandHistory', () => {
 describe('useCommandGroup', () => {
   beforeEach(() => resetCommandBus());
 
-  it('prefixes dispatch with namespace', () => {
-    const bus = createCommandBus();
+  it('prefixes dispatch with namespace', ({ bus }) => {
     setCommandBus(bus);
 
     const dispatched: string[] = [];
@@ -467,8 +466,7 @@ describe('useCommandGroup', () => {
     expect(dispatched).toEqual(['cartAdd', 'cartRemove']);
   });
 
-  it('prefixes register with namespace', () => {
-    const bus = createCommandBus();
+  it('prefixes register with namespace', ({ bus }) => {
     setCommandBus(bus);
 
     const cart = useCommandGroup('cart');
@@ -479,16 +477,14 @@ describe('useCommandGroup', () => {
     expect(results).toEqual(['added:42']);
   });
 
-  it('dispatch returns result from namespaced handler', () => {
-    const bus = createCommandBus();
+  it('dispatch returns result from namespaced handler', ({ bus }) => {
     setCommandBus(bus);
 
     const orders = useCommandGroup('orders');
     orders.register('get', (cmd) => ({ orderId: cmd.target.id, status: 'pending' }));
 
     const result = orders.dispatch('get', { id: 7 });
-    expect(result.ok).toBe(true);
-    expect(result.value).toEqual({ orderId: 7, status: 'pending' });
+    expect(result).toSucceedWith({ orderId: 7, status: 'pending' });
   });
 
   it('isolates namespaces - cart handlers do not respond to order dispatches', () => {
@@ -517,8 +513,7 @@ describe('useCommandGroup', () => {
     expect(group.namespace).toBe('analytics');
   });
 
-  it('cart.register("add") registers "cartAdd"', () => {
-    const bus = createCommandBus();
+  it('cart.register("add") registers "cartAdd"', ({ bus }) => {
     setCommandBus(bus);
 
     const cart = useCommandGroup('cart');
@@ -529,8 +524,7 @@ describe('useCommandGroup', () => {
     expect(calls).toEqual([7]);
   });
 
-  it('cart.dispatch("remove") dispatches "cartRemove"', () => {
-    const bus = createCommandBus();
+  it('cart.dispatch("remove") dispatches "cartRemove"', ({ bus }) => {
     setCommandBus(bus);
 
     const seen: string[] = [];
@@ -542,8 +536,7 @@ describe('useCommandGroup', () => {
     expect(seen).toContain('cartRemove');
   });
 
-  it('query() dispatches namespaced read-only query', () => {
-    const bus = createCommandBus();
+  it('query() dispatches namespaced read-only query', ({ bus }) => {
     setCommandBus(bus);
 
     const beforeCalls: string[] = [];
@@ -553,14 +546,12 @@ describe('useCommandGroup', () => {
     const cart = useCommandGroup('cart');
     const result = cart.query('getTotal', {});
 
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe(99);
+    expect(result).toSucceedWith(99);
     // query skips onBefore - CQRS
     expect(beforeCalls).toHaveLength(0);
   });
 
-  it('emit() fires namespaced domain events', () => {
-    const bus = createCommandBus();
+  it('emit() fires namespaced domain events', ({ bus }) => {
     setCommandBus(bus);
 
     const received: string[] = [];
@@ -580,8 +571,7 @@ describe('useCommandGroup', () => {
 describe('useCommandError', () => {
   beforeEach(() => resetCommandBus());
 
-  it('captures failed dispatches', () => {
-    const bus = createCommandBus();
+  it('captures failed dispatches', ({ bus }) => {
     setCommandBus(bus);
     bus.register('fail', () => { throw new Error('boom'); });
 
@@ -593,8 +583,7 @@ describe('useCommandError', () => {
     expect(errors.value[0].cmd.action).toBe('fail');
   });
 
-  it('does not capture successful dispatches', () => {
-    const bus = createCommandBus();
+  it('does not capture successful dispatches', ({ bus }) => {
     setCommandBus(bus);
     bus.register('ok', () => 'fine');
 
@@ -604,8 +593,7 @@ describe('useCommandError', () => {
     expect(errors.value).toHaveLength(0);
   });
 
-  it('filter narrows which errors are captured', () => {
-    const bus = createCommandBus();
+  it('filter narrows which errors are captured', ({ bus }) => {
     setCommandBus(bus);
     bus.register('cartFail', () => { throw new Error('cart error'); });
     bus.register('userFail', () => { throw new Error('user error'); });
@@ -618,8 +606,7 @@ describe('useCommandError', () => {
     expect(errors.value[0].cmd.action).toBe('cartFail');
   });
 
-  it('clearErrors resets state', () => {
-    const bus = createCommandBus();
+  it('clearErrors resets state', ({ bus }) => {
     setCommandBus(bus);
     bus.register('fail', () => { throw new Error('x'); });
 
@@ -659,8 +646,7 @@ describe('useCommand async loading', () => {
     const result = await resultPromise;
 
     expect(loading.value).toBe(false);
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe('data');
+    expect(result).toSucceedWith('data');
     expect(lastError.value).toBeNull();
   });
 
@@ -689,8 +675,7 @@ describe('useCommand async loading', () => {
 describe('useCommandQuery', () => {
   beforeEach(() => resetCommandBus());
 
-  it('queries and populates data signal', () => {
-    const bus = createCommandBus();
+  it('queries and populates data signal', ({ bus }) => {
     setCommandBus(bus);
     bus.register('getUser', (cmd) => ({ id: cmd.target.id, name: 'Alice' }));
 
@@ -704,8 +689,7 @@ describe('useCommandQuery', () => {
     expect(lastError.value).toBeNull();
   });
 
-  it('sets lastError on query failure', () => {
-    const bus = createCommandBus();
+  it('sets lastError on query failure', ({ bus }) => {
     setCommandBus(bus);
     bus.register('getUser', () => { throw new Error('not found'); });
 
@@ -738,8 +722,7 @@ describe('useCommandQuery', () => {
     expect(data.value).toEqual([{ id: 1, name: 'Widget' }]);
   });
 
-  it('query skips onBefore hooks', () => {
-    const bus = createCommandBus();
+  it('query skips onBefore hooks', ({ bus }) => {
     setCommandBus(bus);
 
     const beforeCalls: string[] = [];
@@ -836,7 +819,7 @@ describe('useCommandHistory - undo handler execution', () => {
 
   it('undo catches and logs handler errors', () => {
     const bus = getCommandBus();
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    using consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     bus.register('op', () => 1, { undo: () => { throw new Error('undo failed'); } });
 
     const { undo } = useCommandHistory();
@@ -844,6 +827,5 @@ describe('useCommandHistory - undo handler execution', () => {
     undo(); // should not throw
 
     expect(consoleError).toHaveBeenCalled();
-    consoleError.mockRestore();
   });
 });

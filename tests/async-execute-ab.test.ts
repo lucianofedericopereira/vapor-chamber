@@ -27,6 +27,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
+import { underCoverage } from './under-coverage';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // Per-file subdir: the whole dir is removed in afterAll, so it must be ours alone.
@@ -93,8 +94,6 @@ async function opsPerSec(factory: Factory, mode: 'dispatch' | 'query', n: number
 }
 
 describe('async execute closure - real path A/B', () => {
-  const underCoverage = process.env.npm_lifecycle_event === 'test:coverage';
-
   it.skipIf(underCoverage)('matches the baseline exactly, and measures the difference', async () => {
     buildBaseline();
     const base = (await import(/* @vite-ignore */ BASELINE)) as { createAsyncCommandBus: Factory };
@@ -131,5 +130,5 @@ describe('async execute closure - real path A/B', () => {
       expect(Number.isFinite(b / a)).toBe(true);
     }
     console.log(`\n  async execute closure - real path, median of 7 interleaved reps, ${N} commands/op\n${rows.join('\n')}\n`);
-  }, 120_000);
+  });
 });

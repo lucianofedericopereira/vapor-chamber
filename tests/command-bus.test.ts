@@ -1,28 +1,26 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, expect, vi, afterEach } from 'vitest';
 import { createCommandBus, createAsyncCommandBus, configureUid } from '../src/command-bus';
+import { stubEnv, stubGlobal } from '../src/vitest-pure';
+import { it } from '../src/vitest';
 
 describe('createCommandBus', () => {
   describe('dispatch', () => {
-    it('should return error when no handler registered', () => {
-      const bus = createCommandBus();
+    it('should return error when no handler registered', ({ bus }) => {
       const result = bus.dispatch('unknownAction', {});
 
-      expect(result.ok).toBe(false);
+      expect(result).toFailWith('VC_CORE_NO_HANDLER');
       expect(result.error?.message).toContain('No handler');
     });
 
-    it('should execute registered handler', () => {
-      const bus = createCommandBus();
+    it('should execute registered handler', ({ bus }) => {
       bus.register('testAction', (cmd) => cmd.target.value * 2);
 
       const result = bus.dispatch('testAction', { value: 5 });
 
-      expect(result.ok).toBe(true);
-      expect(result.value).toBe(10);
+      expect(result).toSucceedWith(10);
     });
 
-    it('should pass action, target, and payload to handler', () => {
-      const bus = createCommandBus();
+    it('should pass action, target, and payload to handler', ({ bus }) => {
       const handler = vi.fn((cmd) => cmd);
 
       bus.register('testAction', handler);
@@ -35,8 +33,7 @@ describe('createCommandBus', () => {
       }));
     });
 
-    it('should catch handler errors and return error result', () => {
-      const bus = createCommandBus();
+    it('should catch handler errors and return error result', ({ bus }) => {
       bus.register('testError', () => {
         throw new Error('Handler failed');
       });
@@ -49,19 +46,18 @@ describe('createCommandBus', () => {
   });
 
   describe('register', () => {
-    it('should return unregister function', () => {
-      const bus = createCommandBus();
+    it('should return unregister function', ({ bus }) => {
       const unregister = bus.register('testAction', () => 'result');
 
       expect(bus.dispatch('testAction', {}).ok).toBe(true);
 
       unregister();
 
-      expect(bus.dispatch('testAction', {}).ok).toBe(false);
+      expect(bus.dispatch('testAction', {})).toFailWith('VC_CORE_NO_HANDLER');
     });
 
     it('should replace existing handler', () => {
-      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      using _warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const bus = createCommandBus();
       bus.register('testAction', () => 'first');
       bus.register('testAction', () => 'second');
@@ -69,13 +65,11 @@ describe('createCommandBus', () => {
       const result = bus.dispatch('testAction', {});
 
       expect(result.value).toBe('second');
-      vi.restoreAllMocks();
     });
   });
 
   describe('use (plugins)', () => {
-    it('should execute plugin before handler', () => {
-      const bus = createCommandBus();
+    it('should execute plugin before handler', ({ bus }) => {
       const order: string[] = [];
 
       bus.use((_cmd, next) => {
@@ -95,8 +89,7 @@ describe('createCommandBus', () => {
       expect(order).toEqual(['plugin-before', 'handler', 'plugin-after']);
     });
 
-    it('should allow plugin to short-circuit', () => {
-      const bus = createCommandBus();
+    it('should allow plugin to short-circuit', ({ bus }) => {
       const handler = vi.fn(() => 'handler-result');
 
       bus.use((_cmd, _next) => {
@@ -112,8 +105,7 @@ describe('createCommandBus', () => {
       expect(handler).not.toHaveBeenCalled();
     });
 
-    it('should execute plugins in order (first = outermost)', () => {
-      const bus = createCommandBus();
+    it('should execute plugins in order (first = outermost)', ({ bus }) => {
       const order: string[] = [];
 
       bus.use((_cmd, next) => {
@@ -146,8 +138,7 @@ describe('createCommandBus', () => {
       ]);
     });
 
-    it('should return unsubscribe function', () => {
-      const bus = createCommandBus();
+    it('should return unsubscribe function', ({ bus }) => {
       const plugin = vi.fn((_cmd, next) => next());
 
       const unsubscribe = bus.use(plugin);
@@ -164,8 +155,7 @@ describe('createCommandBus', () => {
   });
 
   describe('onAfter (hooks)', () => {
-    it('should run after hooks after dispatch', () => {
-      const bus = createCommandBus();
+    it('should run after hooks after dispatch', ({ bus }) => {
       const hook = vi.fn();
 
       bus.onAfter(hook);
@@ -179,8 +169,7 @@ describe('createCommandBus', () => {
       );
     });
 
-    it('should run hook even on error', () => {
-      const bus = createCommandBus();
+    it('should run hook even on error', ({ bus }) => {
       const hook = vi.fn();
 
       bus.onAfter(hook);
@@ -194,9 +183,8 @@ describe('createCommandBus', () => {
       expect(hook.mock.calls[0][1].ok).toBe(false);
     });
 
-    it('should catch hook errors silently', () => {
-      const bus = createCommandBus();
-      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    it('should catch hook errors silently', ({ bus }) => {
+      using consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
 
       bus.onAfter(() => {
         throw new Error('Hook error');
@@ -207,12 +195,9 @@ describe('createCommandBus', () => {
 
       expect(result.ok).toBe(true);
       expect(consoleError).toHaveBeenCalled();
-
-      consoleError.mockRestore();
     });
 
-    it('should return unsubscribe function', () => {
-      const bus = createCommandBus();
+    it('should return unsubscribe function', ({ bus }) => {
       const hook = vi.fn();
 
       const unsubscribe = bus.onAfter(hook);
@@ -233,8 +218,7 @@ describe('re-entrant plugin chain', () => {
   // A plugin may call `next()` more than once per dispatch - retry() does it
   // once per attempt. Each call must replay the SAME tail of the chain, not
   // fall through to the handler because a shared cursor was already exhausted.
-  it('replays every downstream plugin when an upstream plugin calls next() twice', () => {
-    const bus = createCommandBus();
+  it('replays every downstream plugin when an upstream plugin calls next() twice', ({ bus }) => {
     const order: string[] = [];
 
     bus.use((_cmd, next) => {
@@ -267,8 +251,7 @@ describe('re-entrant plugin chain', () => {
   // timer. With save/restore the deferred call re-enters the same plugin and
   // the handler never runs; the old shared cursor survived it only by accident
   // (its exhausted index happened to land on `execute()`).
-  it('a plugin may call next() after it has already returned (deferred continuation)', async () => {
-    const bus = createCommandBus();
+  it('a plugin may call next() after it has already returned (deferred continuation)', async ({ bus }) => {
     const order: string[] = [];
 
     bus.use((_cmd, next) => {
@@ -295,8 +278,7 @@ describe('re-entrant plugin chain', () => {
     expect(order).toEqual(['deferred', 'downstream', 'handler']);
   });
 
-  it('keeps concurrent dispatches on the async bus independent', async () => {
-    const bus = createAsyncCommandBus();
+  it('keeps concurrent dispatches on the async bus independent', async ({ asyncBus: bus }) => {
     const seen: string[] = [];
     bus.use(async (cmd, next) => {
       seen.push(`p1:${cmd.action}`);
@@ -316,8 +298,7 @@ describe('re-entrant plugin chain', () => {
 
 describe('listener fan-out with in-flight unsubscribe', () => {
   // The self-removal case the lenBefore/i-- guard was written for.
-  it('a listener that removes itself does not skip its neighbour', () => {
-    const bus = createCommandBus();
+  it('a listener that removes itself does not skip its neighbour', ({ bus }) => {
     bus.register('act', () => 1);
     const seen: string[] = [];
 
@@ -335,8 +316,7 @@ describe('listener fan-out with in-flight unsubscribe', () => {
   // The case that guard got WRONG: removing a peer that has not run yet
   // shrinks the array without moving the cursor, so decrementing re-invoked
   // the listener that had just finished.
-  it('a listener that removes a LATER peer does not re-run itself', () => {
-    const bus = createCommandBus();
+  it('a listener that removes a LATER peer does not re-run itself', ({ bus }) => {
     bus.register('act', () => 1);
     const seen: string[] = [];
 
@@ -352,8 +332,7 @@ describe('listener fan-out with in-flight unsubscribe', () => {
     expect(seen).toEqual(['first', 'third']); // was ['first', 'first', 'third']
   });
 
-  it('the same holds for wildcard listeners', () => {
-    const bus = createCommandBus();
+  it('the same holds for wildcard listeners', ({ bus }) => {
     bus.register('cartAdd', () => 1);
     const seen: string[] = [];
 
@@ -369,8 +348,7 @@ describe('listener fan-out with in-flight unsubscribe', () => {
     expect(seen).toEqual(['first', 'third']);
   });
 
-  it('a listener removing several later peers still advances correctly', () => {
-    const bus = createCommandBus();
+  it('a listener removing several later peers still advances correctly', ({ bus }) => {
     bus.register('act', () => 1);
     const seen: string[] = [];
 
@@ -390,10 +368,9 @@ describe('listener fan-out with in-flight unsubscribe', () => {
   // The exact-match catch (fanOutListeners' first loop) is covered by
   // tests/echo-bridge.test.ts; the wildcard loop has its own try/catch and
   // was never exercised with a throwing listener.
-  it('a throwing wildcard listener is caught and logged, and its neighbour still runs', () => {
-    const bus = createCommandBus();
+  it('a throwing wildcard listener is caught and logged, and its neighbour still runs', ({ bus }) => {
     bus.register('cartAdd', () => 1);
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+    using consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     const seen: string[] = [];
 
     bus.on('cart*', () => { throw new Error('wildcard listener blew up'); });
@@ -404,13 +381,11 @@ describe('listener fan-out with in-flight unsubscribe', () => {
     expect(result.ok).toBe(true); // a listener throwing does not fail dispatch
     expect(seen).toEqual(['second']);
     expect(consoleError).toHaveBeenCalledWith('[vapor-chamber] Listener error:', expect.any(Error));
-    consoleError.mockRestore();
   });
 });
 
 describe('on()/once() convenience: AbortSignal + Symbol.dispose', () => {
-  it('unsubscribes when the signal aborts', () => {
-    const bus = createCommandBus();
+  it('unsubscribes when the signal aborts', ({ bus }) => {
     bus.register('act', () => 1);
     const ac = new AbortController();
     const seen: string[] = [];
@@ -423,8 +398,7 @@ describe('on()/once() convenience: AbortSignal + Symbol.dispose', () => {
     expect(seen).toEqual(['heard']);
   });
 
-  it('an already-aborted signal never subscribes', () => {
-    const bus = createCommandBus();
+  it('an already-aborted signal never subscribes', ({ bus }) => {
     bus.register('act', () => 1);
     const ac = new AbortController();
     ac.abort();
@@ -435,8 +409,7 @@ describe('on()/once() convenience: AbortSignal + Symbol.dispose', () => {
     expect(seen).toEqual([]);
   });
 
-  it('calling off() manually detaches the abort listener (no leak, no double-call)', () => {
-    const bus = createCommandBus();
+  it('calling off() manually detaches the abort listener (no leak, no double-call)', ({ bus }) => {
     bus.register('act', () => 1);
     const ac = new AbortController();
     const seen: string[] = [];
@@ -450,8 +423,7 @@ describe('on()/once() convenience: AbortSignal + Symbol.dispose', () => {
     expect(seen).toEqual([]);
   });
 
-  it('once() forwards the signal option', () => {
-    const bus = createCommandBus();
+  it('once() forwards the signal option', ({ bus }) => {
     bus.register('act', () => 1);
     const ac = new AbortController();
     const seen: string[] = [];
@@ -462,8 +434,7 @@ describe('on()/once() convenience: AbortSignal + Symbol.dispose', () => {
     expect(seen).toEqual([]);
   });
 
-  it('the returned unsubscribe fn is tagged with Symbol.dispose for `using`', () => {
-    const bus = createCommandBus();
+  it('the returned unsubscribe fn is tagged with Symbol.dispose for `using`', ({ bus }) => {
     bus.register('act', () => 1);
     const seen: string[] = [];
     const off = bus.on('act', () => seen.push('heard')) as unknown as { [Symbol.dispose]: () => void };
@@ -481,8 +452,7 @@ describe('on()/once() convenience: AbortSignal + Symbol.dispose', () => {
 });
 
 describe('createAsyncCommandBus', () => {
-  it('should handle async handlers', async () => {
-    const bus = createAsyncCommandBus();
+  it('should handle async handlers', async ({ asyncBus: bus }) => {
 
     bus.register('asyncAction', async (cmd) => {
       await new Promise((r) => setTimeout(r, 10));
@@ -491,12 +461,10 @@ describe('createAsyncCommandBus', () => {
 
     const result = await bus.dispatch('asyncAction', { value: 5 });
 
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe(10);
+    expect(result).toSucceedWith(10);
   });
 
-  it('should catch async errors', async () => {
-    const bus = createAsyncCommandBus();
+  it('should catch async errors', async ({ asyncBus: bus }) => {
 
     bus.register('asyncError', async () => {
       await new Promise((r) => setTimeout(r, 10));
@@ -509,8 +477,7 @@ describe('createAsyncCommandBus', () => {
     expect(result.error?.message).toBe('Async error');
   });
 
-  it('should support async plugins', async () => {
-    const bus = createAsyncCommandBus();
+  it('should support async plugins', async ({ asyncBus: bus }) => {
     const order: string[] = [];
 
     bus.use(async (_cmd, next) => {
@@ -531,8 +498,7 @@ describe('createAsyncCommandBus', () => {
     expect(order).toEqual(['plugin-before', 'handler', 'plugin-after']);
   });
 
-  it('should support async hooks', async () => {
-    const bus = createAsyncCommandBus();
+  it('should support async hooks', async ({ asyncBus: bus }) => {
     const hookCalled = vi.fn();
 
     bus.onAfter(async (_cmd, result) => {
@@ -547,9 +513,8 @@ describe('createAsyncCommandBus', () => {
     expect(hookCalled).toHaveBeenCalledWith({ ok: true, value: 'result' });
   });
 
-  it('catches a synchronously-throwing after-hook without failing dispatch', async () => {
-    const bus = createAsyncCommandBus();
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+  it('catches a synchronously-throwing after-hook without failing dispatch', async ({ asyncBus: bus }) => {
+    using consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     bus.onAfter(() => { throw new Error('sync hook-boom'); });
     bus.register('asyncAction', async () => 'result');
 
@@ -557,12 +522,10 @@ describe('createAsyncCommandBus', () => {
 
     expect(result).toEqual({ ok: true, value: 'result' });
     expect(consoleError).toHaveBeenCalled();
-    consoleError.mockRestore();
   });
 
-  it('catches a rejecting after-hook without failing dispatch', async () => {
-    const bus = createAsyncCommandBus();
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
+  it('catches a rejecting after-hook without failing dispatch', async ({ asyncBus: bus }) => {
+    using consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
     bus.onAfter(async () => { throw new Error('async hook-boom'); });
     bus.register('asyncAction', async () => 'result');
 
@@ -570,11 +533,9 @@ describe('createAsyncCommandBus', () => {
 
     expect(result).toEqual({ ok: true, value: 'result' });
     expect(consoleError).toHaveBeenCalled();
-    consoleError.mockRestore();
   });
 
-  it('on()/once() forward the signal option (same shared implementation as the sync bus)', async () => {
-    const bus = createAsyncCommandBus();
+  it('on()/once() forward the signal option (same shared implementation as the sync bus)', async ({ asyncBus: bus }) => {
     bus.register('act', async () => 1);
     const ac = new AbortController();
     const seen: string[] = [];
@@ -613,24 +574,20 @@ describe('configureUid', () => {
 // ---------------------------------------------------------------------------
 
 describe('syncQuery bare-bus fast path', () => {
-  it('returns handler result with no plugins installed', () => {
-    const bus = createCommandBus();
+  it('returns handler result with no plugins installed', ({ bus }) => {
     bus.register('getCount', () => 42);
     // No plugins, hooks, or listeners - exercises the bare-bus branch
     const r = bus.query('getCount', {});
-    expect(r.ok).toBe(true);
-    expect(r.value).toBe(42);
+    expect(r).toSucceedWith(42);
   });
 
-  it('returns handleMissing when no handler on bare bus', () => {
-    const bus = createCommandBus();
+  it('returns handleMissing when no handler on bare bus', ({ bus }) => {
     const r = bus.query('missing', {});
-    expect(r.ok).toBe(false);
+    expect(r).toFailWith('VC_CORE_NO_HANDLER');
     expect(r.error?.message).toContain('No handler');
   });
 
-  it('uses full runner path when a plugin is installed', () => {
-    const bus = createCommandBus();
+  it('uses full runner path when a plugin is installed', ({ bus }) => {
     bus.register('get', () => 1);
     const pluginSpy = vi.fn((_cmd: any, next: any) => next());
     bus.use(pluginSpy);
@@ -644,8 +601,7 @@ describe('syncQuery bare-bus fast path', () => {
 // ---------------------------------------------------------------------------
 
 describe('listenerOffAll with wildcard pattern', () => {
-  it('removes only the matching wildcard listener', () => {
-    const bus = createCommandBus();
+  it('removes only the matching wildcard listener', ({ bus }) => {
     bus.register('cartAdd', () => 1);
     const cartListener = vi.fn();
     const allListener  = vi.fn();
@@ -659,8 +615,7 @@ describe('listenerOffAll with wildcard pattern', () => {
     expect(allListener).toHaveBeenCalled(); // untouched
   });
 
-  it('removes exact-match listener via offAll', () => {
-    const bus = createCommandBus();
+  it('removes exact-match listener via offAll', ({ bus }) => {
     bus.register('op', () => 1);
     const listener = vi.fn();
     bus.on('op', listener);
@@ -695,8 +650,7 @@ describe('asyncDispatchBatch mid-flight abort', () => {
   // entered; and its 'undoA' was registered as a plain ACTION, while rollback
   // only ever consults handlers registered with `{ undo }` - so even flipped
   // to true it would have proved nothing.
-  it('rolls back every succeeded command, in reverse order, when the signal aborts mid-batch', async () => {
-    const bus = createAsyncCommandBus();
+  it('rolls back every succeeded command, in reverse order, when the signal aborts mid-batch', async ({ asyncBus: bus }) => {
     const log: string[] = [];
     const ac = new AbortController();
 
@@ -717,8 +671,7 @@ describe('asyncDispatchBatch mid-flight abort', () => {
       { signal: ac.signal, transactional: true },
     );
 
-    expect(result.ok).toBe(false);
-    expect((result.error as { code?: string })?.code).toBe('VC_CORE_ABORTED');
+    expect(result).toFailWith('VC_CORE_ABORTED');
     expect(log).toEqual(['a', 'b', 'undoB', 'undoA']); // reverse order; c never dispatched
     expect(result.results).toHaveLength(2); // partial results kept for inspection
     expect(result.rollbacks).toHaveLength(2);
@@ -726,9 +679,8 @@ describe('asyncDispatchBatch mid-flight abort', () => {
     expect(result.successCount).toBe(0); // all-or-nothing: nothing stands
   });
 
-  it('skips commands with no undo handler, and reports the rollbacks it did run', async () => {
+  it('skips commands with no undo handler, and reports the rollbacks it did run', async ({ asyncBus: bus }) => {
     // The documented skip behaviour - the honest caveat in BatchOptions.
-    const bus = createAsyncCommandBus();
     const log: string[] = [];
     const ac = new AbortController();
 
@@ -748,15 +700,14 @@ describe('asyncDispatchBatch mid-flight abort', () => {
       { signal: ac.signal, transactional: true },
     );
 
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('VC_CORE_ABORTED');
     // 'noUndo' left its side effect in place - that is the contract, not a bug.
     expect(log).toEqual(['withUndo', 'noUndo', 'undoWithUndo']);
     expect(result.rollbacks).toHaveLength(1);
     expect(result.successCount).toBe(0);
   });
 
-  it('a mid-flight abort with NO undo handlers at all reports an empty rollback list', async () => {
-    const bus = createAsyncCommandBus();
+  it('a mid-flight abort with NO undo handlers at all reports an empty rollback list', async ({ asyncBus: bus }) => {
     const log: string[] = [];
     const ac = new AbortController();
 
@@ -772,13 +723,12 @@ describe('asyncDispatchBatch mid-flight abort', () => {
       { signal: ac.signal, transactional: true },
     );
 
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('VC_CORE_ABORTED');
     expect(result.rollbacks).toEqual([]);
     expect(log).toEqual(['a', 'b']); // side effects persist, nothing undone
   });
 
-  it('without transactional, an abort keeps what succeeded and runs no rollback', async () => {
-    const bus = createAsyncCommandBus();
+  it('without transactional, an abort keeps what succeeded and runs no rollback', async ({ asyncBus: bus }) => {
     const log: string[] = [];
     const ac = new AbortController();
 
@@ -794,14 +744,14 @@ describe('asyncDispatchBatch mid-flight abort', () => {
       { signal: ac.signal, transactional: false },
     );
 
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('VC_CORE_ABORTED');
     expect(result.rollbacks).toBeUndefined();
     expect(result.successCount).toBe(2); // both committed and stay committed
     expect(log).toEqual(['a', 'b']); // no undo ran; 'c' never dispatched
   });
 
   it('dev-warns when transactional and continueOnError are both set', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createAsyncCommandBus();
     bus.register('a', async () => 1);
 
@@ -811,7 +761,6 @@ describe('asyncDispatchBatch mid-flight abort', () => {
     });
 
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('mutually exclusive'));
-    warn.mockRestore();
   });
 
   // The test above only proves the warning FIRES when DEV is true (the
@@ -820,9 +769,9 @@ describe('asyncDispatchBatch mid-flight abort', () => {
   // the onMissing:'buffer' overflow warning had. Closing both here.
 
   it('warnBatchOptionConflict is silent when __VC_DEV__=false (IIFE build path)', async () => {
-    vi.stubGlobal('__VC_DEV__', false);
+    using _VC_DEV = stubGlobal('__VC_DEV__', false);
     vi.resetModules();
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const { createAsyncCommandBus: freshCreateAsyncCommandBus } = await import('../src/command-bus');
     const bus = freshCreateAsyncCommandBus();
@@ -834,15 +783,13 @@ describe('asyncDispatchBatch mid-flight abort', () => {
     });
 
     expect(warn).not.toHaveBeenCalled();
-    warn.mockRestore();
-    vi.unstubAllGlobals();
     vi.resetModules();
   });
 
   it('warnBatchOptionConflict is silent when NODE_ENV=production (ESM consumer path)', async () => {
-    vi.stubEnv('NODE_ENV', 'production');
+    using _NODE_ENV = stubEnv('NODE_ENV', 'production');
     vi.resetModules();
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const { createAsyncCommandBus: freshCreateAsyncCommandBus } = await import('../src/command-bus');
     const bus = freshCreateAsyncCommandBus();
@@ -854,8 +801,6 @@ describe('asyncDispatchBatch mid-flight abort', () => {
     });
 
     expect(warn).not.toHaveBeenCalled();
-    warn.mockRestore();
-    vi.unstubAllEnvs();
     vi.resetModules();
   });
 });
@@ -881,7 +826,7 @@ describe('per-instance throttle timers - async bus', () => {
 
     // Bus2 is untouched - still throttled.
     const r3 = await bus2.dispatch('a', {});
-    expect(r3.ok).toBe(false);
+    expect(r3).toFailWith('VC_CORE_THROTTLED');
     expect(r3.error?.message).toContain('throttled');
 
     bus2.dispose();
@@ -896,8 +841,7 @@ describe('async before-hook: plain synchronous throw + after-hooks registered', 
   // inside the catch" branch never runs either. This test is the mirror image
   // of both, and also proves the documented contract that after-hooks still
   // fire when a before-hook cancels the dispatch (observability is intact).
-  it('a plain (non-async) onBefore hook that throws still runs after-hooks', async () => {
-    const bus = createAsyncCommandBus();
+  it('a plain (non-async) onBefore hook that throws still runs after-hooks', async ({ asyncBus: bus }) => {
     let handlerRan = false;
     const afterCalls: Array<{ action: string; ok: boolean }> = [];
 
@@ -907,7 +851,7 @@ describe('async before-hook: plain synchronous throw + after-hooks registered', 
 
     const result = await bus.dispatch('act', {});
 
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('VC_CORE_BEFORE_CANCEL');
     expect(result.error?.message).toBe('sync-blocked');
     expect(handlerRan).toBe(false);
     expect(afterCalls).toEqual([{ action: 'act', ok: false }]); // after-hook still fired
@@ -929,7 +873,7 @@ describe('devWarnThenableResult - folds away in production, both DEV paths', () 
   it('a sync bus with a thenable-returning plugin does not warn when __VC_DEV__=false (IIFE build path)', async () => {
     vi.stubGlobal('__VC_DEV__', false);
     vi.resetModules(); // command-bus.ts is already cached from this file's top-level import
-    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const { createCommandBus: freshCreateCommandBus } = await import('../src/command-bus');
     const bus = freshCreateCommandBus();
@@ -943,13 +887,12 @@ describe('devWarnThenableResult - folds away in production, both DEV paths', () 
     bus.dispatch('act', {});
 
     expect(consoleWarn).not.toHaveBeenCalled();
-    consoleWarn.mockRestore();
   });
 
   it('the same does not warn when NODE_ENV=production (ESM consumer path, no __VC_DEV__ define)', async () => {
     vi.stubEnv('NODE_ENV', 'production');
     vi.resetModules();
-    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const { createCommandBus: freshCreateCommandBus } = await import('../src/command-bus');
     const bus = freshCreateCommandBus();
@@ -959,6 +902,5 @@ describe('devWarnThenableResult - folds away in production, both DEV paths', () 
     bus.dispatch('act', {});
 
     expect(consoleWarn).not.toHaveBeenCalled();
-    consoleWarn.mockRestore();
   });
 });

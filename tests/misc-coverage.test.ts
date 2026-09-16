@@ -10,21 +10,20 @@
  *   - http-query.ts:37-38         - nested-object query param expansion
  *   - chamber-vapor.ts:261-263    - useVaporAsyncCommand catch on rejected dispatch
  */
-import { describe, it, expect, vi } from 'vitest';
-import { createCommandBus } from '../src/command-bus';
+import { describe, expect, vi } from 'vitest';
 import { observe } from '../src/observable';
 import { validateSchemasAsync, type StandardSchemaV1 } from '../src/plugins-schema';
 import { createWorkflow, createReaction } from '../src/utilities';
 import { buildFullUrl } from '../src/http-query';
 import { useVaporAsyncCommand } from '../src/chamber-vapor';
+import { it } from '../src/vitest';
 
 // ---------------------------------------------------------------------------
 // observable.ts:88 - unsubscribe() is idempotent (second call early-returns)
 // ---------------------------------------------------------------------------
 
 describe('observe - idempotent unsubscribe', () => {
-  it('a second unsubscribe() is a no-op and does not re-detach the listener', () => {
-    const bus = createCommandBus();
+  it('a second unsubscribe() is a no-op and does not re-detach the listener', ({ bus }) => {
     bus.register('act', () => 'ok');
 
     // Spy on bus.on so we can capture (and count) the off() function.
@@ -47,7 +46,6 @@ describe('observe - idempotent unsubscribe', () => {
     expect(sub.closed).toBe(true);
     expect(off).toHaveBeenCalledTimes(1); // not called again
 
-    onSpy.mockRestore();
   });
 });
 
@@ -84,7 +82,6 @@ describe('validateSchemasAsync - warn mode', () => {
     expect(handlerRan).toBe(true);       // handler actually ran
     expect(warn).toHaveBeenCalledOnce(); // warning emitted (line 185)
     expect(warn.mock.calls[0]![0]).toMatch(/must be positive/);
-    warn.mockRestore();
   });
 });
 
@@ -144,10 +141,9 @@ describe('createWorkflow - dispatch throws', () => {
 // ---------------------------------------------------------------------------
 
 describe('createReaction - target dispatch throws', () => {
-  it('logs an error (does not rethrow) when the reaction dispatch throws', () => {
+  it('logs an error (does not rethrow) when the reaction dispatch throws', ({ bus }) => {
     // Real bus to drive the source event; we make the target handler register a
     // listener whose own dispatch throws by stubbing bus.dispatch for the target.
-    const bus = createCommandBus();
     bus.register('src', () => 1);
 
     const realDispatch = bus.dispatch.bind(bus);
@@ -168,7 +164,6 @@ describe('createReaction - target dispatch throws', () => {
     expect(errorSpy.mock.calls[0]![1]).toBeInstanceOf(Error);
     expect((errorSpy.mock.calls[0]![1] as Error).message).toBe('reaction target boom');
 
-    errorSpy.mockRestore();
   });
 });
 

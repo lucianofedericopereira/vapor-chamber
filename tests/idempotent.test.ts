@@ -3,15 +3,14 @@
  * client-side half of exactly-once) and stamp an idempotency key that the HTTP
  * bridge forwards as an `Idempotency-Key` header (the wire half).
  */
-import { describe, it, expect } from 'vitest';
-import { createAsyncCommandBus } from '../src/command-bus';
+import { describe, expect } from 'vitest';
 import { idempotent } from '../src/plugins-extra';
+import { it } from '../src/vitest';
 
 const tick = (ms = 0) => new Promise<void>((r) => setTimeout(r, ms));
 
 describe('idempotent plugin', () => {
-  it('collapses concurrent duplicates - handler runs once', async () => {
-    const bus = createAsyncCommandBus();
+  it('collapses concurrent duplicates - handler runs once', async ({ asyncBus: bus }) => {
     let runs = 0;
     bus.use(idempotent());
     bus.register('order', async (cmd) => {
@@ -28,8 +27,7 @@ describe('idempotent plugin', () => {
     expect([a.value, b.value, c.value]).toEqual([1, 1, 1]); // all share the result
   });
 
-  it('collapses sequential repeats within the TTL window', async () => {
-    const bus = createAsyncCommandBus();
+  it('collapses sequential repeats within the TTL window', async ({ asyncBus: bus }) => {
     let runs = 0;
     bus.use(idempotent({ ttl: 10_000 }));
     bus.register('pay', async () => { runs++; return 'ok'; });
@@ -38,8 +36,7 @@ describe('idempotent plugin', () => {
     expect(runs).toBe(1);
   });
 
-  it('different keys are independent', async () => {
-    const bus = createAsyncCommandBus();
+  it('different keys are independent', async ({ asyncBus: bus }) => {
     let runs = 0;
     bus.use(idempotent());
     bus.register('order', async () => { runs++; return 1; });
@@ -50,8 +47,7 @@ describe('idempotent plugin', () => {
     expect(runs).toBe(2);
   });
 
-  it('does NOT cache failures - a retry after error runs again', async () => {
-    const bus = createAsyncCommandBus();
+  it('does NOT cache failures - a retry after error runs again', async ({ asyncBus: bus }) => {
     let n = 0;
     bus.use(idempotent());
     bus.register('flaky', async () => {
@@ -66,8 +62,7 @@ describe('idempotent plugin', () => {
     expect(n).toBe(2);
   });
 
-  it('stamps cmd.meta.idempotencyKey (default: action + stable target)', async () => {
-    const bus = createAsyncCommandBus();
+  it('stamps cmd.meta.idempotencyKey (default: action + stable target)', async ({ asyncBus: bus }) => {
     let stamped: string | undefined;
     bus.use(idempotent());
     bus.register('save', async (cmd) => { stamped = cmd.meta?.idempotencyKey; return 1; });
@@ -75,8 +70,7 @@ describe('idempotent plugin', () => {
     expect(stamped).toBe('save:{"a":1,"b":2}');
   });
 
-  it('honors a custom key and skips on null', async () => {
-    const bus = createAsyncCommandBus();
+  it('honors a custom key and skips on null', async ({ asyncBus: bus }) => {
     let runs = 0;
     bus.use(idempotent({ key: (cmd) => (cmd.target as any).requestId ?? null }));
     bus.register('act', async () => { runs++; return 1; });
@@ -89,8 +83,7 @@ describe('idempotent plugin', () => {
     expect(runs).toBe(3); // r1 once + two un-keyed
   });
 
-  it('actions filter scopes dedup', async () => {
-    const bus = createAsyncCommandBus();
+  it('actions filter scopes dedup', async ({ asyncBus: bus }) => {
     let runs = 0;
     bus.use(idempotent({ actions: ['order*'] }));
     bus.register('ping', async () => { runs++; return 1; });
@@ -104,8 +97,7 @@ describe('idempotent plugin', () => {
 // ---------------------------------------------------------------------------
 
 describe('idempotent - done-cache eviction and rejection', () => {
-  it('evicts the oldest done entry past maxKeys, so the evicted command re-runs', async () => {
-    const bus = createAsyncCommandBus();
+  it('evicts the oldest done entry past maxKeys, so the evicted command re-runs', async ({ asyncBus: bus }) => {
     bus.use(idempotent({ maxKeys: 1 }));
     let runs = 0;
     bus.register('op', async (cmd) => { runs++; return cmd.target.id; });
@@ -121,8 +113,7 @@ describe('idempotent - done-cache eviction and rejection', () => {
     expect(runs).toBe(3);
   });
 
-  it('a thrown/rejected dispatch is not cached - the retry genuinely re-runs', async () => {
-    const bus = createAsyncCommandBus();
+  it('a thrown/rejected dispatch is not cached - the retry genuinely re-runs', async ({ asyncBus: bus }) => {
     bus.use(idempotent());
     let attempts = 0;
     bus.register('flaky', async () => {

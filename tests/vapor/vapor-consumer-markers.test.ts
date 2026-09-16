@@ -140,7 +140,7 @@ describe.skipIf(!haveDist)('Vapor consumer bundle (vapor-chamber/vapor + router/
     // The router's lazy blade chunk is the only other chunk, and it is the one
     // place vDOM is allowed to live: it loads only when a blade row renders.
     for (const code of lazy) expect(importsFrom(code, 'vue')).not.toContain('vaporInteropPlugin');
-  }, 60_000);
+  });
 
   it('the runtime probe stays a bare import("vue") even when the app bundles Vue', async () => {
     const external = await bundle(true);
@@ -152,5 +152,5 @@ describe.skipIf(!haveDist)('Vapor consumer bundle (vapor-chamber/vapor + router/
     // map, that import rejects, which is why wiring has to be static.
     expect(bundled.entry.match(PROBE) ?? []).toHaveLength(1);
     expect(bundled.lazy.some((code) => /\bcreateVaporApp\b/.test(code))).toBe(false);
-  }, 60_000);
+  });
 });

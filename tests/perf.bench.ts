@@ -7,7 +7,7 @@
  * These are not CI tests - they measure throughput on the developer's machine.
  */
 
-import { describe, it, expect, bench, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { effectScope, version as VUE_VERSION } from 'vue';
 import { createCommandBus, createAsyncCommandBus, configureUid, _withOrigin } from '../src/command-bus';
 import { rehydrate, type DehydratedCommand } from '../src/ssr';
@@ -22,6 +22,22 @@ import { alienSignalAdapter } from '../src/alien-signals';
 import { signal as _alienSignal } from 'alien-signals';
 
 const _alienFactory = alienSignalAdapter(_alienSignal as any);
+
+// Vitest 5 made `bench` a test-context fixture: benches register inside a test
+// and run through `bench.compare()`. Each describe below keeps its 4.x shape by
+// shadowing `bench` with a collector whose registrations run as ONE compare, so
+// a group's rows still come from the same run - which is what
+// scripts/bench-ratios-reporter.mjs relies on when it divides two of them.
+// Bench names are unchanged; the reporter matches them exactly.
+function benchGroup(): (name: string, fn: () => unknown) => void {
+  const defs: Array<{ name: string; fn: () => unknown }> = [];
+  it('compare', async ({ bench }) => {
+    await bench.compare(...defs.map((d) => bench(d.name, d.fn)));
+  });
+  return (name, fn) => {
+    defs.push({ name, fn });
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Origin-marker paths - where the `_withOrigin` slot replaced per-site work.
@@ -44,6 +60,7 @@ const _alienFactory = alienSignalAdapter(_alienSignal as any);
 // whitepaper's rc.6 row quotes from this group came from that shape. Pinned by
 // `tests/bench-harness.test.ts`.
 describe('origin-marker paths', () => {
+  const bench = benchGroup();
   bench('dispatch with useCommandHistory installed - 10k (onAfter hook cost)', () => {
     const bus = createCommandBus();
     setCommandBus(bus);
@@ -79,6 +96,7 @@ describe('origin-marker paths', () => {
 });
 
 describe('core dispatch throughput', () => {
+  const bench = benchGroup();
   bench('syncDispatch - bare handler, no plugins', () => {
     const bus = createCommandBus();
     bus.register('test', (cmd) => cmd.target);
@@ -147,6 +165,7 @@ describe('core dispatch throughput', () => {
 });
 
 describe('meta overhead - uid generator comparison', () => {
+  const bench = benchGroup();
   // Default: counter + per-process random prefix. ~12ns per call vs ~104ns for
   // crypto.randomUUID (Node 24, 2026-08-17, hrtime medians over 21x200k reps -
   // quote the runtime with the number). This comment previously said "~30-50ns
@@ -187,6 +206,7 @@ describe('meta overhead - uid generator comparison', () => {
 });
 
 describe('async dispatch throughput', () => {
+  const bench = benchGroup();
   bench('asyncDispatch - bare handler', async () => {
     const bus = createAsyncCommandBus();
     bus.register('test', async (cmd) => cmd.target);
@@ -275,6 +295,7 @@ import TinyEmitter from 'tiny-emitter';
 import { Subject } from 'rxjs';
 
 describe('emit fast path - no listeners', () => {
+  const bench = benchGroup();
   bench('vapor-chamber bus.emit with NO listeners (10k)', () => {
     const bus = createCommandBus();
     for (let i = 0; i < 10_000; i++) bus.emit('nobody-listening', i);
@@ -292,6 +313,7 @@ describe('emit fast path - no listeners', () => {
 });
 
 describe('comparative emit fan-out (10k events x 3 listeners)', () => {
+  const bench = benchGroup();
   bench('vapor-chamber bus.emit - 3 listeners', () => {
     const bus = createCommandBus();
     bus.on('evt', () => {});
@@ -368,6 +390,7 @@ describe('comparative emit fan-out (10k events x 3 listeners)', () => {
 // ---------------------------------------------------------------------------
 
 describe('fast lane - single-handler hot dispatch (10k)', () => {
+  const bench = benchGroup();
   bench('vapor-chamber fast-lane compile + dispatch', () => {
     const lane = createFastLane();
     const onTick = lane.compile<number, number>('tick', (n) => n * 2);
@@ -403,6 +426,7 @@ describe('fast lane - single-handler hot dispatch (10k)', () => {
 });
 
 describe('fast lane - multi-subscriber emit fan-out (10k events x 3 listeners)', () => {
+  const bench = benchGroup();
   bench('vapor-chamber fast-lane emit (live, default)', () => {
     const lane = createFastLane();
     lane.on('evt', () => {});
@@ -445,6 +469,7 @@ describe('fast lane - multi-subscriber emit fan-out (10k events x 3 listeners)',
 });
 
 describe('comparative dispatch (10k dispatches, single handler)', () => {
+  const bench = benchGroup();
   // vapor-chamber's `dispatch` does substantively more than `emit`: meta
   // stamping, plugin chain, hooks, result allocation. The benches below
   // measure the full path for a fair "is the lib competitive?" comparison
@@ -486,6 +511,7 @@ describe('comparative dispatch (10k dispatches, single handler)', () => {
 // ---------------------------------------------------------------------------
 
 describe('listener fan-out', () => {
+  const bench = benchGroup();
   bench('dispatch with 50 exact-match listeners + 5 wildcards', () => {
     const bus = createCommandBus();
     bus.register('hot', (cmd) => cmd.target);
@@ -517,6 +543,7 @@ function makeMemoryStorage() {
 }
 
 describe('persist plugin throughput', () => {
+  const bench = benchGroup();
   bench('100 rapid dispatches with persist enabled (small state)', () => {
     const bus = createCommandBus();
     let counter = 0;
@@ -561,6 +588,7 @@ describe('persist plugin throughput', () => {
 });
 
 describe('SSR rehydrate throughput', () => {
+  const bench = benchGroup();
   function makeCommands(n: number): DehydratedCommand[] {
     const out: DehydratedCommand[] = new Array(n);
     for (let i = 0; i < n; i++) {
@@ -639,6 +667,7 @@ describe('SSR rehydrate throughput', () => {
 // ---------------------------------------------------------------------------
 
 describe('transition bridge throughput', () => {
+  const bench = benchGroup();
   function mockEl(): Element {
     return { tagName: 'DIV' } as unknown as Element;
   }
@@ -714,6 +743,7 @@ describe('transition bridge throughput', () => {
 // ---------------------------------------------------------------------------
 
 describe('active-link stamping - N anchors x M commits', () => {
+  const bench = benchGroup();
   const ANCHORS = 500;
   const COMMITS = 50;
 
@@ -755,6 +785,7 @@ describe('active-link stamping - N anchors x M commits', () => {
 });
 
 describe('directive delegation (.delegate) - mount/unmount cost at scale', () => {
+  const bench = benchGroup();
   const N = 5_000;
 
   // Minimal Element mock - same shape as tests/directives.test.ts's, trimmed
@@ -865,6 +896,7 @@ describe('directive delegation (.delegate) - mount/unmount cost at scale', () =>
 // ---------------------------------------------------------------------------
 
 describe('useCommandState - immediate vs coalesced dispatch cost', () => {
+  const bench = benchGroup();
   // Each iteration creates a fresh effectScope so tryAutoCleanup finds a live
   // Vue scope. We call dispose() inside run() and do NOT call scope.stop() -
   // stopping would fire onScopeDispose and double-call dispose() on
@@ -1005,6 +1037,7 @@ describe('useCommandState - immediate vs coalesced dispatch cost', () => {
 // ---------------------------------------------------------------------------
 
 describe('signal path comparison - fallback vs alien-signals add-on vs Vue ref', () => {
+  const bench = benchGroup();
   beforeAll(async () => {
     await waitForVueDetection();
   });
@@ -1020,7 +1053,7 @@ describe('signal path comparison - fallback vs alien-signals add-on vs Vue ref',
     let sink = 0;
     for (let i = 0; i < 10_000; i++) { s.value = i; sink = s.value; }
     if (sink < 0) console.log(sink);
-  }, { baseline: true });
+  });
 
   bench('closure getter/setter - old v1.3 fallback (historical comparison)', () => {
     // Replaced in v1.4.0. The setter is a real function call - V8 cannot

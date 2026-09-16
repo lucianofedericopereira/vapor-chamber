@@ -31,6 +31,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { asciiTable } from './ascii-table.mjs';
 
 const OUT = 'docs/metrics.json';
 
@@ -126,11 +127,32 @@ function hzOf(reported) {
   return typeof hz === 'number' && Number.isFinite(hz) ? hz : null;
 }
 
+/**
+ * Vitest 5: a bench is no longer a test. Benches run inside one through
+ * `bench.compare()`, and a reporter reads them from the public
+ * `TestCase.benchmarks()` - one entry per compare, one task per bench, named as
+ * registered. The hz column Vitest prints is `task.throughput.mean` (its
+ * `renderBenchmarkRow`), so that is the number divided here, and a ratio stays
+ * the one a reader can recompute from the table. `fromStore` rows are baselines
+ * loaded by `bench.from()`, not measurements of this run: skipped, because a
+ * ratio against one would break the same-run cancellation above.
+ */
+function collectBenchmarks(test, into) {
+  for (const benchmark of test?.benchmarks?.() ?? []) {
+    for (const task of benchmark?.tasks ?? []) {
+      const hz = task?.throughput?.mean;
+      if (task?.fromStore || !task?.name || typeof hz !== 'number' || !Number.isFinite(hz)) continue;
+      into.set(task.name, hz);
+    }
+  }
+}
+
 function collect(modules, into) {
   for (const mod of modules ?? []) {
     for (const test of mod?.children?.allTests?.() ?? []) {
       const hz = hzOf(test);
       if (hz !== null && test?.name) into.set(test.name, hz);
+      collectBenchmarks(test, into);
     }
   }
   return into;
@@ -145,10 +167,41 @@ function write(bench) {
       existing = {};
     }
   }
-  const next = { ...existing, bench };
+  // Merged into the previous bench block, not substituted for it. A filtered
+  // run (`-t`) or a renamed row yields only the ratios it could compute, and
+  // replacing the whole object dropped the other 13 - which is the opposite of
+  // what the skip above intends, and would blank the markers stamp-docs reads.
+  const next = { ...existing, bench: { ...(existing.bench ?? {}), ...bench } };
   const ordered = Object.fromEntries(Object.keys(next).sort().map((k) => [k, next[k]]));
   mkdirSync(dirname(OUT), { recursive: true });
   writeFileSync(OUT, `${JSON.stringify(ordered, null, 2)}\n`);
+}
+
+// Splits a marker name into its two operands: benchFloorVsCompile -> Floor / Compile.
+function label(name) {
+  const [fast, slow] = name.replace(/^bench/, '').split(/Vs/);
+  const spaced = (s) => (s ?? '').replace(/([a-z])([A-Z])/g, '$1 $2');
+  return slow ? [spaced(fast), spaced(slow)] : [spaced(fast), ''];
+}
+
+const hzFmt = (n) => (typeof n === 'number' ? n.toLocaleString('en-US', { maximumFractionDigits: 0 }) : '');
+
+function report(bench, hz) {
+  const rows = Object.entries(bench).map(([name, ratio]) => {
+    const [fast, slow] = label(name);
+    const [fastRow, slowRow] = RATIOS[name] ?? [];
+    return {
+      Comparison: slow ? `${fast} vs ${slow}` : fast,
+      'hz (fast)': hzFmt(hz.get(fastRow)),
+      'hz (slow)': hzFmt(hz.get(slowRow)),
+      Ratio: `${ratio}x`,
+    };
+  });
+  const missing = Object.keys(RATIOS).length - rows.length;
+  const footer = missing > 0
+    ? `${rows.length} of ${Object.keys(RATIOS).length} stamped - ${missing} bench row(s) not found`
+    : `${rows.length} ratios stamped to ${OUT}`;
+  console.log(`\n${asciiTable(rows, 'Bench ratios', { footer })}\n`);
 }
 
 export default class BenchRatiosReporter {
@@ -166,6 +219,8 @@ export default class BenchRatiosReporter {
         bench[name] = (a / b).toFixed(2);
       }
     }
-    if (Object.keys(bench).length > 0) write(bench);
+    if (Object.keys(bench).length === 0) return;
+    write(bench);
+    report(bench, hz);
   }
 }

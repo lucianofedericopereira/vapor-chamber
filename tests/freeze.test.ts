@@ -18,10 +18,10 @@
  *   - production: freezeCached is a pass-through no-op
  */
 
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createAsyncCommandBus } from '../src/command-bus';
+import { afterEach, describe, expect, vi } from 'vitest';
 import { FREEZE_IN_DEV, freezeCached, freezeDeep } from '../src/freeze';
 import { cache, idempotent } from '../src/plugins-extra';
+import { it } from '../src/vitest';
 
 describe('freezeDeep', () => {
   it('freezes nested plain objects and arrays at every depth', () => {
@@ -126,8 +126,7 @@ describe('freezeCached', () => {
 // ---------------------------------------------------------------------------
 
 describe('stores that hand back a shared object freeze it', () => {
-  it('cache() - a later hit cannot be rewritten through an earlier one', async () => {
-    const bus = createAsyncCommandBus();
+  it('cache() - a later hit cannot be rewritten through an earlier one', async ({ asyncBus: bus }) => {
     bus.use(cache({ ttl: 60_000 }));
     bus.register('load', async () => ({ items: [1, 2, 3] }));
 
@@ -140,8 +139,7 @@ describe('stores that hand back a shared object freeze it', () => {
     expect((second.value as { items: number[] }).items).toEqual([1, 2, 3]);
   });
 
-  it('idempotent() - a later duplicate cannot be rewritten through an earlier one', async () => {
-    const bus = createAsyncCommandBus();
+  it('idempotent() - a later duplicate cannot be rewritten through an earlier one', async ({ asyncBus: bus }) => {
     bus.use(idempotent());
     bus.register('load', async () => ({ items: [1, 2, 3] }));
 
@@ -156,8 +154,7 @@ describe('stores that hand back a shared object freeze it', () => {
     expect((second.value as { items: number[] }).items).toEqual([1, 2, 3]);
   });
 
-  it('idempotent() - concurrent duplicates share one frozen result', async () => {
-    const bus = createAsyncCommandBus();
+  it('idempotent() - concurrent duplicates share one frozen result', async ({ asyncBus: bus }) => {
     bus.use(idempotent());
     bus.register('load', async () => ({ items: [1] }));
 

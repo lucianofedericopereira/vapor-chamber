@@ -72,40 +72,41 @@ describe('createWebHistory (happy-dom)', () => {
 
   it('go delegates to window.history.go', () => {
     const h = createWebHistory('/admin');
-    const spy = vi.spyOn(window.history, 'go').mockImplementation(() => {});
-    h.go(-2);
-    expect(spy).toHaveBeenCalledWith(-2);
-    spy.mockRestore();
+    {
+      using spy = vi.spyOn(window.history, 'go').mockImplementation(() => {});
+      h.go(-2);
+      expect(spy).toHaveBeenCalledWith(-2);
+    }
     h.destroy();
   });
 
   it('falls back to a full navigation when pushState throws (Safari throttle)', () => {
     const h = createWebHistory('/admin');
-    const pushSpy = vi.spyOn(window.history, 'pushState').mockImplementation(() => {
-      throw new DOMException('Safari 100 pushState/30s limit', 'SecurityError');
-    });
-    const assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
+    {
+      using _pushSpy = vi.spyOn(window.history, 'pushState').mockImplementation(() => {
+        throw new DOMException('Safari 100 pushState/30s limit', 'SecurityError');
+      });
+      using assignSpy = vi.spyOn(window.location, 'assign').mockImplementation(() => {});
 
-    h.push('/throttled');
+      h.push('/throttled');
 
-    expect(assignSpy).toHaveBeenCalledWith('/admin/throttled');
-    pushSpy.mockRestore();
-    assignSpy.mockRestore();
+      expect(assignSpy).toHaveBeenCalledWith('/admin/throttled');
+    }
     h.destroy();
   });
 
   it('falls back to location.replace when replaceState throws', () => {
     const h = createWebHistory('/admin');
-    const replaceStateSpy = vi.spyOn(window.history, 'replaceState').mockImplementation(() => {
-      throw new DOMException('Safari 100 pushState/30s limit', 'SecurityError');
-    });
-    const replaceSpy = vi.spyOn(window.location, 'replace').mockImplementation(() => {});
+    {
+      using _replaceStateSpy = vi.spyOn(window.history, 'replaceState').mockImplementation(() => {
+        throw new DOMException('Safari 100 pushState/30s limit', 'SecurityError');
+      });
+      using replaceSpy = vi.spyOn(window.location, 'replace').mockImplementation(() => {});
 
-    h.replace('/throttled-too');
+      h.replace('/throttled-too');
 
-    expect(replaceSpy).toHaveBeenCalledWith('/admin/throttled-too');
-    replaceStateSpy.mockRestore();
-    replaceSpy.mockRestore();
+      expect(replaceSpy).toHaveBeenCalledWith('/admin/throttled-too');
+    }
     h.destroy();
   });
 });

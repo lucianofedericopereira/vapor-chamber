@@ -381,8 +381,7 @@ describe('formValidate internal command', () => {
 
     const result = form.bus.dispatch('formValidate', {});
 
-    expect(result.ok).toBe(true);
-    expect(result.value).toEqual({
+    expect(result).toSucceedWith({
       valid: false,
       errors: { email: 'Invalid email', age: 'Required' },
     });

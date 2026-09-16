@@ -9,14 +9,14 @@
  *   - Async + sync bus paths both update state correctly.
  *   - Per-bus isolation: separate buses get separate shared states.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, expect, vi, beforeEach } from 'vitest';
 import {
   createCommandBus,
-  createAsyncCommandBus,
   setCommandBus,
   resetCommandBus,
   useSharedCommandState,
 } from '../src/index';
+import { it } from '../src/vitest';
 
 beforeEach(() => { resetCommandBus(); });
 
@@ -42,8 +42,7 @@ describe('useSharedCommandState - shared identity', () => {
 });
 
 describe('useSharedCommandState - inFlight counter', () => {
-  it('isAnyLoading reflects inFlight > 0 across multiple subscribers', async () => {
-    const bus = createAsyncCommandBus();
+  it('isAnyLoading reflects inFlight > 0 across multiple subscribers', async ({ asyncBus: bus }) => {
     bus.register('slow', async () => {
       await new Promise(r => setTimeout(r, 20));
       return 'ok';
@@ -72,8 +71,7 @@ describe('useSharedCommandState - inFlight counter', () => {
     a.dispose(); b.dispose();
   });
 
-  it('counter never goes below zero on edge cases', async () => {
-    const bus = createCommandBus();
+  it('counter never goes below zero on edge cases', async ({ bus }) => {
     bus.register('quick', () => 'ok');
     setCommandBus(bus);
     const s = useSharedCommandState();
@@ -85,8 +83,7 @@ describe('useSharedCommandState - inFlight counter', () => {
 });
 
 describe('useSharedCommandState - error capture', () => {
-  it('records failed dispatches into the errors ring buffer', () => {
-    const bus = createCommandBus();
+  it('records failed dispatches into the errors ring buffer', ({ bus }) => {
     bus.register('boom', () => { throw new Error('boom1'); });
     setCommandBus(bus);
     const s = useSharedCommandState();
@@ -102,8 +99,7 @@ describe('useSharedCommandState - error capture', () => {
     s.dispose();
   });
 
-  it('respects the errorCap (default 10) - older errors drop off', () => {
-    const bus = createCommandBus();
+  it('respects the errorCap (default 10) - older errors drop off', ({ bus }) => {
     let i = 0;
     bus.register('boom', () => { throw new Error('e' + (++i)); });
     setCommandBus(bus);
@@ -118,8 +114,7 @@ describe('useSharedCommandState - error capture', () => {
     s.dispose();
   });
 
-  it('honors a custom errorCap', () => {
-    const bus = createCommandBus();
+  it('honors a custom errorCap', ({ bus }) => {
     bus.register('boom', () => { throw new Error('x'); });
     setCommandBus(bus);
     const s = useSharedCommandState({ errorCap: 3 });
@@ -130,8 +125,7 @@ describe('useSharedCommandState - error capture', () => {
     s.dispose();
   });
 
-  it('clear() wipes errors but preserves inFlight', async () => {
-    const bus = createAsyncCommandBus();
+  it('clear() wipes errors but preserves inFlight', async ({ asyncBus: bus }) => {
     bus.register('boom', async () => { throw new Error('x'); });
     bus.register('slow', async () => { await new Promise(r => setTimeout(r, 30)); return 'ok'; });
     setCommandBus(bus as any);
@@ -155,8 +149,7 @@ describe('useSharedCommandState - error capture', () => {
 });
 
 describe('useSharedCommandState - async dispatch path', () => {
-  it('async result that resolves with !ok records the error', async () => {
-    const bus = createAsyncCommandBus();
+  it('async result that resolves with !ok records the error', async ({ asyncBus: bus }) => {
     bus.register('async-fail', async () => { throw new Error('async-boom'); });
     setCommandBus(bus as any);
     const s = useSharedCommandState();
@@ -170,22 +163,19 @@ describe('useSharedCommandState - async dispatch path', () => {
     s.dispose();
   });
 
-  it('async result that resolves with ok=true does NOT record an error', async () => {
-    const bus = createAsyncCommandBus();
+  it('async result that resolves with ok=true does NOT record an error', async ({ asyncBus: bus }) => {
     bus.register('async-ok', async (cmd) => cmd.target);
     setCommandBus(bus as any);
     const s = useSharedCommandState();
 
     const result = await s.dispatch('async-ok', 42);
 
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe(42);
+    expect(result).toSucceedWith(42);
     expect(s.errorCount.value).toBe(0);
     s.dispose();
   });
 
-  it('forwards { signal } to bus.dispatch (AbortController integration)', async () => {
-    const bus = createAsyncCommandBus();
+  it('forwards { signal } to bus.dispatch (AbortController integration)', async ({ asyncBus: bus }) => {
     const handler = vi.fn(async () => 'never');
     bus.register('slow', handler);
     setCommandBus(bus as any);
@@ -196,15 +186,14 @@ describe('useSharedCommandState - async dispatch path', () => {
 
     const result = await s.dispatch('slow', null, undefined, { signal: ac.signal });
 
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('VC_CORE_ABORTED');
     expect(handler).not.toHaveBeenCalled();
     s.dispose();
   });
 });
 
 describe('useSharedCommandState - disposal', () => {
-  it('refCount tracks subscribers; state stays alive until all dispose', () => {
-    const bus = createCommandBus();
+  it('refCount tracks subscribers; state stays alive until all dispose', ({ bus }) => {
     bus.register('boom', () => { throw new Error('x'); });
     setCommandBus(bus);
 
@@ -225,8 +214,7 @@ describe('useSharedCommandState - disposal', () => {
 });
 
 describe('useSharedCommandState - bus-wide error observation (v1.6.0)', () => {
-  it('records errors from dispatches made OUTSIDE its own dispatch wrapper', () => {
-    const bus = createCommandBus();
+  it('records errors from dispatches made OUTSIDE its own dispatch wrapper', ({ bus }) => {
     setCommandBus(bus as any);
     const shared = useSharedCommandState();
     bus.register('boom', () => { throw new Error('outside failure'); });
@@ -241,8 +229,7 @@ describe('useSharedCommandState - bus-wide error observation (v1.6.0)', () => {
     resetCommandBus();
   });
 
-  it('does not double-record errors from its own dispatch wrapper', () => {
-    const bus = createCommandBus();
+  it('does not double-record errors from its own dispatch wrapper', ({ bus }) => {
     setCommandBus(bus as any);
     const shared = useSharedCommandState();
     bus.register('boom', () => { throw new Error('own failure'); });
@@ -254,8 +241,7 @@ describe('useSharedCommandState - bus-wide error observation (v1.6.0)', () => {
     resetCommandBus();
   });
 
-  it('unhooks the bus observer after the last dispose', () => {
-    const bus = createCommandBus();
+  it('unhooks the bus observer after the last dispose', ({ bus }) => {
     setCommandBus(bus as any);
     const shared = useSharedCommandState();
     bus.register('boom', () => { throw new Error('late failure'); });

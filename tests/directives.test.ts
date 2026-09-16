@@ -370,13 +370,12 @@ describe('createDirectivePlugin', () => {
       it('falls back to a direct listener with a warning when combined with .capture/.once/.passive', () => {
         const doc = createMockDocument();
         const el = createElement('button', { ownerDocument: doc });
-        const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+        using warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
         const vcDir = app.getDirective('vc');
         vcDir.mounted(el, { arg: 'command', value: 'a', modifiers: { delegate: true, once: true } });
         expect(el.hasClick()).toBe(true);
         expect(doc.hasClickListener()).toBe(false);
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('.delegate is incompatible'));
-        warnSpy.mockRestore();
       });
 
       it('beforeUnmount on a non-delegated element does not touch the document listener', () => {

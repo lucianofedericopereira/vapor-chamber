@@ -19,7 +19,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.resetModules();
-  vi.restoreAllMocks();
 });
 
 const ROWS = [

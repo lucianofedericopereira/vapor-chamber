@@ -108,7 +108,7 @@ describe('DEV - the expression the ESM build emits', () => {
     // What a consumer's production define leaves: `cond ? false : false`.
     const folded = DEV_ESM_SOURCE.split('process.env.NODE_ENV').join('"production"');
     expect(folded).toMatch(/\? "production" !== "production" : false;\n$/);
-  }, 30000);
+  });
 
   it('agrees with src/dev.ts wherever `process` exists', async () => {
     const { DEV_ESM_SOURCE } = await import('../scripts/build.mjs');

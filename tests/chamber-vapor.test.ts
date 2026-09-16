@@ -56,8 +56,7 @@ describe('defineVaporCommand', () => {
     const { dispatch, dispose } = defineVaporCommand('quickCalc', handler);
 
     const result = dispatch({ qty: 5 });
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe(10);
+    expect(result).toSucceedWith(10);
     expect(handler).toHaveBeenCalledOnce();
 
     dispose();
@@ -129,8 +128,7 @@ describe('useCommand - register/on/emit/dispose', () => {
     expect(lastError.value).toBe(null);
 
     const result = dispatch('vaporAdd', { id: 42 });
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe(42);
+    expect(result).toSucceedWith(42);
     // After sync dispatch, loading is back to false
     expect(loading.value).toBe(false);
     expect(lastError.value).toBe(null);
@@ -158,8 +156,7 @@ describe('useCommand - register/on/emit/dispose', () => {
 
     register('vaporReg', handler);
     const result = dispatch('vaporReg', { x: 1 });
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe('registered');
+    expect(result).toSucceedWith('registered');
     expect(handler).toHaveBeenCalledOnce();
 
     dispose();
@@ -261,24 +258,20 @@ describe('defineVaporComponent', () => {
   it('passes options through unchanged so beta.11 attrs/emits + generics flow through', async () => {
     const chamber = await import('../src/chamber');
     const fakeDefine = vi.fn((options: any) => ({ __defined: true, options }));
-    const spy = vi.spyOn(chamber, 'getDefineVaporComponentFn').mockReturnValue(fakeDefine);
-    try {
-      const options = {
-        props: { label: String },
-        emits: ['select'],
-        setup: () => () => null,
-      };
-      const result = defineVaporComponent(options);
-      expect(spy).toHaveBeenCalled();
-      expect(fakeDefine).toHaveBeenCalledTimes(1);
-      // Critical: the wrapper must NOT mutate or strip emits - beta.11 relies on
-      // the declared emits list to keep onXxx listeners out of $attrs.
-      expect(fakeDefine.mock.calls[0]![0]).toBe(options);
-      expect(fakeDefine.mock.calls[0]![0].emits).toEqual(['select']);
-      expect((result as any).__defined).toBe(true);
-    } finally {
-      spy.mockRestore();
-    }
+    using spy = vi.spyOn(chamber, 'getDefineVaporComponentFn').mockReturnValue(fakeDefine);
+    const options = {
+      props: { label: String },
+      emits: ['select'],
+      setup: () => () => null,
+    };
+    const result = defineVaporComponent(options);
+    expect(spy).toHaveBeenCalled();
+    expect(fakeDefine).toHaveBeenCalledTimes(1);
+    // Critical: the wrapper must NOT mutate or strip emits - beta.11 relies on
+    // the declared emits list to keep onXxx listeners out of $attrs.
+    expect(fakeDefine.mock.calls[0]![0]).toBe(options);
+    expect(fakeDefine.mock.calls[0]![0].emits).toEqual(['select']);
+    expect((result as any).__defined).toBe(true);
   });
 });
 
@@ -288,12 +281,8 @@ describe('defineVaporAsyncComponent', () => {
   // wrapper calls through to it when available, and returns null otherwise.
   it('returns null when the fn is not available (mocked)', async () => {
     const chamber = await import('../src/chamber');
-    const spy = vi.spyOn(chamber, 'getDefineVaporAsyncComponentFn').mockReturnValue(null);
-    try {
-      expect(defineVaporAsyncComponent(() => Promise.resolve({}))).toBeNull();
-    } finally {
-      spy.mockRestore();
-    }
+    using _spy = vi.spyOn(chamber, 'getDefineVaporAsyncComponentFn').mockReturnValue(null);
+    expect(defineVaporAsyncComponent(() => Promise.resolve({}))).toBeNull();
   });
 
   it('calls through to Vue defineVaporAsyncComponent when available (beta.14+)', async () => {
@@ -301,14 +290,10 @@ describe('defineVaporAsyncComponent', () => {
     const fakeResult = { __asyncLoader: loader, name: 'AsyncComponentWrapper' };
     const fakeDefine = vi.fn(() => fakeResult);
     const chamber = await import('../src/chamber');
-    const spy = vi.spyOn(chamber, 'getDefineVaporAsyncComponentFn').mockReturnValue(fakeDefine);
-    try {
-      const result = defineVaporAsyncComponent(loader);
-      expect(fakeDefine).toHaveBeenCalledWith(loader);
-      expect(result).toBe(fakeResult);
-    } finally {
-      spy.mockRestore();
-    }
+    using _spy = vi.spyOn(chamber, 'getDefineVaporAsyncComponentFn').mockReturnValue(fakeDefine);
+    const result = defineVaporAsyncComponent(loader);
+    expect(fakeDefine).toHaveBeenCalledWith(loader);
+    expect(result).toBe(fakeResult);
   });
 });
 
@@ -333,8 +318,7 @@ describe('useVaporAsyncCommand', () => {
 
     const result = await resultPromise;
     expect(loading.value).toBe(false);
-    expect(result.ok).toBe(true);
-    expect(result.value).toEqual({ orderId: 123 });
+    expect(result).toSucceedWith({ orderId: 123 });
     expect(lastError.value).toBeNull();
 
     dispose();
@@ -373,7 +357,6 @@ describe('useVaporAsyncCommand', () => {
     const { dispatch } = useVaporAsyncCommand();
     const result = await dispatch('shared', { id: 1 });
 
-    expect(result.ok).toBe(true);
-    expect(result.value).toEqual({ echoed: { id: 1 } });
+    expect(result).toSucceedWith({ echoed: { id: 1 } });
   });
 });

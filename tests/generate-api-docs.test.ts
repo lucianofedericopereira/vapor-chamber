@@ -148,7 +148,7 @@ describe('generate-api-docs', () => {
     // asserts there is no iife ROW rather than no mention.
     expect(index).not.toContain('](iife.md)');
     expect(index).toContain('2 entry points');
-  }, 30000);
+  });
 
   it('resolves aliases through a re-export barrel', () => {
     const page = read('index.md');
@@ -200,5 +200,5 @@ describe('generate-api-docs', () => {
     const first = read('index.md');
     run();
     expect(read('index.md')).toBe(first);
-  }, 30000);
+  });
 });

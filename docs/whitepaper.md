@@ -1562,7 +1562,7 @@ src/
   iife-elements.ts  - CDN entry, elements variant
   index.ts          - public ESM barrel
 
-tests/                           (<!-- vc:testFiles -->169<!-- /vc:testFiles --> files, <!-- vc:tests -->2267<!-- /vc:tests --> tests)
+tests/                           (<!-- vc:testFiles -->167<!-- /vc:testFiles --> files, <!-- vc:tests -->2420<!-- /vc:tests --> tests)
 ```
 
 The per-file test inventory that used to sit here was removed rather than

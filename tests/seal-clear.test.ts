@@ -14,10 +14,11 @@
  * harness and throw VC_CORE_SEALED against the real bus; and unsealBus()
  * reopens it, as it reopens a real bus.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, expect } from 'vitest';
 import { createCommandBus, createAsyncCommandBus, unsealBus, inspectBus, type BusError } from '../src/command-bus';
 import { history } from '../src/plugins-core';
 import { createTestBus } from '../src/testing';
+import { it } from '../src/vitest';
 
 /** The BusError code `fn` throws, or undefined when it does not throw. */
 const thrownCode = (fn: () => unknown): string | undefined => {
@@ -62,8 +63,7 @@ describe.each([
 });
 
 describe('the ledger case: a stray clear() cannot turn a rollback into a no-op', () => {
-  it('undo() still runs the inverse after a refused clear()', () => {
-    const bus = createCommandBus();
+  it('undo() still runs the inverse after a refused clear()', ({ bus }) => {
     let balance = 0;
     bus.register('pay', () => { balance += 10; }, { undo: () => { balance -= 10; } });
     const h = history({ bus });

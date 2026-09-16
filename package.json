@@ -1,6 +1,6 @@
 {
   "name": "vapor-chamber",
-  "version": "1.20.0",
+  "version": "1.21.0",
   "description": "Lightweight command bus for Vue Vapor - plugins, hooks, undo/redo, Vue 3.6 Vapor aligned",
   "type": "module",
   "main": "./dist/index.js",
@@ -36,6 +36,21 @@
       "types": "./dist/vite-hmr.d.ts",
       "import": "./dist/vite-hmr.js",
       "default": "./dist/vite-hmr.js"
+    },
+    "./vitest": {
+      "types": "./dist/vitest.d.ts",
+      "import": "./dist/vitest.js",
+      "default": "./dist/vitest.js"
+    },
+    "./vitest/pure": {
+      "types": "./dist/vitest-pure.d.ts",
+      "import": "./dist/vitest-pure.js",
+      "default": "./dist/vitest-pure.js"
+    },
+    "./vitest/mcp": {
+      "types": "./dist/vitest-mcp.d.ts",
+      "import": "./dist/vitest-mcp.js",
+      "default": "./dist/vitest-mcp.js"
     },
     "./transitions": {
       "types": "./dist/transitions.d.ts",
@@ -139,7 +154,11 @@
     },
     "./package.json": "./package.json"
   },
+  "bin": {
+    "vc-vitest-mcp": "./bin/vc-vitest-mcp.mjs"
+  },
   "files": [
+    "bin",
     "dist",
     "src",
     "scripts",
@@ -150,6 +169,7 @@
   "sideEffects": [
     "./dist/vue.js",
     "./dist/vapor.js",
+    "./dist/vitest.js",
     "./dist/iife.js",
     "./dist/iife-core.js",
     "./dist/iife-elements.js",
@@ -164,8 +184,8 @@
     "build:js": "node scripts/build.mjs",
     "dev": "tsc --watch",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.typecheck.json && tsc -p examples/tsconfig.patterns.json",
-    "lint": "biome check --write src tests scripts",
-    "lint:check": "biome check src tests scripts && node scripts/check-env-guards.mjs && node scripts/check-line-citations.mjs && node scripts/check-doc-claims.mjs && node scripts/stamp-docs.mjs --check && node scripts/check-ascii.mjs",
+    "lint": "biome check --write src tests scripts bin",
+    "lint:check": "biome check src tests scripts bin && node scripts/check-env-guards.mjs && node scripts/check-line-citations.mjs && node scripts/check-doc-claims.mjs && node scripts/stamp-docs.mjs --check && node scripts/check-ascii.mjs",
     "docs:stamp": "node scripts/stamp-docs.mjs",
     "docs:check": "node scripts/stamp-docs.mjs --check",
     "test": "vitest run && vitest run -c vitest.vapor.config.ts",
@@ -221,7 +241,8 @@
     "@vue/reactivity": ">=3.5.0 || >=3.6.0-rc.8",
     "alien-signals": ">=3.1.2",
     "vite": ">=5.0.0",
-    "vue": ">=3.5.0 || >=3.6.0-rc.8"
+    "vue": ">=3.5.0 || >=3.6.0-rc.8",
+    "vitest": ">=5.0.0"
   },
   "peerDependenciesMeta": {
     "alien-signals": {
@@ -241,16 +262,19 @@
     },
     "@vue/reactivity": {
       "optional": true
+    },
+    "vitest": {
+      "optional": true
     }
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.8",
-    "alien-signals": "^3.1.2",
     "@types/node": "^26.2.0",
     "@vitejs/plugin-vue": "^6.0.8",
-    "@vitest/coverage-v8": "^4.1.9",
+    "@vitest/coverage-v8": "^5.0.1",
     "@vue/devtools-api": "^8.1.5",
     "@vue/reactivity": "^3.6.0-rc.8",
+    "alien-signals": "^3.1.2",
     "esbuild": "^0.28.2",
     "eventemitter3": "^5.0.4",
     "happy-dom": "^20.11.2",
@@ -260,7 +284,7 @@
     "tiny-emitter": "^2.1.0",
     "typescript": "^6.0.3",
     "vite": "^8.2.2",
-    "vitest": "^4.1.9",
+    "vitest": "^5.0.1",
     "vue": "^3.6.0-rc.8"
   },
   "engines": {

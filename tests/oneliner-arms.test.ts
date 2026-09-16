@@ -12,7 +12,7 @@
  *  - router/menu: a table with no menu-flagged rows at all.
  *  - ssr: the rehydrate() thenable guard's own `.catch`.
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { createTransitionBridge } from '../src/transitions';
 import { createReaction } from '../src/utilities';
 import { createCommandBus, createAsyncCommandBus } from '../src/index';
@@ -22,7 +22,6 @@ import { rehydrate } from '../src/ssr';
 import { buildMenu } from '../src/router/menu';
 import { createRouteTable } from '../src/router/table';
 
-afterEach(() => vi.restoreAllMocks());
 
 // ---------------------------------------------------------------------------
 // transitions - done() on a rejected dispatch

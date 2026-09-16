@@ -12,7 +12,7 @@
  *  - describeSchema for a bare action (no target/payload/description) and for
  *    a fully-specified one.
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   defineSchema,
   describeSchema,
@@ -23,7 +23,6 @@ import {
 } from '../src/schema';
 import type { BusSchema } from '../src/schema';
 
-afterEach(() => vi.restoreAllMocks());
 
 // ---------------------------------------------------------------------------
 // defineSchema

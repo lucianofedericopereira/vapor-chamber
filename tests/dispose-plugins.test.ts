@@ -11,10 +11,11 @@
  * retry() ends a pending sleep as VC_CORE_ABORTED - a cleared timer alone
  * would have left that dispatch pending forever.
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, expect, vi, afterEach } from 'vitest';
 import { createCommandBus, createAsyncCommandBus, type BusError, type CommandResult, type Plugin } from '../src/command-bus';
 import { debounce, throttle } from '../src/plugins-core';
 import { retry } from '../src/plugins-io';
+import { it } from '../src/vitest';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -90,8 +91,7 @@ describe('dispose() runs plugin dispose()', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('runs every plugin dispose, even when one unsubscribes its own plugin', () => {
-    const bus = createCommandBus();
+  it('runs every plugin dispose, even when one unsubscribes its own plugin', ({ bus }) => {
     const first = vi.fn();
     const second = vi.fn();
     let unsubFirst = (): void => {};
@@ -107,8 +107,7 @@ describe('dispose() runs plugin dispose()', () => {
     expect(second).toHaveBeenCalledTimes(1);
   });
 
-  it('async bus: the same, and the plugins are gone afterwards', async () => {
-    const bus = createAsyncCommandBus();
+  it('async bus: the same, and the plugins are gone afterwards', async ({ asyncBus: bus }) => {
     const spy = vi.fn();
     bus.use(Object.assign((async (_c: unknown, next: () => CommandResult | Promise<CommandResult>) => next()) as any, { dispose: spy }));
     bus.register('t', async () => 1);

@@ -10,14 +10,14 @@
  *  - supersede: merging a caller-supplied signal via AbortSignal.any
  *    and the ctrl-signal fallback when AbortSignal.any is unavailable.
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, expect, vi, afterEach } from 'vitest';
 import { createCommandBus, createAsyncCommandBus } from '../src/index';
 import { rateLimit, metrics, serialize, idempotent, supersede } from '../src/plugins-extra';
 import type { Command } from '../src/index';
+import { it } from '../src/vitest';
 
 afterEach(() => {
   vi.useRealTimers();
-  vi.restoreAllMocks();
 });
 
 function cmd(action: string, extra: Partial<Command> = {}): Command {
@@ -41,7 +41,7 @@ describe('rateLimit window compaction', () => {
     expect(bus.dispatch('tap', {}).ok).toBe(true);
     expect(bus.dispatch('tap', {}).ok).toBe(true);
     expect(bus.dispatch('tap', {}).ok).toBe(true);
-    expect(bus.dispatch('tap', {}).ok).toBe(false); // over the limit
+    expect(bus.dispatch('tap', {})).toFailWith('VC_PLUGIN_RATE_LIMITED'); // over the limit
 
     // ...then let all three expire: head walks past them and, being more than
     // half the array, triggers the slice-compaction.
@@ -56,8 +56,7 @@ describe('rateLimit window compaction', () => {
 // ---------------------------------------------------------------------------
 
 describe('metrics eviction', () => {
-  it('drops oldest entries past maxEntries and compacts', () => {
-    const bus = createCommandBus();
+  it('drops oldest entries past maxEntries and compacts', ({ bus }) => {
     const m = metrics({ maxEntries: 2 });
     bus.use(m);
     bus.register('go', () => 1);
@@ -201,8 +200,7 @@ describe('idempotent', () => {
 // ---------------------------------------------------------------------------
 
 describe('supersede signal merging', () => {
-  it('merges a caller-supplied signal with the per-key controller', async () => {
-    const bus = createAsyncCommandBus();
+  it('merges a caller-supplied signal with the per-key controller', async ({ asyncBus: bus }) => {
     bus.use(supersede({ actions: ['search'] }));
     let observed: AbortSignal | undefined;
     bus.register('search', async (c: Command) => { observed = c.signal; return 1; });

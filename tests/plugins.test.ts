@@ -1,14 +1,12 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
 import { logger, validator, history, debounce, throttle, authGuard, optimistic } from '../src/plugins';
+import { stubGlobal } from '../src/vitest-pure';
+import { it } from '../src/vitest';
 
 describe('logger plugin', () => {
-  beforeEach(() => {
-    vi.restoreAllMocks();
-  });
 
-  it('should log command and result', () => {
-    const bus = createCommandBus();
+  it('should log command and result', ({ bus }) => {
     const group = vi.spyOn(console, 'groupCollapsed').mockImplementation(() => {});
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const groupEnd = vi.spyOn(console, 'groupEnd').mockImplementation(() => {});
@@ -25,8 +23,7 @@ describe('logger plugin', () => {
     expect(groupEnd).toHaveBeenCalled();
   });
 
-  it('should use console.group when collapsed is false', () => {
-    const bus = createCommandBus();
+  it('should use console.group when collapsed is false', ({ bus }) => {
     const group = vi.spyOn(console, 'group').mockImplementation(() => {});
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'groupEnd').mockImplementation(() => {});
@@ -39,8 +36,7 @@ describe('logger plugin', () => {
     expect(group).toHaveBeenCalled();
   });
 
-  it('should respect filter option', () => {
-    const bus = createCommandBus();
+  it('should respect filter option', ({ bus }) => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'groupCollapsed').mockImplementation(() => {});
     vi.spyOn(console, 'groupEnd').mockImplementation(() => {});
@@ -58,8 +54,7 @@ describe('logger plugin', () => {
     expect(log).not.toHaveBeenCalled();
   });
 
-  it('level: "warn" suppresses ok dispatches but still logs failures', () => {
-    const bus = createCommandBus();
+  it('level: "warn" suppresses ok dispatches but still logs failures', ({ bus }) => {
     const group = vi.spyOn(console, 'groupCollapsed').mockImplementation(() => {});
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const error = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -77,8 +72,7 @@ describe('logger plugin', () => {
     expect(error).toHaveBeenCalledWith('error:', expect.anything());
   });
 
-  it('level: "debug" keeps logging ok dispatches like the default', () => {
-    const bus = createCommandBus();
+  it('level: "debug" keeps logging ok dispatches like the default', ({ bus }) => {
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'groupCollapsed').mockImplementation(() => {});
     vi.spyOn(console, 'groupEnd').mockImplementation(() => {});
@@ -90,8 +84,7 @@ describe('logger plugin', () => {
     expect(log).toHaveBeenCalledWith('result:', 'ok');
   });
 
-  it('badges: true prefixes fixed-width [  OK  ] / [ FAIL ] badges (plain text in Node)', () => {
-    const bus = createCommandBus();
+  it('badges: true prefixes fixed-width [  OK  ] / [ FAIL ] badges (plain text in Node)', ({ bus }) => {
     const group = vi.spyOn(console, 'groupCollapsed').mockImplementation(() => {});
     vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -108,7 +101,7 @@ describe('logger plugin', () => {
   });
 
   it('badges: true uses %c styling when window exists', () => {
-    vi.stubGlobal('window', {});
+    using _window = stubGlobal('window', {});
     const bus = createCommandBus();
     const group = vi.spyOn(console, 'groupCollapsed').mockImplementation(() => {});
     vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -123,13 +116,11 @@ describe('logger plugin', () => {
       expect.stringContaining('monospace'),
       '',
     );
-    vi.unstubAllGlobals();
   });
 });
 
 describe('validator plugin', () => {
-  it('should allow valid commands', () => {
-    const bus = createCommandBus();
+  it('should allow valid commands', ({ bus }) => {
 
     bus.use(validator({
       'testAction': () => null,
@@ -138,12 +129,10 @@ describe('validator plugin', () => {
 
     const result = bus.dispatch('testAction', {});
 
-    expect(result.ok).toBe(true);
-    expect(result.value).toBe('success');
+    expect(result).toSucceedWith('success');
   });
 
-  it('should block invalid commands', () => {
-    const bus = createCommandBus();
+  it('should block invalid commands', ({ bus }) => {
 
     bus.use(validator({
       'testAction': () => 'Validation failed',
@@ -156,8 +145,7 @@ describe('validator plugin', () => {
     expect(result.error?.message).toBe('Validation failed');
   });
 
-  it('should pass command to validator', () => {
-    const bus = createCommandBus();
+  it('should pass command to validator', ({ bus }) => {
 
     bus.use(validator({
       'testAction': (cmd) => cmd.target?.value > 0 ? null : 'Value must be positive',
@@ -168,8 +156,7 @@ describe('validator plugin', () => {
     expect(bus.dispatch('testAction', { value: -1 }).ok).toBe(false);
   });
 
-  it('should skip unregistered actions', () => {
-    const bus = createCommandBus();
+  it('should skip unregistered actions', ({ bus }) => {
 
     bus.use(validator({
       'validatedAction': () => 'Blocked',
@@ -183,8 +170,7 @@ describe('validator plugin', () => {
 });
 
 describe('history plugin - undoAction/redoAction triggers', () => {
-  it('repeated undo + redo work when triggers are dispatched through the bus (cart scenario)', () => {
-    const bus = createCommandBus();
+  it('repeated undo + redo work when triggers are dispatched through the bus (cart scenario)', ({ bus }) => {
     let total = 0;
     const h = history({ bus, undoAction: 'cart.undo', redoAction: 'cart.redo' });
     bus.use(h);
@@ -209,8 +195,7 @@ describe('history plugin - undoAction/redoAction triggers', () => {
     expect(h.getState().past.length).toBe(1);
   });
 
-  it('trigger actions are excluded from recording even if filter matches them', () => {
-    const bus = createCommandBus();
+  it('trigger actions are excluded from recording even if filter matches them', ({ bus }) => {
     const h = history({
       bus,
       filter: cmd => cmd.action.startsWith('cart'),
@@ -237,16 +222,14 @@ describe('history plugin - undoAction/redoAction triggers', () => {
   });
 
   it('warns and skips trigger registration when bus is missing', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     history({ undoAction: 'u' });
     expect(warn).toHaveBeenCalledOnce();
-    warn.mockRestore();
   });
 });
 
 describe('history plugin', () => {
-  it('should track successful commands', () => {
-    const bus = createCommandBus();
+  it('should track successful commands', ({ bus }) => {
     const historyPlugin = history();
 
     bus.use(historyPlugin);
@@ -261,8 +244,7 @@ describe('history plugin', () => {
     expect(state.canRedo).toBe(false);
   });
 
-  it('should not track failed commands', () => {
-    const bus = createCommandBus();
+  it('should not track failed commands', ({ bus }) => {
     const historyPlugin = history();
 
     bus.use(historyPlugin);
@@ -276,8 +258,7 @@ describe('history plugin', () => {
     expect(state.past.length).toBe(0);
   });
 
-  it('should undo commands', () => {
-    const bus = createCommandBus();
+  it('should undo commands', ({ bus }) => {
     const historyPlugin = history();
 
     bus.use(historyPlugin);
@@ -294,8 +275,7 @@ describe('history plugin', () => {
     expect(historyPlugin.getState().canRedo).toBe(true);
   });
 
-  it('should redo commands', () => {
-    const bus = createCommandBus();
+  it('should redo commands', ({ bus }) => {
     const historyPlugin = history();
 
     bus.use(historyPlugin);
@@ -311,8 +291,7 @@ describe('history plugin', () => {
     expect(historyPlugin.getState().future.length).toBe(0);
   });
 
-  it('should clear future on new command', () => {
-    const bus = createCommandBus();
+  it('should clear future on new command', ({ bus }) => {
     const historyPlugin = history();
 
     bus.use(historyPlugin);
@@ -329,8 +308,7 @@ describe('history plugin', () => {
     expect(historyPlugin.getState().future.length).toBe(0);
   });
 
-  it('should respect maxSize', () => {
-    const bus = createCommandBus();
+  it('should respect maxSize', ({ bus }) => {
     const historyPlugin = history({ maxSize: 2 });
 
     bus.use(historyPlugin);
@@ -346,8 +324,7 @@ describe('history plugin', () => {
     expect(state.past[1].target.id).toBe(3);
   });
 
-  it('should respect filter', () => {
-    const bus = createCommandBus();
+  it('should respect filter', ({ bus }) => {
     const historyPlugin = history({
       filter: (cmd) => cmd.action.startsWith('track'),
     });
@@ -364,8 +341,7 @@ describe('history plugin', () => {
     expect(state.past.length).toBe(2);
   });
 
-  it('should clear history', () => {
-    const bus = createCommandBus();
+  it('should clear history', ({ bus }) => {
     const historyPlugin = history();
 
     bus.use(historyPlugin);
@@ -387,8 +363,7 @@ describe('debounce plugin', () => {
     vi.useFakeTimers();
   });
 
-  it('should debounce specified actions', () => {
-    const bus = createCommandBus();
+  it('should debounce specified actions', ({ bus }) => {
     const handler = vi.fn(() => 'result');
 
     bus.use(debounce(['testAction'], 100));
@@ -406,8 +381,7 @@ describe('debounce plugin', () => {
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
-  it('should not debounce unspecified actions', () => {
-    const bus = createCommandBus();
+  it('should not debounce unspecified actions', ({ bus }) => {
     const handler = vi.fn(() => 'result');
 
     bus.use(debounce(['debouncedAction'], 100));
@@ -418,8 +392,7 @@ describe('debounce plugin', () => {
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
-  it('should return pending status for debounced calls', () => {
-    const bus = createCommandBus();
+  it('should return pending status for debounced calls', ({ bus }) => {
 
     bus.use(debounce(['testAction'], 100));
     bus.register('testAction', () => 'result');
@@ -430,8 +403,7 @@ describe('debounce plugin', () => {
     expect(result.value?.pending).toBe(true);
   });
 
-  it('should debounce per target', () => {
-    const bus = createCommandBus();
+  it('should debounce per target', ({ bus }) => {
     const handler = vi.fn(() => 'result');
 
     bus.use(debounce(['testAction'], 100));
@@ -455,8 +427,7 @@ describe('throttle plugin', () => {
     vi.useFakeTimers();
   });
 
-  it('should execute first call immediately', () => {
-    const bus = createCommandBus();
+  it('should execute first call immediately', ({ bus }) => {
     const handler = vi.fn(() => 'result');
 
     bus.use(throttle(['testAction'], 100));
@@ -468,8 +439,7 @@ describe('throttle plugin', () => {
     expect(result.value).toBe('result');
   });
 
-  it('should throttle subsequent calls', () => {
-    const bus = createCommandBus();
+  it('should throttle subsequent calls', ({ bus }) => {
     const handler = vi.fn(() => 'result');
 
     bus.use(throttle(['testAction'], 100));
@@ -479,12 +449,11 @@ describe('throttle plugin', () => {
     const throttled = bus.dispatch('testAction', {});
 
     expect(handler).toHaveBeenCalledTimes(1);
-    expect(throttled.ok).toBe(false);
+    expect(throttled).toFailWith('VC_CORE_THROTTLED');
     expect(throttled.error?.message).toContain('throttled');
   });
 
-  it('should allow calls after wait period', () => {
-    const bus = createCommandBus();
+  it('should allow calls after wait period', ({ bus }) => {
     const handler = vi.fn(() => 'result');
 
     bus.use(throttle(['testAction'], 100));
@@ -499,8 +468,7 @@ describe('throttle plugin', () => {
     expect(handler).toHaveBeenCalledTimes(2);
   });
 
-  it('should not throttle unspecified actions', () => {
-    const bus = createCommandBus();
+  it('should not throttle unspecified actions', ({ bus }) => {
     const handler = vi.fn(() => 'result');
 
     bus.use(throttle(['throttledAction'], 100));
@@ -512,8 +480,7 @@ describe('throttle plugin', () => {
     expect(handler).toHaveBeenCalledTimes(2);
   });
 
-  it('should throttle per target', () => {
-    const bus = createCommandBus();
+  it('should throttle per target', ({ bus }) => {
     const handler = vi.fn(() => 'result');
 
     bus.use(throttle(['testAction'], 100));
@@ -533,8 +500,7 @@ describe('throttle plugin', () => {
 // ─── history with bus (undo executes inverse handler) ─────────────────────────
 
 describe('history plugin with bus (undo/redo execution)', () => {
-  it('should execute undo handler when bus is provided', () => {
-    const bus = createCommandBus();
+  it('should execute undo handler when bus is provided', ({ bus }) => {
     const undoFn = vi.fn();
 
     bus.register('cartAdd', () => 'added', { undo: undoFn });
@@ -550,8 +516,7 @@ describe('history plugin with bus (undo/redo execution)', () => {
     );
   });
 
-  it('should re-dispatch on redo when bus is provided', () => {
-    const bus = createCommandBus();
+  it('should re-dispatch on redo when bus is provided', ({ bus }) => {
     const handler = vi.fn(() => 'result');
 
     bus.register('cartAdd', handler);
@@ -572,8 +537,7 @@ describe('history plugin with bus (undo/redo execution)', () => {
 // ─── authGuard plugin ─────────────────────────────────────────────────────────
 
 describe('authGuard plugin', () => {
-  it('should block protected actions when not authenticated', () => {
-    const bus = createCommandBus();
+  it('should block protected actions when not authenticated', ({ bus }) => {
 
     bus.use(authGuard({
       isAuthenticated: () => false,
@@ -591,8 +555,7 @@ describe('authGuard plugin', () => {
     expect(allowed.ok).toBe(true);
   });
 
-  it('should allow when authenticated', () => {
-    const bus = createCommandBus();
+  it('should allow when authenticated', ({ bus }) => {
 
     bus.use(authGuard({
       isAuthenticated: () => true,
@@ -603,8 +566,7 @@ describe('authGuard plugin', () => {
     expect(bus.dispatch('shopCartAdd', {}).ok).toBe(true);
   });
 
-  it('should call onUnauthenticated callback', () => {
-    const bus = createCommandBus();
+  it('should call onUnauthenticated callback', ({ bus }) => {
     const callback = vi.fn();
 
     bus.use(authGuard({
@@ -625,8 +587,7 @@ describe('authGuard plugin', () => {
 // ─── optimistic plugin ────────────────────────────────────────────────────────
 
 describe('optimistic plugin', () => {
-  it('should keep optimistic update on success', () => {
-    const bus = createCommandBus();
+  it('should keep optimistic update on success', ({ bus }) => {
     const state = { count: 0 };
 
     bus.use(optimistic({
@@ -641,8 +602,7 @@ describe('optimistic plugin', () => {
     expect(state.count).toBe(1);
   });
 
-  it('should rollback on failure', () => {
-    const bus = createCommandBus();
+  it('should rollback on failure', ({ bus }) => {
     const state = { count: 0 };
 
     bus.use(optimistic({
@@ -661,8 +621,7 @@ describe('optimistic plugin', () => {
 // ─── Plugin dispose ────────────────────────────────────────────────────────
 
 describe('throttle plugin dispose()', () => {
-  it('cancels all pending throttle timers', () => {
-    const bus = createCommandBus();
+  it('cancels all pending throttle timers', ({ bus }) => {
     const t = throttle(['a'], 10000);
     bus.use(t);
     bus.register('a', () => 1);
@@ -674,8 +633,7 @@ describe('throttle plugin dispose()', () => {
 });
 
 describe('debounce plugin dispose()', () => {
-  it('cancels all pending debounce timers', () => {
-    const bus = createCommandBus();
+  it('cancels all pending debounce timers', ({ bus }) => {
     const d = debounce(['a'], 10000);
     bus.use(d);
     bus.register('a', () => 1);

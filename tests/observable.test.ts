@@ -5,13 +5,13 @@
  * unsubscribe drops it; Symbol.observable interop returns self; dispatchFrom
  * emits values from a source Observable into the bus.
  */
-import { describe, it, expect, vi } from 'vitest';
-import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';
+import { describe, expect, vi } from 'vitest';
+import { createAsyncCommandBus } from '../src/command-bus';
 import { observe, dispatchFrom } from '../src/observable';
+import { it } from '../src/vitest';
 
 describe('observe(bus, pattern)', () => {
-  it('subscribe receives { cmd, result } for each matching dispatch', () => {
-    const bus = createCommandBus();
+  it('subscribe receives { cmd, result } for each matching dispatch', ({ bus }) => {
     bus.register('cartAdd', (cmd) => cmd.target);
     const observations: Array<{ cmd: any; result: any }> = [];
     observe(bus, 'cartAdd').subscribe((o) => observations.push(o));
@@ -22,12 +22,10 @@ describe('observe(bus, pattern)', () => {
     expect(observations).toHaveLength(2);
     expect(observations[0]!.cmd.action).toBe('cartAdd');
     expect(observations[0]!.cmd.target).toEqual({ id: 1 });
-    expect(observations[0]!.result.ok).toBe(true);
-    expect(observations[0]!.result.value).toEqual({ id: 1 });
+    expect(observations[0]!.result).toSucceedWith({ id: 1 });
   });
 
-  it('wildcard pattern receives all matching events', () => {
-    const bus = createCommandBus();
+  it('wildcard pattern receives all matching events', ({ bus }) => {
     bus.register('cartAdd', () => 'a');
     bus.register('cartRemove', () => 'b');
     const seen: string[] = [];
@@ -38,8 +36,7 @@ describe('observe(bus, pattern)', () => {
     expect(seen).toEqual(['cartAdd', 'cartRemove']);
   });
 
-  it('unsubscribe stops further notifications', () => {
-    const bus = createCommandBus();
+  it('unsubscribe stops further notifications', ({ bus }) => {
     bus.register('act', () => 'ok');
     const fn = vi.fn();
     const sub = observe(bus, 'act').subscribe(fn);
@@ -55,8 +52,7 @@ describe('observe(bus, pattern)', () => {
     expect(fn).toHaveBeenCalledOnce(); // not called again
   });
 
-  it('multiple subscribers each get their own listener', () => {
-    const bus = createCommandBus();
+  it('multiple subscribers each get their own listener', ({ bus }) => {
     bus.register('act', () => 'ok');
     const fn1 = vi.fn();
     const fn2 = vi.fn();
@@ -69,16 +65,14 @@ describe('observe(bus, pattern)', () => {
     expect(fn2).toHaveBeenCalledOnce();
   });
 
-  it('Symbol.observable interop returns the same observable', () => {
-    const bus = createCommandBus();
+  it('Symbol.observable interop returns the same observable', ({ bus }) => {
     const obs = observe(bus, 'evt');
     const symObs = (obs as any)[(Symbol as any).observable ?? Symbol.for('@@observable')];
     expect(typeof symObs).toBe('function');
     expect(symObs()).toBe(obs);
   });
 
-  it('observer-object form (next callback)', () => {
-    const bus = createCommandBus();
+  it('observer-object form (next callback)', ({ bus }) => {
     const fn = vi.fn();
     observe(bus, 'evt').subscribe({ next: fn });
     bus.emit('evt', { x: 1 });
@@ -87,8 +81,7 @@ describe('observe(bus, pattern)', () => {
 });
 
 describe('dispatchFrom(bus, action, source)', () => {
-  it('forwards each value emitted by the source as a bus dispatch', () => {
-    const bus = createCommandBus();
+  it('forwards each value emitted by the source as a bus dispatch', ({ bus }) => {
     const handler = vi.fn((cmd) => cmd.target);
     bus.register('tick', handler);
 
@@ -139,8 +132,7 @@ describe('dispatchFrom(bus, action, source)', () => {
     expect((errors[0] as Error).message).toMatch(/No handler registered/);
   });
 
-  it('leaves a sync bus dispatch untouched', () => {
-    const bus = createCommandBus();
+  it('leaves a sync bus dispatch untouched', ({ bus }) => {
     const handler = vi.fn((cmd) => cmd.target);
     bus.register('tick', handler);
     const source = {
@@ -153,8 +145,7 @@ describe('dispatchFrom(bus, action, source)', () => {
     expect(handler).toHaveBeenCalledOnce();
   });
 
-  it('emits :error event on source error', () => {
-    const bus = createCommandBus();
+  it('emits :error event on source error', ({ bus }) => {
     const onError = vi.fn();
     bus.on('boom:error', (cmd) => onError(cmd.target));
 
@@ -170,8 +161,7 @@ describe('dispatchFrom(bus, action, source)', () => {
     expect(onError.mock.calls[0]![0].message).toBe('source failed');
   });
 
-  it('emits :complete event on source complete', () => {
-    const bus = createCommandBus();
+  it('emits :complete event on source complete', ({ bus }) => {
     const onComplete = vi.fn();
     bus.on('done:complete', onComplete);
 

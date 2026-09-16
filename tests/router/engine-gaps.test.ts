@@ -15,11 +15,12 @@
  *  - resolveLocation: a string target carrying BOTH query and hash.
  *  - setRouteData's dev warning for an unknown record name.
  */
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createMemoryHistory } from '../../src/router/history';
 import { createRouter } from '../../src/router/index';
 import type { RouteRecord } from '../../src/router/types';
 import { routerError } from '../../src/router/errors';
+import { stubEnv } from '../../src/vitest-pure';
 
 const ROWS: RouteRecord[] = [
   { name: 'shell', path: '/', parent: null },
@@ -52,7 +53,6 @@ function makeRouter(handler: (...args: any[]) => unknown, opts: Record<string, u
 /** Settle timers + microtasks so background .then/.catch chains run. */
 const flush = () => new Promise<void>(resolve => setTimeout(resolve, 0));
 
-afterEach(() => vi.restoreAllMocks());
 
 // ---------------------------------------------------------------------------
 // trackRevalidation - background refresh outcomes
@@ -290,7 +290,7 @@ describe('setRouteData', () => {
     // name must warn NOTHING and still store the value - and the compiled
     // table must not be consulted at all.
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    vi.stubEnv('NODE_ENV', 'production');
+    using _NODE_ENV = stubEnv('NODE_ENV', 'production');
     vi.resetModules();
     const { createRouter: prodCreateRouter } = await import('../../src/router/index');
     const { createMemoryHistory: prodMemoryHistory } = await import('../../src/router/history');
@@ -309,7 +309,6 @@ describe('setRouteData', () => {
     expect(router.currentRoute.value.data.get('lsit')).toEqual({ typo: true });
 
     router.destroy();
-    vi.unstubAllEnvs();
     vi.resetModules();
   });
 });

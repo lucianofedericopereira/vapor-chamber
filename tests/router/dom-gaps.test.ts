@@ -21,7 +21,6 @@ const cleanups: Array<() => void> = [];
 afterEach(() => {
   for (const fn of cleanups.splice(0)) fn();
   document.body.innerHTML = '';
-  vi.restoreAllMocks();
 });
 
 function install(overrides: Partial<Parameters<typeof installDomIntegration>[0]> = {}) {

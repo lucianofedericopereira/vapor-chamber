@@ -17,7 +17,7 @@ import { createCommandBus, createAsyncCommandBus, BusError, RETRYABLE_CODES, typ
 import { createTestBus } from '../src/testing';
 
 const busError = (r: CommandResult): BusError => {
-  expect(r.ok).toBe(false);
+  expect(r).toFailWith('VC_CORE_BEFORE_CANCEL');
   expect(r.error).toBeInstanceOf(BusError);
   return r.error as BusError;
 };

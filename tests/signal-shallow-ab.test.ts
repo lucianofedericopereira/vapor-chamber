@@ -21,6 +21,7 @@ import { ref, shallowRef, effectScope } from 'vue';
 import { configureSignal } from '../src/signal';
 import { useCommandState, getCommandBus, setCommandBus, waitForVueDetection } from '../src/chamber';
 import { createCommandBus } from '../src/command-bus';
+import { underCoverage } from './under-coverage';
 
 type Factory = (init: any) => any;
 type Kind = 'array' | 'counter';
@@ -72,7 +73,6 @@ describe('signal() shallowRef vs ref - empirical proof (real useCommandState pat
   // headroom under that timeout - the assertions only smoke-check that the
   // ratios are finite/positive, so precision beyond this buys nothing. That
   // timeout, not the assertions, was the source of the flake.
-  const underCoverage = process.env.npm_lifecycle_event === 'test:coverage';
   it.skipIf(underCoverage)('measures the ref-vs-shallowRef diff and proves shallowRef is faster', async () => {
     await waitForVueDetection();
     // sanity: the factory must produce a real Vue ref, not the plain fallback
@@ -129,5 +129,5 @@ describe('signal() shallowRef vs ref - empirical proof (real useCommandState pat
       expect(v.shallow).toBeGreaterThan(0);
       expect(v.ref).toBeGreaterThan(0);
     }
-  }, 45_000);
+  });
 });

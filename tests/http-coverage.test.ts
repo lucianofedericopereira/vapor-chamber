@@ -603,10 +603,9 @@ describe('cache.invalidate', () => {
   });
 
   it('warns in dev when an anchored string looks like an intended regex', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     createResponseCache().invalidate('^/api/users');
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('literal'));
-    warn.mockRestore();
   });
 });
 

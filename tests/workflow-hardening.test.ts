@@ -5,13 +5,12 @@
  * step (nothing to compensate), reverse-order compensation across multiple
  * steps, and the async-bus path.
  */
-import { describe, it, expect } from 'vitest';
-import { createCommandBus, createAsyncCommandBus } from '../src/command-bus';
+import { describe, expect } from 'vitest';
 import { createWorkflow } from '../src/utilities';
+import { it } from '../src/vitest';
 
 describe('createWorkflow - adversarial compensation', () => {
-  it('a compensation step that itself fails does not throw and is recorded', async () => {
-    const bus = createCommandBus();
+  it('a compensation step that itself fails does not throw and is recorded', async ({ bus }) => {
     const order: string[] = [];
     bus.register('reserve', () => { order.push('reserve'); });
     bus.register('charge', () => { order.push('charge'); });
@@ -37,8 +36,7 @@ describe('createWorkflow - adversarial compensation', () => {
     expect(result.compensations![1].ok).toBe(true);  // releaseReserve still ran
   });
 
-  it('failure on the FIRST step compensates nothing', async () => {
-    const bus = createCommandBus();
+  it('failure on the FIRST step compensates nothing', async ({ bus }) => {
     bus.register('step1', () => { throw new Error('boom'); });
     const wf = createWorkflow([
       { action: 'step1', compensate: 'undo1' },
@@ -50,8 +48,7 @@ describe('createWorkflow - adversarial compensation', () => {
     expect(result.compensations).toEqual([]); // nothing succeeded before it -> nothing to undo
   });
 
-  it('only steps with a compensate AND that succeeded are compensated', async () => {
-    const bus = createCommandBus();
+  it('only steps with a compensate AND that succeeded are compensated', async ({ bus }) => {
     const undone: string[] = [];
     bus.register('a', () => {});            // no compensate
     bus.register('b', () => {});            // has compensate
@@ -69,8 +66,7 @@ describe('createWorkflow - adversarial compensation', () => {
     expect(result.compensations).toHaveLength(1);
   });
 
-  it('async bus: failed step compensates previously-succeeded async steps in reverse', async () => {
-    const bus = createAsyncCommandBus();
+  it('async bus: failed step compensates previously-succeeded async steps in reverse', async ({ asyncBus: bus }) => {
     const order: string[] = [];
     bus.register('reserve', async () => { order.push('reserve'); });
     bus.register('charge', async () => { order.push('charge'); });
@@ -92,8 +88,7 @@ describe('createWorkflow - adversarial compensation', () => {
   // Item 31: steps ran with MAPPED inputs, compensations with the raw workflow
   // arguments - so a step that derived a sub-entity was compensated against
   // the parent (or against nothing at all).
-  it('compensates with the mapped target/payload the step actually acted on', async () => {
-    const bus = createCommandBus();
+  it('compensates with the mapped target/payload the step actually acted on', async ({ bus }) => {
     const seen: Array<{ action: string; target: unknown; payload: unknown }> = [];
     const record = (action: string) => (cmd: { target: unknown; payload: unknown }) => {
       seen.push({ action, target: cmd.target, payload: cmd.payload });
@@ -125,8 +120,7 @@ describe('createWorkflow - adversarial compensation', () => {
     expect(compensation?.payload).toEqual({ qty: 3 });
   });
 
-  it('steps without mappers compensate exactly as before', async () => {
-    const bus = createCommandBus();
+  it('steps without mappers compensate exactly as before', async ({ bus }) => {
     const seen: unknown[] = [];
     bus.register('a', () => 1);
     bus.register('undoA', (cmd) => {
@@ -142,8 +136,7 @@ describe('createWorkflow - adversarial compensation', () => {
     expect(seen).toEqual([{ id: 1 }]); // unchanged: mapped === raw
   });
 
-  it('all steps succeed -> ok, no compensations', async () => {
-    const bus = createCommandBus();
+  it('all steps succeed -> ok, no compensations', async ({ bus }) => {
     bus.register('a', () => 1);
     bus.register('b', () => 2);
     const wf = createWorkflow([{ action: 'a' }, { action: 'b', compensate: 'undoB' }]);

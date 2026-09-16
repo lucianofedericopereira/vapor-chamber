@@ -17,7 +17,7 @@
  *    namespace's onDeactivated/onActivated just hand the callbacks back.
  *  - readGlobal's catch via a throwing global getter.
  */
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, expect, vi, afterEach } from 'vitest';
 import { runDispatch } from '../src/chamber';
 import {
   untracked,
@@ -29,6 +29,7 @@ import {
   signal,
 } from '../src/index';
 import { createCommandBus } from '../src/index';
+import { it } from '../src/vitest';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -191,8 +192,7 @@ describe('useCommandHistory redo payload marking', () => {
     expect(origins).toEqual([undefined, 'redo']);
   });
 
-  it('redispatches a non-markable array payload as-is', () => {
-    const bus = createCommandBus();
+  it('redispatches a non-markable array payload as-is', ({ bus }) => {
     setCommandBus(bus);
     const payloads: any[] = [];
     bus.register('act', (cmd: any) => { payloads.push(cmd.payload); return 1; });

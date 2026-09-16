@@ -28,6 +28,32 @@ import { createServer, type ViteDevServer } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import { vaporChamberHMR } from '../src/vite-hmr';
 
+/**
+ * fetch(), retrying only a failure to CONNECT.
+ *
+ * `listen()` having resolved means the socket is bound, not that this worker
+ * will get scheduled to accept on it. Under full-suite load - 178 workers on a
+ * busy machine - the connect attempt outlived its timeout and the test failed
+ * with `TypeError: fetch failed / connect ETIMEDOUT`, twice, at whichever fetch
+ * happened to go first. It never failed in isolation.
+ *
+ * Only a connect-level failure is retried. An HTTP response, of any status, is
+ * returned to the caller untouched, so a 404 or a 500 still fails the assertion
+ * it was going to fail - this hides a starved event loop, never a broken server.
+ */
+async function fetchWhenReady(url: URL, attempts = 5): Promise<Response> {
+  let last: unknown;
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await fetch(url);
+    } catch (e) {
+      last = e;
+      await new Promise((r) => setTimeout(r, 250 * (i + 1)));
+    }
+  }
+  throw last;
+}
+
 const SHIM = 'virtual:vapor-chamber-hmr';
 
 let root: string;
@@ -94,13 +120,13 @@ beforeAll(async () => {
 
   server = await serve(true);
   plain = await serve(false);
-}, 60_000);
+});
 
 afterAll(async () => {
   await server?.close();
   await plain?.close();
   if (root) rmSync(root, { recursive: true, force: true });
-}, 30_000);
+});
 
 describe('vaporChamberHMR in a real Vite dev server', () => {
   it('injects the shim into a script module that imports the package', async () => {
@@ -165,14 +191,20 @@ describe('vaporChamberHMR in a real Vite dev server', () => {
     const live = await serve(true, true);
     try {
       await live.listen();
+      // Use the URL Vite reports, unchanged. This server binds IPv6 only:
+      // rewriting `localhost` to 127.0.0.1 here turned the intermittent
+      // `ETIMEDOUT ::1:PORT` into a deterministic `ECONNREFUSED 127.0.0.1:PORT`,
+      // which is how we learned that. The intermittent failure is the worker's
+      // event loop being starved under full-suite load so the listener does not
+      // accept in time - not the address family. fetchWhenReady handles it.
       const base = live.resolvedUrls?.local[0];
       expect(base).toBeTruthy();
 
-      const html = await (await fetch(new URL('/', base))).text();
+      const html = await (await fetchWhenReady(new URL('/', base))).text();
       const src = html.match(/src="([^"]*vapor-chamber-hmr)"/)?.[1];
       expect(src).toBeTruthy();
 
-      const res = await fetch(new URL(src!, base));
+      const res = await fetchWhenReady(new URL(src!, base));
       expect(res.status).toBe(200);
       const body = await res.text();
       expect(body).toContain('__VAPOR_CHAMBER_BUS__');
@@ -182,7 +214,7 @@ describe('vaporChamberHMR in a real Vite dev server', () => {
     } finally {
       await live.close();
     }
-  }, 30_000);
+  });
 
   it('reaches an app whose entry never names the package', async () => {
     // The module-graph route cannot see this entry at all: nothing in it

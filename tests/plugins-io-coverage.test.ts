@@ -12,9 +12,10 @@
  *   279-280    - sync onReceive returning false suppresses re-dispatch
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createCommandBus, resetCommandBus } from '../src/index';
 import { persist, sync } from '../src/plugins';
+import { it } from '../src/vitest';
 
 // ---------------------------------------------------------------------------
 // persist plugin - storage fallback, error handling, coalescing
@@ -130,8 +131,7 @@ describe('persist plugin - coverage', () => {
     );
   });
 
-  it('coalesce collapses a burst of saves into a single setItem (lines 200-209)', async () => {
-    const bus = createCommandBus();
+  it('coalesce collapses a burst of saves into a single setItem (lines 200-209)', async ({ bus }) => {
     let count = 0;
     bus.register('inc', () => { count++; });
 
@@ -178,8 +178,7 @@ describe('persist plugin - coverage', () => {
     expect(data.coalesced).toBe(JSON.stringify({ count: 4 }));
   });
 
-  it('coalesce respects filter (line 208) - non-matching command schedules no save', async () => {
-    const bus = createCommandBus();
+  it('coalesce respects filter (line 208) - non-matching command schedules no save', async ({ bus }) => {
     bus.register('cartAdd', () => {});
     bus.register('analyticsTrack', () => {});
 
@@ -257,7 +256,7 @@ describe('sync plugin - coverage', () => {
   it('warns when called without a busRef (line 259)', () => {
     const mockBc = makeMockBroadcastChannel();
     vi.stubGlobal('BroadcastChannel', makeBcConstructor(mockBc));
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    using warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     // No second argument -> busRef?.dispatch is falsy -> warning path (line 259).
     const tabSync = sync({ channel: 'no-busref' });
@@ -271,8 +270,6 @@ describe('sync plugin - coverage', () => {
     expect(() => {
       mockBc.simulateMessage({ __vc: true, action: 'whatever', target: {} });
     }).not.toThrow();
-
-    warnSpy.mockRestore();
   });
 
   it('onReceive returning false suppresses re-dispatch (lines 279-280)', () => {

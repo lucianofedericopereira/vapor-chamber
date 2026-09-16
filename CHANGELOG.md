@@ -2,6 +2,206 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.21.0 - 2026-09-16 `vapor-chamber/vitest`, a Vitest 5 plugin, and the suite rewritten on it
+
+A testing entry for Vitest 5 users, built from Vitest's own mechanisms
+(`expect.extend`, setup files, `test.extend`, `provide`, `configureVitest`)
+and named in Vitest's vocabulary. The guide is
+[docs/integrations/vitest.md](docs/integrations/vitest.md); every code block
+in it runs in a test. No library module changed: outside the two new entries
+and the Vite plugin file, `src/` is as v1.20.0 left it, and the IIFEs are
+byte-identical.
+
+### Added: `vapor-chamber/vitest` - one setup-file line
+
+`setupFiles: ['vapor-chamber/vitest']`, plus `"types": ["vapor-chamber/vitest"]`
+in `tsconfig.json`, gives every test file:
+
+- **The matchers**, in Vitest's spy vocabulary with Dispatched for Called:
+  `toHaveBeenDispatched`, `...With`, `...Times`, `...Once`,
+  `toHaveBeenNthDispatchedWith`, `toHaveBeenLastDispatchedWith`; and
+  `toHaveFailedWith(action, code)`, `toSucceedWith(value?)`, `toFailWith(code)`
+  for results. Headers use Vitest 5.0.1's wording, and a failure lists each
+  dispatch with Vitest's own diff, as `toHaveBeenCalledWith` lists calls.
+  Payloads and values compare as `toEqual` does: a first cut called bare
+  `equals`, which found two Maps with different entries equal. On a typed bus
+  the action, payload and result are type-checked.
+- **A recorded shared bus.** Before each test `getCommandBus()` returns a new
+  `createCommandBus()` bus that `tap()` records: the real bus, not a double.
+  It is replaced before the next test rather than reset after this one, so a
+  failed test's bus keeps its record.
+- **The library imported lazily**, inside the hook. Measured on this
+  repository's suite: importing it when the setup file loads failed 4 tests in
+  2 files, which assert the one-shot Vue detection from a clean start, and the
+  lazy import failed none under full-suite load.
+- **What a failed test dispatched.** A test failing on any assertion gets its
+  dispatches appended to the error, printed with Vitest's `chai.util.inspect`
+  in full. The error's stack gets the text too: the json reporter reads
+  `stack`, and showed nothing on a packed consumer until it did.
+  `context.annotate()` was not an option: on Vitest 5.0.1 it throws once the
+  test has failed.
+
+### Added: `bus` and `asyncBus` fixtures
+
+`it` and `test` from `vapor-chamber/vitest` are Vitest's `test.extend('bus',
+...).extend('asyncBus', ...)`: `({ bus })` is a recorded `createCommandBus()`,
+`({ asyncBus })` a recorded `createAsyncCommandBus()`, built only for a test
+that asks and new in each. Vitest's own `it` is not changed. `bus` is not the
+shared bus, and neither fixture is disposed after the test. Users build their
+own snippets with `.extend` (`it.extend('shop', ({ bus }) => ...)`).
+
+- **Module identity**, measured on a packed install: the fixture bus and the
+  test file's own `import 'vapor-chamber'` are one module instance in five
+  configurations (node, happy-dom, `server.deps.inline`, vmThreads, happy-dom
+  with inline) and with no setup file; a second installed copy does not
+  recognise the bus.
+- **Limit, stated:** after `vi.resetModules()` a fixture loads a fresh module
+  instance, as the shared bus does, while the file's static imports keep the
+  first; a test mixing the two (`instanceof BusError`, `history()` state)
+  creates its bus from its own import. Found by migrating this suite: 18
+  converted tests in the 7 files that reset modules failed under a forced
+  reset before every test, and keep `createCommandBus()`.
+
+### Added: `vc` - `tap`, `stubGlobal`, `stubEnv`, `mcp`
+
+As Vitest keeps its utilities in `vi`, the entry keeps its own in `vc`; each
+member is also the named export.
+
+- **`vc.tap(bus)`** records every dispatch through the bus's own `onAfter`
+  hook and returns the same bus. Idempotent; a sealed bus refuses it with
+  `VC_CORE_SEALED`.
+- **`vc.stubGlobal(name, value)` / `vc.stubEnv(name, value)`** return a
+  disposable, so `using` restores the one name when the block ends, a throw
+  included - before `afterEach`, where `vi.stubGlobal` / `vi.stubEnv` restore at
+  the start of the next test. Stored as Vitest stores them; a stub made without
+  `using` is restored before the next test. The type declarations compile
+  without an `esnext.disposable` lib.
+- **`vc.mcp(handler)`** drives an MCP server handler as an agent does:
+  `initialize()`, `tools()`, `toolNames()`, `call(name, args)`, `request()` and
+  `notify()`, ids numbered for you, a protocol error thrown. The matchers
+  `toBeToolResult(value?)` and `toBeToolError(text | RegExp?)` read tool
+  results. It takes the handler, not the bus, so any JSON-RPC MCP handler works.
+
+### Added: `vapor-chamber/vitest/pure`
+
+The same helpers and `matchers`, with no side effect: no matcher registered, no
+hook, no shared bus. It imports nothing from the library at runtime (type
+imports only), asserted from the source and from `dist/`.
+
+### Added: coded diagnostics, `VcTestError`
+
+Each carries `code`, `why`, `fix` and a `docs` link.
+
+- **`VC_TEST_UNTAPPED`** - a bus matcher received a bus nobody tapped. It
+  throws for `.not` too, so a negated assertion cannot pass vacuously.
+- **`VC_TEST_DUPLICATE_INSTANCE`** - the bus comes from a second installed copy
+  of the library; told apart from an untapped bus by its `vapor-chamber:*`
+  symbols.
+- **`VC_TEST_TAP_REMOVED`** - `clear()` or `dispose()` removed the recording
+  hook. Raised only where a missed record could change the verdict, and by the
+  counting and positional matchers always; `tap(bus)` again resumes the same
+  record.
+- **`VC_TEST_VITEST_MAJOR`** - a warning, never a failure, from the plugin, on
+  a Vitest major this release does not know.
+
+### Added: `vaporChamberTest()` in `vapor-chamber/vite`
+
+The plugin adds what needs configuration; the setup-file line alone needs none
+of it.
+
+- **Setup file first**, once, keeping the user's (a string included, which
+  Vite's merge would have put ahead of ours).
+- **`sharedBus.exclude`**: globs from the project root, handed to the setup
+  file through `provide`, for files that must start with nothing imported.
+- **The island project**: `*.island.test.*` and `tests/islands/**` run in an
+  injected project with a DOM (`islands.environment`, default `happy-dom`;
+  `islands: false` injects nothing). Two Vitest 5 behaviours found by running
+  it, both handled and pinned: an inheriting project's `include` is EXTENDED by
+  Vite's merge (this suite ran every file twice, 348 file runs for 174), and the
+  injected project's `exclude` is the root project's array object (pushing into
+  it hid every island file). Its inherited `benchmark.include` is emptied too:
+  before that, `vitest bench` ran each bench file twice (this repository's CI
+  bench job 89 s -> 179 s).
+- **A line on top of a run**, `\\//  powered by vc-vitest-plugin`, in Vue's
+  green (#42B883) and slate (#35495E): 24-bit where `COLORTERM` says so, the
+  nearest xterm-256 shades otherwise, plain where colors are off (Vitest's
+  color rules: `NO_COLOR`, `FORCE_COLOR`, `CI`, `TERM`). Once per run, only
+  beside Vitest's own banner, on stderr: written to stdout it broke
+  `vitest list --json` (measured).
+- **The public type stays structural**: `dist/vite-hmr.d.ts` names no vitest
+  module, so a `vapor-chamber/vite` user without Vitest is unaffected.
+
+### Added: `vc-vitest-mcp` - a minimal MCP server for the test run
+
+`npx vc-vitest-mcp` in a project root serves three tools over stdio, from a
+schema bus built on this library's own MCP layer (`createVitestMcp` in
+`vapor-chamber/vitest/mcp` for programmatic use):
+
+- **`runTests`** runs every test file, or those `target.files` selects, in a
+  Vitest that stays warm between calls, and returns counts and each failure
+  with its message. With `vapor-chamber/vitest` as the project's setup file, a
+  failure carries the dispatches the test made.
+- **`getTestResults`** returns the last run with `stale` and the files changed
+  since. It waits for a run in progress: an MCP client sends calls
+  concurrently, and unqueued it answered "no run yet" to a `runTests` sent just
+  before it (found over stdio on a packed install).
+- **`getCoverageGaps`** runs the tests once with coverage and lists, per source
+  file, the uncovered lines, functions and branch arms.
+
+Measured on Vitest 5.0.1 before it was written: a warm instance re-ran a
+stale module after a test file and a source file were edited, until each path
+was passed to `vitest.invalidateFile()`, and ran no test file created after it
+started until its specification cache was cleared. The server watches the
+project and does both before each run. A coverage provider in a Vitest created
+inside a Vitest test worker wrote no report, so coverage runs as a separate
+`vitest run`, cold. v8 coverage lists only the source files the selected tests
+loaded, unless the config sets `coverage.include`.
+
+- **What an agent can choose:** only `target.files`, Vitest filters among the
+  test files the project's config includes. The root and config are fixed by
+  whoever starts the server. A filter starting with `-` is refused, because the
+  coverage run passes filters on a command line (`VC_TEST_MCP_INVALID_FILES`).
+- **Coded:** `VC_TEST_MCP_INVALID_FILES`, `VC_TEST_MCP_NO_RUN`,
+  `VC_TEST_MCP_NO_COVERAGE`, in `VcTestError`'s catalogue.
+- **The fixture:** `tests/vitest-mcp-server.test.ts` drives the tools through
+  the real `createMcpHandler` on a real Vitest and a temporary project (edits,
+  a new file, a load error, an unhandled rejection, parallel calls, refused
+  filters, a real coverage report); `tests/vitest-consumer.test.ts` starts the
+  command from a packed install over stdio in a project whose config prints and
+  whose test logs, and every stdout line parses as JSON-RPC. With Vitest's
+  output sent to stdout instead, that assertion fails.
+- **Names:** camelCase, as a schema bus normalizes action names;
+  vitest-community/mcp's `run_tests` is `runTests` here.
+
+### Packaging
+
+- Exports `./vitest`, `./vitest/pure` and `./vitest/mcp`, and the
+  `vc-vitest-mcp` command (`bin/`); `dist/vitest.js` joins `sideEffects`.
+- `vitest >=5.0.0` is an optional peer dependency.
+- `vapor-chamber` and `vitest` stay external in the build, so the entry shares
+  the app's copy of the library instead of bundling a second one.
+- `dist/index.d.ts` reaches no vitest declaration (Vitest's types in the root
+  would fail a consumer without Vitest with TS2882, reproduced as the test's
+  control). Types compile strict, without `skipLibCheck`, on a packed install.
+- Sizes (brotli, tooling only, never in an app bundle): `./vitest` 3.9 KB on
+  first load plus 22.9 KB loaded on demand (the library itself); `./vitest/pure`
+  3.1 KB; `./vitest/mcp` 8.9 KB; `./vite` 1.9 -> 2.2 KB.
+
+### This repository's suite runs on it
+
+On Vitest 5.0.1 with `restoreMocks`, `unstubGlobals` and `unstubEnvs` on
+(`clearMocks: false` pinned through the 5.0 default flip), and on the plugin.
+Migrated by verified TypeScript-AST scripts, each file run alone on Node 24 and
+Node 22 with unchanged counts, shuffled runs matching the commit before:
+
+- 53 manual cleanup calls removed, and 82 more restores turned into `using`;
+- 70 `ok` / `value` assertion pairs to `toSucceedWith` / `toFailWith`, 73
+  `expect(r.ok).toBe(false)` to `toFailWith(code)` from a run recording each
+  site's actual code, and 6 more `toSucceedWith`;
+- the MCP tests to `mcpClient` (`tests/mcp.test.ts` 452 -> 379 lines);
+- 481 tests opening with `const bus = createCommandBus()` or
+  `createAsyncCommandBus()` to the fixtures (46 files, 445 lines fewer).
+
 ## v1.20.0 - 2026-09-15: Vue 3.6.0-rc.8 alignment
 
 ### `vaporChamberWire()` under the dev server: the redirect stays build-only, measured

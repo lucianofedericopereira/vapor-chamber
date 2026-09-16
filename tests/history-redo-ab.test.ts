@@ -29,6 +29,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createCommandBus, createAsyncCommandBus } from '../src/command-bus';
 import type * as ShippedMod from '../src/plugins-core';
+import { underCoverage } from './under-coverage';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // Per-file subdir: the whole dir is removed in afterAll, so it must be ours alone.
@@ -121,8 +122,6 @@ const ROWS: Array<[string, (m: Mod) => number | Promise<number>]> = [
 const ROUNDS = 11;
 
 describe('history() async-redo fix - real path A/B', () => {
-  const underCoverage = process.env.npm_lifecycle_event === 'test:coverage';
-
   it.skipIf(underCoverage)('agrees on the sync bus, records an async redo once, and measures the cost', async () => {
     mkdirSync(REF_DIR, { recursive: true });
     const arms: Record<string, Mod> = {};
@@ -181,5 +180,5 @@ describe('history() async-redo fix - real path A/B', () => {
       }
     }
     console.log(`\n  history() async-redo fix - real path, ${ROUNDS} rotated rounds, gc=${!!gc}, NODE_ENV=${process.env.NODE_ENV}; time ratios, >1 slower\n${lines.join('\n')}\n`);
-  }, 600_000);
+  });
 });
