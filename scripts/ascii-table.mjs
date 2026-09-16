@@ -1,6 +1,7 @@
 const ESC = String.fromCharCode(27);
 const ANSI = new RegExp(`${ESC}\\[[0-9;]*[A-Za-z]`, 'g');
-const ZERO_WIDTH = /[̀-ͯ​-‏⁠﻿]/;
+// The invisible set as \u escapes: matcher input, and the literals would fail check-ascii.
+const ZERO_WIDTH = /[\u0300-\u036f\u200b-\u200f\u2060\ufeff]/;
 const NUMERIC = /^[+-]?[\d,_]*\.?\d+(?:[eE][+-]?\d+)?\s*(?:%|ms|s|m|h|B|KB|MB|GB|x)?$/;
 
 const BOX = {
@@ -34,7 +35,7 @@ export function visualWidth(text) {
   return width;
 }
 
-export function truncate(text, max, ellipsis = '…') {
+export function truncate(text, max, ellipsis = '...') {
   const str = String(text);
   if (visualWidth(str) <= max) return str;
   const room = Math.max(0, max - visualWidth(ellipsis));

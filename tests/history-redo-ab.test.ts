@@ -42,6 +42,7 @@ const REF_DIR = resolve(HERE, '__ref', 'history-redo');
  * at all (a scoped origin covers both windows on both buses), so the baseline
  * re-creates it: the pre-q4 code, text for text.
  */
+// biome-ignore-start lint/suspicious/noTemplateCurlyInString: source text matched against src/plugins-core.ts byte for byte, not templates
 const REVERT_FIX: Array<[string, string]> = [
   ["      origin !== 'redo' && origin !== 'undo' && result.ok &&", '      !_replaying && result.ok &&'],
   [
@@ -57,6 +58,7 @@ const REVERT_FIX: Array<[string, string]> = [
     '          _replaying = true;\n          try { bus.dispatch(cmd.action, cmd.target, cmd.payload); }\n          catch (e) { console.error(`[vapor-chamber] Redo dispatch error for "${cmd.action}":`, e); }\n          finally { _replaying = false; }',
   ],
 ];
+// biome-ignore-end lint/suspicious/noTemplateCurlyInString: end of the verbatim-source block
 
 function derive(revert: boolean): string {
   let src = readFileSync(resolve(HERE, '../src/plugins-core.ts'), 'utf8');

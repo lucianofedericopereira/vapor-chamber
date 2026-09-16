@@ -15,7 +15,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { createTestBus } from '../src/testing';
-import { BusError, type CommandResult } from '../src/command-bus';
+import type { BusError, CommandResult } from '../src/command-bus';
 
 const code = (r: CommandResult): string | undefined => (r.error as BusError | undefined)?.code;
 

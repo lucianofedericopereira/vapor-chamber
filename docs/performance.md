@@ -105,7 +105,7 @@ dispatch tests it with one `startsWith`. (This said "walked with
 Real-world impact (listener fan-out, 50 exact + 5 wildcards; the ops/sec are one earlier run on
 one host, the ratio is the latest `npm run bench`):
 - emit: ~750 ops/sec
-- dispatch: ~600 ops/sec - emit runs <!-- vc:benchEmitVsDispatchFanout -->1.22<!-- /vc:benchEmitVsDispatchFanout -->x the dispatch rate (no plugin chain / `meta` stamp / depth tracking)
+- dispatch: ~600 ops/sec - emit runs <!-- vc:benchEmitVsDispatchFanout -->1.63<!-- /vc:benchEmitVsDispatchFanout -->x the dispatch rate (no plugin chain / `meta` stamp / depth tracking)
 
 The bucketing gain scales with listener count: silent for <5 listeners,
 larger beyond ~50.
@@ -125,11 +125,11 @@ was re-measured; this page and the bench comment were not, which is the drift
 this doc exists to prevent. **Always quote the runtime with the number** - an
 unqualified ns figure is exactly what let it drift unnoticed.
 
-The **ratio at the dispatch level is bench-backed and unaffected**: <!-- vc:benchUidCounterVsUuid -->4.26<!-- /vc:benchUidCounterVsUuid -->x on the
+The **ratio at the dispatch level is bench-backed and unaffected**: <!-- vc:benchUidCounterVsUuid -->2.56<!-- /vc:benchUidCounterVsUuid -->x on the
 10k-dispatch hot path (the latest `npm run bench`; one earlier run on one host read
 counter ~1,850 vs `randomUUID` ~750 ops/sec), which is the
 `meta overhead - uid generator comparison` bench in `tests/perf.bench.ts`. Note
-the gap between ~8x per call and <!-- vc:benchUidCounterVsUuid -->4.26<!-- /vc:benchUidCounterVsUuid -->x per dispatch - the rest of the dispatch
+the gap between ~8x per call and <!-- vc:benchUidCounterVsUuid -->2.56<!-- /vc:benchUidCounterVsUuid -->x per dispatch - the rest of the dispatch
 dilutes it, which is why per-call absolutes should never be quoted as if they
 were end-to-end wins.
 
@@ -200,7 +200,7 @@ the next tick.
 Measured on 100 rapid dispatches x 50-item array state (the ops/sec are one earlier run on one
 host; the ratio is the latest `npm run bench`):
 - Default: ~4,100 ops/sec
-- `coalesce: true`: ~97,000 ops/sec (**<!-- vc:benchPersistCoalesce -->26.03<!-- /vc:benchPersistCoalesce -->x**)
+- `coalesce: true`: ~97,000 ops/sec (**<!-- vc:benchPersistCoalesce -->14.68<!-- /vc:benchPersistCoalesce -->x**)
 
 Use when you're measurably bottlenecked on persist; leave default otherwise
 to keep storage in lockstep with bus state.
@@ -544,18 +544,18 @@ onPriceTick(tick);   // pure function call, no allocations on hot path
 | Lib / Path                          | ops/sec    | Relative to floor |
 |-------------------------------------|------------|-------------------|
 | direct function call (theoretical floor) | ~374,000 | 1.0x            |
-| **vapor-chamber `fast-lane`**       | **~28,900**| <!-- vc:benchFloorVsCompile -->12.99<!-- /vc:benchFloorVsCompile -->x |
-| nanoevents emit                     | ~13,900    | <!-- vc:benchFloorVsNano -->27.61<!-- /vc:benchFloorVsNano -->x |
-| mitt emit                           | ~5,130     | <!-- vc:benchFloorVsMitt -->75.09<!-- /vc:benchFloorVsMitt -->x |
-| vapor-chamber `bus.dispatch` (general) | ~1,810  | <!-- vc:benchFloorVsDispatch -->144.43<!-- /vc:benchFloorVsDispatch -->x |
+| **vapor-chamber `fast-lane`**       | **~28,900**| <!-- vc:benchFloorVsCompile -->14.44<!-- /vc:benchFloorVsCompile -->x |
+| nanoevents emit                     | ~13,900    | <!-- vc:benchFloorVsNano -->41.77<!-- /vc:benchFloorVsNano -->x |
+| mitt emit                           | ~5,130     | <!-- vc:benchFloorVsMitt -->90.69<!-- /vc:benchFloorVsMitt -->x |
+| vapor-chamber `bus.dispatch` (general) | ~1,810  | <!-- vc:benchFloorVsDispatch -->225.65<!-- /vc:benchFloorVsDispatch -->x |
 
 The "Relative to floor" column is stamped from the latest `npm run bench`
 (`scripts/bench-ratios-reporter.mjs`); the ops/sec absolutes are one earlier run
 on one host and only show scale.
 
-Fast lane runs **<!-- vc:benchCompileVsNano -->2.12<!-- /vc:benchCompileVsNano -->x the ops/sec of nanoevents** and
-**<!-- vc:benchCompileVsMitt -->5.78<!-- /vc:benchCompileVsMitt -->x that of mitt** on single-handler dispatch - beats every minimal event-emitter peer in this
-class. Its <!-- vc:benchFloorVsCompile -->12.99<!-- /vc:benchFloorVsCompile -->x gap to the theoretical floor of a direct function call is
+Fast lane runs **<!-- vc:benchCompileVsNano -->2.89<!-- /vc:benchCompileVsNano -->x the ops/sec of nanoevents** and
+**<!-- vc:benchCompileVsMitt -->6.28<!-- /vc:benchCompileVsMitt -->x that of mitt** on single-handler dispatch - beats every minimal event-emitter peer in this
+class. Its <!-- vc:benchFloorVsCompile -->14.44<!-- /vc:benchFloorVsCompile -->x gap to the theoretical floor of a direct function call is
 the cost of one Map lookup + one closure call (the closure is what supports
 `remove()` + `clear()`).
 
@@ -584,7 +584,7 @@ that emit (each mode's contract is pinned by its own test in
 `tests/fast-lane.test.ts`). Pick `'snapshot'` only off a measured fan-out
 bottleneck; the remaining sliver to nanoevents is its plain-object event
 lookup vs our `Map.get`. Single-handler `compile()` dispatch is untouched
-by all of this - the headline row and its <!-- vc:benchCompileVsNano -->2.12<!-- /vc:benchCompileVsNano -->x lead over nanoevents stand,
+by all of this - the headline row and its <!-- vc:benchCompileVsNano -->2.89<!-- /vc:benchCompileVsNano -->x lead over nanoevents stand,
 and both modes share a new single-listener fast path on `emit`.
 
 ### When to pick which
@@ -618,13 +618,13 @@ conditional events have zero subscribers. Should be effectively free.
 | Lib                                | ops/sec    | Relative |
 |------------------------------------|------------|----------|
 | nanoevents                         | ~176,600   | 1.0x     |
-| **vapor-chamber `bus.emit`**       | **~21,600**| <!-- vc:benchNanoVsEmitNoListeners -->9.83<!-- /vc:benchNanoVsEmitNoListeners -->x |
-| mitt                               | ~14,960    | <!-- vc:benchNanoVsMittNoListeners -->15.73<!-- /vc:benchNanoVsMittNoListeners -->x |
+| **vapor-chamber `bus.emit`**       | **~21,600**| <!-- vc:benchNanoVsEmitNoListeners -->2.99<!-- /vc:benchNanoVsEmitNoListeners -->x |
+| mitt                               | ~14,960    | <!-- vc:benchNanoVsMittNoListeners -->4.22<!-- /vc:benchNanoVsMittNoListeners -->x |
 
 The "Relative" column is stamped from the latest `npm run bench`; the ops/sec
 absolutes are one earlier run on one host.
 
-vapor-chamber's no-listener fast path runs **<!-- vc:benchEmitNoListenersVsMitt -->1.60<!-- /vc:benchEmitNoListenersVsMitt -->x the ops/sec of mitt**. nanoevents
+vapor-chamber's no-listener fast path runs **<!-- vc:benchEmitNoListenersVsMitt -->1.41<!-- /vc:benchEmitNoListenersVsMitt -->x the ops/sec of mitt**. nanoevents
 is far ahead on this path: its `if (!this.events[event]) return;` is a single
 property check, vs vapor-chamber's `Map.has() + Array.length === 0` two-check
 guard.

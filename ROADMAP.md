@@ -479,7 +479,7 @@ different shapes:
   callable, plus `on`/`emit` for fan-out. Use for per-frame game ticks,
   trading data feeds, audio buffer processing, scroll/mousemove sampling,
   physics steps. Roughly an order of magnitude faster than `bus.dispatch` on
-  the 10k-dispatch bench: <!-- vc:benchCompileVsDispatch -->11.12<!-- /vc:benchCompileVsDispatch -->x its ops/sec on the latest `npm run bench`. This line once read "~36x (25,400 vs
+  the 10k-dispatch bench: <!-- vc:benchCompileVsDispatch -->15.62<!-- /vc:benchCompileVsDispatch -->x its ops/sec on the latest `npm run bench`. This line once read "~36x (25,400 vs
   700)", a third copy of a number maintained in `docs/performance.md`, and both
   halves had drifted: dispatch has since gained the v1.16.0 clock caching.
   `docs/performance.md` maintains the bench table; read current figures there.

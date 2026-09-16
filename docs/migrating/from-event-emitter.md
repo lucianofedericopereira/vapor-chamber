@@ -143,17 +143,17 @@ lane.emit('userUpdate', { userId, name });
 ```
 
 On multi-listener fan-out the fast lane's `on`/`emit` is
-**<!-- vc:benchFastLaneVsMitt -->1.99<!-- /vc:benchFastLaneVsMitt -->x mitt**.
+**<!-- vc:benchFastLaneVsMitt -->2.33<!-- /vc:benchFastLaneVsMitt -->x mitt**.
 Against nanoevents it depends on the removal mode: the default (`'live'`, which
 matches the main bus - a listener removed mid-emit does not run) sits at
-**<!-- vc:benchFastLaneVsNano -->0.94<!-- /vc:benchFastLaneVsNano -->x**, while
+**<!-- vc:benchFastLaneVsNano -->1.22<!-- /vc:benchFastLaneVsNano -->x**, while
 `createFastLane({ removal: 'snapshot' })` reaches
-**<!-- vc:benchFastLaneSnapshotVsNano -->1.08<!-- /vc:benchFastLaneSnapshotVsNano -->x**.
+**<!-- vc:benchFastLaneSnapshotVsNano -->1.32<!-- /vc:benchFastLaneSnapshotVsNano -->x**.
 The gap between those two modes is the price of the v1.12.0 unsub-during-emit
 identity guard, and the guard bought correctness.
 
 Single-handler `compile()` dispatch holds a different and much wider lead,
-**<!-- vc:benchCompileVsNano -->2.12<!-- /vc:benchCompileVsNano -->x nanoevents**,
+**<!-- vc:benchCompileVsNano -->2.89<!-- /vc:benchCompileVsNano -->x nanoevents**,
 and nothing above affects it. For the mode trade-off, see
 [performance.md](../performance.md).
 

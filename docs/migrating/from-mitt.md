@@ -119,7 +119,7 @@ lane.emit('cartAdd', { id: 42 });
 ```
 
 On the three-listener fan-out both libraries are built for, the fast lane
-measures **<!-- vc:benchFastLaneVsMitt -->1.99<!-- /vc:benchFastLaneVsMitt -->x
+measures **<!-- vc:benchFastLaneVsMitt -->2.33<!-- /vc:benchFastLaneVsMitt -->x
 mitt**. `npm run bench` generates that ratio and `npm run docs:stamp` publishes
 it; nobody types it here. See [from-event-emitter.md](./from-event-emitter.md)
 for the nanoevents comparison and the removal-mode trade-off.

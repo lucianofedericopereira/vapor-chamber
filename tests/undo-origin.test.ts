@@ -16,7 +16,7 @@
  * 'redo'. The limit is the flag's old limit: a dispatch an ASYNC undo handler
  * makes after an await is outside the window.
  */
-import { describe, expect, beforeEach, afterEach } from 'vitest';
+import { describe, expect, afterEach } from 'vitest';
 import { createCommandBus, createAsyncCommandBus, _withOriginScope, type Command, type CommandBus } from '../src/command-bus';
 import { history } from '../src/plugins-core';
 import { useCommandHistory, setCommandBus, resetCommandBus } from '../src/chamber';
