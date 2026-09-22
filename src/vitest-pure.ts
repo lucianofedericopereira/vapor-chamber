@@ -152,6 +152,10 @@ const taps = new WeakMap<object, TappedDispatch[]>();
  * `clear()` and `dispose()` remove every hook, this one included. Tapping the
  * bus again re-attaches it to the same record; until then a matcher whose
  * outcome a missed dispatch could change throws `VC_TEST_TAP_REMOVED`.
+ *
+ * The record grows for the life of the bus. What a matcher reads is the part
+ * since the last {@link beginTest}, which is why a bus that outlives a test
+ * needs one per test.
  */
 export function tap<B extends Tappable>(bus: B): B {
   const known = taps.get(bus);
@@ -182,18 +186,48 @@ export function tap<B extends Tappable>(bus: B): B {
  * description as fromOtherInstance below does, because this file imports
  * nothing. A hook added after the clear hides the removal, and a bus without
  * the symbol is never reported: both fall back to what the tap recorded.
+ *
+ * THE SYMBOL CARRIES THE STATE, not a `() => BusInspection` closure, so this
+ * counts `afterHooks` itself rather than reading `afterHookCount` off a
+ * snapshot. The closure was what kept `inspect()` reachable from every bus
+ * ever constructed and shipped its body to consumers that never import
+ * `inspectBus`, against what two docblocks in command-bus.ts promised. This
+ * reads one level deeper into a private shape as a result, which is the same
+ * class of coupling a private symbol already is - and `tests/vitest-consumer`
+ * drives it through a packed install, which is what caught the change.
  */
 function tapRemoved(bus: object): boolean {
   const inspect = Object.getOwnPropertySymbols(bus).find((s) => s.description === 'vapor-chamber:inspect');
-  return inspect !== undefined && (bus as Record<symbol, () => { afterHookCount: number }>)[inspect]().afterHookCount === 0;
+  if (inspect === undefined) return false;
+  const state = (bus as Record<symbol, { afterHooks?: unknown[] } | undefined>)[inspect];
+  return state?.afterHooks?.length === 0;
 }
 
 // Records that grew during the current test, with the bus and where this test's
 // dispatches start. Cleared before each test by vapor-chamber/vitest.
 const touched = new Map<TappedDispatch[], { bus: object; from: number }>();
 
-/** @internal Run by `vapor-chamber/vitest` before each test. */
-export function _beginTest(): void {
+/**
+ * beginTest - open a new record boundary, so the bus matchers answer for the
+ * dispatches that follow it and not for the ones before.
+ *
+ * `vapor-chamber/vitest` calls it before each test, where a fresh shared bus
+ * makes it a formality. A suite using THIS entry on its own must call it in a
+ * `beforeEach` whenever it taps a bus that outlives one test - an app's own
+ * configured bus, published at module load and imported by every test file.
+ * Without it the record is that bus's whole history, and a count or a `.not`
+ * answers for earlier tests.
+ *
+ * @example
+ * import { beforeEach, expect } from 'vitest';
+ * import { beginTest, matchers, tap } from 'vapor-chamber/vitest/pure';
+ * import { bus } from './bus';
+ *
+ * expect.extend(matchers);
+ * tap(bus);
+ * beforeEach(beginTest);
+ */
+export function beginTest(): void {
   touched.clear();
 }
 
@@ -277,7 +311,10 @@ function fromOtherInstance(ours: object, received: object): boolean {
 
 function recordsOf(received: unknown): TappedDispatch[] {
   const log = taps.get(received as object);
-  if (log !== undefined) return log;
+  if (log !== undefined) {
+    const boundary = touched.get(log);
+    return boundary === undefined ? [] : log.slice(boundary.from);
+  }
   if (installed !== undefined && typeof received === 'object' && received !== null && fromOtherInstance(installed, received)) {
     throw new VcTestError('VC_TEST_DUPLICATE_INSTANCE');
   }

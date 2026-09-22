@@ -10,6 +10,7 @@
 
 import { createCommandBus, createAsyncCommandBus, _errResult, } from './command-bus';
 import { GLYPH_COMMAND, GLYPH_OK, GLYPH_WARN } from './glyphs';
+import { onSettled } from './settled';
 import type { CommandBus, AsyncCommandBus, Plugin, CommandResult, CommandBusOptions, CommandMap, BusErrorCode, BusSeverity, BusEmitter } from './command-bus';
 
 // ---------------------------------------------------------------------------
@@ -316,10 +317,20 @@ export type SchemaLoggerOptions = { collapsed?: boolean };
 
 export function schemaLogger(schema: BusSchema, options: SchemaLoggerOptions = {}): Plugin {
   const collapsed = options.collapsed ?? true;
-  return (cmd, next) => {
+  // THROUGH `onSettled`, for the reason src/settled.ts spells out: `next()`
+  // returns a PROMISE on the async bus, so `result.ok` was `undefined` and the
+  // `result:` line printed the ERROR branch for every command, successes
+  // included, with `undefined` as the error. `logger()` had exactly this
+  // defect and was fixed in the sweep that file records; this logger and the
+  // SSR plugin were missed because that sweep was run over `plugins-*.ts` and
+  // neither of them lives there.
+  //
+  // The group is opened INSIDE the callback, so on an async bus the whole
+  // group is written when the result settles rather than split across the
+  // await - otherwise concurrent dispatches interleave their group contents.
+  return (cmd, next) => onSettled(next(), (result) => {
     const def = schema[cmd.action];
     const desc = def?.description ? ` - ${def.description}` : '';
-    const result = next();
     const fn = collapsed ? console.groupCollapsed : console.group;
     fn(`${GLYPH_COMMAND} ${cmd.action}${desc}`);
     if (def?.target && cmd.target && typeof cmd.target === 'object') {
@@ -339,7 +350,7 @@ export function schemaLogger(schema: BusSchema, options: SchemaLoggerOptions = {
     console.log('result:', result.ok ? result.value : result.error);
     console.groupEnd();
     return result;
-  };
+  }) as CommandResult;
 }
 
 // ---------------------------------------------------------------------------

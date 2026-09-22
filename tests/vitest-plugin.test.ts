@@ -36,7 +36,7 @@ function context({ version = '5.0.1', name = '', root = '/app', exclude = ['**/n
     ctx: {
       vitest: { version, config: { reporters }, logger: { warn: vi.fn(), error: vi.fn() } },
       project,
-      injectTestProjects: vi.fn(async () => []),
+      injectTestProjects: vi.fn(async (_projects: unknown) => []),
     },
     project,
     provided,

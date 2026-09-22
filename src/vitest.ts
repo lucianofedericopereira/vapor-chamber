@@ -45,7 +45,7 @@
 
 import { afterEach, beforeEach, chai, expect, inject, type TestAPI, test as vitestTest } from 'vitest';
 import type { AsyncCommandBus, CommandBus } from './command-bus';
-import { _beginTest, _explainFailure, _restoreStubs, _setInstalledBus, matchers, tap, type VaporChamberMatchers } from './vitest-pure';
+import { beginTest, _explainFailure, _restoreStubs, _setInstalledBus, matchers, tap, type VaporChamberMatchers } from './vitest-pure';
 
 export * from './vitest-pure';
 
@@ -68,7 +68,7 @@ beforeEach(async ({ task }) => {
   // A stubGlobal / stubEnv made without `using` is restored here, when Vitest's
   // unstubGlobals / unstubEnvs would restore a vi.stubGlobal / vi.stubEnv.
   _restoreStubs();
-  _beginTest();
+  beginTest();
   if (exclude.some((pattern) => pattern.test(task.file.filepath))) return;
   const vc = await import('vapor-chamber');
   const bus = tap(vc.createCommandBus());

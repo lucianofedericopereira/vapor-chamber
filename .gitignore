@@ -18,7 +18,7 @@ tests/__ref/
 # Test/coverage counts for stamp-docs (scripts/test-counts-reporter.mjs).
 # Deliberately not committed: the counts depend on what else has run (8 files
 # skip without dist/, 2 more tests skip under coverage), so the file would churn
-# — prepublishOnly runs test:run before build. stamp-docs skips markers whose source is missing, so CI is unaffected;
+# - prepublishOnly runs test:run before build. stamp-docs skips markers whose source is missing, so CI is unaffected;
 # stamp locally after `npm run build && npm run test:coverage`.
 docs/metrics.json
 
@@ -47,7 +47,7 @@ Thumbs.db
 *.tsbuildinfo
 vite.config.*.timestamp-*
 
-# Secrets — never commit
+# Secrets - never commit
 .env
 .env.*
 !.env.example
@@ -65,3 +65,16 @@ TODO.md
 
 # Laravel example scaffold output (examples/laravel-app/setup.sh)
 demo-app/
+
+# Throwaway measurement scripts and probe tests. Every alignment cycle writes a
+# few; they are evidence for a commit message, not part of the suite, and twice
+# now one nearly landed as a tmp-*.test.ts. Give them a home that git ignores.
+# At the ROOT, deliberately: under tests/ every tool that walks that directory
+# found them and each needed its own exclude. See vitest.probes.config.ts.
+.probes/
+
+# The probe SFC the vue-tsc gap check wrote into the example. That script is
+# gone (v1.22.0: the reshape removed the argument the gap needed), but the
+# pattern stays - a killed run of any successor probe must still be unable to
+# commit deliberately broken code into an example.
+**/__vue_tsc_gap_probe.vue

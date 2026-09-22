@@ -12,7 +12,7 @@ describe('static fast path - correctness', () => {
     ]);
     // server priority says :id wins - the map must not change that
     expect(table.resolve('/products/new')?.record.name).toBe('product');
-    expect(table.resolve('/products/new')?.record.params ?? {}).toBeTruthy();
+    expect(table.resolve('/products/new')?.record.paramTypes).toEqual({});
     expect(table.resolve('/products/7')?.record.name).toBe('product');
   });
 

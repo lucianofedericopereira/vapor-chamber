@@ -1,5 +1,5 @@
 ---
-// Static HTML out — Astro renders this at build time. The ONLY client JS is
+// Static HTML out - Astro renders this at build time. The ONLY client JS is
 // the bus + the directive scanner; no framework runtime ships to the page.
 ---
 <!doctype html>
@@ -7,10 +7,10 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>exo on Astro — vapor-chamber</title>
+    <title>exo on Astro - vapor-chamber</title>
     <style>
       body { font-family: system-ui, sans-serif; max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
-      /* Two independent sectors, side by side — they share a layout and
+      /* Two independent sectors, side by side - they share a layout and
          nothing else: no shared code, no shared state, only the bus. */
       /* stretch (the grid default) rather than start: both cards take the full
          row height, so the two sectors stay level as the order grows. */
@@ -46,12 +46,12 @@
         (<code>onMissing: 'buffer'</code> + <code>bufferTTL</code>) and replays
         them the moment registration happens.
       </p>
-      <p id="hydration-note">⏳ Handlers hydrate in 2s — click "Add" NOW to see buffering.</p>
+      <p id="hydration-note">⏳ Handlers hydrate in 2s - click "Add" NOW to see buffering.</p>
     </header>
 
     <main class="sectors">
 
-    <!-- Sector A: dispatches named commands into the void. Static HTML — the
+    <!-- Sector A: dispatches named commands into the void. Static HTML - the
          menu is authored, not rendered: no directive reads it, each row only
          carries the command it dispatches. -->
     <section>
@@ -102,7 +102,7 @@
           <thead>
             <tr><th>Item</th><th class="qty">Qty</th><th class="right">Amount</th></tr>
           </thead>
-          <!-- v-each: one <tr> per entry, each clone scoped to its own item —
+          <!-- v-each: one <tr> per entry, each clone scoped to its own item -
                so `v-bind-text="name"` inside a row reads that row's item.
                Adding the same item again mutates that row's qty/amount in
                place; the write is one level deep inside the array, and the
@@ -110,13 +110,13 @@
           <tbody v-each="items">
             <tr>
               <td v-bind-text="name"></td>
-              <td class="qty">×<span v-bind-text="qty"></span></td>
+              <td class="qty">x<span v-bind-text="qty"></span></td>
               <td class="right" v-bind-text="amount"></td>
             </tr>
           </tbody>
           <tfoot>
             <tr class="total">
-              <td colspan="2"><strong>Total</strong> — <span v-bind-text="cartCount"></span> item(s)</td>
+              <td colspan="2"><strong>Total</strong> - <span v-bind-text="cartCount"></span> item(s)</td>
               <td class="right"><strong>$<span v-bind-text="cartTotal"></span></strong></td>
             </tr>
           </tfoot>
@@ -124,7 +124,7 @@
 
         <!-- v-scope: section-local UI state. `open` is declared here so it
              resolves locally; `lastAdded` is not, so it falls through to the
-             bus state — one subtree, both sources, neither aware of the other.
+             bus state - one subtree, both sources, neither aware of the other.
              Even this toggle goes through the bus: the handler writes the
              scope via scopeOf(), the click site never mutates anything. -->
         <div id="details" v-scope='{"open":false}'>
@@ -155,7 +155,7 @@
       });
       bus.use(logger({ filter: (cmd) => cmd.action.startsWith('cart') }));
 
-      busState.items = [];          // the ticket lines — v-each renders these
+      busState.items = [];          // the ticket lines - v-each renders these
       busState.cartCount = 0;
       busState.cartTotal = '0.00';
       busState.cartEmpty = true;
@@ -164,14 +164,14 @@
 
       // Simulated late hydration: handlers register 2s after the page is
       // interactive (override with ?delay=8000 to widen the window). Clicks
-      // made before that are buffered and replayed in order — nothing is lost.
+      // made before that are buffered and replayed in order - nothing is lost.
       const delay = Number(new URLSearchParams(location.search).get('delay')) || 2000;
       setTimeout(() => {
         let cents = 0;
         // Handlers RETURN the new cart state as well as writing it: the return
         // value becomes `result.value` on the dispatch, which is what the
         // logger prints and what an HTTP bridge would send back. Returning
-        // nothing is legal — it just logs `result: undefined`.
+        // nothing is legal - it just logs `result: undefined`.
         const cart = () => ({
           count: busState.cartCount,
           total: busState.cartTotal,
@@ -184,11 +184,11 @@
           cents += unit;
           // Aggregate by name: a repeat Add bumps the existing line rather
           // than stacking a duplicate. Formatting lives in the handler, never
-          // in a directive — the scanner only prints the string it is handed.
+          // in a directive - the scanner only prints the string it is handed.
           const line = busState.items.find((row) => row.name === item.name);
           if (line) {
-            line.qty += 1;                      // a write one level deep…
-            line.amount = money(line.qty * unit); // …and the row re-renders
+            line.qty += 1;                      // a write one level deep...
+            line.amount = money(line.qty * unit); // ...and the row re-renders
           } else {
             busState.items.push({ name: item.name, qty: 1, amount: money(unit) });
           }
@@ -207,7 +207,7 @@
           busState.lastAdded = '';
           return cart();
         });
-        // Local scope state is written by a handler too — same discipline,
+        // Local scope state is written by a handler too - same discipline,
         // narrower blast radius: only this element's scope re-renders.
         const details = document.getElementById('details');
         bus.register('ui.toggleDetails', () => {
@@ -216,7 +216,7 @@
           return { open: scope?.open };
         });
         const note = document.getElementById('hydration-note');
-        if (note) note.textContent = '✅ Handlers hydrated — buffered clicks were replayed.';
+        if (note) note.textContent = '✅ Handlers hydrated - buffered clicks were replayed.';
       }, delay);
     </script>
   </body>

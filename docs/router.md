@@ -378,7 +378,7 @@ import { RouterOutlet } from 'vapor-chamber/router/vapor';  // Vapor, no interop
 
 What it costs, and what it requires:
 
-- **Measured saving: <!-- vc:outletSaving -->20.42<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->64.7<!-- /vc:outletSavingRaw --> KB raw** against the same app
+- **Measured saving: <!-- vc:outletSaving -->21.14<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->67.4<!-- /vc:outletSavingRaw --> KB raw** against the same app
   rendering through the vDOM outlet plus interop - re-derived every test run by
   `tests/vapor/vapor-outlet-size.test.ts` from a Vite production build rather
   than quoted, with the baseline built by the same harness so the two arms
@@ -386,7 +386,7 @@ What it costs, and what it requires:
   >= <!-- vc:outletFloor -->15.0<!-- /vc:outletFloor --> KB, and the Vapor
   outlet's own machinery over a router-without-outlet floor stays
   <= <!-- vc:outletOwnArmCeiling -->5.0<!-- /vc:outletOwnArmCeiling --> KB
-  (measured <!-- vc:outletOwnArm -->4.23<!-- /vc:outletOwnArm --> KB). The
+  (measured <!-- vc:outletOwnArm -->4.21<!-- /vc:outletOwnArm --> KB). The
   subpath's own cost is <!-- vc:sizeRouterVapor -->0.4<!-- /vc:sizeRouterVapor --> KB brotli.
 - **Route components must be `defineVaporComponent` output** (Vapor-compiled
   SFCs are). This is a real constraint, not a convention: with no interop

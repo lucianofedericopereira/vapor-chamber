@@ -161,7 +161,6 @@ export function cache(options: CacheOptions = {}): Plugin & {
     }
 
     dropKey(k);
-    const result = next();
 
     function store_(r: CommandResult): void {
       // Every later hit gets this exact object back - see freeze.ts.
@@ -170,16 +169,14 @@ export function cache(options: CacheOptions = {}): Plugin & {
       evictIfNeeded();
     }
 
-    // Handle async results (Promise from async bus)
-    if (result && typeof result.then === 'function') {
-      return result.then((r: CommandResult) => {
-        if (r.ok) store_(r);
-        return r;
-      });
-    }
-
-    if (result.ok) store_(result);
-    return result;
+    // Through `onSettled`, which is what the two branches here used to spell
+    // out: settle the result, store it if it succeeded, hand it on. The helper
+    // preserves sync-ness, so the sync bus keeps the behaviour the second
+    // branch gave it.
+    return onSettled(next(), (result) => {
+      if (result.ok) store_(result);
+      return result;
+    });
   };
 
   return Object.assign(plugin, {

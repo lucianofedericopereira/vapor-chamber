@@ -90,7 +90,7 @@ describe('createWorkflow - adversarial compensation', () => {
   // the parent (or against nothing at all).
   it('compensates with the mapped target/payload the step actually acted on', async ({ bus }) => {
     const seen: Array<{ action: string; target: unknown; payload: unknown }> = [];
-    const record = (action: string) => (cmd: { target: unknown; payload: unknown }) => {
+    const record = (action: string) => (cmd: { target: unknown; payload?: unknown }) => {
       seen.push({ action, target: cmd.target, payload: cmd.payload });
     };
 

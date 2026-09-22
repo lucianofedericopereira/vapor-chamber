@@ -33,8 +33,15 @@
  * returned function is registered via `onScopeDispose`. There is no `updated`
  * hook at all - a Vapor directive that must react to changing values creates
  * its own effect inside that scope, because `value` is delivered as a getter.
- * That is the substantive porting cost for `v-vc:command`, and the reason
+ * That is the substantive porting cost for `v-vc-command`, and the reason
  * this fixture asserts the shape rather than just "it runs".
+ *
+ * UPDATED FOR 3.6.0-rc.9. The ARGUMENT is a getter too now (#15490), for the
+ * same reason the value is: so `v-probe:[dynamic]` can be tracked. This file
+ * had frozen rc.3's `argument?: string` into its types, its tuple and its
+ * assertion, and went on passing while the argument's contract moved under it -
+ * see the note at the end of tests/directives-vapor-fixture.test.ts for what
+ * that cost. The shape it pins is the shape the INSTALLED Vue requires.
  *
  * Everything is imported from the single with-vapor browser build on purpose -
  * two separately-imported Vue dists are two disconnected reactivity instances
@@ -46,12 +53,12 @@ import { describe, expect, it } from 'vitest';
 
 const WITH_VAPOR = 'vue/dist/vue.runtime-with-vapor.esm-browser.js';
 
-type VaporDir = (el: Element, value: () => unknown, argument?: string, modifiers?: Record<string, boolean>) => (() => void) | void;
+type VaporDir = (el: Element, value: () => unknown, argument?: () => unknown, modifiers?: Record<string, boolean>) => (() => void) | void;
 
 type VaporApi = {
   createVaporApp: (root: unknown) => { mount: (el: unknown) => void; unmount: () => void };
   defineVaporComponent: (c: unknown) => unknown;
-  withVaporDirectives: (node: unknown, dirs: Array<[VaporDir, (() => unknown)?, string?, Record<string, boolean>?]>) => void;
+  withVaporDirectives: (node: unknown, dirs: Array<[VaporDir, (() => unknown)?, (() => unknown)?, Record<string, boolean>?]>) => void;
   template: (html: string, root?: boolean) => () => Element;
   shallowRef: <T>(v: T) => { value: T };
   renderEffect: (fn: () => void) => void;
@@ -73,10 +80,12 @@ describe('custom directives on a vapor app (rc.3)', () => {
   it('runs a custom directive on a vapor component and passes el/value/arg/modifiers', async () => {
     const { createVaporApp, defineVaporComponent, withVaporDirectives, template } = await vapor();
 
-    const seen: Array<{ tag: string; value: unknown; argument?: string; modifiers?: Record<string, boolean> }> = [];
+    const seen: Array<{ tag: string; value: unknown; argType: string; argument: unknown; modifiers?: Record<string, boolean> }> = [];
 
     const vProbe: VaporDir = (el, value, argument, modifiers) => {
-      seen.push({ tag: el.tagName, value: value(), argument, modifiers });
+      // Both the type AND the read, because the point of this test is the shape
+      // the runtime hands over, not the string that comes back out of it.
+      seen.push({ tag: el.tagName, value: value(), argType: typeof argument, argument: argument?.(), modifiers });
     };
 
     const Comp = defineVaporComponent({
@@ -84,7 +93,7 @@ describe('custom directives on a vapor app (rc.3)', () => {
         const el = template('<button>go</button>', true)();
         // Shape mirrors what compiler-vapor emits for
         //   <button v-probe:cmd.stop="'cartAdd'">
-        withVaporDirectives(el, [[vProbe, () => 'cartAdd', 'cmd', { stop: true }]]);
+        withVaporDirectives(el, [[vProbe, () => 'cartAdd', () => 'cmd', { stop: true }]]);
         return el;
       },
     });
@@ -92,11 +101,14 @@ describe('custom directives on a vapor app (rc.3)', () => {
     const host = document.createElement('div');
     createVaporApp(Comp).mount(host);
 
-    // MEASURED on 3.6.0-rc.3: the directive runs, against a real element, with
-    // the full binding surface v-vc:command needs (action value, arg, modifiers).
+    // MEASURED on 3.6.0-rc.3, re-measured on rc.9: the directive runs, against a
+    // real element, with the full binding surface v-vc-command needs (action
+    // value, arg, modifiers). Since #15490 the argument is a GETTER - asserting
+    // `typeof` is what makes this fixture notice the next time that moves.
     expect(seen).toHaveLength(1);
     expect(seen[0].tag).toBe('BUTTON');
     expect(seen[0].value).toBe('cartAdd');
+    expect(seen[0].argType).toBe('function');
     expect(seen[0].argument).toBe('cmd');
     expect(seen[0].modifiers).toEqual({ stop: true });
     expect(host.querySelector('button')).not.toBeNull();
@@ -128,7 +140,7 @@ describe('custom directives on a vapor app (rc.3)', () => {
     btn.click();
     btn.click();
 
-    // This is the exact behaviour `v-vc:command` needs: a direct listener on a
+    // This is the exact behaviour `v-vc-command` needs: a direct listener on a
     // real element inside a Vapor component. It works.
     expect(clicks).toEqual(['cartAdd', 'cartAdd']);
   });
@@ -190,7 +202,7 @@ describe('custom directives on a vapor app (rc.3)', () => {
 
     // THE PORTING CONSTRAINT, pinned: the directive function is NOT re-invoked
     // on a value change (no `updated` hook exists). Only an effect the
-    // directive opened itself sees the new value. A port of v-vc:command that
+    // directive opened itself sees the new value. A port of v-vc-command that
     // reads `binding.value` once and stores it would silently freeze on the
     // first action name.
     expect(invocations).toEqual(['cartAdd']);

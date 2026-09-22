@@ -15,6 +15,7 @@ import {
   createAsyncSchemaCommandBus,
   ERROR_CODE_REGISTRY,
   isRetryableCode,
+  type AnthropicTool,
   type BusSchema,
 } from '../src/schema';
 import { RETRYABLE_CODES } from '../src/command-bus';
@@ -156,7 +157,7 @@ describe('schemaLogger', () => {
 describe('synthesize', () => {
   /** Helper: create an adapter that returns a specific tool call */
   function makeAdapter(toolName: string, input: Record<string, any>) {
-    return vi.fn(async () => ({ name: toolName, input }));
+    return vi.fn(async (_tools: AnthropicTool[], _text: string) => ({ name: toolName, input }));
   }
 
   it('dispatches the tool selected by the LLM', async ({ bus }) => {

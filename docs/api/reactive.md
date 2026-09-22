@@ -60,7 +60,7 @@ const { state, dispose } = useDeepCommandState(
 
 ### UseCommandStateOptions
 
-**Type alias** - [src/chamber.ts:1210](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1210)
+**Type alias** - [src/chamber.ts:1204](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1204)
 
 ```ts
 export type UseCommandStateOptions = {

@@ -143,7 +143,7 @@ describe('useCommand - register/on/emit/dispose', () => {
     const { dispatch, lastError, dispose } = useCommand();
 
     const result = dispatch('vaporFail', {});
-    expect(result.ok).toBe(false);
+    expect((result as { ok: boolean }).ok).toBe(false);
     expect(lastError.value).toBeInstanceOf(Error);
     expect(lastError.value?.message).toBe('vapor-boom');
 
@@ -343,7 +343,7 @@ describe('useVaporAsyncCommand', () => {
     // error case above, which always produces a truthy result.error.
     const asyncBus = { dispatch: async () => ({ ok: false as const }) };
 
-    const { dispatch, lastError } = useVaporAsyncCommand(asyncBus);
+    const { dispatch, lastError } = useVaporAsyncCommand(asyncBus as never); // a stub bus: only `dispatch` is exercised
     const result = await dispatch('missingError', {});
 
     expect(result.ok).toBe(false);

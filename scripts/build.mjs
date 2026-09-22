@@ -18,7 +18,8 @@
 
 import { build } from 'vite';
 import { transform } from 'esbuild';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { join, relative, sep } from 'node:path';
 
 const pkg = JSON.parse(readFileSync('./package.json', 'utf8'));
 
@@ -307,7 +308,48 @@ for (const v of iifeVariants) {
   }
 }
 
+/**
+ * Remove JavaScript this build did not emit.
+ *
+ * Both Vite builds write into `dist/` in sequence and both set
+ * `emptyOutDir: false`, because emptying it between them would delete what the
+ * previous one just wrote - and `tsc` has already put the declarations there
+ * before this script runs at all. The consequence was that `dist/` only ever
+ * grew: a renamed chunk, or a local measurement that once wrote here, stayed
+ * indefinitely, while `files: ["dist"]` ships the directory whole. One tree
+ * carried a `dist/dist.js` five days older than the rest of the build, holding
+ * a second inlined copy of the bus that no export named and nothing imported.
+ *
+ * `emitted` is the authority rather than a list: the licence plugin fills it as
+ * each file is written, and `dist/LICENSE.txt` is already derived from it. Only
+ * `.js` and its `.map` are pruned, because that is what this script owns.
+ * `tsc` prunes none of its own declarations - the same gap one step earlier,
+ * left stated rather than half-closed from here.
+ */
+function pruneUnemitted() {
+  const stale = [];
+  const walkDist = (dir) => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walkDist(full);
+        continue;
+      }
+      const rel = relative('dist', full).split(sep).join('/');
+      if (!rel.endsWith('.js') && !rel.endsWith('.js.map')) continue;
+      const owner = rel.endsWith('.js.map') ? rel.slice(0, -'.map'.length) : rel;
+      if (!emitted.has(owner)) stale.push({ full, rel });
+    }
+  };
+  walkDist('dist');
+  for (const { full } of stale) rmSync(full);
+  if (stale.length) {
+    console.log(`✓ pruned ${stale.length} stale file(s): ${stale.map((s) => s.rel).join(', ')}`);
+  }
+}
+
 writeLicenseManifest();
+pruneUnemitted();
 console.log('✓ Built ESM library + 3 IIFE variants (full / core / elements)');
 
 // Print bundle-size table - keeps the README narrative honest each build.

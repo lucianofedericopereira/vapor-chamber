@@ -105,6 +105,41 @@ describe('createSSRPlugin', () => {
     const cmd = ssr.dehydrate()[0];
     expect(Object.keys(cmd)).toEqual(['action', 'target']);
   });
+
+  // Records on an ASYNC bus, where it used to record nothing at all.
+  it('records on an async bus, the same as on a sync one', async () => {
+    const syncBus = createCommandBus();
+    const syncSsr = createSSRPlugin();
+    syncBus.use(syncSsr.plugin);
+    syncBus.register('cartAdd', () => 'ok');
+    syncBus.dispatch('cartAdd', { id: 1 });
+
+    const asyncBus = createAsyncCommandBus();
+    const asyncSsr = createSSRPlugin();
+    asyncBus.use(asyncSsr.plugin);
+    asyncBus.register('cartAdd', async () => 'ok');
+    await asyncBus.dispatch('cartAdd', { id: 1 });
+
+    // Asserted as EQUAL to the sync arm rather than against a literal: the
+    // point is that the bus kind makes no difference, and a literal would
+    // still pass if both arms broke the same way.
+    expect(asyncSsr.dehydrate()).toEqual(syncSsr.dehydrate());
+    expect(asyncSsr.dehydrate()).toEqual([{ action: 'cartAdd', target: { id: 1 } }]);
+  });
+
+  // COVERAGE, not a fails-before: with the defect nothing was recorded at all,
+  // so an empty dehydrate matched for the wrong reason. It pins the other arm
+  // of `result.ok` now that the result is a real one.
+  it('does not record a FAILED async dispatch', async () => {
+    const asyncBus = createAsyncCommandBus();
+    const ssr = createSSRPlugin();
+    asyncBus.use(ssr.plugin);
+    asyncBus.register('boom', async () => { throw new Error('nope'); });
+
+    const result = await asyncBus.dispatch('boom', {});
+    expect(result.ok).toBe(false);
+    expect(ssr.dehydrate()).toEqual([]);
+  });
 });
 
 describe('rehydrate', () => {

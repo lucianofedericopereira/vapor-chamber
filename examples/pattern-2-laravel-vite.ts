@@ -81,7 +81,7 @@ window.addEventListener('beforeunload', () => sse.teardown())
  *   </button>
  *
  *   <!-- Or declaratively with directive -->
- *   <button v-vc:command="'productFavorite'"
+ *   <button v-vc-command="'productFavorite'"
  *           v-vc-payload="{ id: product.id }">
  *     ♥ Save
  *   </button>

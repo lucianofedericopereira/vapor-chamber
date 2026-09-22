@@ -48,7 +48,7 @@ CI installs the root project alone (`npm ci --workspaces=false
 
 ```
 examples/vapor-sfc/
-├── package.json          # workspace member - vue@<!-- vc:vueAligned -->3.6.0-rc.8<!-- /vc:vueAligned -->, vite@^8
+├── package.json          # workspace member - vue@<!-- vc:vueAligned -->3.6.0-rc.9<!-- /vc:vueAligned -->, vite@^8
 ├── vite.config.ts        # @vitejs/plugin-vue + vaporChamberHMR
 ├── tsconfig.json         # strict TS, ES2022, vue:client types
 ├── index.html            # mount point + minimal styles
@@ -71,9 +71,9 @@ npm run preview    # serve the production build locally
 
 - This example uses the **local checkout** of vapor-chamber via
   `"file:../.."` in `package.json`. To run against a published version,
-  swap to `"vapor-chamber": "^<!-- vc:version -->1.21.0<!-- /vc:version -->"`.
+  swap to `"vapor-chamber": "^<!-- vc:version -->1.22.0<!-- /vc:version -->"`.
 - Vue 3.6 is in **release candidate**. The example pins the RC the library is
-  aligned to, `^<!-- vc:vueAligned -->3.6.0-rc.8<!-- /vc:vueAligned -->`, and
+  aligned to, `^<!-- vc:vueAligned -->3.6.0-rc.9<!-- /vc:vueAligned -->`, and
   that pin is owned by the root `devDependencies.vue` - `npm run docs:stamp`
   rewrites it, and `lint:check` fails when the two disagree. When Vue 3.6 ships
   stable, bump the root and re-stamp. Nothing here is retyped by hand.

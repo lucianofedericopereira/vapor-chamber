@@ -94,7 +94,7 @@ describe('callTool', () => {
     // `meta.origin === undefined`. The marker cannot ride on a primitive or
     // array, so those agent commands were indistinguishable from local ones.
     // See the end-to-end assertion in tests/mcp.test.ts.
-    const dispatch = vi.fn(async () => ({ ok: true, value: 1 }));
+    const dispatch = vi.fn(async (_action: string, _target: unknown, _payload?: unknown) => ({ ok: true as const, value: 1 }));
     const { mcp } = makeHandler({ dispatch });
 
     for (const bad of ['a bare string', [1, 2], 42, true]) {
@@ -115,7 +115,7 @@ describe('callTool', () => {
     // original attribution hole hid. The end-to-end guarantee is pinned
     // against a REAL bus in tests/mcp.test.ts ("never lets an MCP dispatch
     // reach a handler unattributed").
-    const dispatch = vi.fn(async () => ({ ok: true, value: 1 }));
+    const dispatch = vi.fn(async (_action: string, _target: unknown, _payload?: unknown) => ({ ok: true as const, value: 1 }));
     const { mcp } = makeHandler({ dispatch });
 
     const sent = { qty: 2 };
@@ -201,7 +201,7 @@ describe('serveMcpStdio', () => {
   it('answers requests, skips blank lines, and reports parse errors', async () => {
     const written: string[] = [];
     vi.spyOn(process.stdout, 'write').mockImplementation(((s: string) => { written.push(s); return true; }) as any);
-    stops.push(serveMcpStdio({ dispatch: vi.fn(async () => ({ ok: true, value: 'ok' })), getSchema: () => SCHEMA }, { actions: ['*'] }));
+    stops.push(serveMcpStdio({ dispatch: vi.fn(async () => ({ ok: true as const, value: 'ok' })), getSchema: () => SCHEMA }, { actions: ['*'] }));
 
     // Blank lines between real messages must be skipped, not parse-errored.
     process.stdin.emit('data', '\n\n' + JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }) + '\n');
@@ -259,7 +259,7 @@ describe('serveMcpStdio limits', () => {
   it('abandons an over-long line and resynchronises at the next newline', async () => {
     const written = capture();
     stops.push(serveMcpStdio(
-      { dispatch: vi.fn(async () => ({ ok: true, value: 'ok' })), getSchema: () => SCHEMA },
+      { dispatch: vi.fn(async () => ({ ok: true as const, value: 'ok' })), getSchema: () => SCHEMA },
       { actions: ['*'], maxLineLength: 64 },
     ));
 
@@ -333,7 +333,7 @@ describe('serveMcpStdio limits', () => {
     const pause = vi.spyOn(process.stdin, 'pause');
     const resume = vi.spyOn(process.stdin, 'resume');
     stops.push(serveMcpStdio(
-      { dispatch: vi.fn(async () => ({ ok: true, value: 1 })), getSchema: () => SCHEMA },
+      { dispatch: vi.fn(async () => ({ ok: true as const, value: 1 })), getSchema: () => SCHEMA },
       { actions: ['*'], maxInFlight: 0 },
     ));
     pause.mockClear();
@@ -434,7 +434,7 @@ describe('serveMcpStdio limits', () => {
       if (++calls === 2) throw new Error('schema source died');
       return SCHEMA;
     };
-    stops.push(serveMcpStdio({ dispatch: vi.fn(async () => ({ ok: true, value: 1 })), getSchema }, { actions: ['*'] }));
+    stops.push(serveMcpStdio({ dispatch: vi.fn(async () => ({ ok: true as const, value: 1 })), getSchema }, { actions: ['*'] }));
 
     process.stdin.emit('data', JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n');
     process.stdin.emit('data', JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) + '\n');

@@ -21,7 +21,8 @@
 import { describe, expect, it } from 'vitest';
 import { createMemoryHistory } from '../../src/router/history';
 import { createRouter } from '../../src/router/index';
-import type { LoaderHandlers, RouteRecord } from '../../src/router/types';
+import type { RouteRecord } from '../../src/router/types';
+import type { LoaderHandlers } from '../../src/router/index';
 
 const ROWS: RouteRecord[] = [
   {

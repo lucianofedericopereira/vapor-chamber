@@ -3,8 +3,10 @@
  */
 
 import { describe, expect, beforeEach, vi } from 'vitest';
-import { createCommandBus, createAsyncCommandBus, resetCommandBus, retry, BusError } from '../src/index';
+import { createAsyncCommandBus, resetCommandBus, retry, BusError } from '../src/index';
 import { persist, sync } from '../src/plugins';
+import { createFastLane } from '../src/fast-lane';
+import { stubGlobal } from '../src/vitest-pure';
 import { it } from '../src/vitest';
 
 // ---------------------------------------------------------------------------
@@ -208,350 +210,232 @@ describe('persist plugin', () => {
 });
 
 // ---------------------------------------------------------------------------
-// sync plugin (BroadcastChannel)
+// sync bridge (BroadcastChannel over an event channel)
 // ---------------------------------------------------------------------------
 
-describe('sync plugin', () => {
-  type BcMessage = { __vc: boolean; action: string; target: any; payload?: any };
+describe('sync bridge', () => {
+  // A REAL BroadcastChannel and a REAL fast lane, not mocks. The suite that
+  // stood here used a hand-written channel stub, and a stub cannot show what
+  // this bridge exists to fix: the old plugin re-dispatched the command in the
+  // receiving tab, so two tabs re-derived the outcome independently, and a
+  // stub that records `postMessage` calls agrees with that shape whatever it
+  // does. Node provides BroadcastChannel, two instances in one process talk to
+  // each other, and a sender does not receive its own message - which is the
+  // real contract worth testing against. Each test takes its own channel name
+  // so the tests do not hear each other, and closes what it opens.
+  let channelSeq = 0;
+  const nextChannel = () => `vc:test:sync:${++channelSeq}`;
+  const flush = async () => { for (let i = 0; i < 6; i++) await new Promise((r) => setTimeout(r, 5)); };
 
-  function makeMockBroadcastChannel() {
-    const listeners: Array<(event: { data: any }) => void> = [];
-    const posted: BcMessage[] = [];
-    let closed = false;
-    let _onmessage: ((event: { data: any }) => void) | null = null;
-
-    const bc = {
-      postMessage: vi.fn((data: BcMessage) => { posted.push(data); }),
-      close: vi.fn(() => { closed = true; }),
-      get onmessage() { return _onmessage; },
-      set onmessage(fn: ((event: { data: any }) => void) | null) {
-        _onmessage = fn;
-        if (fn) listeners.push(fn);
-      },
-      // Test helper: simulate a message arriving from another tab
-      simulateMessage(data: BcMessage) {
-        listeners.forEach(fn => { fn({ data }); });
-      },
-      get isClosed() { return closed; },
-      posted,
-    };
-    return bc;
-  }
-
-  // Constructor stub - `new BroadcastChannel(...)` returns the mock instance
-  function makeBcConstructor(mockBc: ReturnType<typeof makeMockBroadcastChannel>) {
-    return function MockBroadcastChannel(_channel: string) {
-      return mockBc;
-    } as unknown as typeof BroadcastChannel;
+  /** One "tab": its own lane, its own bridge, applying facts to its own state. */
+  function openTab(channel: string, events = ['cartAdded']) {
+    const lane = createFastLane();
+    const applied: unknown[] = [];
+    for (const e of events) lane.on(e, (data: unknown) => { applied.push(data); });
+    const bridge = sync({ channel, lane, events });
+    return { lane, applied, bridge };
   }
 
   beforeEach(() => {
     resetCommandBus();
   });
 
-  it('broadcasts successful dispatches to other tabs', () => {
-    const mockBc = makeMockBroadcastChannel();
-    vi.stubGlobal('BroadcastChannel', makeBcConstructor(mockBc));
+  it('mirrors an emitted fact to another tab', async () => {
+    const ch = nextChannel();
+    const a = openTab(ch), b = openTab(ch);
+    a.lane.emit('cartAdded', { count: 1, name: 'Coffee' });
+    await flush();
 
-    const bus = createCommandBus();
-    bus.register('cartAdd', () => 'added');
+    expect(a.applied).toEqual([{ count: 1, name: 'Coffee' }]);
+    expect(b.applied).toEqual([{ count: 1, name: 'Coffee' }]);
+    a.bridge.close(); b.bridge.close();
+  });
 
-    const tabSync = sync({ channel: 'test' }, { dispatch: bus.dispatch.bind(bus) });
-    bus.use(tabSync);
+  it('applies the sender\'s values instead of re-deriving them', async () => {
+    // The reason the bridge carries facts rather than commands. Both tabs run
+    // the same non-deterministic producer; only the sender's value may survive.
+    const ch = nextChannel();
+    const a = openTab(ch), b = openTab(ch);
+    const mint = (tab: string) => ({ id: `${tab}-${Math.random()}` });
+    a.lane.emit('cartAdded', mint('A'));
+    await flush();
 
-    bus.dispatch('cartAdd', { id: 1 }, { qty: 2 });
+    expect(b.applied).toEqual(a.applied);
+    expect((b.applied[0] as { id: string }).id.startsWith('A-')).toBe(true);
+    a.bridge.close(); b.bridge.close();
+  });
 
-    expect(mockBc.postMessage).toHaveBeenCalledWith({
-      __vc: true,
-      action: 'cartAdd',
-      target: { id: 1 },
-      payload: { qty: 2 },
+  it('does not echo a received fact back out', async () => {
+    // Three tabs: one emit must produce exactly one apply each, not a storm.
+    const ch = nextChannel();
+    const a = openTab(ch), b = openTab(ch), c = openTab(ch);
+    a.lane.emit('cartAdded', { count: 1 });
+    await flush();
+
+    expect(a.applied).toHaveLength(1);
+    expect(b.applied).toHaveLength(1);
+    expect(c.applied).toHaveLength(1);
+    a.bridge.close(); b.bridge.close(); c.bridge.close();
+  });
+
+  it('only the named events cross', async () => {
+    const ch = nextChannel();
+    const a = openTab(ch, ['cartAdded']), b = openTab(ch, ['cartAdded']);
+    // `cartRecalc` is emitted but never named, so it stays in the tab that
+    // emitted it - which is how a derivation is kept local.
+    const bSawRecalc: unknown[] = [];
+    b.lane.on('cartRecalc', (d: unknown) => { bSawRecalc.push(d); });
+    a.lane.emit('cartRecalc', { derived: true });
+    a.lane.emit('cartAdded', { count: 1 });
+    await flush();
+
+    expect(b.applied).toEqual([{ count: 1 }]);
+    expect(bSawRecalc).toEqual([]);
+    a.bridge.close(); b.bridge.close();
+  });
+
+  it('onReceive returning false drops the fact', async () => {
+    const ch = nextChannel();
+    const a = openTab(ch);
+    const lane = createFastLane();
+    const applied: unknown[] = [];
+    lane.on('cartAdded', (d: unknown) => { applied.push(d); });
+    const seen: Array<[string, unknown]> = [];
+    const bridge = sync({
+      channel: ch, lane, events: ['cartAdded'],
+      onReceive: (event, data) => { seen.push([event, data]); return false; },
     });
 
+    a.lane.emit('cartAdded', { count: 1 });
+    await flush();
+
+    expect(seen).toEqual([['cartAdded', { count: 1 }]]);
+    expect(applied).toEqual([]);
+    a.bridge.close(); bridge.close();
   });
 
-  it('does not broadcast failed dispatches', () => {
-    const mockBc = makeMockBroadcastChannel();
-    vi.stubGlobal('BroadcastChannel', makeBcConstructor(mockBc));
+  it('onReceive returning a non-false value still applies the fact', async () => {
+    const ch = nextChannel();
+    const a = openTab(ch);
+    const lane = createFastLane();
+    const applied: unknown[] = [];
+    lane.on('cartAdded', (d: unknown) => { applied.push(d); });
+    const bridge = sync({ channel: ch, lane, events: ['cartAdded'], onReceive: () => undefined });
 
-    const bus = createCommandBus();
-    bus.register('fail', () => { throw new Error('nope'); });
+    a.lane.emit('cartAdded', { count: 2 });
+    await flush();
 
-    const tabSync = sync({ channel: 'test' }, { dispatch: bus.dispatch.bind(bus) });
-    bus.use(tabSync);
-
-    bus.dispatch('fail', {});
-    expect(mockBc.postMessage).not.toHaveBeenCalled();
-
+    expect(applied).toEqual([{ count: 2 }]);
+    a.bridge.close(); bridge.close();
   });
 
-  it('does not broadcast when an ASYNC dispatch rejects', async () => {
-    // The async arm settles the promise before deciding to broadcast. Its
-    // `.catch` had no coverage: a handler that throws resolves to
-    // `{ ok: false }` (covered above), so only a REJECTED dispatch - a
-    // downstream plugin or transport failing outright - reaches it. Without
-    // the catch this would also surface as an unhandled rejection.
-    // Since VC_PLUGIN_THREW a rejecting downstream plugin is converted to a
-    // result, so the rejection here is onMissing:'throw', the one that
-    // crosses the chain by contract.
-    const mockBc = makeMockBroadcastChannel();
-    vi.stubGlobal('BroadcastChannel', makeBcConstructor(mockBc));
+  it('ignores messages that are not ours', async () => {
+    const ch = nextChannel();
+    const b = openTab(ch);
+    const foreign = new BroadcastChannel(ch);
+    foreign.postMessage({ __vc: false, event: 'cartAdded', data: { evil: true } });
+    foreign.postMessage(null);
+    foreign.postMessage({});
+    await flush();
 
-    const bus = createAsyncCommandBus({ onMissing: 'throw' });
-
-    const tabSync = sync({ channel: 'test' }, { dispatch: bus.dispatch.bind(bus) });
-    bus.use(tabSync, { priority: 100 });
-
-    await expect(bus.dispatch('cartAdd', { id: 1 }, { qty: 2 })).rejects.toThrow('No handler');
-    await Promise.resolve(); // let the plugin's own .then/.catch settle
-
-    expect(mockBc.postMessage).not.toHaveBeenCalled();
-
+    expect(b.applied).toEqual([]);
+    foreign.close(); b.bridge.close();
   });
 
-  it('does not broadcast an ASYNC dispatch that settles ok:false', async () => {
-    // The other half of `if (settled?.ok)`. On an async bus a throwing handler
-    // RESOLVES to `{ ok: false }` rather than rejecting, so this is a distinct
-    // path from the rejection test above - and the async counterpart of the
-    // sync "does not broadcast failed dispatches" case.
-    const mockBc = makeMockBroadcastChannel();
-    vi.stubGlobal('BroadcastChannel', makeBcConstructor(mockBc));
+  it('close() stops the bridge and unsubscribes from the lane', async () => {
+    const ch = nextChannel();
+    const a = openTab(ch), b = openTab(ch);
+    expect(b.bridge.isOpen()).toBe(true);
+    b.bridge.close();
+    expect(b.bridge.isOpen()).toBe(false);
 
-    const bus = createAsyncCommandBus();
-    bus.register('fail', async () => { throw new Error('nope'); });
-    bus.register('work', async () => 'done');
+    a.lane.emit('cartAdded', { count: 1 });
+    await flush();
+    expect(b.applied).toEqual([]);
 
-    const tabSync = sync({ channel: 'test' }, { dispatch: bus.dispatch.bind(bus) });
-    bus.use(tabSync);
-
-    const failed = await bus.dispatch('fail', {});
-    expect(failed.ok).toBe(false);
-    await Promise.resolve();
-    expect(mockBc.postMessage).not.toHaveBeenCalled();
-
-    // ...and the same bus still broadcasts a successful async dispatch, so the
-    // silence above is the failure, not a dead plugin.
-    await bus.dispatch('work', { id: 1 });
-    await Promise.resolve();
-    expect(mockBc.postMessage).toHaveBeenCalledOnce();
-
-  });
-
-  it('re-dispatches received messages locally', () => {
-    const mockBc = makeMockBroadcastChannel();
-    vi.stubGlobal('BroadcastChannel', makeBcConstructor(mockBc));
-
-    const bus = createCommandBus();
-    const received: string[] = [];
-    bus.register('remoteAction', (cmd) => { received.push(cmd.target.data); });
-
-    const tabSync = sync({ channel: 'test' }, { dispatch: bus.dispatch.bind(bus) });
-    bus.use(tabSync);
-
-    // Simulate another tab sending a message
-    mockBc.simulateMessage({ __vc: true, action: 'remoteAction', target: { data: 'from-tab-b' } });
-
-    expect(received).toContain('from-tab-b');
-
-  });
-
-  it('delivers a received payload untouched and attributes it via meta.origin', () => {
-    // Was: asserted a shape-dependent normalization - objects spread with
-    // `__origin: 'sync'`, primitives and arrays passed through bare. That
-    // asymmetry WAS the echo bug: the shapes that could not carry the key
-    // arrived unattributed and got re-broadcast. With `_withOrigin` the
-    // marker is out-of-band, so every shape is attributed identically and the
-    // payload reaches the handler exactly as the sending tab wrote it.
-    const mockBc = makeMockBroadcastChannel();
-    vi.stubGlobal('BroadcastChannel', makeBcConstructor(mockBc));
-
-    const bus = createCommandBus();
-    const seen: any[] = [];
-    const origins: unknown[] = [];
-    bus.register('remote', (cmd) => {
-      seen.push(cmd.payload);
-      origins.push(cmd.meta?.origin);
-      return 1;
-    });
-
-    const tabSync = sync({ channel: 'test' }, { dispatch: bus.dispatch.bind(bus) });
-    bus.use(tabSync);
-
-    mockBc.simulateMessage({ __vc: true, action: 'remote', target: {}, payload: { qty: 2 } });
-    mockBc.simulateMessage({ __vc: true, action: 'remote', target: {}, payload: 42 });
-    mockBc.simulateMessage({ __vc: true, action: 'remote', target: {}, payload: ['a', 'b'] });
-    mockBc.simulateMessage({ __vc: true, action: 'remote', target: {} });
-
-    // No marker key injected into user data, whatever the shape.
-    expect(seen[0]).toEqual({ qty: 2 });
-    expect(seen[1]).toBe(42);
-    expect(seen[2]).toEqual(['a', 'b']);
-    expect(seen[3]).toBeUndefined(); // absent stays absent - no synthetic object
-
-    // ...and every one of them is attributed, which is what suppresses the echo.
-    expect(origins).toEqual(['sync', 'sync', 'sync', 'sync']);
-
-  });
-
-  it('suppresses the echo for EVERY payload shape, not just markable ones', () => {
-    // Regression. `meta.origin` is derived by stampMeta from a `__origin` key
-    // in the PAYLOAD, so it can only mark plain objects and the absent case.
-    // Primitives and arrays reached the plugin unmarked and were re-broadcast:
-    // two tabs ping-ponging forever, each hop a real dispatch through
-    // handlers, plugins and transports. Measured before the fix - object and
-    // absent were suppressed; number, string, boolean and array all echoed.
-    const mockBc = makeMockBroadcastChannel();
-    vi.stubGlobal('BroadcastChannel', makeBcConstructor(mockBc));
-
-    const bus = createCommandBus();
-    bus.register('remote', () => 1);
-
-    const tabSync = sync({ channel: 'test' }, { dispatch: bus.dispatch.bind(bus) });
-    bus.use(tabSync);
-
-    const receive = (payload: unknown, omit = false) => {
-      mockBc.posted.length = 0;
-      (mockBc.postMessage as any).mockClear?.();
-      mockBc.simulateMessage({
-        __vc: true,
-        action: 'remote',
-        target: {},
-        ...(omit ? {} : { payload }),
-      } as any);
-      return mockBc.posted.length;
-    };
-
-    expect(receive({ qty: 2 })).toBe(0); // markable - was already suppressed
-    expect(receive(undefined, true)).toBe(0); // markable
-    expect(receive(42)).toBe(0); // was 1 (echo)
-    expect(receive('hello')).toBe(0); // was 1 (echo)
-    expect(receive(false)).toBe(0); // was 1 (echo)
-    expect(receive(['a', 'b'])).toBe(0); // was 1 (echo)
-
-    // The suppression must be scoped to received commands only - a genuine
-    // LOCAL dispatch with a primitive payload still has to go out, or the fix
-    // would have traded an echo loop for silent cross-tab breakage.
-    mockBc.posted.length = 0;
-    bus.dispatch('remote', { id: 1 }, 99);
-    expect(mockBc.posted).toHaveLength(1);
-    expect(mockBc.posted[0]).toMatchObject({ action: 'remote', payload: 99 });
-
-  });
-
-  it('suppresses the echo for unmarkable payloads on an ASYNC bus too', async () => {
-    // The async arm decides a microtask after next() settles, so the echo flag
-    // must be captured synchronously at plugin entry - this is the case the
-    // old `receiving = true` flag got wrong.
-    const mockBc = makeMockBroadcastChannel();
-    vi.stubGlobal('BroadcastChannel', makeBcConstructor(mockBc));
-
-    const bus = createAsyncCommandBus();
-    bus.register('remote', async () => 1);
-
-    const tabSync = sync({ channel: 'test' }, { dispatch: bus.dispatch.bind(bus) });
-    bus.use(tabSync);
-
-    mockBc.simulateMessage({ __vc: true, action: 'remote', target: {}, payload: 42 });
-    await new Promise((r) => setTimeout(r, 0));
-    expect(mockBc.posted).toHaveLength(0);
-
-    mockBc.simulateMessage({ __vc: true, action: 'remote', target: {}, payload: ['a', 'b'] });
-    await new Promise((r) => setTimeout(r, 0));
-    expect(mockBc.posted).toHaveLength(0);
-
-    // ...and a local async dispatch still broadcasts.
-    await bus.dispatch('remote', { id: 1 }, 7);
-    await new Promise((r) => setTimeout(r, 0));
-    expect(mockBc.posted).toHaveLength(1);
-
-  });
-
-  it('does not re-broadcast received messages (no echo)', () => {
-    const mockBc = makeMockBroadcastChannel();
-    vi.stubGlobal('BroadcastChannel', makeBcConstructor(mockBc));
-
-    const bus = createCommandBus();
-    bus.register('msg', () => {});
-
-    const tabSync = sync({ channel: 'test' }, { dispatch: bus.dispatch.bind(bus) });
-    bus.use(tabSync);
-
-    mockBc.simulateMessage({ __vc: true, action: 'msg', target: {} });
-
-    // The re-dispatch of the received message should NOT be re-broadcast
-    expect(mockBc.postMessage).not.toHaveBeenCalled();
-
-  });
-
-  it('filter limits which actions are broadcast', () => {
-    const mockBc = makeMockBroadcastChannel();
-    vi.stubGlobal('BroadcastChannel', makeBcConstructor(mockBc));
-
-    const bus = createCommandBus();
-    bus.register('cartAdd', () => {});
-    bus.register('analyticsTrack', () => {});
-
-    const tabSync = sync(
-      { channel: 'test', filter: (cmd) => cmd.action.startsWith('cart') },
-      { dispatch: bus.dispatch.bind(bus) }
-    );
-    bus.use(tabSync);
-
-    bus.dispatch('analyticsTrack', {});
-    expect(mockBc.postMessage).not.toHaveBeenCalled();
-
-    bus.dispatch('cartAdd', { id: 1 });
-    expect(mockBc.postMessage).toHaveBeenCalledOnce();
-
-  });
-
-  it('close() closes the BroadcastChannel', () => {
-    const mockBc = makeMockBroadcastChannel();
-    vi.stubGlobal('BroadcastChannel', makeBcConstructor(mockBc));
-
-    const bus = createCommandBus();
-    const tabSync = sync({ channel: 'test' }, { dispatch: bus.dispatch.bind(bus) });
-    bus.use(tabSync);
-
-    tabSync.close();
-    expect(mockBc.close).toHaveBeenCalled();
-    expect(tabSync.isOpen()).toBe(false);
-
-  });
-
-  it('ignores non-vc messages', () => {
-    const mockBc = makeMockBroadcastChannel();
-    vi.stubGlobal('BroadcastChannel', makeBcConstructor(mockBc));
-
-    const bus = createCommandBus();
-    const seen: string[] = [];
-    bus.onAfter((cmd) => seen.push(cmd.action));
-
-    const tabSync = sync({ channel: 'test' }, { dispatch: bus.dispatch.bind(bus) });
-    bus.use(tabSync);
-
-    // Malformed / foreign message - should be ignored
-    mockBc.simulateMessage({ __vc: false, action: 'evil', target: {} });
-    mockBc.simulateMessage(null as any);
-    mockBc.simulateMessage({} as any);
-
-    expect(seen).toHaveLength(0);
-
+    // The closed tab's own lane still works; only the bridge is gone, and its
+    // send-side listener must be off the lane too or it would post on a
+    // closed channel.
+    b.lane.emit('cartAdded', { count: 99 });
+    expect(b.applied).toEqual([{ count: 99 }]);
+    a.bridge.close();
   });
 
   it('is a no-op when BroadcastChannel is not available', () => {
-    // Stub BroadcastChannel as undefined (e.g. SSR / Node)
-    vi.stubGlobal('BroadcastChannel', undefined);
+    using _bc = stubGlobal('BroadcastChannel', undefined);
+    const lane = createFastLane();
+    const applied: unknown[] = [];
+    lane.on('cartAdded', (d: unknown) => { applied.push(d); });
+    const bridge = sync({ channel: 'ssr', lane, events: ['cartAdded'] });
 
-    const bus = createCommandBus();
-    bus.register('cmd', () => {});
+    expect(bridge.isOpen()).toBe(false);
+    expect(() => { lane.emit('cartAdded', { count: 1 }); }).not.toThrow();
+    expect(applied).toEqual([{ count: 1 }]);
+    bridge.close();
+  });
 
-    const tabSync = sync({ channel: 'test' }, { dispatch: bus.dispatch.bind(bus) });
-    bus.use(tabSync);
+  it('a payload that cannot be cloned warns in DEV and leaves the local emit standing', () => {
+    // DataCloneError is thrown synchronously by postMessage. The local
+    // listeners registered after the bridge must still run.
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const ch = nextChannel();
+    const lane = createFastLane();
+    const bridge = sync({ channel: ch, lane, events: ['cartAdded'] });
+    const after: unknown[] = [];
+    lane.on('cartAdded', (d: unknown) => { after.push(d); });
 
-    expect(() => bus.dispatch('cmd', {})).not.toThrow();
-    expect(tabSync.isOpen()).toBe(false);
+    expect(() => { lane.emit('cartAdded', { fn: () => 'nope' }); }).not.toThrow();
+    expect(after).toHaveLength(1);
+    const said = warn.mock.calls.map((c) => String(c[0]));
+    expect(said.some((m) => m.includes('did not cross to other tabs'))).toBe(true);
+    expect(said.some((m) => m.includes('cartAdded'))).toBe(true);
 
+    warn.mockRestore();
+    bridge.close();
+  });
+
+  it('...and says nothing in production', async () => {
+    // `DEV` is a module-level const, so the env has to move BEFORE the module
+    // is evaluated - stubbing it around an already-imported `sync` changes
+    // nothing. Same shape as the directive plugin's production test.
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.resetModules();
+    try {
+      const { sync: prodSync } = await import('../src/plugins-io');
+      const { createFastLane: prodLane } = await import('../src/fast-lane');
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const lane = prodLane();
+      const bridge = prodSync({ channel: nextChannel(), lane, events: ['cartAdded'] });
+
+      expect(() => { lane.emit('cartAdded', { fn: () => 'nope' }); }).not.toThrow();
+      const ours = warn.mock.calls.map((c) => String(c[0])).filter((m) => m.startsWith('[vapor-chamber]'));
+      expect(ours).toEqual([]);
+
+      warn.mockRestore();
+      bridge.close();
+    } finally {
+      vi.unstubAllEnvs();
+      vi.restoreAllMocks();
+      vi.resetModules();
+    }
+  });
+
+  it('is independent of any command bus, sync or async', async () => {
+    // What "item 24 - sync() on an async bus does not loop" used to guard.
+    // The bridge no longer touches the dispatch chain at all, so the async bus
+    // cannot produce a loop: there is nothing for it to re-enter. Pinned by
+    // running a real async dispatch alongside and counting the applies.
+    const ch = nextChannel();
+    const a = openTab(ch), b = openTab(ch);
+    const bus = createAsyncCommandBus();
+    bus.register('cartAdd', async () => { a.lane.emit('cartAdded', { count: 1 }); });
+
+    await bus.dispatch('cartAdd', {});
+    await flush();
+
+    expect(a.applied).toHaveLength(1);
+    expect(b.applied).toHaveLength(1);
+    a.bridge.close(); b.bridge.close();
   });
 });
 

@@ -662,7 +662,7 @@ describe('SSR rehydrate throughput', () => {
 //     which has NO Vue dependency, so Vue's version cannot have moved it. The
 //     shift is host/load variance, not a beta.15 regression; numbers land on the
 //     beta.13 reference. beta.15 changed no code on these paths (docs + one guard
-//     on the non-hot v-vc:command click handler). Canonical cross-beta deltas
+//     on the non-hot v-vc-command click handler). Canonical cross-beta deltas
 //     would need beta.14 re-run on THIS host.
 // ---------------------------------------------------------------------------
 
@@ -720,7 +720,7 @@ describe('transition bridge throughput', () => {
 
 // Vue 3.6.0-rc.2 (#15127) flipped compiler-vapor event delegation from
 // opt-out to opt-in - direct per-element listeners are now the default for
-// compiled `@click`. v-vc:command mirrors that same trade-off with its own
+// compiled `@click`. v-vc-command mirrors that same trade-off with its own
 // opt-in `.delegate` modifier (src/directives.ts): one shared document
 // listener instead of N per-element ones for large v-for'd action lists.
 //
@@ -791,6 +791,12 @@ describe('directive delegation (.delegate) - mount/unmount cost at scale', () =>
   // Minimal Element mock - same shape as tests/directives.test.ts's, trimmed
   // to what mounted()/beforeUnmount() touch. No real DOM needed: delegate
   // mode's cost is dominated by (de)registration, not event dispatch.
+  // NOT A TEARDOWN CHECK. `removeEventListener` here ignores the handler and
+  // the options, so this mock cannot tell a real removal from a mismatched one
+  // and could not have caught the leak rc9/4 fixed. It is shaped for COST -
+  // the (de)registration work per element - and nothing else. Teardown
+  // correctness is asserted in tests/directives-vapor-fixture.test.ts against
+  // a real document, by comparing the remove call with the add call.
   function mockDoc() {
     const listeners = new Map<string, Function>();
     return {
@@ -823,7 +829,7 @@ describe('directive delegation (.delegate) - mount/unmount cost at scale', () =>
   bench(`mount + unmount ${N} direct listeners (default)`, () => {
     const { app, get } = makeApp();
     createDirectivePlugin().install(app);
-    const vc = get('vc');
+    const vc = get('vc-command');
     const els: Element[] = [];
     for (let i = 0; i < N; i++) {
       const el = mockEl();
@@ -838,7 +844,7 @@ describe('directive delegation (.delegate) - mount/unmount cost at scale', () =>
   bench(`mount + unmount ${N} delegated listeners (.delegate)`, () => {
     const { app, get } = makeApp();
     createDirectivePlugin().install(app);
-    const vc = get('vc');
+    const vc = get('vc-command');
     const els: Element[] = [];
     for (let i = 0; i < N; i++) {
       const el = mockEl();

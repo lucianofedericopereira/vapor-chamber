@@ -101,7 +101,7 @@ bus.dispatchBatch([
 ## Bundle size
 
 mitt is <!-- vc:sizeMitt -->0.2<!-- /vc:sizeMitt --> KB brotli. vapor-chamber's `core` IIFE variant is
-**<!-- vc:sizeIifeCore -->8.0<!-- /vc:sizeIifeCore --> KB brotli**, a couple
+**<!-- vc:sizeIifeCore -->7.9<!-- /vc:sizeIifeCore --> KB brotli**, a couple
 of orders of magnitude more; that difference pays for the extras above. For
 always-current per-export numbers, see [BUNDLE-SIZES.md](../BUNDLE-SIZES.md)
 (generated, CI-verified fresh) and prefer it over any figure quoted in prose.

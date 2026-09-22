@@ -2,6 +2,668 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.22.0 - 2026-09-21 Vue 3.6.0-rc.9 alignment
+
+89 commits in `v3.6.0-rc.8..v3.6.0-rc.9` (the full log, not first-parent; the
+release notes list fewer, as at rc.8). Sixteen were read in full or closed by a
+probe or a committed test; the rest are closed from their title and touched files
+and are marked as such in the cycle record. Peer range narrows to
+`>=3.5.0 || >=3.6.0-rc.9` for `vue` and `@vue/reactivity`; both Vapor examples
+repinned and rebuilt.
+
+### `v-vc-payload` and `v-vc-optimistic` now work on Vapor
+
+Two new exports, `vcPayloadVapor` and `vcOptimisticVapor`, beside
+`vcCommandVapor`. All three directives now mean the same thing on both
+renderers, and there is nothing left to document as unavailable over there.
+
+```vue
+<script setup vapor>
+import {
+  vcCommandVapor as vVcCommand,
+  vcPayloadVapor as vVcPayload,
+  vcOptimisticVapor as vVcOptimistic,
+} from 'vapor-chamber/directives'
+</script>
+<template>
+  <button v-vc-command="'cartAdd'" v-vc-payload="{ qty, orderedAt: new Date() }"
+          v-vc-optimistic="bump">Add</button>
+</template>
+```
+
+**What was actually missing.** `v-vc-payload` had a substitute and
+`v-vc-optimistic` had none. The substitute was lossy in a way that is easy to
+miss: `data-vc-payload` is JSON in an attribute, so measured through it a
+`Date` arrives as a string, a `Map` as `{}`, a class instance as a plain object,
+and a function and an `undefined` key disappear entirely. A handler calling
+`cmd.payload.when.getTime()` worked through the binding and threw through the
+attribute. For optimistic-with-rollback there was no route at all: the Vapor
+consumer had to drop `v-vc-command` for that button and hand-roll the dispatch,
+forfeiting `vc-loading` / `vc-error`, disable-while-busy, the re-entrancy guard,
+the timeout and the modifiers - and it could not be done by adding an `@click`
+beside the directive, because since [#15490]'s sibling `80b3a046` that handler
+registers first and can veto the dispatch.
+
+**Read at dispatch time**, like the action, because Vapor has no `updated` hook.
+A changed payload re-targets the next click without the directive re-running. A
+binding beats `data-vc-payload` on both renderers, unchanged.
+
+**Order does not matter.** `<button v-vc-payload="p" v-vc-command="a">` works,
+and so does the reverse. That is not free and it is not defensive: a compiled
+template applies directives in SOURCE order and mounting the command clears the
+element's state first, so the naive port loses a payload written before the
+command - a button that dispatches with nothing, silently. A warning was
+considered and rejected; attribute order is not something a consumer has reason
+to think matters. Both orders are pinned by tests.
+
+**Cost**, same measurement as the reshape above (Vite production consumer
+bundle of `./directives`, brotli q11): **+500 raw / +125 brotli**. The three
+IIFE variants are byte-identical - none carries directives code. The `.d.ts`
+grows 3,238 B, which is types and JSDoc and reaches no consumer's bundle.
+
+**The alias rule applies to these too, and it fails silently.** Vue camelCases
+the whole directive name, so the imports must alias as `vVcPayload` and
+`vVcOptimistic`. Anything shorter compiles, type-checks, and falls back to a
+directive nobody registered - which Vue warns about in DEV and not in a
+production build. `npm run check:example` now clicks the example's button and
+asserts the optimistic counter moved by the payload's `qty`, so a dead binding
+shows up as 1 instead of 3 rather than as nothing at all.
+
+### Fixed: on vDOM, a payload written before the command was silently dropped
+
+The order-independence above was Vapor's alone. On the vDOM plugin
+`<button v-vc-payload="p" v-vc-command="a">` dispatched with **no payload**,
+and `v-vc-optimistic` before the command **never ran** - no warning, no error,
+a control that renders and quietly does less than it says.
+
+Measured against the real vDOM runtime, first click, no re-render since mount:
+
+    <button v-vc-command    v-vc-payload>    payload {qty:3}    delivered
+    <button v-vc-payload    v-vc-command>    payload undefined  DROPPED
+    <button v-vc-optimistic v-vc-command>    optimistic never ran
+
+**Why it survived.** After any re-render the `updated` hook re-applies the
+binding and both recover, so it is a FIRST-CLICK defect: every test that
+renders before it asserts passes, and the source said in as many words that
+the vDOM half "needs nothing equivalent" because the next patch would fix it.
+That is true from the second click. The element is clickable before the first,
+and on a page with no reactive state - the Blade / sprinkled shape this library
+exists to serve - there is no next patch and it never works at all.
+
+**What it cost beyond the payload.** One public spelling meant two things:
+order-independent on Vapor, dead on vDOM. `examples/vapor-sfc` writes
+payload-before-command and states that the order does not matter, which holds
+only because that file is `<script setup vapor>`. A reader copying that markup
+into a vDOM component got a silent no-op. This is the asymmetry the section
+above exists to close, reopened from the other renderer.
+
+**The fix** is the one Vapor already had: the holding slot now takes vDOM
+values as well as Vapor getters, and both registrations write through it, so a
+binding that arrives before the command is held and claimed instead of
+discarded. `payload` and `optimisticFn` join the state literal, so the hidden
+class no longer depends on which renderer mounted the element.
+
+Same measurement as above (Vite production consumer bundle of `./directives`,
+brotli q11):
+
+    before   raw  27,435   brotli  7,324
+    after    raw  27,419   brotli  7,340
+    delta          -16             +16
+
+Raw shrinks because four repeated hook bodies collapse into one shared writer;
+brotli grows by the same small amount because that repetition compressed almost
+perfectly. All three IIFE variants are byte-identical before and after - none
+carries directives code, so they are the control, not the target.
+
+Four tests pin it: both before-command cases (the regression), the
+after-command case (the control, because the cheapest wrong fix swaps which
+order works), an `updated` after a claim, and an element that never mounts a
+command at all.
+
+### BREAKING: the directive selector moved into the NAME
+
+**`v-vc:command` is now `v-vc-command`.** The other two directives were always
+spelled that way, so the three names finally have one shape:
+
+    v-vc-command    v-vc-payload    v-vc-optimistic
+
+Registered as `vc-command`, `vc-payload` and `vc-optimistic`. There is no
+deprecation alias, deliberately: the alias would have to keep the exact
+machinery this change exists to delete.
+
+**Why.** Vue's directive ARGUMENT is a *parameter* slot - `v-bind:href`,
+`v-on:click` - meant to be dynamic, and reactive since [#15490]. This package
+was using it as a *selector*: the argument said which of `command` / `payload` /
+`optimistic` a binding was. That is a category error, and the defect below is
+downstream of it. A selector must not move; a parameter is built to. The two
+requirements were in direct conflict, and the conflict shipped a dead control.
+
+**It is a deletion, not a rename.** Gone with the argument read: the
+`argument()` call, the DEV guard on a non-getter argument, the below-floor Vue
+version warning that existed only to explain that guard, both `binding.arg`
+guards in the vDOM registration, and the documented `v-vc:[kind]` latch -
+unreachable once there is no argument to be dynamic.
+
+Measured on a Vite production consumer bundle of `./directives`, brotli q11:
+
+    before   raw  21,722   brotli  7,126
+    after    raw  21,335   brotli  6,982
+    delta         -387            -144
+
+All three IIFE variants are byte-identical: none of them carries directives
+code, so they serve as the control rather than the target.
+
+**`v-vc:payload` was inert, and this is what fixes it.** The drift the split
+caused: `v-vc:payload` compiled to `[_directive_vc, _ctx.p, "payload"]` - the
+`vc` directive with an argument its `mounted` rejected - so it did nothing,
+while being documented in the README, the whitepaper, an example header and the
+generated API reference. The working spelling was always `v-vc-payload`. It now
+compiles to its own `resolveDirective("vc-payload")`, and two new tests compile
+the notation a consumer actually types rather than resolving a name we chose.
+
+**It also closes the vue-tsc gap for this directive**, which was not the point
+and is worth stating carefully. vue-tsc type-checked the template call by
+passing the ARGUMENT as a raw string - the pre-[#15490] shape - and rejected the
+idiomatic `import { vcCommandVapor as vVc }` form with TS2345. With no argument
+there is nothing to mis-check. A/B in the example's own project, with a control:
+the colon form still reports TS2345, the hyphen form exits clean, and a
+deliberate error in the same probe still reports TS2339, so the template is
+genuinely being checked. **The tool has not caught up** - the bug is still there
+for anyone using an argument. Our usage no longer has the shape that triggers it.
+
+**Upgrading.** Rename the attribute in your templates, and the registration if
+you register app-wide:
+
+    - <button v-vc:command="'cartAdd'">
+    + <button v-vc-command="'cartAdd'">
+
+    - createVaporApp(App).directive('vc', vcCommandVapor)
+    + createVaporApp(App).directive('vc-command', vcCommandVapor)
+
+**The local binding name changes too, and it fails silently if you miss it.** Vue
+resolves an SFC directive by camelCasing the FULL name, so `v-vc-command` looks for
+`vVcCommand`. Under the old spelling the directive was named `vc` and `command` was
+its argument, so the binding was `vVc`:
+
+    - import { vcCommandVapor as vVc } from 'vapor-chamber/directives'
+    + import { vcCommandVapor as vVcCommand } from 'vapor-chamber/directives'
+
+An import left aliased to `vVc` compiles, type-checks and mounts nothing - the same
+silent dead control [#15490] produced. This was caught here by
+`npm run check:example`, which clicks the built example's button and asserts the
+directive responded, and by nothing else.
+
+`v-vc-payload` and `v-vc-optimistic` are unchanged. If you wrote `v-vc:payload`
+or `v-vc:optimistic` anywhere, those bindings were doing nothing; the hyphenated
+spelling is what makes them work.
+
+### `v-vc:command` was a dead control in every compiled Vapor template
+
+**The one defect rc.9 caused here, and it was silent.** [#15490] made a Vapor
+custom directive's ARGUMENT a getter, so compiler-vapor emits
+
+    rc.8  [_directive_vc, () => (_ctx.action), "command",         { stop: true }]
+    rc.9  [_directive_vc, () => (_ctx.action), () => ("command"), { stop: true }]
+
+and `vcCommandVapor` opened with `if (argument !== 'command') return;`. A function
+never equals that string, so the directive returned before mounting: no listener,
+no state, no warning, and no error anywhere. Every `v-vc:command` in a compiled
+Vapor template did nothing.
+
+- **The getter, and only the getter.** Vue's own `VaporDirective` type declares
+  `argument?: () => Arg` with no union, so the string is not a legacy shape but an
+  illegal one; no Vue inside this package's peer range can emit it (3.5 ships
+  neither runtime-vapor nor compiler-vapor, and the second arm of the range starts
+  at rc.9). Accepting both would be a branch no installable Vue can reach, provable
+  only by a hand-written literal - the construct that hid this for a release. A DEV
+  guard names the required version instead, and folds to nothing in a consumer's
+  production build (measured in a Vite production bundle: neither the guard string
+  nor the version string survives, and no unfolded `typeof process` or
+  `import.meta.env` is left).
+- **Why 2,431 passing tests did not see it.** Both Vapor directive fixtures
+  hand-wrote the tuple, copied from an older compiler release, and their headers
+  said so. A literal records a compiler release and then agrees with it forever.
+  `tests/compile-vapor.ts` is the fix: one helper that compiles the consumer's
+  template on the INSTALLED Vue and reads the generated module's imports rather
+  than listing them. Every Vapor test that matters now runs compiler output.
+- **An example carries one now.** `examples/vapor-sfc` had no `v-vc:command`
+  anywhere, so rebuilding all three examples - which this project's alignment
+  ritual does every cycle - passed while the feature was dead.
+  `npm run check:example` builds that example and drives the button in a real
+  page, so the next time it goes inert something fails.
+
+### Teardown is keyed to what was mounted, never to the current binding
+
+Found while measuring the fix above, and older than rc.9: the vDOM `v-vc`'s
+`beforeUnmount` guarded on `binding.arg !== 'command'`, and Vue passes the LATEST
+binding - so after a dynamic argument moved off `command`, teardown never ran and
+the element's listener outlived it. Honest scope: reachable only through
+`v-vc:[kind]`, which nothing uses; the delegated refcount is otherwise complete and
+correct, with plain unmount, partial, full and double-unmount all measured correct
+BEFORE the fix. The fix is the deletion of that line - `unmountCommand` already
+no-ops on an element with no state, so the guard bought nothing. Net -56 B. A
+dynamic `v-vc:[kind]` LATCHES on both renderers alike and is documented rather
+than warned about.
+
+### One listener-options object
+
+Recorded at mount and handed to both `addEventListener` and `removeEventListener`,
+replacing a `capture` boolean that existed only to rebuild what was already there
+(-16 B). `removeEventListener` is a silent no-op when the handler or the capture
+flag differ, and the two calls had disagreed harmlessly (`{}` against `undefined`),
+which had forced the test comparing them to compare capture flags rather than
+arguments. A comparison weakened to pass will not catch what it is for: add
+`{ once: true }` to one side and removal stops matching, with no error.
+
+### Fixtures that run compiler output
+
+New, all driving compiled templates on the installed Vue rather than hand-written
+tuples: `tests/vapor-keepalive-fixture.test.ts` (a cached component swapped out of
+the slot does NOT dispose the directive's scope; reactivation reuses element and
+state; cleanup runs exactly once on each of three teardown routes - include/exclude
+drop, `max` eviction, and a nested branch torn down after reactivation - counting
+cleanup invocations, not listener removals, because with one delegated element a
+second teardown hits an early return and leaves no trace), and
+`tests/vapor-hydration-fixture.test.ts` (genuinely server-rendered: compiled with
+`ssr: true`, rendered to a string by `@vue/server-renderer`, only the string
+crossing to a client that hydrates with `createVaporSSRApp`; the directive adopts
+the server's element, mounts once, dispatches, no mismatch warnings, teardown
+balanced). `tests/directives-vapor-fixture.test.ts` gains keyed and unkeyed v-for:
+a keyed reorder reuses nodes with no re-run and no cleanup, a filter runs exactly
+one cleanup, and in an UNKEYED list the element is reused while the item shifts
+under it and the click follows the item - which a keyed reorder cannot show, since
+it moves the node and a latched value would look identical.
+
+### `createDirectivePlugin()` on a Vapor app now says so, in DEV
+
+Installing the vDOM plugin on a Vapor app leaves every `v-vc-command` inert.
+From rc.9 Vue skips a vDOM object directive in a Vapor template with a warning
+of its own (#15489); before that it called the object and threw a TypeError at
+mount. Vue names the symptom - "Received a VDOM object directive" - so ours
+carries only the fix: **"On a Vapor app use vcCommandVapor."**
+
+One own-property read (`app.vapor`, which a Vapor app carries and a vDOM app
+does not), and the whole branch folds out of a production build. Measured on
+`dist/directives2.js`: **+94 B raw / +21 B brotli**, of which the `if` costs 8
+and the string 13. All three IIFE variants and the tree-shake consumer bundle
+are byte-identical - none of them carries directives code.
+
+Also worth knowing on Vapor: all three directives have a Vapor registration as
+of this release - `vcCommandVapor`, `vcPayloadVapor` and `vcOptimisticVapor` -
+so the remedy is always an import rather than a workaround. The ROADMAP feature
+matrix carries a row for each.
+
+### Upgrade note: a template `@click` now runs before `v-vc-command`
+
+**Scope: only an element carrying BOTH a template `@click` and
+`v-vc-command`.** Nothing else changes. No example or documented recipe pairs
+them - `examples/feature-directives.html` says in as many words that there is
+no click handler anywhere in it, because the directive owns the whole
+interaction.
+
+`80b3a046` moved compiled custom directives to the END of a block, after the
+element's props, children and `v-model`. Measured on one template with both
+compilers: rc.8 emitted `_withVaporDirectives` and then `_on`; rc.9 emits them
+the other way round. The directive's listener ran FIRST on rc.8 and runs
+SECOND on rc.9, so a template handler now gets to veto the dispatch through
+`buildHandler`'s disabled / `aria-disabled` / in-flight guard - deliberate
+since v1.6.0, mirroring Vue's #14948, and unchanged. The platform does not
+retract an event already in flight, so disabling the element from that handler
+does not stop the click reaching us - the guard is what stops the dispatch.
+
+What each kind of veto does, measured on one element carrying both:
+
+| the `@click` handler does | vDOM | Vapor direct | Vapor `.delegate` |
+| --- | --- | --- | --- |
+| nothing | dispatches | dispatches | dispatches |
+| `el.disabled = true` | skips | skips | skips |
+| `stopImmediatePropagation()` | skips | skips | skips |
+| `stopPropagation()` | dispatches | dispatches | **skips** |
+
+**This makes Vapor match vDOM rather than depart from it.** Vue patches an
+element's props before it runs a directive's `mounted`, so the vDOM
+registration has run second all along; on rc.8 neither veto reached the Vapor
+directive at all (measured: both dispatched).
+
+**`.delegate` is unaffected by the rc.9 reordering, and always was.** Its
+listener is on the DOCUMENT and fires during bubbling, after every
+element-level listener whatever order they registered in, so the emission
+order never decided anything for it. The same property is why `.delegate` is
+the one mode plain `stopPropagation()` on the element vetoes: it stops the
+event reaching the document, while a direct listener on that same element is
+not stopped by it. **Both facts are pre-existing and inherent to delegation** -
+neither was introduced by rc.9, and neither changes with it.
+
+If you want the dispatch to happen regardless, move the `@click` work into the
+command handler, or put it on a wrapper element.
+
+### Inherited from rc.9, no code change here
+
+Each reaches consumers only through an API this package re-exports:
+
+- **`958580bf`** - a Vapor component's props are marked shallow, so `watch(props)`
+  is no longer deep. Nothing here watches props or teaches it (grepped across src,
+  examples, docs and README), but an app that does, through
+  `defineVaporComponent`, gets the shallower watcher.
+- **`ab722d18`** - reserved props are skipped in attrs and dynamic props.
+- **`0e4ff650`** - an empty-string dynamic component renders an empty branch;
+  `router/vapor` already passes a getter that can answer null, and this is the
+  same arbitration one value further out.
+- **`90ddc697`** - hydration advances past a multi-root async component.
+
+### BREAKING: `sync` carries facts, not commands, and leaves the dispatch chain
+
+`sync` was a bus plugin that re-broadcast every successful dispatch and
+re-dispatched it in the receiving tab. That replicates INTENT: each tab re-runs
+the handler and derives its own outcome. Measured against a real
+`BroadcastChannel` rather than the channel stub the old tests used, three things
+follow, and none of them were documented:
+
+- A handler that is not deterministic does not mirror. Two tabs running the same
+  `cartAdd` minted `A-line-1-936891` and `B-line-1-675288` and stayed different.
+- A tab seeded differently stays different: one ended at 1, the other at 6.
+- A handler that dispatches a nested command applied that derivation **twice per
+  tab**, because each tab derived its own and then received the peer's.
+
+Suppressing the receive side alone does not fix the third (6 runs become 5, not
+4): the ORIGINATING tab is still broadcasting its derivations. Telling a root
+dispatch from a derived one by inference needs the core to distinguish them,
+which it does not - a root and a nested dispatch carry identical meta - and
+adding a counter to do so taxes every dispatch on the bus.
+
+**So the app declares what crosses instead.** A handler computes a fact and emits
+it on an event channel; the bridge puts that fact on the wire and every other tab
+applies it. A derivation is not a fact unless the app emits it, so there is
+nothing to infer and no counter to pay for, and the receiving tab applies values
+rather than recomputing them - the ordinary CQRS split between a command and
+something that already happened.
+
+```typescript
+const lane = createFastLane()
+lane.on('cartAdded', fact => applyToCart(fact))   // local AND remote land here
+bus.register('cartAdd', cmd => { lane.emit('cartAdded', computeAdd(cmd.target)) })
+const tabSync = sync({ channel: 'vc:app', lane, events: ['cartAdded'] })
+```
+
+**It is also roughly twice as fast, and that is the same change.** As a plugin
+this cost more than half the bus's dispatch throughput, on every dispatch of
+every action, whether or not it synced. Over 11 shuffled rounds of 200,000
+dispatches with `gc()` per round, against a byte-identical self-control arm:
+
+| wiring | ops/s | ratio vs bare |
+|---|--:|--:|
+| bare bus | 28,779,223 | 1.000 |
+| as a plugin (before) | 13,199,687 | 0.459 |
+| self-control, identical code | 13,062,433 | 0.454 |
+| `onAfter` listener | 15,486,719 | 0.538 |
+| **fast lane (now)** | **24,965,803** | **0.867** |
+
+Migration: `sync(opts, busRef)` becomes `sync({ channel, lane, events })` and is
+no longer passed to `bus.use()`. `filter` is gone - `events` names what crosses.
+`onReceive(cmd)` becomes `onReceive(event, data)`. `_withOrigin`'s sync usage and
+the `meta.origin === 'sync'` echo check are both deleted: a lane emit is
+synchronous, so a plain boolean suppresses the echo with no window for the async
+race that forced the origin marker.
+
+**What it still does not do.** Facts mirror; seeds do not. Tabs converge only if
+the facts are absolute ("the count is 2") rather than relative ("add one"). And a
+payload crosses through structured clone, so it cannot carry functions - a
+non-cloneable payload warns in DEV, naming the event, and never takes the local
+emit down with it.
+
+### The argument guard is DEV-only, and the state literal is one shape
+
+Two lib-side items in `vcCommandVapor`'s mount path, found by re-reading this
+cycle's own changes against the built output rather than the source.
+
+- **The argument-shape guard shipped to production.** Only the `console.warn` was
+  gated, so `if (argument !== undefined && typeof argument !== 'function') return;`
+  survived a production build - a branch this entry itself argues no installable
+  Vue can reach. Measured on `./directives`, prod-minified with DEV folded off:
+  37 bytes min, 12 gzip, 14 brotli. The behaviour ran the same way: `return` on a
+  string is a control that renders, clicks and does nothing, with no error, which
+  is the exact shape [#15490] left behind. Now DEV-only. Production reaches the
+  bare `argument()` and throws at the line that caused it.
+- **The state literal gained a hidden-class transition.** `capture` left the
+  literal when it became `listenerOpts`, and the write moved after it,
+  transitioning V8's map once per mount on the direct-listener path;
+  `delegatedDoc` had the same shape on the delegated path. Both are declared in
+  the literal now, so every `DirectiveState` leaves `mountCommand` with one map.
+  Not benched and not claimed as faster: it removes a transition, it cannot be
+  slower, and it is not a size loss - two `undefined` slots cost 40 bytes raw and
+  give back 3 brotli.
+
+Net on `./directives`, prod-minified with DEV folded: -3 brotli, -2 gzip, +3 min.
+
+### A second tooling gap: `tests/` is not typechecked
+
+`tsconfig.json` is `include: ["src/**/*"]` and `tsconfig.typecheck.json` adds two
+named test files, so no other test is ever type-checked. The `sync` rewrite made
+this visible: 21 call sites kept compiling against a signature that no longer
+existed and failed only at runtime. Recorded, not fixed here.
+
+### The `onSettled` sweep missed two plugins, and SSR was dead on an async bus
+
+`src/settled.ts` records a defect found in five shipped plugins: they read
+`next()`'s return value as though it were the result, and on an async bus
+`next()` returns a PROMISE, so `promise.ok` is `undefined`. It was fixed with
+one helper, and that file's closing line is that a rule applied by hand at each
+call site goes missing wherever nobody remembered it.
+
+**The sweep itself was one of those hands.** It was run over the plugin family -
+`plugins-core.ts`, `plugins-extra.ts`, `plugins-io.ts` - and two plugins live
+outside it. Both had the identical defect, for two releases:
+
+- **`createSSRPlugin()` recorded NOTHING on an async bus.** `dehydrate()` came
+  back empty, so the client rehydrated no state at all. Measured through the
+  public API, same dispatch, both bus kinds:
+
+      sync  dehydrate: [{"action":"cartAdd","target":{"id":1}}]
+      async dehydrate: []
+
+  No error, no warning. It reads exactly like a render that had no commands to
+  record, which is the same shape as every other defect in this class.
+- **`schemaLogger()` printed the error branch for every command,** successes
+  included, with `undefined` as the error - the defect `logger()` had, three
+  modules away from `logger()`.
+
+Both now go through `onSettled`. The SSR fix is armed by a test that fails
+without it; the schema one asserts the logged value is `'added'` rather than
+`undefined`.
+
+**The rule is now a test, not a memory.** `tests/settled-sweep.test.ts` scans
+every `.ts` under `src/` for a `next()` result that is bound and then read
+without being settled, and separately asserts the scan covers every module that
+produces a `Plugin` - sixteen of them, not the three whose filenames begin with
+`plugins-`. Comments are blanked before scanning, because `settled.ts`'s own
+docblock quotes the pattern it looks for.
+
+**Why the type system did not catch it, and still would not.** `Plugin` declares
+`next: () => CommandResult` while being usable on either bus, which is a lie on
+the async one; `settled.ts` already says so. Three plugins work around it with
+`const plugin: any`, which is the type system being escaped rather than
+modelled. Collapsing `Plugin` into `AsyncPlugin` does not work either: the sync
+runner (`buildRunner`) genuinely requires a synchronous return, so the two are
+different types and a dual-capable plugin is neither - it needs an overloaded
+signature. Not attempted here. This is also the root of 19 of the type errors
+the `tests/` typecheck gap hides, so the two are one piece of work.
+
+### The prototype-key rule is a sweep too, before it needs to be
+
+`src/dict.ts` is `src/settled.ts` one release earlier, and the shape is
+identical: a bug class found six times, each site "written as if it were the
+first", centralized into one helper, the rule stated in prose, and the known
+sites pinned by `tests/prototype-keys.test.ts` - which says outright that it
+"pins the two non-router sites". Nothing stood between the codebase and site
+seven except somebody remembering.
+
+Swept, and it currently holds: no module tests membership with `in` or with
+`!== undefined`, no prototype-free object is spread back into a plain one, and
+all six sites `dict.ts` names call the helper. That is the same thing that was
+true of `onSettled` right up until two modules grew a `Plugin` outside the
+family someone had grepped, so `tests/dict-sweep.test.ts` now holds it instead
+of a person. Each of its three assertions is armed by injecting the construct
+it bans into a real module and watching the sweep fail.
+
+Two things the sweep needs that are worth stating, because both produced false
+readings first. String literals have to be blanked as well as comments: without
+that the scan reports 26 sites, every one an error message containing the word
+"in" ("Retry in 200ms"). And a TypeScript mapped type `[K in keyof T]` is not a
+membership test.
+
+**The general rule this repository keeps rediscovering.** A bug class fixed by
+writing the rule down is not fixed; it is deferred to whoever reads the prose
+next. Two helpers now exist solely to centralize such a rule, and both had the
+same gap. From here, a helper introduced to centralize a bug class ships with a
+sweep that scans every module for the construct it replaces - not a test per
+known site, and not a grep scoped to the filenames that happened to be involved
+the first time.
+
+### The console-argument convention is a sweep too, before it needs to be
+
+The third instance of the shape the two sections above describe, and this one
+was swept before a single site had broken it. The convention: identifying text
+(an action name, a key, a count, a limit, a code) is interpolated into the
+message, and a value with structure (a caught error, an element, a command, a
+result, an options bag) is passed as a SEPARATE console argument, where devtools
+renders it live and expandable instead of flattening it to "[object Object]".
+
+Censused 2026-09-22 over every `console.*` call in `src/`: every interpolated
+value is identifying text, every inspectable value is already a second argument,
+and `JSON.stringify`, `String(...)` and `.toString()` appear zero times inside a
+console argument. Nothing held that but memory, so
+`scripts/check-console-shape.mjs` holds it now, in `lint:check` beside the other
+guards. It prints its own counts, so the numbers here cannot go stale.
+
+It classifies by TYPE rather than by a list of names that look inspectable: a
+value may be interpolated only if the type checker says it is a string, number,
+boolean or bigint, or a union of those - which is what a string enum and
+`typeof x` are - and everything else fails, `any` and `unknown` included. That
+is `check-ascii.mjs`'s lesson applied on purpose: an alphabet is worth exactly
+the characters somebody thought of, and that list has been wrong here three
+times. The two calls that look like exceptions need no allowlist entry, because
+they pass on shape: `validateNaming`'s `console.warn(msg)` interpolates nothing
+at the call, and the router's `console.error(error)` is the convention itself.
+
+**The arming is in the guard, not in a session's notes.**
+`--self-test` injects five violations into real modules - an object in a
+template, `JSON.stringify` in a message, `String()` around a value, and both
+exempt sites rewritten into the violating shape - confirms each is caught, and
+restores every file by copy in a `finally`, asserting the restore rather than
+assuming it. It refuses to start unless git says every file it will write is
+clean: a `finally` does not run on SIGKILL, so an interrupted run would leave an
+injected defect in a real module, and this repo has had two sessions editing one
+working tree at once. Refusing also makes that trace DETECTABLE - the file shows
+as modified next time rather than being quietly re-mutated on top. The two exempt sites are in there because a shape-based exemption
+that quietly matches too much is indistinguishable from a working check; that is
+the `onSettled` sweep's filename-scoping failure in another costume. It is not
+in `lint:check` (it rebuilds the program per mutation and writes to `src/`) and
+not in the suite: no test here drives a `scripts/check-*.mjs`, and a
+second-long `ts.createProgram` does not belong in a vitest run. Blunt the
+classifier and the gate still reports OK while `--self-test` exits 1 - measured,
+which is the point of having it.
+
+`CONTRIBUTING.md` opened its `lint:check` paragraph with "Four guards" and then
+named exactly four. The fifth made both wrong, and nothing watched that sentence
+- `check-doc-claims` reads docblocks, absent defaults and release status, not
+prose counts. The count is gone rather than bumped: five would have left the same
+trap armed for guard six, which is the failure the last bullet under "Module
+discipline" already describes. The paragraph names its guards now.
+
+Two things stated rather than discovered later. A value that is genuinely a
+string but typed `any` fails this check, and `String(...)` is rejected by the
+same guard, so the way out is a cast at the call site - a claim a reviewer can
+see; the failure message says so. And the blind spot: a message assembled into a
+local and then logged passes unexamined, because following an initializer means
+deciding which declaration a name refers to, and being wrong about that is worse
+than a limit written down.
+
+### Sizes
+
+All three IIFE variants are **byte-identical** across the whole series
+(40,944 / 27,891 / 29,655 raw, 12,094 / 8,177 / 8,673 brotli): `src/directives.ts`
+ships in none of them. The whole cost of the cycle is **+310 B raw / +117 B brotli
+on `dist/directives2.js`**, the opt-in directives subpath - the DEV version guard,
+which a consumer's production build folds away, and the listener-options field.
+
+Vue's own numbers moved, and the generated table now says so: the hand-wired
+`createVaporApp` minimum 44.1 -> 44.5 KB minified, `vapor-chamber/vapor` over it
+4.8 -> 4.4, and `+ vaporInteropPlugin` 81.7 -> 84.2. Every vapor-chamber export row
+is unchanged at brotli. The Vapor outlet guard reads its saving at 21.14 KB brotli
+against the 20.42 recorded on rc.8, own machinery 4.21 against 4.23 - measured by
+the committed guard on this tree, so the direction (rc.9 makes the vDOM-plus-interop
+alternative more expensive, not less) is what the numbers support.
+
+### A tooling gap, measured and not ours - and now unreachable
+
+`vue-tsc` resolves an IMPORTED directive against its `.d.ts` and type-checks the
+template call passing the ARGUMENT as a raw string - the shape [#15490] replaced - so
+`import { vcCommandVapor as vVc } from 'vapor-chamber/directives'` with
+`v-vc:command` failed `vue-tsc --noEmit` against a correct `.d.ts` and a working
+runtime. Isolated three ways: a directive declared LOCALLY in the SFC is not checked
+at all and passes; the same directive imported fails at the argument slot; annotating
+it as Vue's own `VaporDirective` fails too. Upstream's `dts-test` covers the RUNTIME
+call shape only, and template checking lives in vuejs/language-tools, a different
+repository, so the change was never checked against it.
+
+**The reshape above closes it, and the mechanism is the point: `v-vc-command` has no
+argument, so there is nothing for `vue-tsc` to mistype.** This is not the tool
+catching up - the bug is still there, and any directive that takes an argument still
+trips it. It is that the reshape removed a whole class of upstream exposure rather
+than only the defect that started this cycle. If an argument-based notation is ever
+proposed again, this is part of its cost.
+
+So `examples/vapor-sfc` no longer registers the directive app-wide. That registration
+was never a style choice - it was added with the example itself and existed only to
+give `vue-tsc` no declaration to check, which is opting out of checking rather than
+satisfying it. The example now imports the binding, the way the documentation
+recommends, and its own `vue-tsc --noEmit` build step is the proof. `npm run
+check:tsc-gap` and `scripts/check-vue-tsc-directive-gap.mjs` are deleted: a guard
+that can only go red for a reason that cannot affect this package carries no
+information about it.
+
+### Known limitations, measured this cycle and not fixed here
+
+Neither is an rc.9 regression; both were found by measuring rc.9 against this
+library and are recorded where a consumer looks rather than left in a log.
+
+- **A bound update overwrites what `v-vc-command` writes by hand.** The directive
+  adds `vc-loading` / `vc-error` and sets `disabled` directly on the element. Vue
+  compares a binding against its own previous value, not against the live DOM, so
+  a hand-written value survives until that binding next moves and is then
+  overwritten wholesale. Measured on compiled templates: on an element that is NOT
+  the component root, a `:class` update drops `vc-loading` on BOTH renderers; on a
+  component root, where the class arrives as a fallthrough prop and Vue patches it
+  through `classList`, it survives. `:disabled` behaves the same way: a binding that
+  flips mid-dispatch leaves the button looking enabled and accepting clicks that do
+  nothing, since re-entrancy is blocked by internal state a binding cannot reach. rc.9's `a5f7a2c1` ("keep
+  transition classes when updating class binding") is upstream solving the same
+  class of problem for its OWN classes, via a list userland cannot join. Until
+  this is fixed, do not put `:class` or `:disabled` on the same element as
+  `v-vc-command` unless that element is a component root.
+- **Composables imported from the package ROOT degrade in a production bundle.**
+  Known since v1.20.0 and now measured in a real production bundle rather than a
+  model of one: `loading` is not a Vue ref, a listener registered through
+  `useCommand().on()` outlives `app.unmount()`, and the KeepAlive guard is inert.
+  Stated precisely, because the obvious phrasing is wrong: the state still
+  ADVANCES - the reducer runs and `state.value` changes - it is simply not
+  reactive, so a template bound to it never re-renders. The remedy is unchanged
+  and is three-fold: import from `vapor-chamber/vue` or `vapor-chamber/vapor`, or
+  let `vaporChamberWire()` do it at build time. The production warning that names
+  those remedies fires in that bundle, which this cycle confirmed.
+
+### Added: `npm run gate`
+
+One chain in the house order - typecheck, build, test:run, test:vapor, size:check,
+lint, coverage, stamp check, docs, size:doc, clean tree - failing fast, one result
+line per step, and a failure that names the step, so `git rebase --exec` identifies
+both the commit and the step. `npm run docs` and `npm run size:doc` regenerate
+files, so each is followed by a scoped `git diff --exit-code` and the chain ends by
+asserting a clean tree: drift fails the gate instead of being repaired by it. The
+rule it enforces had failed three times before this.
+
+[#15490]: https://github.com/vuejs/core/pull/15490
+
 ## v1.21.0 - 2026-09-16 `vapor-chamber/vitest`, a Vitest 5 plugin, and the suite rewritten on it
 
 A testing entry for Vitest 5 users, built from Vitest's own mechanisms

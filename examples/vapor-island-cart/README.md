@@ -68,4 +68,4 @@ script, and this example's `predev`/`prebuild` hooks build it on demand if
 and without the alias gave byte-identical output (the export list is pinned by
 `tests/vue-bundler-vapor-exports.test.ts`). `vaporChamberHMR()` keeps bus state across HMR.
 
-Aligned with Vue <!-- vc:vueAligned -->3.6.0-rc.8<!-- /vc:vueAligned --> and the working-tree vapor-chamber (`vapor-chamber: file:../..`).
+Aligned with Vue <!-- vc:vueAligned -->3.6.0-rc.9<!-- /vc:vueAligned --> and the working-tree vapor-chamber (`vapor-chamber: file:../..`).

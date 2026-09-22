@@ -33,7 +33,7 @@ Auth guard plugin - blocks protected commands when not authenticated.
 
 ### buildRunner
 
-**Function** - [src/command-bus.ts:1296](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L1296)
+**Function** - [src/command-bus.ts:1310](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L1310)
 
 ```ts
 buildRunner(plugins: Plugin[]) => (cmd: Command, execute: () => CommandResult) => CommandResult
@@ -41,7 +41,7 @@ buildRunner(plugins: Plugin[]) => (cmd: Command, execute: () => CommandResult) =
 
 ### busApiSchema
 
-**Function** - [src/schema.ts:663](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L663)
+**Function** - [src/schema.ts:674](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L674)
 
 ```ts
 busApiSchema() => Record<string, { description: string; params: Record<string, string>; returns: string; }>
@@ -76,7 +76,7 @@ bus.query('getUser', { id: 42 }); // cache hit, handler skipped
 
 ### circuitBreaker
 
-**Function** - [src/plugins-extra.ts:241](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-extra.ts#L241)
+**Function** - [src/plugins-extra.ts:238](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-extra.ts#L238)
 
 ```ts
 circuitBreaker(options?: CircuitBreakerOptions) => Plugin & { getState(action: string): CircuitState; reset(action: string): void; }
@@ -98,7 +98,7 @@ classifyError(error: unknown) => ErrorClassification
 
 ### commandKey
 
-**Function** - [src/command-bus.ts:1131](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L1131)
+**Function** - [src/command-bus.ts:1145](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L1145)
 
 ```ts
 commandKey(action: string, target: any) => string
@@ -133,7 +133,7 @@ configureSignal(ref);
 
 ### configureUid
 
-**Function** - [src/command-bus.ts:789](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L789)
+**Function** - [src/command-bus.ts:803](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L803)
 
 ```ts
 configureUid(fn: () => string) => void
@@ -188,7 +188,7 @@ createVaporChamberApp(App).mount('#app');
 
 ### createAsyncCommandBus
 
-**Function** - [src/command-bus.ts:2420](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L2420)
+**Function** - [src/command-bus.ts:2440](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L2440)
 
 ```ts
 createAsyncCommandBus<M extends CommandMap = CommandMap>(options?: CommandBusOptions) => AsyncCommandBus<M>
@@ -208,7 +208,7 @@ if (result.ok) console.log(result.value); // { name: 'Alice', ... }
 
 ### createAsyncSchemaCommandBus
 
-**Function** - [src/schema.ts:482](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L482)
+**Function** - [src/schema.ts:493](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L493)
 
 ```ts
 createAsyncSchemaCommandBus<S extends BusSchema>(schema: S, options?: SchemaCommandBusOptions) => AsyncSchemaCommandBus<InferMap<S>>
@@ -260,7 +260,7 @@ bus.dispatch('cartAdd', product, { quantity: 2 })
 
 ### createChamber
 
-**Function** - [src/utilities.ts:44](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/utilities.ts#L44)
+**Function** - [src/utilities.ts:45](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/utilities.ts#L45)
 
 ```ts
 createChamber(namespace: string, handlers: ChamberHandlers, opts?: ChamberOptions) => Chamber
@@ -281,7 +281,7 @@ const uninstall = cart.install(bus);
 
 ### createCommandBus
 
-**Function** - [src/command-bus.ts:2004](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L2004)
+**Function** - [src/command-bus.ts:2018](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L2018)
 
 ```ts
 createCommandBus<M extends CommandMap = CommandMap>(options?: CommandBusOptions) => CommandBus<M>
@@ -317,7 +317,7 @@ bus.on('cart/*', (cmd, res) => { }); // wildcard listener
 
 ### createCommandPool
 
-**Function** - [src/command-bus.ts:1199](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L1199)
+**Function** - [src/command-bus.ts:1213](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L1213)
 
 ```ts
 createCommandPool(size?: number) => CommandPool
@@ -325,16 +325,25 @@ createCommandPool(size?: number) => CommandPool
 
 ### createDirectivePlugin
 
-**Function** - [src/directives.ts:448](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L448)
+**Function** - [src/directives.ts:765](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L765)
 
 ```ts
 createDirectivePlugin() => { install(app: any): void; }
 ```
 
-createDirectivePlugin - installs v-vc:command and v-vc:optimistic directives.
+createDirectivePlugin - installs v-vc-command, v-vc-payload and
+v-vc-optimistic.
 
 Opt-in: import and use this plugin only when you need template directives.
 Zero cost when not imported. In Vapor components use {@link vcCommandVapor}.
+
+INSTALLED ON A VAPOR APP IT DOES NOTHING, and says so in DEV. The three
+registrations below are vDOM OBJECT directives; from Vue 3.6.0-rc.9 a Vapor
+template skips a non-function directive with a warning of its own (#15489),
+and before that it called the object and threw. Vue names the symptom
+("Received a VDOM object directive"); this names the fix. The check is one
+own-property read - a Vapor app carries `vapor`, a vDOM app does not - and
+the whole branch folds out of a production build.
 
 ### createEchoBridge
 
@@ -445,7 +454,7 @@ const adminHttp = http.create({ baseURL: '/admin/api', headers: { 'X-Admin': 'tr
 
 ### createReaction
 
-**Function** - [src/utilities.ts:226](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/utilities.ts#L226)
+**Function** - [src/utilities.ts:225](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/utilities.ts#L225)
 
 ```ts
 createReaction(sourcePattern: string, targetAction: string, options?: ReactionOptions) => Reaction
@@ -463,7 +472,7 @@ createReaction('cartAdd', 'inventoryCheck', {
 
 ### createSchemaCommandBus
 
-**Function** - [src/schema.ts:521](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L521)
+**Function** - [src/schema.ts:532](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L532)
 
 ```ts
 createSchemaCommandBus<S extends BusSchema>(schema: S, options?: SchemaCommandBusOptions) => SchemaCommandBus<InferMap<S>>
@@ -521,7 +530,7 @@ sse.teardown()
 
 ### createSSRPlugin
 
-**Function** - [src/ssr.ts:159](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L159)
+**Function** - [src/ssr.ts:160](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L160)
 
 ```ts
 createSSRPlugin(options?: SSRPluginOptions) => SSRPlugin
@@ -534,7 +543,7 @@ to get a serializable command list for embedding in the HTML payload.
 
 ### createTestBus
 
-**Function** - [src/testing.ts:83](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/testing.ts#L83)
+**Function** - [src/testing.ts:84](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/testing.ts#L84)
 
 ```ts
 createTestBus(opts?: { passthroughHandlers?: boolean; }) => TestBus
@@ -589,7 +598,7 @@ createVaporChamberApp(App).mount('#app');
 
 ### createWorkflow
 
-**Function** - [src/utilities.ts:117](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/utilities.ts#L117)
+**Function** - [src/utilities.ts:118](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/utilities.ts#L118)
 
 ```ts
 createWorkflow(steps: WorkflowStep[]) => Workflow
@@ -643,7 +652,7 @@ debounce period. Returns { pending: true } synchronously.
 
 ### defineSchema
 
-**Function** - [src/schema.ts:106](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L106)
+**Function** - [src/schema.ts:107](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L107)
 
 ```ts
 defineSchema<const S extends BusSchema>(schema: S) => S
@@ -798,7 +807,7 @@ if (MyEl) customElements.define('vc-greeting', MyEl);
 
 ### describeErrorCodes
 
-**Function** - [src/schema.ts:642](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L642)
+**Function** - [src/schema.ts:653](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L653)
 
 ```ts
 describeErrorCodes() => string
@@ -812,7 +821,7 @@ const systemPrompt = `When the bus returns an error, use this table:\n${describe
 
 ### describeSchema
 
-**Function** - [src/schema.ts:409](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L409)
+**Function** - [src/schema.ts:420](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L420)
 
 ```ts
 describeSchema(schema: BusSchema) => string
@@ -820,7 +829,7 @@ describeSchema(schema: BusSchema) => string
 
 ### getCommandBus
 
-**Function** - [src/chamber.ts:646](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L646)
+**Function** - [src/chamber.ts:640](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L640)
 
 ```ts
 getCommandBus<M extends CommandMap = CommandMap>() => CommandBus<M>
@@ -832,7 +841,7 @@ to override per call site (`getCommandBus<CommandMap>()` opts back out).
 
 ### getErrorEntry
 
-**Function** - [src/schema.ts:619](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L619)
+**Function** - [src/schema.ts:630](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L630)
 
 ```ts
 getErrorEntry(code: BusErrorCode) => ErrorCodeEntry | undefined
@@ -880,7 +889,7 @@ history(options?: { maxSize?: number; filter?: (cmd: Command) => boolean; bus?: 
 
 ### idempotent
 
-**Function** - [src/plugins-extra.ts:638](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-extra.ts#L638)
+**Function** - [src/plugins-extra.ts:635](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-extra.ts#L635)
 
 ```ts
 idempotent(options?: IdempotentOptions) => AsyncPlugin
@@ -910,7 +919,7 @@ bus.use(createHttpBridge({ endpoint: '/commands', csrf: true }));
 
 ### inspectBus
 
-**Function** - [src/command-bus.ts:2544](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L2544)
+**Function** - [src/command-bus.ts:2566](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L2566)
 
 ```ts
 inspectBus(bus: BaseBus) => BusInspection
@@ -943,7 +952,7 @@ Invalidate the CSRF token cache (e.g. after logout).
 
 ### isRetryableCode
 
-**Function** - [src/schema.ts:632](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L632)
+**Function** - [src/schema.ts:643](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L643)
 
 ```ts
 isRetryableCode(code: string) => boolean | undefined
@@ -970,7 +979,7 @@ isRetryableStatus(status: number) => boolean
 
 ### isVaporAvailable
 
-**Function** - [src/chamber.ts:556](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L556)
+**Function** - [src/chamber.ts:550](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L550)
 
 ```ts
 isVaporAvailable() => boolean
@@ -1004,7 +1013,7 @@ bus.use(logger({ level: 'error', badges: true }));
 
 ### matchesPattern
 
-**Function** - [src/command-bus.ts:1093](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L1093)
+**Function** - [src/command-bus.ts:1107](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L1107)
 
 ```ts
 matchesPattern(pattern: string, action: string) => boolean
@@ -1012,7 +1021,7 @@ matchesPattern(pattern: string, action: string) => boolean
 
 ### metrics
 
-**Function** - [src/plugins-extra.ts:404](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-extra.ts#L404)
+**Function** - [src/plugins-extra.ts:401](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-extra.ts#L401)
 
 ```ts
 metrics(options?: MetricsOptions) => Plugin & { entries(): MetricsEntry[]; summary(): Record<string, { count: number; avgMs: number; errorRate: number; }>; clear(): void; }
@@ -1050,7 +1059,7 @@ bus.use(optimistic({
 
 ### optimisticUndo
 
-**Function** - [src/plugins-core.ts:454](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-core.ts#L454)
+**Function** - [src/plugins-core.ts:448](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-core.ts#L448)
 
 ```ts
 optimisticUndo(bus: CommandBus, actions: string[], options?: OptimisticUndoOptions) => Plugin
@@ -1109,7 +1118,7 @@ postCommand<T = unknown>(url: string, body: unknown, config?: HttpConfig) => Pro
 
 ### rateLimit
 
-**Function** - [src/plugins-extra.ts:340](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-extra.ts#L340)
+**Function** - [src/plugins-extra.ts:337](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-extra.ts#L337)
 
 ```ts
 rateLimit(options?: RateLimitOptions) => Plugin
@@ -1136,7 +1145,7 @@ Read CSRF token from DOM: meta tag -> cookie -> hidden input. TTL-cached for 5 m
 
 ### rehydrate
 
-**Function** - [src/ssr.ts:227](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L227)
+**Function** - [src/ssr.ts:241](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L241)
 
 ```ts
 rehydrate(bus: BaseBus, commands: DehydratedCommand[], options?: RehydrateOptions) => CommandResult[]
@@ -1153,7 +1162,7 @@ early client bootstrap).
 
 ### rehydrateAsync
 
-**Function** - [src/ssr.ts:291](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L291)
+**Function** - [src/ssr.ts:305](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L305)
 
 ```ts
 rehydrateAsync(bus: BaseBus, commands: DehydratedCommand[], options?: RehydrateOptions) => Promise<CommandResult[]>
@@ -1169,7 +1178,7 @@ on the sync path - never an unhandled rejection.
 
 ### resetCommandBus
 
-**Function** - [src/chamber.ts:677](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L677)
+**Function** - [src/chamber.ts:671](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L671)
 
 ```ts
 resetCommandBus() => void
@@ -1198,7 +1207,7 @@ bus.use(retry({ maxAttempts: 3, strategy: 'exponential', baseDelay: 200 }))
 
 ### schemaLogger
 
-**Function** - [src/schema.ts:317](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L317)
+**Function** - [src/schema.ts:318](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L318)
 
 ```ts
 schemaLogger(schema: BusSchema, options?: SchemaLoggerOptions) => Plugin
@@ -1206,7 +1215,7 @@ schemaLogger(schema: BusSchema, options?: SchemaLoggerOptions) => Plugin
 
 ### schemaValidator
 
-**Function** - [src/schema.ts:263](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L263)
+**Function** - [src/schema.ts:264](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L264)
 
 ```ts
 schemaValidator(schema: BusSchema) => Plugin
@@ -1214,7 +1223,7 @@ schemaValidator(schema: BusSchema) => Plugin
 
 ### serialize
 
-**Function** - [src/plugins-extra.ts:539](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-extra.ts#L539)
+**Function** - [src/plugins-extra.ts:536](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-extra.ts#L536)
 
 ```ts
 serialize(options?: SerializeOptions) => AsyncPlugin
@@ -1256,7 +1265,7 @@ bus.use(serialize({ scope: 'cross-tab', key: (cmd) => cmd.target.accountId }));
 
 ### setCommandBus
 
-**Function** - [src/chamber.ts:669](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L669)
+**Function** - [src/chamber.ts:663](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L663)
 
 ```ts
 setCommandBus(bus: CommandBus | AsyncCommandBus) => void
@@ -1279,7 +1288,7 @@ stays `CommandBus` for compatibility.
 
 ### supersede
 
-**Function** - [src/plugins-extra.ts:758](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-extra.ts#L758)
+**Function** - [src/plugins-extra.ts:755](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-extra.ts#L755)
 
 ```ts
 supersede(options?: SupersedeOptions) => AsyncPlugin
@@ -1309,23 +1318,71 @@ bus.use(createHttpBridge({ endpoint: '/api/vc' }));
 
 ### sync
 
-**Function** - [src/plugins-io.ts:347](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-io.ts#L347)
+**Function** - [src/plugins-io.ts:411](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-io.ts#L411)
 
 ```ts
-sync(options: SyncOptions, busRef?: { dispatch: (action: string, target: any, payload?: any) => any; }) => Plugin & { close(): void; isOpen(): boolean; }
+sync(options: SyncOptions) => { close(): void; isOpen(): boolean; }
 ```
 
-sync - broadcast successful commands to all other open tabs via BroadcastChannel.
+sync - mirror emitted FACTS to every other open tab over a BroadcastChannel.
+
+WHAT CROSSES THE WIRE IS A FACT, NOT A COMMAND, and that is the whole design.
+Until v1.22.0 this was a bus PLUGIN that re-broadcast every successful
+dispatch and re-dispatched it in the receiving tab. That shape replicates
+INTENT: each tab re-runs the handler and re-derives the outcome. Three things
+fall out of it, all measured before this was rewritten:
+
+  - A handler that is not deterministic does not mirror. Two tabs running
+    the same `cartAdd` minted `A-line-1-936891` and `B-line-1-675288` and
+    stayed different forever.
+  - A tab seeded differently stays different: A ended at 1, B at 6.
+  - A handler that dispatches a nested command applied that derivation
+    TWICE per tab, because each tab derived its own and then received the
+    peer's. Suppressing the receive side alone did not fix it (6 runs became
+    5, not 4): the ORIGINATING tab was still broadcasting its derivations.
+    Fixing that by inference needs the core to distinguish a root dispatch
+    from a derived one, which it does not, and adding a counter to do so
+    would tax every dispatch on the bus.
+
+Emitting the fact removes the question instead of answering it. The app says
+what crosses by emitting it; a derivation is not a fact unless the app says
+so, so there is nothing to infer and no counter to pay for. The receiving tab
+APPLIES the values the sender computed rather than recomputing them, which is
+the ordinary CQRS split - a command is intent, an event is something that
+already happened - and it is what makes a non-deterministic handler a
+non-issue.
+
+IT ALSO LEAVES THE DISPATCH CHAIN. As a plugin this cost more than half the
+bus's dispatch throughput, on every dispatch of every action, whether or not
+it synced. Measured over 11 shuffled rounds of 200,000 dispatches with
+`gc()` per round, against a byte-identical self-control arm: bare bus 1.000,
+as a plugin 0.459 (control 0.454), as an `onAfter` listener 0.538, and on the
+fast lane 0.867. The correctness fix and the performance fix are the same
+change.
+
+WHAT IT STILL DOES NOT DO. Facts mirror, seeds do not: a tab that starts from
+different state stays different unless the facts are absolute ("the count is
+2") rather than relative ("add one"). And a payload crosses through the
+structured clone algorithm, so it cannot carry functions - see the DEV
+warning below.
 
 ```ts
-const tabSync = sync({ channel: 'vapor-chamber:app' })
-bus.use(tabSync)
+const lane = createFastLane()
+lane.on('cartAdded', (fact) => applyToCart(fact))   // local AND remote land here
+
+bus.register('cartAdd', (cmd) => {
+  const fact = computeAdd(cmd.target)
+  applyToCart(fact)
+  lane.emit('cartAdded', fact)                      // this is what crosses tabs
+})
+
+const tabSync = sync({ channel: 'vapor-chamber:app', lane, events: ['cartAdded'] })
 tabSync.close() // on teardown
 ```
 
 ### synthesize
 
-**Function** - [src/schema.ts:389](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L389)
+**Function** - [src/schema.ts:400](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L400)
 
 ```ts
 synthesize(schema: BusSchema, bus: CommandBus | AsyncCommandBus, text: string, options?: SynthesizeOptions) => Promise<CommandResult>
@@ -1359,7 +1416,7 @@ Throttle plugin - execute immediately, then block for wait period
 
 ### toAnthropicTools
 
-**Function** - [src/schema.ts:236](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L236)
+**Function** - [src/schema.ts:237](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L237)
 
 ```ts
 toAnthropicTools(schema: BusSchema) => AnthropicTool[]
@@ -1367,7 +1424,7 @@ toAnthropicTools(schema: BusSchema) => AnthropicTool[]
 
 ### toOpenAITools
 
-**Function** - [src/schema.ts:244](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L244)
+**Function** - [src/schema.ts:245](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L245)
 
 ```ts
 toOpenAITools(schema: BusSchema) => OpenAITool[]
@@ -1375,7 +1432,7 @@ toOpenAITools(schema: BusSchema) => OpenAITool[]
 
 ### toTools
 
-**Function** - [src/schema.ts:255](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L255)
+**Function** - [src/schema.ts:256](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L256)
 
 ```ts
 toTools(schema: BusSchema, provider?: "anthropic" | "openai") => AnthropicTool[] | OpenAITool[]
@@ -1383,7 +1440,7 @@ toTools(schema: BusSchema, provider?: "anthropic" | "openai") => AnthropicTool[]
 
 ### unsealBus
 
-**Function** - [src/command-bus.ts:2483](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L2483)
+**Function** - [src/command-bus.ts:2505](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L2505)
 
 ```ts
 unsealBus(bus: BaseBus) => void
@@ -1405,7 +1462,7 @@ if (import.meta.hot) {
 
 ### untracked
 
-**Function** - [src/chamber.ts:332](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L332)
+**Function** - [src/chamber.ts:326](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L326)
 
 ```ts
 untracked<T>(fn: () => T) => T
@@ -1434,7 +1491,7 @@ suspending tracking around callbacks - this is that idea at the bus edge.
 
 ### useCommand
 
-**Function** - [src/chamber.ts:871](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L871)
+**Function** - [src/chamber.ts:865](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L865)
 
 ```ts
 useCommand() => { dispatch: <A extends keyof SharedCommandMap & string>(action: A, target: TargetOf<SharedCommandMap, A>, payload?: PayloadOf<SharedCommandMap, A>) => CommandResult<ResultOf<SharedCommandMap, A>> | Promise<CommandResult<ResultOf<SharedCommandMap, A>>>; register: <A extends keyof SharedCommandMap & string>(action: A, handler: (cmd: Command<A, TargetOf<SharedCommandMap, A>, PayloadOf<SharedCommandMap, A>>) => ResultOf<SharedCommandMap, A> | Promise<ResultOf<SharedCommandMap, A>>, opts?: RegisterOptions) => () => void; on: (pattern: string, listener: (cmd: Command, result: CommandResult) => void) => () => void; emit: (event: string, data?: any) => void; loading: Signal<boolean>; lastError: Signal<Error | null>; dispose: () => void; }
@@ -1459,7 +1516,7 @@ dispatch('cartAdd', { id: product.id });
 
 ### useCommandError
 
-**Function** - [src/chamber.ts:1602](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1602)
+**Function** - [src/chamber.ts:1596](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1596)
 
 ```ts
 useCommandError(options?: { filter?: (cmd: Command) => boolean; errorCap?: number; }) => { errors: Signal<{ cmd: Command; error: Error; timestamp: number; }[]>; latestError: Signal<Error | null>; clearErrors: () => void; dispose: () => void; }
@@ -1479,7 +1536,7 @@ const { latestError } = useCommandError({ filter: cmd => cmd.action.startsWith('
 
 ### useCommandGroup
 
-**Function** - [src/chamber.ts:1508](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1508)
+**Function** - [src/chamber.ts:1502](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1502)
 
 ```ts
 useCommandGroup(namespace: string) => { dispatch: (action: string, target: any, payload?: any) => CommandResult; query: (action: string, target: any, payload?: any) => CommandResult; emit: (event: string, data?: any) => void; register: (action: string, handler: Handler, opts?: RegisterOptions) => () => void; use: (plugin: Plugin) => () => void; on: (pattern: string, listener: Listener) => () => void; namespace: string; dispose: () => void; }
@@ -1505,7 +1562,7 @@ orders.dispatch('cancel', { id }) // dispatches 'ordersCancel'
 
 ### useCommandHistory
 
-**Function** - [src/chamber.ts:1319](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1319)
+**Function** - [src/chamber.ts:1313](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1313)
 
 ```ts
 useCommandHistory(options?: { maxSize?: number; filter?: (cmd: Command) => boolean; }) => { past: Signal<Command[]>; future: Signal<Command[]>; canUndo: Signal<boolean>; canRedo: Signal<boolean>; undo: () => Command | undefined; redo: () => Command | undefined; clear: () => void; dispose: () => void; }
@@ -1518,7 +1575,7 @@ Undo executes inverse handlers when registered via register(action, handler, { u
 
 ### useCommandQuery
 
-**Function** - [src/chamber.ts:1465](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1465)
+**Function** - [src/chamber.ts:1459](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1459)
 
 ```ts
 useCommandQuery() => { query: (action: string, target: any, payload?: any) => CommandResult | Promise<CommandResult>; data: Signal<any>; loading: Signal<boolean>; lastError: Signal<Error | null>; }
@@ -1541,7 +1598,7 @@ const result = query('getUser', { id: 42 });
 
 ### useCommandState
 
-**Function** - [src/chamber.ts:1243](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1243)
+**Function** - [src/chamber.ts:1237](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1237)
 
 ```ts
 useCommandState<T>(initial: T, handlers: { [action: string]: (state: T, cmd: Command) => T; }, options?: UseCommandStateOptions) => { state: Signal<T>; dispose: () => void; }
@@ -1563,7 +1620,7 @@ const { state } = useCommandState([], { cartAdd: (s, cmd) => [...s, cmd.target] 
 
 ### useSharedCommandState
 
-**Function** - [src/chamber.ts:1023](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1023)
+**Function** - [src/chamber.ts:1017](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1017)
 
 ```ts
 useSharedCommandState(options?: UseSharedCommandStateOptions) => { dispatch: (action: string, target: any, payload?: any, opts?: { signal?: AbortSignal; }) => CommandResult | Promise<CommandResult>; isLoading: (action: string, target?: unknown) => Readonly<Signal<boolean>>; inFlight: Signal<number>; isAnyLoading: Signal<boolean>; lastError: Signal<Error | null>; errors: Signal<Error[]>; errorCount: Signal<number>; clear: () => void; dispose: () => void; }
@@ -1671,7 +1728,7 @@ Validator plugin - validate commands before execution
 
 ### waitForVueDetection
 
-**Function** - [src/chamber.ts:540](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L540)
+**Function** - [src/chamber.ts:534](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L534)
 
 ```ts
 waitForVueDetection() => Promise<void>
@@ -1739,7 +1796,26 @@ export interface AsyncCommandBus<M extends CommandMap = CommandMap> extends Base
   emit(event: string, data?: any): void;
   dispatchBatch(commands: BatchCommand[], options?: BatchOptions): Promise<BatchResult>;
   register<A extends keyof M & string>(action: A, handler: (cmd: Command<A, TargetOf<M, A>, PayloadOf<M, A>>) => Promise<ResultOf<M, A>>, options?: RegisterOptions): () => void;
+  /**
+   * A plugin written for EITHER bus installs here. Two overloads rather than
+   * `AsyncPlugin | Plugin`: a union parameter makes an inline arrow's `next`
+   * ambiguous and produced 18 more errors than it fixed, where overloads let
+   * an inline arrow resolve against the first signature and a `Plugin` value
+   * against the second.
+   *
+   * The sync shape is genuinely installable here - every built-in plugin is
+   * declared `Plugin` and is designed to run on both - because `next()` may
+   * hand back a promise and they all settle it. What the type cannot say is
+   * "and it handles that": `Plugin`'s `next` returns `CommandResult`, which
+   * is a lie on this bus, and no signature fixes it. Collapsing the two types,
+   * overloading `Plugin` itself and intersecting them were each measured and
+   * each made things worse, because all three force an implementation to
+   * satisfy both signatures at once. The invariant that actually matters -
+   * never read `.ok` off a promise - is enforced by
+   * `tests/settled-sweep.test.ts` instead, over every module.
+   */
   use(plugin: AsyncPlugin, options?: PluginOptions): () => void;
+  use(plugin: Plugin, options?: PluginOptions): () => void;
   /** Subscribe before dispatch. Throw or reject to cancel - dispatch returns `{ ok: false }`. */
   onBefore(hook: AsyncBeforeHook): () => void;
   onAfter(hook: AsyncHook): () => void;
@@ -1836,7 +1912,7 @@ to avoid `as any` casts when working with either bus variant.
 
 ### Chamber
 
-**Interface** - [src/utilities.ts:22](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/utilities.ts#L22)
+**Interface** - [src/utilities.ts:23](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/utilities.ts#L23)
 
 ```ts
 export interface Chamber {
@@ -1916,7 +1992,7 @@ export interface CommandBus<M extends CommandMap = CommandMap> extends BaseBus {
 
 ### CommandPool
 
-**Interface** - [src/command-bus.ts:1188](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L1188)
+**Interface** - [src/command-bus.ts:1202](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L1202)
 
 ```ts
 export interface CommandPool {
@@ -1952,7 +2028,7 @@ pool.reset(); // Reset cursor and clear all slots
 
 ### GlobalCommands
 
-**Interface** - [src/chamber.ts:627](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L627)
+**Interface** - [src/chamber.ts:621](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L621)
 
 ```ts
 export interface GlobalCommands {}
@@ -1997,7 +2073,7 @@ data-only pop if no inverse handler exists.
 
 ### Reaction
 
-**Interface** - [src/utilities.ts:211](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/utilities.ts#L211)
+**Interface** - [src/utilities.ts:210](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/utilities.ts#L210)
 
 ```ts
 export interface Reaction {
@@ -2008,7 +2084,7 @@ export interface Reaction {
 
 ### RecordedDispatch
 
-**Interface** - [src/testing.ts:37](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/testing.ts#L37)
+**Interface** - [src/testing.ts:38](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/testing.ts#L38)
 
 ```ts
 export interface RecordedDispatch {
@@ -2019,7 +2095,7 @@ export interface RecordedDispatch {
 
 ### TestBus
 
-**Interface** - [src/testing.ts:42](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/testing.ts#L42)
+**Interface** - [src/testing.ts:43](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/testing.ts#L43)
 
 ```ts
 export interface TestBus extends CommandBus<any> {
@@ -2062,7 +2138,7 @@ export interface TestBus extends CommandBus<any> {
 
 ### Workflow
 
-**Interface** - [src/utilities.ts:97](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/utilities.ts#L97)
+**Interface** - [src/utilities.ts:98](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/utilities.ts#L98)
 
 ```ts
 export interface Workflow {
@@ -2077,7 +2153,7 @@ export interface Workflow {
 
 ### ActionSchema
 
-**Type alias** - [src/schema.ts:22](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L22)
+**Type alias** - [src/schema.ts:23](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L23)
 
 ```ts
 export type ActionSchema = {
@@ -2105,7 +2181,7 @@ export type ActionSchema = {
 
 ### AnthropicTool
 
-**Type alias** - [src/schema.ts:114](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L114)
+**Type alias** - [src/schema.ts:115](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L115)
 
 ```ts
 export type AnthropicTool = {
@@ -2158,7 +2234,7 @@ export type AsyncPlugin = ((cmd: Command, next: () => CommandResult | Promise<Co
 
 ### AsyncSchemaCommandBus
 
-**Type alias** - [src/schema.ts:463](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L463)
+**Type alias** - [src/schema.ts:474](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L474)
 
 ```ts
 export type AsyncSchemaCommandBus<M extends CommandMap = CommandMap> = AsyncCommandBus<M> & {
@@ -2350,7 +2426,7 @@ if (result.error instanceof BusError) {
 
 ### BusInspection
 
-**Type alias** - [src/command-bus.ts:2504](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L2504)
+**Type alias** - [src/command-bus.ts:2526](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/command-bus.ts#L2526)
 
 ```ts
 export type BusInspection = {
@@ -2393,7 +2469,7 @@ console.log(info.sealed);          // true
 
 ### BusSchema
 
-**Type alias** - [src/schema.ts:44](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L44)
+**Type alias** - [src/schema.ts:45](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L45)
 
 ```ts
 export type BusSchema = Record<string, ActionSchema>;
@@ -2426,7 +2502,7 @@ export type CacheOptions = {
 
 ### ChamberHandlers
 
-**Type alias** - [src/utilities.ts:16](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/utilities.ts#L16)
+**Type alias** - [src/utilities.ts:17](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/utilities.ts#L17)
 
 ```ts
 export type ChamberHandlers = Record<string, Handler>;
@@ -2434,7 +2510,7 @@ export type ChamberHandlers = Record<string, Handler>;
 
 ### ChamberOptions
 
-**Type alias** - [src/utilities.ts:17](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/utilities.ts#L17)
+**Type alias** - [src/utilities.ts:18](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/utilities.ts#L18)
 
 ```ts
 export type ChamberOptions = {
@@ -2445,7 +2521,7 @@ export type ChamberOptions = {
 
 ### CircuitBreakerOptions
 
-**Type alias** - [src/plugins-extra.ts:220](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-extra.ts#L220)
+**Type alias** - [src/plugins-extra.ts:217](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-extra.ts#L217)
 
 ```ts
 export type CircuitBreakerOptions = {
@@ -2650,7 +2726,7 @@ success arm because void commands legitimately produce no value.
 
 ### CommandsOf
 
-**Type alias** - [src/schema.ts:69](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L69)
+**Type alias** - [src/schema.ts:70](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L70)
 
 ```ts
 export type CommandsOf<S extends BusSchema> = InferMap<S>;
@@ -2690,7 +2766,7 @@ Dead letter mode - what to do when a command has no registered handler.
 
 ### DehydratedCommand
 
-**Type alias** - [src/ssr.ts:91](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L91)
+**Type alias** - [src/ssr.ts:92](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L92)
 
 ```ts
 export type DehydratedCommand = {
@@ -2779,7 +2855,7 @@ export type ErrorClassification = {
 
 ### ErrorCodeEntry
 
-**Type alias** - [src/schema.ts:545](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L545)
+**Type alias** - [src/schema.ts:556](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L556)
 
 ```ts
 export type ErrorCodeEntry = {
@@ -2805,7 +2881,7 @@ Useful for generating documentation, i18n lookups, and LLM error handling.
 
 ### FieldMap
 
-**Type alias** - [src/schema.ts:20](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L20)
+**Type alias** - [src/schema.ts:21](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L21)
 
 ```ts
 export type FieldMap  = Record<string, FieldType>;
@@ -2813,7 +2889,7 @@ export type FieldMap  = Record<string, FieldType>;
 
 ### FieldType
 
-**Type alias** - [src/schema.ts:19](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L19)
+**Type alias** - [src/schema.ts:20](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L20)
 
 ```ts
 export type FieldType = 'string' | 'number' | 'boolean' | 'array' | 'object' | 'any';
@@ -3226,7 +3302,7 @@ export type HttpResponse<T = unknown> = {
 
 ### IdempotentOptions
 
-**Type alias** - [src/plugins-extra.ts:589](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-extra.ts#L589)
+**Type alias** - [src/plugins-extra.ts:586](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-extra.ts#L586)
 
 ```ts
 export type IdempotentOptions = {
@@ -3259,7 +3335,7 @@ export type IdempotentOptions = {
 
 ### InferMap
 
-**Type alias** - [src/schema.ts:60](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L60)
+**Type alias** - [src/schema.ts:61](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L61)
 
 ```ts
 export type InferMap<S extends BusSchema> = {
@@ -3294,7 +3370,7 @@ Listener callback for on() subscriptions (wildcard-capable)
 
 ### LlmAdapter
 
-**Type alias** - [src/schema.ts:360](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L360)
+**Type alias** - [src/schema.ts:371](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L371)
 
 ```ts
 export type LlmAdapter = (
@@ -3317,7 +3393,7 @@ const adapter: LlmAdapter = async (tools, text) => {
 
 ### MetricsEntry
 
-**Type alias** - [src/plugins-extra.ts:378](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-extra.ts#L378)
+**Type alias** - [src/plugins-extra.ts:375](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-extra.ts#L375)
 
 ```ts
 export type MetricsEntry = {
@@ -3330,7 +3406,7 @@ export type MetricsEntry = {
 
 ### MetricsOptions
 
-**Type alias** - [src/plugins-extra.ts:385](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-extra.ts#L385)
+**Type alias** - [src/plugins-extra.ts:382](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-extra.ts#L382)
 
 ```ts
 export type MetricsOptions = {
@@ -3361,7 +3437,7 @@ Enforces a regex pattern on action names at register and dispatch time.
 
 ### OpenAITool
 
-**Type alias** - [src/schema.ts:126](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L126)
+**Type alias** - [src/schema.ts:127](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L127)
 
 ```ts
 export type OpenAITool = {
@@ -3382,7 +3458,7 @@ export type OpenAITool = {
 
 ### OptimisticUndoOptions
 
-**Type alias** - [src/plugins-core.ts:409](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-core.ts#L409)
+**Type alias** - [src/plugins-core.ts:403](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-core.ts#L403)
 
 ```ts
 export type OptimisticUndoOptions = {
@@ -3494,7 +3570,7 @@ Options for plugin registration. Higher priority runs first (outermost). Default
 
 ### RateLimitOptions
 
-**Type alias** - [src/plugins-extra.ts:322](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-extra.ts#L322)
+**Type alias** - [src/plugins-extra.ts:319](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-extra.ts#L319)
 
 ```ts
 export type RateLimitOptions = {
@@ -3509,7 +3585,7 @@ export type RateLimitOptions = {
 
 ### ReactionOptions
 
-**Type alias** - [src/utilities.ts:179](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/utilities.ts#L179)
+**Type alias** - [src/utilities.ts:178](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/utilities.ts#L178)
 
 ```ts
 export type ReactionOptions = {
@@ -3562,7 +3638,7 @@ Per-command registration options
 
 ### RehydrateOptions
 
-**Type alias** - [src/ssr.ts:135](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L135)
+**Type alias** - [src/ssr.ts:136](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L136)
 
 ```ts
 export type RehydrateOptions = {
@@ -3674,7 +3750,7 @@ export type SafeResult<T = unknown> = {
 
 ### SchemaCommandBus
 
-**Type alias** - [src/schema.ts:455](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L455)
+**Type alias** - [src/schema.ts:466](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L466)
 
 ```ts
 export type SchemaCommandBus<M extends CommandMap = CommandMap> = CommandBus<M> & {
@@ -3688,7 +3764,7 @@ export type SchemaCommandBus<M extends CommandMap = CommandMap> = CommandBus<M> 
 
 ### SchemaCommandBusOptions
 
-**Type alias** - [src/schema.ts:447](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L447)
+**Type alias** - [src/schema.ts:458](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L458)
 
 ```ts
 export type SchemaCommandBusOptions = CommandBusOptions & {
@@ -3702,7 +3778,7 @@ export type SchemaCommandBusOptions = CommandBusOptions & {
 
 ### SerializeOptions
 
-**Type alias** - [src/plugins-extra.ts:481](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-extra.ts#L481)
+**Type alias** - [src/plugins-extra.ts:478](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-extra.ts#L478)
 
 ```ts
 export type SerializeOptions = {
@@ -3733,7 +3809,7 @@ export type SerializeOptions = {
 
 ### SharedCommandMap
 
-**Type alias** - [src/chamber.ts:635](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L635)
+**Type alias** - [src/chamber.ts:629](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L629)
 
 ```ts
 export type SharedCommandMap = [keyof GlobalCommands] extends [never]
@@ -3785,7 +3861,7 @@ export type SseBridgeOptions = {
 
 ### SSRPlugin
 
-**Type alias** - [src/ssr.ts:113](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L113)
+**Type alias** - [src/ssr.ts:114](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L114)
 
 ```ts
 export type SSRPlugin = {
@@ -3813,7 +3889,7 @@ export type SSRPlugin = {
 
 ### SSRPluginOptions
 
-**Type alias** - [src/ssr.ts:97](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L97)
+**Type alias** - [src/ssr.ts:98](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L98)
 
 ```ts
 export type SSRPluginOptions = {
@@ -3835,7 +3911,7 @@ export type SSRPluginOptions = {
 
 ### SupersedeOptions
 
-**Type alias** - [src/plugins-extra.ts:722](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-extra.ts#L722)
+**Type alias** - [src/plugins-extra.ts:719](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-extra.ts#L719)
 
 ```ts
 export type SupersedeOptions = {
@@ -3855,28 +3931,34 @@ export type SupersedeOptions = {
 
 ### SyncOptions
 
-**Type alias** - [src/plugins-io.ts:322](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-io.ts#L322)
+**Type alias** - [src/plugins-io.ts:332](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-io.ts#L332)
 
 ```ts
 export type SyncOptions = {
   /**
-   * BroadcastChannel name. All tabs using the same name receive each other's commands.
+   * BroadcastChannel name. All tabs using the same name receive each other's facts.
    * @example 'vapor-chamber:app'
    */
   channel: string;
-  /** Which actions to broadcast to other tabs. Default: all successful dispatches. */
-  filter?: (cmd: Command) => boolean;
+  /** The event channel to bridge - `createFastLane()`, or anything of that shape. */
+  lane: SyncLane;
   /**
-   * Called when a command arrives from another tab, before re-dispatching it.
-   * Return false to suppress re-dispatch.
+   * Which events cross to the other tabs. Named rather than inferred: the fast
+   * lane has no wildcard subscription by design, and naming them is the point
+   * - the wire contract is declared, not guessed at from an action prefix.
    */
-  onReceive?: (cmd: Command) => boolean | void;
+  events: string[];
+  /**
+   * Called when a fact arrives from another tab, before it is re-emitted
+   * locally. Return false to drop it.
+   */
+  onReceive?: (event: string, data: unknown) => boolean | void;
 };
 ```
 
 ### SynthesizeOptions
 
-**Type alias** - [src/schema.ts:366](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L366)
+**Type alias** - [src/schema.ts:377](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L377)
 
 ```ts
 export type SynthesizeOptions = {
@@ -3899,7 +3981,7 @@ Extract the target type for action A from a CommandMap. Used in typed bus interf
 
 ### ToolCallInput
 
-**Type alias** - [src/schema.ts:432](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L432)
+**Type alias** - [src/schema.ts:443](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L443)
 
 ```ts
 export type ToolCallInput = {
@@ -4000,7 +4082,7 @@ export type TransitionPhase = 'idle' | 'entering' | 'leaving';
 
 ### UseCommandStateOptions
 
-**Type alias** - [src/chamber.ts:1210](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1210)
+**Type alias** - [src/chamber.ts:1204](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1204)
 
 ```ts
 export type UseCommandStateOptions = {
@@ -4026,7 +4108,7 @@ export type UseCommandStateOptions = {
 
 ### UseSharedCommandStateOptions
 
-**Type alias** - [src/chamber.ts:985](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L985)
+**Type alias** - [src/chamber.ts:979](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L979)
 
 ```ts
 export type UseSharedCommandStateOptions = {
@@ -4046,7 +4128,7 @@ export type UseSharedCommandStateOptions = {
 
 ### WorkflowResult
 
-**Type alias** - [src/utilities.ts:85](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/utilities.ts#L85)
+**Type alias** - [src/utilities.ts:86](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/utilities.ts#L86)
 
 ```ts
 export type WorkflowResult = {
@@ -4064,7 +4146,7 @@ export type WorkflowResult = {
 
 ### WorkflowStep
 
-**Type alias** - [src/utilities.ts:74](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/utilities.ts#L74)
+**Type alias** - [src/utilities.ts:75](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/utilities.ts#L75)
 
 ```ts
 export type WorkflowStep = {
@@ -4119,7 +4201,7 @@ export type WsBridgeOptions = {
 
 ### ERROR_CODE_REGISTRY
 
-**Variable** - [src/schema.ts:582](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L582)
+**Variable** - [src/schema.ts:593](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/schema.ts#L593)
 
 ```ts
 ERROR_CODE_REGISTRY: readonly ErrorCodeEntry[]

@@ -4,7 +4,7 @@
  * Vapor Chamber is not a Laravel tool.
  * This example uses a Next.js frontend with API routes as the backend.
  *
- * app/providers.tsx — configure the bus once at the app root
+ * app/providers.tsx - configure the bus once at the app root
  */
 
 'use client'
@@ -12,7 +12,7 @@ import { createAsyncCommandBus, setCommandBus, retry } from 'vapor-chamber'
 import { createHttpBridge } from 'vapor-chamber/transports'
 import { useEffect } from 'react'
 
-// Singleton bus — shared across all 'use client' components.
+// Singleton bus - shared across all 'use client' components.
 // Log via onAfter: it observes settled results on the async bus (the sync
 // logger() plugin would see an unresolved Promise here).
 const bus = createAsyncCommandBus()
@@ -31,7 +31,7 @@ export function VaporChamberProvider({ children }: { children: React.ReactNode }
 
 /*
  * app/components/CheckoutButton.tsx
- * ——————————————————————————————————
+ * ----------------------------------
  * 'use client'
  * import { useCommand } from 'vapor-chamber'
  * import type { CartItem } from '../types'
@@ -45,7 +45,7 @@ export function VaporChamberProvider({ children }: { children: React.ReactNode }
  *         onClick={() => dispatch('orderCreate', { items })}
  *         disabled={loading.value}
  *       >
- *         {loading.value ? 'Processing…' : 'Complete purchase'}
+ *         {loading.value ? 'Processing...' : 'Complete purchase'}
  *       </button>
  *       {lastError.value && (
  *         <p className="error">{lastError.value.message}</p>
@@ -56,8 +56,8 @@ export function VaporChamberProvider({ children }: { children: React.ReactNode }
  */
 
 /*
- * app/api/vc/route.ts — Next.js API Route handler
- * ——————————————————————————————————————————————————
+ * app/api/vc/route.ts - Next.js API Route handler
+ * --------------------------------------------------
  * export async function POST(req: Request) {
  *   const { command, target, payload } = await req.json()
  *
@@ -71,7 +71,7 @@ export function VaporChamberProvider({ children }: { children: React.ReactNode }
  */
 
 /*
- * Protocol — what the backend receives:
+ * Protocol - what the backend receives:
  * POST /api/vc
  * { "command": "orderCreate", "target": { "items": [...] } }
  *

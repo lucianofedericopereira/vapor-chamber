@@ -62,7 +62,7 @@ describe('tool mapping with a partial action', () => {
   it('gives an empty properties object for an action with no payload', () => {
     const [tool] = toAnthropicTools({ read: { target: { id: 'number' } } } as unknown as BusSchema);
     expect(tool!.input_schema.properties.payload).toBeUndefined();
-    expect(tool!.input_schema.properties.target.properties.id).toEqual({ type: 'number' });
+    expect(tool!.input_schema.properties.target!.properties.id).toEqual({ type: 'number' });
   });
 });
 

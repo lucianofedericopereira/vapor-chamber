@@ -34,7 +34,8 @@ describe('branch mop-up - retry plugin', () => {
     bus.use(retry({ maxAttempts: 1 }), { priority: 10 });
     // Inner plugin returns a failed result WITHOUT an `error`, so retry hits
     // `lastResult.error ?? new Error('Unknown error')` (plugins-io.ts:67).
-    bus.use((_cmd, _next) => ({ ok: false }), { priority: 1 });
+    // eslint-disable-next-line -- a result with no `error` is the point; see below
+    bus.use(((_cmd: unknown, _next: unknown) => ({ ok: false })) as never, { priority: 1 });
     bus.register('x', async () => 'unused');
 
     const result = await bus.dispatch('x', {});

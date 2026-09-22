@@ -1245,7 +1245,7 @@ describe('syncUse async plugin warning', () => {
   it('warns when async function installed on sync bus', () => {
     using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createCommandBus();
-    bus.use(async (_cmd, next) => next());
+    bus.use((async (_cmd: unknown, next: () => unknown) => next()) as never); // async plugin on a SYNC bus - the warning under test
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('Async plugin'));
   });
 });
@@ -1912,12 +1912,24 @@ describe('dispose() - full teardown', () => {
     expect(bus.registeredActions()).toEqual([]);
   });
 
-  it('dispatch returns dead-letter after dispose', () => {
-    const bus = createCommandBus({ deadLetter: 'error' });
+  it('dispatch dead-letters after dispose, through the configured mode', () => {
+    // The option is `onMissing`, whose type is DeadLetterMode. This test used
+    // to pass `{ deadLetter: 'error' }` - a key that does not exist on
+    // CommandBusOptions - so the bus ran on the DEFAULT mode and the assertion
+    // below held for a reason the test was not naming. Nothing caught the
+    // unknown key because `tests/` is not typechecked.
+    const bus = createCommandBus({ onMissing: 'error' });
     bus.register('a', () => 1);
     bus.dispose();
-    const result = bus.dispatch('a', {});
-    expect(result).toFailWith('VC_CORE_NO_HANDLER');
+    expect(bus.dispatch('a', {})).toFailWith('VC_CORE_NO_HANDLER');
+
+    // The mode is actually being read: a bus disposed under 'ignore' answers
+    // ok instead. Without this arm the assertion above cannot tell 'error'
+    // from the default, which is what let the typo sit here.
+    const ignoring = createCommandBus({ onMissing: 'ignore' });
+    ignoring.register('a', () => 1);
+    ignoring.dispose();
+    expect(ignoring.dispatch('a', {}).ok).toBe(true);
   });
 
   it('dispose on async bus clears everything', async ({ asyncBus: bus }) => {

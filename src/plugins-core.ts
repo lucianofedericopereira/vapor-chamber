@@ -5,7 +5,7 @@
  */
 
 import { DEV } from './dev';
-import { onSettled } from './settled';
+import { onSettled, isThenable } from './settled';
 import { countOption } from './bounds';
 import { GLYPH_COMMAND } from './glyphs';
 import type { Command, CommandResult, Plugin, CommandBus } from './command-bus';
@@ -379,25 +379,19 @@ export function optimistic(
     if (!config) return next();
 
     const rollback = config.apply(cmd);
-    const result = next();
 
-    // Handle async result (when used on an async bus)
-    if (result && typeof result.then === 'function') {
-      return result.then((r: CommandResult) => {
-        if (!r.ok && rollback) {
-          try { rollback(); }
-          catch (e) { console.error(`[vapor-chamber] Rollback error for "${cmd.action}":`, e); }
-        }
-        return r;
-      });
-    }
-
-    if (!result.ok && rollback) {
-      try { rollback(); }
-      catch (e) { console.error(`[vapor-chamber] Rollback error for "${cmd.action}":`, e); }
-    }
-
-    return result;
+    // Through `onSettled`, which is what the two branches here used to spell
+    // out: settle the result, roll back if it failed, hand the settled result
+    // on. The helper preserves sync-ness, so the sync bus keeps the exact
+    // behaviour the second branch gave it. The duplicated rollback body is
+    // gone with it - it was written twice and had to stay in step by hand.
+    return onSettled(next(), (result) => {
+      if (!result.ok && rollback) {
+        try { rollback(); }
+        catch (e) { console.error(`[vapor-chamber] Rollback error for "${cmd.action}":`, e); }
+      }
+      return result;
+    });
   };
   return plugin as Plugin;
 }
@@ -467,35 +461,34 @@ export function optimisticUndo(
 
     const result = next();
 
-    // Async path: return predicted result immediately, rollback on failure in background
-    if (result && typeof result.then === 'function') {
+    // The rollback was written out twice - once inside the `.then` below and
+    // once for the sync path - and the two copies had to stay in step by hand.
+    // This plugin cannot use `onSettled` (see the return values below), but
+    // nothing about that required the BODY to be duplicated as well.
+    const rollbackIfFailed = (r: CommandResult): void => {
+      if (r.ok) return;
+      try { undoHandler(cmd); }
+      catch (undoErr) {
+        if (onRollbackError) onRollbackError(cmd, undoErr as Error, r.error!);
+        else console.error(`[vapor-chamber] Undo rollback error for "${cmd.action}":`, undoErr);
+      }
+      if (onRollback) onRollback(cmd, r.error!);
+    };
+
+    // THE TWO PATHS RETURN DIFFERENT THINGS, and that is the feature rather
+    // than an oversight: on an async bus the point is to answer NOW with the
+    // prediction and reconcile in the background, so the settled result is
+    // deliberately not handed on. That is why `onSettled` - whose whole
+    // contract is to pass the settled result through - cannot serve here, and
+    // why a sync bus, having nothing to wait for, returns the real result
+    // instead (documented above).
+    if (isThenable(result)) {
       const optimisticValue = predict ? predict(cmd) : undefined;
-
-      // Fire-and-forget: monitor the real result and rollback if needed
-      (result as Promise<CommandResult>).then((r: CommandResult) => {
-        if (!r.ok) {
-          try { undoHandler(cmd); }
-          catch (undoErr) {
-            if (onRollbackError) onRollbackError(cmd, undoErr as Error, r.error!);
-            else console.error(`[vapor-chamber] Undo rollback error for "${cmd.action}":`, undoErr);
-          }
-          if (onRollback) onRollback(cmd, r.error!);
-        }
-      });
-
+      (result as Promise<CommandResult>).then(rollbackIfFailed);
       return _okResult(optimisticValue);
     }
 
-    // Sync path: rollback immediately if handler failed
-    if (!result.ok) {
-      try { undoHandler(cmd); }
-      catch (undoErr) {
-        if (onRollbackError) onRollbackError(cmd, undoErr as Error, result.error!);
-        else console.error(`[vapor-chamber] Undo rollback error for "${cmd.action}":`, undoErr);
-      }
-      if (onRollback) onRollback(cmd, result.error!);
-    }
-
+    rollbackIfFailed(result);
     return result;
   };
 

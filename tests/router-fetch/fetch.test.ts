@@ -202,7 +202,7 @@ describe('fetchLoaders - stale-while-revalidate', () => {
     // observable - with an instantly-resolving mock the refresh lands before
     // the push() await returns and there is nothing to assert about.
     let calls = 0;
-    let releaseRefresh: (() => void) | null = null;
+    let releaseRefresh: (() => void) | null = null as (() => void) | null;
     (globalThis.fetch as any).mockImplementation(async () => {
       calls++;
       if (calls === 1) return jsonResponse({ version: 1 });
@@ -239,7 +239,7 @@ describe('fetchLoaders - stale-while-revalidate', () => {
   });
 
   it('drops the patch when the user navigated away meanwhile', async () => {
-    let resolveSecond: ((value: unknown) => void) | null = null;
+    let resolveSecond: ((value: unknown) => void) | null = null as ((value: unknown) => void) | null;
     let calls = 0;
     (globalThis.fetch as any).mockImplementation(async () => {
       calls++;

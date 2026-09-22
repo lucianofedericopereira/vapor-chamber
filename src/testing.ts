@@ -32,7 +32,8 @@ import type {
   PluginOptions, BatchCommand, BatchResult, CommandBus,
   Listener, RegisterOptions, BusInspection,
 } from './command-bus';
-import { buildRunner, matchesPattern, abortedResult, BusError, _beforeCancel, _errResult, _okResult, _stampMeta, _UNSEAL } from './command-bus';
+import { buildRunner, matchesPattern, abortedResult, BusError, _beforeCancel, _errResult, _okResult, _stampMeta, _UNSEAL, _tryCatchHandler } from './command-bus';
+import { isThenable } from './settled';
 
 export interface RecordedDispatch {
   cmd: Command;
@@ -143,7 +144,7 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
 
   function dispatch(action: string, target: any, payload?: any): CommandResult {
     if (dispatchDepth >= MAX_DISPATCH_DEPTH) {
-      return { ok: false, error: new BusError('VC_CORE_MAX_DEPTH', `Maximum dispatch depth (${MAX_DISPATCH_DEPTH}) exceeded for "${action}".`, { emitter: 'test', action }) };
+      return _errResult(new BusError('VC_CORE_MAX_DEPTH', `Maximum dispatch depth (${MAX_DISPATCH_DEPTH}) exceeded for "${action}".`, { emitter: 'test', action }));
     }
     dispatchDepth++;
     try { return _dispatchInner(action, target, payload); }
@@ -165,7 +166,7 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
       try { bh[i](cmd); }
       catch (e) {
         // The same VC_CORE_BEFORE_CANCEL result a real bus builds (v1.20.0).
-        const result: CommandResult = { ok: false, error: _beforeCancel(e, action) };
+        const result: CommandResult = _errResult(_beforeCancel(e, action));
         recorded.push({ cmd, result });
         runAfterHooksAndListeners(cmd, result);
         return result;
@@ -174,16 +175,13 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
 
     const handler = handlers.get(action);
 
-    const execute = (): CommandResult => {
-      if (handler && opts.passthroughHandlers) {
-        try {
-          return { ok: true, value: handler(cmd) };
-        } catch (e) {
-          return { ok: false, error: e as Error };
-        }
-      }
-      return { ok: true, value: undefined };
-    };
+    // `_tryCatchHandler` is the bus's OWN wrapper, not a copy of it. This
+    // closure used to spell the same try/catch out, which is how the harness
+    // ends up answering differently from the thing it doubles - the shape of
+    // a result here already drifted once for exactly that reason, and before
+    // that the missing `meta` and the listener fan-out cursor did too.
+    const execute = (): CommandResult =>
+      handler && opts.passthroughHandlers ? _tryCatchHandler(handler, cmd) : _okResult(undefined);
 
     const result = runner(cmd, execute);
     recorded.push({ cmd, result });
@@ -195,13 +193,8 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
     const cmd: Command = { action, target, payload, meta: _stampMeta(payload) };
     // Skip beforeHooks - reads don't trigger mutation gates
     const handler = handlers.get(action);
-    const execute = (): CommandResult => {
-      if (handler && opts.passthroughHandlers) {
-        try { return { ok: true, value: handler(cmd) }; }
-        catch (e) { return { ok: false, error: e as Error }; }
-      }
-      return { ok: true, value: undefined };
-    };
+    const execute = (): CommandResult =>
+      handler && opts.passthroughHandlers ? _tryCatchHandler(handler, cmd) : _okResult(undefined);
     const result = runner(cmd, execute);
     recorded.push({ cmd, result });
     runAfterHooksAndListeners(cmd, result);
@@ -210,7 +203,7 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
 
   function emit(event: string, data?: any): void {
     const cmd: Command = { action: event, target: data };
-    const result: CommandResult = { ok: true, value: undefined };
+    const result: CommandResult = _okResult(undefined);
     // Same fan-out, same cursor rule - this carried its own copy of the
     // length-based bug and had to be fixed twice before it was one function.
     fanOut(cmd, result, event);
@@ -308,7 +301,11 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
     recorded.push({ cmd, result });
     runAfterHooksAndListeners(cmd, result);
     const v = result.value;
-    if (result.ok && v && typeof v.then === 'function') return v.then(_okResult, _errResult);
+    // `isThenable` narrows to PromiseLike, which is the honest type for a
+    // handler's return value - a user handler may return any thenable, not
+    // only a real Promise. `respond()` is declared to return a Promise, so the
+    // thenable is adopted through one here rather than handed straight back.
+    if (result.ok && isThenable(v)) return Promise.resolve(v).then(_okResult, _errResult);
     return Promise.resolve(result);
   }
 

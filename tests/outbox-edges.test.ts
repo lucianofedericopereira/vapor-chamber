@@ -26,6 +26,7 @@ function memoryStorage(seed: OutboxRecord[] = []): OutboxStorage {
   return {
     load: async () => [...rows],
     save: async (records) => { rows = [...records]; },
+    clear: async () => { rows = []; },
   };
 }
 
@@ -41,7 +42,7 @@ describe('outbox - flush without a bus', () => {
 
 describe('outbox - flush re-entrancy', () => {
   it('a second flush joins the in-progress one rather than starting a race', async () => {
-    let release: (() => void) | null = null;
+    let release: (() => void) | null = null as (() => void) | null;
     const gate = new Promise<void>((r) => { release = r; });
 
     const bus = createAsyncCommandBus();

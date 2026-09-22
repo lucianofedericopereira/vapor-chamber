@@ -22,4 +22,17 @@
 import { createVaporChamberApp } from 'vapor-chamber/vapor';
 import App from './App.vue';
 
+// NO app-wide directive registration any more. `v-vc-command` is imported as a
+// `vVc` binding in CartPanel.vue, which is the idiomatic form.
+//
+// It was registered here from rc9/12 until v1.22.0, and not as a style choice:
+// vue-tsc type-checked an imported directive's ARGUMENT as a raw string - the
+// shape #15490 replaced with a getter - so the imported form failed
+// `vue-tsc --noEmit` against a correct .d.ts and a working runtime, and
+// app-wide registration passed only because it left vue-tsc no declaration to
+// check. That was opting out of checking rather than satisfying it.
+//
+// The v1.22.0 reshape moved the selector into the NAME, so `v-vc-command` has
+// no argument for vue-tsc to mistype, and the imported form type-checks. This
+// example's own `vue-tsc --noEmit` build step is the proof.
 createVaporChamberApp(App).mount('#app');

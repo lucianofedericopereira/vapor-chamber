@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# vapor-chamber — scaffold a runnable Laravel demo around the example files.
+# vapor-chamber - scaffold a runnable Laravel demo around the example files.
 #
 # Usage:  ./setup.sh [target-dir]      (default: ./demo-app)
 # Needs:  php >= 8.2, composer. The vapor-chamber IIFE is taken from the
@@ -15,7 +15,7 @@ if [ ! -d "$TARGET" ]; then
   composer create-project laravel/laravel "$TARGET" --prefer-dist --no-interaction
 fi
 
-# 2. Library IIFEs — build the repo dist/ on demand, then copy into public/.
+# 2. Library IIFEs - build the repo dist/ on demand, then copy into public/.
 #    Two variants, one per page: `core` for /cart (no Vue) and `elements` for
 #    /widget (defineWidget + emitDOMEvent, which core deliberately omits).
 #    Only the LIBRARY is copied; Vue and Alpine come from a CDN on the page that
@@ -29,7 +29,7 @@ cp "$REPO/dist/vapor-chamber-core.iife.min.js"     "$TARGET/public/js/"
 cp "$REPO/dist/vapor-chamber-elements.iife.min.js" "$TARGET/public/js/"
 
 # 3. Drop in the demo files. The controller is the audited drop-in companion
-#    from ../laravel-backend — one source, no duplication.
+#    from ../laravel-backend - one source, no duplication.
 mkdir -p "$TARGET/app/Actions/Cart" "$TARGET/app/Http/Controllers"
 cp "$HERE/app/Actions/Cart/"*.php           "$TARGET/app/Actions/Cart/"
 cp "$HERE/../laravel-backend/VaporChamberController.php" "$TARGET/app/Http/Controllers/"
@@ -37,7 +37,7 @@ cp "$HERE/config/vapor-chamber.php"         "$TARGET/config/"
 cp "$HERE/resources/views/cart.blade.php"   "$TARGET/resources/views/"
 cp "$HERE/resources/views/widget.blade.php" "$TARGET/resources/views/"
 
-# 4. Routes — REPLACE our block, don't just skip when present.
+# 4. Routes - REPLACE our block, don't just skip when present.
 #    The old guard was `grep -q VaporChamberController || append`, which is
 #    idempotent but not update-safe: a demo-app scaffolded before a route was
 #    added to this example kept the stale block forever, so `/widget` never

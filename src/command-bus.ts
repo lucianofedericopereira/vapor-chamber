@@ -555,7 +555,26 @@ export interface AsyncCommandBus<M extends CommandMap = CommandMap> extends Base
   emit(event: string, data?: any): void;
   dispatchBatch(commands: BatchCommand[], options?: BatchOptions): Promise<BatchResult>;
   register<A extends keyof M & string>(action: A, handler: (cmd: Command<A, TargetOf<M, A>, PayloadOf<M, A>>) => Promise<ResultOf<M, A>>, options?: RegisterOptions): () => void;
+  /**
+   * A plugin written for EITHER bus installs here. Two overloads rather than
+   * `AsyncPlugin | Plugin`: a union parameter makes an inline arrow's `next`
+   * ambiguous and produced 18 more errors than it fixed, where overloads let
+   * an inline arrow resolve against the first signature and a `Plugin` value
+   * against the second.
+   *
+   * The sync shape is genuinely installable here - every built-in plugin is
+   * declared `Plugin` and is designed to run on both - because `next()` may
+   * hand back a promise and they all settle it. What the type cannot say is
+   * "and it handles that": `Plugin`'s `next` returns `CommandResult`, which
+   * is a lie on this bus, and no signature fixes it. Collapsing the two types,
+   * overloading `Plugin` itself and intersecting them were each measured and
+   * each made things worse, because all three force an implementation to
+   * satisfy both signatures at once. The invariant that actually matters -
+   * never read `.ok` off a promise - is enforced by
+   * `tests/settled-sweep.test.ts` instead, over every module.
+   */
   use(plugin: AsyncPlugin, options?: PluginOptions): () => void;
+  use(plugin: Plugin, options?: PluginOptions): () => void;
   /** Subscribe before dispatch. Throw or reject to cancel - dispatch returns `{ ok: false }`. */
   onBefore(hook: AsyncBeforeHook): () => void;
   onAfter(hook: AsyncHook): () => void;
@@ -743,21 +762,16 @@ let _uidFn: () => string = () => _uidPrefix + '-' + (++_uidCounter).toString(36)
 // whenever the module loaded, which is arbitrarily stale. Reading first and
 // only then arming the reset means the first command of every turn carries an
 // EXACT timestamp, and only the 2nd..nth command of the same synchronous run
-// shares it. Since a `Date.now()` is millisecond-resolution and a typical burst
-// is sub-millisecond, those commands would overwhelmingly have received the
-// same number anyway.
+// shares it.
 //
-// What is genuinely lost: intra-burst duration in bursts long enough to cross a
-// millisecond (a thousand-command rehydrate reads as instantaneous), and
-// tracking of `vi.setSystemTime` for the 2nd..nth command in a turn. Ordering is
-// NOT lost - `meta.id` is a monotonic counter and remains unique and ordered.
-// Consumers who need exact per-command wall clock stamp it themselves - see the
-// note on `CommandMeta.ts`.
+// Lost beyond what `CommandMeta.ts` already records: tracking of
+// `vi.setSystemTime` for the 2nd..nth command in a turn.
 //
 // What `ts` is and is not - a wall clock, not an ordering key, not a duration
-// source - is on `CommandMeta.ts`. If an exact wall clock is ever genuinely
-// needed, the cheap door is a `clock?: () => number` bus option - one branch,
-// no build step, and addable later without breaking anyone.
+// source - and what the cache gives up, are on `CommandMeta.ts`, with the
+// measurement. If an exact wall clock is ever genuinely needed, the cheap door
+// is a `clock?: () => number` bus option - one branch, no build step, and
+// addable later without breaking anyone.
 
 // A boolean rather than a `0` sentinel. `_clockNow === 0` meaning "re-read me"
 // reads as safe - `Date.now()` cannot return 0, that is 1970 - but it is only
@@ -996,7 +1010,7 @@ export { stampMeta as _stampMeta };
  * polymorphic; tests/v8-shapes.test.ts pins the shared map. Underscored: not
  * public API, not in the barrel.
  */
-export { okResult as _okResult, errResult as _errResult };
+export { okResult as _okResult, errResult as _errResult, tryCatchHandler as _tryCatchHandler };
 
 function validateNaming(action: string, naming?: NamingConvention): void {
   if (!naming) return;
@@ -2041,9 +2055,15 @@ export function createCommandBus<M extends CommandMap = CommandMap>(options: Com
     seal:              ()              => { s.sealed = true; },
     isSealed:          ()              => s.sealed,
   };
-  // Symbol keys for tree-shakeable introspection - not on the public interface
+  // Symbol keys for tree-shakeable introspection - not on the public interface.
+  // _INSPECT carries the STATE, not `() => inspect(s)`. A closure here would
+  // hold a reference to inspect() from every bus ever constructed, so its body
+  // shipped to consumers that never import inspectBus - measured at 128 brotli
+  // on a minimal consumer, while two docblocks (this one and inspectBus's)
+  // promised the opposite. Handing over the state keeps inspect() reachable
+  // only from inspectBus, which is where the promise said it was all along.
   (bus as any)[_UNSEAL] = () => { s.sealed = false; };
-  (bus as any)[_INSPECT] = () => inspect(s);
+  (bus as any)[_INSPECT] = s;
   return bus;
 }
 
@@ -2440,7 +2460,7 @@ export function createAsyncCommandBus<M extends CommandMap = CommandMap>(options
     emit:              (e, d)        => asyncEmit(s, e, d),
     dispatchBatch:     (cmds, o)     => asyncDispatchBatch(s, cmds, o),
     register:          (a, h, o)     => register(s, a as string, h as AsyncHandler, o),
-    use:               (p, o)        => asyncUse(s, p, o),
+    use:               (p, o)        => asyncUse(s, p as AsyncPlugin, o),
     onBefore:          (h)           => addHook(s, s.beforeHooks, h, 'onBefore'),
     onAfter:           (h)           => addHook(s, s.afterHooks, h, 'onAfter'),
     on:                (pat, l, o)    => on(s, pat, l, o),
@@ -2456,9 +2476,11 @@ export function createAsyncCommandBus<M extends CommandMap = CommandMap>(options
     seal:              ()            => { s.sealed = true; },
     isSealed:          ()            => s.sealed,
   };
-  // Symbol keys for tree-shakeable introspection - not on the public interface
+  // Symbol keys for tree-shakeable introspection - not on the public interface.
+  // _INSPECT carries the STATE, not a closure over inspect(): see the note in
+  // createCommandBus for the 128 B a closure shipped to consumers of neither.
   (bus as any)[_UNSEAL] = () => { s.sealed = false; };
-  (bus as any)[_INSPECT] = () => inspect(s);
+  (bus as any)[_INSPECT] = s;
   return bus;
 }
 
@@ -2542,8 +2564,8 @@ export type BusInspection = {
  * if (missing.length) console.warn('Missing undo for:', missing);
  */
 export function inspectBus(bus: BaseBus): BusInspection {
-  const fn = (bus as any)[_INSPECT];
-  if (typeof fn === 'function') return fn();
+  const state = (bus as any)[_INSPECT];
+  if (state) return inspect(state);
   // Fallback for TestBus or unknown implementations
   return {
     actions: bus.registeredActions(),

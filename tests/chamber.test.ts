@@ -683,7 +683,7 @@ describe('useCommandQuery', () => {
 
     const result = query('getUser', { id: 42 });
 
-    expect(result.ok).toBe(true);
+    expect((result as { ok: boolean }).ok).toBe(true);
     expect(data.value).toEqual({ id: 42, name: 'Alice' });
     expect(loading.value).toBe(false);
     expect(lastError.value).toBeNull();
@@ -697,7 +697,7 @@ describe('useCommandQuery', () => {
 
     const result = query('getUser', { id: 99 });
 
-    expect(result.ok).toBe(false);
+    expect((result as { ok: boolean }).ok).toBe(false);
     expect(data.value).toBeNull();
     expect(lastError.value?.message).toBe('not found');
   });

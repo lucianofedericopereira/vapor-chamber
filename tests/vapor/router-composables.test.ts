@@ -73,7 +73,7 @@ async function mountWithRouter(router: ReturnType<typeof makeRouter>, setup: () 
   const Root = defineVaporComponent({
     setup() {
       setup();
-      return (template('<div>root</div>', true) as () => Node)();
+      return (template('<div>root</div>', 1) as () => Node)();
     },
   });
   const host = document.createElement('div');
@@ -177,7 +177,7 @@ describe('router composables inside a real Vapor component', () => {
 
     let pag!: { page: { value: number } };
     const { unmount } = await mountWithRouter(router, () => {
-      pag = usePagination({ total: () => 42, perPage: 10 }) as never;
+      pag = usePagination({ total: () => 42, perPage: () => 10 }) as never;
     });
 
     expect(pag.page.value).toBe(1);

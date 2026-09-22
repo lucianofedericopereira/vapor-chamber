@@ -33,7 +33,7 @@ with no store-specific code.
 | --- | --- | --- |
 | persistence | `persist` plugin | nothing |
 | undo / redo | `history` plugin | nothing |
-| cross-tab sync | `sync` plugin | nothing |
+| cross-tab sync | `sync` bridge | nothing |
 | optimistic rollback | `optimistic` plugin | nothing |
 | double-submit collapse | `idempotent` plugin | nothing |
 | ordered same-key writes | `serialize` plugin | nothing |

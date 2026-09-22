@@ -3,7 +3,7 @@
 Runnable demos and copy-paste snippets for vapor-chamber. Each full-project app
 has its own README; each single-file snippet is self-contained. The apps
 consume the library via `file:../..` and auto-build `dist/` on demand. Aligned with
-**Vue <!-- vc:vueAligned -->3.6.0-rc.8<!-- /vc:vueAligned -->**.
+**Vue <!-- vc:vueAligned -->3.6.0-rc.9<!-- /vc:vueAligned -->**.
 
 Two shared helpers sit here rather than in each example:
 
@@ -28,14 +28,14 @@ Two shared helpers sit here rather than in each example:
 | File | Feature |
 |------|---------|
 | [`feature-command-group.ts`](./feature-command-group.ts) | `useCommandGroup` - namespace isolation |
-| [`feature-cross-tab-sync.ts`](./feature-cross-tab-sync.ts) | `sync` plugin - cross-tab coordination (BroadcastChannel) |
+| [`feature-cross-tab-sync.ts`](./feature-cross-tab-sync.ts) | `sync` bridge - cross-tab coordination: a handler emits a fact, every other tab applies it (BroadcastChannel) |
 | [`feature-error-boundary.ts`](./feature-error-boundary.ts) | `useCommandError` - component-scoped error boundary |
 | [`feature-persistence.ts`](./feature-persistence.ts) | `persist` plugin - localStorage / sessionStorage / custom storage (incl. IndexedDB) |
 | [`feature-retry.ts`](./feature-retry.ts) | `retry` plugin - configurable backoff for failed dispatches |
 | [`feature-transitions.ts`](./feature-transitions.ts) | Transition-dispatched commands (the transitions bridge) |
 | [`feature-transports.ts`](./feature-transports.ts) | HTTP / WebSocket / SSE transport plugins |
 | [`feature-vite-hmr.ts`](./feature-vite-hmr.ts) | `vaporChamberHMR` - state-preserving Vite hot reload |
-| [`feature-directives.html`](./feature-directives.html) | `v-vc:command` / `v-vc-payload` / `v-vc-optimistic` - **runnable**, no build step (ESM + import map): `node examples/static-server.mjs` |
+| [`feature-directives.html`](./feature-directives.html) | `v-vc-command` / `v-vc-payload` / `v-vc-optimistic` - **runnable**, no build step (ESM + import map): `node examples/static-server.mjs` |
 
 ## Framework patterns
 

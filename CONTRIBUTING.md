@@ -43,7 +43,7 @@ src/
   form.ts              Reactive form state
   testing.ts           createTestBus + snapshot/time-travel
   devtools.ts          @vue/devtools-api integration
-  directives.ts        v-vc:command directive (vDOM plugin + vcCommandVapor)
+  directives.ts        v-vc-command directive (vDOM plugin + vcCommandVapor)
   transitions.ts       <Transition> hook -> bus dispatch bridge
   ssr.ts               SSR dehydrate/rehydrate
   vite-hmr.ts          Vite HMR plugin
@@ -106,11 +106,14 @@ All seven must pass, and the order is part of the gate:
   coverage on, so the `stamp-docs --check` inside `lint:check`, which follows a plain
   `test:run`, cannot see a stale count.
 
-`lint:check` runs more than biome. Four guards check what the source *says*
+`lint:check` runs more than biome. These guards check what the source *says*
 rather than what it does, which a test cannot:
-`check-env-guards` (no unguarded `process.env`), `check-line-citations` (no
-source-line numbers in test titles), `check-doc-claims` (no docblock attached to
-nothing, no documented default whose value is absent from the file, no release
+`check-env-guards` (no unguarded `process.env`), `check-console-shape` (a value
+with structure is a console ARGUMENT, never a substring of the message; it
+classifies by type rather than by a list of names, and `--self-test` injects the
+violations into real modules to prove it can still fail), `check-line-citations`
+(no source-line numbers in test titles), `check-doc-claims` (no docblock attached
+to nothing, no documented default whose value is absent from the file, no release
 status in a comment - that belongs in CHANGELOG.md), and `check-ascii` (plain
 ASCII, including invisible characters). `stamp-docs --check` fails on a stale
 generated number. CI runs the same set on Node 22 and 24, on Linux and macOS.

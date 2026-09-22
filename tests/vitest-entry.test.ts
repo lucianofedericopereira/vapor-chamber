@@ -20,7 +20,7 @@ import { chai, describe, expect, it } from 'vitest';
 import { getCommandBus } from '../src/chamber';
 import { BusError, createAsyncCommandBus, createCommandBus, inspectBus } from '../src/command-bus';
 import { createTestBus } from '../src/testing';
-import { _beginTest, _explainFailure, _setInstalledBus, tap, VcTestError } from '../src/vitest-pure';
+import { beginTest, _explainFailure, _setInstalledBus, tap, VcTestError } from '../src/vitest-pure';
 
 type Shop = {
   cartAdd: { target: { id: number }; payload: { qty: number }; result: number };
@@ -281,7 +281,7 @@ describe('tap(bus) over onAfter', () => {
 
   it('works on the async bus, recording the settled result', async () => {
     const bus = tap(createAsyncCommandBus<Shop>());
-    bus.register('cartAdd', async (cmd) => cmd.payload.qty + 1);
+    bus.register('cartAdd', async (cmd) => cmd.payload!.qty + 1);
     const result = await bus.dispatch('cartAdd', { id: 1 }, { qty: 2 });
     expect(result).toSucceedWith(3);
     expect(bus).toHaveBeenDispatchedWith('cartAdd', { qty: 2 });
@@ -313,7 +313,7 @@ describe('tap(bus) over onAfter', () => {
 describe('matchers', () => {
   it('toHaveBeenDispatched and toHaveBeenDispatchedWith: action alone, action with payload, and .not', () => {
     const bus = tap(createCommandBus<Shop>());
-    bus.register('cartAdd', (cmd) => cmd.payload.qty);
+    bus.register('cartAdd', (cmd) => cmd.payload!.qty);
     expect(failure(() => expect(bus).toHaveBeenDispatched('cartAdd'))).toContain('Number of dispatches: 0');
 
     bus.dispatch('cartAdd', { id: 1 }, { qty: 2 });
@@ -338,7 +338,7 @@ describe('matchers', () => {
 
   it('toHaveBeenDispatchedTimes and toHaveBeenDispatchedOnce count one action', () => {
     const bus = tap(createCommandBus<Shop>());
-    bus.register('cartAdd', (cmd) => cmd.payload.qty);
+    bus.register('cartAdd', (cmd) => cmd.payload!.qty);
     bus.dispatch('cartAdd', { id: 1 }, { qty: 1 });
     bus.dispatch('cartClear', null);
     expect(bus).toHaveBeenDispatchedTimes('cartAdd', 1);
@@ -356,7 +356,7 @@ describe('matchers', () => {
 
   it('toHaveBeenNthDispatchedWith and toHaveBeenLastDispatchedWith read the dispatches of that action, 1-based', () => {
     const bus = tap(createCommandBus<Shop>());
-    bus.register('cartAdd', (cmd) => cmd.payload.qty);
+    bus.register('cartAdd', (cmd) => cmd.payload!.qty);
     bus.dispatch('cartAdd', { id: 1 }, { qty: 1 });
     bus.dispatch('cartClear', null);
     bus.dispatch('cartAdd', { id: 1 }, { qty: 2 });
@@ -432,7 +432,7 @@ describe('matchers', () => {
 
   it('toSucceedWith: ok alone, ok with value, and a failure with its code in the message', () => {
     const bus = createCommandBus<Shop>();
-    bus.register('cartAdd', (cmd) => cmd.payload.qty);
+    bus.register('cartAdd', (cmd) => cmd.payload!.qty);
     const ok = bus.dispatch('cartAdd', { id: 1 }, { qty: 2 });
     expect(ok).toSucceedWith();
     expect(ok).toSucceedWith(2);
@@ -572,7 +572,7 @@ describe('C3 a failed test shows what it dispatched', () => {
     _explainFailure(matcher, chai);
     expect(matcher.result.errors[0].message).toBe('expected "y" to be dispatched at least once\n\nNumber of dispatches: 1');
 
-    _beginTest();
+    beginTest();
     const quiet = failedTask('q');
     _explainFailure(quiet, chai);
     expect(quiet.result.errors[0].message).toBe('q');
@@ -588,5 +588,23 @@ describe('A12 pure is pure (in-repo half)', () => {
     expect(runtime).toEqual(['./command-bus', './mcp']);
     expect(source).toMatch(/import type \{[^}]*\} from '\.\/command-bus';/);
     expect(source).toMatch(/import type \{[^}]*\} from '\.\/mcp';/);
+  });
+});
+
+describe('A14 the record is scoped to the current test', () => {
+  // A bus the app creates and the suite taps once, so it outlives every test.
+  it('a long-lived bus answers for this test only', () => {
+    const bus = tap(createCommandBus<Shop>());
+    bus.register('cartAdd', () => 1);
+
+    beginTest();
+    bus.dispatch('cartAdd', { id: 1 }, { qty: 1 });
+    expect(bus).toHaveBeenDispatchedTimes('cartAdd', 1);
+
+    beginTest();
+    expect(bus).not.toHaveBeenDispatched('cartAdd');
+    bus.dispatch('cartAdd', { id: 2 }, { qty: 1 });
+    expect(bus).toHaveBeenDispatchedTimes('cartAdd', 1);
+    expect(bus).toHaveBeenLastDispatchedWith('cartAdd', { qty: 1 });
   });
 });

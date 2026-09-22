@@ -192,9 +192,22 @@ const BUDGETS = {
   // elements carry the slot read only (+7 / +12); full carries the plugin
   // and composable changes too. Measured: full 12,094 / 40,944, core 8,177 /
   // 27,891, elements 8,673 / 29,655.
-  'vapor-chamber.iife.min.js':          { rawMax: 40_944, brotliMax: 12_094 },
-  'vapor-chamber-core.iife.min.js':     { rawMax: 27_891, brotliMax: 8_177  },
-  'vapor-chamber-elements.iife.min.js': { rawMax: 29_655, brotliMax: 8_673  },
+  // Then rc9/47-54, all three SMALLER, and the budgets follow the measurement
+  // down - full brotli 12_094 -> 11_884 and raw 40_944 -> 39_938, core 8_177
+  // -> 8_056 and raw 27_891 -> 27_364, elements 8_673 -> 8_554 and raw 29_655
+  // -> 29_128. Three contributors, none of them a size exercise:
+  //   • sync() stopped being a bus plugin and became a bridge over an event
+  //     channel, which deleted its echo-suppression and async-promise arms;
+  //   • two plugins that hand-rolled the thenable check went through
+  //     `onSettled`, which removed a body each of them had written twice;
+  //   • the inspect symbol stopped carrying `() => inspect(s)` and carries the
+  //     STATE instead, so `inspect()` is reachable only from `inspectBus` -
+  //     the biggest single piece, and the one two docblocks already promised.
+  // These are LOWER ceilings and they lock the wins: the budgets had sat at
+  // zero headroom since undo/1, so nothing here was bought with slack.
+  'vapor-chamber.iife.min.js':          { rawMax: 39_938, brotliMax: 11_884 },
+  'vapor-chamber-core.iife.min.js':     { rawMax: 27_364, brotliMax: 8_056  },
+  'vapor-chamber-elements.iife.min.js': { rawMax: 29_128, brotliMax: 8_554  },
 };
 
 const BR_OPTS = { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } };

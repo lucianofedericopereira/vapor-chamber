@@ -4,7 +4,7 @@
  * retry, persist, sync
  */
 
-import { matchesPattern, RETRYABLE_CODES, _withOrigin, _errResult, abortedResult, type Command, type CommandResult, type AsyncPlugin, type Plugin } from './command-bus';
+import { matchesPattern, RETRYABLE_CODES, _errResult, abortedResult, type Command, type CommandResult, type AsyncPlugin, type Plugin } from './command-bus';
 import { onSettled } from './settled';
 import { MAX_TIMEOUT_MS, countOption } from './bounds';
 import { DEV } from './dev';
@@ -316,55 +316,115 @@ export function persist<T>(options: PersistOptions<T>): Plugin & {
 }
 
 // ---------------------------------------------------------------------------
-// Cross-tab sync plugin (BroadcastChannel)
+// Cross-tab sync bridge (BroadcastChannel over an event channel)
 // ---------------------------------------------------------------------------
+
+/**
+ * The event channel `sync` bridges. Structural on purpose: this module imports
+ * nothing from `./fast-lane`, so a consumer who never syncs pays no bytes for
+ * it, and anything with the same two methods can be bridged.
+ */
+export type SyncLane = {
+  on(event: string, listener: (data: any) => void): () => void;
+  emit(event: string, data: any): void;
+};
 
 export type SyncOptions = {
   /**
-   * BroadcastChannel name. All tabs using the same name receive each other's commands.
+   * BroadcastChannel name. All tabs using the same name receive each other's facts.
    * @example 'vapor-chamber:app'
    */
   channel: string;
-  /** Which actions to broadcast to other tabs. Default: all successful dispatches. */
-  filter?: (cmd: Command) => boolean;
+  /** The event channel to bridge - `createFastLane()`, or anything of that shape. */
+  lane: SyncLane;
   /**
-   * Called when a command arrives from another tab, before re-dispatching it.
-   * Return false to suppress re-dispatch.
+   * Which events cross to the other tabs. Named rather than inferred: the fast
+   * lane has no wildcard subscription by design, and naming them is the point
+   * - the wire contract is declared, not guessed at from an action prefix.
    */
-  onReceive?: (cmd: Command) => boolean | void;
+  events: string[];
+  /**
+   * Called when a fact arrives from another tab, before it is re-emitted
+   * locally. Return false to drop it.
+   */
+  onReceive?: (event: string, data: unknown) => boolean | void;
 };
 
-type SyncMessage = { __vc: true; action: string; target: any; payload?: any };
+type SyncMessage = { __vc: true; event: string; data: any };
 
 /**
- * sync - broadcast successful commands to all other open tabs via BroadcastChannel.
+ * sync - mirror emitted FACTS to every other open tab over a BroadcastChannel.
+ *
+ * WHAT CROSSES THE WIRE IS A FACT, NOT A COMMAND, and that is the whole design.
+ * Until v1.22.0 this was a bus PLUGIN that re-broadcast every successful
+ * dispatch and re-dispatched it in the receiving tab. That shape replicates
+ * INTENT: each tab re-runs the handler and re-derives the outcome. Three things
+ * fall out of it, all measured before this was rewritten:
+ *
+ *   - A handler that is not deterministic does not mirror. Two tabs running
+ *     the same `cartAdd` minted `A-line-1-936891` and `B-line-1-675288` and
+ *     stayed different forever.
+ *   - A tab seeded differently stays different: A ended at 1, B at 6.
+ *   - A handler that dispatches a nested command applied that derivation
+ *     TWICE per tab, because each tab derived its own and then received the
+ *     peer's. Suppressing the receive side alone did not fix it (6 runs became
+ *     5, not 4): the ORIGINATING tab was still broadcasting its derivations.
+ *     Fixing that by inference needs the core to distinguish a root dispatch
+ *     from a derived one, which it does not, and adding a counter to do so
+ *     would tax every dispatch on the bus.
+ *
+ * Emitting the fact removes the question instead of answering it. The app says
+ * what crosses by emitting it; a derivation is not a fact unless the app says
+ * so, so there is nothing to infer and no counter to pay for. The receiving tab
+ * APPLIES the values the sender computed rather than recomputing them, which is
+ * the ordinary CQRS split - a command is intent, an event is something that
+ * already happened - and it is what makes a non-deterministic handler a
+ * non-issue.
+ *
+ * IT ALSO LEAVES THE DISPATCH CHAIN. As a plugin this cost more than half the
+ * bus's dispatch throughput, on every dispatch of every action, whether or not
+ * it synced. Measured over 11 shuffled rounds of 200,000 dispatches with
+ * `gc()` per round, against a byte-identical self-control arm: bare bus 1.000,
+ * as a plugin 0.459 (control 0.454), as an `onAfter` listener 0.538, and on the
+ * fast lane 0.867. The correctness fix and the performance fix are the same
+ * change.
+ *
+ * WHAT IT STILL DOES NOT DO. Facts mirror, seeds do not: a tab that starts from
+ * different state stays different unless the facts are absolute ("the count is
+ * 2") rather than relative ("add one"). And a payload crosses through the
+ * structured clone algorithm, so it cannot carry functions - see the DEV
+ * warning below.
  *
  * @example
- * const tabSync = sync({ channel: 'vapor-chamber:app' })
- * bus.use(tabSync)
+ * const lane = createFastLane()
+ * lane.on('cartAdded', (fact) => applyToCart(fact))   // local AND remote land here
+ *
+ * bus.register('cartAdd', (cmd) => {
+ *   const fact = computeAdd(cmd.target)
+ *   applyToCart(fact)
+ *   lane.emit('cartAdded', fact)                      // this is what crosses tabs
+ * })
+ *
+ * const tabSync = sync({ channel: 'vapor-chamber:app', lane, events: ['cartAdded'] })
  * tabSync.close() // on teardown
  */
-export function sync(
-  options: SyncOptions,
-  busRef?: { dispatch: (action: string, target: any, payload?: any) => any }
-): Plugin & {
+export function sync(options: SyncOptions): {
   close(): void;
   isOpen(): boolean;
 } {
-  const { channel, filter, onReceive } = options;
-
-  // DEV-gated: a missing busRef is a call-site mistake fixed at build time, not
-  // a runtime condition the deployed app can recover from. Unlike the persist
-  // validation warning above - which fires on real production state (a stale
-  // payload after a deploy) and therefore stays unconditional.
-  if (DEV && !busRef?.dispatch) {
-    console.warn('[vapor-chamber] sync() called without busRef - received messages will not be re-dispatched locally. Pass { dispatch: bus.dispatch } as the second argument.');
-  }
+  const { channel, lane, events, onReceive } = options;
 
   let bc: BroadcastChannel | null = null;
-  const localDispatch: ((action: string, target: any, payload?: any) => any) | null =
-    busRef?.dispatch ?? null;
 
+  // Echo suppression is a plain boolean, and it is airtight here in a way it
+  // was not on the bus. The old plugin needed `_withOrigin` because a flag
+  // cleared in a `finally` holds only on a SYNC bus - on an async one the
+  // dispatch returns a pending promise and the chain runs a microtask later,
+  // after the flag is already back down. A lane `emit` has no such window: it
+  // is a tight indexed loop over the subscriber list with no promise, no
+  // plugin chain and no envelope, so it completes inside the `try`. The core's
+  // origin machinery is no longer involved at all.
+  let applying = false;
 
   function open(): void {
     if (typeof BroadcastChannel === 'undefined') return;
@@ -373,76 +433,44 @@ export function sync(
     bc.onmessage = (event: MessageEvent<SyncMessage>) => {
       const msg = event.data;
       if (!msg?.__vc) return;
-
-      const cmd: Command = { action: msg.action, target: msg.target, payload: msg.payload };
-
-      if (onReceive) {
-        const allow = onReceive(cmd);
-        if (allow === false) return;
-      }
-
-      if (localDispatch) {
-        // Echo suppression rides ON the dispatch, not beside it. It used to be
-        // a `receiving = true` flag cleared in a `finally`, which holds only on
-        // a sync bus (the dispatch completes inside the try). On an async bus
-        // `localDispatch` returns a pending promise and the plugin chain runs a
-        // microtask later - after `finally` already cleared the flag.
-        //
-        // MEASURED, and worth recording because it is not what you would
-        // predict: on an async bus that flag never actually mattered, because
-        // the plugin below never broadcast anything at all (it read `.ok` off a
-        // promise). Fixing that no-op is what makes the flag's race reachable -
-        // with the broadcast working and the flag still in place, two tabs
-        // ping-pong forever, every hop a real dispatch through handlers,
-        // plugins and transports. So the marker is a PREREQUISITE for the
-        // no-op fix, not an independent cleanup.
-        //
-        // `_withOrigin` sets `meta.origin = 'sync'` for EVERY payload shape,
-        // including the primitives and arrays a `__origin` key cannot ride on
-        // - those used to arrive unmarked and get re-broadcast, ping-ponging
-        // between tabs forever. The payload now reaches handlers exactly as
-        // the sending tab wrote it: no spread, no allocation, no injected key.
-        _withOrigin('sync', () => localDispatch(msg.action, msg.target, msg.payload));
-      }
+      if (onReceive && onReceive(msg.event, msg.data) === false) return;
+      applying = true;
+      try { lane.emit(msg.event, msg.data); }
+      finally { applying = false; }
     };
   }
 
   open();
 
-  function broadcast(cmd: Command): void {
-    // A command that arrived FROM another tab must not be sent back out.
-    // `meta.origin` is stamped by the core via `_withOrigin` on the receive
-    // path, so it is already set by the time any plugin runs - on a sync bus
-    // and an async one alike, and for every payload shape.
-    if (cmd.meta?.origin === 'sync') return;
-    if (filter && !filter(cmd)) return;
-    bc?.postMessage({ __vc: true, action: cmd.action, target: cmd.target, payload: cmd.payload } satisfies SyncMessage);
+  const offs: Array<() => void> = [];
+  for (const name of events) {
+    offs.push(lane.on(name, (data: unknown) => {
+      if (applying) return;
+      try {
+        bc?.postMessage({ __vc: true, event: name, data } satisfies SyncMessage);
+      } catch (e) {
+        // A payload that cannot be structured-cloned (a function, a class
+        // instance with methods, a DOM node) throws DataCloneError here. The
+        // local tab has already applied its own fact by now, so this is a
+        // remote-only failure and must not take the local emit down with it -
+        // a listener that throws would stop the rest of the lane's fan-out.
+        // DEV-gated like the call-site warnings above and unlike persist's
+        // storage warnings: a non-cloneable payload is an authoring mistake
+        // fixed at build time, not a condition a deployed app runs into.
+        if (DEV) {
+          console.warn(`[vapor-chamber] sync: "${name}" did not cross to other tabs - its payload is not structured-cloneable (no functions, class instances or DOM nodes):`, e);
+        }
+      }
+    }));
   }
 
-  const plugin: Plugin = (cmd, next) => {
-    const result = next();
-    // `sync()` is typed as a sync Plugin and installs happily on an
-    // AsyncCommandBus - where `next()` returns a PENDING PROMISE. Reading
-    // `result.ok` on it yields `undefined`, so this plugin used to broadcast
-    // nothing at all on an async bus: cross-tab sync was silently dead, with
-    // no warning, for every setup whose handlers are async. Decide after it
-    // settles instead.
-    if (result !== null && typeof (result as { then?: unknown })?.then === 'function') {
-      (result as unknown as Promise<CommandResult>)
-        .then((settled) => {
-          if (settled?.ok) broadcast(cmd);
-        })
-        .catch(() => {
-          /* a rejected dispatch is not a broadcast-worthy success */
-        });
-      return result;
-    }
-    if (result.ok) broadcast(cmd);
-    return result;
-  };
-
-  return Object.assign(plugin, {
-    close(): void { bc?.close(); bc = null; },
+  return {
+    close(): void {
+      for (const off of offs) off();
+      offs.length = 0;
+      bc?.close();
+      bc = null;
+    },
     isOpen(): boolean { return bc !== null; },
-  });
+  };
 }

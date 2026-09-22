@@ -65,8 +65,22 @@ on('ping', () => { state.fired.push('async'); });
 </script>
 <template><span>async</span></template>`;
 
-function compile() {
-  const { descriptor } = parse(SFC, { filename: 'Async.vue' });
+/** The same contract, with the awaits inside a nested block - see the note at the end. */
+const SFC_NESTED = `<script setup vapor>
+import { useCommand } from 'vc:chamber';
+import { state } from 'vc:state';
+if (true) {
+  if (false) {}
+  await state.gate;
+  await Promise.resolve();
+}
+const { on } = useCommand();
+on('ping', () => { state.fired.push('nested'); });
+</script>
+<template><span>nested</span></template>`;
+
+function compile(source = SFC, filename = 'Async.vue') {
+  const { descriptor } = parse(source, { filename });
   const { content } = compileScript(descriptor, { id: 'vc-async-setup', inlineTemplate: true });
   return { descriptor, content };
 }
@@ -91,22 +105,25 @@ function evaluate(content: string, modules: Record<string, object>): unknown {
 
 let v: VueApi;
 let Async: unknown;
+let AsyncNested: unknown;
 
 beforeAll(async () => {
   await waitForVueDetection();
   v = await import(/* @vite-ignore */ WITH_VAPOR);
   configureVue(v);
-  Async = evaluate(compile().content, { vue: v, 'vc:chamber': chamber, 'vc:state': { state } });
+  const modules = { vue: v, 'vc:chamber': chamber, 'vc:state': { state } };
+  Async = evaluate(compile().content, modules);
+  AsyncNested = evaluate(compile(SFC_NESTED, 'AsyncNested.vue').content, modules);
 });
 
 /** Let the gate's continuation, the restore microtasks and Suspense's resolve all run. */
 const settle = () => new Promise((r) => setTimeout(r, 0));
 
-function mountUnderSuspense() {
+function mountUnderSuspense(component: unknown = Async) {
   const Root = v.defineComponent({
     render: () =>
       v.h(v.Suspense, null, {
-        default: () => v.h(Async),
+        default: () => v.h(component),
         fallback: () => v.h('i', 'fallback'),
       }),
   });
@@ -163,4 +180,62 @@ describe('useCommand() after await in a compiled <script setup vapor> under Susp
     getCommandBus().dispatch('ping', null);
     expect(state.fired).toEqual([]);
   });
+
+  // The same contract with the awaits inside a nested block. Passes on rc.8
+  // too - see the note at the end; this is coverage, not a fails-before.
+  it('arms cleanup after an await inside a nested block', async () => {
+    const { content } = compile(SFC_NESTED, 'AsyncNested.vue');
+    expect(content).toMatch('async setup(');
+    expect(content).toMatch('_withAsyncContext(');
+
+    const { app, host } = mountUnderSuspense(AsyncNested);
+    expect(host.textContent).toBe('fallback');
+
+    state.open();
+    await settle();
+    await v.nextTick();
+    expect(host.textContent).toBe('nested');
+
+    getCommandBus().dispatch('ping', null);
+    expect(state.fired).toEqual(['nested']);
+
+    app.unmount();
+    state.fired.length = 0;
+    getCommandBus().dispatch('ping', null);
+    expect(state.fired).toEqual([]);
+  });
 });
+
+/**
+ * WHY THE NESTED-BLOCK CASE EXISTS, and what it is NOT.
+ *
+ * Vue 3.6.0-rc.9 `54097087` ("restore await scope when leaving nested blocks",
+ * #15465) changed one word in compiler-sfc's top-level-await walker:
+ * `exit(node)` became `leave(node)`. estree-walker's hook is `leave`, so the
+ * handler had never run and the `scope.pop()` inside it was dead code - the
+ * scope stack only ever grew. That stack decides whether an emitted `await`
+ * sequence is prefixed with a defensive `;`.
+ *
+ * IT IS NOT A FAILS-BEFORE, and the first version of this note claimed it was.
+ * Measured directly, rc.8's and rc.9's `compileScript` on this exact SFC differ
+ * by one character - rc.9 emits `;(` where rc.8 emits `(`:
+ *
+ *     11 | if (true) {
+ *     12 |   if (false) {}
+ *     13 |   ;(                        <- rc.9; rc.8 has `(`
+ *     14 |   ([__temp,__restore] = _withAsyncContext(() => Promise.resolve(1))),
+ *
+ * A BlockStatement cannot absorb a following `(` as a call, so rc.8's output is
+ * valid JavaScript here and its `setup()` resolves. Across six await shapes
+ * tried (top level, upstream's own #15465 repro, after a sibling block, inside
+ * a `for`, inside a `switch` case, and a nested block followed by top-level
+ * awaits) the emitted text differs in three and BOTH compilers produce working
+ * output in all six. No shape was found where rc.8 throws and rc.9 does not.
+ *
+ * So this case is COVERAGE, not evidence of an rc.9 improvement: it pins that
+ * the documented contract - `useVaporAsyncCommand` / `useCommand` called after
+ * an `await` arm their cleanup on the restored scope - holds when the awaits
+ * sit inside a nested block, which is an ordinary thing for a consumer to
+ * write and which the top-level case above does not exercise. It passes on
+ * rc.8 and on rc.9.
+ */

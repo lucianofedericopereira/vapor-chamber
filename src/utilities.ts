@@ -7,6 +7,7 @@
  */
 
 import { _withCausation, disposeAll, matchesPattern, _errResult } from './command-bus';
+import { isThenable } from './settled';
 import type { BaseBus, Command, CommandResult, Handler, RegisterOptions, } from './command-bus';
 
 // ---------------------------------------------------------------------------
@@ -136,9 +137,7 @@ export function createWorkflow(steps: WorkflowStep[]): Workflow {
       try {
         const dispatched = bus.dispatch(step.action, stepTarget, stepPayload);
         // Handle both sync and async buses
-        result = dispatched && typeof dispatched.then === 'function'
-          ? await dispatched
-          : dispatched;
+        result = isThenable(dispatched) ? await dispatched : dispatched;
       } catch (e) {
         result = _errResult(e as Error);
       }
@@ -152,7 +151,7 @@ export function createWorkflow(steps: WorkflowStep[]): Workflow {
           const entry = compensations_[j];
           try {
             const comp = bus.dispatch(entry.action, entry.target, entry.payload);
-            const compResult = comp && typeof comp.then === 'function' ? await comp : comp;
+            const compResult = isThenable(comp) ? await comp : comp;
             compensations.push(compResult);
           } catch (e) {
             compensations.push(_errResult(e as Error));

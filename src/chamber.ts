@@ -276,14 +276,8 @@ let _untrack: (<T>(fn: () => T) => T) | null = null;
  * True once `vapor-chamber/vue` has been imported, i.e. the tracking primitives
  * arrived at BUILD time and this bundle is correct in production.
  *
- * The diagnostic below keys off this rather than off "the probe failed", and
- * the difference matters. Probe failure is only observable in a production
- * bundle, where `DEV` is false and nothing can be logged - so a warning keyed
- * to it fires essentially nowhere, which is what the first version of this
- * diagnostic did. Keying it to "you are on the probe path" instead fires where
- * the probe succeeds and DEV is on - a page under Vite's dev server, a test
- * runner with a DOM - while the app still looks fine and there is time to
- * change one import.
+ * {@link warnProbePath} keys its diagnostic off this rather than off "the probe
+ * failed", and records why that is the choice that fires anywhere.
  */
 let _vueSubpathLoaded = false;
 /** One-shot guard for the DEV diagnostic in {@link untracked}. */

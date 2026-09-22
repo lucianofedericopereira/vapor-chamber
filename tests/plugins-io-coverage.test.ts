@@ -13,8 +13,8 @@
  */
 
 import { describe, expect, beforeEach, afterEach, vi } from 'vitest';
-import { createCommandBus, resetCommandBus } from '../src/index';
-import { persist, sync } from '../src/plugins';
+import { resetCommandBus } from '../src/index';
+import { persist } from '../src/plugins';
 import { it } from '../src/vitest';
 
 // ---------------------------------------------------------------------------
@@ -214,113 +214,3 @@ describe('persist plugin - coverage', () => {
 // ---------------------------------------------------------------------------
 // sync plugin - busRef-less warning + onReceive suppression
 // ---------------------------------------------------------------------------
-
-describe('sync plugin - coverage', () => {
-  type BcMessage = { __vc: boolean; action: string; target: any; payload?: any };
-
-  function makeMockBroadcastChannel() {
-    const listeners: Array<(event: { data: any }) => void> = [];
-    const posted: BcMessage[] = [];
-    let _onmessage: ((event: { data: any }) => void) | null = null;
-
-    const bc = {
-      postMessage: vi.fn((data: BcMessage) => { posted.push(data); }),
-      close: vi.fn(),
-      get onmessage() { return _onmessage; },
-      set onmessage(fn: ((event: { data: any }) => void) | null) {
-        _onmessage = fn;
-        if (fn) listeners.push(fn);
-      },
-      simulateMessage(data: BcMessage) {
-        listeners.forEach(fn => { fn({ data }); });
-      },
-      posted,
-    };
-    return bc;
-  }
-
-  function makeBcConstructor(mockBc: ReturnType<typeof makeMockBroadcastChannel>) {
-    return function MockBroadcastChannel(_channel: string) {
-      return mockBc;
-    } as unknown as typeof BroadcastChannel;
-  }
-
-  beforeEach(() => {
-    resetCommandBus();
-  });
-
-  afterEach(() => {
-    vi.unstubAllGlobals();
-  });
-
-  it('warns when called without a busRef (line 259)', () => {
-    const mockBc = makeMockBroadcastChannel();
-    vi.stubGlobal('BroadcastChannel', makeBcConstructor(mockBc));
-    using warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-    // No second argument -> busRef?.dispatch is falsy -> warning path (line 259).
-    const tabSync = sync({ channel: 'no-busref' });
-
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('sync() called without busRef'),
-    );
-
-    // Without a localDispatch, a received message is not re-dispatched and
-    // must not throw.
-    expect(() => {
-      mockBc.simulateMessage({ __vc: true, action: 'whatever', target: {} });
-    }).not.toThrow();
-  });
-
-  it('onReceive returning false suppresses re-dispatch (lines 279-280)', () => {
-    const mockBc = makeMockBroadcastChannel();
-    vi.stubGlobal('BroadcastChannel', makeBcConstructor(mockBc));
-
-    const bus = createCommandBus();
-    const dispatched: string[] = [];
-    bus.register('remoteAction', (cmd) => { dispatched.push(cmd.target?.data); });
-
-    const seen: string[] = [];
-    const tabSync = sync(
-      {
-        channel: 'gated',
-        onReceive: (cmd) => {
-          seen.push(cmd.action);
-          return false; // veto re-dispatch (line 280 early return)
-        },
-      },
-      { dispatch: bus.dispatch.bind(bus) },
-    );
-    bus.use(tabSync);
-
-    mockBc.simulateMessage({ __vc: true, action: 'remoteAction', target: { data: 'blocked' } });
-
-    // onReceive ran and saw the command...
-    expect(seen).toEqual(['remoteAction']);
-    // ...but the veto prevented local re-dispatch.
-    expect(dispatched).toHaveLength(0);
-  });
-
-  it('onReceive returning a non-false value still re-dispatches (line 279 truthy branch)', () => {
-    const mockBc = makeMockBroadcastChannel();
-    vi.stubGlobal('BroadcastChannel', makeBcConstructor(mockBc));
-
-    const bus = createCommandBus();
-    const dispatched: string[] = [];
-    bus.register('remoteAction', (cmd) => { dispatched.push(cmd.target?.data); });
-
-    const tabSync = sync(
-      {
-        channel: 'allowed',
-        // Returning undefined (no explicit false) lets the message through.
-        onReceive: () => undefined,
-      },
-      { dispatch: bus.dispatch.bind(bus) },
-    );
-    bus.use(tabSync);
-
-    mockBc.simulateMessage({ __vc: true, action: 'remoteAction', target: { data: 'allowed-through' } });
-
-    expect(dispatched).toContain('allowed-through');
-  });
-});

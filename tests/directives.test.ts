@@ -1,5 +1,5 @@
 /**
- * Tests for src/directives.ts - v-vc:command, v-vc:payload, v-vc:optimistic
+ * Tests for src/directives.ts - v-vc-command, v-vc-payload, v-vc-optimistic
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createDirectivePlugin } from '../src/directives';
@@ -95,17 +95,21 @@ describe('createDirectivePlugin', () => {
     resetCommandBus();
   });
 
-  it('installs vc, vc-payload, and vc-optimistic directives', () => {
-    expect(app.getDirective('vc')).toBeDefined();
+  // The three NAMES are the public surface now that the selector lives in one.
+  // `vc` must be absent: leaving it registered alongside would be the two
+  // spellings this reshape removed, and nothing else in the suite would notice.
+  it('installs vc-command, vc-payload and vc-optimistic, and no longer installs vc', () => {
+    expect(app.getDirective('vc-command')).toBeDefined();
     expect(app.getDirective('vc-payload')).toBeDefined();
     expect(app.getDirective('vc-optimistic')).toBeDefined();
+    expect(app.getDirective('vc')).toBeUndefined();
   });
 
-  describe('v-vc:command', () => {
+  describe('v-vc-command', () => {
     it('registers click handler on mounted', () => {
       const el = createElement();
-      const vcDir = app.getDirective('vc');
-      vcDir.mounted(el, { arg: 'command', value: 'testAction', modifiers: {} });
+      const vcDir = app.getDirective('vc-command');
+      vcDir.mounted(el, { value: 'testAction', modifiers: {} });
 
       // Should have registered a click listener
       bus.register('testAction', () => 'success');
@@ -113,26 +117,28 @@ describe('createDirectivePlugin', () => {
       // No error means handler was attached
     });
 
-    it('ignores non-command args', () => {
-      const el = createElement();
-      const vcDir = app.getDirective('vc');
-      // Should not throw for other args
-      vcDir.mounted(el, { arg: 'other', value: 'test', modifiers: {} });
-    });
+    // THE `ignores non-command args` CASE WAS DELETED HERE, deliberately, and
+    // not replaced with an inverted one. It asserted that `{ arg: 'other' }`
+    // did not mount - the selector-in-the-argument behaviour. There is no
+    // argument now, so there is nothing to ignore and nothing to assert: a
+    // test that passed `arg` and checked it was disregarded would be pinning
+    // the absence of a feature by feeding it an input Vue never sends. What
+    // replaced it is the name assertion above, which is the same question
+    // asked where the answer now lives.
 
     it('updated() changes the action', () => {
       const el = createElement();
-      const vcDir = app.getDirective('vc');
-      vcDir.mounted(el, { arg: 'command', value: 'action1', modifiers: {} });
-      vcDir.updated(el, { arg: 'command', value: 'action2' });
+      const vcDir = app.getDirective('vc-command');
+      vcDir.mounted(el, { value: 'action1', modifiers: {} });
+      vcDir.updated(el, { value: 'action2' });
       // Should not throw
     });
 
     it('beforeUnmount() removes click handler', () => {
       const el = createElement();
-      const vcDir = app.getDirective('vc');
-      vcDir.mounted(el, { arg: 'command', value: 'test', modifiers: {} });
-      vcDir.beforeUnmount(el, { arg: 'command' });
+      const vcDir = app.getDirective('vc-command');
+      vcDir.mounted(el, { value: 'test', modifiers: {} });
+      vcDir.beforeUnmount(el);
       // After unmount, triggering click should do nothing
     });
 
@@ -142,8 +148,8 @@ describe('createDirectivePlugin', () => {
       el.disabled = true;
       let calls = 0;
       bus.register('disabledAction', () => { calls += 1; });
-      const vcDir = app.getDirective('vc');
-      vcDir.mounted(el, { arg: 'command', value: 'disabledAction', modifiers: {} });
+      const vcDir = app.getDirective('vc-command');
+      vcDir.mounted(el, { value: 'disabledAction', modifiers: {} });
       el.triggerClick();
       expect(calls).toBe(0);
     });
@@ -153,22 +159,22 @@ describe('createDirectivePlugin', () => {
       el.getAttribute = (name: string) => (name === 'aria-disabled' ? 'true' : null);
       let calls = 0;
       bus.register('ariaAction', () => { calls += 1; });
-      const vcDir = app.getDirective('vc');
-      vcDir.mounted(el, { arg: 'command', value: 'ariaAction', modifiers: {} });
+      const vcDir = app.getDirective('vc-command');
+      vcDir.mounted(el, { value: 'ariaAction', modifiers: {} });
       el.triggerClick();
       expect(calls).toBe(0);
     });
 
     // Event modifiers - the direct listener never sees Vue's compiled withModifiers,
-    // so v-vc:command applies .stop/.prevent/.self/.left/.middle/.right/.capture/
+    // so v-vc-command applies .stop/.prevent/.self/.left/.middle/.right/.capture/
     // .once/.passive itself (the numeric modifier remains the dispatch timeout).
     describe('event modifiers', () => {
       it('honors .stop and .prevent on the DOM event', () => {
         const el = createElement();
         let calls = 0, stopped = 0, prevented = 0;
         bus.register('mAction', () => { calls += 1; });
-        const vcDir = app.getDirective('vc');
-        vcDir.mounted(el, { arg: 'command', value: 'mAction', modifiers: { stop: true, prevent: true } });
+        const vcDir = app.getDirective('vc-command');
+        vcDir.mounted(el, { value: 'mAction', modifiers: { stop: true, prevent: true } });
         el.triggerClick({ type: 'click', target: el, stopPropagation() { stopped += 1; }, preventDefault() { prevented += 1; } });
         expect(stopped).toBe(1);
         expect(prevented).toBe(1);
@@ -179,8 +185,8 @@ describe('createDirectivePlugin', () => {
         const el = createElement();
         let calls = 0;
         bus.register('selfAction', () => { calls += 1; });
-        const vcDir = app.getDirective('vc');
-        vcDir.mounted(el, { arg: 'command', value: 'selfAction', modifiers: { self: true } });
+        const vcDir = app.getDirective('vc-command');
+        vcDir.mounted(el, { value: 'selfAction', modifiers: { self: true } });
         // target is a different element -> ignored
         el.triggerClick({ type: 'click', target: {}, stopPropagation() {}, preventDefault() {} });
         expect(calls).toBe(0);
@@ -193,8 +199,8 @@ describe('createDirectivePlugin', () => {
         const el = createElement();
         let calls = 0;
         bus.register('btnAction', () => { calls += 1; });
-        const vcDir = app.getDirective('vc');
-        vcDir.mounted(el, { arg: 'command', value: 'btnAction', modifiers: { left: true } });
+        const vcDir = app.getDirective('vc-command');
+        vcDir.mounted(el, { value: 'btnAction', modifiers: { left: true } });
         // right button (2) -> ignored
         el.triggerClick({ type: 'click', target: el, button: 2, stopPropagation() {}, preventDefault() {} });
         expect(calls).toBe(0);
@@ -205,8 +211,8 @@ describe('createDirectivePlugin', () => {
 
       it('passes .capture / .once / .passive as addEventListener options', () => {
         const el = createElement();
-        const vcDir = app.getDirective('vc');
-        vcDir.mounted(el, { arg: 'command', value: 'optAction', modifiers: { capture: true, once: true, passive: true } });
+        const vcDir = app.getDirective('vc-command');
+        vcDir.mounted(el, { value: 'optAction', modifiers: { capture: true, once: true, passive: true } });
         expect(el._listenerOpts).toEqual({ capture: true, once: true, passive: true });
       });
 
@@ -214,16 +220,16 @@ describe('createDirectivePlugin', () => {
         const el = createElement();
         let calls = 0;
         bus.register('tAction', () => { calls += 1; });
-        const vcDir = app.getDirective('vc');
+        const vcDir = app.getDirective('vc-command');
         // numeric modifier (timeout) + a real event modifier must coexist
-        vcDir.mounted(el, { arg: 'command', value: 'tAction', modifiers: { '5000': true, stop: true } });
+        vcDir.mounted(el, { value: 'tAction', modifiers: { '5000': true, stop: true } });
         el.triggerClick({ type: 'click', target: el, stopPropagation() {}, preventDefault() {} });
         expect(calls).toBe(1);
       });
     });
 
     // Vue 3.6.0-rc.2 (#15127) flipped compiler-vapor event delegation to
-    // opt-in. v-vc:command mirrors the same trade-off with its own opt-in
+    // opt-in. v-vc-command mirrors the same trade-off with its own opt-in
     // `.delegate` modifier: one shared document listener instead of one per
     // element.
     describe('.delegate modifier', () => {
@@ -235,11 +241,11 @@ describe('createDirectivePlugin', () => {
       it('does not attach a direct listener on the element', () => {
         const doc = createMockDocument();
         const el = createElement('button', { ownerDocument: doc });
-        const vcDir = app.getDirective('vc');
-        vcDir.mounted(el, { arg: 'command', value: 'a', modifiers: { delegate: true } });
+        const vcDir = app.getDirective('vc-command');
+        vcDir.mounted(el, { value: 'a', modifiers: { delegate: true } });
         expect(el.hasClick()).toBe(false);
         expect(doc.hasClickListener()).toBe(true);
-        vcDir.beforeUnmount(el, { arg: 'command' });
+        vcDir.beforeUnmount(el);
       });
 
       it('dispatches via the shared document listener', () => {
@@ -247,11 +253,11 @@ describe('createDirectivePlugin', () => {
         const el = createElement('button', { ownerDocument: doc });
         let calls = 0;
         bus.register('a', () => { calls += 1; });
-        const vcDir = app.getDirective('vc');
-        vcDir.mounted(el, { arg: 'command', value: 'a', modifiers: { delegate: true } });
+        const vcDir = app.getDirective('vc-command');
+        vcDir.mounted(el, { value: 'a', modifiers: { delegate: true } });
         doc.dispatchClick(el);
         expect(calls).toBe(1);
-        vcDir.beforeUnmount(el, { arg: 'command' });
+        vcDir.beforeUnmount(el);
       });
 
       it('walks up to the closest delegated ancestor of the click target', () => {
@@ -260,29 +266,29 @@ describe('createDirectivePlugin', () => {
         const icon = createElement('span', { parent: button, ownerDocument: doc });
         let calls = 0;
         bus.register('a', () => { calls += 1; });
-        const vcDir = app.getDirective('vc');
-        vcDir.mounted(button, { arg: 'command', value: 'a', modifiers: { delegate: true } });
+        const vcDir = app.getDirective('vc-command');
+        vcDir.mounted(button, { value: 'a', modifiers: { delegate: true } });
         // Click lands on the inner <span>, not the delegated <button> itself.
         doc.dispatchClick(icon);
         expect(calls).toBe(1);
-        vcDir.beforeUnmount(button, { arg: 'command' });
+        vcDir.beforeUnmount(button);
       });
 
       it('shares one document listener across many delegated elements', () => {
         const doc = createMockDocument();
-        const vcDir = app.getDirective('vc');
+        const vcDir = app.getDirective('vc-command');
         const els = Array.from({ length: 5 }, () => createElement('button', { ownerDocument: doc }));
         for (const el of els) {
-          vcDir.mounted(el, { arg: 'command', value: 'a', modifiers: { delegate: true } });
+          vcDir.mounted(el, { value: 'a', modifiers: { delegate: true } });
         }
         expect(doc.hasClickListener()).toBe(true);
         // Unmount all but one - listener must stay attached.
         for (const el of els.slice(0, -1)) {
-          vcDir.beforeUnmount(el, { arg: 'command' });
+          vcDir.beforeUnmount(el);
         }
         expect(doc.hasClickListener()).toBe(true);
         // Unmount the last one - listener is removed.
-        vcDir.beforeUnmount(els[els.length - 1], { arg: 'command' });
+        vcDir.beforeUnmount(els[els.length - 1]);
         expect(doc.hasClickListener()).toBe(false);
       });
 
@@ -296,8 +302,8 @@ describe('createDirectivePlugin', () => {
         const button = createElement('button', { ownerDocument: doc }); // lives in the shadow root
         let calls = 0;
         bus.register('a', () => { calls += 1; });
-        const vcDir = app.getDirective('vc');
-        vcDir.mounted(button, { arg: 'command', value: 'a', modifiers: { delegate: true } });
+        const vcDir = app.getDirective('vc-command');
+        vcDir.mounted(button, { value: 'a', modifiers: { delegate: true } });
 
         // What the browser actually delivers at document level: target is the
         // host, but composedPath() still carries the inner element.
@@ -310,7 +316,7 @@ describe('createDirectivePlugin', () => {
         });
 
         expect(calls).toBe(1); // was 0 - the control rendered and did nothing
-        vcDir.beforeUnmount(button, { arg: 'command' });
+        vcDir.beforeUnmount(button);
       });
 
       it('does not fire for a delegated element outside the event path', () => {
@@ -319,8 +325,8 @@ describe('createDirectivePlugin', () => {
         const clicked = createElement('div', { ownerDocument: doc });
         let calls = 0;
         bus.register('a', () => { calls += 1; });
-        const vcDir = app.getDirective('vc');
-        vcDir.mounted(unrelated, { arg: 'command', value: 'a', modifiers: { delegate: true } });
+        const vcDir = app.getDirective('vc-command');
+        vcDir.mounted(unrelated, { value: 'a', modifiers: { delegate: true } });
 
         doc.dispatchClick(clicked, {
           type: 'click',
@@ -331,7 +337,7 @@ describe('createDirectivePlugin', () => {
         });
 
         expect(calls).toBe(0);
-        vcDir.beforeUnmount(unrelated, { arg: 'command' });
+        vcDir.beforeUnmount(unrelated);
       });
 
       it('attaches a listener per document (iframe / popup)', () => {
@@ -343,10 +349,10 @@ describe('createDirectivePlugin', () => {
         const elB = createElement('button', { ownerDocument: docB });
         let calls = 0;
         bus.register('a', () => { calls += 1; });
-        const vcDir = app.getDirective('vc');
+        const vcDir = app.getDirective('vc-command');
 
-        vcDir.mounted(elA, { arg: 'command', value: 'a', modifiers: { delegate: true } });
-        vcDir.mounted(elB, { arg: 'command', value: 'a', modifiers: { delegate: true } });
+        vcDir.mounted(elA, { value: 'a', modifiers: { delegate: true } });
+        vcDir.mounted(elB, { value: 'a', modifiers: { delegate: true } });
 
         expect(docA.hasClickListener()).toBe(true);
         expect(docB.hasClickListener()).toBe(true); // was false
@@ -356,14 +362,14 @@ describe('createDirectivePlugin', () => {
 
         // Unmounting every element of the first document must not strand the
         // second document's listener.
-        vcDir.beforeUnmount(elA, { arg: 'command' });
+        vcDir.beforeUnmount(elA);
         expect(docA.hasClickListener()).toBe(false);
         expect(docB.hasClickListener()).toBe(true);
 
         docB.dispatchClick(elB);
         expect(calls).toBe(2);
 
-        vcDir.beforeUnmount(elB, { arg: 'command' });
+        vcDir.beforeUnmount(elB);
         expect(docB.hasClickListener()).toBe(false);
       });
 
@@ -371,8 +377,8 @@ describe('createDirectivePlugin', () => {
         const doc = createMockDocument();
         const el = createElement('button', { ownerDocument: doc });
         using warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-        const vcDir = app.getDirective('vc');
-        vcDir.mounted(el, { arg: 'command', value: 'a', modifiers: { delegate: true, once: true } });
+        const vcDir = app.getDirective('vc-command');
+        vcDir.mounted(el, { value: 'a', modifiers: { delegate: true, once: true } });
         expect(el.hasClick()).toBe(true);
         expect(doc.hasClickListener()).toBe(false);
         expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('.delegate is incompatible'));
@@ -381,11 +387,89 @@ describe('createDirectivePlugin', () => {
       it('beforeUnmount on a non-delegated element does not touch the document listener', () => {
         const doc = createMockDocument();
         const el = createElement('button', { ownerDocument: doc });
-        const vcDir = app.getDirective('vc');
-        vcDir.mounted(el, { arg: 'command', value: 'a', modifiers: {} });
-        vcDir.beforeUnmount(el, { arg: 'command' });
+        const vcDir = app.getDirective('vc-command');
+        vcDir.mounted(el, { value: 'a', modifiers: {} });
+        vcDir.beforeUnmount(el);
         expect(doc.hasClickListener()).toBe(false);
       });
+    });
+  });
+
+  // Attribute ORDER must not change what a dispatch carries. See the note at
+  // the end of this file.
+  describe('order of v-vc-payload / v-vc-optimistic against v-vc-command', () => {
+    it('delivers a payload authored BEFORE the command', () => {
+      const el = createElement();
+      let seen: unknown = '(never dispatched)';
+      bus.register('ordered', (cmd: any) => { seen = cmd.payload; });
+
+      app.getDirective('vc-payload').mounted(el, { value: { qty: 3 } });
+      app.getDirective('vc-command').mounted(el, { value: 'ordered', modifiers: {} });
+
+      el.triggerClick();
+      expect(seen).toEqual({ qty: 3 });
+    });
+
+    // The control. This order always worked; if it ever stops, the fix for the
+    // case above broke the case it was meant to leave alone.
+    it('delivers a payload authored AFTER the command', () => {
+      const el = createElement();
+      let seen: unknown = '(never dispatched)';
+      bus.register('ordered', (cmd: any) => { seen = cmd.payload; });
+
+      app.getDirective('vc-command').mounted(el, { value: 'ordered', modifiers: {} });
+      app.getDirective('vc-payload').mounted(el, { value: { qty: 3 } });
+
+      el.triggerClick();
+      expect(seen).toEqual({ qty: 3 });
+    });
+
+    it('runs an optimistic update authored BEFORE the command, and rolls it back on failure', () => {
+      const el = createElement();
+      let applied = 0;
+      let rolledBack = 0;
+      bus.register('optOrdered', () => { throw new Error('server said no'); });
+
+      app.getDirective('vc-optimistic').mounted(el, {
+        value: () => { applied += 1; return () => { rolledBack += 1; }; },
+      });
+      app.getDirective('vc-command').mounted(el, { value: 'optOrdered', modifiers: {} });
+
+      el.triggerClick();
+      expect(applied).toBe(1);
+      expect(rolledBack).toBe(1);
+    });
+
+    // A binding held before the command must not outlive being replaced: the
+    // `updated` hook writes onto the state the command now owns, not back into
+    // the slot it was parked in.
+    it('lets updated() replace a payload that was authored before the command', () => {
+      const el = createElement();
+      let seen: unknown = '(never dispatched)';
+      bus.register('ordered', (cmd: any) => { seen = cmd.payload; });
+
+      app.getDirective('vc-payload').mounted(el, { value: { qty: 3 } });
+      app.getDirective('vc-command').mounted(el, { value: 'ordered', modifiers: {} });
+      app.getDirective('vc-payload').updated(el, { value: { qty: 9 } });
+
+      el.triggerClick();
+      expect(seen).toEqual({ qty: 9 });
+    });
+
+    // An element that never gets a command must not dispatch anything, and the
+    // held binding must not leak onto the NEXT element to mount one.
+    it('holds nothing against an element that never mounts a command', () => {
+      const orphan = createElement();
+      const other = createElement();
+      let seen: unknown = '(never dispatched)';
+      bus.register('ordered', (cmd: any) => { seen = cmd.payload; });
+
+      app.getDirective('vc-payload').mounted(orphan, { value: { qty: 3 } });
+      app.getDirective('vc-command').mounted(other, { value: 'ordered', modifiers: {} });
+
+      other.triggerClick();
+      expect(seen).toBeUndefined();
+      expect(orphan.hasClick()).toBe(false);
     });
   });
 });
@@ -397,3 +481,53 @@ describe('createDirectivePlugin factory', () => {
     expect(typeof plugin.install).toBe('function');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Why `order of v-vc-payload / v-vc-optimistic against v-vc-command` exists
+// ---------------------------------------------------------------------------
+//
+// Vapor got a holding slot in v1.22.0 so that
+//
+//     <button v-vc-payload="p" v-vc-command="a">
+//
+// works: a compiled template applies directives in SOURCE ORDER, and
+// `mountCommand()` opens by deleting whatever state the element carries, so a
+// payload written first was thrown away. The vDOM half was left out, and the
+// source said so in as many words - that it "needs nothing equivalent",
+// because `updated` re-applies the binding on the next patch.
+//
+// That reasoning answers for the second click. The element is clickable before
+// the first. MEASURED against the real vDOM runtime (happy-dom + Vue), first
+// click, no re-render since mount:
+//
+//     <button v-vc-command   v-vc-payload>    payload {qty:3}    delivered
+//     <button v-vc-payload   v-vc-command>    payload undefined  DROPPED
+//     <button v-vc-optimistic v-vc-command>   optimistic never ran
+//
+// After one unrelated re-render both recover, which is exactly what made it
+// survivable and invisible: any test that renders before it asserts passes,
+// and the failure lands on a page with no reactive state - the Blade /
+// sprinkled shape this library exists to serve - where there is no next patch
+// and it never works at all.
+//
+// The cost was not only a dropped payload. It made ONE public spelling mean
+// two things: order-independent on Vapor, dead on vDOM. `examples/vapor-sfc`
+// writes payload-before-command and states flatly that the order does not
+// matter, which is true only because that file is `<script setup vapor>`. A
+// reader copying that markup into a vDOM component got a silent no-op, and a
+// documented claim was the reason nobody checked.
+//
+// So the four cases above are not one test and three variations. The
+// before-command pair are the regression. The after-command case is the
+// control, because the cheapest wrong fix is one that swaps which order
+// works. The `updated` case pins that claiming a held binding does not freeze
+// it. And the orphan case pins the two things a holding slot can get wrong
+// that nothing else would notice: dispatching for an element with no command,
+// and handing one element's held binding to the next element that mounts one.
+//
+// These run against the mock app rather than a real renderer on purpose: this
+// file's mock IS the vDOM contract (`mounted` / `updated` / `beforeUnmount`
+// with a `binding.value`), and calling the hooks directly is what lets the
+// order be stated in the test instead of inferred from a template. The real
+// renderer measurement above is what established the defect; this is what
+// keeps it fixed.

@@ -881,7 +881,7 @@ describe('devWarnThenableResult - folds away in production, both DEV paths', () 
     // only catches literal `async` functions at use()-time (an unconditional,
     // non-DEV-gated warning); this shape reaches devWarnThenableResult's
     // dispatch-time behavioral check instead, which IS the one gated by DEV.
-    bus.use((_cmd, next) => Promise.resolve(next()));
+    bus.use(((_cmd: unknown, next: () => unknown) => Promise.resolve(next())) as never); // thenable result on a SYNC bus - the warning under test
     bus.register('act', () => 1);
 
     bus.dispatch('act', {});
@@ -896,7 +896,7 @@ describe('devWarnThenableResult - folds away in production, both DEV paths', () 
 
     const { createCommandBus: freshCreateCommandBus } = await import('../src/command-bus');
     const bus = freshCreateCommandBus();
-    bus.use((_cmd, next) => Promise.resolve(next()));
+    bus.use(((_cmd: unknown, next: () => unknown) => Promise.resolve(next())) as never); // thenable result on a SYNC bus - the warning under test
     bus.register('act', () => 1);
 
     bus.dispatch('act', {});

@@ -82,6 +82,7 @@
 import { DEV } from './dev';
 import type { Command, CommandResult, Plugin, BaseBus } from './command-bus';
 import { _errResult } from './command-bus';
+import { onSettled } from './settled';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -162,8 +163,21 @@ export function createSSRPlugin(options: SSRPluginOptions = {}): SSRPlugin {
   let droppedCount = 0;
   let capWarned = false;
 
-  const plugin: Plugin = (cmd: Command, next: () => CommandResult): CommandResult => {
-    const result = next();
+  // THROUGH `onSettled`, because `next()` returns a PROMISE on the async bus
+  // and `promise.ok` is `undefined`. This plugin used to read the return value
+  // as though it were the result, so on an async bus it recorded NOTHING:
+  // `dehydrate()` came back empty and the client rehydrated no state at all,
+  // with no error and no warning - it read exactly like a page that had no
+  // commands to record. Measured through the public API, sync bus against
+  // async bus, in tests/ssr.test.ts.
+  //
+  // src/settled.ts documents the same defect in five other plugins and the
+  // sweep that fixed them. It missed this one and the schema debug logger:
+  // the grep it describes was run over the `plugins-*.ts` family, and both of
+  // these are plugins that live outside it. That file's own closing line is
+  // that a rule applied by hand at each call site goes missing wherever nobody
+  // remembered it, which is what happened to the sweep itself.
+  const plugin: Plugin = (cmd: Command, next: () => CommandResult): CommandResult => onSettled(next(), (result) => {
     if (result.ok && (!filter || filter(cmd))) {
       if (recorded.length < maxCommands) {
         recorded.push({
@@ -187,7 +201,7 @@ export function createSSRPlugin(options: SSRPluginOptions = {}): SSRPlugin {
       }
     }
     return result;
-  };
+  }) as CommandResult;
 
   function dehydrate(): DehydratedCommand[] {
     return [...recorded];

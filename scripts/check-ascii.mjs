@@ -25,25 +25,98 @@
  * Run: node scripts/check-ascii.mjs
  */
 import { readFileSync, readdirSync, statSync } from 'node:fs';
-import { join, sep } from 'node:path';
+import { join, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOTS = ['src', 'tests', 'scripts', 'bin', 'docs', 'examples', '.github', 'assets'];
-const ROOT_FILES = [
-  'index.html',
-  'README.md',
-  'CHANGELOG.md',
-  'CONTRIBUTING.md',
-  'ROADMAP.md',
-  'SECURITY.md',
-  'vitest.config.ts',
-  'vitest.vapor.config.ts',
-  'tsconfig.json',
-  'tsconfig.typecheck.json',
-  'biome.json',
-  'package.json',
+export const ROOTS = ['src', 'tests', 'scripts', 'bin', 'docs', 'examples', '.github', 'assets'];
+/**
+ * Root-level files, DERIVED from the directory rather than listed.
+ *
+ * This was a hand-typed list of twelve names, and it was the FIFTH time a list
+ * in this file came up short. `.gitignore` carried two em dashes and
+ * `ascii: OK` was printed over them for as long as the list existed - a dotfile
+ * has no extension, so it was on nobody's list and the test below could not see
+ * it either. `tsconfig.tests.json` and `vitest.probes.config.ts` arrived in
+ * v1.22.0 and were never opened for the same reason. Same failure as `.astro`,
+ * `.sh` and `.tsx` below: the list has to be re-typed by whoever adds the next
+ * file, and nothing says so.
+ *
+ * The root is read now, one level deep, and the only list left is what to LEAVE
+ * OUT. That inverts the risk: a new root file is scanned by default, and an
+ * exemption has to be written down with a reason, which is visible in a way a
+ * missing name never is. Inclusion is decided by CONTENT, not by an alphabet -
+ * anything that decodes as text is read, so `.DS_Store` is skipped for what it
+ * is rather than for what it is called.
+ */
+export const ROOT_EXEMPT = new Map([
+  ['package-lock.json', 'npm writes it; a dependency name is not ours to re-spell'],
+  ['LICENSE', 'the LGPL v2.1 text, verbatim and byte-exact'],
+]);
+
+const REPLACEMENT = String.fromCodePoint(0xfffd);
+
+/** Decodes as UTF-8 with no NUL and no replacement character. */
+function isTextFile(path) {
+  let buf;
+  try {
+    buf = readFileSync(path);
+  } catch {
+    return false;
+  }
+  if (buf.includes(0)) return false;
+  return !buf.toString('utf8').includes(REPLACEMENT);
+}
+
+/** Every text file in the repository root that is not exempt. */
+export function rootFiles() {
+  let entries;
+  try {
+    entries = readdirSync('.');
+  } catch {
+    return [];
+  }
+  return entries.filter((name) => {
+    if (ROOT_EXEMPT.has(name)) return false;
+    try {
+      if (!statSync(name).isFile()) return false;
+    } catch {
+      return false;
+    }
+    return isTextFile(name);
+  });
+}
+// THE FOURTH TIME THIS LIST WAS WRONG, and the first three are recorded below
+// against the CHARACTER alphabet: the arrows, the console glyphs, the census
+// that found 9,300 more. This one is the FILE alphabet, which nothing had ever
+// questioned, and it failed the same way. `.astro`, `.sh` and `.tsx` were not
+// here, so 28 lines across three files carried em dashes, an ellipsis and a
+// times sign while this script printed "ascii: OK (425 files, no typographic
+// non-ASCII)". A guard that reports a clean sweep over a violation is worse
+// than no guard, because it is the reason nobody looks.
+//
+// `.svg` and `.webmanifest` join them clean, not dirty. Both are text, both sit
+// under `assets/`, and neither had any reason to be exempt except that nobody
+// had listed them - which is exactly the property that made the other three
+// dangerous.
+//
+// The list is now TESTED rather than trusted: tests/ascii-guard.test.ts walks
+// the same roots, decodes every file, and fails if a text extension exists that
+// this array does not name. An alphabet cannot audit itself, so something that
+// reads the tree instead has to.
+export const EXTENSIONS = [
+  '.ts', '.tsx', '.js', '.mjs', '.md', '.json', '.vue', '.yml', '.yaml',
+  '.html', '.css', '.php', '.astro', '.sh', '.svg', '.webmanifest',
 ];
-const EXTENSIONS = ['.ts', '.js', '.mjs', '.md', '.json', '.vue', '.yml', '.yaml', '.html', '.css', '.php'];
-const SKIP_DIRS = new Set(['node_modules', 'coverage', 'dist']);
+// `.astro` is Astro's generated cache under examples/exo-astro, gitignored and
+// rebuilt by `astro build`. It belongs here for the reason the header gives for
+// `dist/`: it is generated, and a clean source regenerates it clean. It was
+// NOT here until tests/ascii-guard.test.ts walked the tree and tripped over a
+// `preview.log` inside it - and the guard had in fact been scanning three of
+// its files (`content.d.ts`, `preview.json`, `types.d.ts`) all along, which
+// made the "N files" in the OK line depend on whether anyone had run the
+// example's build. Both of this guard's lists turned out to be short; this is
+// the second one.
+export const SKIP_DIRS = new Set(['node_modules', 'coverage', 'dist', '.astro']);
 
 /**
  * file-path substring -> reason. Earn every entry.
@@ -149,7 +222,7 @@ const NAME = {
   '\u26a1': 'glyph (import from src/glyphs.ts)',
 };
 
-function walk(dir, out = []) {
+export function walk(dir, out = []) {
   let entries;
   try {
     entries = readdirSync(dir);
@@ -165,48 +238,70 @@ function walk(dir, out = []) {
   return out;
 }
 
-const files = [
-  ...ROOTS.flatMap((root) => walk(root)),
-  ...ROOT_FILES.filter((file) => {
-    try {
-      return statSync(file).isFile();
-    } catch {
-      return false;
-    }
-  }),
-];
+/**
+ * Every file this guard is responsible for. Exported so the test can ask the
+ * TREE what exists and compare it against EXTENSIONS, rather than asking the
+ * list to confirm itself.
+ */
+export function collectFiles() {
+  return [
+    ...ROOTS.flatMap((root) => walk(root)),
+    ...rootFiles(),
+  ];
+}
 
-const hits = [];
-for (const file of files) {
-  if ([...ALLOW.keys()].some((substring) => file.includes(substring))) continue;
-  // src/ is held to plain ASCII; everywhere else, to the alphabet.
+/** The banned set for a given path: plain ASCII under src/, the alphabet elsewhere. */
+export function bannedFor(file) {
   const inSrc = file.startsWith(`src${sep}`) || file.startsWith('src/');
-  const banned = inSrc ? NON_ASCII : OFFENDERS;
-  const lines = readFileSync(file, 'utf8').split('\n');
-  lines.forEach((line, index) => {
-    const match = line.match(banned);
-    if (match) {
-      const count = [...line].filter((ch) => banned.test(ch)).length;
-      // src/ bans everything above U+007F, so the offender is often a character
-      // NAME has never heard of. Fall back to the codepoint: "U+2022" is a
-      // usable thing to search for, and `undefined` is not.
-      const what = NAME[match[0]] ?? `U+${match[0].codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`;
-      hits.push(`${file}:${index + 1}  ${what}${count > 1 ? ` (+${count - 1} more on this line)` : ''}`);
-    }
-  });
+  return inSrc ? NON_ASCII : OFFENDERS;
 }
 
-if (hits.length) {
-  console.error(
-    `ascii: ${hits.length} line(s) carry typographic non-ASCII.\n` +
-      'House rule: plain ASCII in prose and strings. Replacements: dash -> comma/colon/" - ", ' +
-      'arrow -> "->", ellipsis -> "...", times -> "x", curly quotes -> straight.\n' +
-      'Under src/ the rule is stricter and simpler: NOTHING above U+007F. A glyph ' +
-      'that is genuinely dev-facing output belongs in src/glyphs.ts, imported as a ' +
-      'const - see that file.\n' +
-      'A verbatim upstream quote that must stay byte-exact goes in ALLOW with a reason.\n',
-  );
-  for (const hit of hits) console.error(`  ${hit}`);
-  process.exit(1);
+/**
+ * Scan `files` and return one line per offending source line. Exported so the
+ * test can feed it a file of its own and confirm the guard actually FIRES -
+ * an alphabet that matches nothing reports a clean sweep, which is the failure
+ * mode this whole file is a record of.
+ */
+export function scan(files) {
+  const hits = [];
+  for (const file of files) {
+    if ([...ALLOW.keys()].some((substring) => file.includes(substring))) continue;
+    // src/ is held to plain ASCII; everywhere else, to the alphabet.
+    const banned = bannedFor(file);
+    const lines = readFileSync(file, 'utf8').split('\n');
+    lines.forEach((line, index) => {
+      const match = line.match(banned);
+      if (match) {
+        const count = [...line].filter((ch) => banned.test(ch)).length;
+        // src/ bans everything above U+007F, so the offender is often a character
+        // NAME has never heard of. Fall back to the codepoint: "U+2022" is a
+        // usable thing to search for, and `undefined` is not.
+        const what = NAME[match[0]] ?? `U+${match[0].codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`;
+        hits.push(`${file}:${index + 1}  ${what}${count > 1 ? ` (+${count - 1} more on this line)` : ''}`);
+      }
+    });
+  }
+  return hits;
 }
-console.log(`ascii: OK (${files.length} files, no typographic non-ASCII)`);
+
+// Run only as a CLI. Importing this module must not scan the tree and must not
+// call process.exit() - tests/ascii-guard.test.ts imports EXTENSIONS and scan().
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const files = collectFiles();
+  const hits = scan(files);
+
+  if (hits.length) {
+    console.error(
+      `ascii: ${hits.length} line(s) carry typographic non-ASCII.\n` +
+        'House rule: plain ASCII in prose and strings. Replacements: dash -> comma/colon/" - ", ' +
+        'arrow -> "->", ellipsis -> "...", times -> "x", curly quotes -> straight.\n' +
+        'Under src/ the rule is stricter and simpler: NOTHING above U+007F. A glyph ' +
+        'that is genuinely dev-facing output belongs in src/glyphs.ts, imported as a ' +
+        'const - see that file.\n' +
+        'A verbatim upstream quote that must stay byte-exact goes in ALLOW with a reason.\n',
+    );
+    for (const hit of hits) console.error(`  ${hit}`);
+    process.exit(1);
+  }
+  console.log(`ascii: OK (${files.length} files, no typographic non-ASCII)`);
+}

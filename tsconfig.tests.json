@@ -1,0 +1,59 @@
+{
+  // Typechecks `tests/`, which nothing did before. `tsconfig.json` is
+  // `include: ["src/**/*"]` and `tsconfig.typecheck.json` adds two named
+  // files, so 2,400-odd tests compiled only through Vitest's transpiler -
+  // which strips types and never checks them. That is how a call to
+  // `bus.getHandler()` (no such method) and an option named `deadLetter` (no
+  // such key) sat in the suite asserting nothing, and how 21 call sites kept
+  // compiling against a `sync()` signature that had been replaced.
+  //
+  // Its own program, not an addition to the others, for the reason
+  // tsconfig.typecheck.json already gives: `tests/typed-contract.typecheck.ts`
+  // augments GlobalCommands, and that augmentation must not leak into the
+  // build emit - or, as it turns out, into every other test file, where it
+  // narrows `dispatch()` to two action names and produces a hundred errors
+  // that are purely an artifact of sharing a program.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "emitDeclarationOnly": false,
+    "declaration": false,
+    "declarationMap": false,
+    "rootDir": ".",
+    // Import attributes (`with { type: 'json' }`) need a module setting that
+    // admits them; ES2022 does not.
+    "module": "preserve",
+    // Tests read `import.meta.env` (the Vite shape), and vitest.config.ts sets
+    // `globals: true`, so a file may use `afterEach` without importing it.
+    "types": ["node", "vite/client", "vitest/globals"],
+    // Several tests import a build script (`scripts/build.mjs`) to assert on
+    // what it emits. Those are JS with no declarations, and checking them is
+    // not this project's job - importing them is.
+    "allowJs": true,
+    "checkJs": false,
+    // `src/vitest.ts` does `await import('vapor-chamber')`, which resolves
+    // through the package exports to `dist/*.d.ts`. That is a SECOND identity
+    // for every type it names, so `AsyncCommandBus` from dist is not the
+    // `AsyncCommandBus` the file annotates with. Point the self-reference at
+    // the source and there is one of each again.
+    "paths": {
+      "vapor-chamber": ["./src/index.ts"],
+      "vapor-chamber/*": ["./src/*"]
+    }
+  },
+  "include": ["src/**/*", "tests/**/*", "scripts/**/*.mjs"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    // Compile-time contract files with their own program (see above) and
+    // their own `@ts-expect-error` expectations, which only hold there.
+    "tests/typed-contract.typecheck.ts",
+    "tests/types/**",
+    "tests/**/*.test-d.ts",
+    // `*-verify.ts` are standalone scripts run directly (node/tsx), not part
+    // of the suite: they import with explicit `.ts` extensions, which this
+    // program's resolution rejects, and they assert on literal `false === true`
+    // comparisons that only make sense when executed.
+    "tests/**/*-verify.ts"
+  ]
+}

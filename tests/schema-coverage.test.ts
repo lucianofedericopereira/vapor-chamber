@@ -89,6 +89,23 @@ describe('schemaLogger else branches', () => {
     expect(payloadCall).toHaveLength(2);
     expect(payloadCall?.[1]).toEqual({ reason: 'manual' });
   });
+
+  // Logs the real result on an ASYNC bus, where it used to log `undefined`.
+  it('logs the settled value on an async bus, not a pending promise', async ({ asyncBus: bus }) => {
+    vi.spyOn(console, 'groupCollapsed').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.spyOn(console, 'groupEnd').mockImplementation(() => {});
+
+    bus.use(schemaLogger({ cartAdd: { target: { id: 'number' } } }));
+    bus.register('cartAdd', async () => 'added');
+    await bus.dispatch('cartAdd', { id: 1 });
+
+    // `next()` hands back a promise here. Reading `.ok` off it yielded
+    // `undefined`, so this line took the error branch on a SUCCESS and printed
+    // the error - which was `undefined` too.
+    const resultCall = log.mock.calls.find(c => c[0] === 'result:');
+    expect(resultCall?.[1]).toBe('added');
+  });
 });
 
 // ---------------------------------------------------------------------------

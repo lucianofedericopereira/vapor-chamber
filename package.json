@@ -1,6 +1,6 @@
 {
   "name": "vapor-chamber",
-  "version": "1.21.0",
+  "version": "1.22.0",
   "description": "Lightweight command bus for Vue Vapor - plugins, hooks, undo/redo, Vue 3.6 Vapor aligned",
   "type": "module",
   "main": "./dist/index.js",
@@ -183,9 +183,9 @@
     "build:types": "tsc",
     "build:js": "node scripts/build.mjs",
     "dev": "tsc --watch",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.typecheck.json && tsc -p examples/tsconfig.patterns.json",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.typecheck.json && tsc -p tsconfig.tests.json && tsc -p examples/tsconfig.patterns.json",
     "lint": "biome check --write src tests scripts bin",
-    "lint:check": "biome check src tests scripts bin && node scripts/check-env-guards.mjs && node scripts/check-line-citations.mjs && node scripts/check-doc-claims.mjs && node scripts/stamp-docs.mjs --check && node scripts/check-ascii.mjs",
+    "lint:check": "biome check src tests scripts bin && node scripts/check-env-guards.mjs && node scripts/check-console-shape.mjs && node scripts/check-line-citations.mjs && node scripts/check-doc-claims.mjs && node scripts/stamp-docs.mjs --check && node scripts/check-ascii.mjs",
     "docs:stamp": "node scripts/stamp-docs.mjs",
     "docs:check": "node scripts/stamp-docs.mjs --check",
     "test": "vitest run && vitest run -c vitest.vapor.config.ts",
@@ -196,10 +196,12 @@
     "bench": "vitest bench --run tests/perf.bench.ts --reporter=default --reporter=./scripts/bench-ratios-reporter.mjs",
     "ab:vue": "node scripts/ab-vue.mjs",
     "size:check": "node scripts/check-size.mjs",
+    "gate": "node scripts/gate.mjs",
     "size": "node scripts/measure-size.mjs",
     "size:doc": "node scripts/measure-size.mjs --md > docs/BUNDLE-SIZES.md",
     "coverage": "node scripts/measure-coverage.mjs",
     "coverage:doc": "vitest run --coverage && node scripts/measure-coverage.mjs --md > docs/COVERAGE.md",
+    "check:example": "npm --prefix examples/vapor-sfc run build && node scripts/check-example-directive.mjs && npm --prefix examples/vapor-island-cart run build",
     "loc": "node scripts/measure-loc.mjs src",
     "docs": "node scripts/generate-api-docs.mjs",
     "docs:serve": "node scripts/serve-docs.mjs",
@@ -238,11 +240,11 @@
   "peerDependencies": {
     "@vitejs/plugin-vue": ">=5.0.0",
     "@vue/devtools-api": ">=6.0.0",
-    "@vue/reactivity": ">=3.5.0 || >=3.6.0-rc.8",
+    "@vue/reactivity": ">=3.5.0 || >=3.6.0-rc.9",
     "alien-signals": ">=3.1.2",
     "vite": ">=5.0.0",
-    "vue": ">=3.5.0 || >=3.6.0-rc.8",
-    "vitest": ">=5.0.0"
+    "vitest": ">=5.0.0",
+    "vue": ">=3.5.0 || >=3.6.0-rc.9"
   },
   "peerDependenciesMeta": {
     "alien-signals": {
@@ -273,7 +275,8 @@
     "@vitejs/plugin-vue": "^6.0.8",
     "@vitest/coverage-v8": "^5.0.1",
     "@vue/devtools-api": "^8.1.5",
-    "@vue/reactivity": "^3.6.0-rc.8",
+    "@vue/reactivity": "^3.6.0-rc.9",
+    "@vue/runtime-vapor": "^3.6.0-rc.9",
     "alien-signals": "^3.1.2",
     "esbuild": "^0.28.2",
     "eventemitter3": "^5.0.4",
@@ -285,7 +288,7 @@
     "typescript": "^6.0.3",
     "vite": "^8.2.2",
     "vitest": "^5.0.1",
-    "vue": "^3.6.0-rc.8"
+    "vue": "^3.6.0-rc.9"
   },
   "engines": {
     "node": ">=22.12.0"

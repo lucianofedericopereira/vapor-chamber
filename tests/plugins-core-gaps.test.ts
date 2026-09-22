@@ -162,7 +162,18 @@ describe('history/optimistic - optional-shape arms', () => {
     bus.dispatch('historyUndo', {});
     expect(calls).toEqual(['do', 'undo']);
     // The trigger that was never configured is not a registered command.
-    expect(bus.getHandler?.('historyRedo') ?? null).toBeNull();
+    //
+    // This line used to read `expect(bus.getHandler?.('historyRedo') ?? null)
+    // .toBeNull()`. There is no `getHandler` on the bus - the accessors are
+    // `hasHandler` and `getUndoHandler` - so the optional call was `undefined`,
+    // `?? null` made it `null`, and the assertion was `expect(null).toBeNull()`:
+    // it could not fail, for any code, ever. It is the one thing in this test
+    // that was checking the thing the test is named for. Nothing caught it
+    // because `tests/` is not typechecked.
+    expect(bus.hasHandler('historyRedo')).toBe(false);
+    // ...and the configured one IS registered, so the line above is reading a
+    // real difference rather than a bus with nothing on it.
+    expect(bus.hasHandler('historyUndo')).toBe(true);
 
     // ...and the mirror: redo only.
     const bus2 = createCommandBus();
@@ -255,7 +266,7 @@ describe('optimisticUndo - arms the rollback tests skip', () => {
     bus.register('save', async () => { throw new Error('server said no'); }, {
       undo: () => { undone.push('undo'); },
     });
-    bus.use(optimisticUndo(bus, ['save'], { predict: () => ({ optimistic: true }) })); // no onRollback
+    bus.use(optimisticUndo(bus as never, ['save'], { predict: () => ({ optimistic: true }) })); // no onRollback
 
     const result: any = await bus.dispatch('save', { id: 1 });
     expect(result).toSucceedWith({ optimistic: true }); // predicted value returned immediately

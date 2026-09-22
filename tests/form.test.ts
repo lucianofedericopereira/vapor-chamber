@@ -290,7 +290,7 @@ describe('createFormBus - submit() races', () => {
   });
 
   it('a double-click does not run two overlapping submits', async () => {
-    let releaseSubmit: (() => void) | null = null;
+    let releaseSubmit: (() => void) | null = null as (() => void) | null;
     let calls = 0;
 
     const form = createFormBus({
@@ -339,7 +339,7 @@ describe('createFormBus - submit() races', () => {
   // The same window, entered through an async validator: the refused click must
   // not clear the validating/busy flags the live call still owns.
   it('a click during async validation does not disturb the in-flight submit', async () => {
-    let releaseRule: (() => void) | null = null;
+    let releaseRule: (() => void) | null = null as (() => void) | null;
     let calls = 0;
     const form = createFormBus({
       fields: { name: 'Alice' },
@@ -410,7 +410,7 @@ describe('rule/values mismatch and optional onSubmit', () => {
     const form = createFormBus({
       fields: { email: 'a@b.com' },
       // `ghost` has a rule but no field - must be ignored, not crash or error
-      rules: { email: (v) => (v.includes('@') ? null : 'bad'), ghost: () => 'never' } as never,
+      rules: { email: (v: string) => (v.includes('@') ? null : 'bad'), ghost: () => 'never' } as never,
     });
     form.set('email', 'x@y.z'); // live sync validation path
     expect(form.errors.value).toEqual({});
