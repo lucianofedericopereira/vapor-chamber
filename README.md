@@ -1224,7 +1224,7 @@ Three `<script>`-tag drop-ins. Pick by audience, not feature checklist.
 
 | Variant | Audience | Min | Brotli | Gzip |
 |---|---|--:|--:|--:|
-| **core** | Sprinkled JS on server-rendered pages (Blade, Rails, Django, WordPress). You dispatch user actions to a backend over HTTP. | <!-- vc:sizeIifeCoreRaw -->26.7<!-- /vc:sizeIifeCoreRaw --> KB | <!-- vc:sizeIifeCore -->7.9<!-- /vc:sizeIifeCore --> KB | <!-- vc:sizeIifeCoreGzip -->8.8<!-- /vc:sizeIifeCoreGzip --> KB |
+| **core** | Sprinkled JS on server-rendered pages (Blade, Rails, Django, WordPress). You dispatch user actions to a backend over HTTP. | <!-- vc:sizeIifeCoreRaw -->26.7<!-- /vc:sizeIifeCoreRaw --> KB | <!-- vc:sizeIifeCore -->7.9<!-- /vc:sizeIifeCore --> KB | <!-- vc:sizeIifeCoreGzip -->8.7<!-- /vc:sizeIifeCoreGzip --> KB |
 | **elements** | Embeddable widgets (chat bubbles, checkout buttons, third-party drop-ins). You ship a `<vc-widget>` custom element. | <!-- vc:sizeIifeElementsRaw -->28.4<!-- /vc:sizeIifeElementsRaw --> KB | <!-- vc:sizeIifeElements -->8.4<!-- /vc:sizeIifeElements --> KB | <!-- vc:sizeIifeElementsGzip -->9.3<!-- /vc:sizeIifeElementsGzip --> KB |
 | **full** | SPAs that grew big enough to want everything (realtime, undo/redo, persistence, full Vapor surface). | <!-- vc:sizeIifeFullRaw -->39.0<!-- /vc:sizeIifeFullRaw --> KB | <!-- vc:sizeIifeFull -->11.6<!-- /vc:sizeIifeFull --> KB | <!-- vc:sizeIifeFullGzip -->12.9<!-- /vc:sizeIifeFullGzip --> KB |
 

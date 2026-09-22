@@ -29,28 +29,28 @@ A `-` means nothing is deferred, which is every export except `./vitest` and `./
 
 | export | min KB | gzip KB | brotli KB | first load KB | on demand KB |
 |---|--:|--:|--:|--:|--:|
-| `.` | 81.3 | 26.6 | 23.2 | 23.2 | - |
+| `.` | 81.3 | 26.5 | 23.2 | 23.2 | - |
 | `./vue` | 21.7 | 7.7 | 6.9 | 6.9 | - |
-| `./vapor` | 23.0 | 8.1 | 7.3 | 7.3 | - |
+| `./vapor` | 23.0 | 8.0 | 7.3 | 7.3 | - |
 | `./transports` | 12.2 | 4.8 | 4.3 | 4.3 | - |
 | `./directives` | 18.2 | 6.4 | 5.8 | 5.8 | - |
 | `./vite` | 5.3 | 2.5 | 2.2 | 2.2 | - |
 | `./vitest` | 91.2 | 30.0 | 26.2 | 3.9 | 22.8 |
 | `./vitest/pure` | 9.0 | 3.5 | 3.1 | 3.1 | - |
 | `./vitest/mcp` | 26.8 | 9.8 | 8.8 | 8.8 | - |
-| `./transitions` | 17.0 | 6.1 | 5.5 | 5.5 | - |
+| `./transitions` | 17.0 | 6.0 | 5.5 | 5.5 | - |
 | `./ssr` | 1.3 | 0.7 | 0.6 | 0.6 | - |
 | `./fast-lane` | 0.9 | 0.4 | 0.4 | 0.4 | - |
 | `./observable` | 0.5 | 0.3 | 0.3 | 0.3 | - |
 | `./standard-schema` | 1.7 | 0.8 | 0.7 | 0.7 | - |
-| `./alien-signals` | 0.2 | 0.2 | 0.1 | 0.1 | - |
+| `./alien-signals` | 0.2 | 0.1 | 0.1 | 0.1 | - |
 | `./reactive` | 16.0 | 5.7 | 5.2 | 5.2 | - |
 | `./outbox` | 5.3 | 2.2 | 1.9 | 1.9 | - |
 | `./mcp` | 4.1 | 1.9 | 1.7 | 1.7 | - |
 | `./devtools` | 0.1 | 0.1 | 0.1 | 0.1 | - |
 | `./stream-parser` | 6.7 | 2.0 | 1.9 | 1.9 | - |
 | `./store` | 1.5 | 0.8 | 0.7 | 0.7 | - |
-| `./router` | 28.2 | 10.5 | 9.5 | 9.3 | 0.3 |
+| `./router` | 28.2 | 10.4 | 9.5 | 9.3 | 0.3 |
 | `./router/vdom` | 0.9 | 0.5 | 0.4 | 0.4 | - |
 | `./router/vapor` | 0.8 | 0.5 | 0.4 | 0.4 | - |
 | `./router/remote` | 8.8 | 3.7 | 3.4 | 3.4 | - |
@@ -89,5 +89,5 @@ The split was decided on the same measurement taken on the vapor-sfc example at 
 | variant | min KB | gzip KB | brotli KB |
 |---|--:|--:|--:|
 | `vapor-chamber (full)` | 39.0 | 12.9 | 11.6 |
-| `vapor-chamber-core` | 26.7 | 8.8 | 7.9 |
+| `vapor-chamber-core` | 26.7 | 8.7 | 7.9 |
 | `vapor-chamber-elements` | 28.4 | 9.3 | 8.4 |
