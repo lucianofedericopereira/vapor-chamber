@@ -10,8 +10,6 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# `contents: write` is for the bundle-sizes auto-commit in the test job; the
-# other two are what actions/deploy-pages requires.
 permissions:
   contents: write
   pages: write
@@ -27,34 +25,18 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      # Root project only. The examples are npm workspaces, so a bare `npm ci`
-      # would also install astro / vue-tsc / plugin-vue into every job - and no
-      # job here builds an example (see the note in the test job). Measured:
-      # 198M with this flag pair vs 297M without.
       - run: npm ci --workspaces=false --include-workspace-root
       - run: npm run typecheck
       - run: npm run lint:check
 
   test:
-    name: test (Node ${{ matrix.node }} / ${{ matrix.os }})
+    name: test (Node ${{ matrix.node }} /${{ matrix.os }})
     runs-on: ${{ matrix.os }}
-    # The ONLY hang guard in this project. Per-test millisecond ceilings were
-    # removed (see vitest.config.ts): they assert machine speed, and every one
-    # the suite carried eventually failed on slower hardware while nothing was
-    # wrong. A job-level limit is stated once, is not a claim about any test,
-    # and cannot fire early on a slow runner the way a per-test ceiling does.
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        # Matches engines.node (>=22.12.0). Node 20 went EOL in April 2026;
-        # it was already absent from this matrix while package.json still
-        # claimed to support it, so the floor was moved to agree with what CI
-        # actually verifies. 22.12 specifically because Vite and
-        # @vitejs/plugin-vue require ^20.19.0 || >=22.12.0, and Astro 7
-        # (examples/exo-astro, whose source the root suite imports directly)
-        # requires >=22.12.0.
         node: ['22', '24']
     steps:
       - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
@@ -62,28 +44,12 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      # Root project only. The examples are npm workspaces, so a bare `npm ci`
-      # would also install astro / vue-tsc / plugin-vue into every job - and no
-      # job here builds an example (see the note in the test job). Measured:
-      # 198M with this flag pair vs 297M without.
       - run: npm ci --workspaces=false --include-workspace-root
-      # No `npm ci --prefix examples/exo-astro` needed: tests/examples/
-      # exo-astro-directives.test.ts imports that example's source directly,
-      # and Vite's oxc transform resolves the nearest tsconfig - which is now
-      # the self-contained examples/exo-astro/src/directives/tsconfig.json.
-      # The root install alone is enough; keep it that way.
       - run: npm run test:run
-      # The second vitest project, `vue` aliased to the with-vapor dist. It is
-      # NOT part of `test:run`, so without this line the router/vapor outlet
-      # ships unguarded: tests/vapor/vapor-outlet-size.test.ts is the acceptance
-      # guard on that subpath's brotli margin, and its whole purpose is to fail
-      # loudly when the margin erodes. `npm ci` ran `prepare`, so dist/ exists.
       - run: npm run test:vapor
       - run: node scripts/check-size.mjs
       - run: npm run loc
       
-      # Push-only: on a pull_request the checkout is a detached merge ref, so
-      # `git push` would fail outright - and a fork's token cannot write anyway.
       - name: Update bundle sizes docs
         if: github.event_name == 'push' && matrix.os == 'ubuntu-latest' && matrix.node == '22'
         run: |
@@ -102,10 +68,6 @@ jobs:
             git push
           fi
 
-      # Coverage, plus the freshness gate scripts/measure-coverage.mjs asks for
-      # in its own header. A hard diff rather than the auto-commit the sizes doc
-      # uses: two jobs pushing in one workflow would race. A failure here means
-      # coverage moved and nobody ran `npm run coverage:doc`.
       - name: coverage + docs/COVERAGE.md freshness
         if: matrix.os == 'ubuntu-latest' && matrix.node == '24'
         run: |
@@ -116,7 +78,6 @@ jobs:
   bench:
     name: bench smoke (no regression vs baseline)
     runs-on: ubuntu-latest
-    # Hang guard - see the note on the test job.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
@@ -124,14 +85,7 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      # Root project only. The examples are npm workspaces, so a bare `npm ci`
-      # would also install astro / vue-tsc / plugin-vue into every job - and no
-      # job here builds an example (see the note in the test job). Measured:
-      # 198M with this flag pair vs 297M without.
       - run: npm ci --workspaces=false --include-workspace-root
-      # `--reporter=default` is required on Vitest 5: it removed
-      # `benchmark.reporters`, so a bench run takes vitest.config.ts's `dot`
-      # reporter and bench.txt would hold a row of dots and no numbers.
       - run: set -o pipefail; npx vitest bench --run tests/perf.bench.ts --reporter=default 2>&1 | tee bench.txt
         shell: bash
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -149,25 +103,13 @@ jobs:
         with:
           node-version: '22'
           cache: npm
-      # Root project only. The examples are npm workspaces, so a bare `npm ci`
-      # would also install astro / vue-tsc / plugin-vue into every job - and no
-      # job here builds an example (see the note in the test job). Measured:
-      # 198M with this flag pair vs 297M without.
       - run: npm ci --workspaces=false --include-workspace-root
 
-      # The reference is COMMITTED Markdown, so this is a freshness gate rather
-      # than the thing that produces the site. A failure means the public
-      # surface moved and nobody ran `npm run docs`. That is the point of
-      # committing it: an added or changed export shows up in the pull request
-      # instead of disappearing into a gitignored build.
       - run: npm run docs
-      # `git add -N` first: a new entry point writes an untracked page, which a
-      # bare `git diff` does not see - the added export would pass unnoticed.
       - run: git add -N docs/api && git diff --exit-code docs/api
 
   deploy-docs:
     name: deploy docs
-    # Waits for test so the bundle-sizes auto-commit has landed before checkout.
     needs: [test, lint, api-docs]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
@@ -177,16 +119,8 @@ jobs:
     steps:
       - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
         with:
-          # Explicit ref, not the triggering SHA: picks up the bundle-sizes bot
-          # commit the test job may have just pushed.
           ref: main
 
-      # No install and no generate step. The site is index.html plus assets/,
-      # both committed and static, reading the committed docs/api/*.md at view
-      # time - so there is nothing to build here, and the api-docs job above has
-      # already proved the Markdown matches the source. Publishing the checkout
-      # as-is is also why `.nojekyll` is committed at the root: Jekyll would
-      # otherwise convert every .md into HTML and the pages would 404 on fetch.
       - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
