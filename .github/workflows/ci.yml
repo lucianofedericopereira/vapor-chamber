@@ -50,30 +50,26 @@ jobs:
       - run: node scripts/check-size.mjs
       - run: npm run loc
       
-      - name: Update bundle sizes docs
+      - name: Auto-update documentation (Sizes & Coverage)
         if: github.event_name == 'push' && matrix.os == 'ubuntu-latest' && matrix.node == '22'
         run: |
+          # Generate new metrics
           npm run size:doc
-          # The prose QUOTES those numbers through vc:size* markers, and only
-          # stamp-docs rewrites it. Without this the bot lands a BUNDLE-SIZES.md
-          # whose markers nobody re-stamped, and the NEXT run's lint:check fails
-          # on a change CI itself made.
+          npm run test:coverage
+          node scripts/measure-coverage.mjs --md > docs/COVERAGE.md
+          
+          # Stamp docs to prevent linting failures on the next run
           npm run docs:stamp
+          
+          # Commit and push if anything changed
           PATHS="docs README.md CONTRIBUTING.md ROADMAP.md SECURITY.md examples"
           if ! git diff --exit-code $PATHS; then
             git config --global user.name "github-actions[bot]"
             git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add $PATHS
-            git commit -m "docs: auto-update bundle sizes [skip ci]"
+            git commit -m "docs: auto-update metrics [skip ci]"
             git push
           fi
-
-      - name: coverage + docs/COVERAGE.md freshness
-        if: matrix.os == 'ubuntu-latest' && matrix.node == '24'
-        run: |
-          npm run test:coverage
-          node scripts/measure-coverage.mjs --md > docs/COVERAGE.md
-          git diff --exit-code docs/COVERAGE.md
 
   bench:
     name: bench smoke (no regression vs baseline)
