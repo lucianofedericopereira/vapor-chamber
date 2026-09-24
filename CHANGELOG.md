@@ -2,7 +2,95 @@
 
 All notable changes to this project will be documented in this file.
 
-## v1.23.0 - General Improvements
+## v1.24.0 - 2026-09-24
+
+### Added: RFC 9457 problem documents are read on every path
+
+A backend that answers a failure as `application/problem+json` -
+`{ type, title, status, detail, code }`, `code` as an extension member - lost it
+three ways. Measured with only `fetch` stubbed, then against the reference
+controller running under Laravel 13:
+
+- `createHttpClient` parsed a body only when its content type contained
+  `application/json`, which `application/problem+json` does not. The problem
+  stayed a string, so `HttpError.code` read `undefined` - on reads, in
+  `router-fetch`, and in any bridge handed an `httpClient`. `postCommand` was
+  never affected: its fetch calls `raw.json()` whatever the type.
+- Every bridge took its message from `error ?? message`, never `detail`, so the
+  backend's sentence arrived as `HTTP 404`.
+- A batched result, or a WebSocket frame, carrying `problem` resolved as a
+  SUCCESS whose value was `undefined`.
+
+Now:
+
+- The client parses `application/json` and any `+json` structured suffix
+  (RFC 6839), parameters allowed. A type that only contains "json"
+  (`application/json-seq`) stays text - it used to be `JSON.parse`d, which
+  throws on a real JSON text sequence.
+- `Accept` is `application/json, application/problem+json`.
+- A problem's `detail` is the error's message, read once, in `HttpError`
+  itself - so the client, `router-fetch` and every bridge agree. A body without
+  `detail` keeps `HTTP <status>`, and a body with the older `error`/`message`
+  keeps what the bridges read from it.
+- A result `{ id, problem }` is a failure, batched or over WebSocket: message
+  from `detail`, then `title`; code from `problem.code`, then the result's
+  `code`. Both paths now share one reading, `resultFailure()` in
+  `transports.ts`, where each had its own `ok === false` branch. The single
+  bridge keeps its own: there a problem is the error response and arrives as
+  an HttpError, and routing it through the helper cost core +128 B raw for a
+  shape its 2xx never carries.
+- `ProblemDetails` is exported, and `BackendResponse` gains `detail` and
+  `problem`.
+
+**What is deliberately not read.** `type` is an opaque URI: nothing derives a
+code from it, so a backend sends `code` as an extension member. The `status`
+inside a batched problem is data, not the response's status, and changes no
+retry decision.
+
+**The reference controller** (`examples/laravel-backend/VaporChamberController.php`)
+now answers every failure as `application/problem+json`, with an absolute `type`
+(`url('/problems/<code>')`), the status's reason phrase as `title`, and `code`.
+On `batch()` a failed command's problem rides on its own result inside the 200,
+beside `ok: false`. An exception's own `render()` contributes its `code` member
+when it has one, the last segment of its `type` otherwise.
+
+**Upgrade order: the client first.** A v1.23.0 client against the new
+controller still sees every failure as a failure - `ok: false` beside `problem`
+is there for exactly that - but reads `HTTP 422` and `Backend error` for
+messages, and loses the code on a batched result. The previous
+`{ ok: false, error, code }` shape is still read everywhere, so a backend can
+move one endpoint at a time.
+
+**Examples:** the two mock backends (`examples/static-server.mjs`,
+`examples/sprinkled-blade/mock-server.mjs`) answer failures as problems, and
+their 500 no longer echoes the exception's text to the client - it is logged.
+
+**Fixture:** `tests/problem-details.test.ts` - 17 cases across the client,
+`router-fetch`, `createHttpBridge` (through `postCommand` and through an
+`httpClient`), `createBatchingHttpBridge` and `createWsBridge`, each with
+today's shape as the control. 13 fail against v1.23.0; the 4 controls pass on
+both. The stubbed backend it answers with - `reply`, `problemReply`,
+`batchServer`, `singleServer`, `MockWebSocket` - is now one shared file,
+`tests/backend-stubs.ts`, and `batch-redirect`, `outbox-refusal` and
+`transports` use it instead of their own copies.
+
+**Size:** +136 B raw / +62 B brotli on the full IIFE, which carries the batch
+and WebSocket bridges; +21 B raw on core and elements, +3 / -1 B brotli; +7 B
+brotli on the Blade consumer ESM bundle, under its unchanged ceiling. Squeezed
+before landing - how is in `scripts/check-size.mjs`.
+
+### Fixed: the last uncovered branch, back to 100% on all four axes
+
+`runFlush` falls back to `new Error('Unknown error')` when a replay fails with
+no `error` - the shape a hand-written plugin can return - and no test reached
+it since v1.23.0 added `isRetryable`. `tests/outbox-edges.test.ts` now does,
+and pins that the predicate sees that Error rather than `undefined`.
+
+## v1.23.0 - 2026-09-23
+
+Post-v1.22.0 work. The first four entries were written into the v1.22.0 section
+while it was still open and are moved here unchanged - v1.22.0 shipped on
+2026-09-21 and its text is frozen at what was published.
 
 ### Fixed: the backend's `code` survives an envelope failure
 

@@ -5,8 +5,9 @@
  * Drop into app/Http/Controllers/. Adapt the namespace to your project.
  *
  * The controller is intentionally thin - it dispatches to action classes
- * registered in config/vapor-chamber.php and converts exceptions into the
- * lib's response shape ({ ok, state | error, code? }). Laravel's own
+ * registered in config/vapor-chamber.php and converts exceptions into an
+ * RFC 9457 problem ({ type, title, status, detail, code }), answered as
+ * `application/problem+json`. A success stays { ok: true, state }. Laravel's own
  * ValidationException/AuthorizationException/ModelNotFoundException are
  * recognized by type; anything else that declares its own render() (any
  * RFC 9457-shaped exception from a package or the host app) has its
@@ -35,6 +36,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Symfony\Component\HttpFoundation\Response;
 
 class VaporChamberController extends Controller
 {
@@ -55,7 +57,9 @@ class VaporChamberController extends Controller
             $request->user(),
         );
 
-        return response()->json($result['body'], $result['status']);
+        return $result['status'] >= 400
+            ? response()->json($result['body'], $result['status'], ['Content-Type' => 'application/problem+json'])
+            : response()->json($result['body'], $result['status']);
     }
 
     /**
@@ -69,13 +73,20 @@ class VaporChamberController extends Controller
      * mapping) - only the request/response envelope differs. One command's
      * failure never aborts its siblings; each result is reported by `id`.
      *
-     *   { results: [{ id, ok, state?, error?, code? }, ...] }
+     *   { results: [{ id, ok: true, state }, { id, ok: false, problem }, ...] }
+     *
+     * A failed command's problem is the RESULT, not the response: the batch
+     * answers 200 because the request succeeded, and RFC 9457 has no shape for
+     * several failures in one response. `ok: false` rides beside `problem` for
+     * clients older than v1.24.0, which read only `ok` and would otherwise take
+     * the result for a success.
      */
     public function batch(Request $request): JsonResponse
     {
         $commands = $request->input('commands', []);
         if (!is_array($commands)) {
-            return response()->json(['ok' => false, 'error' => 'Missing "commands" array'], 400);
+            $result = $this->problem('Missing "commands" array', 400, 'missing_commands');
+            return response()->json($result['body'], 400, ['Content-Type' => 'application/problem+json']);
         }
 
         $results = [];
@@ -89,7 +100,9 @@ class VaporChamberController extends Controller
                 $entry['idempotencyKey'] ?? null,
                 $request->user(),
             );
-            $results[] = ['id' => $id, ...$result['body']];
+            $results[] = $result['status'] >= 400
+                ? ['id' => $id, 'ok' => false, 'problem' => $result['body']]
+                : ['id' => $id, ...$result['body']];
         }
 
         return response()->json(['results' => $results]);
@@ -106,12 +119,12 @@ class VaporChamberController extends Controller
     private function dispatchOne(Request $request, string $command, mixed $target, mixed $payload, ?string $idempotencyKey, mixed $user): array
     {
         if ($command === '') {
-            return $this->fail('Missing "command" field', 400, 'missing_command');
+            return $this->problem('Missing "command" field', 400, 'missing_command');
         }
 
         $handler = config('vapor-chamber.handlers')[$command] ?? null;
         if (!$handler) {
-            return $this->fail("Unknown command: {$command}", 404, 'unknown_command');
+            return $this->problem("Unknown command: {$command}", 404, 'unknown_command');
         }
 
         // Wire half of exactly-once: the JS `idempotent()` plugin (and the
@@ -129,7 +142,7 @@ class VaporChamberController extends Controller
         // so the client sees one outcome. 30s bounds a crashed holder.
         $lock = $cacheKey ? Cache::lock("vc:idem:lock:{$command}:{$idempotencyKey}", 30) : null;
         if ($lock && !$lock->get()) {
-            return $this->fail('A request with this Idempotency-Key is still running', 409, 'in_progress');
+            return $this->problem('A request with this Idempotency-Key is still running', 409, 'in_progress');
         }
 
         try {
@@ -153,11 +166,11 @@ class VaporChamberController extends Controller
             }
             return ['body' => $body, 'status' => 200];
         } catch (ValidationException $e) {
-            return $this->fail($e->getMessage(), 422, 'validation_failed');
+            return $this->problem($e->getMessage(), 422, 'validation_failed');
         } catch (AuthorizationException $e) {
-            return $this->fail($e->getMessage(), 403, 'forbidden');
+            return $this->problem($e->getMessage(), 403, 'forbidden');
         } catch (ModelNotFoundException $e) {
-            return $this->fail('Resource not found', 404, 'not_found');
+            return $this->problem('Resource not found', 404, 'not_found');
         } catch (\Throwable $e) {
             // Any exception that declares its own render() (a package's own
             // domain exception, or the host app's) gets its status/detail
@@ -170,44 +183,53 @@ class VaporChamberController extends Controller
                 $rendered = $e->render($request);
                 if ($rendered instanceof JsonResponse) {
                     $data = $rendered->getData(true);
-                    $code = is_string($data['type'] ?? null) ? basename($data['type']) : null;
-                    return $this->fail($data['detail'] ?? $e->getMessage(), $rendered->getStatusCode(), $code);
+                    // Its own `code` extension member when it has one; the
+                    // last segment of `type` otherwise, which is this
+                    // controller's convention, not the RFC's.
+                    $code = is_string($data['code'] ?? null) ? $data['code']
+                        : (is_string($data['type'] ?? null) ? basename($data['type']) : 'error');
+                    return $this->problem($data['detail'] ?? $e->getMessage(), $rendered->getStatusCode(), $code);
                 }
             }
 
             report($e);
-            return $this->fail('Internal error', 500, 'internal_error');
+            return $this->problem('Internal error', 500, 'internal_error');
         } finally {
             $lock?->release();
         }
     }
 
     /**
-     * Failure shape: `error` becomes `result.error.message` on the JS side.
-     * For __invoke() this is sent with the given HTTP status, the client
-     * throws an HttpError, and `code` arrives as `HttpError.code`.
+     * Failure shape: an RFC 9457 problem. `detail` becomes `result.error.message`
+     * on the JS side and `code` (an extension member) becomes `error.code`.
      *
-     * For batch() every result rides in a 200 response body (status is
-     * per-command, not per-HTTP-response) so one command's failure can't fail
-     * its siblings. Nothing throws on that path, so no HttpError is built, and
-     * `code` still arrives: since v1.23.0 `result.error.code` is your `code` on a
-     * batched failure and on any 200 answering `{ ok: false }`, exactly as it is
-     * on a thrown one.
+     * For __invoke() it is the response, sent with the given status and
+     * `application/problem+json`; the client throws an HttpError carrying both.
+     * For batch() it is one result's `problem`, inside a 200 - one command's
+     * failure can't fail its siblings, and nothing throws on that path.
      *
-     * One consequence worth knowing: a refusal delivered this way is treated as
-     * PERMANENT by `retry()`, because the request succeeded and you refused in
-     * the body. Do not send one of the library's own retryable codes here
-     * (`VC_CORE_THROTTLED` and five others) unless you mean the client to try
-     * again - use your own namespace and the refusal stays permanent.
+     * `type` is absolute, as RFC 9457 recommends: this app's `/problems/<code>`.
+     * The URI does not have to resolve to a page. `title` is the status's reason
+     * phrase; an app with a registry of its codes can send its own titles, or
+     * leave `title` and `status` out entirely - every member is optional, and
+     * the library reads only `detail` and `code`.
+     *
+     * One consequence worth knowing: a refusal delivered inside a batch's 200 is
+     * treated as PERMANENT by `retry()`, because the request succeeded and you
+     * refused in the body. Do not send one of the library's own retryable codes
+     * there (`VC_CORE_THROTTLED` and five others) unless you mean the client to
+     * try again - use your own namespace and the refusal stays permanent.
      *
      * @return array{body: array<string, mixed>, status: int}
      */
-    private function fail(string $message, int $status, ?string $code = null): array
+    private function problem(string $detail, int $status, string $code): array
     {
-        $body = ['ok' => false, 'error' => $message];
-        if ($code !== null) {
-            $body['code'] = $code;
-        }
-        return ['body' => $body, 'status' => $status];
+        return ['body' => [
+            'type' => url("/problems/{$code}"),
+            'title' => Response::$statusTexts[$status] ?? 'Error',
+            'status' => $status,
+            'detail' => $detail,
+            'code' => $code,
+        ], 'status' => $status];
     }
 }

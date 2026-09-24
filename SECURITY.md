@@ -6,7 +6,7 @@ Security fixes are backported to:
 
 | Version | Supported          |
 |---------|--------------------|
-| <!-- vc:version -->1.23.0<!-- /vc:version --> (latest minor) | ✅ active |
+| <!-- vc:version -->1.24.0<!-- /vc:version --> (latest minor) | ✅ active |
 | earlier 1.x minors, from 1.1 | ✅ critical fixes only |
 | < 1.1   | ❌ no longer maintained |
 

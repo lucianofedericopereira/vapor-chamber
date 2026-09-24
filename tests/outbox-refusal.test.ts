@@ -29,10 +29,7 @@ import { createAsyncCommandBus } from '../src/command-bus';
 import { createOutbox } from '../src/outbox';
 import type { OutboxRecord } from '../src/outbox';
 import { createBatchingHttpBridge, createHttpBridge } from '../src/transports';
-
-function json(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-}
+import { batchServer, singleServer } from './backend-stubs';
 
 function memoryStorage() {
   let data: OutboxRecord[] | null = null;
@@ -59,29 +56,6 @@ async function queued(bridge: 'batch' | 'single', actions: string[], options: Pa
   const rejected: Array<{ record: OutboxRecord; error: Error & { code?: string } }> = [];
   bus.on('outboxRejected', (cmd) => rejected.push(cmd.target));
   return { outbox, bus, storage, rejected };
-}
-
-/** The reference controller's `batch()`: one 200, a result per command. */
-function batchServer(answer: (command: string) => Record<string, unknown>) {
-  const sent: string[] = [];
-  vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
-    const { commands } = JSON.parse(init.body as string);
-    for (const c of commands) sent.push(c.command);
-    return json(200, { results: commands.map((c: { id: string; command: string }) => ({ id: c.id, ...answer(c.command) })) });
-  });
-  return sent;
-}
-
-/** The reference controller's `__invoke`: the command's own status. */
-function singleServer(answer: (command: string) => [number, Record<string, unknown>]) {
-  const sent: string[] = [];
-  vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
-    const { command } = JSON.parse(init.body as string);
-    sent.push(command);
-    const [status, body] = answer(command);
-    return json(status, body);
-  });
-  return sent;
 }
 
 afterEach(() => {

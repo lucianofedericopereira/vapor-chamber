@@ -66,8 +66,8 @@ from the version the library is tested against.
 - **Real CSRF flow A** - the Blade meta tag + `VaporChamber.connect({ csrf: true })`
   attaching `X-CSRF-TOKEN`, verified by Laravel's `web` middleware.
 - **Action classes** - `__invoke($target, $payload, $user)`, inline
-  `validator()->validate()` -> the controller maps `ValidationException` to
-  `422 { ok: false, error }`.
+  `validator()->validate()` -> the controller maps `ValidationException` to a
+  422 `application/problem+json` answer, `code: 'validation_failed'`.
 - **Server-truth state** - the cart lives in the session; reload the page and
   Blade renders the same numbers the bus returned.
 - **Wire observability** - `bus.on('*', ...)` logs every dispatch on the page.

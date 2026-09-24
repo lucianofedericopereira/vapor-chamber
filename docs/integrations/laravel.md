@@ -26,15 +26,51 @@ route, not one-per-command** - the action name is in the JSON body.
 { "ok": true, "state": { "...whatever your action returns..." } }
 ```
 
-**Response body** (failure):
+**Response body** (failure), an [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457)
+problem sent as `Content-Type: application/problem+json`:
+```json
+{
+  "type": "https://example.test/problems/validation_failed",
+  "title": "Unprocessable Content",
+  "status": 422,
+  "detail": "Human-readable message",
+  "code": "validation_failed"
+}
+```
+
+`state` becomes `result.value` on the client; `detail` becomes
+`result.error.message`, and `code`, an extension member, becomes
+`result.error.code`. HTTP status codes follow normal Laravel conventions:
+200 for success, 422 for a validation failure, 401 for an expired session,
+419 for an expired CSRF token, 500 for an unhandled exception.
+
+**What the client reads from a problem, and what it leaves alone.** Only
+`detail` and `code`. `type` is an opaque URI, so nothing derives a code from it;
+`title` and `status` are for other readers (curl, API tools, monitoring), and an
+app that keeps a registry of its codes can leave both out - every member of a
+problem is optional. The library parses any `+json` media type and asks for
+`application/problem+json` in `Accept` since v1.24.0.
+
+**The previous shape still works**, on every path, so a backend can move one
+endpoint at a time:
 ```json
 { "ok": false, "error": "Human-readable message", "code": "validation_failed" }
 ```
+A body carries one shape or the other: a problem's `detail`, or the older
+`error` (then `message`).
 
-`state` becomes `result.value` on the client; `error` becomes
-`result.error.message`. HTTP status codes follow normal Laravel conventions:
-200 for success, 422 for a validation failure, 401 for an expired session,
-419 for an expired CSRF token, 500 for an unhandled exception.
+**On the batch endpoint** the response is a 200 and each failed command's
+problem rides on its own result, because RFC 9457 has no shape for several
+failures in one response:
+```json
+{ "results": [
+  { "id": "1", "ok": true, "state": { "count": 3 } },
+  { "id": "2", "ok": false, "problem": { "type": "https://example.test/problems/not_found",
+                                         "status": 404, "detail": "No such cart", "code": "not_found" } }
+] }
+```
+`ok: false` beside `problem` is for clients older than v1.24.0, which read only
+`ok`; a current client treats a result with `problem` as a failure either way.
 
 `code` is optional and machine-readable, and it reaches the client on EVERY
 failure path as `result.error.code`. Branch on the string instead of parsing
@@ -112,6 +148,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Symfony\Component\HttpFoundation\Response;
 
 class VaporChamberController extends Controller
 {
@@ -123,25 +160,33 @@ class VaporChamberController extends Controller
 
         $handler = config('vapor-chamber.handlers')[$command] ?? null;
         if (!$handler) {
-            return response()->json(
-                ['ok' => false, 'error' => "Unknown command: {$command}"],
-                404,
-            );
+            return $this->problem("Unknown command: {$command}", 404, 'unknown_command');
         }
 
         try {
             $state = app($handler)($target, $payload, $request->user());
             return response()->json(['ok' => true, 'state' => $state]);
         } catch (ValidationException $e) {
-            return response()->json(['ok' => false, 'error' => $e->getMessage()], 422);
+            return $this->problem($e->getMessage(), 422, 'validation_failed');
         } catch (AuthorizationException $e) {
-            return response()->json(['ok' => false, 'error' => $e->getMessage()], 403);
+            return $this->problem($e->getMessage(), 403, 'forbidden');
         } catch (ModelNotFoundException $e) {
-            return response()->json(['ok' => false, 'error' => 'Resource not found'], 404);
+            return $this->problem('Resource not found', 404, 'not_found');
         } catch (\Throwable $e) {
             report($e);
-            return response()->json(['ok' => false, 'error' => 'Internal error'], 500);
+            return $this->problem('Internal error', 500, 'internal_error');
         }
+    }
+
+    private function problem(string $detail, int $status, string $code): JsonResponse
+    {
+        return response()->json([
+            'type' => url("/problems/{$code}"),
+            'title' => Response::$statusTexts[$status] ?? 'Error',
+            'status' => $status,
+            'detail' => $detail,
+            'code' => $code,
+        ], $status, ['Content-Type' => 'application/problem+json']);
     }
 }
 ```
@@ -786,8 +831,8 @@ class UpdateProfile
 }
 ```
 
-The controller's `ValidationException` catch maps it to `422 + { ok: false,
-error: ... }`.
+The controller's `ValidationException` catch maps it to a 422 problem, `code:
+'validation_failed'`, with the validator's message as `detail`.
 
 ---
 

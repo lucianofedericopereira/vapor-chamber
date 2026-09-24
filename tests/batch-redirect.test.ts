@@ -19,18 +19,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BusError, createAsyncCommandBus } from '../src/command-bus';
 import { createBatchingHttpBridge, createHttpBridge } from '../src/transports';
-
-function json(status: number, body: unknown): Response {
-  return new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-}
-
-/** The reference `batch()`: one 200, a result per command. */
-function batchServer(answer: (command: string) => Record<string, unknown>) {
-  vi.stubGlobal('fetch', async (_url: string, init: RequestInit) => {
-    const { commands } = JSON.parse(init.body as string);
-    return json(200, { results: commands.map((c: { id: string; command: string }) => ({ id: c.id, ...answer(c.command) })) });
-  });
-}
+import { batchServer, reply } from './backend-stubs';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -77,7 +66,7 @@ describe('the batching bridge honours onRedirect', () => {
   });
 
   it('CONTROL: the single bridge answers the same field the same way', async () => {
-    vi.stubGlobal('fetch', async () => json(200, { redirect: '/login' }));
+    vi.stubGlobal('fetch', async () => reply(200, { redirect: '/login' }));
     const visits: string[] = [];
     const bus = createAsyncCommandBus();
     bus.use(createHttpBridge({ endpoint: '/api/vc', onRedirect: (url) => visits.push(url) }));

@@ -2937,10 +2937,11 @@ never re-sends an action listed in `noRetry`.
 **Batched commands are the exception, and the policy is the app's.** With
 `createBatchingHttpBridge` every command in the window shares one POST, so the
 bridge's `retry` sees only a failure of that whole request. A command the backend
-fails INSIDE the batch arrives in a 200, as `{ ok: false, code }` - the reference
-controller's `batch()` answers that way for a validation failure and for a crash
-alike, since the status it computed per command does not cross. The default rule
-treats every such result as final. Which of them are worth re-sending is
+fails INSIDE the batch arrives in a 200, as `{ ok: false, problem }` - the
+reference controller's `batch()` answers that way for a validation failure and for
+a crash alike. The problem carries the status it computed per command, and the
+client deliberately does not act on it: a status inside a 200 is data, not the
+response's status. The default rule treats every such result as final. Which of them are worth re-sending is
 something only your backend's vocabulary can say, and since v1.23.0 the `code`
 reaches the client on this path, so say it there:
 
@@ -3454,7 +3455,7 @@ src/
   iife-elements.ts  - CDN entry, elements variant
   index.ts          - public ESM barrel
 
-tests/                           (<!-- vc:testFiles -->178<!-- /vc:testFiles --> files, <!-- vc:tests -->2509<!-- /vc:tests --> tests)
+tests/                           (<!-- vc:testFiles -->179<!-- /vc:testFiles --> files, <!-- vc:tests -->2527<!-- /vc:tests --> tests)
 ```
 
 The per-file test inventory that used to sit here was removed rather than

@@ -318,9 +318,24 @@ const BUDGETS = {
   // only ever have matched a backend's string. MEASURED: -24 raw in all three and
   // -2 / -8 / -7 brotli. Shrinking a wire-facing surface pays here, because a set
   // member is a string plus a comma.
-  'vapor-chamber.iife.min.js':          { rawMax: 40_413, brotliMax: 11_992 },
-  'vapor-chamber-core.iife.min.js':     { rawMax: 27_642, brotliMax: 8_111  },
-  'vapor-chamber-elements.iife.min.js': { rawMax: 29_406, brotliMax: 8_627  },
+  //
+  // v1.24.0, RFC 9457 problem documents (tests/problem-details.test.ts): the
+  // `+json` media-type test, `detail` in `responseError`, the wider `Accept`,
+  // and `resultFailure()` - the one reading of a result shared by the batch and
+  // WebSocket bridges, which only the full IIFE carries. MEASURED against the
+  // published v1.23.0 IIFEs: +136 / +21 / +21 raw, +62 / +3 / -1 brotli.
+  //
+  // Squeezed before landing, each measured on all three: `detail` is read ONCE,
+  // in `responseError` - the bridges' catch paths hand that HttpError on as it
+  // is, so reading `detail` there too was a second copy (-100 raw each); the
+  // unreachable `!res.ok` branches were left alone rather than taught `detail`;
+  // `resultFailure()` is one expression (-20 raw on the full). The single
+  // bridge does NOT route through it: that put the `problem` branch into core
+  // and elements for +128 raw / +65 brotli, for a shape a single bridge's 2xx
+  // never carries - there a problem is the error RESPONSE, an HttpError.
+  'vapor-chamber.iife.min.js':          { rawMax: 40_549, brotliMax: 12_054 },
+  'vapor-chamber-core.iife.min.js':     { rawMax: 27_663, brotliMax: 8_114  },
+  'vapor-chamber-elements.iife.min.js': { rawMax: 29_427, brotliMax: 8_626  },
 };
 
 const BR_OPTS = { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } };

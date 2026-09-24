@@ -326,6 +326,9 @@ describe.skipIf(!haveDist || !esbuild)('ESM tree-shake regression', () => {
       // 6_376 after undo/1: the scoped-origin read in stampMeta (+3; the
       // history code that uses it is not in this bundle). Ceiling unchanged,
       // 4 B of headroom.
+      // 6_363 after v1.24.0's RFC 9457 problem documents (+7 against the
+      // published v1.23.0, one build each: the `+json` test, `detail` in
+      // responseError, the wider Accept). Ceiling unchanged, 17 B of headroom.
       expect(viteBr.length, `vite production brotli grew unexpectedly (${viteBr.length} bytes)`).toBeLessThan(6_380);
 
       // Symbol budget. These are all chamber.ts-only - should NOT appear in a

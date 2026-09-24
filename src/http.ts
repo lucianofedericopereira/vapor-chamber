@@ -397,8 +397,13 @@ function sleepMs(ms: number, signal?: AbortSignal): Promise<void> {
  * may be a number or absent, and every other site already holds a string.
  */
 function responseError(message: string, response: HttpResponse): HttpError {
-  const code = (response.data as any)?.code;
-  return new HttpError('HttpError', message, { response, code: code == null ? undefined : String(code) });
+  const data = response.data as any;
+  const code = data?.code;
+  // An RFC 9457 problem's `detail` is the backend's own sentence for this
+  // occurrence, so it replaces `HTTP <status>` - here, once, for the client,
+  // router-fetch and both bridges alike: a bridge's catch path hands this
+  // error on as it is when the body has no `error`/`message` of its own.
+  return new HttpError('HttpError', data?.detail || message, { response, code: code == null ? undefined : String(code) });
 }
 
 // ---------------------------------------------------------------------------
@@ -762,8 +767,13 @@ async function doClientFetch<T>(
     // `?.get()` rather than the `resHeaders` snapshot above, deliberately: the
     // rationale is on the snapshot helper's docblock (case-insensitive by
     // spec; a miss here hands the caller a string where they asked for JSON).
+    //
+    // JSON is `application/json` or any `+json` structured suffix (RFC 6839) -
+    // `application/problem+json` (RFC 9457) above all, whose `code` was lost
+    // as an unparsed string. A type that only CONTAINS "json"
+    // (`application/json-seq`) is not JSON and stays text.
     const contentType = raw.headers?.get('content-type') || '';
-    if (contentType.includes('application/json')) {
+    if (/[/+]json\s*(;|$)/i.test(contentType)) {
       const text = await raw.text();
       data = text ? JSON.parse(text) : null;
     } else {
@@ -846,7 +856,7 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
       ...instanceDefaults,
       ...options,
       headers: {
-        'Accept': 'application/json',
+        'Accept': 'application/json, application/problem+json',
         'X-Requested-With': 'XMLHttpRequest',
         ...instanceDefaults.headers,
         ...options.headers,

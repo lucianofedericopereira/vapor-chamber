@@ -47,6 +47,31 @@ export type BackendResponse = {
    * returns `['redirect' => url]`; on a batch it is per result.
    */
   redirect?: string;
+  /**
+   * RFC 9457: a failure answered as `application/problem+json`. Its `detail`
+   * becomes the error's message, ahead of `error` and `message`. `code` is read
+   * as an extension member - `type` is an opaque URI and nothing here derives
+   * a code from it.
+   */
+  detail?: string;
+  /**
+   * On a BATCHED result only: this command's failure as an RFC 9457 problem
+   * object. The batch answered 200, so the problem cannot be the response; it
+   * is the result's value. Read as a failure whether or not `ok: false` is
+   * also present.
+   */
+  problem?: ProblemDetails;
+};
+
+/** An RFC 9457 problem details object, `code` as the extension member read. */
+export type ProblemDetails = {
+  type?: string;
+  title?: string;
+  status?: number;
+  detail?: string;
+  instance?: string;
+  code?: string;
+  [extension: string]: unknown;
 };
 
 /**
@@ -102,6 +127,23 @@ function backendError(message: string, code?: string, emitter?: 'transport'): Er
   err.code = code;
   err.emitter = emitter;
   return err;
+}
+
+/**
+ * A result body's failure, or null when it succeeded - the one reading of
+ * `BackendResponse` shared by the single bridge's 2xx, each batched result and
+ * each WebSocket frame, so the three cannot disagree about what failed.
+ *
+ * An RFC 9457 `problem` fails the command whether or not `ok: false` rides
+ * beside it (message from `detail`, then `title`; code from the problem, then
+ * the result). Before v1.24.0 a batched or WebSocket result carrying only
+ * `problem` resolved as a success whose value was undefined.
+ */
+function resultFailure(r: BackendResponse, fallback: string): Error | null {
+  const p = r.problem;
+  return p || r.ok === false
+    ? backendError((p ? p.detail ?? p.title : r.error) ?? fallback, p?.code ?? r.code, 'transport')
+    : null;
 }
 
 /**
@@ -227,7 +269,10 @@ export type HttpBridgeOptions = {
  * createHttpBridge - fetch-based transport plugin.
  *
  * Intercepts matching commands and forwards them to the backend as JSON.
- * The backend receives `{ command, target, payload }` and returns `{ ok, state, error }`.
+ * The backend receives `{ command, target, payload }` and returns `{ ok, state }`
+ * on success. A failure is an RFC 9457 problem (`application/problem+json`,
+ * `detail` as the message, `code` as the code) or the older
+ * `{ ok: false, error, code }`; both are read.
  *
  * Features: multi-source CSRF token reading (meta tag / cookie / hidden input),
  * automatic CSRF-expiry refresh on HTTP 419 (Laravel Sanctum convention by
@@ -369,7 +414,10 @@ type QueuedBatchEntry = { id: string; cmd: Command; resolve: (result: CommandRes
  *
  * matched back against:
  *
- *   { results: [{ id, ok, state, error }, ...] }
+ *   { results: [{ id, ok, state }, { id, ok: false, problem }, ...] }
+ *
+ * A failed result carries an RFC 9457 `problem` object, or the older
+ * `error`/`code` pair; both are read.
  *
  * Each queued command's own dispatch promise resolves independently - a
  * caller dispatches exactly as it would against createHttpBridge; the
@@ -452,10 +500,9 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
             onRedirect(url);
           }
           entry.resolve(_errResult(transportError('VC_TRANSPORT_REDIRECT', onRedirect ? `Redirected to ${url}` : `Backend redirect to ${url} (no onRedirect handler configured)`, entry.cmd.action, { url })));
-        } else if (r.ok === false) {
-          entry.resolve(_errResult(backendError(r.error ?? 'Backend error', r.code, 'transport')));
         } else {
-          entry.resolve(_okResult(r.state));
+          const failure = resultFailure(r, 'Backend error');
+          entry.resolve(failure ? _errResult(failure) : _okResult(r.state));
         }
       }
     } catch (e) {
@@ -707,11 +754,8 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
         if (req) {
           clearTimeout(req.timeoutId);
           pending.delete(data.id);
-          if (data.ok === false) {
-            req.resolve(_errResult(backendError(data.error ?? 'WebSocket error', data.code, 'transport')));
-          } else {
-            req.resolve(_okResult(data.state));
-          }
+          const failure = resultFailure(data, 'WebSocket error');
+          req.resolve(failure ? _errResult(failure) : _okResult(data.state));
         }
       } catch {
         // ignore malformed frames

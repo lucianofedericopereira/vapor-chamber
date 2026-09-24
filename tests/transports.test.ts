@@ -6,6 +6,7 @@ import { describe, expect, vi, afterEach, beforeEach } from 'vitest';
 import { createAsyncCommandBus, createCommandBus, invalidateCsrfCache } from '../src/index';
 import { createHttpBridge, createBatchingHttpBridge, createWsBridge, createSseBridge } from '../src/transports';
 import { it } from '../src/vitest';
+import { MockWebSocket } from './backend-stubs';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -275,31 +276,6 @@ describe('createBatchingHttpBridge', () => {
 // ---------------------------------------------------------------------------
 // createWsBridge
 // ---------------------------------------------------------------------------
-
-// Minimal WebSocket mock
-class MockWebSocket {
-  static OPEN = 1;
-  static CLOSED = 3;
-  readyState = MockWebSocket.OPEN;
-  onopen: (() => void) | null = null;
-  onmessage: ((e: { data: string }) => void) | null = null;
-  onclose: ((e: { code: number; reason: string }) => void) | null = null;
-  onerror: ((e: Event) => void) | null = null;
-  sent: string[] = [];
-
-  constructor(public url: string) {
-    // Simulate open on next tick
-    Promise.resolve().then(() => this.onopen?.());
-  }
-
-  send(data: string) { this.sent.push(data); }
-  close() { this.readyState = MockWebSocket.CLOSED; }
-
-  /** Helper: simulate a server response message */
-  receive(data: object) {
-    this.onmessage?.({ data: JSON.stringify(data) });
-  }
-}
 
 describe('createWsBridge', () => {
   let MockWS: typeof MockWebSocket;

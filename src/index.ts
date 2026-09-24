@@ -271,6 +271,7 @@ export {
   type EchoChannelType,
   type CommandEnvelope,
   type BackendResponse,
+  type ProblemDetails,
 } from './transports';
 
 // Transition integration - optional; prefer 'vapor-chamber/transitions'

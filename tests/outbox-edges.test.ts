@@ -144,3 +144,30 @@ describe('outbox - autoFlush without a window', () => {
     expect(remove).toHaveBeenCalledWith('online', expect.any(Function));
   });
 });
+
+describe('outbox - a failed replay that carries no error', () => {
+  it('is judged with a generic Error, not undefined', async () => {
+    const bus = createAsyncCommandBus();
+    bus.register('sync', async () => 'saved');
+    let online = false;
+    const seen: unknown[] = [];
+    const outbox = createOutbox({
+      storage: memoryStorage(),
+      autoFlush: false,
+      isOnline: () => online,
+      isRetryable: (error) => { seen.push(error); return true; },
+    });
+    outbox.install(bus);
+    await bus.dispatch('sync', 'row-1'); // queued while offline
+
+    // A plugin below the outbox that fails the replay with no `error` field -
+    // the shape a hand-written plugin can return.
+    bus.use(() => ({ ok: false, value: undefined }) as never, { priority: -50 });
+    online = true;
+    const summary = await outbox.flush(bus);
+
+    expect(summary).toEqual({ replayed: 0, failed: 1, rejected: 0 });
+    expect(seen).toHaveLength(1);
+    expect((seen[0] as Error).message).toBe('Unknown error');
+  });
+});

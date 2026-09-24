@@ -2,7 +2,8 @@
  * Mock backend for the sprinkled-blade demo. Single endpoint that emulates
  * what your Laravel `VaporChamberController` (or Rails / Django equivalent)
  * would do: receive `{ command, target, payload }`, dispatch to a handler,
- * return `{ ok, state }` or `{ ok: false, error }`.
+ * return `{ ok, state }`, or an RFC 9457 problem (`application/problem+json`)
+ * for a failure.
  *
  * Run:
  *   node mock-server.mjs
@@ -92,8 +93,13 @@ const server = createServer((req, res) => {
     return;
   }
 
+  const problem = (status, code, detail) => {
+    res.writeHead(status, { 'Content-Type': 'application/problem+json' });
+    res.end(JSON.stringify({ type: `/problems/${code}`, status, detail, code }));
+  };
+
   if (req.method !== 'POST' || req.url !== '/api/vc') {
-    res.writeHead(404).end(JSON.stringify({ ok: false, error: 'Not found' }));
+    problem(404, 'not_found', 'Not found');
     return;
   }
 
@@ -104,16 +110,15 @@ const server = createServer((req, res) => {
       const { command, target, payload } = JSON.parse(body);
       const fn = handlers[command];
       if (!fn) {
-        res.writeHead(404, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: false, error: `Unknown command: ${command}` }));
+        problem(404, 'unknown_command', `Unknown command: ${command}`);
         return;
       }
       const result = fn(target, payload, state);
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ ok: true, state: result }));
     } catch (e) {
-      res.writeHead(500, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: false, error: e?.message ?? 'Unknown error' }));
+      console.error(e);
+      problem(500, 'internal_error', 'Internal error');
     }
   });
 });

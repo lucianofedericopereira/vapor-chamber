@@ -54,20 +54,24 @@ function api(req, res) {
   let body = '';
   req.on('data', (chunk) => { body += chunk; });
   req.on('end', () => {
-    const json = (status, payload) => {
-      res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+    const json = (status, payload, type = 'application/json') => {
+      res.writeHead(status, { 'Content-Type': type, 'Cache-Control': 'no-store' });
       res.end(JSON.stringify(payload));
     };
+    // A failure is an RFC 9457 problem, as the reference controller answers it.
+    const problem = (status, code, detail) =>
+      json(status, { type: `/problems/${code}`, status, detail, code }, 'application/problem+json');
     try {
       const { command, target, payload } = JSON.parse(body || '{}');
       const fn = commands[command];
       if (!fn) {
-        json(404, { ok: false, error: `Unknown command: ${command}`, code: 'unknown_command' });
+        problem(404, 'unknown_command', `Unknown command: ${command}`);
         return;
       }
       json(200, { ok: true, state: fn(target, payload) });
     } catch (e) {
-      json(500, { ok: false, error: e?.message ?? 'Unknown error' });
+      console.error(e);
+      problem(500, 'internal_error', 'Internal error');
     }
   });
 }

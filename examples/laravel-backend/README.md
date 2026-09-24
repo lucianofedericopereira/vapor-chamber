@@ -26,12 +26,19 @@ panels, Reverb realtime, queued commands).
   the optional `payload` argument; `$user` is the authenticated user (or null).
 - **Return any JSON-serializable shape** - it becomes the client's
   `result.value`.
-- **Throw framework exceptions** for failure paths. The controller maps:
-  - `ValidationException` -> 422 + `{ ok: false, error }`
-  - `AuthorizationException` -> 403 + `{ ok: false, error }`
-  - `ModelNotFoundException` -> 404 + `{ ok: false, error }`
-  - Anything else -> 500 + `{ ok: false, error: 'Internal error' }` (and
-    `report()`s the original)
+- **Throw framework exceptions** for failure paths. The controller answers
+  each as an RFC 9457 problem (`application/problem+json`, `{ type, title,
+  status, detail, code }`):
+  - `ValidationException` -> 422, `code: 'validation_failed'`
+  - `AuthorizationException` -> 403, `code: 'forbidden'`
+  - `ModelNotFoundException` -> 404, `code: 'not_found'`
+  - An exception with its own `render()` -> its status, `detail`, and `code`
+    (or the last segment of its `type`)
+  - Anything else -> 500, `code: 'internal_error'`, `detail: 'Internal error'`
+    (and `report()`s the original)
+
+  On the batch endpoint the same problem rides on the command's own result,
+  `{ id, ok: false, problem }`, inside a 200.
 
 ## Idempotency (double-submit protection)
 
