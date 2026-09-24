@@ -2,11 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## v1.23.0 - 2026-09-23
-
-Post-v1.22.0 work. The first four entries were written into the v1.22.0 section
-while it was still open and are moved here unchanged - v1.22.0 shipped on
-2026-09-21 and its text is frozen at what was published.
+## v1.23.0 - General Improvements
 
 ### Fixed: the backend's `code` survives an envelope failure
 
