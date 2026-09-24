@@ -2768,7 +2768,7 @@ Three IIFE variants ship under `dist/`, split by **audience / deployment shape**
 |-----------|-----------------------------------------------------------|--------|
 | core      | Sprinkled JS on server-rendered pages - Blade / Rails / Django | <!-- vc:sizeIifeCore -->7.9<!-- /vc:sizeIifeCore --> KB |
 | elements  | Embeddable widgets via custom elements                    | <!-- vc:sizeIifeElements -->8.4<!-- /vc:sizeIifeElements --> KB |
-| full      | SPAs that grew big (realtime + undo/redo + persistence)   | <!-- vc:sizeIifeFull -->11.7<!-- /vc:sizeIifeFull --> KB |
+| full      | SPAs that grew big (realtime + undo/redo + persistence)   | <!-- vc:sizeIifeFull -->11.8<!-- /vc:sizeIifeFull --> KB |
 
 _(Generated, always-current per-export sizes: [BUNDLE-SIZES.md](./BUNDLE-SIZES.md).)_
 
