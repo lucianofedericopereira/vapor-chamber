@@ -153,7 +153,7 @@ const BUDGETS = {
   // first design, a bus-owned AbortController composed with the caller's
   // signal on every request, fit here (full 11,822) and measured 1.7-1.9x on
   // the sync waiting path and 1.24x on the async request - declined
-  // (rc-alignment-work.md s33). Measured: full 11,905 / 40,261, core 8,020 /
+  // (docs/rc-alignment-log.md s33). Measured: full 11,905 / 40,261, core 8,020 /
   // 27,254, elements 8,519 / 29,018.
   // Then q2/2, all three smaller: the VC_CORE_ABORTED message read "was
   // aborted before it ran" for every abort, mid-flight ones included (a
@@ -205,9 +205,122 @@ const BUDGETS = {
   //     the biggest single piece, and the one two docblocks already promised.
   // These are LOWER ceilings and they lock the wins: the budgets had sat at
   // zero headroom since undo/1, so nothing here was bought with slack.
-  'vapor-chamber.iife.min.js':          { rawMax: 39_938, brotliMax: 11_884 },
-  'vapor-chamber-core.iife.min.js':     { rawMax: 27_364, brotliMax: 8_056  },
-  'vapor-chamber-elements.iife.min.js': { rawMax: 29_128, brotliMax: 8_554  },
+  // 2026-09-23, full only - raw 39_938 -> 39_947, brotli 11_884 -> 11_886.
+  // `sync` was renamed `createChannel`, and this is the whole of it: the name
+  // appears ONCE in the built full IIFE, as the export key, so 13 characters
+  // replace 4. Verified by grep - one occurrence in `vapor-chamber.iife.min.js`
+  // and zero in core and elements, which stay byte-identical and are the
+  // control. The one other string the rename touched, the non-cloneable
+  // payload warning, is DEV-gated and folds out of this build.
+  // Raised rather than squeezed because there is nothing to squeeze: the cost
+  // IS the public name, once, and no dead weight sits next to it to trade.
+  // 2026-09-23, all three - the backend's `code` now survives an envelope
+  // failure. Both HTTP bridges enriched an error when the failure THREW and
+  // built a bare one when the same failure arrived as DATA, twelve lines apart
+  // in the same function, so a 200 carrying `{ ok: false, code }` and every
+  // batched failure (batch() answers 200, nothing throws) lost the field the
+  // example controller promises reaches `HttpError.code`.
+  //
+  // MEASURED, per piece, against the previous ceilings:
+  //   + the fix (4 envelope sites + one builder)   raw +64 / +61 / +61
+  //                                             brotli  +2 / +13 / +14
+  //   + sharing the two catch blocks               raw +30 / +33 / +33  NOT TAKEN
+  //
+  // The squeeze was attempted twice and is in the numbers above: assigning
+  // `code` unconditionally rather than behind a `!== undefined` guard is
+  // -14 B raw (and is the shape-stable form `okResult`/`errResult` already
+  // use), and the shared-catch extraction was reverted because it COSTS 30 B
+  // rather than paying for the fix. That second one re-derived a verdict
+  // `transports.ts` already recorded; the note there now carries the number so
+  // the next reader does not repeat it.
+  //
+  // What remains is the feature itself: four call sites carrying a field, and
+  // a builder used by all four. Raised rather than squeezed further because
+  // there is nothing left that is not the fix.
+  // 2026-09-23, all three - `.code` on a transport error gets ONE owner.
+  //
+  // `defaultIsRetryable` read a `VC_` prefix on `.code` as proof the library
+  // minted it, while both HTTP bridges copied the BACKEND's body code into that
+  // same field. A backend therefore chose which branch of the retry predicate
+  // ran: `code: 'VC_CORE_THROTTLED'` re-sent a 422 the HTTP layer had refused to
+  // re-send, and `code: 'VC_VALIDATION_FAILED'` suppressed the retry of a 503.
+  // Separately, seven library-minted transport failures (an unhandled redirect,
+  // a batch result that never came back, a full offline queue, a dead socket, a
+  // WS timeout) carried no code at all, so each was retried to exhaustion as an
+  // unclassified error. All of it is counted in fetch calls by
+  // tests/transport-code-owner.test.ts.
+  //
+  // MEASURED, per piece, one build each, against the previous ceilings. Raw and
+  // brotli, full / core / elements:
+  //
+  //   1 provenance from `emitter`, not a `VC_` prefix   raw  -25 / -25 / -25
+  //     (drops a `typeof` and a `startsWith`)        brotli   -8 /  -2 /  -5
+  //   2 the 7 codeless sites through `transportError`   raw +174 / +89 / +89
+  //     (a BusError, emitter 'transport', 4 new codes) brotli +54 / +35 / +42
+  //   3 `action` + `context` on those sites             raw +150 / +57 / +57
+  //                                                  brotli  +52 / +16 / +15
+  //   4 the 2xx refusal tagged `emitter: 'transport'`,  raw  +55 / +49 / +49
+  //     so the rule in 2 answers it                brotli   0 / +10 / +12
+  //   5 `HttpError` as a class, 4 hand-assembled        raw  +72 / +71 / +71
+  //     sites collapsed onto its constructor         brotli   +8 /  -9 /  +2
+  //
+  // Squeezed first, and these are the arms NOT taken:
+  //   • `transportError` without its `context` parameter: -12 raw and -12 / -5 /
+  //     -8 brotli. Declined once the parameter was used - `context` is where the
+  //     dropped envelope and the unmatched batch id travel, and a value a reader
+  //     would inspect does not belong inside the sentence.
+  //   • no factory at all, one shared `{ emitter: 'transport' }` const inlined at
+  //     each site: full +19 raw / 0 brotli, core -6 / -7, elements -6 / +5. A
+  //     wash, so the named function stays - it is the one place stating which
+  //     kind of error the transports mint.
+  //   • `HttpError` as a plain factory function: 34 B smaller RAW in all three
+  //     and 19 / 3 / 7 B LARGER brotli. As one `Object.assign` expression: 33 B
+  //     smaller raw, 10 / 6 / 4 larger brotli. Brotli decides, and the class is
+  //     also the only one of the three that can be extended.
+  //   • row 4 as a `retryable: false` BOOLEAN on the error, which is what this
+  //     carried for one commit: 19 B raw and 17 B brotli DEARER on full, 22/6
+  //     and 22/4 on core and elements. It also added a string-keyed field to an
+  //     error built from a response body - the precondition that broke `.code`.
+  //     Reverted on both counts; `src/transports.ts` carries the reasoning.
+  //
+  // Step 1 pays for nothing here - it is a win, and it is the piece that fixes
+  // the defect. Steps 2-5 are features: every transport failure now carries a
+  // code a consumer can switch on and `getErrorEntry(code).fix` can explain, an
+  // emitter a logger can route on, and an `action`. Step 5 buys no bytes at all
+  // (+8 brotli on full, and -9 on core) and is taken for correctness: four sites
+  // spelled the same four assignments out by hand, which is how the envelope
+  // paths came to drop `code` while the catch path twelve lines away kept it.
+  //
+  // The new registry rows cost ZERO IN THESE BUNDLES, and that scope is the whole
+  // claim - verified by grep, the `fix` strings appear 0 times in all three,
+  // because `/* @__PURE__ */` on ERROR_CODE_REGISTRY's freeze still shakes the
+  // whole table out of a build that never reads it.
+  //
+  // A CONSUMER WHO IMPORTS THE REGISTRY PAYS FOR IT, and that is not a caveat on
+  // the sentence above, it is the other half of it. `docs/BUNDLE-SIZES.md` is
+  // where that number lives: the root barrel row moved 23.3 -> 23.8 KB brotli
+  // across this work, which is the rows plus the new code strings together. The
+  // split between them is not stated here because it was not measured; that table
+  // is regenerated every run and is the only place a size should be read from.
+  //
+  // The fifth budget did NOT need raising: the Blade consumer ESM bundle
+  // (tests/esm-treeshake.test.ts) measures 6,342 against its 6,380 ceiling.
+  //
+  // Row 2's four codes became five: `VC_TRANSPORT_TIMEOUT` replaced the two WS
+  // timeout sites' reuse of `VC_CORE_REQUEST_TIMEOUT`, whose registry row says
+  // emitter 'core' and "request() timed out" - both false from a transport. A
+  // row costs nothing here, so this trades a half-true row for two true ones.
+  //
+  // Then, smaller again, and the budgets follow it DOWN: `VC_CORE_HANDLER_THREW`
+  // left RETRYABLE_CODES. With `.code` staying the backend's on a tagged refusal,
+  // every member of that set is a string a backend can send to get a permanent
+  // refusal retried - and that one was minted by no site in `src/`, so it could
+  // only ever have matched a backend's string. MEASURED: -24 raw in all three and
+  // -2 / -8 / -7 brotli. Shrinking a wire-facing surface pays here, because a set
+  // member is a string plus a comma.
+  'vapor-chamber.iife.min.js':          { rawMax: 40_413, brotliMax: 11_992 },
+  'vapor-chamber-core.iife.min.js':     { rawMax: 27_642, brotliMax: 8_111  },
+  'vapor-chamber-elements.iife.min.js': { rawMax: 29_406, brotliMax: 8_627  },
 };
 
 const BR_OPTS = { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } };

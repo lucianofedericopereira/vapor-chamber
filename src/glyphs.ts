@@ -14,9 +14,13 @@
  * while four glyphs sat in shipped strings - the same way it once passed while
  * 48 arrows sat in 15 files.
  *
- * scripts/glyphs.mjs is the Node-side twin: those are .mjs, they run before any
- * build exists, and type stripping is not guaranteed at this package's engines
- * floor, so they cannot import this module.
+ * THE SCRIPTS CANNOT IMPORT THIS: they are .mjs, they run before any build
+ * exists, and type stripping is not guaranteed at this package's engines
+ * floor. They type the character itself instead, which the guard allows -
+ * plain ASCII is enforced under `src/` only, and everywhere else it bans an
+ * alphabet these four are not in. The reason for the stricter rule does not
+ * reach `scripts/` either: nothing there is bundled into a consumer's app,
+ * which is the only place a stray character costs bytes.
  *
  * These are CONSTANTS, not a formatting layer. Adding a helper that wrapped
  * them would put an indirection on `logger()`'s per-dispatch path for no gain;

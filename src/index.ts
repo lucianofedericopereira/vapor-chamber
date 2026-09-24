@@ -8,7 +8,7 @@
  *
  *   OPTIONAL (tree-shaken when unused):
  *     plugins      - logger, validator, history, debounce, throttle, authGuard, optimistic
- *     plugins-io   - retry, persist, sync
+ *     plugins-io   - retry, persist, createChannel
  *     chamber      - Vue composables: useCommand, useCommandGroup, useCommandState, ...
  *     chamber-vapor - Vue 3.6+ Vapor-specific API (requires Vue 3.6)
  *     http         - postCommand, createHttpClient, CSRF token reading
@@ -173,12 +173,12 @@ export {
   optimisticUndo,
   retry,
   persist,
-  sync,
+  createChannel,
   type HistoryState,
   type OptimisticUndoOptions,
   type RetryOptions,
   type PersistOptions,
-  type SyncOptions,
+  type ChannelOptions,
 } from './plugins';
 
 // Vue composables - optional, requires Vue >= 3.5

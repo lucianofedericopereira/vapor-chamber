@@ -14,7 +14,7 @@
  *
  * NOT in this variant (use `vapor-chamber.iife.js` if you need them):
  *   - WebSocket / SSE transports - realtime infra is a different deployment shape
- *   - persist / sync / history / optimistic - stateful plugins, niche for sprinkled JS
+ *   - persist / createChannel / history / optimistic - stateful, niche for sprinkled JS
  *   - mount() - DOM-coupled convenience
  *   - Vapor custom elements - see `vapor-chamber-elements.iife.js`
  *

@@ -16,12 +16,20 @@ interactivity. The two islands never talk to each other directly: the products i
 | `<vc-products>`| Emitter  | `bus.dispatch('cartAdd', product)` from `@click`          |
 | `<vc-cart>`    | Consumer | reads reactive `cart`; dispatches `cartClear/Undo/Redo`   |
 
-The bus (`src/store.ts`) is wired with four plugins:
+The bus (`src/store.ts`) is wired with three plugins:
 
 - **`logger`** - logs `cart.*` commands.
 - **`history`** - bus-backed undo/redo for `cartAdd` (`cartUndo` / `cartRedo`).
-- **`sync`** - cross-tab sync over a `BroadcastChannel`; open two tabs and watch them stay in step.
 - **`persist`** - restores the cart from `localStorage` on reload.
+
+Cross-tab mirroring is **not** a fourth plugin, and this README used to call it
+one. `createChannel` is not on the bus at all: it bridges a `createFastLane()`
+event channel to a `BroadcastChannel`, so no dispatch passes through it. What
+crosses between tabs is a FACT the handler emits - `lane.emit('cartChanged', ...)`
+with the values already computed - and the receiving tab applies those values
+rather than re-running the handler. That is why the same lane listener is the
+single writer for a local change and a remote one, which `src/store.ts` says at
+the listener. Open two tabs and watch them stay in step.
 
 ## Run
 

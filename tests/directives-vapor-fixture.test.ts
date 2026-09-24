@@ -1560,7 +1560,7 @@ const p = { id: 1 };
 // reason and prove nothing about order. The order was isolated separately, on
 // one runtime with only the registration order swapped: directive-first
 // dispatches, template-first does not. That measurement is in the cycle record
-// (rc-alignment-work.md s34.19), not here, because it needs two compilers.
+// (docs/rc-alignment-log.md s34.19), not here, because it needs two compilers.
 //
 // Not pinned here, measured and written up in the same place: the vDOM
 // registration already behaved this way (Vue patches props before `mounted`),

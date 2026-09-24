@@ -71,7 +71,7 @@ describe('item 18 - MCP origin attribution on an async bus', () => {
 });
 
 // ---------------------------------------------------------------------------
-// 24 - sync() echo suppression across an await
+// 24 - createChannel() echo suppression across an await
 // ---------------------------------------------------------------------------
 
 class FakeChannel {

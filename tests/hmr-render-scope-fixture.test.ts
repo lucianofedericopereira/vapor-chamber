@@ -127,8 +127,11 @@ describe('useCommand across real HMR rerenders (rc.6)', () => {
     hmr.rerender(parentId, render('v3'));
     await v.nextTick();
 
-    expect(host.textContent).toContain('v3');
+    // `setups` before the text: the two failure modes need different fixes and
+    // only this order tells them apart. 1 = neither rerender ran; 3 with stale
+    // text = they ran and the DOM did not follow.
     expect(setups).toBe(3);
+    expect(host.textContent).toContain('v3');
 
     // FACT 1 - each superseded generation was DISPOSED, not merely detached.
     // Before rc.6 an element-nested child was unreachable from the block graph,

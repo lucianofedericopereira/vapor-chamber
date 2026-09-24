@@ -2,6 +2,10 @@
 
 **Version 1.0.0 - March 2026**
 
+**Revised 2026-09-23** - first full rewrite. Until this revision the document grew
+by appending: every release added its material at the bottom and nothing above it
+was reread.
+
 *Luciano Federico Pereira - ORCID 0009-0002-4591-6568 - luciano-pereira.pages.dev*
 
 ---
@@ -427,7 +431,7 @@ justification has to stay sharp or the honest answer is "use theirs".
 | | official | here | the difference that justifies existing |
 | --- | --- | --- | --- |
 | router | vue-router | `vapor-chamber/router` | built for the server-owned catch-all: generated route tables, blade rows, typed query-as-state, a vDOM-free core with the renderer opt-in by subpath. vue-router renders through a vDOM `RouterView` and owns its own conventions |
-| store | Pinia | `vapor-chamber/store` | mutations-as-commands: undo, persist, cross-tab sync, optimistic, idempotent and per-key ordering exist *because* a bus exists underneath. Pinia grew a mini-bus (`action()` / `$onAction`) because one does not |
+| store | Pinia | `vapor-chamber/store` | mutations-as-commands: undo, persist, optimistic, idempotent and per-key ordering exist *because* a bus exists underneath. Pinia grew a mini-bus (`action()` / `$onAction`) because one does not. Cross-tab sync is no longer on that list: `createChannel` (named `sync` until v1.23.0) carries facts on a fast lane since v1.22.0 and never sees a dispatch (docs/store.md) |
 
 Two honesty rules keep this from drifting into not-invented-here. **Lessons flow
 in**: vue-router v5's query hardening became the prototype-key rule in
@@ -460,17 +464,25 @@ vue-router and Pinia, and these docs must keep saying so.
 | `schemaValidator` | Guards | Auto-validates field types against schema (auto-installed in schema bus) |
 | `retry` | Resilience | Exponential/linear/fixed backoff on failure |
 | `persist` | Storage | Auto-save state to localStorage/sessionStorage/custom; validate on load |
-| `sync` | Multi-tab | Broadcast commands to all open tabs via BroadcastChannel |
+| `createChannel` | Multi-context | Mirror emitted facts to every other same-origin context via BroadcastChannel. Not a bus plugin: it takes a fast lane, not the bus |
+| `supersede` | Concurrency | Aborts the in-flight dispatch of the same key when a newer one arrives. Async bus only: it mutates `cmd.signal` |
+| `schemaLogger` | DX | `logger` plus the schema's descriptions and a per-field validation mark |
+| `validateSchemas` / `validateSchemasAsync` | Guards | Standard Schema validation, from `vapor-chamber/standard-schema` |
+| `createSSRPlugin` | SSR | Records dispatched commands on the server, then `.dehydrate()` for the HTML payload |
+| `revalidateRoutes` | Router | Refetches the route's loaders after matching dispatches, with an `isRevalidating` flag. From `vapor-chamber/router` |
 | `createHttpBridge` | Transport | Fetch-based HTTP transport |
+| `createBatchingHttpBridge` | Transport | Same options, but every command in the window goes as one POST, matched back by id. Its `retry` covers a failure of the whole POST; a command refused inside the batch arrives with the backend's `code`, and retrying it is the app's `retry({ isRetryable })` |
 | `createWsBridge` | Transport | WebSocket transport with reconnect + bounded queue |
 | `createSseBridge` | Transport | Server-sent events (server push) |
+| `createEchoBridge` | Transport | Laravel Echo / Reverb: public, private and presence channels routed to the bus, plus presence membership |
 
 ```ts
-// retry
+// retry - `isRetryable` REPLACES the default rule, and the rule is the app's.
+// Here: retry what YOUR backend calls transient, by the `code` it sends.
 bus.use(retry({
   maxAttempts: 3, strategy: 'exponential', baseDelay: 200,
   actions: ['api*'],
-  isRetryable: (err) => err.message !== 'Unauthorized',
+  isRetryable: (err) => (err as { code?: string }).code === 'internal_error',
 }))
 
 // persist - with shape validation to reject stale state after deploys
@@ -484,13 +496,13 @@ const saved = cartPersist.load()   // -> T | null (null if validate returns fals
 cartPersist.save()                 // force save (e.g. beforeunload)
 cartPersist.clear()                // remove (e.g. logout)
 
-// sync - cross-tab BroadcastChannel. A FACT crosses, not a command: the
+// createChannel - a BroadcastChannel. A FACT crosses, not a command: the
 // receiving tab applies what this one computed instead of re-running the
 // handler, so a non-deterministic handler still mirrors. Not a bus plugin.
 const lane = createFastLane()
 lane.on('cartChanged', fact => applyToCart(fact))   // local AND remote land here
 bus.register('cartAdd', cmd => { lane.emit('cartChanged', computeCart(cmd.target)) })
-const tabSync = sync({ channel: 'vc:app', lane, events: ['cartChanged'] })
+const tabSync = createChannel({ channel: 'vc:app', lane, events: ['cartChanged'] })
 tabSync.close()
 ```
 
@@ -521,32 +533,6 @@ alien-signals reactivity that shipped with it brought Vue's headline gains: ~14%
 reactive state, ~40% less CPU on complex visualizations, ~100k components mounted in ~100 ms
 (SolidJS parity), sub-10 KB Vapor-only bundles, ~66% smaller JS payload.
 
-Every beta since has been **bug fixes and runtime optimizations** that Vapor Chamber inherits
-through its pass-through wrappers - no consumer code changes. The table below is the running
-**Vue 3.6 alignment log** and the single source of per-beta detail: prose elsewhere stays
-version-agnostic, and each new beta adds one row.
-
-| Vue 3.6 beta | What changed in Vue's runtime | vapor-chamber response |
-|---|---|---|
-| **beta.8** (Mar) | Vapor reaches feature-complete (the alien-signals reactivity rewrite had already landed earlier, in **3.6.0-alpha.1**, #12349 - see headline gains above). | Baseline Vapor surface wrapped. Pass-through. |
-| **beta.9** (Mar) | TransitionGroup->VDOM parity: key inheritance, dynamic `tag` updates, v-if dynamic slots, **no invalid hooks on unkeyed interop children**, leaving-cache isolated by resolved child type, null keys treated as absent; `<Transition>` template children + interop vnode-identity alignment; **v-for+v-if hook application fixed** (the counterpart to beta.8's v-if+v-for); teleport hydration null-/disabled-target anchor fixes; interop vnode lifecycle hooks (`onVnodeBeforeMount`) now invoked; static-key preservation; KeepAlive scope-leak fixes. | Pass-through. The transition bridge forwards whatever hooks Vue fires, so these corrections just mean the bus now receives the **corrected** hook set - moves it previously missed, and no longer the bogus hooks on unkeyed interop children. No code change. |
-| **beta.10** (Apr) | Async setup components hydrate under VDOM Suspense; SSR runtime tree-shaken out of `defineVaporCustomElement`; interop **mount/unmount/update/hydration hook-order aligned with VDOM**; `<Transition>` dynamic-slot update + `appear` with slotted v-show; duplicate dynamic-slot-name last-wins; interop slot remount / stale-effect cleanups; `parentComponent` null-guard. | Pass-through. `createVaporChamberApp` / `defineVapor*` forward Vue's app + components untouched, so the hook-order alignment and async-Suspense hydration are inherited; our SSR is command-replay above DOM hydration, so the custom-element SSR tree-shake doesn't touch it. No code change. |
-| **beta.11** (May) | Tree-shake axes (slot-fallback / teleport / transition / keep-alive / suspense); static-template hydration fast path; dynamic-props stability. | Mirrored as three sized IIFE variants (`core` / `elements` / `full`, §11.6). Pass-through. |
-| **beta.12** | Vapor `setup()` error recovery (component context, fallthrough props, render effects restored after a throw); VDOM-slot interop normalization; SSR unresolved-tag fallback. | Pass-through. Lib-side this cycle: AbortController extensions, `useSharedCommandState`, TestBus snapshot / time-travel. |
-| **beta.13** (May) | `onMove` fires for Vapor **and** VDOM component moves in a Vapor `<TransitionGroup>` (was silently skipped); moves defer until child updates flush; slot-fallback transition hooks; v-for key preservation; 5 SSR hydration fixes; interop CSS scope IDs on Vapor roots; **lazy lifecycle update jobs**; compiler opts (inline `v-bind` spreads, single-use component-resolve lowering, static-prop inlining). | Pass-through. Lazy lifecycle jobs make `tryAutoCleanup` / `onScopeDispose` allocation-free when no reactive state is tracked in the scope. |
-| **beta.14** (Jun) | HMR: child/parent reload alignment, parent-reload dedup, setup-effect preservation, context-restore-on-error, app-instance refresh on root reload. Transitions: `onMove` suppressed for v-show-hidden children. Custom elements: no hook retention on shared definitions; children update from reactive props. Async: `loadingComponent` receives props/slots; `defineVaporAsyncComponent` now a main `vue` export. Interop: bridge no longer mutated on setup; slot wrappers memoised. Vapor root: scope ID preserved on dynamic updates. Scheduler: job-queue length reset after flush. v-for: skip updated hooks on mount, no fast-remove for component v-for, lazy destructure defaults. | HMR shim gains a per-cycle dedup guard + try/catch - the **only** new beta.14 code; the rest is pass-through. **Measured gains:** `useCommandState` ~+24%, `effectScope` lifecycle ~+9%, transition bridge ~+8% (all from the scheduler flush fix). |
-| **beta.15** (Jun) | Teleport (7 fixes): invalid-target handling, disabled-target order preserved, mount location tracked explicitly, CSS vars by mount location, no target-child moves on reorder, raw props proxy reused. Transitions: hooks restored after a skipped move, key inheritance + stability aligned with VDOM, unique keys for multi-root v-for items, v-if comment handling. v-show: appear timing aligned with VDOM, fragment method arguments preserved. Events: click-modifier normalization, **opt-out for event delegation** (#14924), delegated handlers skipped on disabled elements (#14948). Interop: vnode access guarded. Keyed direct template refs cleared on replace. Perf: fragment classes dropped from app-only bundles. | **One new line of behaviour:** `v-vc:command` now bails out on disabled / `aria-disabled` / in-flight elements - it attaches a *direct* (non-delegated) listener, so Vue's #14948 runtime fix doesn't reach it automatically; this mirrors it. Everything else is pass-through. No perf-affecting change on the hot path (re-measure pending on the reference host). |
-| **beta.16** (Jun) | Transitions (6): transition-group leave bucketed by type, raw-key compare before early removal, out-in branch key kept in sync when leave defers render, hooks re-resolved on prop change, leaving cache shared for unkeyed children, `persisted` no longer leaks onto non-v-show roots. Hydration (7): dynamic props applied on mismatch-recreated nodes, static-template clone-cache reused (not re-cloned per adoption), exact tag-mismatch detection, fragment-start warning text, full-mount fallback for empty SSR containers, static-text mismatches patched (prod included), v-if empty branches hydrated with static templates. App lifecycle: no-op mount for a missing selector, unmount safe without dev instance state (prod). Props/emit/attrs/events: nullish dynamic props -> empty, nullish emit sources skipped, symbol attr values stringified, dynamic v-bind event options (`Once`/`Passive`/`Capture`) parsed like VDOM. Compiler (8): setup-let inline assignment, v-html-before-text, unsafe attr names kept out of templates, dynamic/static/native v-model modifier key quoting, slot v-else-without-v-if reporting, empty blocks return `[]`. Perf: **SlotFragment skipped for stable slot fallback** (#14969). | **Fully pass-through - no lib code change** (every commit read at source). Two consumer-visible inheritances: `createTransitionBridge`/`useTransitionCommand` `onLeave` now fires for a non-v-show root removed after a v-show branch (was dropped - `a816c9e`); `createVaporChamberApp(...).mount('#missing')` no-ops instead of throwing and `.unmount()` is prod-safe (`05bf22a` / `52fda7c`). Our `rehydrate()` sits above DOM hydration, so the 7 hydration fixes are below us. **Perf technique to evaluate (measured, post-stable):** #14969 proves slot-fallback reachability at compile time, encodes it as a one-bit flag on the emitted fn, and the runtime selects a lighter `DynamicFragment` over `SlotFragment` when the flag is absent - the "prove-it-at-compile-time, pay-for-the-wrapper-only-when-unprovable" pattern, a candidate for our own hot paths once the Vapor-first/bus-first identity (v2.0.0) is settled. |
-| **beta.17** (Jun) | Compiler-vapor (7): stable slot roots kept on the fast path, non-stable slots avoided for stable root siblings, slot-root tracking skipped for slot outlets, forwarded slot-fallback validity tracked, unsafe repeated expression replacements avoided; perf - redundant text-run slicing avoided, child-context analysis cached. Runtime-vapor (7): slot validity aligned for component roots, dynamic native-element slots hydrated correctly (#14972), **VDOM-interop update hooks paired** (`beforeUpdate`/`updated`, `bcaa753`), **tracking paused when invoking function refs** (#14986), **render-effect creation order preserved on update** (scheduler tiebreaker behind component id, #14984), interop slot owner root re-synced after child updates (`975dd4d`); perf - redundant slot-content validity checks avoided. | **Fully pass-through - no lib code change** (every commit read at source). The two interop fixes land below `getVaporInteropPlugin()`'s pass-through, so mixed Vapor/VDOM trees inherit paired slot hooks (`bcaa753`) and the slot-owner-root re-sync (`975dd4d`) for free; #14972 sits below `rehydrate()`'s command replay; the seven compiler-vapor fixes are compile-time, inherited by recompiling the Vapor SFC examples. **Pattern noted, nothing to act on:** #14984 had to add render-effect *creation order* as a scheduler tiebreaker behind component id - the same insertion-order invariant the bus already gets for free from JS's stable `Array.prototype.sort` on equal-priority plugins (`byPriority`), already pinned by the `equal priority preserves registration order` test. #14986 (pause tracking on function refs) is **N/A** - the lib uses no template/function refs and only *writes* signals from dispatch callbacks, never reads inside a tracked effect. Verified against beta.17: `tsc` clean, **884/884 tests** pass, bench green on the recorded baselines, IIFE sizes unchanged (10.2 / 7.0 / 7.4 KB brotli). |
-| **rc.1** (`6fa3447`, Jul) | **Vue 3.6 enters RC - Vapor feature-complete.** All 13 fixes are runtime-vapor / hydration internals (slot-anchor + hydration-anchor management, v-show transition on a VDOM child #15074, v-if/v-show on transition roots #15069, remove unsafe slot dry runs from VDOM interop #15089/#15031, forwarded-slot/async-setup hydration). | **Fully pass-through - no lib code change** (diffs read at source). The anchor/hydration/dry-run fixes are all renderer-internal - the lib collects no slot vnodes and holds no hydration anchors, so #15089/#06778e7 have no analog here; the two transition fixes reach `createTransitionBridge`/`useTransitionCommand` as a corrected hook set. Verified against rc.1: `tsc` clean, **1102/1102** pass, IIFE 10.8/7.6/8.0 KB brotli. |
-| **rc.2** (Jul) | **compiler-vapor: event delegation flips opt-OUT -> opt-IN (#15127, BREAKING).** Compiled `@click` in Vapor SFCs now attaches a direct per-element listener unless the template writes `.delegate` explicitly; `compilerOptions.eventDelegation` is removed entirely (the beta.15 opt-out, #14924, is gone - there's nothing left to opt out of). One internal compiler-vapor codegen fix (#15124 - v-for loop variables no longer collide with runtime-helper names, e.g. `v-for="child in items"` clashing with the `child()` DOM helper). The other 12 fixes are runtime-vapor internals surfaced by testing Vapor against Nuxt: effect-scope not restored to "no scope" after `setCurrentInstance`, freezing a vapor page's watchers on its first vdom->vapor `<Suspense>` navigation (#15141); a vapor block's transition hooks dropped across interop mount/unmount/move, deadlocking a vdom `<Transition mode="out-in">` wrapped around a vapor page (#15133, #15140); prod-only crash when a vapor `setup()` throws under `onErrorCaptured` (#15130); slot anchor missing for interop slot content without SSR fragment markers, e.g. `RouterLink` (#15131); vapor mount/activated hooks and post-render effects not deferred to an owning `<Suspense>` boundary (#15139, #15144); vapor components never hydrating when deferred past the root hydration pass via interop, e.g. `hydrateOnVisible()` (#15132); pending-async-component placeholder position lost across Suspense/KeepAlive (#15147); async setup's re-entry losing instance context, warning `renderEffect called without active EffectScope` (#15129); the "logical child" hydration cache left stale after mismatch-recovery node replacement (#15145); vdom-interop bypassing prop validation entirely (#15111). | **Pass-through for all 13 runtime-vapor/compiler-vapor fixes - no lib code change** (every diff read at source, not just titles). `createVaporChamberApp` / `getVaporInteropPlugin` / `defineVapor*` forward Vue's own functions untouched; `rehydrate()` replays commands *above* Vue's DOM hydration; `createTransitionBridge`/`useTransitionCommand` only supply hook bodies Vue calls into; `tryAutoCleanup()` calls the public `getCurrentScope()`/`onScopeDispose()` pair, never the internal restore path #15141 fixed. Confirmed no example's `v-for` variable collides with a compiler-vapor helper name (#15124 N/A here). Two real, non-theoretical unblocks worth knowing even though no code changed: a vdom `<Transition mode="out-in">` around a vapor page no longer deadlocks (#15133/#15140 - relevant to anyone pairing `useTransitionCommand` with page-level transitions, Nuxt-style), and a first vdom->vapor `<Suspense>` navigation no longer kills that page's watchers (#15141 - any composable here called from such a page's `setup()` was swept into that teardown with no userland workaround possible). **LIB-SIDE, inspired by studying #15127 rather than required by it:** `v-vc:command` gains its own opt-in `.delegate` modifier (`src/directives.ts`) - one shared document-level listener instead of one per element, mirroring Vue's exact opt-in trade-off (an ancestor's `.stop` can pre-empt a delegated descendant) and its incompatibility with `.capture`/`.once`/`.passive` (dev-warns, falls back to direct). **Measured, not assumed** (`tests/perf.bench.ts`, 5k elements): delegate mode is **~1.3x slower to mount+unmount**, not faster - correcting an initial assumption. Its real payoff is standing listener count (1 vs N) for large, mostly-static lists, so it's documented as a memory trade, not a speed one; `examples/vapor-island-cart`'s 3-item product list is left as plain `@click` (nothing to win at that size) with a comment explaining when to reach for `.delegate` instead. Verified against rc.2: `tsc` clean, **1259/1259** tests pass (71/71 files, coverage 95.86/88.92/96.88/97.36 stmt/branch/fn/line, all above the floors - which are lines 95 / functions 94 / branches 86 / statements 93, i.e. `vitest.config.ts` declaration order, NOT the stmt/branch/fn/line order these four numbers are printed in), lint clean, IIFE 10.8/7.5/8.0 KB brotli (unchanged from rc.1 within rounding). |
-| **rc.3** (Aug) | 36 commits, all read at source. **KeepAlive is the theme** (6): cached component props and dynamic slots isolated behind a commit boundary so a cached child stops observing transient parent values (#15251, closing #15228); branch removal deferred until cache pruning (#15189); leaving cache entries unmounted from their real parent (#15190); updates deferred while async setup is pending (#15172); interop entries fully pruned at `max` (#15181); and KeepAlive scopes now **paused** while deactivated (closing #15237). **Custom directives** hardened in three places: compiler wraps the value in parens (#15258), async component roots treated as pending rather than warned about (#15167), fragment roots re-applied via a detached scope (#15158). **v-show stops over-tracking** twice - transition hooks (#15203) and the source inside fragment effects (#15204) - both by running callbacks with tracking disabled. **App unmount lifecycle aligned with vDOM** (#15262): `onBeforeUnmount` -> `onScopeDispose` -> `onUnmounted`, children before parents. Plus vDOM slot content in `<Transition>` (#15159), teleport target cleanup on scope disposal (#15236), interop prop normalization (#15254), class-prop normalization (#15227), functional-component root bindings, 4 async-hydration fixes, 6 slot-fallback/hydration fixes, and 2 type-only fixes. | **Pass-through for the runtime fixes** - no wrapper change. But the read surfaced two things the lib had wrong, both now corrected with fixtures rather than argument. (1) **Custom directives are NOT VDOM-only.** `withVaporDirectives` is a public export shipping since **3.6.0-alpha.3** (verified by unpacking published dists alpha.3 -> rc.3); rc.3 only hardened it. Four places in this repo asserted the opposite, including a runtime `console.warn`. What genuinely blocks `v-vc:command` is the *shape* - Vapor directives are `(el, value, arg, mods) => cleanup` with **no `updated` hook** - not upstream policy. Fixture: `tests/vapor-directives-fixture.test.ts`. (2) **The `tryKeepAliveHooks` removal note was wrong.** `docs/router.md` said #15237 landing would make it double-suppression; measured, Vue pauses *effects*, while that guard protects a `bus.onAfter` callback the bus invokes directly, which still fires under a paused scope. Guard kept, note corrected. Fixture: `tests/keepalive-pause-fixture.test.ts`. **Technique logged, then applied:** #15203/#15204 run callbacks with tracking disabled (`setActiveSub`) - the bus has the same exposure (a `dispatch()` from inside an effect leaks the *handler's* reads into the caller's dependency set, reproduced). `setActiveSub` is not on the `vue` entry, but `pauseTracking`/`resetTracking` are exported by `@vue/reactivity`, which resolves to the same module instance; `untracked()` is built on those and every composable routes its dispatch through it. Getting them at BUILD time rather than through a runtime probe is what `vapor-chamber/vue` exists for - see §11.6. **Lib-side this cycle:** Vapor detection gains an owned global slot + `configureVue()` - see §11.6. Verified against rc.3: `tsc` clean, **1491/1491** tests (92 files). |
-| **rc.4** (Aug 14) | 12 commits, all read at source. **v-for item scopes reworked** (3): every item - component-shaped included - gets its own `EffectScope` again and is stopped on unmount (`7db1454`, reversing the beta.14-era "the component already has a scope, skip the outer one" rationale); component items are structurally **removed before** their scope stops, so item cleanups such as template refs observe a detached node (`aac355d`); and the `IS_COMPONENT` flag is re-documented upstream as "requires component teardown ordering", not "owns its own scope". **Prop-source caches re-scoped** (2): a `computed` cache created by a parent-owned prop source is collected in the *consuming* scope (`22b9b41`), then narrowed again to the active consumer via `getCurrentScope()` (`e8a09b3`), so a v-for fallback that renders a plain DOM node stops accumulating caches on the owner. **KeepAlive input isolation moved off the branch scope** (#15293): raw prop/slot commit effects now live in a per-instance `inputScope` that `activate()`/`deactivate()` resume/pause, leaving the branch-scope pause to branch-owned effects only - a **refinement of the rc.3 row's "KeepAlive scopes are paused while deactivated"**, which described a mechanism Vue no longer uses on this path. Plus: nested-fragment child keys no longer overwritten by an outer wrapper key (#15292, `setBlockKey` gains `overwrite`); declared `style` props normalized like vdom (#15286); `inheritAttrs: false` ownership read from the *parent* type (#15279); dynamic v-for slot state preserved across re-resolution (#15280, `createForSlots` becomes a keyed, ref-reusing factory - a compile-time signature change); merged event handlers keep their modifiers (#15265); component root propagated through `<Transition>` so fallthrough class/style merge at the root (#15275); redundant transition block resolution skipped when no v-shows are pending (#15272). | **Pass-through for all 12 - no wrapper change**, and three verified N/A rather than assumed: we declare no `inheritAttrs`, pass no `style` props, and run no DOM-connectivity check in a cleanup, so #15279 / #15286 / `aac355d`'s reordering cannot reach us. The v-for scope rework sits below `tryAutoCleanup()`, which calls the public `getCurrentScope()`/`onScopeDispose()` pair and is indifferent to how many scopes are nested above it. `createForSlots` is compiler output; the Vapor SFC examples inherit it by recompiling. **But reading #15293 found a real bug of ours, and it is the only reason this cycle has code in it.** `tryKeepAliveHooks` gated itself on `getCurrentInstance()`, which reads *VDOM's* `currentInstance` - measured on rc.4, that returns null inside `defineVaporComponent({ setup() })` while an `onDeactivated()` registered at the same point works and fires. So the KeepAlive pause/resume in `useCommandHistory` / `useCommandError` was **inert in every Vapor component** - silently recording commands dispatched into a deactivated view - while working in VDOM, which is why 1508 passing tests never saw it. The rc.3 fixture could not have: a bare `effectScope()` stand-in never calls our guard. Fixed by probing `hasInjectionContext()` (Vue 3.3+ - measured true in Vapor *and* VDOM setup, false in a bare scope), `getCurrentInstance()` kept as the fallback for a partial Vue namespace. Fixture: `tests/keepalive-input-scope-fixture.test.ts`, which drives a real `VaporKeepAlive` and pins both halves - that our guard suppresses recording while deactivated, and that an unguarded `bus.onAfter` at the same site still fires (the fact the whole "not double-suppression" argument rests on). **The bus over-tracking item is re-classified, and this corrects how it was recorded.** It has been carried as *blocked* on `setActiveSub` not being exported. That framing was wrong on both counts. First, availability was never the constraint: `pauseTracking`/`resetTracking` are the same mechanism `setActiveSub` implements, they are **typed public API** in rc.4 (`enableTracking` too), and `untracked()` is already built on them - re-verified that `setActiveSub` itself remains JS-only, absent from the `.d.ts` of both `vue` and `@vue/reactivity` in rc.3 and rc.4, but that no longer decides anything. Second, and decisively: making untracking the default costs too much. Measured on rc.4, interleaved A/B, 20k dispatches - a bare `bus.dispatch()` is **35.9 ns**, and the same dispatch wrapped in `pauseTracking`/`resetTracking` is **111 ns: 3.1x, +75.4 ns each** (not reproduced: the rc.7 row in this table re-measured it through the real dispatch path at 1.22x, +5.4 ns). So the item is not waiting on upstream; it is **declined on cost**, and would be declined identically if `setActiveSub` were exported tomorrow. The design that survives is the one already shipped: composables route their dispatch through `untracked()`, where the guard rides on work that is already doing signal writes and the relative cost disappears, while the bare bus stays free. The residual exposure - a *direct* `bus.dispatch()` from user code inside a reactive effect - is a documented boundary, not a bug awaiting an API. Verified against rc.4: `tsc` clean, **1748 + 7** tests (114 files across both projects). |
-| **rc.5** (Aug 21) | 15 commits, all read at source. **Attrs fallthrough is the theme** (5): semantics aligned with vdom - `filterModelListeners` exported from runtime-core and reused, a new `resolveFallthroughAttrs()` returning `{}` rather than `undefined` for stable diffing, and `hasFallthroughAttrs()` checking dynamic sources (`rawProps.$`) before static undeclared keys (`293ca1c`); fallthrough attr effects **re-parented onto the innermost dynamic fragment's branch scope**, with an `EffectScope` retrofitted onto compiler-proven no-scope branches that carry them, so a detached branch stops updating (`be7157e` - `DynamicFragment.hasFallthroughAttrs` becomes a `fallthrough(nodes)` callback invoked inside `runWithRenderCtx`, replacing the old `onBeforeInsert` hook); attrs reach **interop vnode roots** by cloning the vnode and re-cloning under a `renderEffect`, patching rather than remounting so inner state survives (`5073eb5`); functional components that **declare props** now get full fallthrough like vdom instead of the class/style/listener subset (`ef83790`); and resolution **stops descending at slot outlets** instead of warning and continuing into slot content (`10f666e`). **TransitionGroup is the second theme** (7): pending enter/move cbs flushed on the *resolved element* because "for interop children [it] is not the block itself" (`f2fa54d`); group hooks **re-applied onto already-mounted children on prop change**, extending beta.16's element-path fix, with the FLIP-measurement latch preserved across re-resolution (`d3fde91`); `forceReflow(firstChild)` so the reflow uses **the group's own document** - "works inside iframes / foreign documents" (`36dd186`); plus four perf - collect-only child snapshot in `beforeUpdate` (`744d64d`), no bookkeeping on ForBlock wrappers which "have no transition consumers of their own" (`2c914ef`), per-child props tracking skipped when `hasDynamicPropsSource()` is false (`c526d45`), and v-for hot-path allocations trimmed via an LIS planner, indices-only reordering, lazy `RenderEffect` job creation and dropped `ForBlock.prev/next/prevAnchor` (#15329). Plus element namespace resolved at interop boundaries including the `annotation-xml encoding=html` escape back to HTML (#15321), nested vdom slot content preserved under a Vapor Transition root via an `isDirectSlotRoot` discriminator (#15304/#15303), and the rendering Suspense boundary restored in fragment ctx so a late branch's post-render effects queue on the pending boundary rather than the global queue (`5c2805d`). | **Pass-through for all 15 - no wrapper change** - but studying the fallthrough cluster turned the question on this library's own documented usage and found a bug there, which is the only reason this cycle has code in it. **`<Transition v-bind="t">` - the binding this module's JSDoc, the README and `docs/` all tell you to write - was putting bridge internals into the DOM.** `v-bind="obj"` spreads own ENUMERABLE keys as props; Vue matches the nine `on*` hooks to `<Transition>`'s declared props and passes the rest through as fallthrough ATTRIBUTES. `phase` (a signal object) and `dispose` (a function) matched no declared prop, so both were stringified onto the transitioned element - measured on a real mount: `<div class="panel" phase="[object Object]" dispose="() => {}">hi</div>`, on every consumer following the docs since v1.1.0. Fixed by defining both **non-enumerable** (`assembleBridge`), which changes what *spreading* yields and nothing else - `t.phase.value`, `t.dispose()` and `const { phase } = t` read the property directly and are unaffected, since destructuring does not require enumerability; the one intentional casualty, `{ ...bridge }` dropping them, is exactly the operation that caused the leak. Renaming the keys or moving hooks under `t.hooks` were rejected: both fix the leak by breaking the documented call site. **Why 1750 passing tests never saw it:** every test in `tests/transitions.test.ts` calls the hooks directly on a mock element, so nothing ever handed the bridge to Vue - the rc.4 KeepAlive lesson repeating itself, that a fixture substituting a mock for the integration it reasons about can only check the half you already understood. Fixture: `tests/transition-bind-fixture.test.ts`, which **mounts**, and is verified to fail 3-of-4 against the pre-fix code. **Four items N/A by verification, each grepped across `src` and `examples` rather than assumed:** we declare no `inheritAttrs` (so the inheritAttrs gating in `293ca1c`/`5073eb5` cannot reach us), define no functional components (`ef83790`), render no SVG/MathML/`foreignObject` (#15321), and use no template refs (`5c2805d`). `be7157e` newly creates EffectScopes inside branches, but that is below `tryAutoCleanup()`, which registers on whatever `getCurrentScope()` returns from a `setup()` and is indifferent to nesting depth above it. **The one module rc.5 conceptually reaches is `transitions.ts`, and it is idempotent by construction:** `buildHooks` resolves all nine hook identities ONCE per bridge and never rebuilds the object, so `d3fde91`'s re-application re-registers the same nine functions - and re-registration is not invocation, so a prop change dispatches no extra `*Move`/`*Enter`. `f2fa54d` is a straight unblock in our favour: `onMove` dispatches per move, and an interop child whose pending cbs were flushed against the block instead of the element is exactly the shape that strands one. **Two upstream commits converge on decisions this repo already made independently**, recorded because corroboration is worth as much as a diff: `36dd186`'s "use the element's own document" is the rule `directives.ts` enforces with its per-`Document` `delegatedDocs` map (rc.2 cycle, added after a single global count stranded the shared listener on the wrong document and turned delegated controls into dead ones), and `8d83bb2`'s switch to direct `el.addEventListener()` to kill disposer-closure allocation is what `v-vc:command` has always done. **From the Vapor roadmap read (#13687), one finding that outranks the diffs:** the rc.4 `hasInjectionContext()` gate was justified by measurement alone, leaving open whether Vue would later make `getCurrentInstance()` answer in Vapor and render it dead weight. A core maintainer has since confirmed the null is **intentional** (Jul 20), with an internal `useInstanceOption` kept deliberately non-public, and reaffirmed (Aug) that Vapor exposes no general-purpose component instance tree by design. So the gate is permanent, not scaffolding - and the same statement settles two unchecked roadmap boxes for us: **Vue Test Utils** (instance traversal is what upstream ruled out; `createTestBus` asserts at the bus boundary and needs no revision) and **DevTools** (`src/devtools.ts` builds its inspector tree from buffered `bus.onAfter` entries, never from Vue's component tree, so it does not wait on Vapor component-tree bookkeeping). **Perf patterns harvested from the four rc.5 optimization commits - three already shipped here, one measured and parked.** Already applied, and in two cases with evidence going further than upstream's: `c526d45`'s "skip the tracking effect when nothing is dynamic" and `2c914ef`'s "skip bookkeeping for wrappers with no consumers" are the same idea as `_syncDispatchInner`'s bare-bus fast path (five O(1) reads) and `_syncEmitInner`'s no-listener early return - and the fast path's comment records that a cached `isBare` boolean was *tested and measured 25% worse*, because the added state field broke the hidden class; `293ca1c`'s "return `{}` not `undefined` so diffing stays stable" is the shape-stability rule behind `okResult`/`errResult` always setting both `value` and `error`; `8d83bb2`'s allocation trimming is the index-loop-with-length-snapshot / no-`.slice()` / frozen `EMIT_RESULT` singleton work already in the hot paths. **The one genuinely unapplied pattern is `744d64d`'s collect-only distinction** - a pass that only READS skips the bookkeeping the write pass does. Our read path does not: `bus.emit()` deliberately skips `stampMeta` with a recorded rationale, but `bus.query()` - also a read - stamps full meta (`Date.now()` + `uid()` + a 5-field object) exactly like `dispatch`. Measured (41 interleaved rounds, 200k iterations, isolated-cost method, so an upper bound on the marginal delta rather than an exact one): a bare `bus.query()` is **45.1 ns** and `stampMeta`'s own work is **29.8 ns - 66% of it**. **Acted on, after the isolated number was disproved by a better measurement.** That 29.8 ns came from an isolated loop - exactly the method this repo's own `docs/performance.md` warns produces garbage, because a loop-invariant variable read is hoisted while `Date.now()` survives. Re-measured through the REAL dispatch path (`tests/clock-source-ab.test.ts`, interleaved, with an `emit` control row that never stamps and therefore calibrates the harness at a ~2-6% noise floor): the recoverable cost is **15-25 ns per command, fixed** - 1.42-1.67x on a bare bus, 1.42-1.57x on `dispatchBatch`, 1.38-1.50x with an ordinary handler, 1.18-1.24x with three plugins, and **nothing** once 50 listeners dominate. The lever turned out not to be `uid()` or the allocation at all but `Date.now()` itself (32.9 ns isolated on this host); breaking `stampMeta` down showed `toString(36)` at 0.5 ns. So `meta.ts` now reads the clock **once per microtask turn**, eagerly on the first call of each turn so that command is exact. Confirmed on the bench: `bus.dispatch` moved from **197.7x** to **140.0x** slower than a direct call, `emit` unchanged (the control). No API was added - a runtime knob was built, measured and deleted, since an option only earns its place when both settings suit different people; the rare exact-clock need is a user plugin. Containment pinned by `tests/clock-source-contained.test.ts`: every TTL/expiry path reads `Date.now()` directly, so a frozen clock cannot extend a cache entry. **A second, larger lib-side finding came from reading vue-router v5 rather than Vue itself** - recorded here because this router deliberately shares no code with it, which is exactly why the *lessons* have to be imported by hand. v5 protects its query objects with `Object.create(null)`; checking whether ours needed the same turned up **one bug class at four sites**, three of them live. `parseQuery` read `query[key]` on a `{}` to detect repeated keys, so `?constructor=1` came back "already set" and produced `[Object, '1']` instead of `'1'`, while `?__proto__=a` assigned through the inherited setter and replaced the parsed object's prototype; `defaultAffects` used `key in record.queryDefs`, reporting `?toString=`/`?valueOf=` as DECLARED params and refetching a loader for a key never declared; `form.ts` ran a rule for an absent field against an inherited function. Worst of the four, and the one furthest from where the search started: `commandKey`'s canonical serializer copied sorted keys into a `{}`, so an own `__proto__` key - precisely what `JSON.parse` of a server response yields - was swallowed by the setter and dropped from the output. Measured: `{"__proto__":"A","id":1}` and `{"__proto__":"B","id":1}` both keyed to `act:{"id":1}`, and that key backs `idempotent`, `cache`, `serialize` and `supersede`, so two distinct commands deduped into one. The rule now lives once in `src/dict.ts` with its evidence rather than as four independent rediscoveries, and the reads use `Object.hasOwn` - the same fix v1.15.0 applied to the MCP gate, which was this class's first appearance. Whole class cost **0.0 KB brotli** (+0.1 KB raw). Fixtures: `tests/prototype-keys.test.ts`, `tests/router/query-prototype.test.ts`. Verified against rc.5: `tsc` clean, lint clean, **1786 + 7** tests across both projects (120 files), IIFE 11.0 / 7.6 / 8.0 KB brotli - all under budget and unchanged from rc.4. **Performance measured, not asserted** (`npm run ab:vue -- 3.6.0-rc.4`, 51 interleaved rounds, both sides the prod with-vapor dist): scope create/dispose 1.026x, shallowRef writes 0.999x, watcher notify 1.042x, computed read-after-write 0.926x - worst ratio **1.042x**, inside the harness noise band, so no regression on the primitives this library sits on. |
-| **rc.6** (Aug 28) | 14 commits, all read at source. **DOM prop writes are the theme** (3), and they converge on one rule - compare against what you were GIVEN, not what the sink normalized it to. `setDOMProp` stopped skipping the initial write when the value happened to equal the element default (#15341: `<input type="text">` set no attribute at all, because `el.type` already read `"text"`), then went further and moved the change-detection off the live property entirely onto a `$p$`-prefixed expando holding the previous **raw binding** (#15343), so `:type="invalid"` -> `:type="text"` now writes even though the DOM normalized both to `text`. `setValue` additionally mirrors `value` into the **attribute** (#15340/#6007) so `<form>.reset()` restores the bound value rather than the empty string. **Hydration is the second theme** (4): a double `exitHydrationCursor` no longer decrements the live-cursor count twice (`7710394`) nor re-runs the restore that would rewind over a sibling's claimed nodes (`9e6d1e5`); leaving a hydration boundary asks `compareDocumentPosition` instead of walking forward for a node already behind the cursor, which was quadratic over a list of boundaries (`9905d7d`); and `template()` now parses each template string ONCE into an `AdoptTarget` descriptor (type / tag / tagUpper / blank) that every later instance compares against, instead of re-scanning the string per adoption (`29ed4b0`, upstream-measured v-for single-root +15.5%, multi-root +9.2%). Plus: a null `<component :is>` renders as a genuine empty branch rather than a placeholder node, because a build-dependent placeholder (dev comment / prod text) in the semantic content tree made prod hydration mistake detached text for content and crash (`a447d80`), with the branch then keyed by its resolved sentinel rather than the raw value (`7c8d34a`); runtime structural anchors are **claimed** so `isValidBlock` rejects them by marker, making block validity identical across dev (comment) and prod (text) shapes - previously a prod anchor read as renderable content and suppressed slot fallback in prod only (`2473b78`); `v-for`'s index alias is cleared when the source switches from object to array (#15364); the scheduler restores its own state after a flush error, re-queueing leftovers on a fresh microtask and clearing `QUEUED` flags in `finally` so a throwing post job cannot strand later work (`70bd789`); and HMR gains a `runWithHmrUpdating` wrapper that covers the Vapor fast-path reload and, critically, resets the flag immediately when an update **fails** instead of leaving it set forever (`991a885`), while each dev render generation becomes owned by its own `EffectScope` (`9ab65a1`). | **Pass-through for 13 of 14 - no wrapper change (though this cycle carries a src fix of its own, found while auditing the wiring path - see below) - and the DOM-prop cluster is N/A by verification rather than by assumption:** `src` contains no `setAttribute`/`removeAttribute` outside `router/dom.ts`'s two `data-active` calls, writes no DOM properties, and reads no `value` attribute, so nothing here can observe #15340/#15341/#15343 (the SFC examples inherit them by recompiling). Same for the hydration cluster - our SSR is command replay above DOM hydration (§14) - and for `<component :is>`, which appears nowhere in `src` or `examples`; `RouterOutlet` is a VDOM `defineComponent` returning `h()` or `null`, never a Vapor `createDynamicComponent`. **The scheduler's "restore state in `finally`" fix is the one whose CLASS could have reached us, and it was audited rather than waved through:** all three `dispatchDepth` guards (both bus variants + `createTestBus`) already restore in `finally`, and `runDispatch` already clears `loading` on every exit path including the throw - so the class is clean here, verified by reading each site. **The 14th commit is the exception, and it found real behaviour.** `9ab65a1`'s per-render `EffectScope` exists to tear down *element-nested* child components on HMR rerender - children mounted inside an element rather than returned as the parent's block, which the block graph cannot reach. A leaked Vapor instance is a leaked `setup()` scope, and `useCommand()` hangs its cleanup on exactly that scope, so before rc.6 a hot reload left the old generation subscribed: measured on rc.5, after two reloads ONE dispatch fired a `useCommand().on()` listener **three times**, once per generation ever rendered - duplicate side effects growing with dev-session length. rc.6 disposes each superseded generation and the fan-out returns to one. The asymmetry is why nobody noticed: `register()` is keyed in a Map so the newest handler always wins regardless of teardown, while `on()` appends to an array and nothing overwrites a leak. **No code change on our side** - `tryAutoCleanup` was already registering the right cleanup on the right scope; Vue simply began stopping that scope. Fixture: `tests/hmr-render-scope-fixture.test.ts`, which drives the real `__VUE_HMR_RUNTIME__` against a real `createVaporApp` and is verified to FAIL on rc.5. **One perf pattern harvested, measured, and shipped.** `29ed4b0`'s move - hoist a per-call string scan into a descriptor the factory computes once - pointed at our own fan-out: `on()` classifies a pattern as a wildcard to pick a bucket, then throws that result away, and every dispatch re-derives it inside `matchesPattern` (`=== '*'`, a `charCodeAt`, an LRU `Map.get`). Wildcard entries now carry `prefix = pattern.slice(0, -1)`, correct for both shapes with no special case since `'*'` slices to `''` and `startsWith('')` is always true. Measured on the REAL dispatch path, interleaved, with the baseline arm DERIVED from the shipped source so it is the genuine old code: **1.14-1.32x on wildcard fan-out** (10-31 ns/dispatch, scaling with listener count), **0 B brotli**. Two rows deliberately do not move and are the honesty check - no wildcard listeners ~1.00x (the control; that shape already short-circuits) and a lone `'*'` listener ~1.02x (`matchesPattern` already returned on its first comparison). The isolated matcher loop reported **3.66x**; per `docs/performance.md` that number is an inflated upper bound and the real-path figure is the one recorded. Public `matchesPattern` keeps its LRU untouched - it takes arbitrary caller-supplied patterns (plugin `actions:` filters, MCP whitelists) where nothing has classified anything in advance. **And re-running the ritual's reopen-condition check corrected a fact this file got wrong for two cycles.** The rc.5 row states that exactly one of the four wrapped Vapor APIs is statically importable from `vue`. All four are, plus `vaporInteropPlugin` - 18 Vapor names, and the list is **byte-identical on rc.5 and rc.6** (as seen through the test's name filter; the entry's full surface changed at rc.8 - `withOnce` added, runtime-vapor `withAsyncContext` removed), so the error was never about rc.6. `vue.runtime.esm-bundler.js` is 23 lines; the rc.5 row quoted the named `import` and `export` lines and missed the `export * from "@vue/runtime-vapor"` between them. That is precisely the failure mode the same paragraph warns about, inverted: a star re-export has no name to grep for and none to quote, so an absence in a quote is not an absence from the module. The roadmap's reopen condition ("a with-vapor bundler entry OR a vapor subpath/condition") is therefore **met on its first half, and has been since rc.5** - which does not revive the `vue36` flavor, since the `__vapor`-marker fact and the <0.9 KB measurement are independently fatal, but does mean it now stands on "not worth building" rather than "nothing to import from." Enumeration is automated in `tests/vue-bundler-vapor-exports.test.ts`. **A second lib-side bug came out of auditing the WIRING path rather than the guard, and it is the rc.4 KeepAlive finding by another road.** rc.4 established that `tryKeepAliveHooks` must gate on `hasInjectionContext()` because `getCurrentInstance()` is null in Vapor by design. The guard was right; what nobody checked is whether the thing it depends on reaches the registry. It did not - `src/vue.ts`, the entry whose entire purpose is build-time Vue wiring, passed seven names to `configureVue()` and `hasInjectionContext` was not one of them, while `applyVueModule` reads it. Unset, the gate falls back to `getCurrentInstance()` and goes inert, so `useCommandHistory`/`useCommandError` record commands dispatched into a DEACTIVATED KeepAlive view. **Why the suite could not see it:** `tryKeepAliveHooks` calls `probeVue()` first, and under vitest a bare `import('vue')` resolves and supplies the FULL namespace - so the omission is invisible wherever the suite runs, and bites only in a production bundle where the specifier cannot resolve and the registry holds only what the static list passed. Dev-correct / prod-broken, the same asymmetry that caused `vapor-chamber/vue` to exist at all. Fixed by adding the name; fixture `tests/vue-subpath-wiring-fixture.test.ts` blocks the probe, mounts a real `VaporKeepAlive`, and pins BOTH halves - the guard holds with the full list and fails to suppress with that one name withheld, so it proves the mechanism instead of asserting it. The generalized rule now sits in `src/vue.ts`'s header: that list is load-bearing, and any registry entry `chamber.ts` begins reading must be added to it or it serves probe-path consumers only. Relatedly, `configureVue()` was confirmed to MERGE (every assignment is `typeof`-guarded, so unsupplied entries are left unchanged) - never documented, so the vapor-sfc example had been defensively re-enumerating all eight names on top of what `vapor-chamber/vue` already configured; its preamble is now one `configureVue({ createVaporApp })`. **Two things the corrected fact then UNLOCKED, both measured.** First, `vapor-chamber/vapor` - the 3.6-only subpath `src/vue.ts` has prescribed in writing since it was authored, now shipped: it statically imports Vue's Vapor APIs so the registry is seeded at build time instead of by a probe that cannot resolve in a production bundle, which is the failure mode behind both prod-only bugs above. The wired set is measured rather than maximal - a static import is retained by the consumer's bundler whether the app calls it or not, so on the vapor-sfc example `createVaporApp` alone is 80.23 KB raw, `+defineVaporComponent` +0.03, `+defineVaporAsyncComponent` +1.84, `+defineVaporCustomElement` +9.21, and `+vaporInteropPlugin` **+78.27 (roughly doubling the app)**. The entry wires the first three and leaves the last two behind one composable `configureVue()` line, the same audience axis the IIFE variants split on. Second, and smaller but cleaner: **both Vapor examples' `vue` alias and their hand-written `vue-with-vapor.ts` shim are now dead code and were deleted.** That shim was `export * from '@vue/runtime-dom'; export * from '@vue/runtime-vapor';` - which is character-for-character what `vue.runtime.esm-bundler.js` now contains. Verified by building each example with and without the alias: **byte-identical output, same sizes and same content hashes** (all four chunks for island-cart). Consumers copying those configs were carrying a workaround for a problem Vue had already fixed. **The same hoist paid a second time, in the router.** `stampActiveLinks` runs after every navigation over every in-base anchor and re-derived `new URL()` + `stripBase()` per anchor per commit, from an href that almost never changes; `routableTarget` now memoizes per anchor, keyed on the raw href it was derived from (rc.6's `84833e2` lesson - validate against the input, not against element identity, since a Blade menu can rewrite an href in place). Measured on the real function with the baseline arm derived from shipped source: **1.77-1.86x**, saving 42 us/commit at 50 anchors, 172 us at 200 and **828 us at 1000** - and 1000 is not hypothetical for the server-rendered menus this feature exists to light up. A `WeakMap` rather than a node expando, that choice also measured (0.98-1.02x, inside noise, so the non-invasive one wins for free). **One correction recorded with it:** an earlier pass reported 3.12x by timing the imported function against a cached variant defined inside the test file, which V8 does not optimise identically - the isolated-loop error in a different costume. The derived-baseline method is what produced the honest figure. Verified against rc.6: `tsc` clean, lint clean, **1872 + 10** tests across both projects (130 files), IIFE 11.1 / 7.6 / 8.1 KB brotli - all under budget and unchanged from rc.5. **Performance measured, not asserted** (`npm run ab:vue -- 3.6.0-rc.5`, 51 interleaved rounds): scope create/dispose 1.012x, shallowRef writes 0.997x, watcher notify 1.055x, computed read-after-write 0.939x - worst ratio **1.055x**, inside the documented noise band. **A later pass in the same window built on this cycle's dynamic-component work, and it reverses one of this row's own N/A calls.** Above, `<component :is>` is listed as not reaching us, on the grounds that "`RouterOutlet` is a VDOM `defineComponent` returning `h()` or `null`, never a Vapor `createDynamicComponent`." That was true of the only outlet that existed when this row was written. It is no longer true of the library: **`vapor-chamber/router/vapor`** ships a second render surface over the same route snapshot, built on exactly the helpers `a447d80` and `7c8d34a` reshaped - `createDynamicComponent` for the branch (accepting a block, with null rendering as a true empty branch keyed by its resolved sentinel) and `createSlot` for the no-match fallback, whose dev/prod validity parity is `2473b78`. So three rc.6 commits went from inherited-but-unused to load-bearing inside one cycle, which is the clearest available illustration of why the alignment ritual reads diffs at source rather than filtering them by what today's code happens to call. Upstream's own comment on `a447d80` reads *"Support integration with VaporRouterView/VaporRouterLink by accepting blocks"* - this is that integration, built against it. **The prize is startup, and it is transfer and parse rather than steady state:** a pure-Vapor app rendering a route through the vDOM outlet must install `vaporInteropPlugin`, which drags in the vDOM renderer; building the outlet from Vapor's own helpers drops **20.02 KB brotli / 60.8 KB raw** from an executed production bundle, measured against an interop baseline derived by the same harness so neither arm can differ by method (`tests/vapor/vapor-outlet-size.test.ts`). No steady-state per-navigation claim ships, because no committed A/B bench exists for it - §9.4's discipline, unchanged. **The guard now holds two limits, measured on a Vite production build since the rc.8 cycle: the saving stays >= <!-- vc:outletFloor -->15.0<!-- /vc:outletFloor --> KB (today <!-- vc:outletSaving -->21.14<!-- /vc:outletSaving -->), and the Vapor outlet's own machinery over the router-without-outlet floor stays <= <!-- vc:outletOwnArmCeiling -->5.0<!-- /vc:outletOwnArmCeiling --> KB (today <!-- vc:outletOwnArm -->4.21<!-- /vc:outletOwnArm -->)**, and it is deliberately written to fail when a later RC erodes either: growth in `DynamicFragment`/`SlotFragment` lands in the second, and that failure is a decision trigger rather than a threshold to raise. (At this row's time it was one esbuild-measured bar on the difference; the rc.8 row records why it was replaced.) **Two things the design refuses on purpose.** It does not reach Vue through the registry - every helper is a static import from bare `vue`, so an upstream rename is a consumer *build error* rather than the silent runtime null a probe miss would produce in a production bundle, which is the exact failure class `vapor-chamber/vue` and `vapor-chamber/vapor` were shipped to kill. And it does not fall back to interop when handed a vDOM component: `createDynamicComponent` gates its vnode branch on `appContext.vdom`, so without interop a vDOM component silently renders in the wrong mode with no upstream error, and the outlet therefore reads the `__vapor` marker itself and throws a coded `mode_mismatch`. A silent fallback would have restored the entire 20 KB the subpath exists to save while looking like it worked. Blade rows keep requiring the vDOM outlet, since `makeBladeComponent` is itself `defineComponent`/`h` - documented, and made loud at runtime by that error's blade-specific message. **The new dependency surface is nine items and is enumerated, not described**: eight named imports plus one property read (`instance.slots`, because Vapor's `setup` receives the instance as its second argument and no public slot-existence helper exists), pinned through the bundler entry by `tests/vapor/vapor-outlet-helpers.test.ts` for the star-re-export reason this row already records twice. The Phase 1 spike that gated all of this (`tests/vapor/vapor-outlet-spike*`) was **deleted** on landing, its every behaviour now carried by permanent fixtures - six of them, including one that asserts the whole contract against an *executed* production bundle, because the anchor a null branch leaves behind is a comment in dev and an empty text node in prod and only node-KIND assertions survive both. Re-verified at this pass, superseding the counts quoted earlier in this row: `tsc` clean, lint clean, **1950 + 17** tests across both projects (137 files), coverage 100.0% on all four axes, IIFE 11.1 / 7.6 / 8.1 KB brotli - unchanged and under budget, since the subpath adds nothing to them. |
-| **rc.7** (Sep 4) | 50 commits, all read at source, and **all 50 are pass-through**: 21 compiler-vapor, 50 files of runtime-vapor, 5 runtime-core, plus types and tests. Nothing renders here, so slot fallback arbitration, teleport scoping, async-wrapper hydration, transition persistence and v-for row relocation all land below this library. The themes, for the record: **slots** (`VaporSlotFlags` collapses to a 2-bit FORWARDED/SHARED_FALLBACK mode with `isForwardedSlot`/`slotInheritsFallback`/`slotNotifiesBoundary` exported from `shared` so the vapor and interop paths cannot drift; `NON_STABLE` splits out into its own `VaporSlotStability`; the fast path widens twice, each step pinned by a coverage guard that a later commit then flips); **async components** (a resolved one is created AS its resolved component with no wrapper, branches keyed by state, an `asyncComponentState` module whose `isAsyncComponentEnabled` gates every wrapper-aware branch); **transitions** (`persisted` derived by walking from the root on every apply, deleting `capturePendingVShows`/`applyPendingVShows`/`hasVShowMarker` and an ambient stack; composed TransitionGroup keys move off `$key` into a WeakMap with a `getTransitionKey()` accessor; a `disabled` suppression latch deleted in favour of `MoveType.REORDER` at the call site). **Performance: neutral, and the instrument needed fixing first.** `npm run ab:vue -- 3.6.0-rc.6` (51 interleaved rounds) reports 0.993x / 0.991x on scope create-dispose and shallowRef writes, and apparent 0.760x / 0.696x "speedups" on watcher-notify and computed. Those two are ARTEFACTS: running the same harness with rc.7 on BOTH arms reports 0.756x / 0.696x, and two byte-identical copies of one dist loaded through the identical path differ by up to 1.425x in opposite directions per workload. The cause is per-module-instance reactivity state, indistinguishable from a version difference by construction. The diff corroborates the neutral reading - the only `packages/reactivity` file changed is its `package.json` version line. So the printed 0.87-1.15 band is sound for the two workloads that build no persistent graph and much too tight for the two that do; a self-A/B control pass is the fix and is not yet written. **Five defects found here by reading, none of them rc.7's:** `createFormBus().submit()` ran `onSubmit` twice on a double-click, because the re-entry guard read a signal set only after an await; four more prototype-key sites in the plugin layer (`validator`, `optimistic`, `validateSchemas`, `validateSchemasAsync`), one of which made `bus.dispatch()` THROW on an action named `toString`; `defineVaporCommand`/`useVaporAsyncCommand` were the only dispatch paths not wrapped in `untracked()` - the two Vapor ones, and one documented for hot paths; the router re-ran a guard or `afterEach` hook that unregistered a LATER sibling, using the length-based cursor `command-bus.ts` already records as wrong; and `createReaction`'s `maxHops` cap was inert whenever `mapPayload` returned a primitive or array, which is unbounded on an async bus. The last needed a core channel - a one-shot causation slot in `stampMeta`, the mechanism `_withOrigin` already proved - at +18 B brotli. **The tree-shake ceiling was not raised to absorb it:** four pass-through wrappers came out of `command-bus.ts` for -9 B (one of them, `asyncQuery`, was an `async` wrapper whose body was `return await inner(...)`, costing a microtask per query), so the net is +9 B under an unchanged 6560. **Also corrected: a measurement this document relies on.** The rc.4 row declines untracking-by-default on 35.9 ns vs 111 ns, "3.1x, +75.4 ns each". Re-measured through the real dispatch path on rc.7, four runs: 24.7 ns vs 30.2 ns, **1.22x, +5.4 ns** - fourteen times cheaper than the figure the decision rests on. The decision is not revisited here, but the number behind it no longer reproduces. Verified against rc.7: `tsc` clean, lint clean, **2076 + 22** tests across both projects (145 files), coverage 100.0% on all four axes, IIFE 11.1 / 7.6 / 8.1 KB brotli, all three examples rebuilt. **A SECOND PASS IN THE SAME WINDOW read every module in `src` - 62 files - plus all 16 scripts, and found twenty-three more defects, none of them rc.7's.** The three largest groups each turned out to be one cause, which is why they are grouped rather than listed: **five plugins were broken on the async bus** (`next()` returns a PROMISE there, and `logger`, `history`, `circuitBreaker`, `metrics` and `persist` all read it as the result - `promise.ok` is `undefined`, so `logger` reported every SUCCESS through `console.error` as `error: undefined`, `history` recorded nothing, `circuitBreaker` went OPEN after five consecutive successes and began refusing working traffic, `metrics` timed 0.02ms for a 30ms handler, `persist` never saved); **numeric options fail in the direction of their comparison** (every comparison against NaN is false, so `length < max` fails safe while `length > max` and `count >= max` fail OPEN - measured, `history({maxSize: NaN})` kept 500 against a cap of 50 and `StreamParser({maxDepth: NaN})` accepted 5,000 levels of nesting; the eight sites on the list turned out to be 53 candidates and 12 real defects, now one rule in `src/bounds.ts`); and **shared things whose lifetime belonged to whoever got there first** (a store died with the component that created it, leaving every later action returning `ok: false`; two forms on one bus wrote into each other's state). The router alone carried eight, including a cyclic parent chain that HUNG the tab - a synchronous walk with no terminator, no error and no stack, which held a vitest worker until the run was killed at 120s. The Vite plugin's SFC injection had **never once worked** across six releases: `enforce: 'pre'` sees raw SFC text, where compiler-sfc discards anything outside a block, proven by `transformRequest` output being byte-identical with the plugin and without it. **And one bug was worth ~10% of a consumer's bundle:** `src/dev.ts` documented that the ESM build defers DEV to the consumer's bundler, and it did not - the `typeof __VC_DEV__` wrapper cannot be evaluated by any bundler, so every dev-only diagnostic string shipped to production. Measured on a real `vite build` of a consumer app: 14,037 -> 12,764 raw, 4,453 -> 3,999 brotli (one-chunk apps: in a code-split app a chunk that imported DEV kept its strings until v1.20.0 derived DEV per module). **That fix is also why the outlet bar moved.** The guard measures interop MINUS vapor and both arms carry the router, so making the LIBRARY smaller makes the DIFFERENCE smaller: folding DEV shed 97 B from the interop arm against 23 B from the Vapor one, and a 10% consumer win registered as a 0.07 KB regression. The bar was re-baselined once, from 20 to 19.5, and declared in exactly one place and stamped like every other measured number here. (The rc.8 cycle retired that bar for two limits measured on a Vite build, after a second firing on an improvement - see the rc.8 row.) **The methodological finding, and the one worth carrying forward:** six "complete" lists in this cycle were incomplete and every one reported clean - the ASCII guard's alphabet (9,300 characters it had no opinion about), the numeric-option list, the read-every-module list itself (missing `form`, `store` and `vue`), an A/B harness's import rewrites, the example typecheck's include, and the size table's subpaths (`./devtools` and `./stream-parser` were published exports with no size row anywhere). Where a rule could be INVERTED rather than enumerated it now is: `src/` is held to plain ASCII by rejecting everything above U+007F, and the size table, the API reference and the build's entry map are all derived from `package.json` "exports" rather than retyped beside it. |
-| **rc.8** (Sep 11) | 25 commits, all read at source (the release notes list 14; the other 11 are refactors, CI, a build change and the release). **v-once is reworked** around a public `withOnce`: a v-once component snapshots its props AND its slot set while slot content stays live, and the directive helpers run inside it (03). **Props merge like vDOM**: events across prop sources (02), declared `class`/`style`/`on*` props across sources in raw-key order (10), rawProps copied rather than mutated when fallthrough attrs are injected (04). **Lifecycle**: a component instance created but never mounted is disposed (12); async setup registers with the nearest Suspense (11); an awaiting `<script setup vapor>` compiles to an `async setup()` returning its template as a render closure run once setup settles, and runtime-vapor's `withAsyncContext` is removed in favour of runtime-core's (20). **Hydration leaves client render**: no hydration-boundary closure on client render (13), slot hydration moved into top-level functions (19), and Vue's CI now fails a Vapor CSR bundle that carries hydration code (21). **Dynamic components**: branch keyed by the RESOLVED component (05), `:key` passed to `createDynamicComponent` as a fifth argument with KeepAlive caching by it (08), a vnode branch mounted through interop, invalid `:is` types warned and rendered empty, an unchanged key skipping the branch closure (09). Plus `is="vue:X"` on native tags (06), SVG/MathML namespace for element fallbacks (07), a `RenderContext` object replacing four slot/suspense module globals (18), fragment `move()` split from insert (15/16), perf on dynamic props and DEV-only fallthrough bookkeeping (23, 24), and a build change inlining aliased enum members (22) - the only reason the reactivity dist differs; its source is untouched. | **Adopt / retire / copy - the first row not written as pass-through.** **Adopted**, each pinned by a real-mount fixture verified to FAIL on rc.7 with every `@vue/*` package that follows `vue`'s version (eleven) pinned together: commit 12 - a child created before a sibling's render threw was never disposed, so its `useCommand().on()` listener outlived `app.unmount()` (`tests/never-mounted-disposal-fixture.test.ts`); commits 02/10 - `<Transition v-bind="t" @enter="mine">` kept only the LATER-written source on rc.7, which in the documented order dropped the bridge's own `onEnter`, and rc.8 runs both (`tests/transition-bind-merge-fixture.test.ts`, both attribute orders); commits 13/19/21 - the two Vapor examples shrank 607 and 596 B raw, 299 and 164 B brotli, on clean trees (an earlier -14.6 KB raw reading came from a mixed tree and is withdrawn). **Docs only**: commits 11/20 - `useCommand()` after a top-level await arms its cleanup, including across an unmount during the await; that already held on rc.7 (`tests/async-vapor-setup-fixture.test.ts`, which compiles the SFC at test time). **Retired: nothing** - the `router/vapor` mode guard, the `hasInjectionContext()` KeepAlive gate and the transition `settled` latch were each re-checked and each still carries weight. **N/A by reading**: `withOnce`, `is="vue:X"`, the fallback namespace, keyed `<component :is>` (`router/vapor` passes no key, and a component object is its own branch key), and the removed runtime-vapor `withAsyncContext` (never imported here). **Copied, and the outlet guard moved to rolldown.** The esbuild guard read 19.43 KB against its 19.5 bar and failed. On clean trees esbuild read the saving 20.06 -> 19.40 while Vite 8 / rolldown read 18.85 -> 20.42, because esbuild keeps rc.8's new top-level hydration functions and rolldown shakes them - and rolldown is what consumers ship, which is the stance Vue's own commit 21 takes for its CSR bundles. The interop arm's movement is Vue-originated: under rolldown it GREW 1,774 B brotli and the Vapor arm 166 B (attribution to individual commits not established). The guard now builds with Vite's API and asserts two limits instead of a difference that had fired twice on improvements: own machinery <= 5.0 KB (4.23) and saving >= 15 KB (20.42), both stamped. Also in the rc.8 window: `vaporChamberWire()`, a build-only Vite plugin that wires Vue into an app importing the root with no import changed; `vcCommandVapor`, `v-vc:command` for Vapor components (reading its binding getter at dispatch, since the `renderEffect` a tracked port needs would break the subpath on Vue 3.5); and a marker guard on a Vapor consumer's Vite bundle - no vDOM binding, one chamber module, a runtime probe that stays a bare `import("vue")` even with Vue bundled. The registry-object copy of commit 18 was measured and declined: not slower, but +71 B brotli on the full IIFE. Verified against rc.8: `tsc` clean, lint clean, 2128 + 24 tests across both projects (151 + 8 files), coverage 100.0% on all four axes, IIFE 11.3 / 7.7 / 8.2 KB brotli, all three examples rebuilt. |
-
 Vapor Chamber auto-detects Vue at module load and wires `signal()` to **`shallowRef()`**, not
 `ref()`. As 9.1 notes, the alien-signals rewrite changed the **dependency-tracking layer**, but
 `ref(anObjectOrArray)` in 3.6 still calls `toReactive()` and wraps the value in a **deep reactive
@@ -571,7 +557,1841 @@ core with `useCommandState`, differing only in the signal factory (deep `ref()` 
 `shallowRef()`), and ship in a separate tree-shakable chunk so the default install stays lean.
 State is shallow and fast by default, and deep-reactive per state when you opt in.
 
-### 9.2 Vapor mode: the VDOM-less path
+
+---
+
+### 9.2 Vue 3.6 alignment log
+
+Every Vue 3.6 release gets an alignment cycle: read each commit at source, run
+both vitest projects, measure the reactivity primitives against the previous
+release, and record the decision. This is the running log and the single source
+of per-release detail. Prose elsewhere in this document stays version-agnostic.
+
+**What each entry is for.** Not a list of what happened. A record of the train of
+thought, so that when a later release moves the ground under a decision you can
+re-run the reasoning instead of re-deriving it. Each entry carries some or all of:
+
+- **Expected** - what we thought the release would mean for this library before
+  reading it. Recorded even when wrong, especially when wrong: a forecast that
+  failed is the most useful thing in the entry.
+- **Landed** - what Vue actually shipped, read at source rather than from titles.
+- **Decided** - what changed here, and the measurement that justified it.
+- **Alternatives rejected** - the designs that were considered and turned down,
+  with the cost that decided it. This is the part that ages best. A rejected
+  option with its price attached can be reopened honestly when the price changes;
+  a rejected option nobody wrote down gets re-proposed every year.
+- **Still watching** - known limitations, parked techniques, and measurements that
+  no longer reproduce.
+
+The standard is evidence, not assertion. A cycle that changes no code says so and
+says why. Several cycles found defects in this library rather than in Vue, and
+those are recorded here too, because reading a renderer diff against your own
+assumptions is what surfaced them.
+
+| release | read | verdict | tests | IIFE brotli KB |
+| --- | --- | --- | --- | --- |
+| beta.8 - beta.15 | titles + diffs | pass-through | - | - |
+| beta.16 (Jun) | every commit | pass-through | - | - |
+| beta.17 (Jun) | every commit | pass-through | 884 | 10.2 / 7.0 / 7.4 |
+| rc.1 (Jul) | 13 commits | pass-through | 1102 | 10.8 / 7.6 / 8.0 |
+| rc.2 (Jul) | 13 commits | pass-through; `.delegate` added here | 1259 | 10.8 / 7.5 / 8.0 |
+| rc.3 (Aug) | 36 commits | pass-through; two docs claims corrected | 1491 | - |
+| rc.4 (Aug 14) | 12 commits | pass-through; found an inert KeepAlive gate | 1748 + 7 | - |
+| rc.5 (Aug 21) | 15 commits | pass-through; found a DOM leak and a bug class | 1786 + 7 | 11.0 / 7.6 / 8.0 |
+| rc.6 (Aug 28) | 14 commits | 13 pass-through; found an HMR leak and a prod-only wiring bug | 1950 + 17 | 11.1 / 7.6 / 8.1 |
+| rc.7 (Sep 4) | 50 commits | all pass-through; a src-wide read found 28 defects of ours | 2076 + 22 | 11.1 / 7.6 / 8.1 |
+| rc.8 (Sep 11) | 25 commits | adopt / retire / copy | 2128 + 24 | 11.3 / 7.7 / 8.2 |
+| rc.9 (Sep 21) | 89 commits, 16 in full | rc.9 broke a directive here; the fix reshaped it | 2431 | 12.1 / 8.2 / 8.7 |
+
+Coverage has been 100% on all four axes since rc.6. The two test numbers are the
+two vitest projects. "Pass-through" means Vue's change lands below this
+library's wrappers and reaches consumers without a line changing here.
+
+#### beta.8 to beta.15: the Vapor surface settles
+
+**beta.8** (Mar) made Vapor feature-complete. The alien-signals rewrite itself
+had landed earlier, in 3.6.0-alpha.1 (#12349). Baseline Vapor surface wrapped.
+
+**beta.9** (Mar) brought TransitionGroup to VDOM parity: key inheritance,
+dynamic `tag` updates, v-if dynamic slots, no invalid hooks on unkeyed interop
+children, leaving-cache isolated by resolved child type, null keys treated as
+absent. Plus `<Transition>` template children and interop vnode-identity
+alignment, the v-for+v-if hook fix (counterpart to beta.8's v-if+v-for),
+teleport hydration anchor fixes for null and disabled targets, interop vnode
+lifecycle hooks (`onVnodeBeforeMount`) now invoked, static-key preservation, and
+KeepAlive scope-leak fixes.
+
+The transition bridge forwards whatever hooks Vue fires, so the bus simply began
+receiving the corrected hook set: moves it previously missed, and no longer the
+bogus hooks on unkeyed interop children. No code change.
+
+**beta.10** (Apr): async setup components hydrate under VDOM Suspense; SSR
+runtime tree-shaken out of `defineVaporCustomElement`; interop
+mount/unmount/update/hydration hook order aligned with VDOM; `<Transition>`
+dynamic-slot update and `appear` with slotted v-show; duplicate dynamic-slot
+names resolve last-wins; interop slot remount and stale-effect cleanups;
+`parentComponent` null-guard.
+
+`createVaporChamberApp` and `defineVapor*` forward Vue's app and components
+untouched, so the hook-order alignment and async-Suspense hydration are
+inherited. SSR here is command replay above DOM hydration, so the custom-element
+SSR tree-shake does not touch it. No code change.
+
+**beta.11** (May): tree-shake axes for slot-fallback, teleport, transition,
+keep-alive and suspense; static-template hydration fast path; dynamic-props
+stability. Mirrored here as three sized IIFE variants, `core` / `elements` /
+`full` (11.6).
+
+**beta.12**: Vapor `setup()` error recovery, restoring component context,
+fallthrough props and render effects after a throw; VDOM-slot interop
+normalization; SSR unresolved-tag fallback. Pass-through. Lib-side this cycle,
+unrelated to Vue: AbortController extensions, `useSharedCommandState`, and
+TestBus snapshot / time-travel.
+
+**beta.13** (May): `onMove` fires for Vapor and VDOM component moves in a Vapor
+`<TransitionGroup>`, having been silently skipped; moves defer until child
+updates flush; slot-fallback transition hooks; v-for key preservation; 5 SSR
+hydration fixes; interop CSS scope IDs on Vapor roots; lazy lifecycle update
+jobs; compiler optimizations (inline `v-bind` spreads, single-use
+component-resolve lowering, static-prop inlining).
+
+Lazy lifecycle jobs make `tryAutoCleanup` and `onScopeDispose` allocation-free
+when no reactive state is tracked in the scope.
+
+**beta.14** (Jun): HMR child/parent reload alignment, parent-reload dedup,
+setup-effect preservation, context restore on error, app-instance refresh on
+root reload. Transitions: `onMove` suppressed for v-show-hidden children. Custom
+elements: no hook retention on shared definitions, children update from reactive
+props. Async: `loadingComponent` receives props and slots;
+`defineVaporAsyncComponent` becomes a main `vue` export. Interop: bridge no
+longer mutated on setup, slot wrappers memoised. Vapor root: scope ID preserved
+on dynamic updates. Scheduler: job-queue length reset after flush. v-for: skip
+updated hooks on mount, no fast-remove for component v-for, lazy destructure
+defaults.
+
+The HMR shim gained a per-cycle dedup guard and a try/catch. That was the only
+new beta.14 code here. Measured gains from the scheduler flush fix:
+`useCommandState` ~+24%, `effectScope` lifecycle ~+9%, transition bridge ~+8%.
+
+**beta.15** (Jun): seven Teleport fixes (invalid-target handling, disabled-target
+order preserved, mount location tracked explicitly, CSS vars by mount location,
+no target-child moves on reorder, raw props proxy reused). Transitions: hooks
+restored after a skipped move, key inheritance and stability aligned with VDOM,
+unique keys for multi-root v-for items, v-if comment handling. v-show: appear
+timing aligned with VDOM, fragment method arguments preserved. Events:
+click-modifier normalization, an opt-out for event delegation (#14924),
+delegated handlers skipped on disabled elements (#14948). Interop: vnode access
+guarded. Keyed direct template refs cleared on replace. Perf: fragment classes
+dropped from app-only bundles.
+
+One new line of behaviour here: `v-vc:command` now bails out on disabled,
+`aria-disabled` and in-flight elements. It attaches a direct, non-delegated
+listener, so Vue's #14948 runtime fix does not reach it automatically; this
+mirrors it. Everything else is pass-through.
+
+#### beta.16 (Jun): fully pass-through, every commit read
+
+Transitions (6): transition-group leave bucketed by type; raw-key compare before
+early removal; out-in branch key kept in sync when leave defers render; hooks
+re-resolved on prop change; leaving cache shared for unkeyed children;
+`persisted` no longer leaks onto non-v-show roots.
+
+Hydration (7): dynamic props applied on mismatch-recreated nodes; static-template
+clone-cache reused rather than re-cloned per adoption; exact tag-mismatch
+detection; fragment-start warning text; full-mount fallback for empty SSR
+containers; static-text mismatches patched, production included; v-if empty
+branches hydrated with static templates.
+
+App lifecycle: no-op mount for a missing selector; unmount safe without dev
+instance state in production. Props, emit, attrs and events: nullish dynamic
+props become empty; nullish emit sources skipped; symbol attr values stringified;
+dynamic `v-bind` event options (`Once` / `Passive` / `Capture`) parsed like VDOM.
+Compiler (8): setup-let inline assignment; v-html before text; unsafe attr names
+kept out of templates; dynamic, static and native v-model modifier key quoting;
+slot v-else-without-v-if reporting; empty blocks return `[]`. Perf: SlotFragment
+skipped for stable slot fallback (#14969).
+
+**No lib code change.** Two consumer-visible inheritances:
+`createTransitionBridge` / `useTransitionCommand` `onLeave` now fires for a
+non-v-show root removed after a v-show branch, which was previously dropped
+(`a816c9e`); and `createVaporChamberApp(...).mount('#missing')` no-ops instead of
+throwing, with `.unmount()` production-safe (`05bf22a` / `52fda7c`). `rehydrate()`
+sits above DOM hydration, so the seven hydration fixes are below us.
+
+**Perf technique to evaluate, post-stable.** #14969 proves slot-fallback
+reachability at compile time, encodes it as a one-bit flag on the emitted
+function, and the runtime selects a lighter `DynamicFragment` over `SlotFragment`
+when the flag is absent. That is the prove-it-at-compile-time,
+pay-for-the-wrapper-only-when-unprovable pattern, and it is a candidate for our
+own hot paths once the Vapor-first / bus-first identity (v2.0.0) is settled.
+
+#### beta.17 (Jun): fully pass-through, every commit read
+
+Compiler-vapor (7): stable slot roots kept on the fast path; non-stable slots
+avoided for stable root siblings; slot-root tracking skipped for slot outlets;
+forwarded slot-fallback validity tracked; unsafe repeated expression replacements
+avoided; and two perf items, redundant text-run slicing avoided and
+child-context analysis cached.
+
+Runtime-vapor (7): slot validity aligned for component roots; dynamic
+native-element slots hydrated correctly (#14972); VDOM-interop update hooks
+paired, `beforeUpdate` / `updated` (`bcaa753`); tracking paused when invoking
+function refs (#14986); render-effect creation order preserved on update, as a
+scheduler tiebreaker behind component id (#14984); interop slot owner root
+re-synced after child updates (`975dd4d`); redundant slot-content validity checks
+avoided.
+
+**No lib code change.** The two interop fixes land below
+`getVaporInteropPlugin()`'s pass-through, so mixed Vapor/VDOM trees inherit
+paired slot hooks (`bcaa753`) and the slot-owner-root re-sync (`975dd4d`) for
+free. #14972 sits below `rehydrate()`'s command replay. The seven compiler-vapor
+fixes are compile-time, inherited by recompiling the Vapor SFC examples.
+
+**Pattern noted, nothing to act on.** #14984 had to add render-effect creation
+order as a scheduler tiebreaker behind component id. That is the same
+insertion-order invariant the bus already gets for free from JavaScript's stable
+`Array.prototype.sort` on equal-priority plugins (`byPriority`), already pinned
+by the `equal priority preserves registration order` test.
+
+#14986, pausing tracking on function refs, is **N/A**: this library uses no
+template or function refs, and only writes signals from dispatch callbacks, never
+reads inside a tracked effect.
+
+**Verified against beta.17:** `tsc` clean, 884/884 tests pass, bench green on the
+recorded baselines, IIFE sizes unchanged at 10.2 / 7.0 / 7.4 KB brotli.
+
+#### rc.1 (`6fa3447`, Jul): Vue 3.6 enters RC
+
+Vapor is feature-complete. All 13 fixes are runtime-vapor or hydration
+internals: slot-anchor and hydration-anchor management, v-show transition on a
+VDOM child (#15074), v-if/v-show on transition roots (#15069), unsafe slot dry
+runs removed from VDOM interop (#15089 / #15031), forwarded-slot and async-setup
+hydration.
+
+**No lib code change**, diffs read at source. The anchor, hydration and dry-run
+fixes are all renderer-internal: this library collects no slot vnodes and holds
+no hydration anchors, so #15089 and `06778e7` have no analog here. The two
+transition fixes reach `createTransitionBridge` and `useTransitionCommand` as a
+corrected hook set.
+
+**Verified against rc.1:** `tsc` clean, 1102/1102 pass, IIFE 10.8 / 7.6 / 8.0 KB
+brotli.
+
+#### rc.2 (Jul): event delegation flips to opt-in
+
+**Expected.** A compiler-side change to how `@click` attaches is below this
+library, which registers its own listeners directly. The forecast was
+pass-through, and it held. What was not forecast is that reading *why* Vue flipped
+the default would change our own directive: the reasoning transferred even though
+the code did not.
+
+**Landed. BREAKING in compiler-vapor (#15127).** Compiled `@click` in Vapor SFCs now
+attaches a direct per-element listener unless the template writes `.delegate`
+explicitly. `compilerOptions.eventDelegation` is removed entirely: the beta.15
+opt-out (#14924) is gone, because there is nothing left to opt out of.
+
+One internal compiler-vapor codegen fix (#15124): v-for loop variables no longer
+collide with runtime-helper names, for example `v-for="child in items"` clashing
+with the `child()` DOM helper.
+
+The other 12 fixes are runtime-vapor internals surfaced by testing Vapor against
+Nuxt: effect-scope not restored to "no scope" after `setCurrentInstance`, which
+froze a vapor page's watchers on its first vdom-to-vapor `<Suspense>` navigation
+(#15141); a vapor block's transition hooks dropped across interop mount, unmount
+and move, deadlocking a vdom `<Transition mode="out-in">` wrapped around a vapor
+page (#15133, #15140); a production-only crash when a vapor `setup()` throws
+under `onErrorCaptured` (#15130); a missing slot anchor for interop slot content
+without SSR fragment markers, for example `RouterLink` (#15131); vapor mount and
+activated hooks and post-render effects not deferred to an owning `<Suspense>`
+boundary (#15139, #15144); vapor components never hydrating when deferred past
+the root hydration pass via interop, for example `hydrateOnVisible()` (#15132);
+pending-async-component placeholder position lost across Suspense and KeepAlive
+(#15147); async setup re-entry losing instance context, warning `renderEffect
+called without active EffectScope` (#15129); the logical-child hydration cache
+left stale after mismatch-recovery node replacement (#15145); and vdom-interop
+bypassing prop validation entirely (#15111).
+
+**Pass-through for all 13, no lib code change**, every diff read at source rather
+than the titles. `createVaporChamberApp`, `getVaporInteropPlugin` and
+`defineVapor*` forward Vue's own functions untouched; `rehydrate()` replays
+commands above Vue's DOM hydration; `createTransitionBridge` and
+`useTransitionCommand` only supply hook bodies Vue calls into; `tryAutoCleanup()`
+calls the public `getCurrentScope()` / `onScopeDispose()` pair, never the internal
+restore path #15141 fixed. Confirmed no example's `v-for` variable collides with
+a compiler-vapor helper name, so #15124 is N/A here.
+
+**Two real unblocks worth knowing even though no code changed.** A vdom
+`<Transition mode="out-in">` around a vapor page no longer deadlocks (#15133,
+#15140), which matters to anyone pairing `useTransitionCommand` with page-level
+transitions, Nuxt-style. And a first vdom-to-vapor `<Suspense>` navigation no
+longer kills that page's watchers (#15141); any composable here called from such
+a page's `setup()` was swept into that teardown, with no userland workaround
+possible.
+
+**Lib-side, inspired by studying #15127 rather than required by it.**
+`v-vc:command` gains its own opt-in `.delegate` modifier (`src/directives.ts`):
+one shared document-level listener instead of one per element. It mirrors Vue's
+exact opt-in trade-off, that an ancestor's `.stop` can pre-empt a delegated
+descendant, and its incompatibility with `.capture` / `.once` / `.passive`, where
+it dev-warns and falls back to direct.
+
+**Measured, not assumed** (`tests/perf.bench.ts`, 5k elements): delegate mode is
+**~1.3x slower to mount and unmount**, not faster. That corrects the initial
+assumption, and it is the reason `.delegate` is opt-in here rather than the
+default. Its real payoff is standing listener count, 1 rather than N, for large
+mostly-static lists, so it is documented as a memory trade and not a speed one.
+`examples/vapor-island-cart`'s 3-item product list stays plain `@click`, since
+there is nothing to win at that size, with a comment explaining when to reach for
+`.delegate` instead.
+
+**Alternative rejected: make `.delegate` the default**, which was the assumption
+going in. The 1.3x measurement killed it. A default that is slower for the common
+case and cheaper only in standing memory for large static lists is a decision the
+consumer should make, not one we should make for them.
+
+**Verified against rc.2:** `tsc` clean, 1259/1259 tests pass across 71 files,
+coverage 95.86 / 88.92 / 96.88 / 97.36 statements / branches / functions / lines,
+all above the floors. (The floors are lines 95, functions 94, branches 86,
+statements 93, which is `vitest.config.ts` declaration order, not the order those
+four numbers are printed in.) Lint clean, IIFE 10.8 / 7.5 / 8.0 KB brotli,
+unchanged from rc.1 within rounding.
+
+#### rc.3 (Aug): KeepAlive, and two of our own docs claims disproved
+
+**Expected.** A KeepAlive-themed release touching a guard this library owns. The
+forecast was pass-through plus a possible adjustment to `tryKeepAliveHooks`.
+Pass-through held; the guard needed no adjustment. What the read actually
+overturned was two claims in our own documentation that no test had ever
+compiled, which is a failure mode the forecast had no category for and which
+recurs through rc.4, rc.5 and rc.9.
+
+**Landed.** 36 commits, all read at source.
+
+**KeepAlive is the theme** (6): cached component props and dynamic slots isolated
+behind a commit boundary, so a cached child stops observing transient parent
+values (#15251, closing #15228); branch removal deferred until cache pruning
+(#15189); leaving cache entries unmounted from their real parent (#15190);
+updates deferred while async setup is pending (#15172); interop entries fully
+pruned at `max` (#15181); and KeepAlive scopes now paused while deactivated
+(closing #15237).
+
+**Custom directives** hardened in three places: the compiler wraps the value in
+parens (#15258); async component roots are treated as pending rather than warned
+about (#15167); fragment roots re-applied via a detached scope (#15158).
+
+**v-show stops over-tracking** twice, in transition hooks (#15203) and in the
+source inside fragment effects (#15204), both by running callbacks with tracking
+disabled.
+
+**App unmount lifecycle aligned with vDOM** (#15262): `onBeforeUnmount` ->
+`onScopeDispose` -> `onUnmounted`, children before parents.
+
+Plus vDOM slot content in `<Transition>` (#15159), teleport target cleanup on
+scope disposal (#15236), interop prop normalization (#15254), class-prop
+normalization (#15227), functional-component root bindings, 4 async-hydration
+fixes, 6 slot-fallback and hydration fixes, and 2 type-only fixes.
+
+**Pass-through for the runtime fixes**, no wrapper change. But the read surfaced
+two things this library had wrong, both now corrected with fixtures rather than
+argument.
+
+1. **Custom directives are NOT VDOM-only.** `withVaporDirectives` is a public
+   export shipping since 3.6.0-alpha.3, verified by unpacking published dists
+   from alpha.3 to rc.3; rc.3 only hardened it. Four places in this repo asserted
+   the opposite, including a runtime `console.warn`. What genuinely blocks
+   `v-vc:command` is the shape, since Vapor directives are
+   `(el, value, arg, mods) => cleanup` with no `updated` hook, not upstream
+   policy. Fixture: `tests/vapor-directives-fixture.test.ts`.
+2. **The `tryKeepAliveHooks` removal note was wrong.** `docs/router.md` said
+   #15237 landing would make it double-suppression. Measured: Vue pauses
+   *effects*, while that guard protects a `bus.onAfter` callback the bus invokes
+   directly, which still fires under a paused scope. Guard kept, note corrected.
+   Fixture: `tests/keepalive-pause-fixture.test.ts`.
+
+**Technique logged, then applied.** #15203 and #15204 run callbacks with tracking
+disabled (`setActiveSub`). The bus has the same exposure, reproduced: a
+`dispatch()` from inside an effect leaks the handler's reads into the caller's
+dependency set. `setActiveSub` is not on the `vue` entry, but `pauseTracking` and
+`resetTracking` are exported by `@vue/reactivity`, which resolves to the same
+module instance; `untracked()` is built on those, and every composable routes its
+dispatch through it. Getting them at build time rather than through a runtime
+probe is what `vapor-chamber/vue` exists for, see 11.6.
+
+**Lib-side this cycle:** Vapor detection gains an owned global slot and
+`configureVue()`, see 11.6.
+
+**Verified against rc.3:** `tsc` clean, 1491/1491 tests across 92 files.
+
+#### rc.4 (Aug 14): a KeepAlive gate that was inert in every Vapor component
+
+**Expected.** Scope and lifecycle internals, forecast pass-through. It was, for
+all 12. But rc.3 had just established that reading a diff against our own
+assumptions is what finds our bugs, and rc.4 proved it twice over: #15293 exposed
+a guard that had never worked in Vapor, and a re-reading of an old decision showed
+its justifying number was wrong by a factor of fourteen.
+
+**Landed.** 12 commits, all read at source.
+
+**v-for item scopes reworked** (3): every item, component-shaped included, gets
+its own `EffectScope` again and is stopped on unmount (`7db1454`, reversing the
+beta.14-era "the component already has a scope, skip the outer one" rationale);
+component items are structurally removed before their scope stops, so item
+cleanups such as template refs observe a detached node (`aac355d`); and the
+`IS_COMPONENT` flag is re-documented upstream as "requires component teardown
+ordering", not "owns its own scope".
+
+**Prop-source caches re-scoped** (2): a `computed` cache created by a
+parent-owned prop source is collected in the consuming scope (`22b9b41`), then
+narrowed again to the active consumer via `getCurrentScope()` (`e8a09b3`), so a
+v-for fallback that renders a plain DOM node stops accumulating caches on the
+owner.
+
+**KeepAlive input isolation moved off the branch scope** (#15293): raw prop and
+slot commit effects now live in a per-instance `inputScope` that `activate()` and
+`deactivate()` resume and pause, leaving the branch-scope pause to branch-owned
+effects only. This refines the rc.3 entry's "KeepAlive scopes are paused while
+deactivated", which described a mechanism Vue no longer uses on this path.
+
+Plus: nested-fragment child keys no longer overwritten by an outer wrapper key
+(#15292, `setBlockKey` gains `overwrite`); declared `style` props normalized like
+vdom (#15286); `inheritAttrs: false` ownership read from the parent type
+(#15279); dynamic v-for slot state preserved across re-resolution (#15280, where
+`createForSlots` becomes a keyed, ref-reusing factory, a compile-time signature
+change); merged event handlers keep their modifiers (#15265); component root
+propagated through `<Transition>` so fallthrough class and style merge at the
+root (#15275); redundant transition block resolution skipped when no v-shows are
+pending (#15272).
+
+**Pass-through for all 12, no wrapper change**, and three verified N/A rather
+than assumed: this library declares no `inheritAttrs`, passes no `style` props,
+and runs no DOM-connectivity check in a cleanup, so #15279, #15286 and
+`aac355d`'s reordering cannot reach it. The v-for scope rework sits below
+`tryAutoCleanup()`, which calls the public `getCurrentScope()` /
+`onScopeDispose()` pair and is indifferent to how many scopes are nested above
+it. `createForSlots` is compiler output; the Vapor SFC examples inherit it by
+recompiling.
+
+**Reading #15293 found a real bug of ours, and it is the only reason this cycle
+has code in it.** `tryKeepAliveHooks` gated itself on `getCurrentInstance()`,
+which reads VDOM's `currentInstance`. Measured on rc.4, that returns null inside
+`defineVaporComponent({ setup() })` while an `onDeactivated()` registered at the
+same point works and fires. So the KeepAlive pause/resume in `useCommandHistory`
+and `useCommandError` was **inert in every Vapor component**, silently recording
+commands dispatched into a deactivated view, while working in VDOM. That is why
+1508 passing tests never saw it, and the rc.3 fixture could not have: a bare
+`effectScope()` stand-in never calls our guard.
+
+Fixed by probing `hasInjectionContext()` (Vue 3.3+, measured true in Vapor and in
+VDOM setup, false in a bare scope), keeping `getCurrentInstance()` as the
+fallback for a partial Vue namespace. Fixture:
+`tests/keepalive-input-scope-fixture.test.ts`, which drives a real
+`VaporKeepAlive` and pins both halves: that our guard suppresses recording while
+deactivated, and that an unguarded `bus.onAfter` at the same site still fires,
+which is the fact the whole not-double-suppression argument rests on.
+
+**Alternative re-examined and rejected on cost: untracking every dispatch by
+default.** It had been carried as *blocked* on `setActiveSub` not being exported.
+That framing was wrong on both counts.
+
+First, availability was never the constraint. `pauseTracking` and `resetTracking`
+are the same mechanism `setActiveSub` implements, they are typed public API in
+rc.4 (`enableTracking` too), and `untracked()` is already built on them.
+Re-verified that `setActiveSub` itself remains JS-only, absent from the `.d.ts`
+of both `vue` and `@vue/reactivity` in rc.3 and rc.4, but that no longer decides
+anything.
+
+Second, and decisively: making untracking the default costs too much. Measured on
+rc.4, interleaved A/B, 20k dispatches, a bare `bus.dispatch()` is 35.9 ns and the
+same dispatch wrapped in `pauseTracking` / `resetTracking` is 111 ns: **3.1x,
++75.4 ns each**. (Not reproduced: the rc.7 entry re-measured it through the real
+dispatch path at 1.22x, +5.4 ns.)
+
+So the item is not waiting on upstream. It is **declined on cost**, and would be
+declined identically if `setActiveSub` were exported tomorrow. The design that
+survives is the one already shipped: composables route their dispatch through
+`untracked()`, where the guard rides on work that is already doing signal writes
+and the relative cost disappears, while the bare bus stays free. The residual
+exposure, a direct `bus.dispatch()` from user code inside a reactive effect, is a
+documented boundary, not a bug awaiting an API.
+
+**Verified against rc.4:** `tsc` clean, 1748 + 7 tests across 114 files in both
+projects.
+#### rc.5 (Aug 21): attrs fallthrough, and a leak in our own documented binding
+
+**Expected.** Attrs fallthrough is renderer-internal and this library declares no
+props, so the forecast was pass-through. It held for all 15 commits. But the
+fallthrough cluster is about *which object keys reach the DOM*, and asking that
+question of our own documented `<Transition v-bind="t">` binding found that two
+internals had been reaching the DOM since v1.1.0. The pattern by now is explicit:
+**the value of reading a diff is not the diff, it is the question the diff makes
+you ask about your own code.**
+
+**Landed.** 15 commits, all read at source.
+
+**Attrs fallthrough is the theme** (5). Semantics aligned with vdom:
+`filterModelListeners` exported from runtime-core and reused, a new
+`resolveFallthroughAttrs()` returning `{}` rather than `undefined` for stable
+diffing, and `hasFallthroughAttrs()` checking dynamic sources (`rawProps.$`)
+before static undeclared keys (`293ca1c`). Fallthrough attr effects re-parented
+onto the innermost dynamic fragment's branch scope, with an `EffectScope`
+retrofitted onto compiler-proven no-scope branches that carry them, so a detached
+branch stops updating (`be7157e`: `DynamicFragment.hasFallthroughAttrs` becomes a
+`fallthrough(nodes)` callback invoked inside `runWithRenderCtx`, replacing the old
+`onBeforeInsert` hook). Attrs reach interop vnode roots by cloning the vnode and
+re-cloning under a `renderEffect`, patching rather than remounting so inner state
+survives (`5073eb5`). Functional components that declare props now get full
+fallthrough like vdom, instead of the class/style/listener subset (`ef83790`).
+And resolution stops descending at slot outlets instead of warning and continuing
+into slot content (`10f666e`).
+
+**TransitionGroup is the second theme** (7). Pending enter and move callbacks are
+flushed on the resolved element, because "for interop children [it] is not the
+block itself" (`f2fa54d`). Group hooks are re-applied onto already-mounted
+children on prop change, extending beta.16's element-path fix, with the
+FLIP-measurement latch preserved across re-resolution (`d3fde91`).
+`forceReflow(firstChild)` makes the reflow use the group's own document, so it
+"works inside iframes / foreign documents" (`36dd186`). Plus four perf items: a
+collect-only child snapshot in `beforeUpdate` (`744d64d`); no bookkeeping on
+ForBlock wrappers, which "have no transition consumers of their own" (`2c914ef`);
+per-child props tracking skipped when `hasDynamicPropsSource()` is false
+(`c526d45`); and v-for hot-path allocations trimmed via an LIS planner,
+indices-only reordering, lazy `RenderEffect` job creation and dropped
+`ForBlock.prev` / `next` / `prevAnchor` (#15329).
+
+Plus element namespace resolved at interop boundaries, including the
+`annotation-xml encoding=html` escape back to HTML (#15321); nested vdom slot
+content preserved under a Vapor Transition root via an `isDirectSlotRoot`
+discriminator (#15304 / #15303); and the rendering Suspense boundary restored in
+fragment context, so a late branch's post-render effects queue on the pending
+boundary rather than the global queue (`5c2805d`).
+
+**Pass-through for all 15, no wrapper change.** But studying the fallthrough
+cluster turned the question on this library's own documented usage and found a
+bug there, which is the only reason this cycle has code in it.
+
+**`<Transition v-bind="t">`, the binding this module's JSDoc, the README and
+`docs/` all tell you to write, was putting bridge internals into the DOM.**
+`v-bind="obj"` spreads own enumerable keys as props; Vue matches the nine `on*`
+hooks to `<Transition>`'s declared props and passes the rest through as
+fallthrough attributes. `phase` (a signal object) and `dispose` (a function)
+matched no declared prop, so both were stringified onto the transitioned element.
+Measured on a real mount:
+
+    <div class="panel" phase="[object Object]" dispose="() => {}">hi</div>
+
+on every consumer following the docs since v1.1.0.
+
+Fixed by defining both **non-enumerable** (`assembleBridge`), which changes what
+*spreading* yields and nothing else: `t.phase.value`, `t.dispose()` and
+`const { phase } = t` read the property directly and are unaffected, since
+destructuring does not require enumerability. The one intentional casualty,
+`{ ...bridge }` dropping them, is exactly the operation that caused the leak.
+
+**Alternatives rejected: rename the keys, or move the hooks under `t.hooks`.**
+Both fix the leak by breaking the documented call site. Non-enumerability fixes it
+by changing only the operation that was wrong.
+
+**Why 1750 passing tests never saw it.** Every test in `tests/transitions.test.ts`
+calls the hooks directly on a mock element, so nothing ever handed the bridge to
+Vue. That is the rc.4 KeepAlive lesson repeating itself: a fixture substituting a
+mock for the integration it reasons about can only check the half you already
+understood. Fixture: `tests/transition-bind-fixture.test.ts`, which mounts, and
+is verified to fail 3 of 4 against the pre-fix code.
+
+**Four items N/A by verification**, each grepped across `src` and `examples`
+rather than assumed: we declare no `inheritAttrs` (so the inheritAttrs gating in
+`293ca1c` and `5073eb5` cannot reach us), define no functional components
+(`ef83790`), render no SVG, MathML or `foreignObject` (#15321), and use no
+template refs (`5c2805d`). `be7157e` newly creates EffectScopes inside branches,
+but that is below `tryAutoCleanup()`, which registers on whatever
+`getCurrentScope()` returns from a `setup()` and is indifferent to nesting depth
+above it.
+
+**The one module rc.5 conceptually reaches is `transitions.ts`, and it is
+idempotent by construction.** `buildHooks` resolves all nine hook identities once
+per bridge and never rebuilds the object, so `d3fde91`'s re-application
+re-registers the same nine functions, and re-registration is not invocation, so a
+prop change dispatches no extra `*Move` or `*Enter`. `f2fa54d` is a straight
+unblock in our favour: `onMove` dispatches per move, and an interop child whose
+pending callbacks were flushed against the block instead of the element is
+exactly the shape that strands one.
+
+**Two upstream commits converge on decisions this repo already made
+independently**, recorded because corroboration is worth as much as a diff.
+`36dd186`'s "use the element's own document" is the rule `directives.ts` enforces
+with its per-`Document` `delegatedDocs` map, added in the rc.2 cycle after a
+single global count stranded the shared listener on the wrong document and turned
+delegated controls into dead ones. And `8d83bb2`'s switch to direct
+`el.addEventListener()` to kill disposer-closure allocation is what
+`v-vc:command` has always done.
+
+**From the Vapor roadmap read (#13687), one finding that outranks the diffs.**
+The rc.4 `hasInjectionContext()` gate was justified by measurement alone, leaving
+open whether Vue would later make `getCurrentInstance()` answer in Vapor and
+render it dead weight. A core maintainer has since confirmed the null is
+**intentional** (Jul 20), with an internal `useInstanceOption` kept deliberately
+non-public, and reaffirmed (Aug) that Vapor exposes no general-purpose component
+instance tree by design. So the gate is permanent, not scaffolding.
+
+The same statement settles two unchecked roadmap boxes. **Vue Test Utils**:
+instance traversal is what upstream ruled out, and `createTestBus` asserts at the
+bus boundary and needs no revision. **DevTools**: `src/devtools.ts` builds its
+inspector tree from buffered `bus.onAfter` entries, never from Vue's component
+tree, so it does not wait on Vapor component-tree bookkeeping.
+
+**Perf patterns harvested from the four rc.5 optimization commits: three already
+shipped here, one measured and parked.**
+
+Already applied, in two cases with evidence going further than upstream's.
+`c526d45`'s "skip the tracking effect when nothing is dynamic" and `2c914ef`'s
+"skip bookkeeping for wrappers with no consumers" are the same idea as
+`_syncDispatchInner`'s bare-bus fast path (five O(1) reads) and
+`_syncEmitInner`'s no-listener early return. The fast path's comment records that
+a cached `isBare` boolean was tested and **measured 25% worse**, because the added
+state field broke the hidden class. `293ca1c`'s "return `{}` not `undefined` so
+diffing stays stable" is the shape-stability rule behind `okResult` / `errResult`
+always setting both `value` and `error`. `8d83bb2`'s allocation trimming is the
+index-loop-with-length-snapshot, no-`.slice()`, frozen `EMIT_RESULT` singleton
+work already in the hot paths.
+
+**The one genuinely unapplied pattern is `744d64d`'s collect-only distinction**, a
+pass that only reads skipping the bookkeeping the write pass does. Our read path
+does not: `bus.emit()` deliberately skips `stampMeta` with a recorded rationale,
+but `bus.query()`, also a read, stamps full meta (`Date.now()` + `uid()` + a
+5-field object) exactly like `dispatch`.
+
+Measured (41 interleaved rounds, 200k iterations, isolated-cost method, so an
+upper bound on the marginal delta rather than an exact one): a bare `bus.query()`
+is 45.1 ns and `stampMeta`'s own work is 29.8 ns, 66% of it.
+
+**Acted on, after the isolated number was disproved by a better measurement.**
+That 29.8 ns came from an isolated loop, exactly the method this repo's own
+`docs/performance.md` warns produces garbage, because a loop-invariant variable
+read is hoisted while `Date.now()` survives. Re-measured through the real
+dispatch path (`tests/clock-source-ab.test.ts`, interleaved, with an `emit`
+control row that never stamps and therefore calibrates the harness at a ~2-6%
+noise floor), the recoverable cost is **15-25 ns per command, fixed**: 1.42-1.67x
+on a bare bus, 1.42-1.57x on `dispatchBatch`, 1.38-1.50x with an ordinary
+handler, 1.18-1.24x with three plugins, and nothing once 50 listeners dominate.
+
+The lever turned out not to be `uid()` or the allocation at all, but `Date.now()`
+itself (32.9 ns isolated on this host); breaking `stampMeta` down showed
+`toString(36)` at 0.5 ns. So `meta.ts` now reads the clock **once per microtask
+turn**, eagerly on the first call of each turn so that command is exact.
+Confirmed on the bench: `bus.dispatch` moved from 197.7x to **140.0x** slower
+than a direct call, `emit` unchanged as the control.
+
+No API was added. A runtime knob was built, measured and deleted, since an option
+only earns its place when both settings suit different people; the rare
+exact-clock need is a user plugin. Containment is pinned by
+`tests/clock-source-contained.test.ts`: every TTL and expiry path reads
+`Date.now()` directly, so a frozen clock cannot extend a cache entry.
+
+**A second, larger lib-side finding came from reading vue-router v5 rather than
+Vue itself**, recorded here because this router deliberately shares no code with
+it, which is exactly why the lessons have to be imported by hand.
+
+v5 protects its query objects with `Object.create(null)`. Checking whether ours
+needed the same turned up **one bug class at four sites, three of them live**.
+`parseQuery` read `query[key]` on a `{}` to detect repeated keys, so
+`?constructor=1` came back "already set" and produced `[Object, '1']` instead of
+`'1'`, while `?__proto__=a` assigned through the inherited setter and replaced the
+parsed object's prototype. `defaultAffects` used `key in record.queryDefs`,
+reporting `?toString=` and `?valueOf=` as declared params and refetching a loader
+for a key never declared. `form.ts` ran a rule for an absent field against an
+inherited function.
+
+Worst of the four, and the one furthest from where the search started:
+`commandKey`'s canonical serializer copied sorted keys into a `{}`, so an own
+`__proto__` key, precisely what `JSON.parse` of a server response yields, was
+swallowed by the setter and dropped from the output. Measured:
+`{"__proto__":"A","id":1}` and `{"__proto__":"B","id":1}` both keyed to
+`act:{"id":1}`, and that key backs `idempotent`, `cache`, `serialize` and
+`supersede`, so two distinct commands deduped into one.
+
+The rule now lives once in `src/dict.ts` with its evidence rather than as four
+independent rediscoveries, and the reads use `Object.hasOwn`, the same fix
+v1.15.0 applied to the MCP gate, which was this class's first appearance. Whole
+class cost **0.0 KB brotli** (+0.1 KB raw). Fixtures:
+`tests/prototype-keys.test.ts`, `tests/router/query-prototype.test.ts`.
+
+**Verified against rc.5:** `tsc` clean, lint clean, 1786 + 7 tests across both
+projects (120 files), IIFE 11.0 / 7.6 / 8.0 KB brotli, all under budget and
+unchanged from rc.4.
+
+**Performance measured, not asserted** (`npm run ab:vue -- 3.6.0-rc.4`, 51
+interleaved rounds, both sides the production with-vapor dist): scope
+create/dispose 1.026x, shallowRef writes 0.999x, watcher notify 1.042x, computed
+read-after-write 0.926x. Worst ratio 1.042x, inside the harness noise band, so no
+regression on the primitives this library sits on.
+
+#### rc.6 (Aug 28): DOM prop writes, an HMR leak, and a production-only wiring bug
+
+**Expected.** DOM property writes and hydration internals, forecast pass-through
+and N/A. Correct for 13 of 14. The fourteenth, a per-render `EffectScope` for HMR,
+was forecast as irrelevant and turned out to be fixing a listener leak that had
+been multiplying our fan-out once per hot reload. This is also the cycle where an
+N/A call recorded in this very entry gets **reversed inside the same release
+window**, when `vapor-chamber/router/vapor` began using the exact helpers the
+entry had just declared unreachable. That reversal is the strongest argument in
+this document for reading every commit rather than filtering by what today's code
+calls.
+
+**Landed.** 14 commits, all read at source.
+
+**DOM prop writes are the theme** (3), and they converge on one rule: compare
+against what you were GIVEN, not what the sink normalized it to. `setDOMProp`
+stopped skipping the initial write when the value happened to equal the element
+default (#15341: `<input type="text">` set no attribute at all, because `el.type`
+already read `"text"`), then went further and moved change detection off the live
+property entirely onto a `$p$`-prefixed expando holding the previous **raw
+binding** (#15343), so `:type="invalid"` -> `:type="text"` now writes even though
+the DOM normalized both to `text`. `setValue` additionally mirrors `value` into
+the **attribute** (#15340 / #6007) so `<form>.reset()` restores the bound value
+rather than the empty string.
+
+**Hydration is the second theme** (4). A double `exitHydrationCursor` no longer
+decrements the live-cursor count twice (`7710394`) nor re-runs the restore that
+would rewind over a sibling's claimed nodes (`9e6d1e5`). Leaving a hydration
+boundary asks `compareDocumentPosition` instead of walking forward for a node
+already behind the cursor, which was quadratic over a list of boundaries
+(`9905d7d`). And `template()` now parses each template string once into an
+`AdoptTarget` descriptor (type / tag / tagUpper / blank) that every later instance
+compares against, instead of re-scanning the string per adoption (`29ed4b0`,
+upstream-measured v-for single-root +15.5%, multi-root +9.2%).
+
+Plus: a null `<component :is>` renders as a genuine empty branch rather than a
+placeholder node, because a build-dependent placeholder (dev comment, production
+text) in the semantic content tree made production hydration mistake detached text
+for content and crash (`a447d80`), with the branch then keyed by its resolved
+sentinel rather than the raw value (`7c8d34a`). Runtime structural anchors are
+claimed, so `isValidBlock` rejects them by marker, making block validity identical
+across dev (comment) and production (text) shapes; previously a production anchor
+read as renderable content and suppressed slot fallback in production only
+(`2473b78`). `v-for`'s index alias is cleared when the source switches from object
+to array (#15364). The scheduler restores its own state after a flush error,
+re-queueing leftovers on a fresh microtask and clearing `QUEUED` flags in
+`finally`, so a throwing post job cannot strand later work (`70bd789`). And HMR
+gains a `runWithHmrUpdating` wrapper that covers the Vapor fast-path reload and,
+critically, resets the flag immediately when an update fails instead of leaving it
+set forever (`991a885`), while each dev render generation becomes owned by its own
+`EffectScope` (`9ab65a1`).
+
+**Pass-through for 13 of 14**, with a src fix of this library's own found while
+auditing the wiring path, below.
+
+**The DOM-prop cluster is N/A by verification rather than assumption:** `src`
+contains no `setAttribute` or `removeAttribute` outside `router/dom.ts`'s two
+`data-active` calls, writes no DOM properties, and reads no `value` attribute, so
+nothing here can observe #15340, #15341 or #15343. The SFC examples inherit them
+by recompiling. Same for the hydration cluster, since our SSR is command replay
+above DOM hydration (14), and for `<component :is>`, which appears nowhere in
+`src` or `examples`. `RouterOutlet` is a VDOM `defineComponent` returning `h()` or
+`null`, never a Vapor `createDynamicComponent`. (That last call is reversed later
+in this entry.)
+
+**The scheduler's restore-state-in-`finally` fix is the one whose class could have
+reached us, and it was audited rather than waved through.** All three
+`dispatchDepth` guards (both bus variants plus `createTestBus`) already restore in
+`finally`, and `runDispatch` already clears `loading` on every exit path including
+the throw. The class is clean here, verified by reading each site.
+
+**The 14th commit is the exception, and it found real behaviour.** `9ab65a1`'s
+per-render `EffectScope` exists to tear down element-nested child components on
+HMR rerender: children mounted inside an element rather than returned as the
+parent's block, which the block graph cannot reach. A leaked Vapor instance is a
+leaked `setup()` scope, and `useCommand()` hangs its cleanup on exactly that
+scope, so before rc.6 a hot reload left the old generation subscribed. Measured on
+rc.5, after two reloads one dispatch fired a `useCommand().on()` listener **three
+times**, once per generation ever rendered: duplicate side effects growing with
+dev-session length. rc.6 disposes each superseded generation and the fan-out
+returns to one.
+
+The asymmetry is why nobody noticed. `register()` is keyed in a Map, so the newest
+handler always wins regardless of teardown, while `on()` appends to an array and
+nothing overwrites a leak.
+
+**No code change on our side**: `tryAutoCleanup` was already registering the right
+cleanup on the right scope, and Vue simply began stopping that scope. Fixture:
+`tests/hmr-render-scope-fixture.test.ts`, which drives the real
+`__VUE_HMR_RUNTIME__` against a real `createVaporApp` and is verified to FAIL on
+rc.5.
+
+**One perf pattern harvested, measured, and shipped.** `29ed4b0`'s move, hoisting
+a per-call string scan into a descriptor the factory computes once, pointed at our
+own fan-out: `on()` classifies a pattern as a wildcard to pick a bucket, then
+throws that result away, and every dispatch re-derives it inside `matchesPattern`
+(`=== '*'`, a `charCodeAt`, an LRU `Map.get`).
+
+Wildcard entries now carry `prefix = pattern.slice(0, -1)`, correct for both
+shapes with no special case, since `'*'` slices to `''` and `startsWith('')` is
+always true. Measured on the real dispatch path, interleaved, with the baseline
+arm derived from the shipped source so it is the genuine old code: **1.14-1.32x on
+wildcard fan-out** (10-31 ns per dispatch, scaling with listener count), **0 B
+brotli**.
+
+Two rows deliberately do not move, and they are the honesty check: no wildcard
+listeners ~1.00x (the control, since that shape already short-circuits) and a lone
+`'*'` listener ~1.02x (`matchesPattern` already returned on its first comparison).
+The isolated matcher loop reported 3.66x; per `docs/performance.md` that number is
+an inflated upper bound and the real-path figure is the one recorded.
+
+Public `matchesPattern` keeps its LRU untouched: it takes arbitrary
+caller-supplied patterns (plugin `actions:` filters, MCP whitelists) where nothing
+has classified anything in advance.
+
+**Re-running the ritual's reopen-condition check corrected a fact this document
+got wrong for two cycles.** The rc.5 entry stated that exactly one of the four
+wrapped Vapor APIs is statically importable from `vue`. All four are, plus
+`vaporInteropPlugin`: **18 Vapor names**, and the list is byte-identical on rc.5
+and rc.6 as seen through the test's name filter. (The entry's full surface changed
+at rc.8: `withOnce` added, runtime-vapor `withAsyncContext` removed.) So the error
+was never about rc.6.
+
+`vue.runtime.esm-bundler.js` is 23 lines. The rc.5 entry quoted the named `import`
+and `export` lines and missed the `export * from "@vue/runtime-vapor"` between
+them. That is precisely the failure mode the same paragraph warns about, inverted:
+**a star re-export has no name to grep for and none to quote, so an absence in a
+quote is not an absence from the module.**
+
+The roadmap's reopen condition (a with-vapor bundler entry OR a vapor subpath or
+condition) is therefore met on its first half, and has been since rc.5. That does
+not revive the `vue36` flavor, since the `__vapor`-marker fact and the <0.9 KB
+measurement are independently fatal, but it does mean the flavor now stands on
+"not worth building" rather than "nothing to import from". Enumeration is
+automated in `tests/vue-bundler-vapor-exports.test.ts`.
+
+**A second lib-side bug came out of auditing the WIRING path rather than the
+guard, and it is the rc.4 KeepAlive finding by another road.** rc.4 established
+that `tryKeepAliveHooks` must gate on `hasInjectionContext()` because
+`getCurrentInstance()` is null in Vapor by design. The guard was right. What
+nobody checked is whether the thing it depends on reaches the registry.
+
+It did not. `src/vue.ts`, the entry whose entire purpose is build-time Vue wiring,
+passed seven names to `configureVue()` and `hasInjectionContext` was not one of
+them, while `applyVueModule` reads it. Unset, the gate falls back to
+`getCurrentInstance()` and goes inert, so `useCommandHistory` and
+`useCommandError` record commands dispatched into a deactivated KeepAlive view.
+
+**Why the suite could not see it:** `tryKeepAliveHooks` calls `probeVue()` first,
+and under vitest a bare `import('vue')` resolves and supplies the full namespace.
+The omission is invisible wherever the suite runs, and bites only in a production
+bundle where the specifier cannot resolve and the registry holds only what the
+static list passed. Dev-correct and production-broken, the same asymmetry that
+caused `vapor-chamber/vue` to exist at all.
+
+Fixed by adding the name. Fixture `tests/vue-subpath-wiring-fixture.test.ts`
+blocks the probe, mounts a real `VaporKeepAlive`, and pins both halves: the guard
+holds with the full list, and fails to suppress with that one name withheld. It
+proves the mechanism instead of asserting it. The generalized rule now sits in
+`src/vue.ts`'s header: **that list is load-bearing, and any registry entry
+`chamber.ts` begins reading must be added to it, or it serves probe-path consumers
+only.**
+
+Relatedly, `configureVue()` was confirmed to MERGE (every assignment is
+`typeof`-guarded, so unsupplied entries are left unchanged). That was never
+documented, so the vapor-sfc example had been defensively re-enumerating all eight
+names on top of what `vapor-chamber/vue` already configured; its preamble is now
+one `configureVue({ createVaporApp })`.
+
+**Two things the corrected fact then unlocked, both measured.**
+
+First, **`vapor-chamber/vapor`**, the 3.6-only subpath `src/vue.ts` has prescribed
+in writing since it was authored, now shipped. It statically imports Vue's Vapor
+APIs so the registry is seeded at build time instead of by a probe that cannot
+resolve in a production bundle, which is the failure mode behind both
+production-only bugs above.
+
+The wired set is measured rather than maximal, because a static import is retained
+by the consumer's bundler whether the app calls it or not. On the vapor-sfc
+example: `createVaporApp` alone is 80.23 KB raw, `+defineVaporComponent` +0.03,
+`+defineVaporAsyncComponent` +1.84, `+defineVaporCustomElement` +9.21, and
+`+vaporInteropPlugin` **+78.27, roughly doubling the app**. The entry wires the
+first three and leaves the last two behind one composable `configureVue()` line,
+the same audience axis the IIFE variants split on.
+
+Second, smaller but cleaner: **both Vapor examples' `vue` alias and their
+hand-written `vue-with-vapor.ts` shim are now dead code and were deleted.** That
+shim was `export * from '@vue/runtime-dom'; export * from '@vue/runtime-vapor';`,
+which is character-for-character what `vue.runtime.esm-bundler.js` now contains.
+Verified by building each example with and without the alias: byte-identical
+output, same sizes and same content hashes, all four chunks for island-cart.
+Consumers copying those configs were carrying a workaround for a problem Vue had
+already fixed.
+
+**The same hoist paid a second time, in the router.** `stampActiveLinks` runs
+after every navigation over every in-base anchor and re-derived `new URL()` plus
+`stripBase()` per anchor per commit, from an href that almost never changes.
+`routableTarget` now memoizes per anchor, keyed on the raw href it was derived
+from, which is rc.6's `84833e2` lesson: validate against the input, not against
+element identity, since a Blade menu can rewrite an href in place.
+
+Measured on the real function with the baseline arm derived from shipped source:
+**1.77-1.86x**, saving 42 us per commit at 50 anchors, 172 us at 200 and **828 us
+at 1000**. 1000 is not hypothetical for the server-rendered menus this feature
+exists to light up. A `WeakMap` rather than a node expando, that choice also
+measured at 0.98-1.02x, inside noise, so the non-invasive one wins for free.
+
+**One correction recorded with it:** an earlier pass reported 3.12x by timing the
+imported function against a cached variant defined inside the test file, which V8
+does not optimise identically. That is the isolated-loop error in a different
+costume. The derived-baseline method is what produced the honest figure.
+
+**Verified against rc.6:** `tsc` clean, lint clean, 1872 + 10 tests across both
+projects (130 files), IIFE 11.1 / 7.6 / 8.1 KB brotli, all under budget and
+unchanged from rc.5.
+
+**Performance measured, not asserted** (`npm run ab:vue -- 3.6.0-rc.5`, 51
+interleaved rounds): scope create/dispose 1.012x, shallowRef writes 0.997x,
+watcher notify 1.055x, computed read-after-write 0.939x. Worst ratio 1.055x,
+inside the documented noise band.
+
+##### The Vapor outlet, and an N/A call this entry reverses
+
+A later pass in the same window built on this cycle's dynamic-component work, and
+it **reverses one of this entry's own N/A calls**. Above, `<component :is>` is
+listed as not reaching us, on the grounds that `RouterOutlet` is a VDOM
+`defineComponent` returning `h()` or `null`, never a Vapor
+`createDynamicComponent`. That was true of the only outlet that existed when this
+was written. It is no longer true of the library.
+
+**`vapor-chamber/router/vapor`** ships a second render surface over the same route
+snapshot, built on exactly the helpers `a447d80` and `7c8d34a` reshaped:
+`createDynamicComponent` for the branch, accepting a block, with null rendering as
+a true empty branch keyed by its resolved sentinel, and `createSlot` for the
+no-match fallback, whose dev/production validity parity is `2473b78`.
+
+So three rc.6 commits went from inherited-but-unused to load-bearing inside one
+cycle, which is the clearest available illustration of why the alignment ritual
+reads diffs at source rather than filtering them by what today's code happens to
+call. Upstream's own comment on `a447d80` reads *"Support integration with
+VaporRouterView/VaporRouterLink by accepting blocks"*. This is that integration,
+built against it.
+
+**The prize is startup, and it is transfer and parse rather than steady state.** A
+pure-Vapor app rendering a route through the vDOM outlet must install
+`vaporInteropPlugin`, which drags in the vDOM renderer. Building the outlet from
+Vapor's own helpers drops **20.02 KB brotli / 60.8 KB raw** from an executed
+production bundle, measured against an interop baseline derived by the same
+harness so neither arm can differ by method
+(`tests/vapor/vapor-outlet-size.test.ts`). No steady-state per-navigation claim
+ships, because no committed A/B bench exists for it. That is 9.5's discipline,
+unchanged.
+
+**The guard holds two limits**, measured on a Vite production build since the rc.8
+cycle: the saving stays >= <!-- vc:outletFloor -->15.0<!-- /vc:outletFloor --> KB
+(today <!-- vc:outletSaving -->21.14<!-- /vc:outletSaving -->), and the Vapor
+outlet's own machinery over the router-without-outlet floor stays <=
+<!-- vc:outletOwnArmCeiling -->5.0<!-- /vc:outletOwnArmCeiling --> KB (today
+<!-- vc:outletOwnArm -->4.21<!-- /vc:outletOwnArm -->). It is deliberately written
+to fail when a later RC erodes either: growth in `DynamicFragment` or
+`SlotFragment` lands in the second, and that failure is a decision trigger rather
+than a threshold to raise. (At this entry's time it was one esbuild-measured bar
+on the difference; the rc.8 entry records why it was replaced.)
+
+**Two alternatives the design refuses on purpose.** It does not reach Vue through
+the registry: every helper is a static import from bare `vue`, so an upstream rename
+is a consumer *build error* rather than the silent runtime null a probe miss would
+produce in a production bundle, which is the exact failure class
+`vapor-chamber/vue` and `vapor-chamber/vapor` were shipped to kill. And it does
+not fall back to interop when handed a vDOM component: `createDynamicComponent`
+gates its vnode branch on `appContext.vdom`, so without interop a vDOM component
+silently renders in the wrong mode with no upstream error. The outlet therefore
+reads the `__vapor` marker itself and throws a coded `mode_mismatch`. A silent
+fallback would have restored the entire 20 KB the subpath exists to save while
+looking like it worked.
+
+Blade rows keep requiring the vDOM outlet, since `makeBladeComponent` is itself
+`defineComponent` and `h`. That is documented, and made loud at runtime by that
+error's blade-specific message.
+
+**The new dependency surface is nine items and is enumerated, not described:**
+eight named imports plus one property read (`instance.slots`, because Vapor's
+`setup` receives the instance as its second argument and no public
+slot-existence helper exists), pinned through the bundler entry by
+`tests/vapor/vapor-outlet-helpers.test.ts` for the star-re-export reason this
+entry already records twice.
+
+The Phase 1 spike that gated all of this (`tests/vapor/vapor-outlet-spike*`) was
+**deleted** on landing, its every behaviour now carried by permanent fixtures: six
+of them, including one that asserts the whole contract against an *executed*
+production bundle, because the anchor a null branch leaves behind is a comment in
+dev and an empty text node in production, and only node-KIND assertions survive
+both.
+
+Re-verified at this pass, superseding the counts quoted earlier in this entry:
+`tsc` clean, lint clean, 1950 + 17 tests across both projects (137 files),
+coverage 100.0% on all four axes, IIFE 11.1 / 7.6 / 8.1 KB brotli, unchanged and
+under budget, since the subpath adds nothing to them.
+#### rc.7 (Sep 4): 50 commits, none of them ours, and 28 defects that were
+
+**Expected.** rc.7's changelog is dominated by slots, async components and
+transitions. The forecast going in was pass-through: nothing in this library
+renders, so slot arbitration and transition persistence land below it. That
+forecast held for all 50 commits. What it did not predict is that reading 50
+renderer commits carefully would leave the team calibrated enough to read our own
+`src` the same way, and that the second read would find far more than the first.
+
+**Landed.** 21 compiler-vapor, 50 files of runtime-vapor, 5 runtime-core, plus
+types and tests. **All 50 are pass-through.** The themes, for the record:
+
+- **Slots.** `VaporSlotFlags` collapses to a 2-bit FORWARDED / SHARED_FALLBACK
+  mode, with `isForwardedSlot`, `slotInheritsFallback` and `slotNotifiesBoundary`
+  exported from `shared` so the vapor and interop paths cannot drift. `NON_STABLE`
+  splits out into its own `VaporSlotStability`. The fast path widens twice, each
+  step pinned by a coverage guard that a later commit then flips.
+- **Async components.** A resolved one is created AS its resolved component with
+  no wrapper, branches are keyed by state, and an `asyncComponentState` module
+  gates every wrapper-aware branch through `isAsyncComponentEnabled`.
+- **Transitions.** `persisted` is derived by walking from the root on every apply,
+  deleting `capturePendingVShows`, `applyPendingVShows`, `hasVShowMarker` and an
+  ambient stack. Composed TransitionGroup keys move off `$key` into a WeakMap with
+  a `getTransitionKey()` accessor. A `disabled` suppression latch is deleted in
+  favour of `MoveType.REORDER` at the call site.
+
+**Performance: neutral, and the instrument needed fixing first.**
+`npm run ab:vue -- 3.6.0-rc.6` (51 interleaved rounds) reports 0.993x and 0.991x
+on scope create-dispose and shallowRef writes, and apparent 0.760x and 0.696x
+"speedups" on watcher-notify and computed.
+
+Those two are **artefacts**. Running the same harness with rc.7 on BOTH arms
+reports 0.756x and 0.696x, and two byte-identical copies of one dist loaded
+through the identical path differ by up to 1.425x in opposite directions per
+workload. The cause is per-module-instance reactivity state, indistinguishable
+from a version difference by construction. The diff corroborates the neutral
+reading: the only `packages/reactivity` file changed is its `package.json` version
+line.
+
+So the printed 0.87-1.15 band is sound for the two workloads that build no
+persistent graph and much too tight for the two that do. **Still watching:** a
+self-A/B control pass is the fix and is not yet written.
+
+**Decided (first pass): five defects found by reading, none of them rc.7's.**
+
+- `createFormBus().submit()` ran `onSubmit` twice on a double-click, because the
+  re-entry guard read a signal set only after an await.
+- Four more prototype-key sites in the plugin layer (`validator`, `optimistic`,
+  `validateSchemas`, `validateSchemasAsync`), one of which made `bus.dispatch()`
+  THROW on an action named `toString`.
+- `defineVaporCommand` and `useVaporAsyncCommand` were the only dispatch paths not
+  wrapped in `untracked()`: the two Vapor ones, and one documented for hot paths.
+- The router re-ran a guard or `afterEach` hook that unregistered a LATER sibling,
+  using the length-based cursor `command-bus.ts` already records as wrong.
+- `createReaction`'s `maxHops` cap was inert whenever `mapPayload` returned a
+  primitive or array, which is unbounded on an async bus.
+
+The last needed a core channel: a one-shot causation slot in `stampMeta`, the
+mechanism `_withOrigin` already proved, at +18 B brotli.
+
+**Alternative rejected: raising the tree-shake ceiling to absorb it.** Instead
+four pass-through wrappers came out of `command-bus.ts` for -9 B. One of them,
+`asyncQuery`, was an `async` wrapper whose body was `return await inner(...)`,
+costing a microtask per query. Net +9 B under an unchanged 6560.
+
+**Corrected: a measurement this document relies on.** The rc.4 entry declines
+untracking-by-default on 35.9 ns vs 111 ns, "3.1x, +75.4 ns each". Re-measured
+through the real dispatch path on rc.7, four runs: **24.7 ns vs 30.2 ns, 1.22x,
++5.4 ns**, fourteen times cheaper than the figure the decision rests on. The
+decision is not revisited here, but the number behind it no longer reproduces.
+Anyone reopening untracking-by-default should start from 1.22x, not 3.1x.
+
+**Verified against rc.7:** `tsc` clean, lint clean, 2076 + 22 tests across both
+projects (145 files), coverage 100.0% on all four axes, IIFE 11.1 / 7.6 / 8.1 KB
+brotli, all three examples rebuilt.
+
+##### The second pass: every module in src, and 23 more defects
+
+A second pass in the same window read every module in `src` (62 files) plus all 16
+scripts. The three largest groups each turned out to be one cause, which is why
+they are grouped rather than listed.
+
+**Five plugins were broken on the async bus.** `next()` returns a PROMISE there,
+and `logger`, `history`, `circuitBreaker`, `metrics` and `persist` all read it as
+the result. `promise.ok` is `undefined`, so `logger` reported every SUCCESS
+through `console.error` as `error: undefined`; `history` recorded nothing;
+`circuitBreaker` went OPEN after five consecutive successes and began refusing
+working traffic; `metrics` timed 0.02 ms for a 30 ms handler; `persist` never
+saved.
+
+**Numeric options fail in the direction of their comparison.** Every comparison
+against NaN is false, so `length < max` fails safe while `length > max` and
+`count >= max` fail OPEN. Measured: `history({maxSize: NaN})` kept 500 against a
+cap of 50, and `StreamParser({maxDepth: NaN})` accepted 5,000 levels of nesting.
+The eight sites on the list turned out to be 53 candidates and 12 real defects,
+now one rule in `src/bounds.ts`.
+
+**Shared things whose lifetime belonged to whoever got there first.** A store died
+with the component that created it, leaving every later action returning
+`ok: false`; two forms on one bus wrote into each other's state.
+
+The router alone carried eight, including a cyclic parent chain that HUNG the tab:
+a synchronous walk with no terminator, no error and no stack, which held a vitest
+worker until the run was killed at 120s.
+
+The Vite plugin's SFC injection had **never once worked** across six releases.
+`enforce: 'pre'` sees raw SFC text, where compiler-sfc discards anything outside a
+block, proven by `transformRequest` output being byte-identical with the plugin
+and without it.
+
+**And one bug was worth ~10% of a consumer's bundle.** `src/dev.ts` documented
+that the ESM build defers DEV to the consumer's bundler, and it did not: the
+`typeof __VC_DEV__` wrapper cannot be evaluated by any bundler, so every dev-only
+diagnostic string shipped to production. Measured on a real `vite build` of a
+consumer app: 14,037 -> 12,764 raw, 4,453 -> 3,999 brotli. (One-chunk apps. In a
+code-split app a chunk that imported DEV kept its strings until v1.20.0 derived
+DEV per module.)
+
+**That fix is also why the outlet bar moved, and it is worth understanding before
+touching that guard.** The guard measures interop MINUS vapor, and both arms carry
+the router, so making the LIBRARY smaller makes the DIFFERENCE smaller. Folding
+DEV shed 97 B from the interop arm against 23 B from the Vapor one, and a 10%
+consumer win registered as a 0.07 KB regression. The bar was re-baselined once,
+from 20 to 19.5, declared in exactly one place and stamped like every other
+measured number here. (The rc.8 cycle retired that bar for two limits measured on
+a Vite build, after a second firing on an improvement. See the rc.8 entry.)
+
+**The methodological finding, and the one worth carrying forward.** Six "complete"
+lists in this cycle were incomplete and every one reported clean: the ASCII
+guard's alphabet (9,300 characters it had no opinion about), the numeric-option
+list, the read-every-module list itself (missing `form`, `store` and `vue`), an
+A/B harness's import rewrites, the example typecheck's include, and the size
+table's subpaths (`./devtools` and `./stream-parser` were published exports with
+no size row anywhere).
+
+**The rule adopted from it: where a rule can be INVERTED rather than enumerated,
+invert it.** `src/` is held to plain ASCII by rejecting everything above U+007F,
+and the size table, the API reference and the build's entry map are all derived
+from `package.json` "exports" rather than retyped beside it.
+
+#### rc.8 (Sep 11): the first cycle not written as pass-through
+
+**Expected.** After seven cycles of pass-through the working assumption was that
+an RC either lands below us or does not reach us. rc.8 broke that assumption in
+both directions at once: two commits changed behaviour we depend on and had to be
+adopted with fixtures, and one measurement method had to be thrown away because
+the tool it used does not agree with what consumers ship.
+
+**Landed.** 25 commits, all read at source. The release notes list 14; the other
+11 are refactors, CI, a build change and the release.
+
+- **v-once is reworked** around a public `withOnce`: a v-once component snapshots
+  its props AND its slot set while slot content stays live, and the directive
+  helpers run inside it (03).
+- **Props merge like vDOM**: events across prop sources (02); declared `class`,
+  `style` and `on*` props across sources in raw-key order (10); rawProps copied
+  rather than mutated when fallthrough attrs are injected (04).
+- **Lifecycle**: a component instance created but never mounted is disposed (12);
+  async setup registers with the nearest Suspense (11); an awaiting
+  `<script setup vapor>` compiles to an `async setup()` returning its template as
+  a render closure run once setup settles, and runtime-vapor's `withAsyncContext`
+  is removed in favour of runtime-core's (20).
+- **Hydration leaves client render**: no hydration-boundary closure on client
+  render (13), slot hydration moved into top-level functions (19), and Vue's CI
+  now fails a Vapor CSR bundle that carries hydration code (21).
+- **Dynamic components**: branch keyed by the RESOLVED component (05); `:key`
+  passed to `createDynamicComponent` as a fifth argument, with KeepAlive caching
+  by it (08); a vnode branch mounted through interop, invalid `:is` types warned
+  and rendered empty, an unchanged key skipping the branch closure (09).
+
+Plus `is="vue:X"` on native tags (06), SVG/MathML namespace for element fallbacks
+(07), a `RenderContext` object replacing four slot/suspense module globals (18),
+fragment `move()` split from insert (15/16), perf on dynamic props and DEV-only
+fallthrough bookkeeping (23, 24), and a build change inlining aliased enum members
+(22), which is the only reason the reactivity dist differs; its source is
+untouched.
+
+**Decided: adopt.** Each pinned by a real-mount fixture verified to FAIL on rc.7,
+with every `@vue/*` package that follows `vue`'s version (eleven of them) pinned
+together.
+
+- Commit 12: a child created before a sibling's render threw was never disposed,
+  so its `useCommand().on()` listener outlived `app.unmount()`
+  (`tests/never-mounted-disposal-fixture.test.ts`).
+- Commits 02 and 10: `<Transition v-bind="t" @enter="mine">` kept only the
+  LATER-written source on rc.7, which in the documented order dropped the bridge's
+  own `onEnter`. rc.8 runs both (`tests/transition-bind-merge-fixture.test.ts`,
+  both attribute orders).
+- Commits 13, 19 and 21: the two Vapor examples shrank 607 and 596 B raw, 299 and
+  164 B brotli, on clean trees. An earlier -14.6 KB raw reading came from a mixed
+  tree and is **withdrawn**.
+
+**Decided: docs only.** Commits 11 and 20 mean `useCommand()` after a top-level
+await arms its cleanup, including across an unmount during the await. That already
+held on rc.7 (`tests/async-vapor-setup-fixture.test.ts`, which compiles the SFC at
+test time).
+
+**Decided: retire nothing.** The `router/vapor` mode guard, the
+`hasInjectionContext()` KeepAlive gate and the transition `settled` latch were
+each re-checked and each still carries weight. This is the step the ritual exists
+to force: a guard added for an old RC is dead weight unless re-justified, and
+three were re-justified rather than assumed.
+
+**N/A by reading:** `withOnce`, `is="vue:X"`, the fallback namespace, keyed
+`<component :is>` (`router/vapor` passes no key, and a component object is its own
+branch key), and the removed runtime-vapor `withAsyncContext`, never imported here.
+
+**Decided: the outlet guard moves to rolldown, and stops measuring a difference.**
+The esbuild guard read 19.43 KB against its 19.5 bar and failed. On clean trees
+esbuild read the saving 20.06 -> 19.40 while Vite 8 / rolldown read 18.85 ->
+20.42, because esbuild keeps rc.8's new top-level hydration functions and rolldown
+shakes them. **Rolldown is what consumers ship**, which is the stance Vue's own
+commit 21 takes for its CSR bundles.
+
+The interop arm's movement is Vue-originated: under rolldown it GREW 1,774 B
+brotli and the Vapor arm 166 B. Attribution to individual commits is not
+established.
+
+The guard now builds with Vite's API and asserts two limits instead of a
+difference that had fired twice on improvements: own machinery <= 5.0 KB (4.23)
+and saving >= 15 KB (20.42), both stamped. **The general lesson, and the reason
+this is written down rather than just changed: a guard on a DIFFERENCE fires when
+either arm improves. Two absolute limits cannot.**
+
+**Alternative rejected: copying commit 18's registry object.** Measured and
+declined. Not slower, but **+71 B brotli on the full IIFE**. A refactor that buys
+upstream clarity buys us nothing here, and bytes are not free.
+
+**Also in the rc.8 window**, lib-side: `vaporChamberWire()`, a build-only Vite
+plugin that wires Vue into an app importing the root with no import changed;
+`vcCommandVapor`, `v-vc:command` for Vapor components, reading its binding getter
+at dispatch, since the `renderEffect` a tracked port needs would break the subpath
+on Vue 3.5; and a marker guard on a Vapor consumer's Vite bundle, asserting no
+vDOM binding, one chamber module, and a runtime probe that stays a bare
+`import("vue")` even with Vue bundled.
+
+**Verified against rc.8:** `tsc` clean, lint clean, 2128 + 24 tests across both
+projects (151 + 8 files), coverage 100.0% on all four axes, IIFE 11.3 / 7.7 / 8.2
+KB brotli, all three examples rebuilt.
+
+#### rc.9 (Sep 21): rc.9 broke a directive here, and the fix deleted its cause
+
+**Expected.** Eight cycles of pass-through had made a working assumption
+comfortable: a renderer change lands below this library. rc.9 disproved it. One
+commit, #15490, changed the shape of a value `vcCommandVapor` compares against,
+and every `v-vc:command` in every compiled Vapor template stopped working, with no
+warning and no error. The cycle's whole train of thought runs from that defect to
+a conclusion bigger than the fix: **the notation itself was a category error, and
+the defect was downstream of it.**
+
+**Landed.** 89 commits in `v3.6.0-rc.8..v3.6.0-rc.9`, the full log rather than
+first-parent. Sixteen were read in full or closed by a probe or a committed test;
+the rest are closed from their title and touched files, and are marked as such in
+the cycle record. The peer range narrows to `>=3.5.0 || >=3.6.0-rc.9` for `vue`
+and `@vue/reactivity`; both Vapor examples repinned and rebuilt.
+
+**The defect.** #15490 made a Vapor custom directive's ARGUMENT a getter, so
+compiler-vapor emits:
+
+    rc.8  [_directive_vc, () => (_ctx.action), "command",         { stop: true }]
+    rc.9  [_directive_vc, () => (_ctx.action), () => ("command"), { stop: true }]
+
+and `vcCommandVapor` opened with `if (argument !== 'command') return;`. A function
+never equals that string, so the directive returned before mounting: no listener,
+no state, no warning, no error.
+
+**Why 2,431 passing tests did not see it.** Both Vapor directive fixtures
+hand-wrote the tuple, copied from an older compiler release, and their headers
+said so. **A literal records a compiler release and then agrees with it forever.**
+`tests/compile-vapor.ts` is the fix: one helper that compiles the consumer's
+template on the INSTALLED Vue and reads the generated module's imports rather than
+listing them. Every Vapor test that matters now runs compiler output. And
+`examples/vapor-sfc` had no `v-vc:command` anywhere, so rebuilding all three
+examples, which this ritual does every cycle, passed while the feature was dead.
+`npm run check:example` now builds that example and drives the button in a real
+page.
+
+**Alternative rejected: accept both shapes.** Vue's own `VaporDirective` type
+declares `argument?: () => Arg` with no union, so the string is not a legacy shape
+but an illegal one. No Vue inside this package's peer range can emit it: 3.5 ships
+neither runtime-vapor nor compiler-vapor, and the second arm of the range starts
+at rc.9. Accepting both would be a branch no installable Vue can reach, provable
+only by a hand-written literal, which is **the exact construct that hid this bug
+for a release**. A DEV guard names the required version instead, and folds to
+nothing in a consumer's production build.
+
+**Decided, and it is the real conclusion of the cycle: the selector moved into the
+NAME. `v-vc:command` is now `v-vc-command`.**
+
+Vue's directive ARGUMENT is a *parameter* slot, like `v-bind:href` and
+`v-on:click`, meant to be dynamic, and reactive since #15490. This package was
+using it as a *selector*: the argument said which of `command`, `payload` or
+`optimistic` a binding was. That is a category error. **A selector must not move;
+a parameter is built to.** The two requirements were in direct conflict, and the
+conflict shipped a dead control.
+
+The three names now have one shape, registered as `vc-command`, `vc-payload` and
+`vc-optimistic`:
+
+    v-vc-command    v-vc-payload    v-vc-optimistic
+
+**It is a deletion, not a rename.** Gone with the argument read: the `argument()`
+call, the DEV guard on a non-getter argument, the below-floor Vue version warning
+that existed only to explain that guard, both `binding.arg` guards in the vDOM
+registration, and the documented `v-vc:[kind]` latch, unreachable once there is no
+argument to be dynamic. Measured on a Vite production consumer bundle of
+`./directives`, brotli q11: **-387 raw / -144 brotli**. All three IIFE variants are
+byte-identical, since none carries directives code; they are the control, not the
+target.
+
+**Alternative rejected: a deprecation alias.** It would have to keep the exact
+machinery this change exists to delete. Refused deliberately, and this is the
+reason to write it down: the alias is cheap to add and permanently expensive to
+carry.
+
+**`v-vc:payload` was inert, and this fixes it.** The drift the split caused:
+`v-vc:payload` compiled to `[_directive_vc, _ctx.p, "payload"]`, the `vc`
+directive with an argument its `mounted` rejected, so it did nothing, while being
+documented in the README, this whitepaper, an example header and the generated API
+reference. The working spelling was always `v-vc-payload`. It now compiles to its
+own `resolveDirective("vc-payload")`, and two new tests compile the notation a
+consumer actually types rather than resolving a name we chose.
+
+**It also closes a `vue-tsc` gap, which was not the point and is worth stating
+carefully.** vue-tsc type-checked the template call by passing the ARGUMENT as a
+raw string, the pre-#15490 shape, and rejected the idiomatic
+`import { vcCommandVapor as vVc }` form with TS2345. With no argument there is
+nothing to mis-check. A/B in the example's own project, with a control: the colon
+form still reports TS2345, the hyphen form exits clean, and a deliberate error in
+the same probe still reports TS2339, so the template is genuinely being checked.
+**The tool has not caught up.** The bug is still there for anyone using an
+argument; our usage no longer has the shape that triggers it. **If an
+argument-based notation is ever proposed again, this is part of its cost.**
+
+So `examples/vapor-sfc` no longer registers the directive app-wide. That
+registration was never a style choice: it existed only to give `vue-tsc` no
+declaration to check, which is opting out of checking rather than satisfying it.
+The example now imports the binding, the way the documentation recommends, and its
+own `vue-tsc --noEmit` build step is the proof. `npm run check:tsc-gap` and
+`scripts/check-vue-tsc-directive-gap.mjs` are deleted: **a guard that can only go
+red for a reason that cannot affect this package carries no information about it.**
+
+**Upgrading**, and both halves fail silently if missed:
+
+    - <button v-vc:command="'cartAdd'">
+    + <button v-vc-command="'cartAdd'">
+
+    - createVaporApp(App).directive('vc', vcCommandVapor)
+    + createVaporApp(App).directive('vc-command', vcCommandVapor)
+
+Vue resolves an SFC directive by camelCasing the FULL name, so `v-vc-command`
+looks for `vVcCommand`. Under the old spelling the directive was named `vc` with
+`command` as its argument, so the binding was `vVc`:
+
+    - import { vcCommandVapor as vVc } from 'vapor-chamber/directives'
+    + import { vcCommandVapor as vVcCommand } from 'vapor-chamber/directives'
+
+An import left aliased to `vVc` compiles, type-checks and mounts nothing: the same
+silent dead control #15490 produced. This was caught by `npm run check:example`,
+which clicks the built example's button and asserts the directive responded, and
+by nothing else.
+
+##### `v-vc-payload` and `v-vc-optimistic` now work on Vapor
+
+Two new exports, `vcPayloadVapor` and `vcOptimisticVapor`, beside
+`vcCommandVapor`. All three directives now mean the same thing on both renderers,
+and there is nothing left to document as unavailable on Vapor.
+
+**What was actually missing.** `v-vc-payload` had a substitute and
+`v-vc-optimistic` had none. The substitute was lossy in a way that is easy to
+miss: `data-vc-payload` is JSON in an attribute, so measured through it a `Date`
+arrives as a string, a `Map` as `{}`, a class instance as a plain object, and a
+function and an `undefined` key disappear entirely. A handler calling
+`cmd.payload.when.getTime()` worked through the binding and threw through the
+attribute.
+
+For optimistic-with-rollback there was no route at all. The Vapor consumer had to
+drop `v-vc-command` for that button and hand-roll the dispatch, forfeiting
+`vc-loading` / `vc-error`, disable-while-busy, the re-entrancy guard, the timeout
+and the modifiers. It could not be done by adding an `@click` beside the
+directive, because since #15490's sibling `80b3a046` that handler registers first
+and can veto the dispatch.
+
+**Read at dispatch time**, like the action, because Vapor has no `updated` hook. A
+changed payload re-targets the next click without the directive re-running. A
+binding beats `data-vc-payload` on both renderers, unchanged.
+
+**Order does not matter**, and that is not free and not defensive. A compiled
+template applies directives in SOURCE order, and mounting the command clears the
+element's state first, so the naive port loses a payload written before the
+command: a button that dispatches with nothing, silently. Both orders are pinned
+by tests.
+
+**Alternative rejected: warn on the losing order.** Attribute order is not
+something a consumer has reason to think matters, so a warning would be teaching
+them to work around a defect instead of fixing it.
+
+**Cost** (Vite production consumer bundle of `./directives`, brotli q11): **+500
+raw / +125 brotli**. The three IIFE variants are byte-identical. The `.d.ts` grows
+3,238 B, which is types and JSDoc and reaches no consumer's bundle.
+
+**The alias rule applies to these too, and it fails silently.** Vue camelCases the
+whole directive name, so the imports must alias as `vVcPayload` and
+`vVcOptimistic`. Anything shorter compiles, type-checks, and falls back to a
+directive nobody registered, which Vue warns about in DEV and not in a production
+build. `npm run check:example` now clicks the example's button and asserts the
+optimistic counter moved by the payload's `qty`, so a dead binding shows up as 1
+instead of 3 rather than as nothing at all.
+
+##### Fixed: on vDOM, a payload written before the command was silently dropped
+
+The order-independence above was Vapor's alone. On the vDOM plugin,
+`<button v-vc-payload="p" v-vc-command="a">` dispatched with **no payload**, and
+`v-vc-optimistic` before the command **never ran**. No warning, no error: a
+control that renders and quietly does less than it says.
+
+Measured against the real vDOM runtime, first click, no re-render since mount:
+
+    <button v-vc-command    v-vc-payload>    payload {qty:3}    delivered
+    <button v-vc-payload    v-vc-command>    payload undefined  DROPPED
+    <button v-vc-optimistic v-vc-command>    optimistic never ran
+
+**Why it survived.** After any re-render the `updated` hook re-applies the binding
+and both recover, so it is a FIRST-CLICK defect: every test that renders before it
+asserts passes, and the source said in as many words that the vDOM half "needs
+nothing equivalent" because the next patch would fix it. That is true from the
+second click. The element is clickable before the first, and on a page with no
+reactive state, the Blade or sprinkled shape this library exists to serve, there
+is no next patch and it never works at all.
+
+**What it cost beyond the payload.** One public spelling meant two things:
+order-independent on Vapor, dead on vDOM. `examples/vapor-sfc` writes
+payload-before-command and states that the order does not matter, which holds only
+because that file is `<script setup vapor>`. A reader copying that markup into a
+vDOM component got a silent no-op.
+
+**The fix** is the one Vapor already had: the holding slot now takes vDOM values as
+well as Vapor getters, and both registrations write through it, so a binding that
+arrives before the command is held and claimed instead of discarded. `payload` and
+`optimisticFn` join the state literal, so the hidden class no longer depends on
+which renderer mounted the element.
+
+    before   raw  27,435   brotli  7,324
+    after    raw  27,419   brotli  7,340
+    delta          -16             +16
+
+Raw shrinks because four repeated hook bodies collapse into one shared writer;
+brotli grows by the same small amount because that repetition compressed almost
+perfectly.
+
+Four tests pin it: both before-command cases (the regression), the after-command
+case (the control, **because the cheapest wrong fix swaps which order works**), an
+`updated` after a claim, and an element that never mounts a command at all.
+
+##### Teardown is keyed to what was mounted, never to the current binding
+
+Found while measuring the fix above, and older than rc.9. The vDOM `v-vc`'s
+`beforeUnmount` guarded on `binding.arg !== 'command'`, and Vue passes the LATEST
+binding, so after a dynamic argument moved off `command`, teardown never ran and
+the element's listener outlived it.
+
+Honest scope: reachable only through `v-vc:[kind]`, which nothing uses. The
+delegated refcount is otherwise complete and correct, with plain unmount, partial,
+full and double-unmount all measured correct BEFORE the fix. The fix is the
+deletion of that line, since `unmountCommand` already no-ops on an element with no
+state, so the guard bought nothing. **Net -56 B.** A dynamic `v-vc:[kind]` LATCHES
+on both renderers alike, and is documented rather than warned about.
+
+##### One listener-options object
+
+Recorded at mount and handed to both `addEventListener` and
+`removeEventListener`, replacing a `capture` boolean that existed only to rebuild
+what was already there (**-16 B**).
+
+`removeEventListener` is a silent no-op when the handler or the capture flag
+differ, and the two calls had disagreed harmlessly (`{}` against `undefined`),
+which had forced the test comparing them to compare capture flags rather than
+arguments. **A comparison weakened to pass will not catch what it is for:** add
+`{ once: true }` to one side and removal stops matching, with no error.
+
+##### The argument guard is DEV-only, and the state literal is one shape
+
+Two items in `vcCommandVapor`'s mount path, found by re-reading this cycle's own
+changes against the built output rather than the source.
+
+- **The argument-shape guard shipped to production.** Only the `console.warn` was
+  gated, so `if (argument !== undefined && typeof argument !== 'function') return;`
+  survived a production build: a branch this entry itself argues no installable Vue
+  can reach. Measured on `./directives`, production-minified with DEV folded off:
+  37 bytes min, 12 gzip, 14 brotli. The behaviour ran the same way. A `return` on a
+  string is a control that renders, clicks and does nothing, with no error, which
+  is the exact shape #15490 left behind. Now DEV-only; production reaches the bare
+  `argument()` and throws at the line that caused it.
+- **The state literal gained a hidden-class transition.** `capture` left the
+  literal when it became `listenerOpts`, and the write moved after it,
+  transitioning V8's map once per mount on the direct-listener path; `delegatedDoc`
+  had the same shape on the delegated path. Both are declared in the literal now,
+  so every `DirectiveState` leaves `mountCommand` with one map. **Not benched and
+  not claimed as faster: it removes a transition, it cannot be slower, and it is
+  not a size loss** - two `undefined` slots cost 40 bytes raw and give back 3
+  brotli.
+
+Net on `./directives`, production-minified with DEV folded: -3 brotli, -2 gzip,
++3 min.
+
+##### `createDirectivePlugin()` on a Vapor app now says so, in DEV
+
+Installing the vDOM plugin on a Vapor app leaves every `v-vc-command` inert. From
+rc.9 Vue skips a vDOM object directive in a Vapor template with a warning of its
+own (#15489); before that it called the object and threw a TypeError at mount. Vue
+names the symptom, "Received a VDOM object directive", so ours carries only the
+fix: **"On a Vapor app use vcCommandVapor."**
+
+One own-property read (`app.vapor`, which a Vapor app carries and a vDOM app does
+not), and the whole branch folds out of a production build. Measured on
+`dist/directives2.js`: **+94 B raw / +21 B brotli**, of which the `if` costs 8 and
+the string 13.
+
+All three directives have a Vapor registration as of this release, so the remedy
+is always an import rather than a workaround.
+
+##### Upgrade note: a template `@click` now runs before `v-vc-command`
+
+**Scope: only an element carrying BOTH a template `@click` and `v-vc-command`.**
+Nothing else changes. No example or documented recipe pairs them;
+`examples/feature-directives.html` says in as many words that there is no click
+handler anywhere in it, because the directive owns the whole interaction.
+
+`80b3a046` moved compiled custom directives to the END of a block, after the
+element's props, children and `v-model`. Measured on one template with both
+compilers: rc.8 emitted `_withVaporDirectives` and then `_on`; rc.9 emits them the
+other way round. The directive's listener ran FIRST on rc.8 and runs SECOND on
+rc.9, so a template handler now gets to veto the dispatch through `buildHandler`'s
+disabled / `aria-disabled` / in-flight guard, deliberate since v1.6.0, mirroring
+Vue's #14948, and unchanged. The platform does not retract an event already in
+flight, so disabling the element from that handler does not stop the click
+reaching us; the guard is what stops the dispatch.
+
+What each kind of veto does, measured on one element carrying both:
+
+| the `@click` handler does | vDOM | Vapor direct | Vapor `.delegate` |
+| --- | --- | --- | --- |
+| nothing | dispatches | dispatches | dispatches |
+| `el.disabled = true` | skips | skips | skips |
+| `stopImmediatePropagation()` | skips | skips | skips |
+| `stopPropagation()` | dispatches | dispatches | **skips** |
+
+**This makes Vapor match vDOM rather than depart from it.** Vue patches an
+element's props before it runs a directive's `mounted`, so the vDOM registration
+has run second all along; on rc.8 neither veto reached the Vapor directive at all,
+measured, both dispatched.
+
+**`.delegate` is unaffected by the rc.9 reordering, and always was.** Its listener
+is on the DOCUMENT and fires during bubbling, after every element-level listener
+whatever order they registered in, so emission order never decided anything for
+it. The same property is why `.delegate` is the one mode plain `stopPropagation()`
+on the element vetoes: it stops the event reaching the document, while a direct
+listener on that same element is not stopped by it. **Both facts are pre-existing
+and inherent to delegation**; neither was introduced by rc.9 and neither changes
+with it.
+
+If you want the dispatch to happen regardless, move the `@click` work into the
+command handler, or put it on a wrapper element.
+
+##### Inherited from rc.9, no code change here
+
+Each reaches consumers only through an API this package re-exports.
+
+- **`958580bf`**: a Vapor component's props are marked shallow, so `watch(props)`
+  is no longer deep. Nothing here watches props or teaches it, grepped across src,
+  examples, docs and README, but an app that does, through `defineVaporComponent`,
+  gets the shallower watcher.
+- **`ab722d18`**: reserved props are skipped in attrs and dynamic props.
+- **`0e4ff650`**: an empty-string dynamic component renders an empty branch.
+  `router/vapor` already passes a getter that can answer null, and this is the same
+  arbitration one value further out.
+- **`90ddc697`**: hydration advances past a multi-root async component.
+
+##### BREAKING: `sync` carries facts, not commands, and leaves the dispatch chain
+
+`sync` was a bus plugin that re-broadcast every successful dispatch and
+re-dispatched it in the receiving tab. **That replicates INTENT:** each tab re-runs
+the handler and derives its own outcome. Measured against a real
+`BroadcastChannel` rather than the channel stub the old tests used, three things
+follow, and none of them were documented:
+
+- A handler that is not deterministic does not mirror. Two tabs running the same
+  `cartAdd` minted `A-line-1-936891` and `B-line-1-675288` and stayed different.
+- A tab seeded differently stays different: one ended at 1, the other at 6.
+- A handler that dispatches a nested command applied that derivation **twice per
+  tab**, because each tab derived its own and then received the peer's.
+
+**Alternative rejected: suppress the receive side.** It does not fix the third case
+(6 runs become 5, not 4): the ORIGINATING tab is still broadcasting its
+derivations.
+
+**Alternative rejected: infer root from derived dispatches.** That needs the core
+to distinguish them, which it does not, since a root and a nested dispatch carry
+identical meta, and adding a counter to do so taxes every dispatch on the bus.
+
+**Decided: the app declares what crosses instead.** A handler computes a fact and
+emits it on an event channel; the bridge puts that fact on the wire and every other
+tab applies it. A derivation is not a fact unless the app emits it, so there is
+nothing to infer and no counter to pay for, and the receiving tab applies values
+rather than recomputing them: the ordinary CQRS split between a command and
+something that already happened.
+
+```typescript
+const lane = createFastLane()
+lane.on('cartAdded', fact => applyToCart(fact))   // local AND remote land here
+bus.register('cartAdd', cmd => { lane.emit('cartAdded', computeAdd(cmd.target)) })
+const tabSync = createChannel({ channel: 'vc:app', lane, events: ['cartAdded'] })
+```
+
+**It is also roughly twice as fast, and that is the same change.** As a plugin this
+cost more than half the bus's dispatch throughput, on every dispatch of every
+action, whether or not it synced. Over 11 shuffled rounds of 200,000 dispatches
+with `gc()` per round, against a byte-identical self-control arm:
+
+| wiring | ops/s | ratio vs bare |
+|---|--:|--:|
+| bare bus | 28,779,223 | 1.000 |
+| as a plugin (before) | 13,199,687 | 0.459 |
+| self-control, identical code | 13,062,433 | 0.454 |
+| `onAfter` listener | 15,486,719 | 0.538 |
+| **fast lane (now)** | **24,965,803** | **0.867** |
+
+Migration: `sync(opts, busRef)` becomes `createChannel({ channel, lane, events })` and is no
+longer passed to `bus.use()`. `filter` is gone; `events` names what crosses.
+`onReceive(cmd)` becomes `onReceive(event, data)`. `_withOrigin`'s sync usage and
+the `meta.origin === 'sync'` echo check are both deleted: a lane emit is
+synchronous, so a plain boolean suppresses the echo with no window for the async
+race that forced the origin marker.
+
+**What it still does not do.** Facts mirror; seeds do not. Tabs converge only if
+the facts are absolute ("the count is 2") rather than relative ("add one"). And a
+payload crosses through structured clone, so it cannot carry functions; a
+non-cloneable payload warns in DEV, naming the event, and never takes the local
+emit down with it.
+
+##### Four sweeps, and the rule behind them
+
+Three parts of this cycle are the same shape, and a fourth that came just after
+it; the shape is the point, not which release carried each one.
+
+**The `onSettled` sweep missed two plugins.** `src/settled.ts` records a defect
+found in five shipped plugins: they read `next()`'s return value as though it were
+the result, and on an async bus `next()` returns a PROMISE, so `promise.ok` is
+`undefined`. It was fixed with one helper, and that file's closing line is that a
+rule applied by hand at each call site goes missing wherever nobody remembered it.
+
+**The sweep itself was one of those hands.** It was run over the plugin family,
+`plugins-core.ts`, `plugins-extra.ts`, `plugins-io.ts`, and two plugins live
+outside it. Both had the identical defect, for two releases:
+
+- **`createSSRPlugin()` recorded NOTHING on an async bus.** `dehydrate()` came back
+  empty, so the client rehydrated no state at all. Measured through the public API,
+  same dispatch, both bus kinds:
+
+      sync  dehydrate: [{"action":"cartAdd","target":{"id":1}}]
+      async dehydrate: []
+
+  No error, no warning. It reads exactly like a render that had no commands to
+  record, which is the same shape as every other defect in this class.
+- **`schemaLogger()` printed the error branch for every command,** successes
+  included, with `undefined` as the error: the defect `logger()` had, three modules
+  away from `logger()`.
+
+**The rule is now a test, not a memory.** `tests/settled-sweep.test.ts` scans every
+`.ts` under `src/` for a `next()` result that is bound and then read without being
+settled, and separately asserts the scan covers every module that produces a
+`Plugin`: sixteen of them, not the three whose filenames begin with `plugins-`.
+Comments are blanked before scanning, because `settled.ts`'s own docblock quotes
+the pattern it looks for.
+
+**Why the type system did not catch it, and still would not.** `Plugin` declares
+`next: () => CommandResult` while being usable on either bus, which is a lie on the
+async one; `settled.ts` already says so. Three plugins work around it with
+`const plugin: any`, which is the type system being escaped rather than modelled.
+**Alternative rejected: collapse `Plugin` into `AsyncPlugin`.** The sync runner
+(`buildRunner`) genuinely requires a synchronous return, so the two are different
+types and a dual-capable plugin is neither; it needs an overloaded signature. Not
+attempted here. This is also the root of 19 of the type errors the `tests/`
+typecheck gap hides, so the two are one piece of work.
+
+**The prototype-key rule is a sweep too, before it needs to be.** `src/dict.ts` is
+`src/settled.ts` one release earlier, and the shape is identical: a bug class found
+six times, each site written as if it were the first, centralized into one helper,
+the rule stated in prose, and the known sites pinned by
+`tests/prototype-keys.test.ts`, which says outright that it "pins the two
+non-router sites". Nothing stood between the codebase and site seven except
+somebody remembering.
+
+Swept, and it currently holds: no module tests membership with `in` or with
+`!== undefined`, no prototype-free object is spread back into a plain one, and all
+six sites `dict.ts` names call the helper. That is the same thing that was true of
+`onSettled` right up until two modules grew a `Plugin` outside the family someone
+had grepped, so `tests/dict-sweep.test.ts` now holds it instead of a person. Each
+of its three assertions is armed by injecting the construct it bans into a real
+module and watching the sweep fail.
+
+Two things the sweep needs, because both produced false readings first. **String
+literals have to be blanked as well as comments:** without that the scan reports 26
+sites, every one an error message containing the word "in" ("Retry in 200ms"). And
+**a TypeScript mapped type `[K in keyof T]` is not a membership test.**
+
+**The console-argument convention is a sweep too, and this one was swept before a
+single site had broken it.** The convention: identifying text (an action name, a
+key, a count, a limit, a code) is interpolated into the message, and a value with
+structure (a caught error, an element, a command, a result, an options bag) is
+passed as a SEPARATE console argument, where devtools renders it live and
+expandable instead of flattening it to "[object Object]".
+
+Censused 2026-09-22 over every `console.*` call in `src/`: every interpolated value
+is identifying text, every inspectable value is already a second argument, and
+`JSON.stringify`, `String(...)` and `.toString()` appear zero times inside a
+console argument. Nothing held that but memory, so
+`scripts/check-console-shape.mjs` holds it now, in `lint:check` beside the other
+guards. It prints its own counts, so the numbers here cannot go stale.
+
+**The error-code registry is a sweep too - added in v1.23.0 rather than this
+cycle, and listed here because it is the same shape.** It exists because a table
+called itself complete while nothing checked it. `ERROR_CODE_REGISTRY` describes itself
+as "the single source of truth" and "the complete registry of all BusError codes",
+and it is what `getErrorEntry(code).fix` reads and what `describeErrorCodes()`
+prints into an LLM system prompt - so a code with no row is a failure the library
+can emit and cannot explain, surfacing as `undefined` at the moment a developer
+most wants an answer. The transport work added five codes at once, and the only
+thing standing between that and a missing row was somebody remembering.
+
+`tests/error-registry-sweep.test.ts` takes BOTH sides from source - the codes
+parsed out of the `BusErrorCode` union, the rows read from the exported registry -
+so there is no allowlist, nothing to update on a rename, and no judgement call.
+Both directions are asserted, duplicates too, and each was armed by injection: a
+code with no row, a row with no code, and a renamed union declaration, which makes
+the parse THROW rather than return an empty list, because a sweep that reports
+clean over a moved declaration is the one result it must never produce.
+
+**Its limit is stated in the file, and it is the interesting part.** A completeness
+diff cannot see a row that is false in a way both sides agree on.
+`VC_CORE_HANDLER_THREW` is exactly that: declared, registered, listed as
+retryable - and emitted by no site in `src/`, because a handler's throw reaches
+`result.error` unwrapped (`tryCatchHandler` is
+`catch (e) { return errResult(e as Error) }`). Its row promised that a handler
+throw arrives as that code, which was never true. The row was corrected and the
+code left in place, being public API; catching the class needs a third question,
+"which site mints this?", and that needs an allowlist for the codes deliberately
+never minted - which by this repo's bar makes it a chore rather than a guard.
+
+**It classifies by TYPE rather than by a list of names that look inspectable:** a
+value may be interpolated only if the type checker says it is a string, number,
+boolean or bigint, or a union of those, which is what a string enum and `typeof x`
+are, and everything else fails, `any` and `unknown` included. That is
+`check-ascii.mjs`'s lesson applied on purpose: **an alphabet is worth exactly the
+characters somebody thought of, and that list has been wrong here three times.**
+The two calls that look like exceptions need no allowlist entry, because they pass
+on shape: `validateNaming`'s `console.warn(msg)` interpolates nothing at the call,
+and the router's `console.error(error)` is the convention itself.
+
+**The arming is in the guard, not in a session's notes.** `--self-test` injects
+five violations into real modules (an object in a template, `JSON.stringify` in a
+message, `String()` around a value, and both exempt sites rewritten into the
+violating shape), confirms each is caught, and restores every file by copy in a
+`finally`, asserting the restore rather than assuming it.
+
+It refuses to start unless git says every file it will write is clean. A `finally`
+does not run on SIGKILL, so an interrupted run would leave an injected defect in a
+real module, and this repo has had two sessions editing one working tree at once.
+Refusing also makes that trace DETECTABLE: the file shows as modified next time
+rather than being quietly re-mutated on top. The two exempt sites are in there
+because a shape-based exemption that quietly matches too much is
+indistinguishable from a working check, which is the `onSettled` sweep's
+filename-scoping failure in another costume.
+
+It is not in `lint:check` (it rebuilds the program per mutation and writes to
+`src/`) and not in the suite (no test here drives a `scripts/check-*.mjs`, and a
+second-long `ts.createProgram` does not belong in a vitest run). Blunt the
+classifier and the gate still reports OK while `--self-test` exits 1, measured,
+which is the point of having it.
+
+**Two limits stated rather than discovered later.** A value that is genuinely a
+string but typed `any` fails this check, and `String(...)` is rejected by the same
+guard, so the way out is a cast at the call site, a claim a reviewer can see; the
+failure message says so. And the blind spot: a message assembled into a local and
+then logged passes unexamined, because following an initializer means deciding
+which declaration a name refers to, and being wrong about that is worse than a
+limit written down.
+
+**`CONTRIBUTING.md` opened its `lint:check` paragraph with "Four guards" and then
+named exactly four.** The fifth made both wrong, and nothing watched that sentence:
+`check-doc-claims` reads docblocks, absent defaults and release status, not prose
+counts. **The count is gone rather than bumped**, since five would have left the
+same trap armed for guard six. The paragraph names its guards now.
+
+**The general rule this repository keeps rediscovering.** A bug class fixed by
+writing the rule down is not fixed; it is deferred to whoever reads the prose next.
+Two helpers now exist solely to centralize such a rule, and both had the same gap.
+**From here, a helper introduced to centralize a bug class ships with a sweep that
+scans every module for the construct it replaces** - not a test per known site, and
+not a grep scoped to the filenames that happened to be involved the first time.
+
+##### Still watching
+
+- **The `Plugin` / `AsyncPlugin` overload.** `Plugin` declares
+  `next: () => CommandResult` while being usable on either bus, which is a lie on
+  the async one, and three plugins escape it with `const plugin: any`. The sync
+  runner genuinely requires a synchronous return, so the two are different types
+  and a dual-capable plugin is neither; it needs an overloaded signature. Not
+  attempted.
+
+  (The `tests/` typecheck gap this was recorded against is CLOSED.
+  `tsconfig.tests.json` covers `src`, `tests` and `scripts`, and `npm run
+  typecheck` runs it. The gap and its fix both landed inside the v1.22.0 window,
+  so the CHANGELOG entry that says "recorded, not fixed here" describes a state
+  that its own release superseded.)
+- **A bound update overwrites what `v-vc-command` writes by hand.** The directive
+  adds `vc-loading` / `vc-error` and sets `disabled` directly on the element. Vue
+  compares a binding against its own previous value, not against the live DOM, so a
+  hand-written value survives until that binding next moves and is then overwritten
+  wholesale. Measured on compiled templates: on an element that is NOT the component
+  root, a `:class` update drops `vc-loading` on BOTH renderers; on a component root,
+  where the class arrives as a fallthrough prop and Vue patches it through
+  `classList`, it survives. `:disabled` behaves the same way: a binding that flips
+  mid-dispatch leaves the button looking enabled and accepting clicks that do
+  nothing, since re-entrancy is blocked by internal state a binding cannot reach.
+  rc.9's `a5f7a2c1` ("keep transition classes when updating class binding") is
+  upstream solving the same class of problem for its OWN classes, via a list
+  userland cannot join. **Until this is fixed, do not put `:class` or `:disabled` on
+  the same element as `v-vc-command` unless that element is a component root.**
+- **Composables imported from the package ROOT degrade in a production bundle.**
+  Known since v1.20.0 and now measured in a real production bundle rather than a
+  model of one: `loading` is not a Vue ref, a listener registered through
+  `useCommand().on()` outlives `app.unmount()`, and the KeepAlive guard is inert.
+  Stated precisely, because the obvious phrasing is wrong: the state still
+  ADVANCES, the reducer runs and `state.value` changes, it is simply not reactive,
+  so a template bound to it never re-renders. The remedy is unchanged and
+  three-fold: import from `vapor-chamber/vue` or `vapor-chamber/vapor`, or let
+  `vaporChamberWire()` do it at build time. The production warning that names those
+  remedies fires in that bundle, which this cycle confirmed.
+
+**Sizes.** All three IIFE variants are **byte-identical across the whole series**
+(40,944 / 27,891 / 29,655 raw; 12,094 / 8,177 / 8,673 brotli): `src/directives.ts`
+ships in none of them. The whole cost of the cycle is **+310 B raw / +117 B brotli
+on `dist/directives2.js`**, the opt-in directives subpath: the DEV version guard,
+which a consumer's production build folds away, and the listener-options field.
+
+Vue's own numbers moved, and the generated table now says so: the hand-wired
+`createVaporApp` minimum 44.1 -> 44.5 KB minified, `vapor-chamber/vapor` over it
+4.8 -> 4.4, and `+ vaporInteropPlugin` 81.7 -> 84.2. Every vapor-chamber export row
+is unchanged at brotli. The Vapor outlet guard reads its saving at 21.14 KB brotli
+against the 20.42 recorded on rc.8, own machinery 4.21 against 4.23, measured by
+the committed guard on this tree. The direction, that rc.9 makes the
+vDOM-plus-interop alternative more expensive rather than less, is what the numbers
+support.
+
+**Added: `npm run gate`.** One chain in the house order (typecheck, build,
+test:run, test:vapor, size:check, lint, coverage, stamp check, docs, size:doc,
+clean tree), failing fast, one result line per step, and a failure that names the
+step, so `git rebase --exec` identifies both the commit and the step. `npm run
+docs` and `npm run size:doc` regenerate files, so each is followed by a scoped
+`git diff --exit-code`, and the chain ends by asserting a clean tree: **drift fails
+the gate instead of being repaired by it.** The rule it enforces had failed three
+times before this.
+
+[#15490]: https://github.com/vuejs/core/pull/15490
+
+---
+
+### 9.3 Vapor mode: the VDOM-less path
 
 Under Vapor mode, the compiler generates imperative DOM code instead of a render function:
 
@@ -598,7 +2418,7 @@ import { vaporInteropPlugin } from 'vue'
 app.use(vaporInteropPlugin)
 ```
 
-### 9.3 Lifecycle cleanup
+### 9.4 Lifecycle cleanup
 
 Composables use `onScopeDispose` (Vue 3.5+), never `onUnmounted`. The reason is
 `getCurrentInstance()`, and only that:
@@ -633,7 +2453,7 @@ gated on `getCurrentInstance()` until the rc.4 cycle, so KeepAlive pause/resume 
 every Vapor component while this page described the hazard correctly. A documented invariant
 is not an enforced one - that is what the fixture is for.
 
-### 9.4 Memory: useCommand vs defineVaporCommand
+### 9.5 Memory: useCommand vs defineVaporCommand
 
 Each `useCommand()` call creates 2 signals (`loading`, `lastError`):
 
@@ -660,7 +2480,7 @@ loading/error state is not needed in the template.
 | `useCommand()` | 2 | ✅ | UI-bound dispatch + register/on/emit (Vapor & VDOM) |
 | `defineVaporCommand()` | 0 | ✅ | Fire-and-forget (analytics, scroll, search) |
 
-### 9.5 Rolldown / Vite 8 compatibility
+### 9.6 Rolldown / Vite 8 compatibility
 
 Dynamic imports of optional peer dependencies use `/* @vite-ignore */` to prevent Rolldown
 (Rust-based bundler in Vite 8) from treating them as required:
@@ -674,7 +2494,7 @@ import(/* @vite-ignore */ vuePkg)  // optional peer dep - must not fail build
 
 ## 10. Vue Composables
 
-### 10.1 Full reference
+### 10.1 The composables at a glance
 
 ```ts
 // Single command composable - reactive state + register + on + emit + auto-cleanup, Vapor-safe
@@ -715,6 +2535,12 @@ const restarting = isLoading('svcRestart', 'httpd')   // true only while that ke
 // Direct bus access
 const bus = getCommandBus()
 ```
+
+Shapes, not signatures. Several of these return more than the destructure
+shows: `useCommandHistory` also gives `clear` and `dispose`, `useCommandError`
+a `dispose`, and `useSharedCommandState` the shared `inFlight`, `lastError` and
+`errors` beside the two above. [`docs/api/`](./api/) is generated from source
+and is the complete list.
 
 ### 10.2 When to use which
 
@@ -798,13 +2624,21 @@ the re-entrancy guard, the timeout and the modifiers with it. A binding beats
 relative to `v-vc-command`.
 `tests/directives-vapor-fixture.test.ts` pins it on a real Vapor mount (click,
 `.stop`, re-target, unmount, `.delegate`, app-wide registration). The plugin's
-install-time "not ported to Vapor" warning is gone.
+install-time warning no longer says "not ported to Vapor", because it now is:
+it reads `[vapor-chamber] On a Vapor app use vcCommandVapor.` The warning
+itself stays, and has to. `createDirectivePlugin()` registers vDOM OBJECT
+directives, which a Vapor template skips (Vue's own #15489 warning fires
+beside ours), so installed on a Vapor app the plugin does nothing at all. DEV
+only, behind one own-property read - a Vapor app carries `vapor`, a vDOM app
+does not - and the branch folds out of a production build. The same fixture
+pins that both messages fire and that they are different messages.
 
 This section once called the feature itself VDOM-only. That was never true:
-`withVaporDirectives` ships in every Vue version this project has tracked
-(verified by unpacking the published `@vue/runtime-vapor` dist from
-3.6.0-alpha.3 through rc.3; rc.3 only hardened it - #15258 codegen, #15167
-async component roots, #15158 fragment roots).
+`withVaporDirectives` ships in every `@vue/runtime-vapor` dist that was
+unpacked to check, 3.6.0-alpha.3 through rc.3, and rc.3 only hardened it
+(#15258 codegen, #15167 async component roots, #15158 fragment roots). The
+releases after rc.3 were not unpacked for this, so the claim is the range, not
+every version this project has since tracked.
 
 ### 10.4 Vite HMR plugin
 
@@ -813,8 +2647,19 @@ import { vaporChamberHMR } from 'vapor-chamber/vite'
 export default defineConfig({ plugins: [vue(), vaporChamberHMR()] })
 ```
 
-Bus handlers and registered state survive Vite hot module replacement transparently.
-Supports `.vapor.vue` files (Vue 3.6+ Vapor SFCs) in addition to `.ts`, `.js`, `.vue`, `.tsx`, `.jsx`.
+Bus handlers and registered state survive Vite hot module replacement.
+
+**The transform takes SCRIPTS only**: `.ts`, `.js`, `.tsx`, `.jsx`. `.vue` and
+`.vapor.vue` were in that list and were removed, because the injection into
+them never once reached the browser: the plugin is `enforce: 'pre'`, so it sees
+the raw SFC text and a prepended import lands outside every block, where
+`compiler-sfc` discards it without a word. Nothing was lost, because nothing
+was ever gained - the shim reaches the graph through the entry script, and the
+virtual module is a singleton, so one import anywhere is the whole mechanism.
+An `index.html` that Vite itself serves gets the shim regardless, injected
+ahead of the app's own module script. What is left uncovered is an app served
+from a backend template whose entry script never names the package, which no
+amount of module matching can fix.
 
 ---
 
@@ -882,7 +2727,7 @@ Three integration points:
 
 ```ts
 const { dispatch } = useCommand()
-const result = await bus.request('orderCancel', { id })
+const result = await dispatch('orderCancel', { id })
 if (result.ok) router.visit('/orders')  // Inertia router
 ```
 
@@ -923,7 +2768,7 @@ Three IIFE variants ship under `dist/`, split by **audience / deployment shape**
 |-----------|-----------------------------------------------------------|--------|
 | core      | Sprinkled JS on server-rendered pages - Blade / Rails / Django | <!-- vc:sizeIifeCore -->7.9<!-- /vc:sizeIifeCore --> KB |
 | elements  | Embeddable widgets via custom elements                    | <!-- vc:sizeIifeElements -->8.4<!-- /vc:sizeIifeElements --> KB |
-| full      | SPAs that grew big (realtime + undo/redo + persistence)   | <!-- vc:sizeIifeFull -->11.6<!-- /vc:sizeIifeFull --> KB |
+| full      | SPAs that grew big (realtime + undo/redo + persistence)   | <!-- vc:sizeIifeFull -->11.7<!-- /vc:sizeIifeFull --> KB |
 
 _(Generated, always-current per-export sizes: [BUNDLE-SIZES.md](./BUNDLE-SIZES.md).)_
 
@@ -1065,7 +2910,7 @@ Route::post('/vc', function (Request $request) {
         'cartAdd' => app(CartService::class)->add($request->input('target')),
         default    => abort(404),
     };
-    return response()->json(['state' => $state]);
+    return response()->json(['ok' => true, 'state' => $state]);
 });
 ```
 
@@ -1089,9 +2934,32 @@ that the HTTP layer itself refuses to re-send (`tests/retry-bridge-path.test.ts`
 bridge's own `retry` is still the right tool for HTTP: it honours `Retry-After` and
 never re-sends an action listed in `noRetry`.
 
+**Batched commands are the exception, and the policy is the app's.** With
+`createBatchingHttpBridge` every command in the window shares one POST, so the
+bridge's `retry` sees only a failure of that whole request. A command the backend
+fails INSIDE the batch arrives in a 200, as `{ ok: false, code }` - the reference
+controller's `batch()` answers that way for a validation failure and for a crash
+alike, since the status it computed per command does not cross. The default rule
+treats every such result as final. Which of them are worth re-sending is
+something only your backend's vocabulary can say, and since v1.23.0 the `code`
+reaches the client on this path, so say it there:
+
+```ts
+bus.use(retry({ actions: ['cart*', 'order*'], isRetryable: (err) => (err as { code?: string }).code === 'internal_error' }))
+bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', csrf: true }))
+```
+
+This is `retry()` over a bridge on purpose, scoped to the bridged actions: the
+bridge cannot see per-command failures, and `retry()` re-dispatches just the
+failed command, which joins the next batch.
+
 ### 11.8 Filament panel islands
 
+`mount()` is in the **full** variant only, not core or elements (11.6 splits
+them; README's variant table is the per-symbol list).
+
 ```html
+<script src=".../vapor-chamber.iife.min.js"></script>
 <div id="analytics-island"></div>
 <script>
 VaporChamber.mount('#analytics-island', {
@@ -1109,7 +2977,7 @@ Livewire and Vapor Chamber never touch each other's DOM scope.
 
 The three experimental subpaths compose into a path with no vDOM anywhere on it.
 Each closes one hole in the `dispatch -> state -> signal -> DOM` story of section
-9.2: rendering a route used to restore the vDOM renderer, and app state had no
+9.3: rendering a route used to restore the vDOM renderer, and app state had no
 first-party home here.
 
 ```
@@ -1234,7 +3102,7 @@ Declarative cross-chamber dispatch rules. Explicit edges between domain modules.
 ```ts
 createReaction('cartAdd', 'inventoryCheck', {
   when: (cmd, result) => result.ok,
-  map:  (cmd) => ({ target: { itemId: cmd.payload.itemId } }),
+  map:  (cmd) => ({ itemId: cmd.payload.itemId }),   // returns the TARGET itself
 }).install(bus);
 ```
 
@@ -1460,8 +3328,11 @@ alongside the bus as the `vapor-chamber/router` subpath (Vue 3.6 over Laravel
 Blade; reads/URL-state live there, writes stay on the bus). Inertia, Vue
 Router, or Next.js Router remain fine hosts where they are already in place.
 
-**Not a state management library.** `useCommandState` provides reactive state atoms for
-command-driven values. Pinia remains the right tool for complex shared state.
+**Not a state management library (core).** The bus stores nothing, and that
+part has not moved. What did move is package scope: `vapor-chamber/store`
+ships a state layer, and section 6 records which half of the original argument
+survived and which did not. Pinia remains the right answer for an app already
+on it; 11.9 and section 7's positioning table say when each one is.
 
 **Not opinionated about your backend.** The `/api/vc` endpoint is a convention, not a
 requirement.
@@ -1540,7 +3411,7 @@ src/
   reactive.ts       - deepSignal, useDeepCommandState (deep-reactivity companion, vapor-chamber/reactive)
   observable.ts     - observe, dispatchFrom (RxJS-style observable adapter)
   plugins-core.ts   - logger, validator, history, debounce, throttle, authGuard, optimistic
-  plugins-io.ts     - retry, persist, sync
+  plugins-io.ts     - retry, persist, createChannel
   plugins-extra.ts  - cache, circuitBreaker, rateLimit, metrics
   plugins-schema.ts - validateSchemas / validateSchemasAsync
   plugins.ts        - barrel re-export of plugins-core + plugins-io
@@ -1554,6 +3425,15 @@ src/
   directives.ts     - createDirectivePlugin (v-vc-command + event modifiers)
   ssr.ts            - createSSRPlugin, rehydrate (dehydrate / replay)
   utilities.ts      - createChamber, createWorkflow, createReaction
+  store.ts          - defineChamberStore (state whose every mutation is a command)
+  outbox.ts         - durable offline queue, replayed in order on reconnect
+  mcp.ts            - MCP server layer: a schema action becomes an MCP tool
+  stream-parser.ts  - dependency-free incremental JSON parser
+  vue.ts            - the entry for apps that have Vue (wires Vue at build time)
+  vapor.ts          - the entry for Vue 3.6 Vapor apps (same, plus Vapor)
+  vitest.ts         - the Vitest entry, with its side effects (setup file)
+  vitest-pure.ts    - the same helpers, registering nothing
+  vitest-mcp.ts     - a Vitest MCP server: runTests / getTestResults / getCoverageGaps
   vite-hmr.ts       - vaporChamberHMR() Vite plugin
   devtools.ts       - Vue DevTools integration (dynamic import)
   dict.ts           - prototype-free dictionaries (one rule, one place)
@@ -1574,7 +3454,7 @@ src/
   iife-elements.ts  - CDN entry, elements variant
   index.ts          - public ESM barrel
 
-tests/                           (<!-- vc:testFiles -->173<!-- /vc:testFiles --> files, <!-- vc:tests -->2478<!-- /vc:tests --> tests)
+tests/                           (<!-- vc:testFiles -->186<!-- /vc:testFiles --> files, <!-- vc:tests -->2508<!-- /vc:tests --> tests)
 ```
 
 The per-file test inventory that used to sit here was removed rather than

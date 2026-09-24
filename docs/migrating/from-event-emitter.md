@@ -94,7 +94,7 @@ bus.register('cartAdd', (cmd) => addToCart(cmd.target));
 const result = bus.dispatch('cartAdd', { id: 42 });
 if (result.ok) console.log('added', result.value);
 
-// Plugins (logger, retry, debounce, throttle, persist, sync, ...)
+// Plugins (logger, retry, debounce, throttle, persist, ...)
 bus.use(retry({ maxAttempts: 3 }));
 
 // Async + AbortController

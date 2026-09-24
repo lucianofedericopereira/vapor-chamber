@@ -41,7 +41,7 @@ dispatch is now reported on the same `<action>:error` channel the source's
 own errors use, so it is observable rather than either fatal or silent.
 
 `ssr.ts` guards the same shape on its replay path and `plugins-io.ts`'s
-`sync()` was fixed for it; this was the third place a promise from
+`createChannel()` was fixed for it; this was the third place a promise from
 `BaseBus.dispatch` was allowed to float.
 
 ```ts

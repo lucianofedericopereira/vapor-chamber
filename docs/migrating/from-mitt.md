@@ -72,7 +72,7 @@ const result = bus.dispatch('cartAdd', { id: 42 });
 if (result.ok) console.log('added', result.value);
 else console.error(result.error);
 
-// Plugins - logger, retry, debounce, throttle, persist, sync, ...
+// Plugins - logger, retry, debounce, throttle, persist, ...
 bus.use(logger());
 bus.use(retry({ maxAttempts: 3 }));
 

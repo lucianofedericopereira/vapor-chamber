@@ -3,7 +3,7 @@
  * One gate, in the house order, so that a skipped step is a deleted line in a
  * script rather than something somebody forgot.
  *
- *   node scripts/gate.mjs [--expect-stamp-drift]
+ *   node scripts/gate.mjs
  *   npm run gate
  *
  * WHY IT EXISTS. The rule "run `npm run docs` after every src-touching commit,

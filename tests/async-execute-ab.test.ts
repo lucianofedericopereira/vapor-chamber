@@ -19,7 +19,7 @@
  * matching, the transform throws rather than measuring one arm twice.
  *
  * NO TIMING THRESHOLD IS ASSERTED; the printed table is the evidence. The
- * audit's verdict (rc-alignment-work.md s27) comes from the three-arm,
+ * audit's verdict (docs/rc-alignment-log.md s27) comes from the three-arm,
  * gc()-controlled, seven-process run, not from this single in-suite pass.
  */
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';

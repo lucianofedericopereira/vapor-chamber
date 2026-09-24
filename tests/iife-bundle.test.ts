@@ -87,7 +87,7 @@ describe.skipIf(!haveAll)('IIFE variants - audience-based contracts', () => {
       const ns = loadNamespace(variants.core);
       assertAbsent(ns, [
         'ws', 'sse',
-        'persist', 'sync', 'history', 'optimistic',
+        'persist', 'createChannel', 'history', 'optimistic',
         'mount',
         'defineVaporCustomElement', 'defineWidget',
         'defineVaporComponent', 'defineVaporAsyncComponent',
@@ -115,7 +115,7 @@ describe.skipIf(!haveAll)('IIFE variants - audience-based contracts', () => {
       const ns = loadNamespace(variants.elements);
       assertAbsent(ns, [
         'ws', 'sse',
-        'persist', 'sync', 'history', 'optimistic',
+        'persist', 'createChannel', 'history', 'optimistic',
         'mount',
         'defineVaporComponent', 'defineVaporAsyncComponent',
         'useCommand', 'useVaporAsyncCommand',
@@ -137,7 +137,7 @@ describe.skipIf(!haveAll)('IIFE variants - audience-based contracts', () => {
         'http', 'ws', 'sse',
         // all plugins
         'logger', 'validator', 'history', 'debounce', 'throttle',
-        'authGuard', 'optimistic', 'retry', 'persist', 'sync',
+        'authGuard', 'optimistic', 'retry', 'persist', 'createChannel',
         // widget surface
         'defineVaporCustomElement', 'defineWidget', 'emitDOMEvent',
         // full Vapor surface

@@ -116,7 +116,25 @@ export const EXTENSIONS = [
 // made the "N files" in the OK line depend on whether anyone had run the
 // example's build. Both of this guard's lists turned out to be short; this is
 // the second one.
-export const SKIP_DIRS = new Set(['node_modules', 'coverage', 'dist', '.astro']);
+/**
+ * Generated and vendor trees. Nothing here is written by hand, so there is no
+ * character in it for anyone to have chosen.
+ *
+ * `__ref` is the one that had to be earned. Each `tests/*-ab.test.ts` writes
+ * `tests/__ref/<name>/` while it runs and removes it afterwards (.gitignore says
+ * so), and a vitest run has several of them going at once - so a walk of
+ * `tests/` races the writer. `tests/ascii-guard.test.ts` collects paths into one
+ * list and reads them later, which turned a race into an ENOENT on
+ * `__ref/before-cancel/before-cancel-pre.ts` in a full suite run, while the same
+ * file passed 15/15 on its own. Skipping the tree fixes both readers at once,
+ * and it keeps the rule total: a directory name, not a file allowlist that would
+ * need upkeep on every new A/B test.
+ *
+ * Deliberately NOT fixed by catching ENOENT in the reader. That would make the
+ * guard able to skip a real file silently, which is the one failure mode a guard
+ * must not have.
+ */
+export const SKIP_DIRS = new Set(['node_modules', 'coverage', 'dist', '.astro', '__ref']);
 
 /**
  * file-path substring -> reason. Earn every entry.

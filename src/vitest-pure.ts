@@ -103,6 +103,16 @@ const CATALOGUE: Record<VcTestDiagnostic, { why: string; fix: string }> = {
 /** A coded misuse diagnostic: `code` to switch on, `why`, `fix` and a `docs` link. */
 export class VcTestError extends Error {
   readonly code: VcTestDiagnostic;
+  /**
+   * Provenance, for `retry()`'s default predicate. Reachable, which is why it
+   * is here: `tryCatchHandler` returns `errResult(e)` with the thrown value
+   * UNWRAPPED (command-bus.ts:856), so a handler that throws one of these puts
+   * it straight into `result.error`. Without an emitter it took the status
+   * rule - no status, name not 'AbortError' - and was retried. With one it
+   * takes the code rule and is correctly permanent, since no `VC_TEST_*` code
+   * is in RETRYABLE_CODES. 'test' is what BusEmitter already declares for this.
+   */
+  readonly emitter = 'test';
   readonly why: string;
   readonly fix: string;
   readonly docs: string;

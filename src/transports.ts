@@ -8,11 +8,11 @@
  * Use with createAsyncCommandBus() for full async dispatch support.
  */
 
-import type { Command, CommandResult, AsyncPlugin, BaseBus } from './command-bus';
+import type { Command, CommandResult, AsyncPlugin, BaseBus, BusErrorCode } from './command-bus';
 import { MAX_TIMEOUT_MS, countOption } from './bounds';
-import { matchesPattern, abortedResult, _okResult, _errResult, } from './command-bus';
-import { postCommand } from './http';
-import type { HttpClient } from './http';
+import { matchesPattern, abortedResult, BusError, _okResult, _errResult, } from './command-bus';
+import { HttpError, postCommand } from './http';
+import type { HttpClient, HttpErrorName, HttpResponse } from './http';
 import { signal } from './signal';
 import type { Signal } from './signal';
 
@@ -32,7 +32,98 @@ export type BackendResponse = {
   ok?: boolean;
   state?: any;
   error?: string;
+  /**
+   * The backend's machine-readable failure code. Documented as reaching
+   * consumers as `HttpError.code`, and until now that was true only when the
+   * failure THREW: the envelope paths built a bare Error and dropped it, so a
+   * 200 carrying `{ ok: false, code }` - the shape this type admits - lost it,
+   * as did every batched failure, since `batch()` answers 200 and nothing
+   * throws.
+   */
+  code?: string;
+  /**
+   * A navigation the backend hands back instead of a result - see
+   * `onRedirect`. The reference controller puts it here when an action
+   * returns `['redirect' => url]`; on a batch it is per result.
+   */
+  redirect?: string;
 };
+
+/**
+ * An error for a failure that arrived as DATA rather than as a throw.
+ *
+ * Carries the backend's `code`, which is the whole point: the catch path below
+ * has copied it since v1.20.0 and the envelope paths did not, so the same
+ * failure reached a consumer with or without `error.code` depending only on
+ * whether the transport happened to throw.
+ *
+ * `.code` HERE IS THE BACKEND'S, and that is the line this file draws. What the
+ * library codes itself goes through `transportError` below, as a `BusError`
+ * whose `emitter` says so. Two kinds of failure, two kinds of object, and one
+ * owner per field - because `defaultIsRetryable` used to tell them apart by
+ * looking for a `VC_` prefix on a string a backend supplies.
+ *
+ * `emitter` is passed ONLY by the three sites where the refusal arrived inside a
+ * 2xx, and its job there is to make an existing rule answer rather than to add
+ * one. The server received, processed and refused, so re-sending cannot change
+ * the answer - and `defaultIsRetryable` already says a transport error is
+ * retried only when its code is one of RETRYABLE_CODES' six. A backend code
+ * is not one of those, so the refusal is permanent with no verdict field, no
+ * new code, and `.code` still the backend's.
+ *
+ * The two `!res.ok` sites are left WITHOUT it. A real HTTP status existed
+ * there, and the status rule is the right judge: tagging them would make a 503
+ * that resolved instead of throwing permanently non-retryable.
+ *
+ * Stamping `status: 200` or attaching the `response` would also have let the
+ * status rule find a status, and both were rejected: the request succeeded, the
+ * refusal is in the body, and saying otherwise is a lie a later reader cannot
+ * detect.
+ *
+ * WHY NOT A `retryable` BOOLEAN, which this carried for one commit. It worked
+ * and it measured 19 B raw / 17 B brotli DEARER on the full IIFE, but the
+ * reason it went is the shape: a string-keyed field on an error object built
+ * from a response body, which the predicate then obeys unconditionally. That is
+ * the precondition that broke `.code` - a plausible wire field, added
+ * additively over two releases until a backend controlled it. `emitter` is not
+ * a plausible wire field: a backend has no reason to claim to be a subsystem of
+ * this library, and it is written from string literals at every site in `src/`.
+ * DO NOT add `retryable` to `BackendResponse`, and do not spread a body into an
+ * error built here.
+ */
+function backendError(message: string, code?: string, emitter?: 'transport'): Error {
+  // `code` is assigned unconditionally, not behind a `!== undefined` guard.
+  // Every error this builds then leaves with ONE hidden class, the rule
+  // `okResult`/`errResult` already follow - and an absent `code` reads as
+  // `undefined` either way, since the guard only decided whether the key
+  // existed. MEASURED: dropping the guard is -14 B raw across all three IIFEs.
+  // `emitter` is assigned the same way and for the same reason.
+  const err = new Error(message) as Error & { code?: string; emitter?: string };
+  err.code = code;
+  err.emitter = emitter;
+  return err;
+}
+
+/**
+ * The transport's OWN failure: no backend answered, or one answered something
+ * the protocol cannot carry back to the caller who asked.
+ *
+ * This is the other half of `backendError`, and the split is the point. A
+ * backend refusal carries the BACKEND's `code`; a transport failure carries
+ * OURS, in a `BusError`, which is the class the core has minted every coded
+ * error with since v1.0. Nothing new is declared here: `BusErrorCode` types the
+ * code, `'transport'` has been a `BusEmitter` member and unused the whole time,
+ * and `context` is where the core already puts a value a reader would inspect
+ * rather than read - so a dropped command travels beside the sentence instead
+ * of inside it.
+ *
+ * `emitter` is what makes the two kinds tellable apart, and it is the field the
+ * `VC_` prefix was standing in for. A backend can put any string in `code`,
+ * including `VC_CORE_THROTTLED`; nothing a backend sends reaches `emitter`,
+ * because no transport ever copies a body field into it.
+ */
+const transportError = (code: BusErrorCode, message: string, action?: string, context?: Record<string, unknown>): BusError =>
+  new BusError(code, message, { emitter: 'transport', action, context });
 
 // ---------------------------------------------------------------------------
 // createHttpBridge
@@ -202,18 +293,18 @@ export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
       if (redirectUrl && typeof redirectUrl === 'string') {
         if (onRedirect) {
           onRedirect(redirectUrl);
-          return _errResult(new Error(`Redirected to ${redirectUrl}`));
+          return _errResult(transportError('VC_TRANSPORT_REDIRECT', `Redirected to ${redirectUrl}`, cmd.action, { url: redirectUrl }));
         }
-        return _errResult(new Error(`Backend redirect to ${redirectUrl} (no onRedirect handler configured)`));
+        return _errResult(transportError('VC_TRANSPORT_REDIRECT', `Backend redirect to ${redirectUrl} (no onRedirect handler configured)`, cmd.action, { url: redirectUrl }));
       }
 
       if (!res.ok) {
-        const msg = (res.data as any)?.message ?? (res.data as any)?.error ?? `HTTP ${res.status}`;
-        return _errResult(new Error(msg));
+        const d = res.data as BackendResponse | undefined;
+        return _errResult(backendError((d as any)?.message ?? d?.error ?? `HTTP ${res.status}`, d?.code));
       }
 
       if (res.data?.ok === false) {
-        return _errResult(new Error(res.data.error ?? 'Backend error'));
+        return _errResult(backendError(res.data.error ?? 'Backend error', res.data.code, 'transport'));
       }
 
       return _okResult(res.data?.state);
@@ -226,12 +317,7 @@ export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
       const body = src.response?.data as { error?: unknown; message?: unknown } | null | undefined;
       const msg = body?.error ?? body?.message;
       if (typeof msg === 'string' && msg.length > 0) {
-        const err = new Error(msg, { cause: src }) as Error & { status?: number; code?: string; response?: unknown };
-        err.name = src.name;
-        if (src.status !== undefined) err.status = src.status;
-        if (src.code !== undefined) err.code = src.code;
-        err.response = src.response;
-        return _errResult(err);
+        return _errResult(new HttpError(src.name as HttpErrorName, msg, { status: src.status, response: src.response as HttpResponse, code: src.code, cause: src }));
       }
       return _errResult(src);
     }
@@ -262,7 +348,11 @@ export type BatchingHttpBridgeOptions = HttpBridgeOptions & {
 };
 
 type BatchedCommandEnvelope = { id: string; command: string; target: any; payload?: any; idempotencyKey?: string };
-type BatchedResult = { id: string; ok?: boolean; state?: any; error?: string };
+// `{ id } & BackendResponse`, not a restatement of it. Spelled out by hand
+// until now, which is why `code` had to be added in two places instead of one
+// - and how the two shapes would have drifted again at the next field. The WS
+// frame below already composes it this way.
+type BatchedResult = { id: string } & BackendResponse;
 type BatchResponse = { results?: BatchedResult[] };
 
 type QueuedBatchEntry = { id: string; cmd: Command; resolve: (result: CommandResult) => void };
@@ -293,7 +383,7 @@ type QueuedBatchEntry = { id: string; cmd: Command; resolve: (result: CommandRes
  * bus.dispatch('cartAdd', product, { quantity: 2 })
  */
 export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): AsyncPlugin {
-  const { endpoint, actions, csrf = false, csrfCookieUrl, headers = {}, timeout = 10_000, retry = 0, noRetry = [], signal, onSessionExpired, scopeController, httpClient, window: flushWindow = 'microtask' } = options;
+  const { endpoint, actions, csrf = false, csrfCookieUrl, headers = {}, timeout = 10_000, retry = 0, noRetry = [], signal, onSessionExpired, onRedirect, scopeController, httpClient, window: flushWindow = 'microtask' } = options;
   const csrfFlag = csrf === 'inertia' ? false : csrf;
   const effectiveSignal = scopeController && signal
     ? (typeof AbortSignal.any === 'function' ? AbortSignal.any([signal, scopeController.signal]) : signal)
@@ -338,19 +428,32 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
           });
 
       if (!res.ok) {
-        const msg = (res.data as any)?.message ?? (res.data as any)?.error ?? `HTTP ${res.status}`;
-        const err = new Error(msg);
+        const d = res.data as BackendResponse | undefined;
+        const err = backendError((d as any)?.message ?? d?.error ?? `HTTP ${res.status}`, d?.code);
         for (const entry of batch) entry.resolve(_errResult(err));
         return;
       }
 
       const byId = new Map((res.data?.results ?? []).map((r) => [r.id, r]));
+      // `onRedirect` navigates, so it fires once per batch - two navigations
+      // in one tick race. Every redirected command still fails on its own,
+      // carrying its own url. Until v1.23.0 this bridge accepted the option
+      // (its options extend HttpBridgeOptions) and never read it: a redirect
+      // result resolved as a success whose value was the redirect.
+      let navigated = false;
       for (const entry of batch) {
         const r = byId.get(entry.id);
         if (!r) {
-          entry.resolve(_errResult(new Error(`[vapor-chamber] batch response missing a result for "${entry.cmd.action}" (id ${entry.id})`)));
+          entry.resolve(_errResult(transportError('VC_TRANSPORT_PROTOCOL', `[vapor-chamber] batch response missing a result for "${entry.cmd.action}" (id ${entry.id})`, entry.cmd.action, { id: entry.id })));
+        } else if (typeof r.redirect === 'string' && r.redirect) {
+          const url = r.redirect;
+          if (onRedirect && !navigated) {
+            navigated = true;
+            onRedirect(url);
+          }
+          entry.resolve(_errResult(transportError('VC_TRANSPORT_REDIRECT', onRedirect ? `Redirected to ${url}` : `Backend redirect to ${url} (no onRedirect handler configured)`, entry.cmd.action, { url })));
         } else if (r.ok === false) {
-          entry.resolve(_errResult(new Error(r.error ?? 'Backend error')));
+          entry.resolve(_errResult(backendError(r.error ?? 'Backend error', r.code, 'transport')));
         } else {
           entry.resolve(_okResult(r.state));
         }
@@ -366,15 +469,22 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
         // The same fields createHttpBridge copies, and for the same reader:
         // this used to keep the message alone, so retry()'s status rule had no
         // status to read and a 422 batch was re-sent maxAttempts times
-        // (tests/retry-bridge-path.test.ts). Inline rather than shared with
-        // createHttpBridge, whose bundle (tests/esm-treeshake.test.ts) has two
-        // bytes of headroom.
-        const wrapped = new Error(msg, { cause: src }) as Error & { status?: number; code?: string; response?: unknown };
-        wrapped.name = src.name;
-        if (src.status !== undefined) wrapped.status = src.status;
-        if (src.code !== undefined) wrapped.code = src.code;
-        wrapped.response = src.response;
-        err = wrapped;
+        // (tests/retry-bridge-path.test.ts).
+        //
+        // MEASURED: extracting these two catch blocks into one shared HELPER
+        // costs +30 B raw on the full IIFE and +33 on core and elements. The
+        // abstraction was dearer than the duplication, and that verdict stands
+        // for a helper. It is not what happened here: both sites now call the
+        // `HttpError` CONSTRUCTOR, which the layer below had to have anyway, so
+        // the shared code is paid for once by `http.ts` rather than added.
+        //
+        // This note used to justify itself with "that bundle has two bytes of
+        // headroom", which read as a constraint that could expire. The headroom
+        // later became 115 and the sharing was tried on the strength of it; the
+        // numbers above are what came back. The byte cost was never about the
+        // headroom. Same shape as this file's chained-assignment entry, which
+        // measured one byte WORSE than two separate statements.
+        err = new HttpError(src.name as HttpErrorName, msg, { status: src.status, response: src.response as HttpResponse, code: src.code, cause: src });
       }
       for (const entry of batch) entry.resolve(_errResult(err));
     }
@@ -505,7 +615,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
         const req = pending.get(dropped.id)!;
         clearTimeout(req.timeoutId);
         pending.delete(dropped.id);
-        req.resolve(_errResult(new Error(`WS queue overflow: "${dropped.envelope.command}" dropped`)));
+        req.resolve(_errResult(transportError('VC_TRANSPORT_QUEUE_FULL', `WS queue overflow: "${dropped.envelope.command}" dropped`, dropped.envelope.command, { dropped: dropped.envelope })));
       }
       queue.push({ id, envelope, timeout, queuedAt: Date.now() });
     }
@@ -524,7 +634,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
         const req = pending.get(id)!;
         clearTimeout(req.timeoutId);
         pending.delete(id);
-        req.resolve(_errResult(new Error(`WS queued message "${envelope.command}" expired after ${elapsed}ms (timeout: ${timeout}ms)`)));
+        req.resolve(_errResult(transportError('VC_TRANSPORT_TIMEOUT', `WS queued message "${envelope.command}" expired after ${elapsed}ms (timeout: ${timeout}ms)`, envelope.command, { elapsed, timeout })));
         continue;
       }
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -553,7 +663,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
     const reqs = Array.from(pending.values());
     pending.clear();
     for (const req of reqs) {
-      req.resolve(_errResult(new Error(reason)));
+      req.resolve(_errResult(transportError('VC_TRANSPORT_CLOSED', reason)));
     }
   }
 
@@ -598,7 +708,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
           clearTimeout(req.timeoutId);
           pending.delete(data.id);
           if (data.ok === false) {
-            req.resolve(_errResult(new Error(data.error ?? 'WebSocket error')));
+            req.resolve(_errResult(backendError(data.error ?? 'WebSocket error', data.code, 'transport')));
           } else {
             req.resolve(_okResult(data.state));
           }
@@ -682,7 +792,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
       };
 
       const timeoutId = setTimeout(() => {
-        settle(_errResult(new Error(`WS request "${cmd.action}" timed out after ${wsTimeout}ms`)));
+        settle(_errResult(transportError('VC_TRANSPORT_TIMEOUT', `WS request "${cmd.action}" timed out after ${wsTimeout}ms`, cmd.action, { timeout: wsTimeout })));
       }, wsTimeout);
 
       pending.set(id, {

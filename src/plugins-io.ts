@@ -1,7 +1,7 @@
 /**
  * vapor-chamber - I/O plugins (async/storage/network)
  *
- * retry, persist, sync
+ * retry, persist, createChannel
  */
 
 import { matchesPattern, RETRYABLE_CODES, _errResult, abortedResult, type Command, type CommandResult, type AsyncPlugin, type Plugin } from './command-bus';
@@ -49,10 +49,18 @@ export type RetryOptions = {
    * off would only delay the answer (tests/retry-bridge-path.test.ts). A
    * timeout is a `TimeoutError`, not an abort, and stays retryable.
    *
-   * - A BusError (a `.code` starting with 'VC_') is retried only when the code
-   *   is transient per RETRYABLE_CODES (throttled, rate-limited, timeout,
+   * - An error CARRYING an `emitter` property is retried only when its code is
+   *   transient per RETRYABLE_CODES (throttled, rate-limited, timeout,
    *   circuit-open, ...) - known-permanent codes (validation, sealed bus, max
    *   depth, ...) stop retrying immediately instead of wasting attempts.
+   *   Carrying the property, not being a `BusError`: that is what the check
+   *   tests, and a handler's own thrown object reaches `result.error`
+   *   unwrapped, so the two sets are not the same. This asked for a `VC_`
+   *   prefix on `.code` until v1.23.0, which a BACKEND could supply; see the
+   *   note on `defaultIsRetryable` for what changed and what did not. This
+   *   rule is also what makes a backend's refusal inside a 2xx permanent: the
+   *   transport tags it `emitter: 'transport'` and its code, being the
+   *   backend's, is not one of the six.
    * - An error carrying an HTTP status (`error.status` or
    *   `error.response.status`, both set by the HTTP bridge and the http
    *   client) is retried only for 408, 429 and 5xx - the set the HTTP layer
@@ -94,15 +102,49 @@ function retryDelay(strategy: 'fixed' | 'linear' | 'exponential', base: number, 
 /**
  * Default isRetryable - the three rules are stated on RetryOptions.isRetryable.
  *
- * The status rule is checked AFTER the `VC_` one on purpose: the bridge copies
- * the backend's body code onto the error, and a backend code is not ours to
- * interpret, while a `VC_` code is. A 4xx status is the HTTP layer's own
- * verdict that re-sending cannot help, so this plugin must not overrule it.
+ * ONE FIELD, ONE OWNER, and until v1.23.0 `.code` had two. The first rule here
+ * asked whether `.code` started with `VC_` and took a match as proof the library
+ * had minted it, while both HTTP bridges copy the BACKEND's body code into that
+ * same field - so a backend chose which branch ran. Measured in
+ * tests/transport-code-owner.test.ts: `code: 'VC_CORE_THROTTLED'` on a 422 was
+ * re-sent three times, after the HTTP layer had refused to re-send it once, and
+ * `code: 'VC_VALIDATION_FAILED'` on a 503 suppressed a retry the status rule
+ * would have allowed. No hostile backend is needed - `VC_` is a convention
+ * nobody polices, and it has three claimants in this repo alone (`BusError`,
+ * `VcTestError` in vitest-pure.ts, and any response body).
+ *
+ * `emitter` replaces the prefix because a backend cannot reach it: no transport
+ * copies a body field into it, and `BusError`'s constructor sets it on every
+ * instance (defaulting to 'core'), so it needed nothing added to be reliable.
+ * `.code` did not move - it stays the backend's, which is what whitepaper 5.7
+ * documents and what the catch path has delivered since v1.20.0.
+ *
+ * WHAT THE FIRST CHECK TESTS is that an `emitter` property is PRESENT, not that
+ * the error is a `BusError`, and those are not the same set. A handler's throw
+ * reaches `result.error` unwrapped - `tryCatchHandler` is
+ * `catch (e) { return errResult(e as Error) }` - so a handler that throws an
+ * object carrying `emitter` takes this branch. That is a different party from a
+ * backend (the handler author is whoever configured `retry()`), so it is stated
+ * rather than defended against. `VcTestError` was the one library class the
+ * check missed and now carries `emitter: 'test'`, which is reachable by exactly
+ * that route.
+ *
+ * THE RESIDUE, stated because it is the same defect shape in miniature. A 2xx
+ * refusal is tagged `emitter: 'transport'` while its `.code` is the BACKEND's,
+ * so a backend sending one of RETRYABLE_CODES' six exact strings gets that
+ * refusal retried. Bounded and one-directional, where the `VC_` prefix was
+ * unbounded and went both ways - and today every 2xx refusal is retried, so
+ * this is strictly smaller than what it replaces. Pinned in
+ * tests/transport-code-owner.test.ts so it is a known quantity rather than a
+ * surprise.
+ *
+ * The status rule stays LAST of the two that read a field, and for the reason
+ * it always did: a 4xx is the HTTP layer's own verdict that re-sending cannot
+ * help, so this plugin must not overrule it.
  */
 function defaultIsRetryable(error: Error): boolean {
-  const e = error as { name?: unknown; code?: unknown; status?: unknown; response?: { status?: unknown } };
-  const code = e.code;
-  if (typeof code === 'string' && code.startsWith('VC_')) return RETRYABLE_CODES.has(code);
+  const e = error as { name?: unknown; code?: unknown; emitter?: unknown; status?: unknown; response?: { status?: unknown } };
+  if (e.emitter !== undefined) return RETRYABLE_CODES.has(e.code as string);
   const status = e.status ?? e.response?.status;
   // An abort's `code` is the NUMBER 20 (DOMException), so it always lands here.
   return e.name !== 'AbortError' && (typeof status !== 'number' || isRetryableStatus(status));
@@ -316,27 +358,27 @@ export function persist<T>(options: PersistOptions<T>): Plugin & {
 }
 
 // ---------------------------------------------------------------------------
-// Cross-tab sync bridge (BroadcastChannel over an event channel)
+// createChannel (BroadcastChannel over an event channel)
 // ---------------------------------------------------------------------------
 
 /**
- * The event channel `sync` bridges. Structural on purpose: this module imports
+ * The event channel `createChannel` reads. Structural on purpose: this module imports
  * nothing from `./fast-lane`, so a consumer who never syncs pays no bytes for
  * it, and anything with the same two methods can be bridged.
  */
-export type SyncLane = {
+export type ChannelLane = {
   on(event: string, listener: (data: any) => void): () => void;
   emit(event: string, data: any): void;
 };
 
-export type SyncOptions = {
+export type ChannelOptions = {
   /**
    * BroadcastChannel name. All tabs using the same name receive each other's facts.
    * @example 'vapor-chamber:app'
    */
   channel: string;
   /** The event channel to bridge - `createFastLane()`, or anything of that shape. */
-  lane: SyncLane;
+  lane: ChannelLane;
   /**
    * Which events cross to the other tabs. Named rather than inferred: the fast
    * lane has no wildcard subscription by design, and naming them is the point
@@ -350,10 +392,11 @@ export type SyncOptions = {
   onReceive?: (event: string, data: unknown) => boolean | void;
 };
 
-type SyncMessage = { __vc: true; event: string; data: any };
+type ChannelMessage = { __vc: true; event: string; data: any };
 
 /**
- * sync - mirror emitted FACTS to every other open tab over a BroadcastChannel.
+ * createChannel - mirror emitted FACTS to every other same-origin context
+ * over a BroadcastChannel.
  *
  * WHAT CROSSES THE WIRE IS A FACT, NOT A COMMAND, and that is the whole design.
  * Until v1.22.0 this was a bus PLUGIN that re-broadcast every successful
@@ -405,10 +448,10 @@ type SyncMessage = { __vc: true; event: string; data: any };
  *   lane.emit('cartAdded', fact)                      // this is what crosses tabs
  * })
  *
- * const tabSync = sync({ channel: 'vapor-chamber:app', lane, events: ['cartAdded'] })
+ * const tabSync = createChannel({ channel: 'vapor-chamber:app', lane, events: ['cartAdded'] })
  * tabSync.close() // on teardown
  */
-export function sync(options: SyncOptions): {
+export function createChannel(options: ChannelOptions): {
   close(): void;
   isOpen(): boolean;
 } {
@@ -430,7 +473,7 @@ export function sync(options: SyncOptions): {
     if (typeof BroadcastChannel === 'undefined') return;
     bc = new BroadcastChannel(channel);
 
-    bc.onmessage = (event: MessageEvent<SyncMessage>) => {
+    bc.onmessage = (event: MessageEvent<ChannelMessage>) => {
       const msg = event.data;
       if (!msg?.__vc) return;
       if (onReceive && onReceive(msg.event, msg.data) === false) return;
@@ -447,7 +490,7 @@ export function sync(options: SyncOptions): {
     offs.push(lane.on(name, (data: unknown) => {
       if (applying) return;
       try {
-        bc?.postMessage({ __vc: true, event: name, data } satisfies SyncMessage);
+        bc?.postMessage({ __vc: true, event: name, data } satisfies ChannelMessage);
       } catch (e) {
         // A payload that cannot be structured-cloned (a function, a class
         // instance with methods, a DOM node) throws DataCloneError here. The
@@ -458,7 +501,7 @@ export function sync(options: SyncOptions): {
         // storage warnings: a non-cloneable payload is an authoring mistake
         // fixed at build time, not a condition a deployed app runs into.
         if (DEV) {
-          console.warn(`[vapor-chamber] sync: "${name}" did not cross to other tabs - its payload is not structured-cloneable (no functions, class instances or DOM nodes):`, e);
+          console.warn(`[vapor-chamber] createChannel: "${name}" did not cross - its payload is not structured-cloneable (no functions, class instances or DOM nodes):`, e);
         }
       }
     }));

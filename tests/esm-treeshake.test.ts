@@ -164,7 +164,7 @@ describe.skipIf(!haveDist || !esbuild)('ESM tree-shake regression', () => {
       //
       // This one is a genuine core tax and worth naming as such. It replaced
       // three PER-SITE workarounds that each lived in an OPTIONAL entry point
-      // - a depth counter in plugins-io's sync(), a one-shot identity match
+      // - a depth counter in plugins-io's createChannel(), a one-shot identity match
       // (`expectedRedo`) in chamber's history, and a payload spread in all
       // three - so a consumer importing none of them used to pay zero. Now
       // stampMeta consults the slot unconditionally and everyone pays.
@@ -174,7 +174,7 @@ describe.skipIf(!haveDist || !esbuild)('ESM tree-shake regression', () => {
       // `agentOrigin`'s deprecation note already promises the CORE stamps it.
       // The payload-key mechanism could only mark payloads that hold keys, so
       // primitives and arrays arrived unattributed - an infinite cross-tab
-      // broadcast loop in sync(), a double-recorded redo, and an MCP command
+      // broadcast loop in createChannel(), a double-recorded redo, and an MCP command
       // invisible to an `origin === 'agent'` audit filter. Correct attribution
       // for every payload shape is worth 25 bytes; net source is −35 code lines.
       //

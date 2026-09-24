@@ -321,14 +321,14 @@ describe('createOutbox - flush', () => {
     online = true;
     const summary = await outbox.flush();
 
-    expect(summary).toEqual({ replayed: 2, failed: 0 });
+    expect(summary).toEqual({ replayed: 2, failed: 0, rejected: 0 });
     expect(seen.map(s => s.action)).toEqual(['a', 'b']); // strict FIFO
     expect(seen[0].key).toBe(key1); // ORIGINAL keys, not re-derived
     expect(seen[1].key).toBe(key2);
     expect(seen.every(s => s.origin === 'replay')).toBe(true);
     expect(outbox.pending.value).toBe(0);
     expect(storage.data).toEqual([]);
-    expect(flushed).toEqual([{ replayed: 2, failed: 0 }]);
+    expect(flushed).toEqual([{ replayed: 2, failed: 0, rejected: 0 }]);
   });
 
   it('a failing replay stops the flush and preserves order; retry succeeds on next flush', async () => {
@@ -352,14 +352,14 @@ describe('createOutbox - flush', () => {
 
     online = true;
     const first = await outbox.flush();
-    expect(first).toEqual({ replayed: 0, failed: 1 });
+    expect(first).toEqual({ replayed: 0, failed: 1, rejected: 0 });
     expect(runs).toEqual([]); // 'b' never overtook the failed 'a'
     expect(outbox.pending.value).toBe(2);
     expect(storage.data!.map(r => r.action)).toEqual(['a', 'b']); // order preserved
 
     failFirst = false;
     const second = await outbox.flush();
-    expect(second).toEqual({ replayed: 2, failed: 0 });
+    expect(second).toEqual({ replayed: 2, failed: 0, rejected: 0 });
     expect(runs).toEqual(['a', 'b']);
     expect(outbox.pending.value).toBe(0);
   });
@@ -403,7 +403,7 @@ describe('createOutbox - flush', () => {
     // The rejection was caught and turned into a failed record - the flush
     // returned a summary instead of rejecting, and nothing was lost. (A
     // VC_PLUGIN_THREW result now, not a rejection - the outcome is the same.)
-    expect(first).toEqual({ replayed: 0, failed: 1 });
+    expect(first).toEqual({ replayed: 0, failed: 1, rejected: 0 });
     expect(runs).toEqual([]); // the handler never ran; the plugin threw first
     expect(outbox.pending.value).toBe(2);
     expect(storage.data!.map((r) => r.action)).toEqual(['a', 'b']); // order preserved
@@ -411,7 +411,7 @@ describe('createOutbox - flush', () => {
     // And the queue is still replayable once the downstream plugin recovers.
     explode = false;
     const second = await outbox.flush();
-    expect(second).toEqual({ replayed: 2, failed: 0 });
+    expect(second).toEqual({ replayed: 2, failed: 0, rejected: 0 });
     expect(runs).toEqual(['a', 'b']);
     expect(outbox.pending.value).toBe(0);
   });
@@ -429,11 +429,11 @@ describe('createOutbox - flush', () => {
 
     await bus.dispatch('a', { n: 1 }); // offline: queued, no handler needed
     online = true;
-    expect(await outbox.flush()).toEqual({ replayed: 0, failed: 1 });
+    expect(await outbox.flush()).toEqual({ replayed: 0, failed: 1, rejected: 0 });
     expect(storage.data!.map((r) => r.action)).toEqual(['a']); // kept
 
     bus.register('a', async () => 'ok-a');
-    expect(await outbox.flush()).toEqual({ replayed: 1, failed: 0 });
+    expect(await outbox.flush()).toEqual({ replayed: 1, failed: 0, rejected: 0 });
   });
 
   it('wraps a non-Error rejection value in an Error rather than storing it raw', async () => {
@@ -458,7 +458,7 @@ describe('createOutbox - flush', () => {
     // a foreign bus: the real one, with a dispatch that rejects.
     const foreign = { ...bus, dispatch: () => Promise.reject('a bare string, not an Error') } as any;
     const summary = await outbox.flush(foreign);
-    expect(summary).toEqual({ replayed: 0, failed: 1 });
+    expect(summary).toEqual({ replayed: 0, failed: 1, rejected: 0 });
     // Record survives the non-Error rejection intact.
     expect(outbox.pending.value).toBe(1);
     expect(storage.data!.map((r) => r.action)).toEqual(['a']);
@@ -490,7 +490,7 @@ describe('createOutbox - flush', () => {
     const summary = await outbox.flush();
 
     expect(runs).toEqual(['a', 'b', 'c']); // 'c' landed behind 'b'
-    expect(summary).toEqual({ replayed: 3, failed: 0 });
+    expect(summary).toEqual({ replayed: 3, failed: 0, rejected: 0 });
     expect(outbox.pending.value).toBe(0);
   });
 
@@ -502,7 +502,7 @@ describe('createOutbox - flush', () => {
     const bus = createAsyncCommandBus();
     bus.use(outbox.plugin, { priority: 200 });
     const summary = await outbox.flush(bus);
-    expect(summary).toEqual({ replayed: 0, failed: 0 });
+    expect(summary).toEqual({ replayed: 0, failed: 0, rejected: 0 });
   });
 });
 
@@ -532,7 +532,7 @@ describe('createOutbox - hydrate and lifecycle', () => {
     expect(outbox.pending.value).toBe(1);
 
     const summary = await outbox.flush();
-    expect(summary).toEqual({ replayed: 1, failed: 0 });
+    expect(summary).toEqual({ replayed: 1, failed: 0, rejected: 0 });
     expect(seenKeys).toEqual(['cartAdd:{"id":7}']);
     expect(outbox.pending.value).toBe(0);
   });
@@ -752,7 +752,7 @@ describe('indexedDbOutbox', () => {
 
     online = true;
     const summary = await outbox2.flush();
-    expect(summary).toEqual({ replayed: 1, failed: 0 });
+    expect(summary).toEqual({ replayed: 1, failed: 0, rejected: 0 });
   });
 });
 

@@ -17,7 +17,7 @@ import { ... } from 'vapor-chamber/transports';
 
 ### createBatchingHttpBridge
 
-**Function** - [src/transports.ts:295](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L295)
+**Function** - [src/transports.ts:385](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L385)
 
 ```ts
 createBatchingHttpBridge(options: BatchingHttpBridgeOptions) => AsyncPlugin
@@ -50,7 +50,7 @@ bus.dispatch('cartAdd', product, { quantity: 2 })
 
 ### createEchoBridge
 
-**Function** - [src/transports.ts:859](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L859)
+**Function** - [src/transports.ts:969](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L969)
 
 ```ts
 createEchoBridge(options: EchoBridgeOptions) => { install(bus: BaseBus): void; teardown(): void; }
@@ -82,7 +82,7 @@ realtime.teardown();
 
 ### createHttpBridge
 
-**Function** - [src/transports.ts:153](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L153)
+**Function** - [src/transports.ts:244](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L244)
 
 ```ts
 createHttpBridge(options: HttpBridgeOptions) => AsyncPlugin
@@ -108,7 +108,7 @@ await bus.dispatch('cartAdd', product, { quantity: 2 })
 
 ### createSseBridge
 
-**Function** - [src/transports.ts:754](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L754)
+**Function** - [src/transports.ts:864](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L864)
 
 ```ts
 createSseBridge(options: SseBridgeOptions) => { install(bus: BaseBus): void; teardown(): void; isConnected(): boolean; }
@@ -135,7 +135,7 @@ sse.teardown()
 
 ### createWsBridge
 
-**Function** - [src/transports.ts:446](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L446)
+**Function** - [src/transports.ts:556](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L556)
 
 ```ts
 createWsBridge(options: WsBridgeOptions) => AsyncPlugin & { connect(): void; disconnect(): void; isConnected(): boolean; connected: Signal<boolean>; }
@@ -164,6 +164,21 @@ export type BackendResponse = {
   ok?: boolean;
   state?: any;
   error?: string;
+  /**
+   * The backend's machine-readable failure code. Documented as reaching
+   * consumers as `HttpError.code`, and until now that was true only when the
+   * failure THREW: the envelope paths built a bare Error and dropped it, so a
+   * 200 carrying `{ ok: false, code }` - the shape this type admits - lost it,
+   * as did every batched failure, since `batch()` answers 200 and nothing
+   * throws.
+   */
+  code?: string;
+  /**
+   * A navigation the backend hands back instead of a result - see
+   * `onRedirect`. The reference controller puts it here when an action
+   * returns `['redirect' => url]`; on a batch it is per result.
+   */
+  redirect?: string;
 };
 ```
 
@@ -171,7 +186,7 @@ The JSON shape expected from the backend
 
 ### BatchingHttpBridgeOptions
 
-**Type alias** - [src/transports.ts:250](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L250)
+**Type alias** - [src/transports.ts:336](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L336)
 
 ```ts
 export type BatchingHttpBridgeOptions = HttpBridgeOptions & {
@@ -205,7 +220,7 @@ The JSON shape sent to the backend endpoint
 
 ### EchoBridgeOptions
 
-**Type alias** - [src/transports.ts:812](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L812)
+**Type alias** - [src/transports.ts:922](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L922)
 
 ```ts
 export type EchoBridgeOptions = {
@@ -234,7 +249,7 @@ export type EchoBridgeOptions = {
 
 ### EchoChannelType
 
-**Type alias** - [src/transports.ts:801](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L801)
+**Type alias** - [src/transports.ts:911](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L911)
 
 ```ts
 export type EchoChannelType = 'public' | 'private' | 'presence';
@@ -242,7 +257,7 @@ export type EchoChannelType = 'public' | 'private' | 'presence';
 
 ### EchoSubscription
 
-**Type alias** - [src/transports.ts:803](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L803)
+**Type alias** - [src/transports.ts:913](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L913)
 
 ```ts
 export type EchoSubscription = {
@@ -257,7 +272,7 @@ export type EchoSubscription = {
 
 ### HttpBridgeOptions
 
-**Type alias** - [src/transports.ts:41](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L41)
+**Type alias** - [src/transports.ts:132](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L132)
 
 ```ts
 export type HttpBridgeOptions = {
@@ -356,7 +371,7 @@ export type HttpBridgeOptions = {
 
 ### SseBridgeOptions
 
-**Type alias** - [src/transports.ts:712](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L712)
+**Type alias** - [src/transports.ts:822](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L822)
 
 ```ts
 export type SseBridgeOptions = {
@@ -385,7 +400,7 @@ export type SseBridgeOptions = {
 
 ### WsBridgeOptions
 
-**Type alias** - [src/transports.ts:399](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L399)
+**Type alias** - [src/transports.ts:509](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L509)
 
 ```ts
 export type WsBridgeOptions = {

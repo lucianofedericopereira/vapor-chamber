@@ -112,12 +112,30 @@ describe('check-ascii: the FILE alphabet matches what is actually on disk', () =
   });
 });
 
+/** Tracked root-level files, or null when `root` is not a git checkout. */
+function gitRootFiles(): string[] | null {
+  let out: string;
+  try {
+    out = execFileSync('git', ['ls-files'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+  } catch {
+    return null;
+  }
+  return out.split('\n').filter((p) => p !== '' && !p.includes('/'));
+}
+
 describe('check-ascii: the ROOT is covered by the tree, not by a list', () => {
   // Asks git what is in the root, the way the suite above asks the filesystem
   // what is under the roots. See the note at the end of this file.
-  const tracked = execFileSync('git', ['ls-files'], { cwd: root, encoding: 'utf8' })
-    .split('\n')
-    .filter((p) => p !== '' && !p.includes('/'));
+  //
+  // OUTSIDE A GIT CHECKOUT (a release copy, an extracted tarball) there is
+  // nothing to ask, and `git ls-files` failing took the whole file down with
+  // it - the other 14 tests never ran. The fallback is every regular file in
+  // the root: a SUPERSET of what git tracks, so the check is never weaker
+  // there, only possibly stricter (an untracked text file must be scanned or
+  // exempt too). Directories and symlinks are not files to read.
+  const tracked = gitRootFiles() ?? readdirSync(root, { withFileTypes: true })
+    .filter((d) => d.isFile())
+    .map((d) => d.name);
 
   it('finds tracked root files to classify', () => {
     expect(tracked.length).toBeGreaterThan(5);

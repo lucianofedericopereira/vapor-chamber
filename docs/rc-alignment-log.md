@@ -1,24 +1,18 @@
-# RC alignment work - Vue 3.6 RC cycles (rc.8 from 2026-09-14, rc.9 from 2026-09-21)
+# RC alignment log - the record of each Vue 3.6 RC cycle
 
-Status: the rc.8 cycle closed with v1.20.0 (s33.4, re-cut s33.5). The rc.9
-cycle is s34, on branch `rc9`, IN PROGRESS: the directive work has landed and
-step 8's four places are still owed (s34.7).
-Read this file in full before acting; s13 supersedes s9, s11.8 and s11.9 where
-they differ; s11 supersedes s5, s7 and s9 where they differ.
-DEV-ONLY, AND IT STAYS. This file is the per-RC checklist and the cycle record.
-It is tracked and kept in this repository permanently - it is never deleted at a
-cycle close, and the old line here ("commit it or delete it when the cycle
-closes") read as if it were, which is how the rc.9 sync came to delete it unread.
-It does not ship and it is not upstream's: `package.json` "files" is an allowlist
-(bin, dist, src, scripts, ROADMAP.md, CHANGELOG.md, LICENSE), there is no
-`.npmignore`, and `npm pack --dry-run` lists 320 files with zero occurrences of
-this one (verified 2026-09-21). A sync that makes the worktree 1:1 with upstream
-removes it, as `1d51ed2` did; restore it afterwards, as `rc9/17` did.
-"Remove" applies to what is deployed or published, never to this.
+The working record of the rc.8 (2026-09-14) and rc.9 (2026-09-21) alignment
+cycles: what was read, measured, decided and retracted, in the order it
+happened. It is long on purpose and not the place to start.
 
-The rc.9 cycle did not read this file until sixteen commits were in, and s34
-records what that cost. If you are picking this up: the sections below are the
-point of the file, and s0's discipline is the reason it exists.
+- **What to do when a new RC lands:** [rc-alignment.md](./rc-alignment.md).
+- **What each cycle changed:** `CHANGELOG.md`, and the alignment table in
+  whitepaper section 9.
+- **Why a decision was taken:** `docs/decisions.md`.
+
+Section numbers below (s10.1, s19.4, s27, s33, s34.19, ...) are cited by tests
+and scripts; keep them stable. Moved here from the repository root on
+2026-09-24 (it was `rc-alignment-work.md`). Dev-only: not in `package.json`
+"files", never published.
 
 ## 0. The goal, as stated by the owner (do not lose this)
 

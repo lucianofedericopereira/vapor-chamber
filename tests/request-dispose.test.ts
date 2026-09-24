@@ -19,7 +19,7 @@
  * the field, and docs/performance.md's shape note says why: a `signal` store
  * on the sync path is the class of change measured 25% worse. A bus-owned
  * signal on every request, composed with the caller's, was built first and
- * measured slower on both waiting paths (rc-alignment-work.md s33, V5).
+ * measured slower on both waiting paths (docs/rc-alignment-log.md s33, V5).
  *
  * The sync request() also honours the caller's { signal } now: its type
  * accepted one and its body ignored it. Pre-aborted, it settles before the

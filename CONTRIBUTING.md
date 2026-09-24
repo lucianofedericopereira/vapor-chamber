@@ -37,13 +37,14 @@ src/
   http-query.ts        Query helpers
   plugins-core.ts      Core plugins (logger, validator, debounce, throttle, ...)
   plugins-extra.ts     Extra plugins (cache, circuitBreaker, rateLimit, metrics)
-  plugins-io.ts        I/O plugins (retry, persist, sync)
+  plugins-io.ts        I/O plugins (retry, persist) + createChannel
   plugins.ts           Re-export aggregator
   schema.ts            LLM tool-use layer (toAnthropicTools, toOpenAITools, ...)
   form.ts              Reactive form state
   testing.ts           createTestBus + snapshot/time-travel
   devtools.ts          @vue/devtools-api integration
-  directives.ts        v-vc-command directive (vDOM plugin + vcCommandVapor)
+  directives.ts        v-vc-command / -payload / -optimistic (vDOM plugin +
+                       vcCommandVapor / vcPayloadVapor / vcOptimisticVapor)
   transitions.ts       <Transition> hook -> bus dispatch bridge
   ssr.ts               SSR dehydrate/rehydrate
   vite-hmr.ts          Vite HMR plugin
@@ -69,9 +70,13 @@ scripts/
                        status in comments
   check-ascii.mjs      Plain ASCII, invisible characters included
   stamp-docs.mjs       Republishes generated numbers into prose; --check gates
+  gate.mjs             The whole chain in one command, in the house order
 docs/
   whitepaper.md        Design philosophy + integration patterns
   performance.md       Performance & tuning reference
+  rc-alignment.md      What to do when a new Vue RC lands
+  rc-alignment-log.md  The record of each RC cycle (dev-only)
+  decisions.md         Append-only decision log
 ROADMAP.md             RC tracking, version policy, feature matrix
 ```
 
@@ -80,6 +85,26 @@ ROADMAP.md             RC tracking, version policy, feature matrix
 ## Workflow
 
 ### Before opening a PR
+
+```bash
+npm run gate           # all of the below, in order, on a committed tree
+```
+
+That is the whole check, and it is the one to run. Eleven steps in the house
+order, one line of output each, stopping at the first failure with the step
+named - so under `git rebase --exec 'npm run gate'` a red line identifies both
+the commit and the step. It does two things the manual list below cannot: it
+REGENERATES `docs/api/` and `docs/BUNDLE-SIZES.md` and then fails on a diff,
+rather than trusting you to have run them, and it ends by asserting a clean
+tree. A chain that merely regenerates would repair the drift and report green,
+which launders the defect instead of catching it.
+
+Two things to know before you use it. It expects a COMMITTED tree, so running
+it with work in progress ends red at `clean tree` by design; the ten steps
+before it still report. And `npm run gate | tail` masks the exit code, so a red
+gate reads as green - pipe to a file instead.
+
+The steps individually, when you want to iterate on one of them:
 
 ```bash
 npm run typecheck      # tsc --noEmit
@@ -91,7 +116,12 @@ npm run lint:check     # biome + the prose guards (see below)
 npm run test:coverage  # 100% statements / branches / functions / lines
 ```
 
-All seven must pass, and the order is part of the gate:
+All seven must pass, and the order is part of the gate. `npm run gate` runs them
+in exactly this order plus the drift and clean-tree steps. Deliberately NOT in
+that chain: `npm run bench` (its ratios are host state, and its markers are
+never stamped from a working tree), `npm run check:example` (it drives three
+example builds and belongs to the alignment cycle, not to every commit), and
+`ab:vue` (it needs a second Vue installed).
 
 - **Build before the test runs.** The size, boundary and Vite-plugin guards read
   `dist/` and skip themselves (`describe.skipIf(!haveDist)`) when it is absent, so a

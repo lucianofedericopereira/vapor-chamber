@@ -13,7 +13,7 @@ import { ... } from 'vapor-chamber/router';
 
 **Type aliases:** [`AfterEachHook`](#aftereachhook) [`Breadcrumb`](#breadcrumb) [`ComponentEntry`](#componententry) [`ComponentMap`](#componentmap) [`HistoryListener`](#historylistener) [`IdlePreheatOptions`](#idlepreheatoptions) [`LoaderContext`](#loadercontext) [`LoaderHandlers`](#loaderhandlers) [`MenuItem`](#menuitem) [`NavigationGuard`](#navigationguard) [`Pagination`](#pagination) [`PaginationOptions`](#paginationoptions) [`ParamType`](#paramtype) [`PrefixHandler`](#prefixhandler) [`QueryParamDef`](#queryparamdef) [`QueryParamHandle`](#queryparamhandle) [`QueryPatch`](#querypatch) [`QueryValues`](#queryvalues) [`RenderEntry`](#renderentry) [`ResolveBaseOptions`](#resolvebaseoptions) [`RevalidateMap`](#revalidatemap) [`RevalidateOptions`](#revalidateoptions) [`RevalidatePlugin`](#revalidateplugin) [`RouteLocation`](#routelocation) [`RouteLocationRaw`](#routelocationraw) [`RouteParams`](#routeparams) [`Router`](#router) [`RouteRecord`](#routerecord) [`RouterError`](#routererror) [`RouterErrorCode`](#routererrorcode) [`RouterHistory`](#routerhistory) [`RouterOptions`](#routeroptions) [`RouteSnapshot`](#routesnapshot) [`RoutesPayload`](#routespayload) [`RoutesSource`](#routessource) [`RouteTable`](#routetable) [`TableRecord`](#tablerecord) [`UrlHandler`](#urlhandler)
 
-**Variables:** [`HARD_NAV_CODES`](#hard-nav-codes) [`START_LOCATION`](#start-location)
+**Variables:** [`HARD_NAV_CODES`](#hard_nav_codes) [`START_LOCATION`](#start_location)
 
 ## Functions
 

@@ -85,15 +85,80 @@ export type HttpResponse<T = unknown> = {
   error?: unknown;
 };
 
-export type HttpError = Error & {
-  name: 'HttpError' | 'TimeoutError' | 'AbortError';
-  response?: HttpResponse;
-  status?: number;
+export type HttpErrorName = 'HttpError' | 'TimeoutError' | 'AbortError';
+
+/**
+ * A CLASS since v1.23.0, and a type - `Error & { ... }` - since v0.4.
+ *
+ * The type was why FOUR places built this shape by hand: `responseError` and
+ * the timeout below, and the two catch blocks in `transports.ts` that
+ * re-assemble it field by field to swap in the backend's own message. A type
+ * cannot be called, so each site spelled the same four assignments out and each
+ * was free to forget one. That is not hypothetical: the envelope paths dropped
+ * `code` while the catch path kept it, and the two sat twelve lines apart in one
+ * function (fixed in v1.23.0, `tests/envelope-code.test.ts`).
+ *
+ * Nothing about the shape moved: the same five fields under the same names, and
+ * `HttpError` still names a type wherever it did, because a class declaration
+ * declares one. `index.ts` re-exports it as a type only, so the constructor is
+ * not new public surface and stays shakeable out of a barrel import.
+ *
+ * MEASURED, three shapes of the same consolidation, one build each. Brotli,
+ * full / core / elements:
+ *
+ *     class (this)                 12,011 / 8,125 / 8,638
+ *     plain factory function       12,030 / 8,128 / 8,645
+ *     one Object.assign expression 12,021 / 8,131 / 8,642
+ *
+ * The class is smallest in all three. It is 34 B LARGER raw than either of the
+ * others, in all three, and raw is the ceiling that absorbs toolchain drift
+ * rather than the headline number - so brotli decides, as the budget comments in
+ * `scripts/check-size.mjs` already say it does.
+ *
+ * It is also the only one of the three that can be extended: a factory returns
+ * an intersection type nobody can subclass, and `Object.assign` returns a shape
+ * with no identity at all. That is the tie-break the bytes did not need to make
+ * here, and it is why this is a class rather than the cheapest expression.
+ *
+ * None of the three is a byte SAVING over the four hand-assembled sites - the
+ * class costs +8 B brotli on full. What it buys is that a site can no longer
+ * omit a field, which is the defect that produced `tests/envelope-code.test.ts`.
+ *
+ * `response`, `status` and `code` are assigned unconditionally rather than
+ * behind a `!== undefined` guard, the shape `okResult`/`errResult` and
+ * `backendError` already use, so two instances built here never differ. NOT a
+ * claim that an HttpError has one hidden class for its whole life: `silent` is
+ * stamped after construction at two call sites, and always was.
+ *
+ * `instanceof` is deliberately NOT part of what this buys. Using it to tell a
+ * library error from a backend one was considered and dropped - `emitter` is
+ * the field that answers that, and it answers it for a plain object too.
+ */
+export class HttpError extends Error {
+  declare name: HttpErrorName;
+  declare response?: HttpResponse;
+  declare status?: number;
   /** Machine-readable error code from response body (e.g. `'CART_ITEM_LIMIT_EXCEEDED'`). */
-  code?: string;
+  declare code?: string;
   /** Set when the request's `silent: true` config opts the caller out of a global error handler/toast. */
-  silent?: boolean;
-};
+  declare silent?: boolean;
+
+  constructor(
+    name: HttpErrorName,
+    message: string,
+    opts: { response?: HttpResponse; status?: number; code?: string; cause?: Error } = {},
+  ) {
+    super(message, opts.cause ? { cause: opts.cause } : undefined);
+    this.name = name;
+    this.response = opts.response;
+    // `status` is taken from the response when the caller does not say
+    // otherwise. The catch paths in `transports.ts` pass it explicitly because
+    // a custom `httpClient` may throw something carrying a status and no
+    // response, and deriving it would drop the one field `retry()` reads.
+    this.status = opts.status ?? opts.response?.status;
+    this.code = opts.code;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -324,20 +389,16 @@ function sleepMs(ms: number, signal?: AbortSignal): Promise<void> {
 // Error constructors
 // ---------------------------------------------------------------------------
 
-function httpError(message: string, response: HttpResponse): HttpError {
-  const err = new Error(message) as HttpError;
-  err.name = 'HttpError';
-  err.response = response;
-  err.status = response.status;
+/**
+ * `HttpError` for a non-2xx, with the body's `code` lifted out.
+ *
+ * The `!= null` guard and the `String()` stay here rather than moving into the
+ * the constructor: this is the one site reading an UNTRUSTED body, where `code`
+ * may be a number or absent, and every other site already holds a string.
+ */
+function responseError(message: string, response: HttpResponse): HttpError {
   const code = (response.data as any)?.code;
-  if (code != null) err.code = String(code);
-  return err;
-}
-
-function timeoutError(action: string, timeoutMs: number): HttpError {
-  const err = new Error(`"${action}" timed out after ${timeoutMs}ms`) as HttpError;
-  err.name = 'TimeoutError';
-  return err;
+  return new HttpError('HttpError', message, { response, code: code == null ? undefined : String(code) });
 }
 
 // ---------------------------------------------------------------------------
@@ -476,7 +537,7 @@ async function runWithRetry<T>(
           continue;
         }
 
-        const failed = httpError(`HTTP ${res.status}`, res);
+        const failed = responseError(`HTTP ${res.status}`, res);
         if (silent) failed.silent = true;
         throw failed;
       }
@@ -489,7 +550,9 @@ async function runWithRetry<T>(
       if (err.name === 'AbortError' && userSignal?.aborted) throw err;
       // A timeout-triggered abort is transient: it competes for the retry
       // budget like a 5xx/429/408 instead of throwing on the first attempt.
-      const failure = err.name === 'AbortError' ? timeoutError(url, timeout) : err;
+      const failure = err.name === 'AbortError'
+        ? new HttpError('TimeoutError', `"${url}" timed out after ${timeout}ms`)
+        : err;
       // A non-transient response thrown above re-enters here; do not retry it
       // (a 422 must not re-send a mutation). isRetryableStatus above owns the
       // retryable statuses.

@@ -8,6 +8,11 @@ the remote subpath below).
 The server owns one catch-all (`/admin/{any?}` -> Blade shell -> one island); the
 router owns every URL inside. **Path = navigation, query = state.**
 
+**This is not vue-router.** It reuses several of its names for different things -
+`router.currentRoute` is the frozen snapshot `{ location, render, data }`, and
+the vue-router-shaped route object is `useRoute()` - so a habit from there
+returns `undefined` rather than an error.
+
 Data loading is **pluggable**: the router owns *when* loaders run (on
 navigation, abort-on-supersede, two-phase commit); a loader **preset** owns
 *how* each row's `load` string resolves, via the loader SPI. In-box:

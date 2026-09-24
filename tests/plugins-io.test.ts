@@ -1,10 +1,10 @@
 /**
- * Tests for I/O plugins: retry, persist, sync
+ * Tests for I/O plugins: retry, persist, createChannel
  */
 
 import { describe, expect, beforeEach, vi } from 'vitest';
 import { createAsyncCommandBus, resetCommandBus, retry, BusError } from '../src/index';
-import { persist, sync } from '../src/plugins';
+import { persist, createChannel } from '../src/plugins';
 import { createFastLane } from '../src/fast-lane';
 import { stubGlobal } from '../src/vitest-pure';
 import { it } from '../src/vitest';
@@ -210,10 +210,10 @@ describe('persist plugin', () => {
 });
 
 // ---------------------------------------------------------------------------
-// sync bridge (BroadcastChannel over an event channel)
+// createChannel (BroadcastChannel over an event channel)
 // ---------------------------------------------------------------------------
 
-describe('sync bridge', () => {
+describe('createChannel', () => {
   // A REAL BroadcastChannel and a REAL fast lane, not mocks. The suite that
   // stood here used a hand-written channel stub, and a stub cannot show what
   // this bridge exists to fix: the old plugin re-dispatched the command in the
@@ -232,7 +232,7 @@ describe('sync bridge', () => {
     const lane = createFastLane();
     const applied: unknown[] = [];
     for (const e of events) lane.on(e, (data: unknown) => { applied.push(data); });
-    const bridge = sync({ channel, lane, events });
+    const bridge = createChannel({ channel, lane, events });
     return { lane, applied, bridge };
   }
 
@@ -301,7 +301,7 @@ describe('sync bridge', () => {
     const applied: unknown[] = [];
     lane.on('cartAdded', (d: unknown) => { applied.push(d); });
     const seen: Array<[string, unknown]> = [];
-    const bridge = sync({
+    const bridge = createChannel({
       channel: ch, lane, events: ['cartAdded'],
       onReceive: (event, data) => { seen.push([event, data]); return false; },
     });
@@ -320,7 +320,7 @@ describe('sync bridge', () => {
     const lane = createFastLane();
     const applied: unknown[] = [];
     lane.on('cartAdded', (d: unknown) => { applied.push(d); });
-    const bridge = sync({ channel: ch, lane, events: ['cartAdded'], onReceive: () => undefined });
+    const bridge = createChannel({ channel: ch, lane, events: ['cartAdded'], onReceive: () => undefined });
 
     a.lane.emit('cartAdded', { count: 2 });
     await flush();
@@ -366,7 +366,7 @@ describe('sync bridge', () => {
     const lane = createFastLane();
     const applied: unknown[] = [];
     lane.on('cartAdded', (d: unknown) => { applied.push(d); });
-    const bridge = sync({ channel: 'ssr', lane, events: ['cartAdded'] });
+    const bridge = createChannel({ channel: 'ssr', lane, events: ['cartAdded'] });
 
     expect(bridge.isOpen()).toBe(false);
     expect(() => { lane.emit('cartAdded', { count: 1 }); }).not.toThrow();
@@ -380,14 +380,14 @@ describe('sync bridge', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const ch = nextChannel();
     const lane = createFastLane();
-    const bridge = sync({ channel: ch, lane, events: ['cartAdded'] });
+    const bridge = createChannel({ channel: ch, lane, events: ['cartAdded'] });
     const after: unknown[] = [];
     lane.on('cartAdded', (d: unknown) => { after.push(d); });
 
     expect(() => { lane.emit('cartAdded', { fn: () => 'nope' }); }).not.toThrow();
     expect(after).toHaveLength(1);
     const said = warn.mock.calls.map((c) => String(c[0]));
-    expect(said.some((m) => m.includes('did not cross to other tabs'))).toBe(true);
+    expect(said.some((m) => m.includes('did not cross'))).toBe(true);
     expect(said.some((m) => m.includes('cartAdded'))).toBe(true);
 
     warn.mockRestore();
@@ -401,11 +401,11 @@ describe('sync bridge', () => {
     vi.stubEnv('NODE_ENV', 'production');
     vi.resetModules();
     try {
-      const { sync: prodSync } = await import('../src/plugins-io');
+      const { createChannel: prodChannel } = await import('../src/plugins-io');
       const { createFastLane: prodLane } = await import('../src/fast-lane');
       const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const lane = prodLane();
-      const bridge = prodSync({ channel: nextChannel(), lane, events: ['cartAdded'] });
+      const bridge = prodChannel({ channel: nextChannel(), lane, events: ['cartAdded'] });
 
       expect(() => { lane.emit('cartAdded', { fn: () => 'nope' }); }).not.toThrow();
       const ours = warn.mock.calls.map((c) => String(c[0])).filter((m) => m.startsWith('[vapor-chamber]'));
@@ -421,7 +421,7 @@ describe('sync bridge', () => {
   });
 
   it('is independent of any command bus, sync or async', async () => {
-    // What "item 24 - sync() on an async bus does not loop" used to guard.
+    // What "item 24 - createChannel() on an async bus does not loop" used to guard.
     // The bridge no longer touches the dispatch chain at all, so the async bus
     // cannot produce a loop: there is nothing for it to re-enter. Pinned by
     // running a real async dispatch alongside and counting the applies.

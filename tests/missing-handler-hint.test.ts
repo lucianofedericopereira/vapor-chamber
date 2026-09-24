@@ -4,7 +4,7 @@
  * A transport plugin forwards only the actions its `actions` filter matches;
  * any other falls through `next()` to the handler lookup, which then says
  * "Call bus.register(...) first" - the wrong fix when the action was meant for
- * the transport (rc-alignment-work s10.1, B2). In DEV, a bus with at least one
+ * the transport (docs/rc-alignment-log.md s10.1, B2). In DEV, a bus with at least one
  * plugin installed now names that cause too. Production keeps the shipped
  * string: the addition sits behind DEV, which the IIFEs fold at build and a
  * consumer's production build folds.

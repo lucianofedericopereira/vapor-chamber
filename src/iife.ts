@@ -33,7 +33,7 @@ import {
   optimistic,
   retry,
   persist,
-  sync,
+  createChannel,
 } from './plugins';
 import {
   createHttpBridge,
@@ -217,7 +217,7 @@ const VaporChamber = {
   optimistic,
   retry,
   persist,
-  sync,
+  createChannel,
 
   // --- Vapor (Vue 3.6+) ---
   defineVaporCustomElement,

@@ -13,7 +13,7 @@
  *
  * NOT in this variant (use `vapor-chamber.iife.js` if you need them):
  *   - WebSocket / SSE - most widgets poll or use server-side push to HTTP
- *   - persist / sync / history / optimistic - stateful plugins; widgets
+ *   - persist / createChannel / history / optimistic - stateful; widgets
  *     usually keep state in their own custom-element instance
  *   - Vapor sync/async composables - these target SFC-based apps, not
  *     custom-element widgets
@@ -105,7 +105,15 @@ function connect(options: HttpBridgeOptions & { plugins?: Plugin[]; onMissing?: 
  *
  * @example
  * <script src=".../vapor-chamber-elements.iife.min.js"></script>
- * <script>
+ * <script type="module">
+ *   // REQUIRED, and the whole example is inert without it. Vue ships Vapor as
+ *   // esm-browser only, so a classic `<script src>` page cannot obtain it and
+ *   // the runtime probe's bare `import('vue')` cannot resolve in a browser.
+ *   // Without this, `defineVaporCustomElement` is absent, `defineWidget`
+ *   // returns FALSE, and you get an unregistered element with nothing thrown.
+ *   const Vue = await import('https://.../vue.runtime-with-vapor.esm-browser.prod.js');
+ *   VaporChamber.configureVue(Vue);
+ *
  *   VaporChamber.defineWidget('vc-cart', {
  *     props: { sku: String },
  *     setup(props) {

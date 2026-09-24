@@ -28,13 +28,52 @@ route, not one-per-command** - the action name is in the JSON body.
 
 **Response body** (failure):
 ```json
-{ "ok": false, "error": "Human-readable message" }
+{ "ok": false, "error": "Human-readable message", "code": "validation_failed" }
 ```
 
 `state` becomes `result.value` on the client; `error` becomes
 `result.error.message`. HTTP status codes follow normal Laravel conventions:
 200 for success, 422 for a validation failure, 401 for an expired session,
 419 for an expired CSRF token, 500 for an unhandled exception.
+
+`code` is optional and machine-readable, and it reaches the client on EVERY
+failure path as `result.error.code`. Branch on the string instead of parsing
+`error`:
+
+```js
+const result = await bus.dispatch('cartAdd', product, { quantity: 2 })
+if (!result.ok && result.error.code === 'stock_depleted') showRestockNotice()
+```
+
+That holds whether the failure arrived as a non-2xx (which throws an `HttpError`
+carrying `code`) or inside a 200 body, which is every batched command. Through
+v1.22.0 the second case dropped the field; both paths carry it as of v1.23.0, so
+the two are the same to a caller.
+
+**One consequence to know before choosing a code.** A failure delivered inside a
+2xx is treated as PERMANENT by the client's `retry()` plugin by default. A
+non-2xx is judged by its status instead - 408, 429 and 5xx are retried, every
+other 4xx is not. So a 422 and a `200 { ok: false }` both stop after one attempt.
+
+Know what "inside a 2xx" covers, though: on the batch endpoint it is EVERY
+failure, a crash included. `dispatchOne()` computes a status per command (500 for
+an unhandled exception) and `batch()` keeps only the body, so a batched
+`internal_error` arrives as a 200 refusal and is not retried by default. Which
+of your codes are worth re-sending is your application's rule, not the
+library's; pass it to `retry()`, scoped to the bridged actions:
+
+```js
+bus.use(retry({ actions: ['cart*'], isRetryable: (err) => err.code === 'internal_error' }))
+```
+
+The exception is worth stating because it is the one way a backend can surprise
+the client: the library reserves SIX of its own codes as transient -
+`VC_CORE_THROTTLED`, `VC_CORE_REQUEST_TIMEOUT`, `VC_TRANSPORT_TIMEOUT`,
+`VC_PLUGIN_CIRCUIT_OPEN`, `VC_PLUGIN_RATE_LIMITED` and `VC_UNKNOWN` - and
+sending one of those strings as YOUR `code` in a 2xx refusal makes `retry()`
+re-send it. Use your own namespace - `stock_depleted`,
+`validation_failed` - and the refusal stays permanent. `ERROR_CODE_REGISTRY` on
+the client is the full list if you need to check one.
 
 ---
 
@@ -241,8 +280,9 @@ Flow B typically means a Vite dev server (`localhost:5173`) talking to
 `localhost:8000`. Those are two origins, so the browser sends a preflight
 before every dispatch. The bridge always sends `X-Requested-With: XMLHttpRequest`
 (it is what makes Laravel answer 419/401 as **JSON** instead of redirecting to
-a login page), and `Idempotency-Key` whenever the `idempotent()` plugin is
-enabled. If the preflight does not allow a header, the whole request fails
+a login page), and `Idempotency-Key` whenever the command carries one - the
+`idempotent()` plugin stamps it, and so does `vapor-chamber/outbox` on every
+delivery attempt of a queued command. If the preflight does not allow a header, the whole request fails
 *before it reaches Laravel*, and the browser error says little: Chrome reports
 only `Failed to fetch`; Firefox at least names the header.
 
@@ -256,7 +296,7 @@ only `Failed to fetch`; Firefox at least names the header.
     'X-Requested-With',    // <- always sent; omit it and every dispatch fails
     'X-CSRF-TOKEN',        // <- Flow A (Blade meta tag)
     'X-XSRF-TOKEN',        // <- Flow B (Sanctum cookie)
-    'Idempotency-Key',     // <- only with the idempotent() plugin
+    'Idempotency-Key',     // <- with idempotent() or the outbox
 ],
 'supports_credentials' => true,   // required for the cookie flows
 ```
@@ -334,6 +374,17 @@ returns the redirect instead of issuing one:
 return ['redirect' => route('login')];
 ```
 
+The controller lifts exactly that shape - an array whose only key is
+`redirect` - to the top of the envelope (`{ redirect }`, and per result on the
+batch endpoint), which is where the bridges read it. Before v1.23.0 it was
+wrapped as `{ ok: true, state: { redirect } }` and `onRedirect` never fired: the
+dispatch succeeded with the URL as its value. A state that merely contains a
+`redirect` key among others is still returned as data.
+
+`createBatchingHttpBridge` honours `onRedirect` too, as of v1.23.0 (it accepted
+the option before and ignored it). It navigates once per batch, with the first
+URL; every redirected command still fails with its own `error.context.url`.
+
 ```ts
 const bridge = createHttpBridge({
   endpoint: '/api/vc',
@@ -341,6 +392,23 @@ const bridge = createHttpBridge({
   onRedirect: (url) => router.visit(url),
 });
 ```
+
+**A redirect is a FAILED dispatch, handler or no handler.** `onRedirect` fires
+and the dispatch still resolves `{ ok: false }` - there is no state to return, so
+there is nothing for `result.value` to be. Do not write `if (result.ok)` after a
+command the backend may redirect; branch on the code instead:
+
+```ts
+const result = await dispatch('orderCancel', { id })
+if (!result.ok && result.error.code === 'VC_TRANSPORT_REDIRECT') return  // Inertia is navigating
+```
+
+Since v1.23.0 that error carries `code: 'VC_TRANSPORT_REDIRECT'` and
+`error.context.url`, so you can read the target without parsing the message, and
+`retry()` will not re-send it - a backend that redirects will redirect again, so
+re-sending only spends attempts. With no `onRedirect` configured the same code
+arrives with a message saying so, which is how a missing handler surfaces instead
+of a silent no-op.
 
 ---
 
@@ -392,10 +460,22 @@ listener that listens for DOM events.
 </div>
 
 <script src=".../vapor-chamber-elements.iife.min.js"></script>
-<script>
+
+<!-- Vue, as a MODULE, and then configureVue(). Not optional on this variant:
+     Vue ships Vapor as esm-browser ONLY - there is no
+     vue.runtime-with-vapor.global.js - so a classic <script src> page cannot
+     obtain Vapor, and the library's runtime probe cannot resolve a bare
+     specifier in a browser. Without this, defineWidget() returns false and the
+     widget never mounts, with nothing thrown. -->
+<script type="module">
+  const Vue = await import(
+    'https://cdn.jsdelivr.net/npm/vue@<version>/dist/vue.runtime-with-vapor.esm-browser.prod.js'
+  );
+  VaporChamber.configureVue(Vue);
+
   const { dispatch } = VaporChamber.connect({ endpoint: '/api/vc' });
 
-  VaporChamber.defineWidget('vc-cart', {
+  const defined = VaporChamber.defineWidget('vc-cart', {
     setup() {
       // A Vapor setup() returns a BLOCK - real DOM nodes. With no build step
       // there is no compiler to turn a template into one, and `h` is not on
@@ -416,8 +496,15 @@ listener that listens for DOM events.
       return button;
     }
   });
+
+  // The sharp edge, made visible rather than silent.
+  if (!defined) console.warn('Vapor was not detected - the widget did not mount.');
 </script>
 ```
+
+[`examples/laravel-app`](../../examples/laravel-app/) runs this page for real,
+and pins the Vue version it loads to the one this library is tested against
+instead of leaving a placeholder in the URL.
 
 Alpine's `@cart-added.window` listens at the window level, which the event
 reaches by bubbling. For scoped listening, put `@cart-added` directly on a
@@ -717,8 +804,9 @@ covers the client side of both:
   bridge forwards it as a standard `Idempotency-Key` request header. The backend
   reads that header, replays the stored result for a key it has finished, and
   answers **409** to a second request while the first with the same key is still
-  running - so even a retry that slips past the client lands once. 409 is a 4xx,
-  which the bridge never retries, so the client sees one outcome.
+  running - so even a retry that slips past the client lands once. The bridge
+  retries 408, 429 and 5xx and nothing else, so a 409 is never re-sent and the
+  client sees one outcome.
 
 ```ts
 import { createAsyncCommandBus, idempotent } from 'vapor-chamber';
@@ -735,8 +823,10 @@ bus.dispatch('checkoutSubmit', { cartId });
 ```
 
 For commands that must also never *interleave* (two writes to the same account),
-add `serialize({ key })`: it orders same-key commands locally while `idempotent`
-collapses identical ones. Together they give exactly-once semantics on the client.
+add `serialize({ key: (cmd) => cmd.target.accountId })`: it orders same-key
+commands locally while `idempotent` collapses identical ones. `key` is a
+function of the command and defaults to `cmd.action`, which serializes each
+action against itself. Together they give exactly-once semantics on the client.
 
 The only backend contract is the standard one: honor the `Idempotency-Key` header
 (persist the key with its result; return the stored result on a repeat), and

@@ -54,7 +54,20 @@ export type BusEmitter =
 export type BusErrorCode =
   // Core
   | 'VC_CORE_NO_HANDLER'          // No handler registered for action
-  | 'VC_CORE_HANDLER_THREW'       // Handler threw an exception
+  // NOT MINTED BY THE BUS, and the name reads as though it were. A handler's
+  // throw reaches `result.error` UNWRAPPED - `tryCatchHandler` is
+  // `catch (e) { return errResult(e as Error) }` - so the consumer receives
+  // the handler's own error, which is the contract `vitest-pure.ts`'s
+  // `ExpectedCode` is widened to `string & {}` for. Declared since v1.0 and
+  // emitted by no site in `src/`; kept because it is public API and a
+  // consumer may construct one, and because wrapping handler throws now would
+  // take away the raw error every catch-free handler relies on. It LEFT
+  // RETRYABLE_CODES in v1.23.0: that set is a collision surface now (see it
+  // below), and a code nothing mints could only ever have matched a backend's
+  // string or one a consumer built by hand. The consequence is priced: a
+  // consumer who throws a BusError carrying this code from a handler is no
+  // longer retried by default, and must pass its own predicate.
+  | 'VC_CORE_HANDLER_THREW'
   | 'VC_CORE_BEFORE_CANCEL'       // A beforeHook threw to cancel dispatch
   | 'VC_CORE_NAMING_VIOLATION'    // Action name doesn't match naming pattern
   | 'VC_CORE_HANDLER_OVERWRITE'   // Handler replaced without unregister
@@ -69,6 +82,15 @@ export type BusErrorCode =
   | 'VC_PLUGIN_THREW'             // A plugin threw or rejected in its own body (a pipeline bug; not retryable)
   | 'VC_PLUGIN_CACHE_MISS'        // Cache miss (info-level, not an error)
   | 'VC_VALIDATION_FAILED'        // Schema / per-action validation rejected the dispatch
+  // Transports. These are the transport's OWN failures - the ones where no
+  // backend answered, or answered something the protocol cannot carry. A
+  // backend's refusal is not one of them and keeps its own code; see the note
+  // on `transportError` in transports.ts.
+  | 'VC_TRANSPORT_REDIRECT'       // Backend answered `{ redirect }`
+  | 'VC_TRANSPORT_PROTOCOL'       // A response the protocol cannot match to a request
+  | 'VC_TRANSPORT_QUEUE_FULL'     // Offline send queue at maxQueueSize; oldest dropped
+  | 'VC_TRANSPORT_CLOSED'         // The socket closed or was torn down before a reply
+  | 'VC_TRANSPORT_TIMEOUT'        // No reply within the transport's own timeout
   // Workflow
   | 'VC_WORKFLOW_STEP_FAILED'     // A workflow step failed, compensating
   | 'VC_WORKFLOW_COMPENSATE_FAILED' // Compensation step also failed
@@ -135,14 +157,30 @@ export class BusError extends Error {
  * must not pull into their bundles. tests/schema.test.ts asserts this set
  * stays in sync with the registry's `retryable: true` entries.
  *
+ * EVERY MEMBER IS ALSO A COLLISION SURFACE, since v1.23.0. A backend's refusal
+ * inside a 2xx reaches `defaultIsRetryable` tagged `emitter: 'transport'` with
+ * the BACKEND's string still in `.code`, so this set is consulted about a value
+ * the backend chose - and a backend sending one of these exact names gets a
+ * permanent refusal retried. That is the bounded residue `plugins-io.ts` states
+ * and `tests/transport-code-owner.test.ts` pins. Adding a member widens it, so a
+ * code belongs here only if something actually emits it and it is actually
+ * transient.
+ *
+ * `VC_CORE_HANDLER_THREW` was removed for the first of those reasons: nothing
+ * mints it (see the note on the code itself), so it could only ever have matched
+ * a backend string or a code a consumer built by hand. That took the residue from
+ * seven strings to six, and nothing could regress because no site emitted it.
+ * MEASURED: -24 B raw in all three IIFEs and -2 / -8 / -7 brotli - a set member
+ * is a string plus a comma, so shrinking the surface pays rather than costs.
+ *
  * @example
  * if (result.error instanceof BusError && RETRYABLE_CODES.has(result.error.code)) {
  *   // transient - safe to re-dispatch
  * }
  */
 export const RETRYABLE_CODES: ReadonlySet<string> = new Set([
-  'VC_CORE_HANDLER_THREW',
   'VC_CORE_REQUEST_TIMEOUT',
+  'VC_TRANSPORT_TIMEOUT',
   'VC_CORE_THROTTLED',
   'VC_PLUGIN_CIRCUIT_OPEN',
   'VC_PLUGIN_RATE_LIMITED',
@@ -866,7 +904,7 @@ async function tryCatchAsyncHandler(handler: AsyncHandler, cmd: Command): Promis
  * It exists because `__origin`-in-the-payload can only mark payloads that hold
  * keys. A number, string, boolean or array cannot carry it, so those dispatches
  * reached handlers unattributed - an infinite cross-tab broadcast loop in
- * sync(), a double-recorded redo in chamber(), and an MCP command invisible to
+ * createChannel(), a double-recorded redo in chamber(), and an MCP command invisible to
  * an `origin === 'agent'` audit filter. Each site had grown its own workaround
  * (a depth counter, a one-shot identity match, a boundary refusal); this
  * replaces all three with one mechanism that works for every payload shape and
@@ -955,7 +993,7 @@ export function _withCausation<T>(causationId: string | undefined, fn: () => T):
  *
  * `__origin` was added for a family of four bugs that all shared one shape -
  * a module-level flag set before a dispatch and cleared in `finally`
- * (`_mcpDispatching` in mcp.ts, `receiving` in sync(), `paused` in redo(),
+ * (`_mcpDispatching` in mcp.ts, `receiving` in createChannel(), `paused` in redo(),
  * and the reaction guard). On a sync bus the dispatch completes inside the
  * `try`, so the flag holds and the tests pass. On an **async** bus the
  * dispatch returns a pending promise, the plugin chain runs a microtask later,
@@ -1307,6 +1345,12 @@ function wrapThrottle(handler: Handler | AsyncHandler, wait: number, timers: Set
 // survived debounce only by accident - its exhausted index happened to land
 // on `execute()`. Deferred continuations are a first-class case here, so
 // correctness takes the 13.5%.
+/**
+ * @internal Machinery, not API. Nothing outside `src/` imports it - `testing.ts`
+ * takes it relatively, and every mention of it in the docs describes it as
+ * internals. The root export stays, so anything that did reach for it keeps
+ * working; the tag only stops the generated reference advertising it.
+ */
 export function buildRunner(plugins: Plugin[]) {
   return function run(cmd: Command, execute: () => CommandResult): CommandResult {
     function nextFrom(idx: number): CommandResult {

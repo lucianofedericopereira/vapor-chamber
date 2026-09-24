@@ -33,11 +33,19 @@ with no store-specific code.
 | --- | --- | --- |
 | persistence | `persist` plugin | nothing |
 | undo / redo | `history` plugin | nothing |
-| cross-tab sync | `sync` bridge | nothing |
 | optimistic rollback | `optimistic` plugin | nothing |
 | double-submit collapse | `idempotent` plugin | nothing |
 | ordered same-key writes | `serialize` plugin | nothing |
 | a devtools timeline | `vapor-chamber/devtools` | nothing |
+
+Cross-context mirroring is not on that list, and until v1.22.0 it was.
+`createChannel` mirrors
+emitted FACTS over a BroadcastChannel: it takes a fast lane, not the bus, so no
+dispatch reaches it. Store state crosses tabs only if the app emits the fact it
+wants mirrored and the receiving tab applies it. That is a real cost, and it
+buys convergence - the old plugin re-dispatched the command in every tab, so
+each tab re-derived its own outcome, and two tabs disagreed for ever whenever
+the handler was not deterministic.
 
 ```ts
 const bus = createCommandBus();
@@ -46,7 +54,7 @@ bus.use(persist({ key: 'vc:cart', getState: () => cart.state.value }));
 
 const cart = useCart(bus);
 cart.add(1);
-// saved, undoable, and visible in the timeline - the store did not participate
+// saved and undoable - the store did not participate
 ```
 
 Pinia reaches a fraction of that by growing a roughly 70-line bus inside itself
@@ -89,8 +97,13 @@ actions: {
 }
 ```
 
-State is a `shallowRef`, measured at about 3.4x a deep `ref` on array state
-(`tests/signal-shallow-ab.test.ts`). A reducer that mutates and returns the same
+State is a `shallowRef`. The number behind that choice is a dispatch rate, not
+a property of the ref: on the real dispatch path, 100 array appends run at about
+3.4x a deep `ref`, because `ref` wraps an array in a deep reactive proxy that
+wholesale replacement never needs. The A/B is `tests/signal-shallow-ab.test.ts`;
+the absolute figures live in finding 5 of
+[performance.md](./performance.md#reactive-runtime-notes-vue-36).
+A reducer that mutates and returns the same
 object does not notify, which is why `$reset` and every action build fresh
 objects. `state` is exposed with a getter and no setter, so `cart.state.value =
 x` throws in strict mode: the bus is the only mutation channel.
@@ -132,8 +145,14 @@ cart.$reset()     // back to state(), as a fresh object
 cart.$dispose()   // unregister handlers, drop from the registry
 ```
 
-Created inside an `effectScope`, a store disposes with it. Outside one, the
-caller owns `$dispose` - the same contract as every other composable here.
+A store is shared, so disposal is refcounted: **the last holder out disposes,
+not the first one in.** Every `useCart(bus)` call from inside an `effectScope`
+joins that scope to the store's holder count and leaves when the scope ends;
+the store is disposed when the count reaches zero. Two components can hold the
+same store and the first to unmount does not take it away from the second.
+
+Called outside a scope there is no lifetime to hook, nothing is counted, and
+the caller owns `$dispose()` - the same contract as every other composable here.
 
 ## Status
 

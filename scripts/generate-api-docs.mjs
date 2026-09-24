@@ -101,6 +101,22 @@ const isAlias = (symbol) => (symbol.flags & ts.SymbolFlags.Alias) !== 0;
 const resolve = (symbol) => (isAlias(symbol) ? checker.getAliasedSymbol(symbol) : symbol);
 
 /**
+ * Resolved symbol -> the name it is EXPORTED under, when the two differ.
+ *
+ * Resolving an alias is required for `@internal` and for the type, but it also
+ * renames the symbol, and the declaration's name is not always the public one.
+ * `src/vitest.ts` does `export { expect }` on a binding Vitest declares as
+ * `globalExpect`, so the reference published `globalExpect` - a name that is
+ * not importable from this package - and omitted `expect`, which is. The same
+ * shape as the `v-vc:payload` drift: a documented spelling nothing compiles.
+ *
+ * Rebuilt per entry point, because one declaration can be exported under
+ * different names by different entries and the program is shared across them.
+ */
+const publicNames = new Map();
+const nameOf = (symbol) => publicNames.get(symbol) ?? symbol.name;
+
+/**
  * Ordered because the first match wins and the flags overlap: a class carries
  * the Value flag too, an enum member carries Property. Interface before Type
  * for the same reason.
@@ -154,9 +170,9 @@ function signatureOf(symbol) {
   const calls = type.getCallSignatures();
   const format = ts.TypeFormatFlags.NoTruncation | ts.TypeFormatFlags.WriteArrowStyleSignature;
   if (calls.length) {
-    return calls.map((call) => `${symbol.name}${checker.signatureToString(call, declaration, format)}`);
+    return calls.map((call) => `${nameOf(symbol)}${checker.signatureToString(call, declaration, format)}`);
   }
-  return [`${symbol.name}: ${checker.typeToString(type, declaration, format)}`];
+  return [`${nameOf(symbol)}: ${checker.typeToString(type, declaration, format)}`];
 }
 
 /** `src/router/engine.ts:120`, linked to the repo, or null for a synthesized symbol. */
@@ -210,7 +226,12 @@ function membersOf(symbol) {
     }));
 }
 
-const anchor = (name) => name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+// Underscores SURVIVE. GitHub's slugger strips punctuation but keeps `_` and
+// `-`, so `ERROR_CODE_REGISTRY` anchors as `error_code_registry`. Folding `_`
+// into `-` here made every SCREAMING_SNAKE entry in a Contents list a dead
+// link - seven of them, across index, mcp, router and vitest-mcp - while the
+// sections they pointed at were correct and present.
+const anchor = (name) => name.toLowerCase().replace(/[^a-z0-9_]+/g, '-').replace(/^-|-$/g, '');
 const escapeCell = (text) => text.replace(/\|/g, '\\|').replace(/\n+/g, ' ');
 
 function renderSymbol(symbol) {
@@ -218,7 +239,7 @@ function renderSymbol(symbol) {
   const source = sourceOf(symbol);
   const tags = tagsOf(symbol);
 
-  out.push(`### ${symbol.name}`, '');
+  out.push(`### ${nameOf(symbol)}`, '');
   const meta = [`**${kindOf(symbol)}**`];
   if (source) {
     meta.push(
@@ -281,11 +302,16 @@ function renderEntry(entry) {
 
   // `@internal` is honoured on the RESOLVED symbol: the barrel re-export never
   // carries the tag, only the declaration does.
+  publicNames.clear();
   const symbols = checker
     .getExportsOfModule(moduleSymbol)
-    .map(resolve)
+    .map((exported) => {
+      const resolved = resolve(exported);
+      if (resolved.name !== exported.name) publicNames.set(resolved, exported.name);
+      return resolved;
+    })
     .filter((symbol) => !tagsOf(symbol).some((tag) => tag.name === 'internal'))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
 
   const grouped = new Map();
   for (const symbol of symbols) {
@@ -313,7 +339,9 @@ function renderEntry(entry) {
   // colliding anchors, so every table-of-contents link landed on the wrong one.
   body.push('## Contents', '');
   for (const kind of order) {
-    const links = grouped.get(kind).map((symbol) => `[\`${symbol.name}\`](#${anchor(symbol.name)})`);
+    const links = grouped
+      .get(kind)
+      .map((symbol) => `[\`${nameOf(symbol)}\`](#${anchor(nameOf(symbol))})`);
     // Space-separated, not comma-separated. Each entry is a backticked name,
     // and on the site each also carries a kind icon, so the entries are
     // already delimited; the commas were punctuation doing no work.

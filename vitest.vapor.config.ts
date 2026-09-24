@@ -40,11 +40,13 @@ const WITH_VAPOR = fileURLToPath(
 
 export default defineConfig({
   resolve: {
-    alias: {
+    alias: [
       // Exact match only: `vue/dist/...` deep imports must still resolve
-      // normally, so a fixture can reach a specific build on purpose.
-      vue: WITH_VAPOR,
-    },
+      // normally, so a fixture can reach a specific build on purpose. The
+      // regex is what makes that true - a string key also rewrites `vue/...`
+      // (Vite's `matches()`: `=== find || startsWith(find + '/')`).
+      { find: /^vue$/, replacement: WITH_VAPOR },
+    ],
   },
   test: {
     globals: true,

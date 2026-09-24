@@ -98,6 +98,6 @@ function mountAnalyticsIsland(el: HTMLElement, endpoint: string) {
  * This pattern scales:
  * - Single chart widget -> one island, one bus
  * - Full dashboard section -> multiple islands, each with its own bus
- * - Cross-island coordination -> use sync() plugin with a shared channel
+ * - Cross-island coordination -> use createChannel() plugin with a shared channel
  */
 export {}

@@ -17,7 +17,8 @@
 
 import type { AsyncCommandBus, AsyncPlugin, Command, CommandResult } from './command-bus';
 import { countOption } from './bounds';
-import { commandKey, matchesPattern, _okResult, _errResult } from './command-bus';
+import { BusError, commandKey, matchesPattern, _okResult, _errResult } from './command-bus';
+import { isRetryableStatus } from './http-errors';
 import { signal } from './signal';
 import type { Signal } from './signal';
 
@@ -219,9 +220,50 @@ export type OutboxOptions = {
    * dropped with a console warning. Default: 200.
    */
   maxQueue?: number;
+  /**
+   * Whether a failed replay is worth trying again later. `true` keeps the
+   * record at the head and stops the flush, so order is preserved and the
+   * next flush retries from the same spot. `false` means the answer is final
+   * (the server refused it): the record is dropped, `'outboxRejected'` fires
+   * with `{ record, error }`, and the flush moves on to the next record.
+   *
+   * Default: final only when the SERVER gave a verdict on this command - a
+   * refusal inside a 2xx (`{ ok: false }`), or a 4xx other than 401 (session),
+   * 408 (timeout), 419 (CSRF) and 429 (rate limit). Everything else is kept:
+   * a 5xx, a network failure, and every error the library raised itself (a
+   * plugin that threw, a handler not registered yet, a redirect), because
+   * dropping a queued command over a client-side failure loses the user's
+   * data. Pass `() => true` to block on every failure, or your own rule in
+   * your backend's codes (`error.code`).
+   *
+   * WHY IT EXISTS: before v1.23.0 every failure blocked, so one record
+   * the server refuses held the whole queue for good - each flush re-sent it,
+   * got the same answer, and the records behind it never left.
+   */
+  isRetryable?: (error: Error, record: OutboxRecord) => boolean;
 };
 
 /** The object returned by {@link createOutbox}. */
+/**
+ * The default `isRetryable`: false only for the server's verdict on the
+ * command. A `BusError` is the library's own failure, never a verdict; a
+ * refusal inside a 2xx carries `emitter: 'transport'` without being one.
+ */
+function outboxIsRetryable(error: Error): boolean {
+  if (error instanceof BusError) return true;
+  const e = error as { emitter?: unknown; status?: unknown; response?: { status?: unknown } };
+  if (e.emitter === 'transport') return false;
+  const status = e.status ?? e.response?.status;
+  if (typeof status !== 'number' || status < 400 || status >= 500) return true;
+  return status === 401 || status === 419 || isRetryableStatus(status);
+}
+
+/**
+ * What one `flush()` did. `failed` is 0 or 1: a retryable failure stops the
+ * flush. `rejected` counts records dropped as final (see `isRetryable`).
+ */
+export type OutboxFlushSummary = { replayed: number; failed: number; rejected: number };
+
 export type Outbox = {
   /**
    * The outbox plugin. Install OUTERMOST - before `idempotent()` and the
@@ -239,7 +281,7 @@ export type Outbox = {
    * replay stops the flush - that record and everything after it stay queued.
    * Re-entrant calls join the in-progress flush.
    */
-  flush(bus?: AsyncCommandBus): Promise<{ replayed: number; failed: number }>;
+  flush(bus?: AsyncCommandBus): Promise<OutboxFlushSummary>;
   /** Reactive queue depth - bindable in templates ("3 changes pending sync"). */
   pending: Signal<number>;
   /** Load the persisted queue from storage. Call once at startup, before the first flush. */
@@ -262,11 +304,15 @@ export type Outbox = {
  * `'online'` event, or a manual `flush()`), records replay sequentially
  * through the full pipeline with `meta.origin = 'replay'` and their original
  * idempotency keys, so the backend can reject any duplicate it already
- * applied. `'outboxFlushed'` fires with the `{ replayed, failed }` summary.
+ * applied. `'outboxFlushed'` fires with the `{ replayed, failed, rejected }`
+ * summary.
  *
- * Failure-safe: the first failed replay (an `ok: false` result or a throw)
- * stops the flush and keeps that record plus everything behind it queued -
- * order is never reshuffled, and the next flush retries from the same spot.
+ * Failure-safe: the first RETRYABLE failed replay (an `ok: false` result or a
+ * throw) stops the flush and keeps that record plus everything behind it
+ * queued - order is never reshuffled, and the next flush retries from the same
+ * spot. A FINAL failure (the server refused it; see `isRetryable`) is dropped
+ * and reported as `'outboxRejected'` with `{ record, error }`, and the flush
+ * continues - otherwise one refusal would hold the queue forever.
  *
  * SSR-safe: no window/navigator access at module load; the `'online'`
  * listener is only attached when a window exists and is removed by `dispose()`.
@@ -293,6 +339,7 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
     autoFlush = true,
     key: keyFn,
     maxQueue: rawMaxQueue = 200,
+    isRetryable = outboxIsRetryable,
   } = options;
 
   // Clamped, and not defensively: `enforceBound` below is the same
@@ -318,7 +365,7 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
 
   let queue: OutboxRecord[] = [];
   let busRef: AsyncCommandBus | null = null;
-  let flushPromise: Promise<{ replayed: number; failed: number }> | null = null;
+  let flushPromise: Promise<OutboxFlushSummary> | null = null;
   /**
    * The record currently being re-dispatched by `flush()`. The plugin lets
    * exactly one matching command through per replay (claim-once), identified
@@ -400,9 +447,10 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
     return enqueue(cmd);
   };
 
-  async function runFlush(bus: AsyncCommandBus): Promise<{ replayed: number; failed: number }> {
+  async function runFlush(bus: AsyncCommandBus): Promise<OutboxFlushSummary> {
     let replayed = 0;
     let failed = 0;
+    let rejected = 0;
     // Strict order: one record at a time, head of the queue first. The record
     // stays queued until its replay succeeds, so commands dispatched DURING the
     // flush land behind it (the plugin sees a non-empty queue).
@@ -423,19 +471,30 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
         replayed++;
         pending.value = queue.length;
         await saveQueue();
-      } else {
-        // Stop: keep this record and everything behind it, in order.
-        failed++;
-        await saveQueue();
-        break;
+        continue;
       }
+      const error = result?.error ?? new Error('Unknown error');
+      if (!isRetryable(error, record)) {
+        // Final: the answer will not change, so keeping it would block every
+        // record behind it on every flush. Drop it, say which, move on.
+        queue.shift();
+        rejected++;
+        pending.value = queue.length;
+        await saveQueue();
+        bus.emit('outboxRejected', { record, error });
+        continue;
+      }
+      // Retryable: keep this record and everything behind it, in order.
+      failed++;
+      await saveQueue();
+      break;
     }
-    const summary = { replayed, failed };
+    const summary = { replayed, failed, rejected };
     bus.emit('outboxFlushed', summary);
     return summary;
   }
 
-  function flush(bus?: AsyncCommandBus): Promise<{ replayed: number; failed: number }> {
+  function flush(bus?: AsyncCommandBus): Promise<OutboxFlushSummary> {
     const target = bus ?? busRef;
     if (!target) {
       return Promise.reject(new Error('[vapor-chamber] outbox.flush(): no bus available. Call outbox.install(bus) first, or pass the bus: outbox.flush(bus).'));

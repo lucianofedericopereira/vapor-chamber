@@ -24,7 +24,7 @@
  *
  * WHY THAT MATTERS, and it is the whole design. Because `cart.add(42)` is a
  * command, everything the bus already does applies with no store-specific code:
- * `persist` saves it, `sync` broadcasts it cross-tab, `history` undoes it,
+ * `persist` saves it, `createChannel` mirrors it, `history` records it (undo: the record only),
  * `optimistic` rolls it back, `idempotent` collapses a double-submit,
  * `serialize` orders same-key writes, and the devtools timeline shows it. Pinia
  * grew a ~70-line bus inside itself (`action()` / `$onAction`) to reach a
@@ -119,8 +119,10 @@ export type ChamberStore<S extends object, A extends Record<string, StoreAction<
  *
  * B holds a live object whose every action now returns `ok: false` and whose
  * state never changes again. Silent - no throw, no warning, and B's own code is
- * blameless. Measured exactly that way in tests/store.test.ts. Two components
- * sharing a store is not an edge case, it is what a store IS.
+ * blameless. Measured exactly that way in tests/store-form-sharing.test.ts,
+ * which pins all three paths: first holder out, last holder out, and no scope
+ * at all. Two components sharing a store is not an edge case, it is what a
+ * store IS.
  */
 type StoreEntry = { store: unknown; offs: Array<() => void>; holders: number };
 

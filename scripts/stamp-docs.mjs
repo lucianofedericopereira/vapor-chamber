@@ -63,12 +63,20 @@ const VALUES = {
 
 /**
  * Values derived from artifacts the TEST RUN produces, added separately because
- * they can be absent: a fresh checkout has `docs/metrics.json` (committed) but
- * not `coverage/` (gitignored), and `lint:check` runs `--check` before any test
- * has run in CI. A missing source therefore SKIPS its markers - leaving whatever
- * the doc already says - rather than failing the gate or, worse, stamping a
- * placeholder over a real number. Only a source that exists can make a marker
- * stale, which is the property that keeps `--check` honest.
+ * they can be absent. BOTH sources are gitignored - `coverage/`, and
+ * `docs/metrics.json` at .gitignore:23, which records why: the counts depend on
+ * what else has run, so a committed copy would churn. A fresh checkout
+ * therefore has NEITHER, and `lint:check` runs `--check` before any test has
+ * run in CI. A missing source SKIPS its markers - leaving whatever the doc
+ * already says - rather than failing the gate or, worse, stamping a placeholder
+ * over a real number. Only a source that exists can make a marker stale, which
+ * is the property that keeps `--check` honest.
+ *
+ * This docblock previously said `docs/metrics.json` was committed, which is the
+ * opposite of .gitignore:23 and hid the one cost worth knowing: a marker whose
+ * source is absent renders exactly like a current one, and `--check` calls it
+ * current having had nothing to compare it against. The twelve `vc:bench*`
+ * markers are that set. Run `npm run bench` before trusting one.
  */
 function readJson(path) {
   try {

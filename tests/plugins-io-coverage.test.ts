@@ -8,7 +8,7 @@
  *   194        - clear() catch branch (storage.removeItem throws)
  *   200-202    - scheduleSave() coalescing (microtask flush + early return)
  *   207-209    - coalesce plugin branch (schedules a single save per burst)
- *   259        - sync() called without a busRef (warning path)
+ *   259        - createChannel() called without a busRef (warning path)
  *   279-280    - sync onReceive returning false suppresses re-dispatch
  */
 

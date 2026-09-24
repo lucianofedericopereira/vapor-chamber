@@ -2,6 +2,583 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.23.0 - 2026-09-23
+
+Post-v1.22.0 work. The first four entries were written into the v1.22.0 section
+while it was still open and are moved here unchanged - v1.22.0 shipped on
+2026-09-21 and its text is frozen at what was published.
+
+### Fixed: the backend's `code` survives an envelope failure
+
+Both HTTP bridges enriched an error when the failure THREW and built a bare one
+when the same failure arrived as DATA, twelve lines apart in the same function.
+`postCommand` throws an `HttpError` on a non-2xx with the parsed body attached,
+and the catch path has copied `status`, `code` and `response` off it since
+v1.20.0. A 200 carrying `{ ok: false, code }` throws nothing, so the envelope
+path built `new Error(body.error)` and the code was read by nobody.
+
+Not a missing feature. `examples/laravel-backend/VaporChamberController.php`
+sends the field and its `fail()` docblock promises it arrives as
+`HttpError.code` - a promise that was false twice over on the batch path, since
+`batch()` answers 200 with per-command status in the body, so nothing throws and
+no `HttpError` is ever built. That docblock was corrected in `df6923d`; this is
+the code half.
+
+Four sites now carry it, through one small builder: the HTTP envelope
+(`ok: false`), the non-2xx-that-did-not-throw branch, the batching bridge's
+per-result branch, and the WebSocket frame. `BackendResponse` gains `code?`, and
+because the WS frame is parsed as `{ id: string } & BackendResponse` that one
+type covers all four. `BatchedResult` stops being a hand-written restatement of
+`{ id } & BackendResponse` and composes it instead - the spelling the WS site
+already used, and the reason `code` would otherwise have needed adding twice.
+
+**What this does NOT fix**, stated plainly so nobody reads it as closed: the
+retry hole. `defaultIsRetryable` reads `e.status ?? e.response?.status`, an
+envelope error carries neither, so it still returns true and a batched 422 is
+still re-sent. Closing that needs the `status` contract, which changes a
+documented shape and is its own step with its own evidence.
+
+**Cost, and the squeeze, MEASURED per piece:**
+
+    the fix (4 sites + one builder)      raw +64 / +61 / +61   brotli +2 / +13 / +14
+    sharing the two catch blocks         raw +30 / +33 / +33   NOT TAKEN
+
+Two squeezes were attempted and both are in those numbers. Assigning `code`
+unconditionally rather than behind a `!== undefined` guard is **-14 B raw** and
+is also the shape-stable form `okResult` / `errResult` already use, so every
+error the builder returns leaves with one hidden class.
+
+The second is the interesting one. The plan for this change argued that
+extracting the two byte-identical catch blocks into one helper would pay for the
+fix, on the grounds that `transports.ts`'s note declining exactly that
+("inline rather than shared with createHttpBridge, whose bundle has two bytes of
+headroom") had expired now that the bundle has 115. Measured: the extraction
+**costs 30 B raw** rather than saving. The abstraction is more expensive than the
+duplication, and the headroom was never what made it so. The extraction was
+reverted, and that note now carries the number under a `MEASURED:` prefix so the
+next reader does not re-derive it - which cost four builds here.
+
+Budgets raised by the remainder, which is the feature itself, with the per-piece
+table in `scripts/check-size.mjs`.
+
+**Fixture:** `tests/envelope-code.test.ts`, real bridges with only `fetch`
+stubbed, verified to FAIL against the pre-fix module on both defect cases while
+the controls pass. It carries two controls - the throw path still delivering
+`code`, and a 5xx delivering code and status - because a negative result is only
+evidence if the same probe fires where it must. One test was relabelled after
+the arming run: it was written to cover the `!res.ok` branch and turned out to
+drive the catch path, since a 503 throws. It stays as a control and says so,
+rather than claiming coverage it does not have. And `error.status` is
+deliberately NOT asserted on the envelope cases: on that path the response
+really is 200, so `status` is not a field being dropped but one that does not
+exist.
+
+### Fixed: `.code` on a transport error had two owners
+
+`defaultIsRetryable` read a `VC_` prefix on `.code` as proof the library minted
+it, and its docblock said so: "a backend code is not ours to interpret, while a
+`VC_` code is." The bridges write the BACKEND's body code into that same field,
+so the claim was false and a backend chose which branch of the predicate ran.
+Two directions, both counted in `tests/transport-code-owner.test.ts`:
+
+    code: 'VC_CORE_THROTTLED'   on a 422  ->  re-sent 3x  (the HTTP layer had refused to re-send it once)
+    code: 'VC_VALIDATION_FAILED' on a 503  ->  sent 1x     (a retryable status, suppressed from the wire)
+
+No hostile backend is needed. `VC_` is a convention nobody polices, and it has
+three claimants inside this repo already: `BusError`, `VcTestError` in
+`src/vitest-pure.ts` (a `VC_TEST_*` code family with no emitter), and whatever a
+body carries.
+
+**`.code` does not move, and that is the decision.** It stays the backend's on a
+transport error. The whitepaper documents it (section 5.7), the example
+controller's `fail()` promises it, and the catch path has delivered it since
+v1.20.0 - a released contract. What moves is the QUESTION: provenance now comes
+from `emitter`, which `BusError`'s constructor has always set and which no
+transport ever copies a body field into. A field the backend can write cannot
+answer "did the library write this".
+
+    - if (typeof code === 'string' && code.startsWith('VC_')) return RETRYABLE_CODES.has(code);
+    + if (e.emitter !== undefined) return RETRYABLE_CODES.has(e.code as string);
+
+That is the whole provenance fix and it is **smaller**: -25 B raw and -8 / -2 / -5
+brotli. `emitter` is on every `BusError` because the constructor defaults it to
+`'core'`, so nothing had to be added to make it reliable.
+
+**The other half: seven library-minted transport failures carried no code at
+all.** An unhandled backend redirect, a batch result that never came back, a full
+offline queue, a queued message that expired, a dead socket, a WS request
+timeout. Each was indistinguishable from an unclassified error, so each was
+retried to exhaustion - and for the redirect the retry cannot change the answer,
+it just issues `maxAttempts` requests to a backend that will redirect every time.
+
+They are `BusError`s now, through one `transportError` builder, with
+`emitter: 'transport'` - a `BusEmitter` member declared since v1.0 and never
+set by anything until now. Five new codes: `VC_TRANSPORT_REDIRECT`,
+`VC_TRANSPORT_PROTOCOL`, `VC_TRANSPORT_QUEUE_FULL`, `VC_TRANSPORT_CLOSED` and
+`VC_TRANSPORT_TIMEOUT`. The last one replaced reusing `VC_CORE_REQUEST_TIMEOUT`
+at the two WS timeout sites: that row says emitter `core` and "request() timed
+out waiting for a response", and from a transport both are false. A registry row
+costs nothing in these bundles, so the reuse traded two true rows for one
+half-true one. Each code carries `action` and a `context` holding the
+value a reader would inspect rather than read - the dropped envelope, the
+unmatched batch id, the redirect URL - so it travels beside the sentence instead
+of inside it, the rule `scripts/check-console-shape.mjs` enforces for console
+arguments.
+
+**The retry hole IS closed, and the previous entry predicted otherwise.** It said
+closing it "needs the `status` contract, which changes a documented shape". It
+does not. A refusal that arrives as `{ ok: false }` inside a 2xx means the server
+received, processed and refused, so it is not a transient transport failure and
+the transport is the layer that knows this. It says so by tagging the refusal
+`emitter: 'transport'`, and then an EXISTING rule answers: a transport error is
+retried only when its code is one of RETRYABLE_CODES' six, and a backend code
+is not one of those. No status is stamped on a response that carried 200, no
+`response` is attached to make a predicate find one, and the "no status means
+retry" fallback is untouched for every non-HTTP consumer that depends on it. The
+three rejected approaches stay rejected; this is a fourth.
+
+**No new field, and that is the second decision.** This shipped for one commit
+as a `retryable: false` boolean on the error, which worked. It went for two
+reasons. It measured 19 B raw / 17 B brotli DEARER on the full IIFE (22/6 and
+22/4 on core and elements) than letting `emitter` carry it. And it was a
+string-keyed field on an error object built from a response body, which the
+predicate then obeyed unconditionally - the exact precondition that broke
+`.code`, which became a wire field additively over two releases. `emitter` is
+not a plausible wire field: a backend has no reason to claim to be a subsystem
+of this library, and it is written from string literals at every site in `src/`.
+`src/transports.ts` carries the do-not.
+
+**The residue, stated and pinned.** A 2xx refusal carries `emitter: 'transport'`
+while its `.code` is the BACKEND's, so a backend sending one of RETRYABLE_CODES'
+six exact strings gets that refusal retried. Bounded and one-directional, where
+the `VC_` prefix was unbounded and went both ways - and before this every 2xx
+refusal was retried, so it is strictly smaller than what it replaces. It has its
+own tests rather than a comment, and they enumerate the colliding strings FROM
+`RETRYABLE_CODES` so the size cannot drift from the set. Closing it completely is
+what the boolean bought, and it was not worth the shape.
+
+**Six, not seven, and that is the set getting smaller rather than the rule
+getting cleverer.** `VC_CORE_HANDLER_THREW` was in `RETRYABLE_CODES` while being
+minted by no site in `src/` - a dead code is still a live collision surface, and
+that one could only ever have matched a backend's string or a code a consumer
+built by hand. Removed with nothing able to regress, because nothing emitted it -
+and it PAYS rather than costs: MEASURED -24 B raw in all three IIFEs and -2 / -8 /
+-7 brotli, a set member being a string plus a comma. (An earlier draft of this
+entry said "at zero bytes", which was a guess, and wrong in the flattering
+direction.) Priced: a consumer throwing a `BusError` with that code from
+a handler is no longer retried by default and must pass its own predicate, which
+is what the corrected registry row now says. `RETRYABLE_CODES`' own docblock
+records that adding a member widens the wire-facing surface.
+
+**Cost, MEASURED per piece,** one build each, raw and brotli, full / core /
+elements. The full table is in `scripts/check-size.mjs`:
+
+    1 provenance from `emitter`            raw  -25 / -25 / -25   brotli  -8 /  -2 /  -5
+    2 the 7 codeless sites, 5 new codes    raw +174 / +89 / +89   brotli +54 / +35 / +42
+    3 `action` + `context` on those sites  raw +150 / +57 / +57   brotli +52 / +16 / +15
+    4 the 2xx refusal tagged `emitter`     raw  +55 / +49 / +49   brotli   0 / +10 / +12
+
+Squeezed first; three arms measured and not taken. `transportError` without its
+`context` parameter is -12 raw and -12 / -5 / -8 brotli, declined once the
+parameter earned its place. Dropping the builder for one shared
+`{ emitter: 'transport' }` const inlined at each site is a wash (full +19 raw /
+0 brotli, core -6 / -7, elements -6 / +5), so the named function stays as the one
+place saying which kind of error the transports mint. And row 4 as a `retryable`
+boolean is 19 / 22 / 22 raw and 17 / 6 / 4 brotli dearer than the tag.
+
+The five registry rows cost **nothing in these bundles**, and that scope is the
+whole claim - verified by grep, the `fix` strings appear 0 times in all three,
+because `/* @__PURE__ */` on `ERROR_CODE_REGISTRY`'s freeze still shakes the whole
+table out of a build that never reads it. A consumer who imports the registry does
+pay: the root barrel row in `docs/BUNDLE-SIZES.md` moved 23.3 -> 23.8 KB brotli
+across this work, rows and new code strings together. The fifth budget
+did not need raising either: the Blade consumer ESM bundle measures 6,342 against
+its 6,380 ceiling.
+
+Step 1 pays for itself and is the piece that fixes the defect; steps 2-4 are
+features, taken on the trade: a transport failure now carries a code a consumer
+can switch on and `getErrorEntry(code).fix` can explain, an emitter a logger can
+route on, and an action.
+
+**Fixture:** `tests/transport-code-owner.test.ts`, real bridges with only `fetch`
+stubbed, counting HTTP requests rather than inspecting fields, because an attempt
+count is what the defect cost. Verified to FAIL on all three defect cases against
+`git show HEAD:` copies of every touched module. Two controls, and both PASS
+against the pre-fix module, which is what makes the three failures evidence: with
+no `code` the status rule still decides 503 -> 3 and 422 -> 1, and a transport
+failure with a retryable code is still retried - so `emitter: 'transport'` cannot
+have become a blanket "never retry" that would pass the first three assertions
+for the wrong reason.
+
+**Not addressed, and not from a "0 consumers" reading.** `VcTestError`
+(`src/vitest-pure.ts`) carries a `VC_TEST_*` code and no `emitter`, so it is the
+one library error class the new provenance rule does not recognise. No path puts
+one in a `CommandResult` today. `ERROR_CODE_REGISTRY` calls itself the complete
+registry of all `BusError` codes and nothing asserts that; a code added without a
+row would make it false silently, which is the same shape as the incomplete
+plugin catalogue found in whitepaper section 8.
+
+### `HttpError` is a class, and four hand-assembled sites are one call
+
+It was `Error & { ... }` since v0.4. A type cannot be called, so four places
+built the shape by hand: the non-2xx and timeout constructors in `http.ts`, and
+the two catch blocks in `transports.ts` that re-assemble it field by field to
+swap in the backend's own message. Each spelled the same four assignments out and
+each was free to forget one. That is not hypothetical - it is how the envelope
+paths came to drop `code` while the catch path twelve lines away kept it, the
+defect the entry above this one fixed.
+
+Nothing about the shape moved: the same five fields under the same names, and
+`HttpError` still names a type wherever it did, because a class declaration
+declares one. `index.ts` re-exports it as a type only, so the constructor is not
+new public surface and stays shakeable out of a barrel import.
+
+**Three shapes were measured**, one build each, brotli, full / core / elements:
+
+    class (shipped)               12,011 / 8,125 / 8,638
+    plain factory function        12,030 / 8,128 / 8,645
+    one Object.assign expression  12,021 / 8,131 / 8,642
+
+The class is smallest in all three. It is 34 B LARGER raw in all three, and raw
+is the ceiling that absorbs toolchain drift rather than the headline number - the
+budget comments have said brotli is the meaningful metric since the Vite 8 move.
+
+It is also the only one of the three that can be EXTENDED: a factory returns an
+intersection nobody can subclass, and `Object.assign` returns a shape with no
+identity at all. That is the tie-break the bytes did not need to make here, and
+it is the reason to prefer it when they are this close.
+
+`instanceof` is deliberately not what this buys. Using it to tell a library error
+from a backend one was considered and dropped - `emitter` answers provenance, and
+answers it for a plain object too.
+
+**Cost: +72 raw / +71 / +71 and +8 brotli / -9 / +2.** Not a saving, and it was
+not taken as one. `core` gets smaller; `full` pays 8 bytes. What it buys is that
+a site can no longer omit a field. The Blade consumer ESM bundle measures 6,344
+against its 6,380 ceiling, so that budget still does not move.
+
+The note in `transports.ts` that priced sharing the two catch blocks stays, with
+its number intact, and now says why this is not the case it declined: that
+measurement was for a new shared HELPER, +30 B raw. Both sites call a CONSTRUCTOR
+the layer below had to have anyway, so the shared code is paid for once by
+`http.ts` rather than added.
+
+### BREAKING: `sync` is now `createChannel`
+
+`sync(opts)` -> `createChannel(opts)`, `SyncOptions` -> `ChannelOptions`,
+`SyncLane` -> `ChannelLane`. Same module, same behaviour, same options. The
+section below is the change this one finishes.
+
+**The name promised the one thing the mechanism cannot do.** That section ends
+with a paragraph headed "What it still does not do": facts mirror but seeds do
+not, a context opened later does not catch up, and tabs converge only when the
+facts are absolute. A name needing a defensive paragraph is the defect. And
+`sync` was the only bare verb among the primitives - `createCommandBus`,
+`createFastLane`, `createChamber`, `createWorkflow`, `createHttpClient`,
+`createOutbox`, `createTestBus` - so it read as a verb you call rather than a
+handle you hold and close.
+
+It also kept being mis-filed. Seven documentation sites listed it among the bus
+plugins after it stopped being one, in README, ROADMAP, both migration guides,
+the whitepaper's catalogue and an example, and one claimed the plugin pipeline
+"applies automatically" to it, which it cannot.
+
+`createChannel` pairs with `createFastLane` on the axis that matters: a lane is
+local, a channel crosses contexts. It also uses the word the API already uses
+for its own option (`channel`).
+
+**Names rejected, with the reason each failed:**
+
+- `createTabBridge` - names one example. The implementation is a bare
+  `new BroadcastChannel(...)`, which reaches every same-origin context: tabs,
+  windows, iframes and workers. Encoding "tab" in the name of a general
+  mechanism is the defect it was meant to fix.
+- `createBroadcastBridge` - "broadcast" is redundant with "channel", and
+  "bridge" is the wrong family. All five `create*Bridge` attach to the BUS
+  (`bus.use(createHttpBridge(...))`, `realtime.install(bus)`). This takes a
+  lane and never sees a dispatch, so filing it as a bridge repeats the plugin
+  mistake one level over.
+
+**Migration** is the call site and the import:
+
+    - import { sync } from 'vapor-chamber'
+    + import { createChannel } from 'vapor-chamber'
+
+    - const tabSync = sync({ channel, lane, events })
+    + const tabSync = createChannel({ channel, lane, events })
+
+**Cost: +9 B raw / +2 B brotli, on the full IIFE only.** That is the whole of
+it, and it is irreducible: `createChannel` appears exactly ONCE in the built
+bundle, as the export key, so 13 characters replace 4. Verified by grep - one
+occurrence in `vapor-chamber.iife.min.js`, zero in core and elements, which
+stay byte-identical and serve as the control. The budget was raised rather than
+squeezed because there is nothing to squeeze: the cost is the public name, once,
+with no dead weight beside it to trade. The one string the rename touched, the
+non-cloneable-payload warning, is DEV-gated and folds out of that build - its
+wording also dropped "to other tabs", which was inaccurate for the same reason
+`createTabBridge` was.
+
+Also corrected while renaming: README's plugin list had "cross-tab sync" among
+the plugins, and ROADMAP's capability list had it under Transports as a
+"cross-tab" bridge. Neither is a plugin and neither is tab-scoped.
+
+### `buildRunner` is `@internal`, and the reference stops advertising it
+
+It sat in the root barrel with a full section in the generated reference, while
+every mention of it in prose treats it as internals - `docs/performance.md` calls
+it "buildRunner's PERF NOTE", the whitepaper twice describes it as the sync
+runner. Nothing outside `src/` imports it: `src/testing.ts` takes it relatively
+from `./command-bus`, and `command-bus.ts` uses it internally. No test, no
+example, no documented consumer call.
+
+**Not a removal.** The export stays exactly where it is, so anything that did
+reach for it keeps working - the no-removal-on-zero-consumers rule respected
+rather than argued around. One JSDoc tag, no code, and the `@internal` filter
+`generate-api-docs.mjs` already applies does the rest; an existing mechanism, not
+a new one. The reference goes from 459 to 458 exports, the root entry from 196 to
+195. The existing PERF NOTE above the function is untouched: the new block sits
+between it and the declaration, where TypeScript reads it.
+
+### Fixed: the API reference published a name nobody can import
+
+Two defects in the generated reference, both live in the output rather than stale
+files - regenerating before the fix produced no diff.
+
+**A name that does not compile.** `getExportsOfModule()` is mapped through
+`resolve()` so that `@internal` and the type come from the declaration, and that
+also renamed the symbol. A declaration's name is not always the public one:
+`src/vitest.ts` does `export { expect }` on a binding Vitest declares as
+`globalExpect`. So `docs/api/vitest.md` listed `globalExpect` under Variables,
+documented its signature, and never mentioned `expect` - while that module's own
+JSDoc tells you to write `import { expect, it } from 'vapor-chamber/vitest'`. The
+same shape as the `v-vc:payload` drift: a documented spelling that nothing
+compiles. Fixed by keeping the export name BESIDE the resolved symbol instead of
+in place of it, in a map rebuilt per entry point, because one declaration can be
+exported under different names by different entries and the program is shared.
+
+**Every SCREAMING_SNAKE entry in a Contents list was a dead link.** `anchor()`
+folded `_` into `-`, but GitHub's slugger keeps underscores, so
+`ERROR_CODE_REGISTRY` anchored as `error_code_registry` while the link said
+`error-code-registry`. Seven of them. The sections were present and correct; only
+the navigation to them was broken.
+
+Also here: `scripts/stamp-docs.mjs` claimed "a fresh checkout has
+docs/metrics.json (committed)". It does not - `.gitignore` ignores it
+deliberately, because the counts depend on what else has run and a committed copy
+would churn. The ignore is right and the comment was its opposite, and the cost it
+hid is worth one line: a marker whose source is absent renders exactly like a
+current one, and `--check` reports it current having had nothing to compare
+against. Twelve `vc:bench*` markers are that set.
+
+### Fixed: the ascii guard raced the A/B tests' generated tree
+
+`npm run test:run` failed intermittently on a file that is not on disk -
+`ENOENT: tests/__ref/before-cancel/before-cancel-pre.ts`, from
+`tests/ascii-guard.test.ts` - while the same file passed 15/15 on its own. Each
+`tests/*-ab.test.ts` writes `tests/__ref/<name>/` while it runs and removes it
+afterwards, and eight of them do, so a vitest run has several writers going at
+once. The guard's test collects paths into one list and reads them later, which
+turns that race into an ENOENT on a path that existed at walk time.
+
+`__ref` joins `SKIP_DIRS` in `scripts/check-ascii.mjs`, beside `dist` and
+`coverage`, which is where a generated tree belongs. One directory name fixes both
+readers - the guard's own walk and the test's unfiltered one, since the test
+imports `SKIP_DIRS` rather than keeping its own list.
+
+NOT fixed by catching ENOENT in the reader, which is the other obvious way: that
+would make the guard able to skip a real file silently, and a guard that can do
+that is worse than the flake. Verified both directions - the guard still scans its
+full set and still REJECTS an em dash injected into `src/dev.ts`, because a skip
+rule that quietly matched too much would be indistinguishable from a working
+guard.
+
+### `gate.mjs` advertised a flag it no longer implements
+
+Its usage block offered `node scripts/gate.mjs [--expect-stamp-drift]`. The flag
+is gone - the docblock says so nine lines later ("it was a countdown, not a
+setting, and a second use would have made it one") and the implementation went
+with it. Only the usage line survived, documenting an option that does nothing,
+and passing it is silently accepted as an unknown argument: the worst of the three
+possible behaviours, because a reader who follows the usage line believes stamp
+drift is being tolerated when the check is unconditional.
+
+### Documentation: fourteen false claims, and one drift direction worth naming
+
+Every tracked document that had never been read end to end was read end to end,
+each claim checked against source before reading for sense. What that found, by
+file:
+
+- **ROADMAP.md** - "we align on rc.8" while the pin reads rc.9, and a header line
+  that read "Last reviewed against Vue 3.6.0-rc.8". The file carried FIVE
+  `vc:vueAligned` markers: four were stamped and correct the whole time, and only
+  the one hand-typed mention was stale. It is a marker now. Also: the prose plugin
+  list omitted `optimisticUndo` and `supersede`, and the feature matrix - which
+  that file calls "the single source of truth for feature status" - omitted
+  `supersede` entirely, a public export since v1.9.0. And "Four pieces have landed
+  under it" was two short.
+- **CONTRIBUTING.md** - `plugins-io.ts` still listed `sync` as a plugin;
+  `directives.ts` named one Vapor directive where there are three; and
+  `npm run gate` appeared ZERO times, in the file whose Workflow section lists
+  seven commands and says "the order is part of the gate". It is now the first
+  thing that section offers, with its two traps: it wants a committed tree, and
+  `| tail` masks its exit code.
+- **docs/integrations/laravel.md** - it told backend authors `code` does not
+  survive a 200 body and to read it back only from a throw. Also added, because
+  nothing said it: a redirect is a FAILED dispatch whether or not `onRedirect` is
+  wired, it carries `VC_TRANSPORT_REDIRECT` and `error.context.url`, and `retry()`
+  will not re-send it.
+- **docs/integrations/vitest.md** - the Diagnostics section enumerates what a
+  `VcTestError` carries, and it gained a field this cycle.
+- **examples/vapor-island-cart/README.md** - called `createChannel` a plugin and
+  counted "four plugins", while its own `src/store.ts` says "the bridge is NOT a
+  bus plugin", uses `createFastLane()`, and has three `bus.use` calls. The rename
+  swept the name and left the semantics, which is what v1.22.0 actually changed.
+- **examples/exo-astro/README.md** - "vapor-chamber itself still runs on Node
+  >= 20.19; only this example carries the higher bar". The root `engines.node` is
+  `>=22.12.0`, so there is no higher bar. True once; the root floor moved up.
+- **examples/vapor-sfc/README.md** - a file tree that reads as complete, missing
+  one file.
+
+Source comments in the same pass: four modules stopped calling the alignment log a
+table, `src/glyphs.ts` and `src/store.ts` lost three citations to files that never
+existed, `src/iife-elements.ts` and `src/mcp.ts` stopped carrying `@example`s that
+instruct the reader into a no-op, and `src/plugins-io.ts` records what happens when
+a backend uses the `VC_` prefix.
+
+**The drift direction worth naming, because nothing watches for it.** A doc that
+correctly describes a LIMITATION acquires an expiry date the moment someone sets
+out to remove the limitation. It does not drift away from the code; the code moves
+to meet it, and the sentence stays internally coherent, cites real behaviour, and
+is exactly what a reader trusts. Two instances landed in one day, both about
+`code` not surviving an envelope failure - the page and the PHP docblock each said
+so accurately, and then the client was fixed. When a commit removes a limitation,
+grep for the words that documented it.
+
+Two checks earned their place and one did not. A document that carries the same
+fact as BOTH a `vc:` marker and a hand-typed literal will drift at the hand-typed
+one - that is how ROADMAP broke, and it is worth grepping a file for a marker
+family and then for that value outside a marker. Where a runnable example ships
+for a documented pattern, diff them; three of this pass's sharpest finds came from
+an example contradicting its own README. And a scan for staleness BY VALUE cannot
+see staleness by mismatch: it finds a current value typed by hand, never an old
+one, which is why "we align on rc.8" survived the first sweep of the same file.
+
+### Upgrade note: your OWN Vapor directives, if they take an argument
+
+v1.22.0's rc.9 notes cover this library's directives. The same Vue change
+reaches any Vapor directive a consumer wrote: from rc.9 (#15490) the third
+parameter is a getter, `() => Arg`, not the string. Code written against rc.8
+that reads it as a string fails only in a COMPILED template, so tests that
+hand-write the `withVaporDirectives` tuple stay green. Reported by
+`vapor-chamber-router-wire`: `v-wire:title` threw `path.split is not a
+function` on every compiled template while six hand-tuple tests passed.
+
+    - function vMine(el, value, argument, modifiers) { use(argument) }
+    + function vMine(el, value, argument, modifiers) { use(argument?.()) }
+
+`tests/compile-vapor.ts` is the fixture that catches it; compile the template
+on the installed Vue rather than writing its output by hand. If a vitest config
+aliases `vue` to the with-vapor build, make it `{ find: /^vue$/ }` - a string
+key also rewrites `vue/compiler-sfc`, and `vitest.vapor.config.ts` here now
+does the same.
+
+### Fixed: one refused command no longer holds the outbox forever
+
+`runFlush` stopped at the first failed replay of ANY kind and kept that record
+at the head. That is right for a transient failure - order is preserved and the
+next flush retries from the same spot - and wrong for a refusal: the server has
+already answered, so every flush re-sent the same record, got the same answer,
+and the records queued behind it never left. Measured with the reference
+controller's batch shape, one refused record ahead of two good ones:
+
+    flush 1: { replayed: 0, failed: 1 }  pending 3
+    flush 2: { replayed: 0, failed: 1 }  pending 3
+    flush 3: { replayed: 0, failed: 1 }  pending 3
+
+The only way out was `clear()`, which drops the good records too, and
+`'outboxFlushed'` did not say which record was stuck.
+
+A failure the SERVER gave as its verdict on the command is now final: the record
+is dropped, `'outboxRejected'` fires with `{ record, error }` so the app can tell
+the user or re-queue it, and the flush moves on. "Verdict" by default means a
+refusal inside a 2xx, or a 4xx other than 401, 408, 419 and 429. Everything else
+still blocks exactly as before - a 5xx, a network failure, and every error the
+library raised itself (a plugin that threw, a handler not registered yet, a
+redirect) - because dropping a queued command over a client-side failure loses
+the user's data. The two existing tests that pin "nothing was lost" for those
+cases are unchanged and pass.
+
+Which failures are final is the app's call, so it is an option:
+`createOutbox({ isRetryable: (error, record) => boolean })`. It sees the record,
+so the rule can be per action and in the backend's own codes; `() => true`
+restores the old block-on-everything behaviour.
+
+**Changed shape:** the flush summary gains `rejected` -
+`{ replayed, failed, rejected }`, from `flush()` and on `'outboxFlushed'`.
+
+**Fixture:** `tests/outbox-refusal.test.ts`, real bridges with only `fetch`
+stubbed - a batched refusal and a single-endpoint 422 at the head are rejected
+and the rest replay; 401, 429 and 500 are kept; the app's predicate overrides
+both ways. All 8 cases fail against the pre-fix module.
+
+### Fixed: `onRedirect` never fired with the reference controller, and the batching bridge ignored it
+
+Two halves of one feature, each broken on its own, measured by running the real
+controller under Laravel and feeding its output to the real bridge.
+
+**The controller.** `docs/integrations/laravel.md` tells an action to hand a
+navigation back with `return ['redirect' => route('login')]`. The controller
+wrapped every return value as `state`, so it answered
+`{"ok":true,"state":{"redirect":"/login"}}` - and both bridges read `redirect`
+at the TOP of the envelope. Fed that exact body, `createHttpBridge` with
+`onRedirect` set: `onRedirect calls: 0 | result.ok: true | value: {"redirect":"/login"}`.
+The documented recipe had never navigated. `dispatchOne()` now lifts exactly
+that shape - an array whose only key is `redirect` - to `{ redirect }`, and per
+result on `batch()`. A state that merely contains a `redirect` key is still
+data.
+
+**The batching bridge.** `BatchingHttpBridgeOptions` extends
+`HttpBridgeOptions`, so it has always ACCEPTED `onRedirect`, and never read it:
+a redirect result resolved as a success. It now fails that command with
+`VC_TRANSPORT_REDIRECT` and `context.url`, as the single bridge does, and calls
+`onRedirect` once per batch with the first URL - two navigations in one tick
+race. `BackendResponse` gains the `redirect?: string` field the single bridge
+was already reading untyped.
+
+**Fixture:** `tests/batch-redirect.test.ts` - a redirect beside a normal
+result, two redirects in one batch, no `onRedirect`, and the single bridge as
+the control. The three batch cases fail against the pre-fix module; the
+control passes on both.
+
+### Fixed: the ascii guard's test failed outside a git checkout
+
+`tests/ascii-guard.test.ts` lists the tracked root files with `git ls-files`
+at collection time. In a copy that is not a git checkout - a release folder, an
+extracted tarball - that threw, and the whole file failed with 0 tests: a false
+failure, and its other 14 checks never ran. It now falls back to every regular
+file in the root, which is a SUPERSET of what git tracks, so the check is never
+weaker there. Armed both ways: with the guard's `rootFiles()` stubbed to return
+nothing, the fallback fails the assertion it exists for; restored, 15/15 pass,
+in a checkout and out of one.
+
+### Documentation: three whitepaper claims and one integration-guide claim
+
+- `whitepaper.md`, the plugin table: the batching bridge had "Same options and
+  backend contract". Its `retry` covers a failure of the whole POST only; a
+  command refused inside the batch arrives with the backend's `code`, and
+  re-sending it is the app's `retry({ isRetryable })`. Section 11.7 now shows
+  that, scoped to the bridged actions.
+- `whitepaper.md`, the `retry` example: `isRetryable: (err) => err.message !==
+  'Unauthorized'` matched nothing the library emits (`authGuard` says
+  "Unauthorized: X requires authentication"). It now shows the app's rule in
+  the backend's own codes, and says the predicate replaces the default.
+- `whitepaper.md`: the module map still listed `sync` in `plugins-io.ts`, and
+  the store row still called it `sync`.
+- `integrations/laravel.md`: "a failure inside a 2xx ... you refused in the
+  body" is false on the batch endpoint, where a crash (`internal_error`, 500 in
+  `dispatchOne()`) is delivered inside the same 200. It says so now, and shows
+  the app-owned rule.
+
 ## v1.22.0 - 2026-09-21 Vue 3.6.0-rc.9 alignment
 
 89 commits in `v3.6.0-rc.8..v3.6.0-rc.9` (the full log, not first-parent; the

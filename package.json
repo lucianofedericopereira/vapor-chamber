@@ -1,6 +1,6 @@
 {
   "name": "vapor-chamber",
-  "version": "1.22.0",
+  "version": "1.23.0",
   "description": "Lightweight command bus for Vue Vapor - plugins, hooks, undo/redo, Vue 3.6 Vapor aligned",
   "type": "module",
   "main": "./dist/index.js",
@@ -201,7 +201,7 @@
     "size:doc": "node scripts/measure-size.mjs --md > docs/BUNDLE-SIZES.md",
     "coverage": "node scripts/measure-coverage.mjs",
     "coverage:doc": "vitest run --coverage && node scripts/measure-coverage.mjs --md > docs/COVERAGE.md",
-    "check:example": "npm --prefix examples/vapor-sfc run build && node scripts/check-example-directive.mjs && npm --prefix examples/vapor-island-cart run build",
+    "check:example": "npm --prefix examples/vapor-sfc run build && node scripts/check-example-directive.mjs && npm --prefix examples/vapor-island-cart run build && npm --prefix examples/exo-astro run build",
     "loc": "node scripts/measure-loc.mjs src",
     "docs": "node scripts/generate-api-docs.mjs",
     "docs:serve": "node scripts/serve-docs.mjs",

@@ -36,7 +36,7 @@ command handler. Sector A dispatches named commands onto the bus without knowing
 who handles them; Sector B reads reactive state without knowing who wrote it.
 The two sectors are fully decoupled, and because the bus instance is already
 there, the whole vapor-chamber plugin pipeline (logging, validation, history,
-persist, sync) applies automatically.
+persist) applies automatically.
 
 Local state is not an exception to that rule: a binding reads from the nearest
 `v-scope` that **declared** its head key and falls through to the global bus
@@ -73,8 +73,10 @@ exactly this case.
 
 ## Run
 
-Needs **Node ≥ 22.12** - Astro 7's own floor. (vapor-chamber itself still runs
-on Node ≥ 20.19; only this example carries the higher bar.)
+Needs **Node ≥ 22.12**, which is Astro 7's own floor and also the library's:
+the root `engines.node` is `>=22.12.0`. This note used to add that
+vapor-chamber itself ran on Node >= 20.19 and that only this example carried
+the higher bar - true once, and false since the root floor moved up.
 
 ```bash
 cd examples/exo-astro

@@ -2,7 +2,7 @@
  * vapor-chamber - SSR hydration plugin
  *
  * Vue alignment history (one line per version - full per-item detail lives in
- * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table):
+ * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log", section 9.2):
  *   vNext / rc.2 - pass-through. Four hydration fixes land below rehydrate()'s command
  *            replay, which sits ABOVE Vue's DOM hydration and only ever hands it a
  *            more-correct DOM: slot anchor created for unwrapped interop slot content

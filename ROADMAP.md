@@ -3,11 +3,15 @@
 This project tracks Vue 3.6 through its **release-candidate** phase (rc.1
 landed 2026-07-18; rc.2 on 2026-07-22; rc.3 on 2026-08-11; rc.4 on 2026-08-14;
 rc.5 on 2026-08-21; rc.6 on 2026-08-28; rc.7 on 2026-09-04; rc.8 on
-2026-09-11). That phase decides what is stable, what is transitional, and what
-will change once Vue 3.6 ships stable; this file is the source of truth for the
-distinction.
+2026-09-11; rc.9 on 2026-09-21). That phase decides what is stable, what is
+transitional, and what will change once Vue 3.6 ships stable; this file is the
+source of truth for the distinction.
 
-Last reviewed against **Vue 3.6.0-rc.8** (2026-09-11).
+Aligned to **Vue <!-- vc:vueAligned -->3.6.0-rc.9<!-- /vc:vueAligned -->** - the
+`vue` devDependency pin, stamped rather than typed, so it cannot fall behind the
+package again. What each cycle actually reviewed, with commit counts and what it
+found, is the alignment table in whitepaper section 9. How a cycle is run is
+`docs/rc-alignment.md`; the per-cycle record is `docs/rc-alignment-log.md`.
 
 ---
 
@@ -35,7 +39,8 @@ runway, not the waiting room.** The freeze above still governs ordinary feature
 requests, and its real job is unchanged - standing pressure to justify every
 byte with evidence. What changed is the conclusion drawn from a tiny userbase
 and a pre-release peer dep. This repo's own history is the argument: the bus
-hardened over the betas, and the router was built and realigned from rc.1 to rc.8.
+hardened over the betas, and the router was built and realigned from rc.1 onward,
+through every RC since.
 Waiting for stable buys safety at the cost of arriving unproven. Building now
 means v2.0 at stable is the promotion and semver stabilization of a system that
 has already survived N alignment cycles, not a construction start.
@@ -43,9 +48,11 @@ has already survived N alignment cycles, not a construction start.
 A piece may therefore land experimental in a 1.x minor once it clears the
 v1.17.0 template: measured cost, what it buys, fixtures to the house standard.
 "Improves the architecture" clears that bar and "change for its own sake" does
-not. Four pieces have landed under it - `revalidateRoutes`,
-`vapor-chamber/router/vapor`, `vapor-chamber/store` and `vcCommandVapor` - each
-shipping independently, each with a dated row in `docs/decisions.md`. **At stable the remaining work is arrival, not
+not. Six pieces have landed under it - `revalidateRoutes`,
+`vapor-chamber/router/vapor`, `vapor-chamber/store`, `vcCommandVapor`,
+`vcPayloadVapor` and `vcOptimisticVapor` - each shipping independently, each with
+a dated row in `docs/decisions.md`, which is the test this sentence states and so
+the only thing that decides whether a later piece belongs in this count. **At stable the remaining work is arrival, not
 construction:** re-measure every number, run the v2.0 identity decision over a
 proven surface, stabilize semver.
 
@@ -206,11 +213,14 @@ Vue 3.6 stable:
 - **Command bus** - `createCommandBus`, `createAsyncCommandBus`, plugins,
   hooks, before-hooks, wildcard listeners, request/response, batch, query,
   emit, meta, BusError, introspection.
-- **Transports** - HTTP, WebSocket, SSE bridges. Independent of Vue.
+- **Transports** - HTTP, WebSocket, SSE bridges, and `createChannel`, a fact
+  bridge over BroadcastChannel (not a bus plugin: it takes a fast lane, not the
+  bus). Independent of Vue.
 - **Plugins** - logger, validator, history, debounce, throttle, authGuard,
-  optimistic, retry, persist, sync, cache, circuitBreaker, rateLimit, metrics,
-  serialize (per-key sequential processing, async),
-  idempotent (collapse duplicate commands + stamp Idempotency-Key).
+  optimistic, optimisticUndo, retry, persist, cache, circuitBreaker, rateLimit,
+  metrics, serialize (per-key sequential processing, async),
+  idempotent (collapse duplicate commands + stamp Idempotency-Key),
+  supersede (abort the previous in-flight dispatch for the same key).
 - **Schema / LLM layer** - bus -> tool-call adapters for Anthropic / OpenAI.
 - **Form bus** - reactive form state with async validation.
 - **HTTP client** - fetch wrapper with CSRF, interceptors, dedup.
@@ -431,12 +441,21 @@ plugin's install-time "not ported to Vapor" warning is gone.
 ### `createVaporChamberApp` will become a soft-deprecated convenience
 
 When Vue Vapor is absent it throws a clearer error than `createVaporApp` would,
-which helps discoverability during beta. Post-stable, point users at
+which helps discoverability while Vue 3.6 is in RC. Post-stable, point users at
 `import { createVaporApp } from 'vue'` directly.
 
-**Plan, and its status:** JSDoc `@deprecated` was planned for v1.3 and has not
-been applied: there is no `@deprecated` tag on it at v1.17.0. The plan
-(soft-deprecate, working through v2) stands, and it is outstanding, not done.
+**Status: not due.** The `@deprecated` JSDoc is a "What flips at Vue 3.6
+stable" item, owed by v2.0.0. Vue is at
+<!-- vc:vueAligned -->3.6.0-rc.9<!-- /vc:vueAligned -->, so the trigger has not
+fired.
+
+Holding the tag is deliberate. While Vapor ships only in a physically separate
+dist, the clear throw is the feature: `createVaporChamberApp` names which of
+"Vue absent", "Vue without Vapor" and "Vue unreachable" happened, and
+`createVaporApp` names none of them.
+
+Nothing is removed before v2.0. Soft-deprecation here means a JSDoc tag and a
+doc pointer: no runtime warning, no behaviour change, no break.
 
 ## Variant contents are not under semver before v2.0
 
@@ -704,8 +723,8 @@ line used to name the build-flag wrapper-elimination work and call it blocked on
 Vue 3.6 RC. Both halves are dead: that apparatus was **withdrawn at rc.3**, not
 deferred, and `configureVue()` replaced it (see "Thin Vapor wrappers will become
 opt-in via build flag" above); and the RC gate it waited on has since passed (we
-align on rc.8). The two statements sat in the same file contradicting each
-other for two cycles.
+align on <!-- vc:vueAligned -->3.6.0-rc.9<!-- /vc:vueAligned -->). The two statements sat in the same file
+contradicting each other for two cycles.
 
 For performance characteristics, optimization philosophy, and tuning options
 see [docs/performance.md](./docs/performance.md).
@@ -770,13 +789,14 @@ single source of truth for feature status).
 | `optimisticUndo` - auto-rollback via registered undo handlers | `plugins-core` | ✅ v1.0 | ✅ covered |
 | `retry` with configurable backoff + glob filter | `plugins-io` | ✅ v0.4.2 | ✅ 100% lines |
 | `persist` (localStorage / custom storage) | `plugins-io` | ✅ v0.4.2 | ✅ covered |
-| `sync` (BroadcastChannel cross-tab) | `plugins-io` | ✅ v0.4.2 | ✅ covered |
+| `createChannel` (BroadcastChannel, same-origin contexts) | `plugins-io` | ✅ v0.4.2 | ✅ covered |
 | `cache` - LRU query result caching with TTL + glob filter | `plugins-extra` | ✅ v1.0 | ✅ covered |
 | `circuitBreaker` - per-action closed/open/half-open resilience | `plugins-extra` | ✅ v1.0 | ✅ covered |
 | `rateLimit` - per-action sliding window limiter | `plugins-extra` | ✅ v1.0 | ✅ covered |
 | `metrics` - lightweight telemetry (count, duration, errorRate) | `plugins-extra` | ✅ v1.0 | ✅ covered |
 | `serialize` - per-key sequential processing (async; prevents same-key races; `scope:'cross-tab'` via Web Locks) | `plugins-extra` | ✅ v1.5 | ✅ covered |
 | `idempotent` - collapse duplicate commands (double-submit/retry); stamps `Idempotency-Key` for the HTTP bridge | `plugins-extra` | ✅ v1.5 | ✅ covered |
+| `supersede` - aborts the previous in-flight dispatch for the same key (async bus; the stale request is cancelled, not ignored) | `plugins-extra` | ✅ v1.9.0 | ✅ covered |
 
 ### Utilities
 

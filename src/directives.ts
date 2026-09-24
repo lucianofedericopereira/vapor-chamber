@@ -2,7 +2,7 @@
  * vapor-chamber - Directive plugin (opt-in, 0KB when not imported)
  *
  * Vue alignment history (one line per version - full per-item detail lives in
- * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table):
+ * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log", section 9.2):
  *   v1.22.0 - LIB-SIDE: THE SELECTOR MOVED OUT OF THE ARGUMENT AND INTO THE
  *          NAME. `v-vc:command` is now `v-vc-command`, matching
  *          `v-vc-payload` and `v-vc-optimistic`, which were always spelled
@@ -304,7 +304,23 @@ function removeDelegatedElement(doc: Document | null): void {
 // CSS classes added to the element:
 //   vc-loading  - while the dispatch is in flight
 //   vc-error    - when the last dispatch failed
-//   vc-success  - briefly added on success (removed after 1 tick)
+//
+// DO NOT put `:class` or `v-bind:class` on an element carrying this directive,
+// and do not bind `:disabled` on it either. The directive writes both directly:
+// `classList.add`/`remove` for the two classes above, and `el.disabled` on a
+// button. Vue diffs a binding against ITS OWN previous value, not against the
+// DOM, so the next update of that binding overwrites what the directive wrote
+// and the control silently stops showing that it is working. Nothing throws.
+// A STATIC `class="..."` attribute is fine and was measured so: it is applied
+// at mount and never re-patched, so it competes with nothing.
+//
+// A dispatch with NO target does not match `isLoading(action)`. The directive
+// substitutes `{}` when no target is present (see `data-vc-target` above),
+// while `isLoading(action)` asks for the key with no target at all, and those
+// are two different keys. The `vc-loading` CLASS still lands, so anything
+// styled off the class works while anything rendered off `isLoading` does not
+// - which is why this reads as a styling quirk rather than a mismatch. Give
+// the element a target, or drive the spinner off the class.
 
 const LOADING_CLASS = 'vc-loading';
 const ERROR_CLASS = 'vc-error';

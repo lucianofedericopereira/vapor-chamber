@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * Tests for src/dom.ts - installDomIntegration / stampActiveLinks.
+ * Tests for src/router/dom.ts - installDomIntegration / stampActiveLinks.
  *
  * dom.ts is otherwise excluded from this project's node-environment vitest
  * run (see vitest.config.ts) and was, until now, covered only by a browser

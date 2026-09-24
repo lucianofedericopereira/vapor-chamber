@@ -13,13 +13,13 @@ import { ... } from 'vapor-chamber/mcp';
 
 **Type aliases:** [`McpBus`](#mcpbus) [`McpHandlerOptions`](#mcphandleroptions) [`McpStdioOptions`](#mcpstdiooptions) [`McpTool`](#mcptool)
 
-**Variables:** [`MCP_SERVER_VERSION`](#mcp-server-version)
+**Variables:** [`MCP_SERVER_VERSION`](#mcp_server_version)
 
 ## Functions
 
 ### agentOrigin
 
-**Function** - [src/mcp.ts:135](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L135)
+**Function** - [src/mcp.ts:136](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L136)
 
 > **Deprecated.** Since v1.12.0 `meta.origin === 'agent'` is stamped by the core,
 from the `__origin` key {@link createMcpHandler} puts in the payload it
@@ -43,7 +43,7 @@ agentOrigin() => Plugin
 
 ### busToMcpTools
 
-**Function** - [src/mcp.ts:110](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L110)
+**Function** - [src/mcp.ts:111](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L111)
 
 ```ts
 busToMcpTools(schema: BusSchema) => McpTool[]
@@ -72,7 +72,7 @@ const tools = busToMcpTools({
 
 ### createMcpHandler
 
-**Function** - [src/mcp.ts:231](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L231)
+**Function** - [src/mcp.ts:232](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L232)
 
 ```ts
 createMcpHandler(bus: McpBus, options?: McpHandlerOptions) => (message: unknown) => Promise<object | null>
@@ -97,10 +97,10 @@ Protocol methods handled:
     `isError: true` on failure - tool errors are results, not JSON-RPC errors)
   - anything else with an `id` - JSON-RPC error `-32601` (method not found)
 
-Origin stamping: install {@link agentOrigin} on the bus
-(`bus.use(agentOrigin(), { priority: 150 })`) to stamp `meta.origin='agent'`
-on MCP-driven dispatches. See {@link agentOrigin} for the concurrency
-caveat on async buses.
+Origin stamping: MCP-driven dispatches carry `meta.origin='agent'` on their
+own, stamped onto the dispatch itself. Nothing to install. {@link agentOrigin}
+is a pass-through kept for compatibility and records why the plugin shape was
+wrong on an async bus.
 
 ```ts
 const handle = createMcpHandler(bus, { actions: ['cartGet', 'cartAdd'] });
@@ -140,7 +140,6 @@ the protocol stream. Log to stderr instead.
 ```ts
 // mcp-server.ts - spawned by an MCP client
 const bus = createSchemaCommandBus(schema);
-bus.use(agentOrigin(), { priority: 150 });
 registerHandlers(bus);
 const stop = serveMcpStdio(bus, { actions: ['cart*', 'productGet'] });
 process.on('SIGTERM', stop);
@@ -150,7 +149,7 @@ process.on('SIGTERM', stop);
 
 ### McpBus
 
-**Type alias** - [src/mcp.ts:144](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L144)
+**Type alias** - [src/mcp.ts:145](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L145)
 
 ```ts
 export type McpBus = {
@@ -163,7 +162,7 @@ Minimal bus surface the MCP layer needs - any schema bus (sync or async) satisfi
 
 ### McpHandlerOptions
 
-**Type alias** - [src/mcp.ts:149](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L149)
+**Type alias** - [src/mcp.ts:150](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L150)
 
 ```ts
 export type McpHandlerOptions = {
@@ -189,7 +188,7 @@ export type McpHandlerOptions = {
 
 ### McpStdioOptions
 
-**Type alias** - [src/mcp.ts:367](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L367)
+**Type alias** - [src/mcp.ts:368](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L368)
 
 ```ts
 export type McpStdioOptions = McpHandlerOptions & {
@@ -217,7 +216,7 @@ export type McpStdioOptions = McpHandlerOptions & {
 
 ### McpTool
 
-**Type alias** - [src/mcp.ts:41](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L41)
+**Type alias** - [src/mcp.ts:42](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L42)
 
 ```ts
 export type McpTool = {
@@ -237,10 +236,10 @@ An MCP tool definition, as returned by the `tools/list` method.
 
 ### MCP_SERVER_VERSION
 
-**Variable** - [src/mcp.ts:177](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L177)
+**Variable** - [src/mcp.ts:178](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L178)
 
 ```ts
-MCP_SERVER_VERSION: "1.22.0"
+MCP_SERVER_VERSION: "1.23.0"
 ```
 
 Version reported by the MCP `initialize` handshake.

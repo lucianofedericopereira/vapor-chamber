@@ -15,7 +15,7 @@ import { ... } from 'vapor-chamber/directives';
 
 ### createDirectivePlugin
 
-**Function** - [src/directives.ts:765](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L765)
+**Function** - [src/directives.ts:781](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L781)
 
 ```ts
 createDirectivePlugin() => { install(app: any): void; }
@@ -37,7 +37,7 @@ the whole branch folds out of a production build.
 
 ### vcCommandVapor
 
-**Function** - [src/directives.ts:602](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L602)
+**Function** - [src/directives.ts:618](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L618)
 
 ```ts
 vcCommandVapor(el: Element, value?: () => unknown, _argument?: () => unknown, modifiers?: Record<string, boolean | undefined>) => (() => void) | undefined
@@ -117,7 +117,7 @@ import { vcCommandVapor as vVcCommand } from 'vapor-chamber/directives';
 
 ### vcOptimisticVapor
 
-**Function** - [src/directives.ts:742](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L742)
+**Function** - [src/directives.ts:758](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L758)
 
 ```ts
 vcOptimisticVapor(el: Element, value?: () => unknown) => () => void
@@ -156,7 +156,7 @@ const bump = (cmd) => { count.value++; return () => { count.value--; }; };
 
 ### vcPayloadVapor
 
-**Function** - [src/directives.ts:707](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L707)
+**Function** - [src/directives.ts:723](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L723)
 
 ```ts
 vcPayloadVapor(el: Element, value?: () => unknown) => () => void

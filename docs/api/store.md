@@ -17,7 +17,7 @@ import { ... } from 'vapor-chamber/store';
 
 ### defineChamberStore
 
-**Function** - [src/store.ts:146](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store.ts#L146)
+**Function** - [src/store.ts:148](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store.ts#L148)
 
 ```ts
 defineChamberStore<S extends object, A extends Record<string, StoreAction<S>>>(id: string, options: ChamberStoreOptions<S, A>) => (bus: BaseBus, router?: StoreRouter) => ChamberStore<S, A>

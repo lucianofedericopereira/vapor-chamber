@@ -1,5 +1,5 @@
 import { reactive } from 'vue';
-import { createCommandBus, logger, persist, history as mkHistory, sync } from 'vapor-chamber';
+import { createCommandBus, logger, persist, history as mkHistory, createChannel } from 'vapor-chamber';
 import { createFastLane } from 'vapor-chamber/fast-lane';
 
 export interface Product {
@@ -69,7 +69,7 @@ bus.use(cartHistory);
 // Tab sync - the bridge is NOT a bus plugin: it listens on the lane and puts
 // `cartChanged` on a BroadcastChannel, so it costs the dispatch path nothing
 // and a derived command never leaks to the other tabs.
-export const tabSync = sync({ channel: 'vc:cart:vapor', lane, events: ['cartChanged'] });
+export const tabSync = createChannel({ channel: 'vc:cart:vapor', lane, events: ['cartChanged'] });
 
 // Persist
 const cartPersist = persist({ key: 'vc:cart:vapor', getState: () => ({ ...cart, runningTotal }) });

@@ -17,7 +17,7 @@ Two shared helpers sit here rather than in each example:
 | App | What it shows |
 |-----|---------------|
 | [`vapor-sfc/`](./vapor-sfc) | End-to-end `<script setup vapor>` SFC tree - three panels showing `useCommand`, `defineVaporCommand`, and `useSharedCommandState` side by side. |
-| [`vapor-island-cart/`](./vapor-island-cart) | Light-DOM Vapor custom-element islands coordinating through one bus (progressive enhancement: `logger` + `history` undo/redo + cross-tab `sync` + `persist`). |
+| [`vapor-island-cart/`](./vapor-island-cart) | Light-DOM Vapor custom-element islands coordinating through one bus (progressive enhancement: `logger` + `history` undo/redo + `createChannel` + `persist`). |
 | [`exo-astro/`](./exo-astro) | Five declarative directives for Astro pages (incl. `v-each`) - **dispatch before hydration** via `onMissing:'buffer'`. Its scanner is covered by [`tests/examples/`](../tests/examples/). |
 | [`laravel-app/`](./laravel-app) | Real, verified Laravel app (13.x on a current skeleton): Blade page -> core IIFE -> dispatch -> session-backed actions, with real CSRF (419/401). |
 | [`laravel-backend/`](./laravel-backend) | Drop-in PHP controller/action files - the backend half of a dispatch. |
@@ -28,7 +28,7 @@ Two shared helpers sit here rather than in each example:
 | File | Feature |
 |------|---------|
 | [`feature-command-group.ts`](./feature-command-group.ts) | `useCommandGroup` - namespace isolation |
-| [`feature-cross-tab-sync.ts`](./feature-cross-tab-sync.ts) | `sync` bridge - cross-tab coordination: a handler emits a fact, every other tab applies it (BroadcastChannel) |
+| [`feature-cross-tab-sync.ts`](./feature-cross-tab-sync.ts) | `createChannel` - a handler emits a fact, every other same-origin context applies it (BroadcastChannel) |
 | [`feature-error-boundary.ts`](./feature-error-boundary.ts) | `useCommandError` - component-scoped error boundary |
 | [`feature-persistence.ts`](./feature-persistence.ts) | `persist` plugin - localStorage / sessionStorage / custom storage (incl. IndexedDB) |
 | [`feature-retry.ts`](./feature-retry.ts) | `retry` plugin - configurable backoff for failed dispatches |

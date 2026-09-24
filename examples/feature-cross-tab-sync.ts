@@ -19,7 +19,7 @@ import {
   createCommandBus,
   setCommandBus,
   useCommandState,
-  sync,
+  createChannel,
   persist,
 } from 'vapor-chamber'
 import { createFastLane } from 'vapor-chamber/fast-lane'
@@ -56,7 +56,7 @@ bus.register('cartAdd', (cmd) => {
   })
 })
 
-const tabSync = sync({
+const tabSync = createChannel({
   channel: 'vapor-chamber:app',   // all tabs sharing this channel stay in step
   lane,
   events: ['cartChanged'],        // the wire contract, declared, not guessed at
@@ -77,11 +77,11 @@ lane.on('loggedOut', () => {
   window.location.href = '/login'
 })
 
-const authSync = sync({ channel: 'vapor-chamber:auth', lane, events: ['loggedOut'] })
+const authSync = createChannel({ channel: 'vapor-chamber:auth', lane, events: ['loggedOut'] })
 
 // ─── Dropping a fact on arrival ───────────────────────────────────────────────
 
-const notificationSync = sync({
+const notificationSync = createChannel({
   channel: 'vapor-chamber:notifications',
   lane,
   events: ['notificationCleared'],
@@ -112,7 +112,7 @@ bus.register('prefsSetTheme', (cmd) => {
   lane.emit('prefsChanged', { ...prefsState.state.value, theme: (cmd.target as UserPrefs).theme })
 })
 
-const prefsSync = sync({ channel: 'vapor-chamber:prefs', lane, events: ['prefsChanged'] })
+const prefsSync = createChannel({ channel: 'vapor-chamber:prefs', lane, events: ['prefsChanged'] })
 
 // User changes theme in Tab A -> persisted to localStorage AND mirrored to all tabs
 bus.dispatch('prefsSetTheme', { theme: 'dark', lang: 'en' })

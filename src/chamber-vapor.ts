@@ -2,7 +2,7 @@
  * vapor-chamber - Vue 3.6+ Vapor-specific API
  *
  * Vue alignment history (one line per version - full per-item detail lives in
- * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table, the single
+ * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log", section 9.2, the single
  * source of per-beta detail; this header records only changes to THIS file):
  *   rc.5 / rc.2 / rc.1 / beta.17 / beta.16 - pass-through. This file renders
  *          nothing; it forwards Vue's own define* functions, so rendering-side

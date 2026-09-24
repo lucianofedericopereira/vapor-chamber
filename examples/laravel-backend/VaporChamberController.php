@@ -138,7 +138,16 @@ class VaporChamberController extends Controller
             }
 
             $state = app($handler)($target, $payload, $user);
-            $body = ['ok' => true, 'state' => $state];
+            // An action hands a navigation back by returning exactly
+            // ['redirect' => url] (docs/integrations/laravel.md). Both bridges
+            // read `redirect` at the top of the envelope - per result on a
+            // batch - so it is lifted there. Wrapped as `state` it was a
+            // success whose value happened to be a URL, and `onRedirect` never
+            // fired. Only that exact shape is lifted: a state that merely HAS
+            // a `redirect` key among others is data, not a navigation.
+            $body = is_array($state) && array_keys($state) === ['redirect']
+                ? ['redirect' => $state['redirect']]
+                : ['ok' => true, 'state' => $state];
             if ($cacheKey) {
                 Cache::put($cacheKey, $body, self::IDEMPOTENCY_TTL_SECONDS);
             }
@@ -174,11 +183,22 @@ class VaporChamberController extends Controller
     }
 
     /**
-     * Failure shape: `error` becomes `result.error.message` on the JS side;
-     * `code` is exposed as the machine-readable `HttpError.code`. For
-     * __invoke() this is sent with the given HTTP status; for batch() every
-     * result rides in a 200 response body (status is per-command, not
-     * per-HTTP-response) so one command's failure can't fail its siblings.
+     * Failure shape: `error` becomes `result.error.message` on the JS side.
+     * For __invoke() this is sent with the given HTTP status, the client
+     * throws an HttpError, and `code` arrives as `HttpError.code`.
+     *
+     * For batch() every result rides in a 200 response body (status is
+     * per-command, not per-HTTP-response) so one command's failure can't fail
+     * its siblings. Nothing throws on that path, so no HttpError is built, and
+     * `code` still arrives: since v1.23.0 `result.error.code` is your `code` on a
+     * batched failure and on any 200 answering `{ ok: false }`, exactly as it is
+     * on a thrown one.
+     *
+     * One consequence worth knowing: a refusal delivered this way is treated as
+     * PERMANENT by `retry()`, because the request succeeded and you refused in
+     * the body. Do not send one of the library's own retryable codes here
+     * (`VC_CORE_THROTTLED` and five others) unless you mean the client to try
+     * again - use your own namespace and the refusal stays permanent.
      *
      * @return array{body: array<string, mixed>, status: int}
      */

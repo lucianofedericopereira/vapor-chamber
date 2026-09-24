@@ -2,7 +2,7 @@
  * vapor-chamber - Transition integration
  *
  * Vue alignment history (one line per version - full per-item detail lives in
- * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log" table):
+ * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log", section 9.2):
  *   rc.8 - pass-through, and a composition that did not work now does:
  *          VaporTransition's declared `on*` props merge across sources, so
  *          `<Transition v-bind="t" @enter="mine">` runs both hooks. rc.7 kept

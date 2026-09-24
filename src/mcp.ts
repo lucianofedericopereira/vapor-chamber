@@ -13,11 +13,12 @@
  *
  * @example
  * import { createSchemaCommandBus } from 'vapor-chamber';
- * import { createMcpHandler, agentOrigin, serveMcpStdio } from 'vapor-chamber/mcp';
+ * import { createMcpHandler, serveMcpStdio } from 'vapor-chamber/mcp';
  *
  * const bus = createSchemaCommandBus(schema);
- * bus.use(agentOrigin(), { priority: 150 }); // stamp meta.origin='agent' on MCP dispatches
  * bus.register('cartAdd', (cmd) => addToCart(cmd.target.id, cmd.payload.qty));
+ * // meta.origin='agent' arrives on its own - see agentOrigin() for why there
+ * // is no bus.use() line here any more.
  *
  * // Wire to any transport (HTTP body, WebSocket message, test harness, ...):
  * const handle = createMcpHandler(bus, { actions: ['cartAdd', 'cart*'] });
@@ -174,7 +175,7 @@ export type McpHandlerOptions = {
  * advertised a version that had not existed for months. A failing test at
  * release time is the cheapest possible checklist.
  */
-export const MCP_SERVER_VERSION = '1.22.0';
+export const MCP_SERVER_VERSION = '1.23.0';
 
 /** Latest MCP protocol revision this handler speaks. */
 const MCP_PROTOCOL_VERSION = '2025-06-18';
@@ -218,10 +219,10 @@ function toolResult(text: string, isError?: boolean): object {
  *     `isError: true` on failure - tool errors are results, not JSON-RPC errors)
  *   - anything else with an `id` - JSON-RPC error `-32601` (method not found)
  *
- * Origin stamping: install {@link agentOrigin} on the bus
- * (`bus.use(agentOrigin(), { priority: 150 })`) to stamp `meta.origin='agent'`
- * on MCP-driven dispatches. See {@link agentOrigin} for the concurrency
- * caveat on async buses.
+ * Origin stamping: MCP-driven dispatches carry `meta.origin='agent'` on their
+ * own, stamped onto the dispatch itself. Nothing to install. {@link agentOrigin}
+ * is a pass-through kept for compatibility and records why the plugin shape was
+ * wrong on an async bus.
  *
  * @example
  * const handle = createMcpHandler(bus, { actions: ['cartGet', 'cartAdd'] });
@@ -411,7 +412,6 @@ export type McpStdioOptions = McpHandlerOptions & {
  * @example
  * // mcp-server.ts - spawned by an MCP client
  * const bus = createSchemaCommandBus(schema);
- * bus.use(agentOrigin(), { priority: 150 });
  * registerHandlers(bus);
  * const stop = serveMcpStdio(bus, { actions: ['cart*', 'productGet'] });
  * process.on('SIGTERM', stop);

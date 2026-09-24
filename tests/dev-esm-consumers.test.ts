@@ -9,7 +9,7 @@
  * only inside the chunk that defines it, and the ESM build used to export ONE
  * shared DEV. In examples/vapor-island-cart the store chunk defined it
  * (`var t=!1`) and the Cart chunk imported it, so Cart shipped chamber.ts's
- * whole probe-path hint, dead at runtime (rc-alignment-work s19.4).
+ * whole probe-path hint, dead at runtime (docs/rc-alignment-log.md s19.4).
  *
  * scripts/build.mjs now derives DEV once per importing module, so no chunk
  * imports it from another. The two shapes below are the examples' own: one

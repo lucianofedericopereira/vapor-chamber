@@ -13,7 +13,7 @@ import { ... } from 'vapor-chamber/vitest/mcp';
 
 **Interfaces:** [`VitestMcpFailure`](#vitestmcpfailure) [`VitestMcpGap`](#vitestmcpgap) [`VitestMcpOptions`](#vitestmcpoptions) [`VitestMcpRun`](#vitestmcprun) [`VitestMcpServer`](#vitestmcpserver)
 
-**Variables:** [`VITEST_MCP_ACTIONS`](#vitest-mcp-actions) [`VITEST_MCP_SCHEMA`](#vitest-mcp-schema)
+**Variables:** [`VITEST_MCP_ACTIONS`](#vitest_mcp_actions) [`VITEST_MCP_SCHEMA`](#vitest_mcp_schema)
 
 ## Functions
 

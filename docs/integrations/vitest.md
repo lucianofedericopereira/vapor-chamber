@@ -6,9 +6,13 @@ with `test.extend`, and a plugin for what needs configuration. Every command
 bus in a test is the real one; the entry records what it dispatched and asserts
 on that.
 
-Every code block on this page runs. `tests/vitest-consumer.test.ts` installs
-the built package in a temporary project, uses this page's config blocks as
-its `vitest.config.ts`, and runs each test block with a real Vitest.
+Every code block on this page is checked, and the tag after its language says
+how. `tests/vitest-consumer.test.ts` installs the built package in a temporary
+project, uses this page's two config blocks as its `vitest.config.ts`, and runs
+every test block there with a real Vitest. The rest are compared rather than
+run: the failure block against what a real failing run prints, the branding
+block against real stderr, and the two JSON blocks against what the package
+ships.
 
 ---
 
@@ -51,9 +55,11 @@ export default defineConfig({
 - `sharedBus.exclude`: test files, as globs from the project root, that get no
   shared bus. A file that asserts the library's one-shot Vue detection from a
   clean start needs nothing to have imported the library first.
-- `islands`: files named `*.island.test.*` or under `tests/islands/` run in a
-  project of their own with a DOM (`happy-dom` unless
-  `islands.environment` says otherwise). `false` turns it off.
+- `islands`: files named `*.island.test.*` or `*.island.spec.*`, and files
+  under `test/islands/` or `tests/islands/`, run in a project of their own with
+  a DOM (`happy-dom` unless `islands.environment` says otherwise). That project
+  inherits the rest of your config - aliases, setup files, plugins - which is
+  Vitest 5's default for projects. `false` turns it off.
 - The setup file is placed first in `setupFiles`, once, and yours are kept.
 - On a Vitest major this release does not know, one warning,
   `VC_TEST_VITEST_MAJOR`, never a failure.
@@ -327,9 +333,10 @@ config.
   pays a cold start. v8 coverage lists only the source files the selected tests
   loaded; set `coverage.include` in your config to list the others. The server
   speaks stdio only.
-- **Programmatic use.** `createVitestMcp({ root, config })` from
-  `vapor-chamber/vitest/mcp` returns the schema bus; serve it with
-  `createMcpHandler` or `serveMcpStdio`.
+- **Programmatic use.** `await createVitestMcp({ root, config })` from
+  `vapor-chamber/vitest/mcp` returns `{ bus, close }`. Serve `bus` with
+  `createMcpHandler` or `serveMcpStdio`, passing `VITEST_MCP_ACTIONS` (or
+  fewer) as `actions`, and call `close()` on teardown.
 
 Tool names are camelCase, as a vapor-chamber schema bus names its actions.
 
@@ -338,6 +345,9 @@ Tool names are camelCase, as a vapor-chamber schema bus names its actions.
 ## Diagnostics
 
 A misuse throws a `VcTestError` with a `code`, the reason, the fix and a link.
+It also carries `emitter: 'test'`, which is not for you to read: it is how
+`retry()`'s default predicate recognises a library-minted error, and a handler
+that throws one of these reaches `result.error` unwrapped.
 
 | code | cause | fix |
 | --- | --- | --- |
@@ -391,7 +401,9 @@ it('a spy restores itself at the end of its block', () => {
 
 `vapor-chamber/vitest/pure` exports the same helpers and registers nothing: no
 matcher, no hook, no shared bus. It imports nothing from the library at
-runtime.
+runtime. What it does not carry is `it`, `test` and `expect`: the fixtures are
+the registration, so they stay in the full entry and a pure test takes those
+three from Vitest, as below.
 
 ```ts test
 import { createCommandBus } from 'vapor-chamber';
