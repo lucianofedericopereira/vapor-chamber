@@ -18,7 +18,7 @@ external. **Read this carefully:** the shared command-bus core (3.8 KB brotli on
 included in *every* row, so the rows are **not additive** - importing two exports does not cost
 their sum (the core is shared once). `.` is the full main barrel measured *import-everything*;
 your app's tree-shaking drops whatever you don't use (e.g. importing just `createCommandBus`
-from it is 3.8 KB brotli, not 23.8 KB).
+from it is 3.8 KB brotli, not 23.9 KB).
 
 **brotli vs first load.** `brotli` joins every chunk of the build into one measurement, the
 historical figure and the one to compare against older releases. `first load` and `on demand`
@@ -29,35 +29,35 @@ A `-` means nothing is deferred, which is every export except `./vitest` and `./
 
 | export | min KB | gzip KB | brotli KB | first load KB | on demand KB |
 |---|--:|--:|--:|--:|--:|
-| `.` | 83.3 | 27.2 | 23.8 | 23.8 | - |
+| `.` | 83.6 | 27.3 | 23.9 | 23.9 | - |
 | `./vue` | 21.7 | 7.7 | 6.9 | 6.9 | - |
-| `./vapor` | 23.0 | 8.1 | 7.3 | 7.3 | - |
-| `./transports` | 12.7 | 5.0 | 4.4 | 4.4 | - |
+| `./vapor` | 23.0 | 8.0 | 7.3 | 7.3 | - |
+| `./transports` | 12.9 | 5.0 | 4.5 | 4.5 | - |
 | `./directives` | 18.2 | 6.4 | 5.8 | 5.8 | - |
 | `./vite` | 5.3 | 2.5 | 2.2 | 2.2 | - |
-| `./vitest` | 93.1 | 30.7 | 26.7 | 3.9 | 23.4 |
+| `./vitest` | 93.4 | 30.8 | 26.8 | 3.9 | 23.5 |
 | `./vitest/pure` | 9.0 | 3.5 | 3.1 | 3.1 | - |
 | `./vitest/mcp` | 26.8 | 9.8 | 8.8 | 8.8 | - |
-| `./transitions` | 17.0 | 6.1 | 5.5 | 5.5 | - |
+| `./transitions` | 17.0 | 6.0 | 5.5 | 5.5 | - |
 | `./ssr` | 1.3 | 0.7 | 0.6 | 0.6 | - |
 | `./fast-lane` | 0.9 | 0.4 | 0.4 | 0.4 | - |
 | `./observable` | 0.5 | 0.3 | 0.3 | 0.3 | - |
 | `./standard-schema` | 1.7 | 0.8 | 0.7 | 0.7 | - |
-| `./alien-signals` | 0.2 | 0.2 | 0.1 | 0.1 | - |
+| `./alien-signals` | 0.2 | 0.1 | 0.1 | 0.1 | - |
 | `./reactive` | 16.0 | 5.7 | 5.2 | 5.2 | - |
-| `./outbox` | 5.3 | 2.2 | 1.9 | 1.9 | - |
+| `./outbox` | 5.9 | 2.4 | 2.2 | 2.2 | - |
 | `./mcp` | 4.1 | 1.9 | 1.7 | 1.7 | - |
 | `./devtools` | 0.1 | 0.1 | 0.1 | 0.1 | - |
 | `./stream-parser` | 6.7 | 2.0 | 1.9 | 1.9 | - |
 | `./store` | 1.5 | 0.8 | 0.7 | 0.7 | - |
-| `./router` | 28.2 | 10.5 | 9.5 | 9.3 | 0.3 |
+| `./router` | 28.2 | 10.4 | 9.5 | 9.3 | 0.3 |
 | `./router/vdom` | 0.9 | 0.5 | 0.4 | 0.4 | - |
 | `./router/vapor` | 0.8 | 0.5 | 0.4 | 0.4 | - |
 | `./router/remote` | 8.9 | 3.8 | 3.4 | 3.4 | - |
 | `./router-fetch` | 10.0 | 4.2 | 3.8 | 3.8 | - |
 | `./iife` | 39.4 | 13.2 | 11.8 | 11.8 | - |
-| `./iife-core` | 25.7 | 8.5 | 7.6 | 7.6 | - |
-| `./iife-elements` | 28.9 | 9.6 | 8.6 | 8.6 | - |
+| `./iife-core` | 25.7 | 8.4 | 7.6 | 7.6 | - |
+| `./iife-elements` | 28.9 | 9.5 | 8.6 | 8.6 | - |
 | `core: createCommandBus alone` | 12.0 | 4.2 | 3.8 | 3.8 | - |
 | `consumer: createCommandBus + logger + createHttpBridge` | 19.0 | 6.9 | 6.2 | 6.2 | - |
 
@@ -89,5 +89,5 @@ The split was decided on the same measurement taken on the vapor-sfc example at 
 | variant | min KB | gzip KB | brotli KB |
 |---|--:|--:|--:|
 | `vapor-chamber (full)` | 39.5 | 13.0 | 11.7 |
-| `vapor-chamber-core` | 27.0 | 8.9 | 7.9 |
+| `vapor-chamber-core` | 27.0 | 8.8 | 7.9 |
 | `vapor-chamber-elements` | 28.7 | 9.4 | 8.4 |

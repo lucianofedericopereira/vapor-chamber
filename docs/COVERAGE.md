@@ -43,7 +43,7 @@ above before trusting these numbers to describe them.
 | `src/http.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
 | `src/mcp.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
 | `src/observable.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
-| `src/outbox.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
+| `src/outbox.ts` | 100.0 | 99.0 | 100.0 | 100.0 |
 | `src/plugins-core.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
 | `src/plugins-extra.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
 | `src/plugins-io.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
