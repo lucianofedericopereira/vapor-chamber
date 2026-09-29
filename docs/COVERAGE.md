@@ -25,6 +25,7 @@ above before trusting these numbers to describe them.
 | file | % stmt | % branch | % funcs | % lines |
 |---|--:|--:|--:|--:|
 | **(all files)** | 100.0 | 100.0 | 100.0 | 100.0 |
+| `src/a11y.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
 | `src/alien-signals.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
 | `src/bounds.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
 | `src/chamber-vapor.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
@@ -41,6 +42,7 @@ above before trusting these numbers to describe them.
 | `src/http-errors.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
 | `src/http-query.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
 | `src/http.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
+| `src/ledger.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
 | `src/mcp.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
 | `src/observable.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
 | `src/outbox.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
@@ -50,6 +52,7 @@ above before trusting these numbers to describe them.
 | `src/plugins-schema.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
 | `src/reactive.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
 | `src/router-fetch/index.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
+| `src/router/announce.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
 | `src/router/blade.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
 | `src/router/composables.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
 | `src/router/dom.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
@@ -68,6 +71,7 @@ above before trusting these numbers to describe them.
 | `src/router/types.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
 | `src/router/url.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
 | `src/router/vdom.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
+| `src/scheduler.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
 | `src/schema.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
 | `src/settled.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
 | `src/signal.ts` | 100.0 | 100.0 | 100.0 | 100.0 |
