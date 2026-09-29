@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## Unreleased
+## v1.25.0 - 2026-09-29
 
 ### Changed (breaking): a failure's code is `owner:condition:subject`, and the owner comes from the wiring
 
