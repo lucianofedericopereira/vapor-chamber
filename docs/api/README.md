@@ -9,14 +9,14 @@ The `iife` builds are deliberately absent. They install a `VaporChamber`
 global instead of exporting a module, and their surface is a variant contract -
 see [`docs/BUNDLE-SIZES.md`](../BUNDLE-SIZES.md).
 
-**461 public exports across 26 entry points.**
+**476 public exports across 26 entry points.**
 
 | entry point | source | exports |
 |---|---|--:|
-| [`vapor-chamber`](index.md) | [`src/index.ts`](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/index.ts) | 196 |
+| [`vapor-chamber`](index.md) | [`src/index.ts`](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/index.ts) | 213 |
 | [`vapor-chamber/vue`](vue.md) | [`src/vue.ts`](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vue.ts) | 15 |
 | [`vapor-chamber/vapor`](vapor.md) | [`src/vapor.ts`](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vapor.ts) | 22 |
-| [`vapor-chamber/transports`](transports.md) | [`src/transports.ts`](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts) | 15 |
+| [`vapor-chamber/transports`](transports.md) | [`src/transports.ts`](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts) | 14 |
 | [`vapor-chamber/directives`](directives.md) | [`src/directives.ts`](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts) | 4 |
 | [`vapor-chamber/vite`](vite.md) | [`src/vite-hmr.ts`](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts) | 6 |
 | [`vapor-chamber/vitest`](vitest.md) | [`src/vitest.ts`](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest.ts) | 23 |
@@ -30,7 +30,7 @@ see [`docs/BUNDLE-SIZES.md`](../BUNDLE-SIZES.md).
 | [`vapor-chamber/alien-signals`](alien-signals.md) | [`src/alien-signals.ts`](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/alien-signals.ts) | 3 |
 | [`vapor-chamber/reactive`](reactive.md) | [`src/reactive.ts`](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/reactive.ts) | 3 |
 | [`vapor-chamber/outbox`](outbox.md) | [`src/outbox.ts`](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts) | 8 |
-| [`vapor-chamber/mcp`](mcp.md) | [`src/mcp.ts`](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts) | 9 |
+| [`vapor-chamber/mcp`](mcp.md) | [`src/mcp.ts`](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts) | 8 |
 | [`vapor-chamber/devtools`](devtools.md) | [`src/devtools.ts`](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/devtools.ts) | 1 |
 | [`vapor-chamber/stream-parser`](stream-parser.md) | [`src/stream-parser.ts`](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/stream-parser.ts) | 7 |
 | [`vapor-chamber/store`](store.md) | [`src/store.ts`](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store.ts) | 5 |

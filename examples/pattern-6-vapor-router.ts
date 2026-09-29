@@ -84,8 +84,9 @@ const router = createRouter({
 //   const page = useQueryParam<number>('page');   // typed by the route row
 //   page.value = 3;   // pushState, loader refetch (abortable), NO remount
 //
-// Inside a form component:
+// Inside a form component (composables in setup, never after an await):
+//   const router = useRouter();                                    // in setup
 //   const result = await dispatch('productUpdate', { id }, form);  // bus write
-//   if (result.ok) useRouter().push({ name: 'catalog.products' }); // router read
+//   if (result.ok) router.push({ name: 'catalog.products' });      // router read
 
 export { bus, router };

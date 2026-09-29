@@ -12,7 +12,7 @@
 
 namespace App\Actions\Cart;
 
-use Illuminate\Validation\Rule;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 
 class AddToCart
 {
@@ -25,12 +25,14 @@ class AddToCart
 
     public function __invoke(?array $target, ?array $payload, $user): array
     {
-        validator($target ?? [], [
-            'id' => ['required', 'integer', Rule::in(array_keys(self::CATALOG))],
+        // A field error is the payload's (`/payload/qty`); an item that does
+        // not exist is a missing target, answered 404 `not_found`.
+        validator($payload ?? [], [
+            'qty' => ['sometimes', 'integer', 'min:1', 'max:99'],
         ])->validate();
 
-        $qty  = max(1, (int) ($payload['qty'] ?? 1));
-        $item = self::CATALOG[$target['id']];
+        $item = self::CATALOG[(int) ($target['id'] ?? 0)] ?? throw new ModelNotFoundException();
+        $qty  = (int) ($payload['qty'] ?? 1);
 
         $cart = session('vc.cart', ['count' => 0, 'cents' => 0, 'last' => '']);
         $cart['count'] += $qty;

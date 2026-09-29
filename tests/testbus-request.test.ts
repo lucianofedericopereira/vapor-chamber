@@ -6,7 +6,7 @@
  * code under test used request()/respond() got a double that could not
  * exercise that path at all. Now a responder answers through the plugin
  * chain and the after-hooks, is recorded like a dispatch, has its thenable
- * value awaited, and an already-aborted signal settles VC_CORE_ABORTED
+ * value awaited, and an already-aborted signal settles core:aborted:dispatch
  * before it runs; with no responder the request falls back to dispatch(), as
  * on a real bus. A sealed TestBus refuses respond(); dispose() drops
  * responders (clear() keeps them, as it keeps handlers - the double's own
@@ -15,7 +15,7 @@
  */
 import { describe, it, expect, vi } from 'vitest';
 import { createTestBus } from '../src/testing';
-import type { BusError, CommandResult } from '../src/command-bus';
+import type { BusError, CommandResult, Plugin } from '../src/command-bus';
 
 const code = (r: CommandResult): string | undefined => (r.error as BusError | undefined)?.code;
 
@@ -71,7 +71,7 @@ describe('TestBus request()/respond()', () => {
 
     const r = await bus.request('q', 1, undefined, { signal: ac.signal });
 
-    expect(code(r)).toBe('VC_CORE_ABORTED');
+    expect(code(r)).toBe('core:aborted:dispatch');
     expect(responder).not.toHaveBeenCalled();
     expect(bus.wasDispatched('q')).toBe(false);
   });
@@ -87,7 +87,8 @@ describe('TestBus request()/respond()', () => {
   it('dispose() runs plugin dispose() like a real bus, and drops responders', async () => {
     const bus = createTestBus();
     const spy = vi.fn();
-    bus.use(Object.assign(((_c: unknown, next: () => CommandResult) => next()) as any, { dispose: spy }));
+    const passThrough: Plugin = (_c, next) => next();
+    bus.use(Object.assign(passThrough, { dispose: spy }));
     bus.respond('q', () => 'answer');
 
     bus.dispose();

@@ -25,7 +25,7 @@ describe('createHttpBridge redirect & error-body paths', () => {
     }));
 
     const onRedirect = vi.fn();
-    const bus = createAsyncCommandBus();
+    const bus = createAsyncCommandBus({ retry: false });
     bus.use(createHttpBridge({ endpoint: '/api/vc', onRedirect }));
 
     const result = await bus.dispatch('go', {});
@@ -40,13 +40,13 @@ describe('createHttpBridge redirect & error-body paths', () => {
       json: async () => ({ redirect: '/checkout' }),
     }));
 
-    const bus = createAsyncCommandBus();
+    const bus = createAsyncCommandBus({ retry: false });
     bus.use(createHttpBridge({ endpoint: '/api/vc' }));
 
     const result = await bus.dispatch('go', {});
     expect(result.ok).toBe(false);
     expect(result.error?.message).toContain('/checkout');
-    expect(result.error?.message).toContain('no onRedirect handler');
+    expect(result.error?.message).toContain('No onRedirect handler is configured');
   });
 
   // The boundary of the redirect contract, pinned because three docs described
@@ -68,7 +68,7 @@ describe('createHttpBridge redirect & error-body paths', () => {
     } as any;
 
     const onRedirect = vi.fn();
-    const bus = createAsyncCommandBus();
+    const bus = createAsyncCommandBus({ retry: false });
     bus.use(createHttpBridge({ endpoint: '/api/vc', httpClient, onRedirect }));
 
     const result = await bus.dispatch('go', {});
@@ -76,7 +76,7 @@ describe('createHttpBridge redirect & error-body paths', () => {
     expect(result.ok).toBe(false);
   });
 
-  it('extracts message/error from body on a !ok response via custom httpClient', async () => {
+  it('reads the problem of a !ok response a custom httpClient resolves with', async () => {
     // postCommand throws on !res.ok, so the bridge's own !res.ok branch is only
     // reachable through a custom httpClient that returns a non-ok response.
     const httpClient = {
@@ -84,34 +84,29 @@ describe('createHttpBridge redirect & error-body paths', () => {
         ok: false,
         status: 422,
         headers: {},
-        data: { message: 'validation exploded' },
+        data: { status: 422, code: 'validation_failed', detail: 'validation exploded' },
       }),
     } as any;
 
-    const bus = createAsyncCommandBus();
+    const bus = createAsyncCommandBus({ retry: false });
     bus.use(createHttpBridge({ endpoint: '/api/vc', httpClient }));
 
     const result = await bus.dispatch('save', {});
-    expect(result.ok).toBe(false);
+    expect(result).toFailWith('remote:invalid:validation_failed');
     expect(result.error?.message).toBe('validation exploded');
   });
 
-  it('falls back to error field then HTTP status when no message present', async () => {
+  it('a body that is not a problem reads by its status alone', async () => {
     const httpClient = {
-      post: vi.fn().mockResolvedValue({
-        ok: false,
-        status: 500,
-        headers: {},
-        data: { error: 'kaboom' },
-      }),
+      post: vi.fn().mockResolvedValue({ ok: false, status: 500, headers: {}, data: '<html>oops</html>' }),
     } as any;
 
-    const bus = createAsyncCommandBus();
+    const bus = createAsyncCommandBus({ retry: false });
     bus.use(createHttpBridge({ endpoint: '/api/vc', httpClient }));
 
     const result = await bus.dispatch('save', {});
-    expect(result.ok).toBe(false);
-    expect(result.error?.message).toBe('kaboom');
+    expect(result).toFailWith('remote:failed:http');
+    expect(result.error?.message).toBe('HTTP 500');
   });
 });
 
@@ -129,11 +124,11 @@ describe('createBatchingHttpBridge - custom httpClient !ok path', () => {
         ok: false,
         status: 422,
         headers: {},
-        data: { message: 'batch validation exploded' },
+        data: { status: 422, code: 'validation_failed', detail: 'batch validation exploded' },
       }),
     } as any;
 
-    const bus = createAsyncCommandBus();
+    const bus = createAsyncCommandBus({ retry: false });
     bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', httpClient }));
 
     const [a, b] = await Promise.all([bus.dispatch('a', {}), bus.dispatch('b', {})]);
@@ -148,7 +143,7 @@ describe('createBatchingHttpBridge - custom httpClient !ok path', () => {
       post: vi.fn().mockResolvedValue({ ok: false, status: 500, headers: {}, data: {} }),
     } as any;
 
-    const bus = createAsyncCommandBus();
+    const bus = createAsyncCommandBus({ retry: false });
     bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', httpClient }));
 
     const result = await bus.dispatch('a', {});
@@ -223,7 +218,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     vi.useFakeTimers();
     MockWebSocket.autoOpen = false; // hold socket CLOSED so sends queue
 
-    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
+    const bus = createAsyncCommandBus({ onMissing: 'ignore', retry: false });
     const ws = createWsBridge({ url: 'ws://localhost', maxQueueSize: 1, reconnect: false });
     bus.use(ws);
     ws.connect(); // socket exists but stays CLOSED
@@ -243,7 +238,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     expect(sockets[0].sent.length).toBe(1);
     const flushed = JSON.parse(sockets[0].sent[0]);
     expect(flushed.command).toBe('cartUpdate');
-    sockets[0].receive({ id: flushed.id, ok: true });
+    sockets[0].receive({ id: flushed.id, state: null });
     expect((await second).ok).toBe(true);
   });
 
@@ -262,7 +257,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     vi.useFakeTimers();
     MockWebSocket.autoOpen = false; // hold socket CLOSED so sends queue
 
-    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
+    const bus = createAsyncCommandBus({ onMissing: 'ignore', retry: false });
     const ws = createWsBridge({ url: 'ws://localhost', maxQueueSize: 1, timeout: 50, reconnect: false });
     bus.use(ws);
     ws.connect();
@@ -301,7 +296,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     vi.useFakeTimers();
     MockWebSocket.autoOpen = false;
 
-    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
+    const bus = createAsyncCommandBus({ onMissing: 'ignore', retry: false });
     const ws = createWsBridge({ url: 'ws://localhost', maxQueueSize: 1, timeout: 50, reconnect: false });
     bus.use(ws);
     ws.connect();
@@ -321,7 +316,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     sockets[0].open();
     const sent = sockets[0].sent.map((raw: string) => JSON.parse(raw).command);
     expect(sent).toEqual(['cartUpdate']);
-    sockets[0].receive({ id: JSON.parse(sockets[0].sent[0]).id, ok: true });
+    sockets[0].receive({ id: JSON.parse(sockets[0].sent[0]).id, state: null });
     expect((await live).ok).toBe(true);
   });
 
@@ -329,7 +324,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     vi.useFakeTimers();
     MockWebSocket.autoOpen = false; // hold CLOSED so the message queues
 
-    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
+    const bus = createAsyncCommandBus({ onMissing: 'ignore', retry: false });
     const ws = createWsBridge({ url: 'ws://localhost', timeout: 5_000, reconnect: false });
     bus.use(ws);
     ws.connect();
@@ -360,7 +355,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     vi.setSystemTime(t0);
     MockWebSocket.autoOpen = false;
 
-    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
+    const bus = createAsyncCommandBus({ onMissing: 'ignore', retry: false });
     const ws = createWsBridge({ url: 'ws://localhost', timeout: 5_000, reconnect: false });
     bus.use(ws);
     ws.connect();
@@ -523,7 +518,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     vi.useFakeTimers();
     MockWebSocket.autoOpen = false; // hold socket CLOSED so both dispatches queue
 
-    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
+    const bus = createAsyncCommandBus({ onMissing: 'ignore', retry: false });
     const ws = createWsBridge({ url: 'ws://localhost', reconnect: false });
     bus.use(ws);
     ws.connect();
@@ -546,7 +541,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     expect(sockets[0].sent.length).toBe(1); // only the first item got out
     const sentFirst = JSON.parse(sockets[0].sent[0]);
     expect(sentFirst.command).toBe('cartAdd');
-    sockets[0].receive({ id: sentFirst.id, ok: true });
+    sockets[0].receive({ id: sentFirst.id, state: null });
     expect((await first).ok).toBe(true);
 
     // The second item was re-queued, not lost - a later open flushes it.
@@ -554,15 +549,15 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     expect(sockets[0].sent.length).toBe(2);
     const sentSecond = JSON.parse(sockets[0].sent[1]);
     expect(sentSecond.command).toBe('cartUpdate');
-    sockets[0].receive({ id: sentSecond.id, ok: true });
+    sockets[0].receive({ id: sentSecond.id, state: null });
     expect((await second).ok).toBe(true);
 
     ws.disconnect();
   });
 
-  it('defaults to a generic message when an error response omits data.error', async () => {
+  it('a problem with no detail says its status', async () => {
     vi.useFakeTimers();
-    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
+    const bus = createAsyncCommandBus({ onMissing: 'ignore', retry: false });
     const ws = createWsBridge({ url: 'ws://localhost', reconnect: false });
     bus.use(ws);
     ws.connect();
@@ -570,9 +565,11 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
 
     const result = bus.dispatch('cartAdd', { id: 1 });
     const sent = JSON.parse(sockets[0].sent[0]);
-    sockets[0].receive({ id: sent.id, ok: false }); // no `error` field at all
+    sockets[0].receive({ id: sent.id, problem: { status: 503, code: 'unavailable' } }); // no `detail`
 
-    expect((await result).error?.message).toBe('WebSocket error');
+    const r = await result;
+    expect(r).toFailWith('remote:limited:unavailable');
+    expect(r.error?.message).toBe('HTTP 503');
     ws.disconnect();
   });
 
@@ -605,7 +602,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
 
   it('pre-flight abort resolves immediately without ever sending', async () => {
     vi.useFakeTimers();
-    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
+    const bus = createAsyncCommandBus({ onMissing: 'ignore', retry: false });
     const ws = createWsBridge({ url: 'ws://localhost', reconnect: false });
     bus.use(ws);
     ws.connect();
@@ -615,14 +612,14 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     controller.abort();
     const result = await bus.dispatch('cartAdd', { id: 1 }, undefined, { signal: controller.signal });
 
-    expect(result).toFailWith('VC_CORE_ABORTED');
+    expect(result).toFailWith('core:aborted:dispatch');
     expect(sockets[0].sent.length).toBe(0); // never sent - aborted before dispatch
     ws.disconnect();
   });
 
   it('a late timeout after the response already settled is a no-op', async () => {
     vi.useFakeTimers();
-    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
+    const bus = createAsyncCommandBus({ onMissing: 'ignore', retry: false });
     const ws = createWsBridge({ url: 'ws://localhost', reconnect: false, timeout: 50 });
     bus.use(ws);
     ws.connect();
@@ -631,7 +628,7 @@ describe('createWsBridge reconnect / queue / overflow paths', () => {
     const result = bus.dispatch('cartAdd', { id: 1 });
     const sent = JSON.parse(sockets[0].sent[0]);
     // Response arrives well before the timeout - settles as a success.
-    sockets[0].receive({ id: sent.id, ok: true, state: 42 });
+    sockets[0].receive({ id: sent.id, state: 42 });
     expect((await result).ok).toBe(true);
 
     // The timeout firing afterwards must not overwrite the already-settled
@@ -769,7 +766,7 @@ describe('bridge signal merging - AbortSignal.any fallbacks', () => {
     AbortSignal.any = undefined;
     try {
       okFetch();
-      const bus = createAsyncCommandBus();
+      const bus = createAsyncCommandBus({ retry: false });
       bus.use(
         createHttpBridge({
           endpoint: '/api',
@@ -790,7 +787,7 @@ describe('bridge signal merging - AbortSignal.any fallbacks', () => {
     AbortSignal.any = undefined;
     try {
       okFetch();
-      const bus = createAsyncCommandBus();
+      const bus = createAsyncCommandBus({ retry: false });
       bus.use(createHttpBridge({ endpoint: '/api', signal: new AbortController().signal }));
       // cmd.signal AND effectiveSignal both present -> the second merge site.
       const result = await bus.dispatch('act', {}, undefined, { signal: new AbortController().signal });
@@ -815,11 +812,11 @@ describe('bridge signal merging - AbortSignal.any fallbacks', () => {
           const sent = JSON.parse(String(init.body)) as { commands: Array<{ id: string }> };
           return {
             ok: true,
-            json: async () => ({ results: sent.commands.map((c) => ({ id: c.id, ok: true, state: 1 })) }),
+            json: async () => ({ results: sent.commands.map((c) => ({ id: c.id, state: 1 })) }),
           };
         }),
       );
-      const bus = createAsyncCommandBus();
+      const bus = createAsyncCommandBus({ retry: false });
       bus.use(
         createBatchingHttpBridge({
           endpoint: '/api/batch',
@@ -839,23 +836,25 @@ describe('bridge signal merging - AbortSignal.any fallbacks', () => {
     }
   });
 
-  it('zeroes retry for a noRetry action and forwards an Idempotency-Key', async () => {
+  it('forwards the Idempotency-Key the idempotent plugin stamps', async () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ state: 1 }) });
     vi.stubGlobal('fetch', fetchMock);
 
-    const bus = createAsyncCommandBus();
+    const bus = createAsyncCommandBus({ retry: false });
     // Stamp the key the `idempotent` plugin would normally set, so the bridge
     // takes the `idemKey ? {...} : headers` TRUE arm.
     bus.use((cmd, next) => {
       if (cmd.meta) cmd.meta.idempotencyKey = 'key-123';
       return next();
     }, { priority: 300 });
-    bus.use(createHttpBridge({ endpoint: '/api', retry: 3, noRetry: ['act'] }));
+    bus.use(createHttpBridge({ endpoint: '/api' }));
 
     const result = await bus.dispatch('act', {});
     expect(result.ok).toBe(true);
 
     const [, init] = fetchMock.mock.calls[0];
-    expect(init.headers['Idempotency-Key']).toBe('key-123');
+    // A Structured Field String, as the draft requires
+    // (tests/idempotency-header.test.ts).
+    expect(init.headers['Idempotency-Key']).toBe('"key-123"');
   });
 });

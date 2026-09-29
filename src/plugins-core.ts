@@ -6,10 +6,10 @@
 
 import { DEV } from './dev';
 import { onSettled, isThenable } from './settled';
-import { countOption } from './bounds';
+import { createLedger } from './ledger';
 import { GLYPH_COMMAND } from './glyphs';
-import type { Command, CommandResult, Plugin, CommandBus } from './command-bus';
-import { BusError, commandKey, disposeAll, _okResult, _errResult, _withOriginScope } from './command-bus';
+import type { Command, CommandResult, Plugin, CommandBus, AsyncCommandBus, BaseBus } from './command-bus';
+import { commandKey, disposeAll, _okResult, _errResult, _throttleGate } from './command-bus';
 
 /**
  * Logger plugin - logs all commands and results
@@ -38,7 +38,7 @@ export function logger(options: {
   // Ok results log at 'info', failures at 'error' - only 'warn'/'error' can suppress.
   const skipOk = level === 'warn' || level === 'error';
 
-  return ((cmd: Command, next: () => CommandResult) => {
+  return (cmd, next) => {
     if (filter && !filter(cmd)) return next();
 
     const log = collapsed ? console.groupCollapsed : console.group;
@@ -64,15 +64,11 @@ export function logger(options: {
       return result;
     };
 
-    // AN ASYNC BUS HANDS BACK A PROMISE, and both paths below used to treat it
-    // as a CommandResult. `promise.ok` is undefined, so the ok-test failed and
-    // EVERY command - successful ones included - was logged through
-    // `console.error('error:', undefined)`, with the result value never shown
-    // at all. Measured on an async bus; see ../settled for the other four
-    // plugins that shared the mistake.
+    // Both paths settle through `onSettled`: on the async bus `next()` is a
+    // promise, and reading `.ok` off it would log every command as an error.
 
     // Fast path (defaults): open the group before the handler runs so nested
-    // dispatch logs stay grouped - output identical to previous versions.
+    // dispatch logs stay grouped.
     if (!badges && !skipOk) {
       open(true);
       return onSettled(next(), close);
@@ -85,7 +81,7 @@ export function logger(options: {
       return close(result);
     };
     return onSettled(next(), decide);
-  }) as unknown as Plugin;
+  };
 }
 
 /**
@@ -102,24 +98,28 @@ export function validator(rules: {
   // property load into a hash lookup, the same "classify once at
   // construction" shape as schemaValidator's `compiled`.
   const compiled = new Map(Object.entries(rules));
-  return (cmd, next) => {
+  const plugin: Plugin = (cmd, next, fail) => {
     const rule = compiled.get(cmd.action);
     if (rule) {
       const error = rule(cmd);
+      // Coded, as the catalogue declares for per-action validation; the
+      // message stays the rule's own.
+      // tests/errors-match-catalogue.test.ts.
       if (error) {
-        return _errResult(new Error(error));
+        return _errResult(fail('invalid:payload', error, { action: cmd.action }));
       }
     }
     return next();
   };
+  return Object.assign(plugin, { id: 'validator' });
 }
 
 /**
  * History plugin - tracks command history for undo/redo
  *
- * v0.3.0: undo() now executes the inverse handler if the command was
- * registered with { undo: fn } via bus.register(). Falls back to
- * data-only pop if no inverse handler exists.
+ * undo() executes the inverse handler if the command was registered with
+ * { undo: fn } via bus.register(), and falls back to a data-only pop if none
+ * exists.
  */
 export interface HistoryState {
   past: Command[];
@@ -131,62 +131,33 @@ export interface HistoryState {
 export function history(options: {
   maxSize?: number;
   filter?: (cmd: Command) => boolean;
-  /** Reference to the command bus - enables undo() to execute inverse handlers */
-  bus?: CommandBus;
-  /**
-   * Action name to register as the undo trigger (e.g. 'cart.undo'). The plugin
-   * registers the bus handler itself and ALWAYS excludes this action from
-   * recording - even if `filter` would match it. Without this, a hand-wired
-   * `bus.register('cart.undo', () => h.undo())` records the trigger command
-   * into history (clearing the redo stack and burying real entries), so undo
-   * works once and redo never enables. Requires `bus`.
-   */
+  /** Either bus: an undo handler is read and a redo dispatched through it. */
+  bus?: CommandBus | AsyncCommandBus;
   undoAction?: string;
-  /** Action name to register as the redo trigger. Same semantics as undoAction. */
   redoAction?: string;
 } = {}): Plugin & {
   getState: () => HistoryState;
   undo: () => Command | undefined;
   redo: () => Command | undefined;
   clear: () => void;
-  /** Unregister the undoAction/redoAction bus handlers (no-op if none). */
   dispose: () => void;
 } {
-  const { maxSize: rawMaxSize = 50, filter, bus, undoAction, redoAction } = options;
-  // `past.length > maxSize` gates EVICTION, so a NaN cap evicted nothing and the
-  // stack grew without bound - measured at 500 entries against a cap of 50.
-  const maxSize = countOption(rawMaxSize, 50);
-  const past: Command[] = [];
-  const future: Command[] = [];
-  // A `_replaying` flag used to bracket the redo dispatch and the undo
-  // handler. It held only while the recorder ran INSIDE the dispatch - the
-  // sync bus. On an async bus the recorder runs when the dispatch settles,
-  // after the `finally` had cleared it, so a redo was recorded twice and the
-  // rest of the redo stack wiped; the redo dispatch then got origin 'redo'
-  // (`_withOrigin`, the useCommandHistory fix), which the recorder skips on
-  // both buses, and the flag stayed for what only it covered on the sync bus:
-  // the commands an undo handler or a redone handler dispatch themselves. On
-  // the async bus those were still recorded. Since v1.20.0 both windows are a
-  // SCOPED origin (`_withOriginScope`, read in stampMeta's synchronous
-  // prologue), which marks every dispatch made synchronously inside them on
-  // either bus, so the flag went. The origin test sits first because that
-  // order measured smallest (+14 B br on the full IIFE, against +20 after
-  // the action tests).
-
-  const plugin: Plugin = ((cmd: Command, next: () => CommandResult) => onSettled(next(), (result) => {
-    const origin = cmd.meta?.origin;
-    if (
-      origin !== 'redo' && origin !== 'undo' && result.ok &&
-      cmd.action !== undoAction && cmd.action !== redoAction &&
-      (!filter || filter(cmd))
-    ) {
-      past.push(cmd);
-      if (past.length > maxSize) past.shift();
-      future.length = 0;
-    }
-
+  const { maxSize, filter, bus, undoAction, redoAction } = options;
+  // The stacks, the recording rule and undo/redo live in ONE place,
+  // createLedger (ledger.ts), shared with useCommandHistory. What is this
+  // plugin's own: recording in the plugin chain once the dispatch settles, and
+  // leaving its trigger actions out.
+  const ledger = createLedger({
+    maxSize,
+    filter,
+    bus,
+    skip: (cmd) => cmd.action === undoAction || cmd.action === redoAction,
+  });
+  const { past, future } = ledger;
+  const plugin: Plugin = (cmd, next) => onSettled(next(), (result) => {
+    ledger.record(cmd, result);
     return result;
-  })) as unknown as Plugin;
+  });
 
   const api = Object.assign(plugin, {
     getState: (): HistoryState => ({
@@ -195,39 +166,9 @@ export function history(options: {
       canUndo: past.length > 0,
       canRedo: future.length > 0,
     }),
-
-    undo: () => {
-      const cmd = past.pop();
-      if (cmd) {
-        future.push(cmd);
-        if (bus) {
-          const undoHandler = bus.getUndoHandler(cmd.action);
-          if (undoHandler) {
-            try { _withOriginScope('undo', () => undoHandler(cmd)); }
-            catch (e) { console.error(`[vapor-chamber] Undo handler error for "${cmd.action}":`, e); }
-          }
-        }
-      }
-      return cmd;
-    },
-
-    redo: () => {
-      const cmd = future.pop();
-      if (cmd) {
-        past.push(cmd);
-        if (bus) {
-          try { _withOriginScope('redo', () => bus.dispatch(cmd.action, cmd.target, cmd.payload)); }
-          catch (e) { console.error(`[vapor-chamber] Redo dispatch error for "${cmd.action}":`, e); }
-        }
-      }
-      return cmd;
-    },
-
-    clear: () => {
-      past.length = 0;
-      future.length = 0;
-    },
-
+    undo: () => ledger.undo(),
+    redo: () => ledger.redo(),
+    clear: () => ledger.clear(),
     dispose: () => {
       disposeAll(_triggerUnregisters);
     },
@@ -241,8 +182,9 @@ export function history(options: {
         console.warn("[vapor-chamber] history(): undoAction/redoAction require the `bus` option - triggers not registered.");
       }
     } else {
-      if (undoAction) _triggerUnregisters.push(bus.register(undoAction, () => { api.undo(); }));
-      if (redoAction) _triggerUnregisters.push(bus.register(redoAction, () => { api.redo(); }));
+      const either: BaseBus = bus;
+      if (undoAction) _triggerUnregisters.push(either.register(undoAction, () => { api.undo(); }));
+      if (redoAction) _triggerUnregisters.push(either.register(redoAction, () => { api.redo(); }));
     }
   }
 
@@ -252,45 +194,35 @@ export function history(options: {
 /**
  * Debounce plugin - debounce specific actions
  *
- * v0.3.0 FIX: Stores the latest next() closure and re-invokes it after the
- * debounce period. Returns { pending: true } synchronously.
+ * Runs the latest dispatch per action and target once `wait` passes with no
+ * newer one. Returns { pending: true } synchronously.
  */
 export function debounce(
   actions: string[],
   wait: number
 ): Plugin & { /** Cancel all pending debounce timers. */ dispose(): void } {
   const actionSet = new Set(actions);
-  const timers = new Map<string, ReturnType<typeof setTimeout>>();
-  const latestNext = new Map<string, () => CommandResult>();
+  // One entry per key: its timer and the latest next(), replaced together.
+  const pending = new Map<string, { timer: ReturnType<typeof setTimeout>; next: () => unknown }>();
 
   const plugin: Plugin = (cmd, next) => {
     if (!actionSet.has(cmd.action)) return next();
 
     const key = commandKey(cmd.action, cmd.target);
+    const existing = pending.get(key);
+    if (existing) clearTimeout(existing.timer);
 
-    const existing = timers.get(key);
-    if (existing) clearTimeout(existing);
-
-    latestNext.set(key, next);
-
-    timers.set(key, setTimeout(() => {
-      timers.delete(key);
-      const currentNext = latestNext.get(key);
-      latestNext.delete(key);
-      /* v8 ignore next -- defensive: latestNext and this timer are set
-         back-to-back and only cleared together (here or in dispose(), which
-         also clears the timer), so a live timer always finds its entry */
-      if (currentNext) {
-        try { currentNext(); }
-        catch (e) { console.error('[vapor-chamber] Debounced execution error:', e); }
-      }
-    }, wait));
+    pending.set(key, { next, timer: setTimeout(() => {
+      pending.delete(key);
+      try { next(); }
+      catch (e) { console.error('[vapor-chamber] Debounced execution error:', e); }
+    }, wait) });
 
     return _okResult({ pending: true, key });
   };
 
   return Object.assign(plugin, {
-    dispose(): void { for (const [, t] of timers) clearTimeout(t); timers.clear(); latestNext.clear(); },
+    dispose(): void { for (const [, e] of pending) clearTimeout(e.timer); pending.clear(); },
   });
 }
 
@@ -302,28 +234,18 @@ export function throttle(
   wait: number
 ): Plugin & { /** Cancel all pending throttle timers. */ dispose(): void } {
   const actionSet = new Set(actions);
-  const lastRun = new Map<string, number>();
   const timers = new Set<ReturnType<typeof setTimeout>>();
-
-  const plugin: Plugin = (cmd, next) => {
-    if (!actionSet.has(cmd.action)) return next();
-
-    const key = commandKey(cmd.action, cmd.target);
-    const now = Date.now();
-    const last = lastRun.get(key) ?? 0;
-
-    if (now - last >= wait) {
-      lastRun.set(key, now);
-      const timer = setTimeout(() => { lastRun.delete(key); timers.delete(timer); }, wait);
-      timers.add(timer);
-      return next();
-    }
-
-    const retryIn = wait - (now - last);
-    return _errResult(new BusError('VC_CORE_THROTTLED', `Action "${cmd.action}" throttled. Retry in ${retryIn}ms.`, { emitter: 'core', action: cmd.action, context: { retryIn, wait } }));
+  // The gate register({ throttle }) uses; a plugin returns the refusal.
+  const lastRun = new Map<string, number>();
+  const gate = _throttleGate(wait, timers, lastRun);
+  const plugin: Plugin = (cmd, next, fail) => {
+    // The plugin's own `fail`: the refusal is the plugin's, not core's.
+    const refused = actionSet.has(cmd.action) ? gate(cmd, fail) : undefined;
+    return refused ? _errResult(refused) : next();
   };
 
   return Object.assign(plugin, {
+    id: 'throttle',
     dispose(): void { for (const t of timers) clearTimeout(t); timers.clear(); lastRun.clear(); },
   });
 }
@@ -338,18 +260,15 @@ export function authGuard(options: {
 }): Plugin {
   const { isAuthenticated, protected: protectedPrefixes, onUnauthenticated } = options;
 
-  return (cmd, next) => {
-    const isProtected = protectedPrefixes.some(p =>
-      cmd.action.startsWith(p) || cmd.action === p
-    );
-
-    if (isProtected && !isAuthenticated()) {
+  const plugin: Plugin = (cmd, next, fail) => {
+    // A prefix match covers the exact name too.
+    if (protectedPrefixes.some(p => cmd.action.startsWith(p)) && !isAuthenticated()) {
       if (onUnauthenticated) onUnauthenticated(cmd);
-      return _errResult(new Error(`Unauthorized: ${cmd.action} requires authentication`));
+      return _errResult(fail('refused:action', `Unauthorized: ${cmd.action} requires authentication`, { action: cmd.action }));
     }
-
     return next();
   };
+  return Object.assign(plugin, { id: 'authGuard' });
 }
 
 /**
@@ -374,17 +293,14 @@ export function optimistic(
   // plugin called it as the optimistic `apply` and treated the result as a
   // rollback closure.
   const compiled = new Map(Object.entries(handlers));
-  const plugin: any = (cmd: Command, next: () => any) => {
+  return (cmd, next) => {
     const config = compiled.get(cmd.action);
     if (!config) return next();
 
     const rollback = config.apply(cmd);
 
-    // Through `onSettled`, which is what the two branches here used to spell
-    // out: settle the result, roll back if it failed, hand the settled result
-    // on. The helper preserves sync-ness, so the sync bus keeps the exact
-    // behaviour the second branch gave it. The duplicated rollback body is
-    // gone with it - it was written twice and had to stay in step by hand.
+    // Through `onSettled`: settle the result, roll back if it failed, hand the
+    // settled result on - synchronously on the sync bus.
     return onSettled(next(), (result) => {
       if (!result.ok && rollback) {
         try { rollback(); }
@@ -393,7 +309,6 @@ export function optimistic(
       return result;
     });
   };
-  return plugin as Plugin;
 }
 
 // ---------------------------------------------------------------------------
@@ -453,7 +368,7 @@ export function optimisticUndo(
   const actionSet = new Set(actions);
   const { predict, onRollback, onRollbackError } = options;
 
-  const plugin: any = (cmd: Command, next: () => any) => {
+  return (cmd, next) => {
     if (!actionSet.has(cmd.action)) return next();
 
     const undoHandler = bus.getUndoHandler(cmd.action);
@@ -488,9 +403,7 @@ export function optimisticUndo(
       return _okResult(optimisticValue);
     }
 
-    rollbackIfFailed(result);
+    rollbackIfFailed(result as CommandResult);
     return result;
   };
-
-  return plugin as Plugin;
 }

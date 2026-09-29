@@ -34,24 +34,15 @@
  * APIs do not exist on 3.5, where importing them by name is a link error. Vapor
  * wiring belongs in a 3.6-only subpath.
  *
- * THE LIST IS LOAD-BEARING, NOT DECORATIVE - v1.17.0 fixed a name missing from
- * it. `hasInjectionContext` (Vue 3.3+, so inside this entry's 3.5-safe scope)
- * was absent, and `applyVueModule` reads it. Its consumer is
- * `tryKeepAliveHooks`, which gates on it precisely BECAUSE
- * `getCurrentInstance()` returns null inside a Vapor component by design - the
- * rc.4 finding. Without it in the registry that gate silently falls back to
- * `getCurrentInstance()` and goes inert, so `useCommandHistory` /
- * `useCommandError` record commands dispatched into a DEACTIVATED KeepAlive
- * view: the exact bug rc.4 fixed, reintroduced through the wiring path rather
- * than through the guard.
- *
- * Why it survived: `tryKeepAliveHooks` calls `probeVue()` first, and under a
- * dev server (or vitest) the probe resolves `import('vue')` and supplies the
- * FULL namespace, `hasInjectionContext` included - so the omission is invisible
- * everywhere the suite runs. It bites only in a production bundle, where the
- * bare specifier cannot resolve and the registry holds nothing but what this
- * list passed. Dev-correct / prod-broken, the same asymmetry that motivated
- * this entry's existence in the first place.
+ * THE LIST IS LOAD-BEARING, NOT DECORATIVE. `applyVueModule` reads each name,
+ * and a missing one is invisible wherever a probe runs: under a dev server or
+ * vitest the probe resolves `import('vue')` and supplies the FULL namespace.
+ * Only a production bundle, where the bare specifier cannot resolve, holds
+ * nothing but this list - dev-correct, prod-broken. `hasInjectionContext` is
+ * the example: `tryKeepAliveHooks` gates on it because `getCurrentInstance()`
+ * returns null inside a Vapor component, and without it that gate goes inert,
+ * so `useCommandHistory` / `useCommandError` record commands dispatched into a
+ * DEACTIVATED KeepAlive view.
  *
  * So: when `chamber.ts` starts reading a new registry entry, it must be added
  * here too, or it exists only for probe-path consumers. Pinned by
@@ -83,7 +74,7 @@ configureVue({
   shallowRef,
   getCurrentScope,
   getCurrentInstance,
-  // Load-bearing, and it was MISSING until v1.17.0 - see the note below.
+  // Load-bearing - see the note above.
   hasInjectionContext,
   onScopeDispose,
   onActivated,

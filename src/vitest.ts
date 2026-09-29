@@ -123,8 +123,12 @@ afterEach(({ task }) => _explainFailure(task, chai));
  * });
  */
 export const test: TestAPI<TestScoped<VaporChamberFixtures>> = vitestTest
-  .extend('bus', async (): Promise<CommandBus> => tap((await import('vapor-chamber')).createCommandBus()))
-  .extend('asyncBus', async (): Promise<AsyncCommandBus> => tap((await import('vapor-chamber')).createAsyncCommandBus()));
+  // Through the package itself, so the app and the fixture share one instance.
+  // In this repository the package name resolves to dist/ and this file to
+  // src/, and BusError's private `#code` makes the two declarations distinct
+  // classes to TypeScript, hence the casts; a consumer has one declaration.
+  .extend('bus', async (): Promise<CommandBus> => tap((await import('vapor-chamber')).createCommandBus() as unknown as CommandBus))
+  .extend('asyncBus', async (): Promise<AsyncCommandBus> => tap((await import('vapor-chamber')).createAsyncCommandBus() as unknown as AsyncCommandBus));
 
 /** The fixtures `test` and `it` add to Vitest's test context. */
 export interface VaporChamberFixtures {

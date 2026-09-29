@@ -12,7 +12,7 @@ was reread.
 
 ## Abstract
 
-Vapor Chamber is a command bus built for Vue Vapor, with a <!-- vc:sizeCore -->3.8<!-- /vc:sizeCore --> KB brotli dispatch core. It provides a semantic,
+Vapor Chamber is a command bus built for Vue Vapor, with a <!-- vc:sizeCore -->3.7<!-- /vc:sizeCore --> KB brotli dispatch core. It provides a semantic,
 middleware-aware dispatch layer that connects any frontend pattern to any backend, without
 imposing a framework, a build system, or an opinion about your stack. v1.0 adds
 e-commerce-grade features: transactional batch dispatch with undo rollback, automatic
@@ -197,7 +197,7 @@ dispatch(action, target, payload)
   1. check recursion depth (max 16)
   2. validate naming convention (regex test)
   3. build Command { action, target, payload, meta: { ts, id, correlationId?, causationId? } }
-  4. run beforeHooks - throw to cancel, returns { ok: false } (VC_CORE_BEFORE_CANCEL, cause: the throw)
+  4. run beforeHooks - throw to cancel, returns { ok: false } (core:refused:hook, cause: the throw)
   5. run plugins in priority order (cached runner - rebuilt only on use()/unuse())
   6. execute handler (Map.get - O(1) lookup)
   7. run afterHooks
@@ -213,7 +213,7 @@ usable.
 
 The plugin chain is built once when plugins are added or removed. Each dispatch creates the
 innermost `execute` closure and one `next` closure per plugin level: the runners are re-entrant, so
-`retry()` and deferred continuations re-enter the chain at the right level (`buildRunner`'s PERF
+the bus's retry and deferred continuations re-enter the chain at the right level (`buildRunner`'s PERF
 NOTE in `src/command-bus.ts` records the cost). This paragraph used to end "no per-dispatch
 allocations for the chain traversal", the claim docs/performance.md also corrected.
 
@@ -268,7 +268,7 @@ concerns live:
 bus.use(logger())            // log every command
 bus.use(authGuard(check))    // block unauthorized commands
 bus.use(optimistic(opts))    // apply optimistic updates
-bus.use(retry(opts))         // retry on failure
+createAsyncCommandBus({ retry: opts }) // the async bus's own retry
 ```
 
 The pipeline is composable and is the same model on sync and async buses.
@@ -284,8 +284,6 @@ bus.use(createHttpBridge({
   endpoint: '/api/vc',
   csrf: true,
   timeout: 15_000,
-  retry: 2,
-  noRetry: ['paymentCharge', 'orderPlace'],  // never retry non-idempotent commands
   actions: ['cart*', 'order*'],
   scopeController: ctrl,                     // v0.6.0: all requests cancelled on dispose
 }))
@@ -451,13 +449,13 @@ vue-router and Pinia, and these docs must keep saying so.
 | `validator` | Guards | Pre-dispatch validation with short-circuit |
 | `history` | State | Undo/redo with inverse handler execution |
 | `debounce` | Rate limiting | Wait for activity to stop before executing |
-| `throttle` | Rate limiting | Execute immediately, block for N ms. On block throws `BusError('VC_CORE_THROTTLED', ...)` with `retryIn` in `error.context`. |
+| `throttle` | Rate limiting | Execute immediately, block for N ms. On block refuses with `throttle:limited:handler` (`core:limited:handler` for `register(..., { throttle })`), `retryIn` in `error.context`. |
 | `authGuard` | Guards | Block protected actions when unauthenticated |
 | `optimistic` | UX | Apply state immediately, rollback on failure |
 | `optimisticUndo` | UX | Auto-rollback via registered undo handlers on dispatch failure |
 | `cache` | Performance | LRU query result caching with TTL and glob filter |
-| `circuitBreaker` | Resilience | Per-action closed/open/half-open circuit states |
-| `rateLimit` | Rate limiting | Per-action sliding window rate limiter |
+| `circuitBreaker` | Resilience | Per-action closed/open/half-open circuit states. While open, refuses with `circuitBreaker:limited:action` and `retryIn`, the time left until half-open; a backend's failure counts, a plugin's own throw does not. |
+| `rateLimit` | Rate limiting | Per-action sliding window rate limiter. Refuses the excess with `rateLimit:limited:action` and `retryIn`, the time until a slot frees. |
 | `metrics` | Observability | Lightweight telemetry: count, duration, errorRate per action |
 | `serialize` | Concurrency | Per-key sequential processing of async commands - prevents same-key read-modify-write races |
 | `idempotent` | Exactly-once | Collapses duplicate commands (double-submit/retry/reconnect); stamps an `Idempotency-Key` the HTTP bridge forwards to the backend |
@@ -471,19 +469,17 @@ vue-router and Pinia, and these docs must keep saying so.
 | `createSSRPlugin` | SSR | Records dispatched commands on the server, then `.dehydrate()` for the HTML payload |
 | `revalidateRoutes` | Router | Refetches the route's loaders after matching dispatches, with an `isRevalidating` flag. From `vapor-chamber/router` |
 | `createHttpBridge` | Transport | Fetch-based HTTP transport |
-| `createBatchingHttpBridge` | Transport | Same options, but every command in the window goes as one POST, matched back by id. Its `retry` covers a failure of the whole POST; a command refused inside the batch arrives with the backend's `code`, and retrying it is the app's `retry({ isRetryable })` |
+| `createBatchingHttpBridge` | Transport | Same options, but every command in the window goes as one POST, matched back by id. The bus re-sends per command: a transient one joins the next batch, a verdict settles |
 | `createWsBridge` | Transport | WebSocket transport with reconnect + bounded queue |
 | `createSseBridge` | Transport | Server-sent events (server push) |
 | `createEchoBridge` | Transport | Laravel Echo / Reverb: public, private and presence channels routed to the bus, plus presence membership |
 
 ```ts
-// retry - `isRetryable` REPLACES the default rule, and the rule is the app's.
-// Here: retry what YOUR backend calls transient, by the `code` it sends.
-bus.use(retry({
-  maxAttempts: 3, strategy: 'exponential', baseDelay: 200,
-  actions: ['api*'],
-  isRetryable: (err) => (err as { code?: string }).code === 'internal_error',
-}))
+// retry - the async bus's own. Declare where running twice is safe; a
+// transient failure is re-sent for any action, an uncertain one only here.
+const apiBus = createAsyncCommandBus({
+  retry: { maxAttempts: 3, actions: { 'api*': 'idempotent', apiCharge: false } },
+})
 
 // persist - with shape validation to reject stale state after deploys
 const cartPersist = persist({
@@ -1480,10 +1476,10 @@ unchanged.
 
 **The guard holds two limits**, measured on a Vite production build since the rc.8
 cycle: the saving stays >= <!-- vc:outletFloor -->15.0<!-- /vc:outletFloor --> KB
-(today <!-- vc:outletSaving -->21.14<!-- /vc:outletSaving -->), and the Vapor
+(today <!-- vc:outletSaving -->21.18<!-- /vc:outletSaving -->), and the Vapor
 outlet's own machinery over the router-without-outlet floor stays <=
 <!-- vc:outletOwnArmCeiling -->5.0<!-- /vc:outletOwnArmCeiling --> KB (today
-<!-- vc:outletOwnArm -->4.21<!-- /vc:outletOwnArm -->). It is deliberately written
+<!-- vc:outletOwnArm -->4.13<!-- /vc:outletOwnArm -->). It is deliberately written
 to fail when a later RC erodes either: growth in `DynamicFragment` or
 `SlotFragment` lands in the second, and that failure is a decision trigger rather
 than a threshold to raise. (At this entry's time it was one esbuild-measured bar
@@ -2198,15 +2194,18 @@ settled, and separately asserts the scan covers every module that produces a
 Comments are blanked before scanning, because `settled.ts`'s own docblock quotes
 the pattern it looks for.
 
-**Why the type system did not catch it, and still would not.** `Plugin` declares
-`next: () => CommandResult` while being usable on either bus, which is a lie on the
-async one; `settled.ts` already says so. Three plugins work around it with
-`const plugin: any`, which is the type system being escaped rather than modelled.
-**Alternative rejected: collapse `Plugin` into `AsyncPlugin`.** The sync runner
-(`buildRunner`) genuinely requires a synchronous return, so the two are different
-types and a dual-capable plugin is neither; it needs an overloaded signature. Not
-attempted here. This is also the root of 19 of the type errors the `tests/`
-typecheck gap hides, so the two are one piece of work.
+**Why the type system did not catch it, and does now.** `Plugin` used to declare
+`next: () => CommandResult` while being usable on either bus, a lie on the async
+one, and three plugins escaped it with `const plugin: any`. Collapsing, overloading
+and intersecting the two types each forced one implementation to satisfy both
+signatures. A generic does not: `Plugin` is
+`<R extends CommandResult | Promise<CommandResult>>(cmd, next: () => R, fail) => R | CommandResult`,
+which is a sync plugin at `R = CommandResult` and an async one at the union, so a
+plugin that settles through `onSettled` (generic in `R`, and exported) fits both
+buses with no cast, and one that reads `.ok` off `next()` does not compile.
+`SyncPlugin` is the sync-only shape; the async bus has one `use(AsyncPlugin)`.
+The change found two example plugins with the defect (`examples/custom-plugins.ts`)
+and the README's timing example.
 
 **The prototype-key rule is a sweep too, before it needs to be.** `src/dict.ts` is
 `src/settled.ts` one release earlier, and the shape is identical: a bug class found
@@ -2263,7 +2262,7 @@ clean over a moved declaration is the one result it must never produce.
 
 **Its limit is stated in the file, and it is the interesting part.** A completeness
 diff cannot see a row that is false in a way both sides agree on.
-`VC_CORE_HANDLER_THREW` is exactly that: declared, registered, listed as
+`core:failed:handler` is exactly that: declared, registered, listed as
 retryable - and emitted by no site in `src/`, because a handler's throw reaches
 `result.error` unwrapped (`tryCatchHandler` is
 `catch (e) { return errResult(e as Error) }`). Its row promised that a handler
@@ -2326,32 +2325,28 @@ not a grep scoped to the filenames that happened to be involved the first time.
 
 ##### Still watching
 
-- **The `Plugin` / `AsyncPlugin` overload.** `Plugin` declares
-  `next: () => CommandResult` while being usable on either bus, which is a lie on
-  the async one, and three plugins escape it with `const plugin: any`. The sync
-  runner genuinely requires a synchronous return, so the two are different types
-  and a dual-capable plugin is neither; it needs an overloaded signature. Not
-  attempted.
+- **The `Plugin` / `AsyncPlugin` overload: CLOSED** by a generic `Plugin` (see
+  "Why the type system did not catch it, and does now").
 
-  (The `tests/` typecheck gap this was recorded against is CLOSED.
-  `tsconfig.tests.json` covers `src`, `tests` and `scripts`, and `npm run
-  typecheck` runs it. The gap and its fix both landed inside the v1.22.0 window,
-  so the CHANGELOG entry that says "recorded, not fixed here" describes a state
-  that its own release superseded.)
 - **A bound update overwrites what `v-vc-command` writes by hand.** The directive
-  adds `vc-loading` / `vc-error` and sets `disabled` directly on the element. Vue
+  adds `vc-loading` / `vc-error`, and on a button `aria-disabled` while in
+  flight, directly on the element (not `disabled` since the focus fix:
+  see the Unreleased CHANGELOG entry). Vue
   compares a binding against its own previous value, not against the live DOM, so a
   hand-written value survives until that binding next moves and is then overwritten
   wholesale. Measured on compiled templates: on an element that is NOT the component
   root, a `:class` update drops `vc-loading` on BOTH renderers; on a component root,
   where the class arrives as a fallthrough prop and Vue patches it through
-  `classList`, it survives. `:disabled` behaves the same way: a binding that flips
-  mid-dispatch leaves the button looking enabled and accepting clicks that do
-  nothing, since re-entrancy is blocked by internal state a binding cannot reach.
+  `classList`, it survives. `:aria-disabled` behaves the same way:
+  a binding that flips mid-dispatch leaves the button announced as enabled while
+  presses do nothing, since re-entrancy is blocked by internal state a binding
+  cannot reach. `:disabled` no longer competes with the directive at all: it
+  stopped writing `disabled`, so a value the app binds is left alone.
   rc.9's `a5f7a2c1` ("keep transition classes when updating class binding") is
   upstream solving the same class of problem for its OWN classes, via a list
-  userland cannot join. **Until this is fixed, do not put `:class` or `:disabled` on
-  the same element as `v-vc-command` unless that element is a component root.**
+  userland cannot join. **Until this is fixed, do not put `:class` or `:aria-disabled`
+  on the same element as `v-vc-command` unless that element is a component
+  root.**
 - **Composables imported from the package ROOT degrade in a production bundle.**
   Known since v1.20.0 and now measured in a real production bundle rather than a
   model of one: `loading` is not a Vue ref, a listener registered through
@@ -2766,9 +2761,9 @@ Three IIFE variants ship under `dist/`, split by **audience / deployment shape**
 
 | Variant   | Audience                                                  | Brotli |
 |-----------|-----------------------------------------------------------|--------|
-| core      | Sprinkled JS on server-rendered pages - Blade / Rails / Django | <!-- vc:sizeIifeCore -->7.9<!-- /vc:sizeIifeCore --> KB |
-| elements  | Embeddable widgets via custom elements                    | <!-- vc:sizeIifeElements -->8.4<!-- /vc:sizeIifeElements --> KB |
-| full      | SPAs that grew big (realtime + undo/redo + persistence)   | <!-- vc:sizeIifeFull -->11.8<!-- /vc:sizeIifeFull --> KB |
+| core      | Sprinkled JS on server-rendered pages - Blade / Rails / Django | <!-- vc:sizeIifeCore -->8.0<!-- /vc:sizeIifeCore --> KB |
+| elements  | Embeddable widgets via custom elements                    | <!-- vc:sizeIifeElements -->8.5<!-- /vc:sizeIifeElements --> KB |
+| full      | SPAs that grew big (realtime + undo/redo + persistence)   | <!-- vc:sizeIifeFull -->12.0<!-- /vc:sizeIifeFull --> KB |
 
 _(Generated, always-current per-export sizes: [BUNDLE-SIZES.md](./BUNDLE-SIZES.md).)_
 
@@ -2910,7 +2905,7 @@ Route::post('/vc', function (Request $request) {
         'cartAdd' => app(CartService::class)->add($request->input('target')),
         default    => abort(404),
     };
-    return response()->json(['ok' => true, 'state' => $state]);
+    return response()->json(['state' => $state]);
 });
 ```
 
@@ -2921,38 +2916,32 @@ Route::post('/vc', function (Request $request) {
 // every dispatch returns a Promise where a result is expected (`result.ok` is undefined).
 const bus = createAsyncCommandBus()
 bus.use(logger())
-// HTTP retry lives on the bridge, not in retry(): 408/429/5xx/timeouts only, same Idempotency-Key.
-bus.use(createHttpBridge({ endpoint: '/api/vc', csrf: true, retry: 2, noRetry: ['orderPlace'] }))
+// The bus re-sends through the bridge what the answer declares temporary,
+// invisibly to the plugins outside; a lost request only for an idempotent action.
+bus.use(createHttpBridge({ endpoint: '/api/vc', csrf: true }))
 setCommandBus(bus)
 createApp(App).use(createDirectivePlugin()).mount('#app')
 ```
 
-This recipe used to stack `retry()` in front of the bridge, on a sync bus. That was
-wrong twice: the sync bus cannot run the bridge, and `retry()` re-sent a 422 write
-that the HTTP layer itself refuses to re-send (`tests/retry-bridge-path.test.ts`).
-`retry()`'s default is now status-aware, so the stack is no longer harmful, but the
-bridge's own `retry` is still the right tool for HTTP: it honours `Retry-After` and
-never re-sends an action listed in `noRetry`.
+One rule, in one place (docs/plan-shape.md 4): the async bus re-sends the call
+that produced the outcome - a handler, or a bridge (`transport: true`) - so the
+plugins outside see one dispatch. It reads the failure's condition, waits the
+`Retry-After` it carries, re-sends an uncertain failure only for an action
+declared idempotent or a keyed command, and keeps a per-bus budget
+(`tests/retry-policy.test.ts`, `tests/wire-contract.test.ts`).
 
-**Batched commands are the exception, and the policy is the app's.** With
-`createBatchingHttpBridge` every command in the window shares one POST, so the
-bridge's `retry` sees only a failure of that whole request. A command the backend
-fails INSIDE the batch arrives in a 200, as `{ ok: false, problem }` - the
-reference controller's `batch()` answers that way for a validation failure and for
-a crash alike. The problem carries the status it computed per command, and the
-client deliberately does not act on it: a status inside a 200 is data, not the
-response's status. The default rule treats every such result as final. Which of them are worth re-sending is
-something only your backend's vocabulary can say, and since v1.23.0 the `code`
-reaches the client on this path, so say it there:
+**Batched commands read like single ones.** With `createBatchingHttpBridge`
+every command in the window shares one POST. A command the backend fails INSIDE the batch
+arrives in a 200 as `{ id, problem }`, and its problem carries the status the
+backend computed for that command: the client reads the failure's condition
+from it through the same status table as a single response (the wire contract,
+docs/plan-failures-and-contract.md 4.4). So a batched 503 is `limited` and a
+batched 422 is `invalid`, exactly as they would be alone, and the bus re-sends
+just the transient ones, each joining the next batch:
 
 ```ts
-bus.use(retry({ actions: ['cart*', 'order*'], isRetryable: (err) => (err as { code?: string }).code === 'internal_error' }))
 bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', csrf: true }))
 ```
-
-This is `retry()` over a bridge on purpose, scoped to the bridged actions: the
-bridge cannot see per-command failures, and `retry()` re-dispatches just the
-failed command, which joins the next batch.
 
 ### 11.8 Filament panel islands
 
@@ -3348,7 +3337,7 @@ requirement.
 | Build required | no | no | no | no (IIFE available) |
 | Reactivity model | server-driven | x-data | hypermedia | Vue Vapor signals |
 | Transport | AJAX/WS (built-in) | none | AJAX (built-in) | plugin |
-| Bundle size | ~50KB | ~15KB | ~14KB | <!-- vc:sizeCore -->3.8<!-- /vc:sizeCore --> KB brotli core |
+| Bundle size | ~50KB | ~15KB | ~14KB | <!-- vc:sizeCore -->3.7<!-- /vc:sizeCore --> KB brotli core |
 | TypeScript | partial | no | no | full |
 | Vue DevTools | no | no | no | yes |
 | Undo/redo | no | no | no | built-in |
@@ -3377,7 +3366,7 @@ table above.
 The core (`command-bus.ts` + `testing.ts`) will remain:
 - **Zero runtime dependencies** - always
 - **Framework-agnostic** - always
-- **<!-- vc:sizeCore -->3.8<!-- /vc:sizeCore --> KB brotli dispatch core** - measured ([BUNDLE-SIZES.md](./BUNDLE-SIZES.md)); this line read "~4 KB gzipped" while every other size in this document is brotli, which is a different number for the same artifact
+- **<!-- vc:sizeCore -->3.7<!-- /vc:sizeCore --> KB brotli dispatch core** - measured ([BUNDLE-SIZES.md](./BUNDLE-SIZES.md)); this line read "~4 KB gzipped" while every other size in this document is brotli, which is a different number for the same artifact
 - **`command-bus.ts` at 100% line + branch + function coverage** - measured ([vitest.config](../vitest.config.ts) gate; 3 provably-unreachable defensive guards excluded with rationale). *(`testing.ts` is the test harness - excluded from coverage by design.)*
 
 Optional layers may add dependencies. The core never will.
@@ -3412,14 +3401,15 @@ src/
   reactive.ts       - deepSignal, useDeepCommandState (deep-reactivity companion, vapor-chamber/reactive)
   observable.ts     - observe, dispatchFrom (RxJS-style observable adapter)
   plugins-core.ts   - logger, validator, history, debounce, throttle, authGuard, optimistic
-  plugins-io.ts     - retry, persist, createChannel
+  plugins-io.ts     - persist, createChannel
   plugins-extra.ts  - cache, circuitBreaker, rateLimit, metrics
   plugins-schema.ts - validateSchemas / validateSchemasAsync
   plugins.ts        - barrel re-export of plugins-core + plugins-io
   schema.ts         - schema bus, toTools / toAnthropicTools / toOpenAITools, schemaValidator, LlmAdapter
-  form.ts           - createFormBus (validation, async validators, Precognition)
-  http.ts           - postCommand, readCsrfToken, invalidateCsrfCache
-  http-cache.ts     - getCached / setCache / clearAllCache / invalidateCacheByPattern
+  form.ts           - createFormBus (validation, async validators, the server's `errors` pointers)
+  http.ts           - createHttpClient, postCommand, readCsrfToken, invalidateCsrfCache
+  http-cache.ts     - createResponseCache (per client: one cache and dedupe map per createHttpClient)
+  http-errors.ts    - the HTTP contract: conditionOfStatus, failureCondition, isRetryableStatus, ProblemDetails
   http-query.ts     - buildFullUrl (URL + query-string builder)
   transports.ts     - createHttpBridge, createWsBridge, createSseBridge, createEchoBridge
   transitions.ts    - createTransitionBridge, useTransitionCommand
@@ -3435,9 +3425,13 @@ src/
   vitest.ts         - the Vitest entry, with its side effects (setup file)
   vitest-pure.ts    - the same helpers, registering nothing
   vitest-mcp.ts     - a Vitest MCP server: runTests / getTestResults / getCoverageGaps
-  vite-hmr.ts       - vaporChamberHMR() Vite plugin
+  vite-hmr.ts       - vaporChamberHMR() and vaporChamberWire() Vite plugins
   devtools.ts       - Vue DevTools integration (dynamic import)
   dict.ts           - prototype-free dictionaries (one rule, one place)
+  settled.ts        - onSettled: read a result that may be a promise, on either bus
+  scheduler.ts      - lanes (serialize) and cancellable waits (the bus's retry, the outbox)
+  ledger.ts         - the one undo/redo ledger behind history() and useCommandHistory()
+  a11y.ts           - announce() / setAnnouncer(): status messages for assistive technology
   router/           - the router subpath (Vue 3.6 over a server-owned catch-all)
     engine.ts       - navigation: guards, two-phase commit, query fast path
     table.ts        - rows -> compiled table (chains, query defs, matching)
@@ -3455,7 +3449,7 @@ src/
   iife-elements.ts  - CDN entry, elements variant
   index.ts          - public ESM barrel
 
-tests/                           (<!-- vc:testFiles -->179<!-- /vc:testFiles --> files, <!-- vc:tests -->2527<!-- /vc:tests --> tests)
+tests/                           (<!-- vc:testFiles -->189<!-- /vc:testFiles --> files, <!-- vc:tests -->2614<!-- /vc:tests --> tests)
 ```
 
 The per-file test inventory that used to sit here was removed rather than

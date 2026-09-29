@@ -1,11 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isRouterError } from '../../src/router/errors';
-import { createMemoryHistory } from '../../src/router/history';
-import { createRouter } from '../../src/router/index';
 import { buildBreadcrumbs, buildMenu } from '../../src/router/menu';
 import { createRouteTable } from '../../src/router/table';
 import type { RouteRecord } from '../../src/router/types';
 import { pathActivity } from '../../src/router/url';
+import { makeRouter } from './fixture';
 
 /** An admin-shaped table: a menued section GROUP with menued children, a
  *  menued static leaf, a non-menued detail route under a titled ancestor. */
@@ -207,9 +206,8 @@ describe('buildBreadcrumbs', () => {
 
 describe('router surface', () => {
   it('exposes base and reactive routes - setRoutes swaps what useMenu would see', async () => {
-    const router = createRouter({
+    const router = makeRouter({
       base: '/admin',
-      history: createMemoryHistory('/admin'),
       routes: ROWS,
       components: { Home: {}, Products: {}, Brands: {}, Edit: {}, Orders: {} },
     });

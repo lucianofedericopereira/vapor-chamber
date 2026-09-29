@@ -1,61 +1,17 @@
 /**
  * vapor-chamber - act on a command result that may not have arrived yet.
  *
- * Internal. A plugin is `(cmd, next) => result`, and on the ASYNC bus `next()`
- * returns a PROMISE of the result. Five shipped plugins read `next()`'s return
- * value as though it were the result itself, and `promise.ok` is `undefined` -
- * so on an async bus, measured through the public API:
+ * A plugin is `(cmd, next) => result`, and on the ASYNC bus `next()` returns a
+ * PROMISE of the result, whose `.ok` is `undefined`. A plugin that reads it as
+ * the result fails silently: a logger logs every command as an error, a
+ * history records nothing, a circuit breaker opens after five SUCCESSES, an
+ * SSR plugin dehydrates nothing. `onSettled` settles it, and stays synchronous
+ * on the sync bus.
  *
- *   logger()          logged EVERY command through console.error as
- *                     `error: undefined`, successes included, and never once
- *                     printed the result value
- *   history()         recorded nothing at all - undo/redo silently inert
- *   circuitBreaker()  took the failure branch on every command, so it went
- *                     OPEN after five consecutive SUCCESSES and began
- *                     refusing traffic that was working
- *   metrics()         wrote `ok: undefined` and timed the promise's creation
- *                     rather than its settlement: 0.02ms for a 30ms handler
- *   persist()         never saved
- *
- * None throws. Every one of them reads as "the plugin is attached and quiet",
- * and the circuit breaker actively breaks a healthy system while looking like
- * it is protecting one.
- *
- * The type system did not catch it because these are declared `Plugin` (whose
- * `next` returns `CommandResult`) while being usable on either bus, and the
- * delivery where it bites hardest is the IIFE/CDN build, where there are no
- * types at all.
- *
- * Found by grepping the plugin family for `const x = next()` followed by a read
- * of `x.ok` with no thenable check - five hits - and then measuring each one
- * through the public API on an async bus. (A console line seen while running
- * the examples prompted the search; it turned out to be stale output from an
- * earlier page in the same tab, so it is not evidence of anything. The five
- * measurements above are.)
- *
- * One helper rather than five inline thenable checks, for the reason this
- * repository has now relearned four times: a rule applied by hand at each call
- * site is missing wherever nobody remembered it.
- *
- * AND THE SWEEP ITSELF WAS ONE OF THOSE HANDS. It was run over the plugin
- * family - `plugins-core.ts`, `plugins-extra.ts`, `plugins-io.ts` - and two
- * plugins live outside it and were missed for two releases:
- *
- *   createSSRPlugin()  recorded NOTHING on an async bus. `dehydrate()` came
- *                      back empty, so the client rehydrated no state at all
- *                      and the page read as one that simply had no commands
- *                      to record. Measured: the same dispatch records on a
- *                      sync bus and returns `[]` on an async one.
- *   schemaLogger()     printed the error branch for every command, successes
- *                      included, with `undefined` as the error - the identical
- *                      defect `logger()` had, three modules away from it.
- *
- * Both now go through this helper. The general lesson is unchanged and the
- * specific one is new: the grep that finds this bug class has to run over
- * everything that returns a `Plugin`, which is sixteen modules, not the three
- * whose filenames start with `plugins-`. `tests/settled-sweep.test.ts` asserts
- * that, so the next module to grow a plugin is covered by a test rather than
- * by somebody remembering.
+ * Two guards, because a rule applied by hand at each call site is missing
+ * wherever nobody remembered it: the `Plugin` type (reading `.ok` straight off
+ * `next()` does not compile), and `tests/settled-sweep.test.ts`, which checks
+ * every module that returns a plugin - the IIFE/CDN build has no types.
  */
 
 import type { CommandResult } from './command-bus';
@@ -112,10 +68,10 @@ export function isThenable(value: unknown): value is PromiseLike<unknown> {
  * question for the owner, not something to take silently, so it is not here.
  * Reinstate the parameter and convert those two sites together with the raise.
  */
-export function onSettled(
-  result: MaybeAsyncResult,
+export function onSettled<R extends MaybeAsyncResult>(
+  result: R,
   fn: (settled: CommandResult) => CommandResult,
-): MaybeAsyncResult {
+): R {
   // The predicate is INLINE here rather than a call to `isThenable`, which is
   // the same test written twice in one file on purpose. `onSettled` is in the
   // budgeted Blade consumer bundle (it reaches it through `logger`), and
@@ -125,6 +81,52 @@ export function onSettled(
   // file that already has the rule at the top of it. Keeping the call site
   // free lets the export tree-shake away for anyone who does not use it.
   return (result != null && typeof (result as PromiseLike<CommandResult>).then === 'function')
-    ? (result as Promise<CommandResult>).then(fn)
-    : fn(result as CommandResult);
+    // Sync in, sync out; a promise in, a promise out: `R` either way.
+    ? (result as Promise<CommandResult>).then(fn) as R
+    : fn(result as CommandResult) as R;
+}
+
+/**
+ * Move a history's stacks for an undo or redo, and move them BACK if it does
+ * not land. Moving first means observers inside the call see the result (a
+ * listener on a redo's re-dispatch reads the redone state; pinned by
+ * tests/plugins-core-gaps.test.ts, "island-cart wiring"). Moving back means an
+ * undo the server refused does not read "undone" - for a screen-reader user,
+ * who cannot see that nothing changed, that is indistinguishable from success
+ * (WCAG 3.3.4).
+ *
+ * Not landing is a throw, a rejection, or a failed CommandResult, returned or
+ * resolved; a throw or rejection is logged here, once for every caller, as
+ * `<label> error for "<action>"`. Returns a promise when it had to wait, so
+ * the caller can refuse a second press meanwhile. Shared by useCommandHistory
+ * and the history() plugin, which had the defect twice.
+ * tests/history-undo-lands.test.ts.
+ */
+export function moveUnlessRefused(
+  move: () => void,
+  revert: () => void,
+  call: () => unknown,
+  label: string,
+  action: string,
+): Promise<void> | undefined {
+  const onError = (e: unknown): void => console.error(`[vapor-chamber] ${label} error for "${action}":`, e);
+  const refused = (v: unknown): boolean =>
+    v != null && typeof v === 'object' && (v as { ok?: unknown }).ok === false;
+  move();
+  let outcome: unknown;
+  try {
+    outcome = call();
+  } catch (e) {
+    revert();
+    onError(e);
+    return undefined;
+  }
+  if (!isThenable(outcome)) {
+    if (refused(outcome)) revert();
+    return undefined;
+  }
+  return Promise.resolve(outcome).then(
+    (v) => { if (refused(v)) revert(); },
+    (e) => { revert(); onError(e); },
+  );
 }

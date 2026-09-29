@@ -1,7 +1,7 @@
 <!--
   Cross-component aggregate state via `useSharedCommandState`.
 
-  Errors are observed BUS-WIDE (v1.6.0): even though CartPanel dispatches via
+  Errors are observed BUS-WIDE: even though CartPanel dispatches via
   its own per-component `useCommand`, every failed command on the shared
   bus lands in this panel's error list. `isAnyLoading` tracks dispatches made
   through `useSharedCommandState().dispatch` (bus-wide in-flight pairing is
@@ -39,15 +39,20 @@ const { clear } = shared;
       Aggregate state across all components. Watch this panel react when you
       click in Cart or type in Search.
     </p>
+    <!-- The button stays in place (aria-disabled when there is nothing to
+         clear): removing it while it has focus would drop keyboard focus. -->
     <p>
       <strong>Recent errors ({{ errorCount }}):</strong>
-      <button v-if="errorCount > 0" @click="clear" style="margin-left: 0.5rem;">
+      <button :aria-disabled="errorCount === 0" @click="errorCount > 0 && clear()" style="margin-left: 0.5rem;">
         Clear
       </button>
     </p>
-    <ul v-if="errors.length">
-      <li v-for="(e, i) in errors" :key="i" class="error">{{ e.message }}</li>
-    </ul>
-    <p v-else class="ok">No errors.</p>
+    <!-- A live region: a new error is announced, not only listed. -->
+    <div aria-live="polite">
+      <ul v-if="errors.length">
+        <li v-for="(e, i) in errors" :key="i" class="error">{{ e.message }}</li>
+      </ul>
+      <p v-else class="ok">No errors.</p>
+    </div>
   </section>
 </template>

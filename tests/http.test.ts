@@ -64,7 +64,7 @@ describe('postCommand - basic', () => {
   it('throws HttpError on non-retryable error status', async () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(400, 'bad request'));
 
-    await expect(postCommand('/api/cmd', {})).rejects.toMatchObject({ name: 'HttpError', status: 400 });
+    await expect(postCommand('/api/cmd', {})).rejects.toMatchObject({ name: 'HttpError', response: { status: 400 } });
   });
 
   it('merges extra headers', async () => {
@@ -82,9 +82,29 @@ describe('postCommand - basic', () => {
 // ---------------------------------------------------------------------------
 
 describe('postCommand - retry', () => {
-  it('retries on 500 and succeeds', async () => {
+  it("does not re-send a 422: the server's verdict", async () => {
+    (globalThis.fetch as any).mockResolvedValue(mockResponse(422));
+    await expect(postCommand('/api/cmd', {}, { retry: 2 })).rejects.toMatchObject({ response: { status: 422 } });
+    expect((globalThis.fetch as any).mock.calls).toHaveLength(1);
+  });
+
+  it('re-sends any status that carries Retry-After, waiting what it says', async () => {
     (globalThis.fetch as any)
-      .mockResolvedValueOnce(mockResponse(500))
+      .mockResolvedValueOnce(mockResponse(409, null, { 'retry-after': '1' }))
+      .mockResolvedValueOnce(mockResponse(200, { state: 1 }));
+    vi.useFakeTimers();
+    const promise = postCommand('/api/cmd', {}, { retry: 1 });
+    await vi.advanceTimersByTimeAsync(999);
+    expect((globalThis.fetch as any).mock.calls).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    const res = await promise;
+    expect(res.ok).toBe(true);
+    expect((globalThis.fetch as any).mock.calls).toHaveLength(2);
+  });
+
+  it('retries on 503 and succeeds', async () => {
+    (globalThis.fetch as any)
+      .mockResolvedValueOnce(mockResponse(503))
       .mockResolvedValueOnce(mockResponse(200, { ok: true }));
 
     vi.useFakeTimers();
@@ -101,7 +121,7 @@ describe('postCommand - retry', () => {
 
     vi.useFakeTimers();
     const promise = postCommand('/api/cmd', {}, { retry: 2 });
-    const assertion = expect(promise).rejects.toMatchObject({ name: 'HttpError', status: 503 });
+    const assertion = expect(promise).rejects.toMatchObject({ name: 'HttpError', response: { status: 503 } });
     await vi.runAllTimersAsync();
     await assertion;
 
@@ -146,15 +166,15 @@ describe('postCommand - retry', () => {
   });
 
   // postCommand is createHttpBridge's transport, so this is every bus command
-  // dispatched with `retry` configured: a 422 used to be thrown inside the try,
-  // caught by the retry catch, and re-sent - the exact mutation replay that
+  // dispatched with `retry` configured: a 422 thrown inside the try must not be
+  // caught by the retry catch and re-sent - the mutation replay that
   // Idempotency-Key forwarding exists to make survivable.
   it('does NOT retry a 422 validation failure', async () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(422, { message: 'validation_failed' }));
 
     vi.useFakeTimers();
     const promise = postCommand('/api/cmd', {}, { retry: 2 });
-    const assertion = expect(promise).rejects.toMatchObject({ name: 'HttpError', status: 422 });
+    const assertion = expect(promise).rejects.toMatchObject({ name: 'HttpError', response: { status: 422 } });
     await vi.runAllTimersAsync();
     await assertion;
 
@@ -166,7 +186,7 @@ describe('postCommand - retry', () => {
 
     vi.useFakeTimers();
     const promise = postCommand('/api/cmd', {}, { retry: 2 });
-    const assertion = expect(promise).rejects.toMatchObject({ name: 'HttpError', status: 403 });
+    const assertion = expect(promise).rejects.toMatchObject({ name: 'HttpError', response: { status: 403 } });
     await vi.runAllTimersAsync();
     await assertion;
 
@@ -236,6 +256,15 @@ describe('postCommand - silent flag', () => {
     expect(err.silent).toBe(true);
   });
 
+  it('stamps it on a request that got no response at all', async () => {
+    (globalThis.fetch as any).mockRejectedValue(new TypeError('Failed to fetch'));
+
+    const err = await postCommand('/api/cmd', {}, { silent: true }).catch((e: any) => e);
+
+    expect(err).toBeInstanceOf(TypeError);
+    expect(err.silent).toBe(true);
+  });
+
   it('does not stamp without the flag', async () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(500, { message: 'boom' }));
 
@@ -254,7 +283,7 @@ describe('postCommand - session expiry', () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(401));
     const onSessionExpired = vi.fn();
 
-    await expect(postCommand('/api/cmd', {}, { onSessionExpired })).rejects.toMatchObject({ status: 401 });
+    await expect(postCommand('/api/cmd', {}, { onSessionExpired })).rejects.toMatchObject({ response: { status: 401 } });
     expect(onSessionExpired).toHaveBeenCalledWith(401);
   });
 
@@ -310,7 +339,7 @@ describe('postCommand - CSRF 419 refresh', () => {
   it('does not retry 419 a second time (csrfRetried guard)', async () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(419));
 
-    await expect(postCommand('/api/cmd', {}, { retry: 0 })).rejects.toMatchObject({ status: 419 });
+    await expect(postCommand('/api/cmd', {}, { retry: 0 })).rejects.toMatchObject({ response: { status: 419 } });
     // call[0] = original POST, call[1] = csrf-cookie GET, call[2] = retry POST -> 419 again -> throw
     expect((globalThis.fetch as any).mock.calls).toHaveLength(3);
   });

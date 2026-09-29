@@ -119,13 +119,10 @@ export function createWorkflow(steps: WorkflowStep[]): Workflow {
   async function run(bus: BaseBus, target: any, payload?: any): Promise<WorkflowResult> {
     const results: CommandResult[] = [];
     // The MAPPED target/payload are captured alongside the compensating action,
-    // not just its name. Compensations used to dispatch with the workflow's
-    // original arguments, so a step pairing `mapTarget`/`mapPayload` with
-    // `compensate` - deriving an order id, addressing a sub-entity - was
-    // compensated against something it never acted on: the saga either missed
-    // the entity it had modified or acted on the parent. Silent, and only on
-    // the failure path, which is the last place anyone looks and the one place
-    // a saga must be right.
+    // not just its name: a step pairing `mapTarget`/`mapPayload` with
+    // `compensate` (deriving an order id, addressing a sub-entity) must be
+    // compensated against what it acted on, not the workflow's original
+    // arguments - silently wrong otherwise, and only on the failure path.
     const compensations_: Array<{ action: string; target: any; payload: any }> = [];
 
     for (let i = 0; i < steps.length; i++) {
@@ -189,7 +186,7 @@ export type ReactionOptions = {
    *
    * - **Sync bus:** listeners fire nested inside dispatch, so
    *   `MAX_DISPATCH_DEPTH` halts each chain - 16 recursive dispatches and a
-   *   logged `VC_CORE_MAX_DEPTH` per matching action. Degraded, bounded.
+   *   logged `core:exceeded:depth` per matching action. Degraded, bounded.
    * - **Async bus:** listeners fire post-settle, so each cycle is a fresh
    *   top-level dispatch with the depth counter unwound. Nothing bounds it -
    *   a self-sustaining infinite loop running handlers, plugins and (with a
@@ -250,13 +247,11 @@ export function createReaction(
     // `meta.causationId`, so the chain is walked through meta rather than
     // through the payload.
     //
-    // It used to ride `__reactionHops` in the payload, which cannot mark a
-    // primitive or an array - so `mapPayload: () => 42` dropped the marker,
-    // every hop read as hop 1, and the cap never fired. Measured: an indirect
-    // cycle ran to MAX_DISPATCH_DEPTH (16) on a sync bus instead of stopping at
-    // maxHops, and is unbounded on an async bus, which is exactly the failure
-    // `ReactionOptions.allowSelfMatch` documents. The payload marker is still
-    // written when the payload can hold keys, so nothing reading it changed.
+    // Not in the payload: a `__reactionHops` marker cannot ride on a primitive
+    // or an array, so `mapPayload: () => 42` would read every hop as hop 1 and
+    // the cap would never fire (measured: an indirect cycle runs to
+    // MAX_DISPATCH_DEPTH on a sync bus and unbounded on an async one). The
+    // payload marker is still written when the payload can hold keys.
     //
     // Capped like `_prefixCache` in command-bus.ts: a long-lived reaction on a
     // busy bus would otherwise grow this without bound. Eviction degrades a

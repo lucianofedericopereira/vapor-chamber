@@ -1,5 +1,5 @@
 import { describe, expect, beforeEach, vi, afterEach } from 'vitest';
-import { createCommandBus, createAsyncCommandBus, createCommandPool, commandKey, unsealBus, inspectBus, BusError, matchesPattern, disposeAll } from '../src/command-bus';
+import { createCommandBus, createAsyncCommandBus, createCommandPool, commandKey, unsealBus, inspectBus, BusError, matchesPattern, disposeAll, ownerOf } from '../src/command-bus';
 import { optimisticUndo } from '../src/plugins-core';
 import { createTestBus } from '../src/testing';
 import { getCommandBus, setCommandBus, resetCommandBus } from '../src/chamber';
@@ -85,7 +85,7 @@ describe('onMissing option', () => {
   it("defaults to 'error' - returns { ok: false, error }", ({ bus }) => {
     const result = bus.dispatch('no.handler', {});
 
-    expect(result).toFailWith('VC_CORE_NO_HANDLER');
+    expect(result).toFailWith('core:missing:handler');
     expect(result.error?.message).toContain('No handler');
   });
 
@@ -316,7 +316,7 @@ describe('resetCommandBus', () => {
 
     // Old handler should not exist on new bus
     const result = bus2.dispatch('test', {});
-    expect(result).toFailWith('VC_CORE_NO_HANDLER');
+    expect(result).toFailWith('core:missing:handler');
   });
 });
 
@@ -600,7 +600,7 @@ describe('request/respond', () => {
     });
 
     const result = await bus.request('slowAction', {}, undefined, { timeout: 50 });
-    expect(result).toFailWith('VC_CORE_REQUEST_TIMEOUT');
+    expect(result).toFailWith('core:timeout:request');
     expect(result.error?.message).toContain('timed out');
   });
 
@@ -657,7 +657,7 @@ describe('per-command throttle at register time', () => {
 
     const r2 = bus.dispatch('fastAction', { id: 1 });
     expect(handler).toHaveBeenCalledTimes(1);
-    expect(r2).toFailWith('VC_CORE_THROTTLED');
+    expect(r2).toFailWith('core:limited:handler');
     expect(r2.error?.message).toContain('throttled');
     expect((r2.error as any)?.context?.retryIn).toBeGreaterThan(0);
 
@@ -895,7 +895,7 @@ describe('bus.clear() (sync)', () => {
     bus.clear();
 
     const result = bus.dispatch('a', {});
-    expect(result).toFailWith('VC_CORE_NO_HANDLER'); // no handler -> dead letter
+    expect(result).toFailWith('core:missing:handler'); // no handler -> dead letter
   });
 
   it('removes plugins', ({ bus }) => {
@@ -1023,7 +1023,7 @@ describe('async bus - request/respond', () => {
     bus.respond('slow', async () => new Promise((resolve) => setTimeout(() => resolve('done'), 500)));
 
     const result = await bus.request('slow', {}, undefined, { timeout: 50 });
-    expect(result).toFailWith('VC_CORE_REQUEST_TIMEOUT');
+    expect(result).toFailWith('core:timeout:request');
     expect(result.error?.message).toContain('timed out');
   });
 });
@@ -1191,7 +1191,7 @@ describe('wrapThrottle circular-ref target', () => {
     expect(r1.ok).toBe(true);
 
     const r2 = bus.dispatch('circAction', circular);
-    expect(r2).toFailWith('VC_CORE_THROTTLED');
+    expect(r2).toFailWith('core:limited:handler');
     expect(r2.error?.message).toContain('throttled');
   });
 });
@@ -1234,7 +1234,7 @@ describe('syncRequest with throwing plugin', () => {
 
     const result = await bus.request('qa', {});
     // Converted at the plugin boundary (tests/plugin-throw-fixture.test.ts).
-    expect(result).toFailWith('VC_PLUGIN_THREW');
+    expect(result).toFailWith('plugin:failed:plugin');
     expect(((result.error as Error).cause as Error).message).toBe('plugin-kaboom');
   });
 });
@@ -1256,7 +1256,7 @@ describe('async bus default onMissing', () => {
   it("returns { ok: false } when no handler and no onMissing option", async () => {
     const bus = createAsyncCommandBus(); // default = 'error'
     const result = await bus.dispatch('neverRegistered', {});
-    expect(result).toFailWith('VC_CORE_NO_HANDLER');
+    expect(result).toFailWith('core:missing:handler');
     expect(result.error?.message).toContain('No handler');
   });
 });
@@ -1445,7 +1445,7 @@ describe('async register with throttle option', () => {
     expect(r1.ok).toBe(true);
 
     const r2 = await bus.dispatch('fastAsync', { id: 1 });
-    expect(r2).toFailWith('VC_CORE_THROTTLED');
+    expect(r2).toFailWith('core:limited:handler');
     expect(r2.error?.message).toContain('throttled');
   });
 });
@@ -1677,7 +1677,7 @@ describe('TestBus.onBefore - real implementation', () => {
     const bus = createTestBus();
     bus.onBefore(() => { throw new Error('blocked'); });
     const result = bus.dispatch('test', {});
-    expect(result).toFailWith('VC_CORE_BEFORE_CANCEL');
+    expect(result).toFailWith('core:refused:hook');
     expect(result.error?.message).toBe('blocked');
   });
 
@@ -1779,7 +1779,7 @@ describe('seal() - freeze bus topology', () => {
       expect.unreachable('should have thrown');
     } catch (e) {
       expect(e).toBeInstanceOf(BusError);
-      expect((e as BusError).code).toBe('VC_CORE_SEALED');
+      expect((e as BusError).code).toBe('core:refused:bus');
     }
   });
 });
@@ -1921,7 +1921,7 @@ describe('dispose() - full teardown', () => {
     const bus = createCommandBus({ onMissing: 'error' });
     bus.register('a', () => 1);
     bus.dispose();
-    expect(bus.dispatch('a', {})).toFailWith('VC_CORE_NO_HANDLER');
+    expect(bus.dispatch('a', {})).toFailWith('core:missing:handler');
 
     // The mode is actually being read: a bus disposed under 'ignore' answers
     // ok instead. Without this arm the assertion above cannot tell 'error'
@@ -1988,7 +1988,7 @@ describe('recursion depth guard', () => {
     expect(depth2Count).toBe(2);
   });
 
-  it('deep error result contains VC_CORE_MAX_DEPTH code', ({ bus }) => {
+  it('deep error result contains core:exceeded:depth code', ({ bus }) => {
     let deepResult: any;
     bus.register('loop', (cmd) => {
       const r = bus.dispatch('loop', cmd.target);
@@ -1997,7 +1997,7 @@ describe('recursion depth guard', () => {
     });
     bus.dispatch('loop', {});
     expect(deepResult).toBeDefined();
-    expect(deepResult).toFailWith('VC_CORE_MAX_DEPTH');
+    expect(deepResult).toFailWith('core:exceeded:depth');
   });
 });
 
@@ -2097,7 +2097,7 @@ describe('per-instance throttle timers', () => {
 
     // Bus2 should still have its throttle active
     const r3 = bus2.dispatch('a', {});
-    expect(r3).toFailWith('VC_CORE_THROTTLED');
+    expect(r3).toFailWith('core:limited:handler');
     expect(r3.error?.message).toContain('throttled');
 
     bus2.dispose();
@@ -2120,10 +2120,9 @@ describe('TestBus seal()', () => {
     expect(() => bus.use((_cmd, next) => next())).toThrow(/sealed/i);
   });
 
-  // Was 'clear resets sealed state': the TestBus unsealed on clear(), which the
-  // real buses never did. Aligned in v1.20.0 (tests/seal-clear.test.ts): a
-  // sealed bus refuses clear(), and unsealBus() is the way to reopen it.
-  it('clear no longer resets sealed state - unsealBus() does', () => {
+  // As on the real buses (tests/seal-clear.test.ts): a sealed bus refuses
+  // clear(), and unsealBus() is the way to reopen it.
+  it('clear does not reset sealed state - unsealBus() does', () => {
     const bus = createTestBus();
     bus.seal();
     expect(() => bus.clear()).toThrow(/sealed/i);
@@ -2426,7 +2425,7 @@ describe('core dispatch - error & edge branches', () => {
 
     const result = bus.dispatch('act', {});
 
-    expect(result).toFailWith('VC_CORE_BEFORE_CANCEL');
+    expect(result).toFailWith('core:refused:hook');
     expect(result.error?.message).toBe('blocked-by-hook');
     expect(handlerRan).toBe(false); // handler never runs - hook short-circuits
   });
@@ -2438,7 +2437,7 @@ describe('core dispatch - error & edge branches', () => {
 
     const result = await bus.dispatch('act', {});
 
-    expect(result).toFailWith('VC_CORE_BEFORE_CANCEL');
+    expect(result).toFailWith('core:refused:hook');
     expect(result.error?.message).toBe('async-blocked');
     expect(handlerRan).toBe(false);
   });
@@ -2482,7 +2481,7 @@ describe('core dispatch - error & edge branches', () => {
       { action: 'second', target: {} },
     ], { transactional: true, signal: ac.signal });
 
-    expect(result).toFailWith('VC_CORE_ABORTED');
+    expect(result).toFailWith('core:aborted:dispatch');
     expect(result.error).toBeDefined();
     expect(result.successCount).toBe(0); // rolled back -> reported as 0
     expect(result.rollbacks).toHaveLength(1);
@@ -2524,19 +2523,19 @@ describe('core dispatch - query, rollback, buffer & error defaults', () => {
   it('sync query() on a missing handler routes through the plugin runner', ({ bus }) => {
     bus.use((_cmd, next) => next()); // installing a plugin forces the runner path
     const r = bus.query('nope', {});
-    expect(r).toFailWith('VC_CORE_NO_HANDLER');
+    expect(r).toFailWith('core:missing:handler');
     expect(r.error?.message).toContain('No handler');
   });
 
   it('async query() on a missing handler - bare and plugin-runner paths', async () => {
     const bare = createAsyncCommandBus();
     const r1 = await bare.query('nope', {});
-    expect(r1).toFailWith('VC_CORE_NO_HANDLER');
+    expect(r1).toFailWith('core:missing:handler');
 
     const withPlugin = createAsyncCommandBus();
     withPlugin.use((_cmd, next) => next());
     const r2 = await withPlugin.query('nope', {});
-    expect(r2).toFailWith('VC_CORE_NO_HANDLER');
+    expect(r2).toFailWith('core:missing:handler');
   });
 
   it('async transactional rollback skips commands without an undo handler', async ({ asyncBus: bus }) => {
@@ -2573,22 +2572,20 @@ describe('core dispatch - query, rollback, buffer & error defaults', () => {
   });
 
   it('unsealBus is a safe no-op on a bus without the internal unseal symbol', () => {
-    // Was a TestBus. The TestBus carries the symbol since v1.20.0 (unsealBus()
-    // reopens it like a real bus), so a bare object is the bus without one.
+    // The TestBus carries the symbol (unsealBus() reopens it like a real bus),
+    // so a bare object is the bus without one.
     const bus = { isSealed: () => true } as any;
     expect(() => unsealBus(bus)).not.toThrow();
   });
 
-  it('BusError applies default severity/emitter and omits cause when opts are absent', () => {
-    const e = new BusError('VC_CORE_MAX_DEPTH', 'boom');
-    expect(e.severity).toBe('error');
-    expect(e.emitter).toBe('core');
+  it('a BusError built by hand is the app\'s, and omits cause when opts are absent', () => {
+    const e = new BusError('exceeded:depth', 'boom');
+    expect(e.code).toBe('app:exceeded:depth');
+    expect(ownerOf(e)).toBe('app');
     expect(e.cause).toBeUndefined();
 
-    const e2 = new BusError('VC_CORE_MAX_DEPTH', 'x', { cause: new Error('c'), severity: 'warn', emitter: 'plugin' });
+    const e2 = new BusError('exceeded:depth', 'x', { cause: new Error('c') });
     expect(e2.cause).toBeInstanceOf(Error);
-    expect(e2.severity).toBe('warn');
-    expect(e2.emitter).toBe('plugin');
   });
 
   it('exact-listener unsubscribe is safe after offAll() cleared the bucket', ({ bus }) => {

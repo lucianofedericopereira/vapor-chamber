@@ -5,10 +5,6 @@
  * without executing real handlers. Useful for unit-testing components that
  * use useCommand() without wiring up the full application logic.
  *
- * v0.4.3: Added snapshot assertions and time-travel through dispatch history.
- * v0.3.0: Added on(), request(), respond(), getUndoHandler() stubs.
- * (request() and respond() are real since v1.20.0 - see request() below.)
- *
  * @example
  * const bus = createTestBus();
  * setCommandBus(bus);
@@ -28,11 +24,15 @@
  */
 
 import type {
-  Command, CommandResult, Handler, Plugin, Hook, BeforeHook,
+  AsyncPlugin, Command, CommandResult, Handler, Plugin, Hook, BeforeHook,
   PluginOptions, BatchCommand, BatchResult, CommandBus,
   Listener, RegisterOptions, BusInspection,
 } from './command-bus';
-import { buildRunner, matchesPattern, abortedResult, BusError, _beforeCancel, _errResult, _okResult, _stampMeta, _UNSEAL, _tryCatchHandler } from './command-bus';
+
+// The double stands in for the bus, so its failures are core's: a test must
+// read the same code it will meet in production.
+const testFail = _failures('core');
+import { buildRunner, matchesPattern, abortedResult, _failures, _beforeCancel, _errResult, _okResult, _stampMeta, _UNSEAL, _tryCatchHandler } from './command-bus';
 import { isThenable } from './settled';
 
 export interface RecordedDispatch {
@@ -144,7 +144,7 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
 
   function dispatch(action: string, target: any, payload?: any): CommandResult {
     if (dispatchDepth >= MAX_DISPATCH_DEPTH) {
-      return _errResult(new BusError('VC_CORE_MAX_DEPTH', `Maximum dispatch depth (${MAX_DISPATCH_DEPTH}) exceeded for "${action}".`, { emitter: 'test', action }));
+      return _errResult(testFail('exceeded:depth', `Maximum dispatch depth (${MAX_DISPATCH_DEPTH}) exceeded for "${action}".`, { action, context: { depth: MAX_DISPATCH_DEPTH } }));
     }
     dispatchDepth++;
     try { return _dispatchInner(action, target, payload); }
@@ -165,7 +165,7 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
     for (let i = 0, len = bh.length; i < len; i++) {
       try { bh[i](cmd); }
       catch (e) {
-        // The same VC_CORE_BEFORE_CANCEL result a real bus builds (v1.20.0).
+        // The same core:refused:hook result a real bus builds.
         const result: CommandResult = _errResult(_beforeCancel(e, action));
         recorded.push({ cmd, result });
         runAfterHooksAndListeners(cmd, result);
@@ -175,11 +175,8 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
 
     const handler = handlers.get(action);
 
-    // `_tryCatchHandler` is the bus's OWN wrapper, not a copy of it. This
-    // closure used to spell the same try/catch out, which is how the harness
-    // ends up answering differently from the thing it doubles - the shape of
-    // a result here already drifted once for exactly that reason, and before
-    // that the missing `meta` and the listener fan-out cursor did too.
+    // `_tryCatchHandler` is the bus's OWN wrapper, not a copy of it: a copy is
+    // how a double ends up answering differently from the thing it doubles.
     const execute = (): CommandResult =>
       handler && opts.passthroughHandlers ? _tryCatchHandler(handler, cmd) : _okResult(undefined);
 
@@ -224,19 +221,22 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
   }
 
   function register(action: string, handler: Handler, regOpts: RegisterOptions = {}): () => void {
-    if (sealed) throw new BusError('VC_CORE_SEALED', `Cannot call register() on a sealed bus.`, { emitter: 'test' });
+    if (sealed) throw testFail('refused:bus', `Cannot call register() on a sealed bus.`);
     handlers.set(action, handler);
     if (regOpts.undo) {
       undoHandlers.set(action, regOpts.undo);
     }
+    // Only what THIS call registered, as the real bus does
+    // (tests/register-ownership.test.ts): a test double must not diverge.
+    const undo = regOpts.undo;
     return () => {
-      handlers.delete(action);
-      undoHandlers.delete(action);
+      if (handlers.get(action) === handler) handlers.delete(action);
+      if (undo && undoHandlers.get(action) === undo) undoHandlers.delete(action);
     };
   }
 
   function use(plugin: Plugin, options: PluginOptions = {}): () => void {
-    if (sealed) throw new BusError('VC_CORE_SEALED', `Cannot call use() on a sealed bus.`, { emitter: 'test' });
+    if (sealed) throw testFail('refused:bus', `Cannot call use() on a sealed bus.`);
     const entry = { plugin, priority: options.priority ?? 0 };
     plugins.push(entry);
     rebuildRunner();
@@ -247,13 +247,13 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
   }
 
   function onBefore(hook: BeforeHook): () => void {
-    if (sealed) throw new BusError('VC_CORE_SEALED', `Cannot call onBefore() on a sealed bus.`, { emitter: 'test' });
+    if (sealed) throw testFail('refused:bus', `Cannot call onBefore() on a sealed bus.`);
     beforeHooks.push(hook);
     return () => { const i = beforeHooks.indexOf(hook); if (i !== -1) beforeHooks.splice(i, 1); };
   }
 
   function onAfter(hook: Hook): () => void {
-    if (sealed) throw new BusError('VC_CORE_SEALED', `Cannot call onAfter() on a sealed bus.`, { emitter: 'test' });
+    if (sealed) throw testFail('refused:bus', `Cannot call onAfter() on a sealed bus.`);
     afterHooks.push(hook);
     return () => {
       const i = afterHooks.indexOf(hook);
@@ -280,12 +280,9 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
   }
 
   /**
-   * request() and respond() were stubs until v1.20.0: respond() dropped the
-   * handler and request() resolved dispatch(), so a consumer's request path
-   * could not be tested against this double. Now, as on a real bus: a
-   * responder answers through the plugin chain and the after-hooks, its value
+   * As on a real bus: a responder answers through the plugin chain and the after-hooks, its value
    * is awaited when it is a thenable, an already-aborted signal settles
-   * VC_CORE_ABORTED before the responder runs, and no responder falls back to
+   * core:aborted:dispatch before the responder runs, and no responder falls back to
    * dispatch(). Not mirrored: the timeout and dispose() settling a waiting
    * request - a double records, it does not wait.
    */
@@ -310,7 +307,7 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
   }
 
   function respond(action: string, handler: (cmd: Command) => any): () => void {
-    if (sealed) throw new BusError('VC_CORE_SEALED', `Cannot call respond() on a sealed bus.`, { emitter: 'test' });
+    if (sealed) throw testFail('refused:bus', `Cannot call respond() on a sealed bus.`);
     responders.set(action, handler);
     return () => { responders.delete(action); };
   }
@@ -358,15 +355,14 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
     wasDispatched: (action: string) => recorded.some(r => r.cmd.action === action),
     getDispatched: (action: string) => recorded.filter(r => r.cmd.action === action),
     // A sealed bus refuses clear() and dispose() leaves it sealed, as on the
-    // real buses; unsealBus() reopens it through the same symbol. Both used to
-    // reset `sealed`, so a test could pass here and throw VC_CORE_SEALED
-    // against the real bus.
+    // real buses; unsealBus() reopens it through the same symbol. A double
+    // that reset `sealed` would pass a test the real bus fails.
     clear: () => {
-      if (sealed) throw new BusError('VC_CORE_SEALED', `Cannot call clear() on a sealed bus.`, { emitter: 'test' });
+      if (sealed) throw testFail('refused:bus', `Cannot call clear() on a sealed bus.`);
       recorded.splice(0); patternListeners.length = 0; beforeHooks.length = 0;
     },
     dispose: () => {
-      // Plugin dispose() first, as a real bus's dispose() does (v1.20.0).
+      // Plugin dispose() first, as a real bus's dispose() does.
       for (let i = plugins.length - 1; i >= 0; i--) plugins[i].plugin.dispose?.();
       recorded.splice(0); patternListeners.length = 0; beforeHooks.length = 0; afterHooks.length = 0; handlers.clear(); undoHandlers.clear(); responders.clear(); plugins.length = 0;
     },
@@ -390,4 +386,21 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
     travelTo,
     travelToAction,
   } as unknown as TestBus;
+}
+
+/**
+ * A plugin called on its own, outside a bus, wired the way `bus.use()` wires
+ * it: with its own `fail`, so its refusals carry its declared `id` (or
+ * `'plugin'`) as their owner, exactly as they will on a bus. Here beside
+ * `createTestBus` rather than in `vapor-chamber/vitest`, whose pure entry
+ * imports nothing from the library at runtime.
+ *
+ * @example
+ * const call = wired(rateLimit({ max: 1, windowMs: 1000 }));
+ * call(cmd, next);
+ * expect(call(cmd, next)).toFailWith('rateLimit:limited:action');
+ */
+export function wired<P extends Plugin | AsyncPlugin>(plugin: P): (cmd: Command, next: () => CommandResult | Promise<CommandResult>) => ReturnType<P> {
+  const fail = _failures(plugin.id ?? 'plugin');
+  return (cmd, next) => (plugin as AsyncPlugin)(cmd, next, fail) as ReturnType<P>;
 }

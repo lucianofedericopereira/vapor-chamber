@@ -34,9 +34,9 @@
  *      Vapor bundled into it. Pinned by
  *      `tests/vapor-sfc-prod-detection.test.ts`.
  *   2. Registry entries the probe would have supplied are simply absent, and
- *      guards that depend on them go quietly inert - v1.17.0 found
- *      `hasInjectionContext` missing this way, which disabled the KeepAlive
- *      guard in `useCommandHistory` / `useCommandError`. Pinned by
+ *      guards that depend on them go quietly inert - a missing
+ *      `hasInjectionContext` disables the KeepAlive guard in
+ *      `useCommandHistory` / `useCommandError`. Pinned by
  *      `tests/vue-subpath-wiring-fixture.test.ts`.
  *
  * Both are dev-correct / prod-broken, which is the worst shape a defect can

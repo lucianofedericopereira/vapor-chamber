@@ -21,7 +21,7 @@
  * is ignored rather than decremented from someone else's count. The one exit
  * with a start and no settle is a PLUGIN that throws or rejects: neither runner
  * catches it, so no after-hook or listener fires. Pinned at the end.
- * That was true until VC_PLUGIN_THREW: both runners now convert the throw into
+ * That was true until plugin:failed:plugin: both runners now convert the throw into
  * a result, and `onMissing: 'throw'` is settled before it is re-thrown, so the
  * cases at the end pin that every start settles (tests/plugin-throw-fixture.test.ts).
  */
@@ -136,7 +136,7 @@ describe('isLoading - async bus', () => {
     const ac = new AbortController();
     ac.abort();
     const aborted = await (bus as any).dispatch('svcRestart', 'httpd', undefined, { signal: ac.signal });
-    expect(aborted).toFailWith('VC_CORE_ABORTED');
+    expect(aborted).toFailWith('core:aborted:dispatch');
     expect(p.seen['svcRestart:httpd']).toEqual([false, true]);
 
     gate.resolve('up');
@@ -198,7 +198,7 @@ describe('isLoading - sync bus', () => {
     const p = mountPanel(bus, [['svcRestart', 'httpd']]);
 
     const r = bus.dispatch('svcRestart', 'httpd', 'deny');
-    expect(r).toFailWith('VC_CORE_BEFORE_CANCEL');
+    expect(r).toFailWith('core:refused:hook');
     expect(p.seen['svcRestart:httpd']).toEqual([false]);
 
     bus.dispatch('svcRestart', 'httpd');
@@ -276,7 +276,7 @@ describe('isLoading - lifecycle', () => {
     const p = mountPanel(bus, [['svcRestart', 'httpd']]);
     bus.use(() => { throw new Error('plugin blew up'); });
     const r = bus.dispatch('svcRestart', 'httpd');
-    expect((r.error as any)?.code).toBe('VC_PLUGIN_THREW');
+    expect((r.error as any)?.code).toBe('plugin:failed:plugin');
     expect(p.seen['svcRestart:httpd']).toEqual([false, true, false]);
     p.unmount();
   });

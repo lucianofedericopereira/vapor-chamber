@@ -2,8 +2,8 @@
 
 A **real, verified Laravel app** wiring the full vapor-chamber dispatch loop:
 Blade page -> IIFE bundle -> `POST /api/vc` (real Laravel CSRF) -> one thin
-controller -> action classes -> session-backed cart -> `{ ok, state }` back into
-the page. No build step, no Vue, no database - it runs on a fresh skeleton
+controller -> action classes -> session-backed cart -> `{ state }` back into
+the page (a failure is an RFC 9457 problem). No build step, no Vue, no database - it runs on a fresh skeleton
 with zero migrations.
 
 This folder complements [`../laravel-backend/`](../laravel-backend) (drop-in
@@ -61,13 +61,14 @@ from the version the library is tested against.
   bubbling `CustomEvent` from inside the shadow root, so Alpine's
   `@cart-added.window` and a plain `document.addEventListener` both see it. This
   is the runnable counterpart to the patterns in
-  [`docs/integrations/laravel.md`](../../docs/integrations/laravel.md), which
-  until now had none.
+  [`docs/integrations/laravel.md`](../../docs/integrations/laravel.md).
 - **Real CSRF flow A** - the Blade meta tag + `VaporChamber.connect({ csrf: true })`
   attaching `X-CSRF-TOKEN`, verified by Laravel's `web` middleware.
 - **Action classes** - `__invoke($target, $payload, $user)`, inline
-  `validator()->validate()` -> the controller maps `ValidationException` to a
-  422 `application/problem+json` answer, `code: 'validation_failed'`.
+  `validator()->validate()` on the payload -> the controller maps
+  `ValidationException` to a 422 `application/problem+json` answer,
+  `code: 'validation_failed'`, each field as a `/payload/<field>` pointer; an
+  unknown item is `ModelNotFoundException` -> 404 `not_found`.
 - **Server-truth state** - the cart lives in the session; reload the page and
   Blade renders the same numbers the bus returned.
 - **Wire observability** - `bus.on('*', ...)` logs every dispatch on the page.
@@ -79,13 +80,17 @@ from the version the library is tested against.
 curl -s -X POST http://127.0.0.1:8000/api/vc \
   -H 'Content-Type: application/json' -H "X-CSRF-TOKEN: $TOKEN" -b cookies.txt \
   -d '{"command":"cartAdd","target":{"id":1},"payload":{"qty":2}}'
-# -> {"ok":true,"state":{"count":2,"total":8,"lastAdded":"Coffee"}}
+# -> {"state":{"count":2,"total":8,"lastAdded":"Coffee"}}
 
-# validation failure
-... -d '{"command":"cartAdd","target":{"id":99}}'   # -> 422 {"ok":false,...}
+# validation failure - an RFC 9457 problem, the field as a JSON pointer
+... -d '{"command":"cartAdd","target":{"id":1},"payload":{"qty":0}}'
+# -> 422 {"status":422,"code":"validation_failed","detail":"...","errors":[{"pointer":"/payload/qty","detail":"..."}]}
+
+# an item that does not exist
+... -d '{"command":"cartAdd","target":{"id":99}}'   # -> 404 {"status":404,"code":"not_found","detail":"Resource not found"}
 
 # unknown command
-... -d '{"command":"nope","target":{}}'             # -> 404 {"ok":false,...}
+... -d '{"command":"nope","target":{}}'             # -> 404 {"status":404,"code":"unknown_command","detail":"..."}
 ```
 
 (Get `$TOKEN` + session cookie from `GET /cart` first - or just use the page.)

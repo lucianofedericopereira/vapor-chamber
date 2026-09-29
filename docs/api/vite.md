@@ -17,7 +17,7 @@ import { ... } from 'vapor-chamber/vite';
 
 ### vaporChamberHMR
 
-**Function** - [src/vite-hmr.ts:170](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L170)
+**Function** - [src/vite-hmr.ts:112](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L112)
 
 ```ts
 vaporChamberHMR(options?: VaporChamberHMROptions) => any
@@ -32,7 +32,7 @@ Injects a small runtime shim that:
 
 ### vaporChamberTest
 
-**Function** - [src/vite-hmr.ts:612](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L612)
+**Function** - [src/vite-hmr.ts:538](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L538)
 
 ```ts
 vaporChamberTest(options?: VaporChamberTestOptions) => any
@@ -47,7 +47,7 @@ integration for most suites. The plugin adds what needs config:
   string is kept too, where Vite's own merge would have left ours last;
 - `sharedBus.exclude`, handed to the setup file with `provide`;
 - the island project (see `islands`);
-- a one-time warning, `VC_TEST_VITEST_MAJOR`, on a Vitest major this release
+- a one-time warning, `test:unexpected:version`, on a Vitest major this release
   does not know. A warning, never a failure.
 - one line on top of a run, `\\//  powered by vc-vitest-plugin`, in Vue's
   green and slate where the terminal has colors: on stderr, once per run,
@@ -69,7 +69,7 @@ export default defineConfig({
 
 ### vaporChamberWire
 
-**Function** - [src/vite-hmr.ts:469](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L469)
+**Function** - [src/vite-hmr.ts:395](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L395)
 
 ```ts
 vaporChamberWire(options?: VaporChamberWireOptions) => any
@@ -141,7 +141,7 @@ export default defineConfig({
 
 ### VaporChamberHMROptions
 
-**Type alias** - [src/vite-hmr.ts:129](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L129)
+**Type alias** - [src/vite-hmr.ts:71](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L71)
 
 ```ts
 export type VaporChamberHMROptions = {
@@ -160,25 +160,18 @@ export type VaporChamberHMROptions = {
 
 vapor-chamber - Vite plugins: HMR (serve) and build-time Vue wiring (build)
 
-v1.20.0 - CHANGED (same release, later): `vaporChamberWire()` also runs under the dev server,
-          where it only defines `__VC_WIRED__`. chamber.ts's DEV probe-path
-          hint reads it, so a plugin user is no longer told to change imports
-          the plugin already wires in the build. The redirect stays
-          build-only, now on a measurement: over a pre-bundled install, a
-          dev-time redirect put two chamber modules in the page. See the
-          function's note.
-v1.20.0 - ADDED: `vaporChamberWire()`, a second plugin, build-only. It
-          resolves the bare 'vapor-chamber' specifier to a virtual module
-          that imports 'vapor-chamber/vue' (or '/vapor') for its side effect
-          and re-exports the real root, so an app importing its composables
-          from the root is wired in production with no import changed (H1).
-          Kept apart from `vaporChamberHMR`, which stays serve-only and
-          unchanged: one runs where the probe cannot resolve, the other
-          where it can. See the function's own note for the shape and why
-          it does not run under the dev server.
-v1.19.0 - CODE CHANGE, and the first one this file's own tests could not
-          have found. The transform claimed `.vue` and `.vapor.vue` and had
-          never delivered a shim to either: `enforce: 'pre'` puts it ahead of
+Two plugins (the history is in CHANGELOG.md):
+  - `vaporChamberHMR()`, serve-only: keeps the bus across hot reloads.
+  - `vaporChamberWire()`: in a build it resolves the bare 'vapor-chamber'
+    specifier to a virtual module that imports 'vapor-chamber/vue' (or
+    '/vapor') for its side effect and re-exports the real root, so an app
+    importing from the root is wired in production with no import changed.
+    Under the dev server it only defines `__VC_WIRED__`, which chamber.ts's
+    DEV probe hint reads: a dev-time redirect over a pre-bundled install put
+    two chamber modules in the page (see the function's note).
+
+The rules the HMR shim keeps:
+  - SCRIPTS ONLY. `enforce: 'pre'` runs ahead of
 
 ```ts
 // vite.config.ts
@@ -201,7 +194,7 @@ bus.register('cartAdd', handler)
 
 ### VaporChamberTestOptions
 
-**Type alias** - [src/vite-hmr.ts:504](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L504)
+**Type alias** - [src/vite-hmr.ts:430](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L430)
 
 ```ts
 export type VaporChamberTestOptions = {
@@ -227,7 +220,7 @@ export type VaporChamberTestOptions = {
 
 ### VaporChamberWireOptions
 
-**Type alias** - [src/vite-hmr.ts:383](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L383)
+**Type alias** - [src/vite-hmr.ts:309](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L309)
 
 ```ts
 export type VaporChamberWireOptions = {

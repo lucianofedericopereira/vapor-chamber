@@ -15,10 +15,11 @@
  * transport) so offline commands are captured before any wire work happens.
  */
 
-import type { AsyncCommandBus, AsyncPlugin, Command, CommandResult } from './command-bus';
+import type { AsyncCommandBus, AsyncPlugin, BusError, Command, CommandResult } from './command-bus';
 import { countOption } from './bounds';
-import { BusError, commandKey, matchesPattern, _okResult, _errResult } from './command-bus';
-import { isRetryableStatus } from './http-errors';
+import { commandKey, matchesPattern, failureCondition, _okResult, _errResult, ownerOf } from './command-bus';
+import type { HttpError } from './http';
+import { createSleeper } from './scheduler';
 import { signal } from './signal';
 import type { Signal } from './signal';
 
@@ -84,7 +85,7 @@ export type OutboxStorage = {
  */
 export function localStorageOutbox(storageKey: string = 'vc:outbox'): OutboxStorage {
   function getStore(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null {
-    if (typeof globalThis !== 'undefined' && typeof (globalThis as any).localStorage !== 'undefined') {
+    if (typeof (globalThis as any).localStorage !== 'undefined') {
       return (globalThis as any).localStorage as Storage;
     }
     return null;
@@ -236,27 +237,28 @@ export type OutboxOptions = {
    * data. Pass `() => true` to block on every failure, or your own rule in
    * your backend's codes (`error.code`).
    *
-   * WHY IT EXISTS: before v1.23.0 every failure blocked, so one record
-   * the server refuses held the whole queue for good - each flush re-sent it,
-   * got the same answer, and the records behind it never left.
+   * WHY IT EXISTS: if every failure blocked, one record the server refuses
+   * would hold the whole queue for good - each flush re-sends it, gets the
+   * same answer, and the records behind it never leave.
    */
   isRetryable?: (error: Error, record: OutboxRecord) => boolean;
 };
 
-/** The object returned by {@link createOutbox}. */
 /**
  * The default `isRetryable`: false only for the server's verdict on the
- * command. A `BusError` is the library's own failure, never a verdict; a
- * refusal inside a 2xx carries `emitter: 'transport'` without being one.
+ * command. A `remote` failure is that verdict when RFC 9110 puts it on the
+ * request (a 4xx: `invalid`, `refused`, `missing`, `already`), except an
+ * expired session (401, 419), which replays after sign-in. A server's own
+ * failure (5xx), a transient one and the library's own failures keep the
+ * record.
  */
 function outboxIsRetryable(error: Error): boolean {
-  if (error instanceof BusError) return true;
-  const e = error as { emitter?: unknown; status?: unknown; response?: { status?: unknown } };
-  if (e.emitter === 'transport') return false;
-  const status = e.status ?? e.response?.status;
-  if (typeof status !== 'number' || status < 400 || status >= 500) return true;
-  return status === 401 || status === 419 || isRetryableStatus(status);
+  const owner = ownerOf(error);
+  if (owner !== undefined && owner !== 'remote') return true;
+  const status = owner === 'remote' ? (error as BusError).context?.status : (error as HttpError).response?.status;
+  return status === 401 || status === 419 || !VERDICTS.has(failureCondition(error));
 }
+const VERDICTS = new Set(['invalid', 'refused', 'missing', 'already']);
 
 /**
  * What one `flush()` did. `failed` is 0 or 1: a retryable failure stops the
@@ -264,6 +266,7 @@ function outboxIsRetryable(error: Error): boolean {
  */
 export type OutboxFlushSummary = { replayed: number; failed: number; rejected: number };
 
+/** The object returned by {@link createOutbox}. */
 export type Outbox = {
   /**
    * The outbox plugin. Install OUTERMOST - before `idempotent()` and the
@@ -364,6 +367,8 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
   const pending = signal(0);
 
   let queue: OutboxRecord[] = [];
+  // The scheduler's waits, for a flush the answer asked to come back for.
+  const waits = createSleeper();
   let busRef: AsyncCommandBus | null = null;
   let flushPromise: Promise<OutboxFlushSummary> | null = null;
   /**
@@ -412,8 +417,8 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
     // plugin chain entirely and never allocates a Command, and `enqueue` is
     // private to this closure, reachable only from the plugin below. So every
     // command arriving here came through a normal dispatch, where stampMeta
-    // runs unconditionally in the synchronous prologue. The old runtime guard
-    // could not fire; if that invariant ever breaks, this throws loudly rather
+    // runs unconditionally in the synchronous prologue. A runtime guard could
+    // not fire; if that invariant ever breaks, this throws loudly rather
     // than silently dropping the idempotency key - which is the one thing that
     // must not happen quietly on a queued write.
     cmd.meta!.idempotencyKey = record.key;
@@ -484,9 +489,15 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
         bus.emit('outboxRejected', { record, error });
         continue;
       }
-      // Retryable: keep this record and everything behind it, in order.
+      // Retryable: keep this record and everything behind it, in order. When
+      // the answer declared when to come back (a Retry-After), the scheduler
+      // flushes again then; otherwise the next 'online' or flush() does.
       failed++;
       await saveQueue();
+      const retryIn = (error as BusError).context?.retryIn;
+      if (autoFlush && typeof retryIn === 'number') {
+        void waits.sleep(retryIn).then((due) => { if (due) void flush(bus); });
+      }
       break;
     }
     const summary = { replayed, failed, rejected };
@@ -544,6 +555,7 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
   }
 
   function dispose(): void {
+    waits.wakeAll();
     if (onlineHandler !== null && typeof window !== 'undefined' && typeof window.removeEventListener === 'function') {
       window.removeEventListener('online', onlineHandler);
     }

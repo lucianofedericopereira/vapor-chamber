@@ -70,16 +70,10 @@ export type RoutableTarget = { path: string; fullPath: string };
  * a large share of the anchors.
  *
  * **Measured 1.77-1.86x per commit** (42 us saved at 50 anchors, 172 us at 200,
- * 828 us at 1000), `tests/router-stamp-ab.test.ts`.
- *
- * A NOTE ON THAT NUMBER, because the first one was wrong. An earlier pass
- * measured this at 3.12x by comparing the imported `stampActiveLinks` against a
- * cached variant written INSIDE the test file. V8 does not optimise those two
- * identically, so the gap absorbed a harness artifact - the same class of error
- * `docs/performance.md` warns about for isolated loops, wearing a different
- * costume. Deriving the baseline arm from the shipped source, which is what the
- * A/B does now, gives 1.77-1.86x. Prefer the harness's printed table over any
- * figure copied into prose, including this one.
+ * 828 us at 1000), `tests/router-stamp-ab.test.ts`, with the baseline arm
+ * DERIVED from the shipped source: a variant written inside a test file is
+ * optimised differently by V8 and inflates the ratio. Prefer the harness's
+ * printed table over any figure copied into prose, including this one.
  */
 const routableMemo = new WeakMap<HTMLAnchorElement, { href: string; target: RoutableTarget | null }>();
 
@@ -202,8 +196,21 @@ export function installDomIntegration(options: DomIntegrationOptions): () => voi
 }
 
 /**
+ * Remove `aria-current` only when it is the `"page"` this module sets: a value
+ * the page chose for another purpose (`"step"`, `"location"`) is not ours.
+ */
+function releaseCurrentPage(anchor: Element): void {
+  if (anchor.getAttribute('aria-current') === 'page') anchor.removeAttribute('aria-current');
+}
+
+/**
  * Stamp `data-active` (prefix match) / `data-exact-active` (same path,
  * trailing-slash tolerant) on every in-base anchor. Call after each commit.
+ *
+ * The exact match also gets `aria-current="page"`, which is what a screen
+ * reader announces as "current page" (WAI-ARIA 1.2). Only the exact match: a
+ * section link that is merely a prefix match is active for styling, not the
+ * page, and ARIA asks for one current element per set.
  */
 export function stampActiveLinks(base: string, currentPath: string, root: ParentNode = document): void {
   for (const anchor of root.querySelectorAll<HTMLAnchorElement>('a[href]')) {
@@ -211,11 +218,14 @@ export function stampActiveLinks(base: string, currentPath: string, root: Parent
     if (!routable) {
       anchor.removeAttribute('data-active');
       anchor.removeAttribute('data-exact-active');
+      releaseCurrentPage(anchor);
       continue;
     }
     const { active, exact } = pathActivity(routable.path, currentPath);
     anchor.toggleAttribute('data-active', active);
     anchor.toggleAttribute('data-exact-active', exact);
+    if (exact) anchor.setAttribute('aria-current', 'page');
+    else releaseCurrentPage(anchor);
   }
 }
 
@@ -245,12 +255,9 @@ export function preheatIdle(factories: ReadonlyArray<() => Promise<unknown>>, op
   let aborted = false;
   const abortEvents = ['scroll', 'click', 'keydown', 'pointerdown'] as const;
   // `{ once: true }` removes only the listener that actually FIRES, so the
-  // returned canceller has to detach the rest itself. Without that, a visitor
-  // who never scrolls or clicks leaves four listeners attached for the life of
-  // the page - and the router re-arms this on every bfcache restore
-  // (`armIdlePreheat`), so the set grows once per restore. That is the same
-  // accumulation `start()` already fixed one level up, where re-arming used to
-  // push a fresh entry onto `teardowns` each time.
+  // returned canceller detaches the rest itself: otherwise a visitor who never
+  // scrolls or clicks keeps four listeners for the life of the page, one more
+  // set per bfcache restore (the router re-arms this in `armIdlePreheat`).
   const abort = () => {
     aborted = true;
     for (const ev of abortEvents) window.removeEventListener(ev, abort);

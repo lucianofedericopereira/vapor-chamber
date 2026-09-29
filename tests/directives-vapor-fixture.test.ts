@@ -96,11 +96,9 @@ describe('v-vc-command on a real Vapor app (vcCommandVapor)', () => {
   const seen: string[] = [];
 
   // Pays for the with-vapor Vue build ONCE, in a hook, before any test is
-  // timed. It used to be paid inside whichever test ran first, against the 5 s
-  // default: on a slow machine that test timed out, and because a timeout does
-  // not cancel the async body, its `button.click()` ran later and pushed a
-  // stray action into the NEXT test's `seen` - failing a second test that was
-  // never broken. Warming here removes the timeout, and with it the leak.
+  // timed. Paid inside the first test it could time out against the 5 s
+  // default, and since a timeout does not cancel the async body, its late
+  // `button.click()` would push a stray action into the NEXT test's `seen`.
   beforeAll(async () => {
     await vapor();
   });
@@ -204,12 +202,9 @@ describe('v-vc-command on a real Vapor app (vcCommandVapor)', () => {
     host.remove();
   });
 
-  // INVERTED at v1.22.0, and the inversion is the whole reshape in one case.
-  // This used to pass `() => 'payload'` and assert `seen` stayed EMPTY: the
-  // argument was the selector, and a non-`command` argument declined to mount.
-  // The selector is the NAME now, so the argument is inert - whatever lands in
-  // that slot, the directive mounts and dispatches. Asserting that is what
-  // stops someone reintroducing a read of it.
+  // The argument is inert: the selector is the NAME, so whatever lands in that
+  // slot, the directive mounts and dispatches. Asserting that is what stops
+  // someone reintroducing a read of it.
   it('ignores whatever is in the argument slot - the selector is the name now', async () => {
     const { app, host, button } = await mount((vVc) => [vVc, () => 'cartAdd', () => 'payload']);
     button.click();
@@ -355,14 +350,9 @@ describe('v-vc-command on a real Vapor app (vcCommandVapor)', () => {
     host.remove();
   });
 
-  // REPLACED at v1.22.0. This case used to assert the DEV guard that rejected a
-  // STRING argument and named the required Vue. That guard existed only to
-  // defend the selector-in-the-argument read, and it went with it - so there is
-  // nothing left to reject. What is worth pinning instead is the stronger
-  // property the deletion bought: a string in that slot, the pre-#15490 shape
-  // that made this directive a dead control, is now simply DATA THE DIRECTIVE
-  // NEVER TOUCHES. It cannot throw, it cannot decline to mount, and it cannot
-  // be the reason a control is silent, because nothing reads it.
+  // A string in the argument slot - the pre-#15490 shape that made a
+  // selector-in-the-argument directive a dead control - is data the directive
+  // never touches: it cannot throw, decline to mount, or silence a control.
   it('a STRING in the argument slot - the pre-#15490 shape - cannot break the directive', async () => {
     const v = await vapor();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -724,12 +714,9 @@ describe('v-vc-command on a real vDOM app (createDirectivePlugin)', () => {
     host.remove();
   });
 
-  // INVERTED at v1.22.0, the vDOM twin of the Vapor case above. It asserted
-  // that `arg: 'other'` was ignored through mount, update AND unmount - three
-  // `binding.arg` guards, one per hook, except that `beforeUnmount` never had
-  // one and must never get one. Two of those guards are gone; the third never
-  // existed. So the argument reaches no hook, and the directive behaves the
-  // same with a stray one as without.
+  // The vDOM twin of the Vapor case above: the argument reaches no hook -
+  // mount, update or unmount - and `beforeUnmount` must never guard on the
+  // binding at all.
   it('a stray argument reaches no hook - mount, update and unmount all ignore it', async () => {
     const v = await vapor();
     const value = v.shallowRef('cartAdd');
@@ -825,15 +812,16 @@ describe('v-vc-command on a real vDOM app (createDirectivePlugin)', () => {
     });
     // A <span>, not a <button>: a button is disabled while in flight, and the
     // platform would swallow the second click before the directive saw it.
-    const { app, host, el } = mountVdom(v, () => withDirs(v, 'span', null, [['vc-command', 'slow', undefined, { '20': true }]]));
+    const { app, host, el } = mountVdom(v, () => withDirs(v, 'span', null, [['vc-command', 'slow', undefined, { '200': true }]]));
 
     el('span').click();
     el('span').click();
     await settle();
     expect(calls).toBe(1);
+    // 200ms: wide enough that a loaded run (coverage) still checks in flight.
     expect(el('span').classList.contains('vc-loading')).toBe(true);
 
-    await new Promise((r) => setTimeout(r, 60));
+    await new Promise((r) => setTimeout(r, 260));
     expect(el('span').classList.contains('vc-loading')).toBe(false);
     expect(el('span').classList.contains('vc-error')).toBe(true);
     app.unmount();
@@ -915,15 +903,9 @@ describe('v-vc-command on a real vDOM app (createDirectivePlugin)', () => {
     host.remove();
   });
 
-  // THE ARG FLIP IS GONE FROM THIS CASE, and the case is not. It used to drive
-  // teardown through a dynamic argument moving off `command` - the only route
-  // that reached rc9/4's defect, where `beforeUnmount` guarded on the CURRENT
-  // binding and never detached. There is no argument to flip now, so the route
-  // is unreachable and staging it would mean feeding Vue an input it cannot
-  // produce. What the case was actually FOR survives untouched: that the shared
-  // document listener comes off by IDENTITY, not merely goes quiet. A binding
-  // update still drives `updated`, so the element is still exercised through a
-  // re-render before unmount - it is the action that changes now, not the arg.
+  // The shared document listener comes off by IDENTITY, not merely goes quiet.
+  // A binding update still drives `updated`, so the element is exercised
+  // through a re-render before unmount (the action changes, there is no arg).
   it('.delegate: the document listener comes off by identity after an update and unmount', async () => {
     const v = await vapor();
     const add = vi.spyOn(document, 'addEventListener');
@@ -1034,7 +1016,16 @@ describe('v-vc-command on a real vDOM app (createDirectivePlugin)', () => {
     // not merely made inert. A mounted-flag or isConnected check in the handler
     // would satisfy the click assertion below and fail this one.
     app.unmount();
-    const removed = remove.mock.calls.filter((c) => c[0] === 'click');
+    const clicks = remove.mock.calls.filter((c) => c[0] === 'click');
+    // Two kinds of `click` removal reach this spy since markBusy: the in-flight
+    // guard, added as a capture listener when a dispatch starts and removed
+    // when it lands (once per dispatch, two here), and the directive's own
+    // handler at unmount. Every guard must come off, or a finished dispatch
+    // would keep swallowing presses; the handler must come off once.
+    const guards = clicks.filter((c) => c[1] !== ours![1]);
+    expect(guards).toHaveLength(2);
+    expect(guards.every((c) => c[2] === true)).toBe(true);
+    const removed = clicks.filter((c) => c[1] === ours![1]);
     expect(removed).toHaveLength(1);
     // Same reasoning as the delegated case: a mismatched handler or options
     // object makes removeEventListener a silent no-op, so the call is compared
@@ -1234,7 +1225,7 @@ describe('v-vc-command on a real vDOM app (createDirectivePlugin)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// v-vc-payload and v-vc-optimistic on a real VAPOR app (v1.22.0, plan 4a)
+// v-vc-payload and v-vc-optimistic on a real VAPOR app
 // ---------------------------------------------------------------------------
 
 /** Mount a COMPILED Vapor template with all three directives registered app-wide. */
@@ -1357,9 +1348,8 @@ describe('v-vc-payload / v-vc-optimistic on a real Vapor app', () => {
     host.remove();
   });
 
-  // The capability gap s34.23 recorded, closed. Before v1.22.0 this template
-  // produced Vue's "Failed to resolve directive: vc-optimistic" and no
-  // optimistic update at all.
+  // Without a Vapor registration this template would produce Vue's "Failed to
+  // resolve directive: vc-optimistic" and no optimistic update at all.
   it('optimistic applies immediately and rolls back when the dispatch fails', async () => {
     const v = await vapor();
     getCommandBus().register('cartAdd', () => {
@@ -1549,10 +1539,9 @@ const p = { id: 1 };
 // veto the dispatch through `buildHandler`'s disabled / aria-disabled /
 // in-flight guard.
 //
-// The guard is not incidental: it has been deliberate since v1.6.0, mirroring
-// Vue's #14948 for the DIRECT listener this directive attaches, and the owner
-// ruled it stays. What changed is who runs first, not what the guard does, so
-// this case pins the rc.9 behaviour rather than repairing anything.
+// The guard is deliberate, mirroring Vue's #14948 for the DIRECT listener this
+// directive attaches, and it stays. Since rc.9 a template @click runs first,
+// so this case pins that order rather than repairing anything.
 //
 // It cannot be a fails-before. rc.8 is not installed, and rc.8's compiler emits
 // the ARGUMENT as a bare string, which `vcCommandVapor` rejects by design since

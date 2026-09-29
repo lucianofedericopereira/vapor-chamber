@@ -213,7 +213,7 @@ import { getCommandBus } from 'vapor-chamber';
 it('an excluded file gets no tapped shared bus', () => {
   let code;
   try { expect(getCommandBus()).toHaveBeenDispatched('a'); } catch (e) { code = e.code; }
-  expect(code).toBe('VC_TEST_UNTAPPED');
+  expect(code).toBe('test:missing:tap');
 });
 `;
 
@@ -250,7 +250,7 @@ it('a bus from a second installed copy is named as a duplicate', () => {
   bus.dispatch('a', null);
   let error;
   try { expect(bus).toHaveBeenDispatched('a'); } catch (e) { error = e; }
-  expect(error?.code).toBe('VC_TEST_DUPLICATE_INSTANCE');
+  expect(error?.code).toBe('test:already:instance');
   expect(error?.fix).toContain('npm ls vapor-chamber');
 });
 it('control: the copy the setup file loaded is tapped', () => {
@@ -592,7 +592,7 @@ describe.skipIf(!haveDist)('vc-vitest-mcp, started as an MCP client starts it', 
   it('a filter that reads as a command-line option is refused with its code', async () => {
     const { replies } = await mcpStdio;
     expect(replies.get(6).result.isError).toBe(true);
-    expect(text(replies.get(6))).toContain('VC_TEST_MCP_INVALID_FILES');
+    expect(text(replies.get(6))).toContain('test:invalid:files');
   });
 });
 
@@ -753,7 +753,7 @@ describe.skipIf(!haveDist)('A10 identity', () => {
     expect(passed(outcomes, 'tests/fixture-duplicate.test.js')).toHaveLength(1);
   });
 
-  it('a duplicated install produces VC_TEST_DUPLICATE_INSTANCE', async () => {
+  it('a duplicated install produces test:already:instance', async () => {
     const outcomes = await duplicate;
     expect(failedIn(outcomes, 'tests/duplicate.test.js')).toEqual([]);
     expect(passed(outcomes, 'tests/duplicate.test.js').map((o) => o.title)).toEqual([

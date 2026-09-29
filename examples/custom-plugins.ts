@@ -4,24 +4,25 @@
  * Demonstrates: writing custom plugins for various use cases
  */
 
-import { createCommandBus, type Plugin, type Command } from 'vapor-chamber';
+import { createCommandBus, onSettled, type Plugin, type Command } from 'vapor-chamber';
 
 // ============================================
 // Plugin 1: Analytics
 // ============================================
+// A `Plugin` runs on either bus, so `next()` may be a promise: read the result
+// through `onSettled`, which stays sync on the sync bus.
 function analyticsPlugin(trackFn: (event: string, data: any) => void): Plugin {
   return (cmd, next) => {
     const start = performance.now();
-    const result = next();
-
-    trackFn('command_executed', {
-      action: cmd.action,
-      success: result.ok,
-      duration: performance.now() - start,
-      timestamp: Date.now()
+    return onSettled(next(), (result) => {
+      trackFn('command_executed', {
+        action: cmd.action,
+        success: result.ok,
+        duration: performance.now() - start,
+        timestamp: Date.now()
+      });
+      return result;
     });
-
-    return result;
   };
 }
 
@@ -32,18 +33,18 @@ function authGuardPlugin(
   isAuthenticated: () => boolean,
   protectedPrefixes: string[]
 ): Plugin {
-  return (cmd, next) => {
+  // A plugin refuses through the `fail` it is handed: the code reads
+  // `authGuard:refused:action`, owned by the plugin's `id`.
+  const plugin: Plugin = (cmd, next, fail) => {
     const isProtected = protectedPrefixes.some(p => cmd.action.startsWith(p));
 
     if (isProtected && !isAuthenticated()) {
-      return {
-        ok: false,
-        error: new Error(`Unauthorized: ${cmd.action} requires authentication`)
-      };
+      return { ok: false, error: fail('refused:action', `Unauthorized: ${cmd.action} requires authentication`, { action: cmd.action }) };
     }
 
     return next();
   };
+  return Object.assign(plugin, { id: 'authGuard' });
 }
 
 // ============================================
@@ -56,14 +57,13 @@ function optimisticPlugin(
 ): Plugin {
   return (cmd, next) => {
     const rollback = applyOptimistic(cmd);
-    const result = next();
-
-    if (!result.ok && rollback) {
-      console.log(`Rolling back optimistic update for ${cmd.action}`);
-      rollback();
-    }
-
-    return result;
+    return onSettled(next(), (result) => {
+      if (!result.ok && rollback) {
+        console.log(`Rolling back optimistic update for ${cmd.action}`);
+        rollback();
+      }
+      return result;
+    });
   };
 }
 
@@ -76,7 +76,7 @@ function rateLimiterPlugin(
 ): Plugin {
   const requests: number[] = [];
 
-  return (cmd, next) => {
+  const plugin: Plugin = (cmd, next, fail) => {
     const now = Date.now();
 
     // Remove old requests outside the window
@@ -85,15 +85,15 @@ function rateLimiterPlugin(
     }
 
     if (requests.length >= maxRequests) {
-      return {
-        ok: false,
-        error: new Error(`Rate limit exceeded. Max ${maxRequests} requests per ${windowMs}ms`)
-      };
+      // `retryIn` declares when to come back: a caller and the outbox wait for it.
+      const retryIn = requests[0] + windowMs - now;
+      return { ok: false, error: fail('limited:action', `Rate limit exceeded. Max ${maxRequests} requests per ${windowMs}ms`, { action: cmd.action, context: { retryIn } }) };
     }
 
     requests.push(now);
     return next();
   };
+  return Object.assign(plugin, { id: 'rateLimiter' });
 }
 
 // ============================================
@@ -191,6 +191,10 @@ console.log(bus.dispatch('adminSettings', { theme: 'dark' }));
 
 console.log('\n--- Item add with auto-transform ---');
 console.log(bus.dispatch('itemAdd', { name: 'Widget' }, { quantity: 5 }));
+
+console.log('\n--- Optimistic update, rolled back when the handler fails ---');
+const incremented = bus.dispatch('counterIncrement', null);
+console.log(incremented.ok ? 'kept' : 'rolled back', '->', optimisticState.value);
 
 console.log('\n--- Rate limit test (4 rapid requests) ---');
 for (let i = 0; i < 4; i++) {

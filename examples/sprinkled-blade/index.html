@@ -31,7 +31,7 @@
   <style>
     body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
     button { padding: 0.5rem 1rem; cursor: pointer; }
-    button:disabled { opacity: 0.5; cursor: wait; }
+    button[aria-disabled="true"] { opacity: 0.5; cursor: wait; }
     .panel { border: 1px solid #ddd; padding: 1rem; margin: 1rem 0; border-radius: 6px; }
     .row { display: flex; gap: 1rem; align-items: center; }
     /* Nothing below may move when state changes. The status line always
@@ -70,7 +70,7 @@
            the cart lives on the server and outlives the page. -->
       <span id="count" data-cart></span>
     </div>
-    <p id="status"></p>
+    <p id="status" role="status"></p>
   </div>
 
   <div class="panel">
@@ -113,32 +113,39 @@
       countEl.textContent = `${state.count} items (total: $${state.total.toFixed(2)})`;
     };
 
-    const run = async (action, target, payload, okMessage) => {
+    let inFlight = false;
+    const run = async (button, action, target, payload, okMessage) => {
       // Do NOT blank the status here. Clearing it on click and refilling it a
       // few ms later is a visible blink on a local round trip - the message is
       // replaced when the result lands, never emptied in between.
       //
-      // Same reasoning for the disabled state: a busy affordance that shows
-      // and hides inside ~100ms reads as a glitch, not as feedback. It only
+      // Same reasoning for the busy state: a busy affordance that shows and
+      // hides inside ~100ms reads as a glitch, not as feedback. It only
       // appears if the dispatch is genuinely slow enough to be worth showing.
-      const busy = setTimeout(() => { btn.disabled = true; }, 120);
+      //
+      // `aria-disabled`, not `disabled`: disabling the focused button sends a
+      // keyboard user's focus to <body> (HTML's focus fixup), for good. A press
+      // while one is in flight is ignored here instead.
+      if (inFlight) return;
+      inFlight = true;
+      const busy = setTimeout(() => button.setAttribute('aria-disabled', 'true'), 120);
 
       const result = await dispatch(action, target, payload);
 
       clearTimeout(busy);
-      btn.disabled = false;
-      if (result.ok) {
-        render(result.value);
-        statusEl.innerHTML = `<span class="ok">${okMessage}</span>`;
-      } else {
-        statusEl.innerHTML = `<span class="err">Error: ${result.error.message}</span>`;
-      }
+      button.removeAttribute('aria-disabled');
+      inFlight = false;
+      // Text, never HTML: the message is the backend's sentence. The status
+      // line is a live region, so a screen reader hears the outcome.
+      if (result.ok) render(result.value);
+      statusEl.className = result.ok ? 'ok' : 'err';
+      statusEl.textContent = result.ok ? okMessage : `Error: ${result.error.message}`;
       return result;
     };
 
-    btn.addEventListener('click', () => run('cartAdd', { id: 1 }, { qty: 1 }, 'Added.'));
-    document.getElementById('clear')
-      .addEventListener('click', () => run('cartClear', {}, null, 'Cleared.'));
+    btn.addEventListener('click', () => run(btn, 'cartAdd', { id: 1 }, { qty: 1 }, 'Added.'));
+    const clearBtn = document.getElementById('clear');
+    clearBtn.addEventListener('click', () => run(clearBtn, 'cartClear', {}, null, 'Cleared.'));
 
     // Hydrate the counter ONLY if the server didn't already render it. The
     // cart is server state: it survives reloads and is shared by every tab

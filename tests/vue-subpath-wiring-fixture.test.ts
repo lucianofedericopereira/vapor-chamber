@@ -18,14 +18,15 @@
  * and `tests/vapor-sfc-prod-detection.test.ts` pins the sibling case for Vue
  * detection itself.
  *
- * WHAT IT FOUND (v1.17.0). `hasInjectionContext` was absent from the list.
+ * WHAT IT GUARDS: every name the registry reads must be on the list; for
+ * example `hasInjectionContext`.
  * `tryKeepAliveHooks` gates on it *specifically because* `getCurrentInstance()`
  * returns null inside a Vapor component by design - the rc.4 finding, recorded
  * in whitepaper §9 and ROADMAP. With the entry unset the gate falls back to
  * `getCurrentInstance()` and goes inert, so `useCommandHistory` /
  * `useCommandError` record commands dispatched into a DEACTIVATED KeepAlive
- * view. Measured here before the fix: a command dispatched while the component
- * was deactivated came back in `history.past`. rc.4's guard was correct the
+ * view: a command dispatched while the component was deactivated would come
+ * back in `history.past`. rc.4's guard was correct the
  * whole time; the wiring never delivered what the guard depends on.
  *
  * WHAT IT PINS, and the second assertion is the load-bearing one:
@@ -199,7 +200,7 @@ describe('vapor-chamber/vue wiring, under production-bundle conditions', () => {
     await v.nextTick();
     bus.dispatch('cartAdd', 'b');
 
-    // The pre-v1.17.0 behaviour, kept as evidence rather than described in prose.
+    // What a missing entry does, kept as evidence rather than described in prose.
     expect(history.past.value.map((c) => c.target)).toEqual(['a', 'b']);
 
     app.unmount();

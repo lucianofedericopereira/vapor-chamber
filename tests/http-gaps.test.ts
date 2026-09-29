@@ -53,7 +53,7 @@ describe('postCommand - silent on permanent failures', () => {
 
     await expect(
       postCommand('/api/vc', { command: 'save' }, { retry: 3, silent: true }),
-    ).rejects.toMatchObject({ silent: true, status: 422 });
+    ).rejects.toMatchObject({ silent: true, response: { status: 422 } });
 
     // A permanent 4xx must not consume the retry budget.
     expect((globalThis.fetch as any).mock.calls).toHaveLength(1);
@@ -63,7 +63,7 @@ describe('postCommand - silent on permanent failures', () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(422, { error: 'invalid' }));
 
     const err = await postCommand('/api/vc', { command: 'save' }, { retry: 1 }).catch(e => e);
-    expect(err.status).toBe(422);
+    expect(err.response.status).toBe(422);
     expect(err.silent).toBeUndefined();
   });
 });
@@ -103,7 +103,7 @@ describe('createHttpClient - abort and session expiry', () => {
     const onSessionExpired = vi.fn();
     const http = createHttpClient();
 
-    await expect(http.get('/api/me', { onSessionExpired })).rejects.toMatchObject({ status: 401 });
+    await expect(http.get('/api/me', { onSessionExpired })).rejects.toMatchObject({ response: { status: 401 } });
     expect(onSessionExpired).toHaveBeenCalledTimes(1);
   });
 
@@ -133,9 +133,9 @@ describe('createHttpClient - response interceptor onRejected', () => {
     const http = createHttpClient({ retry: 0 });
     http.interceptors.response.use(onFulfilled, onRejected);
 
-    await expect(http.get('/api/data')).rejects.toMatchObject({ status: 500 });
+    await expect(http.get('/api/data')).rejects.toMatchObject({ response: { status: 500 } });
     expect(onRejected).toHaveBeenCalledTimes(1);
-    expect((onRejected.mock.calls[0]![0] as any).status).toBe(500);
+    expect((onRejected.mock.calls[0]![0] as any).response.status).toBe(500);
     expect(onFulfilled).not.toHaveBeenCalled();
   });
 

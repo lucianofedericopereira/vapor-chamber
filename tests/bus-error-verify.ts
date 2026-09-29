@@ -1,7 +1,7 @@
 /**
  * BusError structured error system verification
  */
-import { createCommandBus, BusError } from '../src/command-bus.ts';
+import { createCommandBus, BusError, ownerOf } from '../src/command-bus.ts';
 
 let pass = 0, fail = 0;
 function assert(cond: boolean, msg: string) { if (cond) { pass++; } else { fail++; console.error('FAIL:', msg); } }
@@ -12,9 +12,8 @@ const r = bus.dispatch('missing', {});
 assert(r.ok === false, 'missing handler -> ok=false');
 assert(r.error instanceof BusError, 'error is BusError');
 const be = r.error as BusError;
-assert(be.code === 'VC_CORE_NO_HANDLER', 'code is VC_CORE_NO_HANDLER');
-assert(be.severity === 'error', 'severity is error');
-assert(be.emitter === 'core', 'emitter is core');
+assert(be.code === 'core:missing:handler', 'code is core:missing:handler');
+assert(ownerOf(be) === 'core', 'owner is core');
 assert(be.action === 'missing', 'action is "missing"');
 
 // Test 2: Throttle produces BusError with code
@@ -26,7 +25,7 @@ assert(r2.ok === false, 'throttled -> ok=false');
 // The handler throws BusError which gets caught by tryCatchHandler
 assert(r2.error instanceof BusError, 'throttle error is BusError');
 const te = r2.error as BusError;
-assert(te.code === 'VC_CORE_THROTTLED', 'code is VC_CORE_THROTTLED');
+assert(te.code === 'core:limited:handler', 'code is core:limited:handler');
 assert(te.context?.retryIn !== undefined, 'context has retryIn');
 
 // Test 3: Request timeout produces BusError
@@ -36,7 +35,7 @@ const r3 = await bus3.request('slow', {}, undefined, { timeout: 50 });
 assert(r3.ok === false, 'timeout -> ok=false');
 assert(r3.error instanceof BusError, 'timeout error is BusError');
 const toe = r3.error as BusError;
-assert(toe.code === 'VC_CORE_REQUEST_TIMEOUT', 'code is VC_CORE_REQUEST_TIMEOUT');
+assert(toe.code === 'core:timeout:request', 'code is core:timeout:request');
 assert(toe.context?.timeout === 50, 'context has timeout=50');
 
 // Test 4: BusError instanceof Error
@@ -46,7 +45,7 @@ assert(be.name === 'BusError', 'name is BusError');
 // Test 5: switch on code works (LLM pattern)
 let handled = false;
 switch (be.code) {
-  case 'VC_CORE_NO_HANDLER': handled = true; break;
+  case 'core:missing:handler': handled = true; break;
   default: break;
 }
 assert(handled, 'switch on code works');

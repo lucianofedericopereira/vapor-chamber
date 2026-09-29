@@ -8,7 +8,7 @@
  * Surface:
  *   - Command bus (sync + async)
  *   - HTTP transport only (createHttpBridge)
- *   - Lightweight plugins: logger, validator, debounce, throttle, retry, authGuard
+ *   - Lightweight plugins: logger, validator, debounce, throttle, authGuard
  *   - createApp() for one-line setup
  *   - connect() - even shorter: HTTP + CSRF in a single call
  *
@@ -25,6 +25,7 @@ import {
   createCommandBus,
   createAsyncCommandBus,
   type CommandBusOptions,
+  type AsyncCommandBusOptions,
 } from './command-bus';
 import {
   logger,
@@ -32,22 +33,23 @@ import {
   debounce,
   throttle,
   authGuard,
-  retry,
 } from './plugins';
 import { createHttpBridge, type HttpBridgeOptions } from './transports';
-import type { AsyncPlugin, Plugin } from './command-bus';
+import type { AsyncPlugin } from './command-bus';
 
 export type CreateAppOptions = {
   transport?: AsyncPlugin;
-  plugins?: Plugin[];
+  plugins?: AsyncPlugin[];
   onMissing?: CommandBusOptions['onMissing'];
+  /** The bus's retry (on by default); `{ actions: { cartAdd: 'idempotent' } }` declares, `false` turns it off. */
+  retry?: AsyncCommandBusOptions['retry'];
 };
 
 function createApp(options: CreateAppOptions = {}) {
-  const bus = createAsyncCommandBus({ onMissing: options.onMissing ?? 'error' });
-  if (options.plugins) for (const p of options.plugins) bus.use(p as AsyncPlugin);
+  const bus = createAsyncCommandBus({ onMissing: options.onMissing ?? 'error', retry: options.retry });
+  if (options.plugins) for (const p of options.plugins) bus.use(p);
   if (options.transport) bus.use(options.transport);
-  return { bus, dispatch: bus.dispatch.bind(bus) };
+  return { bus, dispatch: bus.dispatch };
 }
 
 /**
@@ -64,13 +66,9 @@ function createApp(options: CreateAppOptions = {}) {
  *   });
  * </script>
  */
-function connect(options: HttpBridgeOptions & { plugins?: Plugin[]; onMissing?: CommandBusOptions['onMissing'] }) {
-  const { plugins, onMissing, ...httpOptions } = options;
-  return createApp({
-    transport: createHttpBridge({ csrf: true, ...httpOptions }),
-    plugins,
-    onMissing,
-  });
+function connect(options: HttpBridgeOptions & Omit<CreateAppOptions, 'transport'>) {
+  const { plugins, onMissing, retry, ...httpOptions } = options;
+  return createApp({ transport: createHttpBridge({ csrf: true, ...httpOptions }), plugins, onMissing, retry });
 }
 
 const VaporChamber = {
@@ -88,12 +86,9 @@ const VaporChamber = {
   debounce,
   throttle,
   authGuard,
-  retry,
 } as const;
 
-if (typeof globalThis !== 'undefined') {
-  (globalThis as any).VaporChamber = VaporChamber;
-}
+(globalThis as any).VaporChamber = VaporChamber;
 
 // Default export only: the IIFE build assigns the DEFAULT export to the
 // `VaporChamber` global, so the API object lands directly on window

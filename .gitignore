@@ -7,6 +7,9 @@ dist/
 # Test coverage
 coverage/
 
+# Browser-suite attachments (screenshots Vitest writes on a run)
+.vitest/
+
 # Bench-run outputs
 bench.txt
 

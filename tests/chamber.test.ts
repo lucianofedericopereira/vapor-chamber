@@ -60,6 +60,19 @@ describe('useCommand', () => {
     resetCommandBus();
   });
 
+  it('an unregister called by hand, then again by teardown, removes nothing the second time', () => {
+    const bus = getCommandBus();
+    const scope = effectScope();
+    let off!: () => void;
+    scope.run(() => { off = useCommand().register('pageSave' as never, () => 'page'); });
+    off();
+    // A later owner of the same action must survive the scope's teardown,
+    // which runs the same unregister again.
+    bus.register('pageSave', () => 'later');
+    scope.stop();
+    expect(bus.dispatch('pageSave', {})).toSucceedWith('later');
+  });
+
   it('should return dispatch function', () => {
     const { dispatch } = useCommand();
 
@@ -195,7 +208,7 @@ describe('useCommandState', () => {
 
     // After dispose, handler is unregistered
     const result = bus.dispatch('counterIncrement', {});
-    expect(result).toFailWith('VC_CORE_NO_HANDLER');
+    expect(result).toFailWith('core:missing:handler');
   });
 });
 

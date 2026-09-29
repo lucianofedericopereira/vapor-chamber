@@ -34,8 +34,9 @@ import { DEV } from './dev';
 import { onSettled } from './settled';
 import { MAX_TIMEOUT_MS, countOption } from './bounds';
 import type { Command, CommandResult, Plugin, AsyncPlugin } from './command-bus';
-import { matchesPattern, commandKey, BusError, _errResult } from './command-bus';
+import { matchesPattern, commandKey, _isBug, _errResult } from './command-bus';
 import { freezeCached } from './freeze';
+import { createLanes } from './scheduler';
 
 function makeActionFilter(patterns: string[] | undefined): (action: string) => boolean {
   if (!patterns?.length) return () => true;
@@ -96,13 +97,9 @@ export function cache(options: CacheOptions = {}): Plugin & {
   const store = new Map<string, { result: CommandResult; expiresAt: number; action: string }>();
 
   // action -> the keys stored under it. Entries are keyed by `getKey`, which a
-  // custom `key` option can make ANY shape - so action-wide invalidation
-  // cannot recompute them. It used to try (`commandKey(action, target)` and a
-  // `action + ':'` prefix scan, both the DEFAULT key shape), which meant every
-  // `invalidate()` call silently deleted nothing whenever `key` was set - and
-  // `key` exists precisely for callers whose identity ISN'T `action:target`.
-  // Recording the mapping at insert time makes action-wide invalidation work
-  // for any key shape instead of documenting a hole.
+  // custom `key` option can make ANY shape, so action-wide invalidation cannot
+  // recompute them from `action:target`; recording the mapping at insert time
+  // makes it work for any key shape.
   const byAction = new Map<string, Set<string>>();
 
   function getKey(cmd: Command): string {
@@ -134,12 +131,9 @@ export function cache(options: CacheOptions = {}): Plugin & {
   }
 
   function evictIfNeeded(): void {
-    // Walk insertion order and stop at the bound. Structurally cannot spin,
-    // which the old `while (store.size > maxSize)` form could: once the store
-    // emptied, the condition stayed true under a negative bound while the
-    // `firstKey !== undefined` guard deleted nothing. Bounding the ITERATION
-    // rather than guarding the value removes that failure mode entirely -
-    // and removes the unreachable-by-design branch the guard created.
+    // Walk insertion order and stop at the bound. Bounding the ITERATION
+    // cannot spin, where `while (store.size > maxSize)` can: under a negative
+    // bound the condition stays true once the store is empty.
     // (Deleting the current key mid-iteration is well-defined for a Map.)
     for (const key of store.keys()) {
       if (store.size <= maxSize) break;
@@ -147,8 +141,7 @@ export function cache(options: CacheOptions = {}): Plugin & {
     }
   }
 
-  // Typed as any to work with both sync Plugin and AsyncPlugin signatures
-  const plugin: any = (cmd: Command, next: () => any) => {
+  const plugin: Plugin = (cmd, next) => {
     if (!matchesActions(cmd.action)) return next();
 
     const k = getKey(cmd);
@@ -169,10 +162,8 @@ export function cache(options: CacheOptions = {}): Plugin & {
       evictIfNeeded();
     }
 
-    // Through `onSettled`, which is what the two branches here used to spell
-    // out: settle the result, store it if it succeeded, hand it on. The helper
-    // preserves sync-ness, so the sync bus keeps the behaviour the second
-    // branch gave it.
+    // Through `onSettled`: settle the result, store it if it succeeded, hand
+    // it on - synchronously on the sync bus.
     return onSettled(next(), (result) => {
       if (result.ok) store_(result);
       return result;
@@ -262,17 +253,19 @@ export function circuitBreaker(options: CircuitBreakerOptions = {}): Plugin & {
     return c;
   }
 
-  const plugin: Plugin = ((cmd: Command, next: () => CommandResult) => {
+  const plugin: Plugin = (cmd, next, fail) => {
     if (!matchesActions(cmd.action)) return next();
 
     const c = getCircuit(cmd.action);
 
     if (c.state === 'open') {
-      // Check if reset timeout has elapsed -> half-open
-      if (Date.now() - c.openedAt >= resetTimeout) {
+      // Past resetTimeout -> half-open; before it, the refusal declares the
+      // time left (`retryIn`), which the async bus's retry and the outbox wait for.
+      const retryIn = resetTimeout - (Date.now() - c.openedAt);
+      if (retryIn <= 0) {
         c.state = 'half-open';
       } else {
-        return _errResult(new BusError('VC_PLUGIN_CIRCUIT_OPEN', `Circuit breaker is open for "${cmd.action}". Will retry after resetTimeout (${resetTimeout}ms).`, { emitter: 'plugin', severity: 'error', action: cmd.action, context: { resetTimeout, failCount: c.failCount } }));
+        return _errResult(fail('limited:action', `Circuit breaker is open for "${cmd.action}". Retry in ${retryIn}ms.`, { action: cmd.action, context: { retryIn, resetTimeout, failCount: c.failCount } }));
       }
     }
 
@@ -285,11 +278,11 @@ export function circuitBreaker(options: CircuitBreakerOptions = {}): Plugin & {
       } else {
         c.failCount = 0;
       }
-    } else if ((result.error as { code?: unknown }).code !== 'VC_PLUGIN_THREW') {
+    } else if (!_isBug(result.error)) {
       // A plugin that threw (converted by the runner) is a pipeline bug, not
       // the server failing - a redeploy fixes it, and letting three of them
       // lock the action out is the wrong failure mode. It neither counts nor
-      // resets the run of real failures.
+      // resets the run of real failures. A backend's failure counts.
       c.failCount++;
       if (c.failCount >= threshold && c.state === 'closed') {
         c.state = 'open';
@@ -300,9 +293,10 @@ export function circuitBreaker(options: CircuitBreakerOptions = {}): Plugin & {
 
     return result;
   });
-  }) as unknown as Plugin;
+  };
 
   return Object.assign(plugin, {
+    id: 'circuitBreaker',
     getState(action: string): CircuitState {
       return getCircuit(action).state;
     },
@@ -341,7 +335,7 @@ export function rateLimit(options: RateLimitOptions = {}): Plugin {
   // Per-action sliding window: { timestamps[], head } - head index avoids O(n) shift()
   const windows = new Map<string, { ts: number[]; head: number }>();
 
-  return (cmd, next) => {
+  const plugin: Plugin = (cmd, next, fail) => {
     if (!matchesActions(cmd.action)) return next();
 
     const now = Date.now();
@@ -360,12 +354,15 @@ export function rateLimit(options: RateLimitOptions = {}): Plugin {
 
     const activeCount = win.ts.length - win.head;
     if (activeCount >= max) {
-      return _errResult(new BusError('VC_PLUGIN_RATE_LIMITED', `Rate limit exceeded for "${cmd.action}": ${max} per ${windowMs}ms.`, { emitter: 'plugin', severity: 'error', action: cmd.action, context: { max, windowMs, currentCount: activeCount } }));
+      // The oldest dispatch in the window frees a slot when it leaves it.
+      const retryIn = win.ts[win.head] + windowMs - now;
+      return _errResult(fail('limited:action', `Rate limit exceeded for "${cmd.action}": ${max} per ${windowMs}ms. Retry in ${retryIn}ms.`, { action: cmd.action, context: { retryIn, max, windowMs, currentCount: activeCount } }));
     }
 
     win.ts.push(now);
     return next();
   };
+  return Object.assign(plugin, { id: 'rateLimit' });
 }
 
 // ---------------------------------------------------------------------------
@@ -421,7 +418,7 @@ export function metrics(options: MetricsOptions = {}): Plugin & {
     }
   }
 
-  const plugin: Plugin = ((cmd: Command, next: () => CommandResult) => {
+  const plugin: Plugin = (cmd, next) => {
     if (!matchesActions(cmd.action)) return next();
 
     const start = performance.now();
@@ -443,7 +440,7 @@ export function metrics(options: MetricsOptions = {}): Plugin & {
 
     return result;
   });
-  }) as unknown as Plugin;
+  };
 
   return Object.assign(plugin, {
     entries(): MetricsEntry[] { return data.slice(head); },
@@ -537,28 +534,9 @@ export function serialize(options: SerializeOptions = {}): AsyncPlugin {
   const { key, actions, scope = 'instance', lockPrefix = 'vapor-chamber:serialize' } = options;
   const matchesActions = makeActionFilter(actions);
   const crossTab = scope === 'cross-tab';
-  // Per-key tail of the in-flight chain (default mode AND cross-tab fallback).
-  // Stored promises never reject (errors swallowed), so chaining the next
-  // same-key command onto them is safe.
-  const tails = new Map<string, Promise<unknown>>();
-
-  function inMemory(k: string, next: () => CommandResult | Promise<CommandResult>) {
-    const prev = tails.get(k) ?? Promise.resolve();
-    // Run after the previous same-key command settles - success OR failure both
-    // release the lane, so one rejection can't deadlock the queue.
-    const run = prev.then(
-      () => next(),
-      /* v8 ignore next -- defensive: stored tails are rejection-absorbed two
-         lines down, so `prev` can never actually reject */
-      () => next(),
-    );
-    // The stored tail must never reject; the next command chains onto it.
-    const tail = run.then(() => {}, () => {});
-    tails.set(k, tail);
-    // Reclaim the entry once this lane drains with nothing queued behind it.
-    tail.then(() => { if (tails.get(k) === tail) tails.delete(k); });
-    return run;
-  }
+  // The in-memory lanes (default mode AND the cross-tab fallback): the shared
+  // scheduler's, so serialize, retry and the outbox order runs one way.
+  const lanes = createLanes();
 
   return (cmd, next) => {
     if (!matchesActions(cmd.action)) return next();
@@ -575,7 +553,7 @@ export function serialize(options: SerializeOptions = {}): AsyncPlugin {
         return locks.request(`${lockPrefix}:${k}`, () => next());
       }
     }
-    return inMemory(k, next);
+    return lanes.run(k, next);
   };
 }
 

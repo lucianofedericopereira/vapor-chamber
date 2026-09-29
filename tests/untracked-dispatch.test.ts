@@ -27,11 +27,8 @@
  * calling a **raw bus** from inside an effect, has a documented one-line
  * answer: wrap it in the exported `untracked()`.
  *
- * The list above used to stop at four, and the two it omitted were the ones in
- * `chamber-vapor.ts` - so the claim "every path a component actually uses" was
- * false for exactly the platform this library is named for, and the omission
- * read as a scope statement rather than as the gap it was. Both now untrack,
- * and both are pinned below.
+ * The two paths in `chamber-vapor.ts` are on the list and pinned below: they
+ * are the paths of exactly the platform this library is named for.
  *
  * `untracked()` is backed by `@vue/reactivity`'s `pauseTracking`/
  * `resetTracking` - not `vue`, which does not expose them (verified on

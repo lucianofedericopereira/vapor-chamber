@@ -87,7 +87,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { matchesPattern } from '../src/command-bus';
+import { createCommandBus, matchesPattern } from '../src/command-bus';
 import { isRouterError } from '../src/router/errors';
 import type { LoaderHandlers } from '../src/router/loaders';
 import { revalidateRoutes } from '../src/router/revalidate';
@@ -235,19 +235,32 @@ describe('revalidateRoutes - behaviour', () => {
     router.destroy();
   });
 
-  it('raises a loud coded error for a record that is not in the current chain', async () => {
+  it('reports a record that is not in the current chain as a coded error, through onError', async () => {
     const router = makeRouter(() => ({ ok: 1 }));
     await router.isReady();
     await router.push('/cart');
 
+    const onError = vi.fn();
+    const plugin = revalidateRoutes(router, LOADERS(() => ({ ok: 1 })), { 'cart*': ['nope'] }, { onError });
+    const result = plugin({ action: 'cartAdd' }, () => ({ ok: true }));
+    expect(result).toEqual({ ok: true });
+    expect(isRouterError(onError.mock.calls[0]?.[0], 'unknown_route_name')).toBe(true);
+    plugin.dispose();
+    router.destroy();
+  });
+
+  it('a wiring mistake never turns a succeeded command into a failure', async () => {
+    const router = makeRouter(() => ({ ok: 1 }));
+    await router.isReady();
+    await router.push('/cart');
+
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const bus = createCommandBus();
+    bus.register('cartAdd', () => 'added');
     const plugin = revalidateRoutes(router, LOADERS(() => ({ ok: 1 })), { 'cart*': ['nope'] });
-    let caught: unknown;
-    try {
-      plugin({ action: 'cartAdd' }, () => ({ ok: true }));
-    } catch (error) {
-      caught = error;
-    }
-    expect(isRouterError(caught, 'unknown_route_name')).toBe(true);
+    bus.use(plugin as never);
+    expect(bus.dispatch('cartAdd', {})).toMatchObject({ ok: true, value: 'added' });
+    expect(errors).toHaveBeenCalled();
     plugin.dispose();
     router.destroy();
   });
@@ -397,13 +410,10 @@ describe('revalidateRoutes - edges', () => {
     const router = makeRouter(() => ({ v: 1 }));
     await router.isReady();   // on '/', no loader-bearing records at all
 
-    const plugin = revalidateRoutes(router, LOADERS(() => ({ v: 1 })), { '*': ['shop.cart'] });
-    let caught: unknown;
-    try {
-      plugin({ action: 'cartAdd' }, () => ({ ok: true }));
-    } catch (error) {
-      caught = error;
-    }
+    const onError = vi.fn();
+    const plugin = revalidateRoutes(router, LOADERS(() => ({ v: 1 })), { '*': ['shop.cart'] }, { onError });
+    plugin({ action: 'cartAdd' }, () => ({ ok: true }));
+    const caught = onError.mock.calls[0]?.[0];
     expect(isRouterError(caught, 'unknown_route_name')).toBe(true);
     expect(String((caught as Error).message)).toContain('none');
     plugin.dispose();
@@ -608,8 +618,8 @@ describe('revalidateRoutes - overlapping refreshes only', () => {
     plugin({ action: 'wishAdd' }, () => ({ ok: true }));
     await settle();
 
-    // Both landed. The cart's refresh used to be aborted by the wishlist's and
-    // its value stayed exactly as it was before the command.
+    // Both landed: the wishlist's refresh does not abort the cart's (which
+    // would leave its value exactly as it was before the command).
     expect(router.currentRoute.value.data.get('shop.cart')).not.toEqual(cartBefore);
     expect((router.currentRoute.value.data.get('shop.wish') as { ref: string }).ref).toBe('wish');
 

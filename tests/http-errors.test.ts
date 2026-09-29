@@ -3,10 +3,24 @@
  */
 import { describe, expect, it } from 'vitest';
 import { classifyError, isRetryableStatus } from '../src/http-errors';
+import { conditionOfStatus } from '../src/command-bus';
 import * as root from '../src/index';
 
+describe('the status table (docs/plan-failures-and-contract.md 4.4)', () => {
+  it('each status declares the condition RFC 9110 gives it', () => {
+    const table: Array<[number, string]> = [
+      [404, 'missing'], [410, 'missing'], [409, 'already'],
+      [401, 'refused'], [403, 'refused'], [419, 'refused'],
+      [429, 'limited'], [503, 'limited'], [408, 'timeout'], [504, 'timeout'],
+      [501, 'unexpected'], [502, 'unexpected'], [505, 'unexpected'],
+      [500, 'failed'], [599, 'failed'], [400, 'invalid'], [422, 'invalid'], [413, 'invalid'],
+    ];
+    for (const [status, condition] of table) expect(conditionOfStatus(status), String(status)).toBe(condition);
+  });
+});
+
 describe('isRetryableStatus', () => {
-  it('408, 429 and every 5xx may be sent again', () => {
+  it('408, 429 and every 5xx may be sent again (the AWS SDK and .NET defaults)', () => {
     for (const s of [408, 429, 500, 501, 502, 503, 504, 505, 599]) {
       expect(isRetryableStatus(s), String(s)).toBe(true);
     }

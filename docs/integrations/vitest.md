@@ -62,7 +62,7 @@ export default defineConfig({
   Vitest 5's default for projects. `false` turns it off.
 - The setup file is placed first in `setupFiles`, once, and yours are kept.
 - On a Vitest major this release does not know, one warning,
-  `VC_TEST_VITEST_MAJOR`, never a failure.
+  `test:unexpected:version`, never a failure.
 
 A run with the plugin opens with one line, in Vue's green and slate where the
 terminal has colors:
@@ -140,8 +140,8 @@ it('a result succeeds with a value, or fails with a code', () => {
   bus.register('cartAdd', () => 3);
 
   expect(bus.dispatch('cartAdd', { id: 1 }, { qty: 2 })).toSucceedWith(3);
-  expect(bus.dispatch('cartClear', null)).toFailWith('VC_CORE_NO_HANDLER');
-  expect(bus).toHaveFailedWith('cartClear', 'VC_CORE_NO_HANDLER');
+  expect(bus.dispatch('cartClear', null)).toFailWith('core:missing:handler');
+  expect(bus).toHaveFailedWith('cartClear', 'core:missing:handler');
 });
 ```
 
@@ -256,7 +256,7 @@ Dispatched during this test:
 
   1st dispatch on getCommandBus():
 
-    { action: 'cartAdd', target: { id: 1 }, payload: { qty: 2 }, ok: false, code: 'VC_CORE_NO_HANDLER' }
+    { action: 'cartAdd', target: { id: 1 }, payload: { qty: 2 }, ok: false, code: 'core:missing:handler' }
 
 Number of dispatches: 1
 ```
@@ -321,7 +321,7 @@ config.
 - **What an agent can choose.** The root and the config are fixed by whoever
   starts the server. An agent passes only `files`, Vitest filters that select
   among the test files your config already includes; a filter that starts with
-  `-` is refused (`VC_TEST_MCP_INVALID_FILES`).
+  `-` is refused (`test:invalid:files`).
 - **Edits are seen.** The server watches the project and invalidates changed
   files before each run, so a run after an edit is not stale, and a new test
   file is found.
@@ -345,19 +345,17 @@ Tool names are camelCase, as a vapor-chamber schema bus names its actions.
 ## Diagnostics
 
 A misuse throws a `VcTestError` with a `code`, the reason, the fix and a link.
-It also carries `emitter: 'test'`, which is not for you to read: it is how
-`retry()`'s default predicate recognises a library-minted error, and a handler
-that throws one of these reaches `result.error` unwrapped.
+A handler that throws one reaches `result.error` unwrapped.
 
 | code | cause | fix |
 | --- | --- | --- |
-| `VC_TEST_UNTAPPED` | a bus matcher received a bus nobody passed to `tap()` | `vc.tap(createCommandBus())` where the bus is created |
-| `VC_TEST_DUPLICATE_INSTANCE` | the bus comes from a second installed copy of vapor-chamber | dedupe the install (`npm ls vapor-chamber`) |
-| `VC_TEST_TAP_REMOVED` | `clear()` or `dispose()` removed the recording hook | `vc.tap(bus)` again after clearing |
-| `VC_TEST_VITEST_MAJOR` | a Vitest major this release does not know (a warning) | nothing if the suite passes |
-| `VC_TEST_MCP_INVALID_FILES` | an agent passed `target.files` that is not a short list of filters, or a filter starting with `-` | pass file filters relative to the project root |
-| `VC_TEST_MCP_NO_RUN` | `getTestResults` before any `runTests` | call `runTests` first |
-| `VC_TEST_MCP_NO_COVERAGE` | the coverage run wrote no report | install the coverage provider your config names |
+| `test:missing:tap` | a bus matcher received a bus nobody passed to `tap()` | `vc.tap(createCommandBus())` where the bus is created |
+| `test:already:instance` | the bus comes from a second installed copy of vapor-chamber | dedupe the install (`npm ls vapor-chamber`) |
+| `test:lost:tap` | `clear()` or `dispose()` removed the recording hook | `vc.tap(bus)` again after clearing |
+| `test:unexpected:version` | a Vitest major this release does not know (a warning) | nothing if the suite passes |
+| `test:invalid:files` | an agent passed `target.files` that is not a short list of filters, or a filter starting with `-` | pass file filters relative to the project root |
+| `test:missing:run` | `getTestResults` before any `runTests` | call `runTests` first |
+| `test:missing:coverage` | the coverage run wrote no report | install the coverage provider your config names |
 
 A bus nobody recorded is named, never reported as empty, and `.not` throws too,
 so a negated assertion cannot pass by accident:
@@ -368,7 +366,7 @@ import { expect, it } from 'vapor-chamber/vitest';
 
 it('an untapped bus is a coded error', () => {
   const bus = createCommandBus();
-  expect(() => expect(bus).not.toHaveBeenDispatched('cartAdd')).toThrow(/VC_TEST_UNTAPPED/);
+  expect(() => expect(bus).not.toHaveBeenDispatched('cartAdd')).toThrow(/test:missing:tap/);
 });
 ```
 
@@ -415,7 +413,7 @@ expect.extend(matchers);
 it('registers only what you ask for', () => {
   const bus = tap(createCommandBus());
   bus.dispatch('cartAdd', null);
-  expect(bus).toHaveFailedWith('cartAdd', 'VC_CORE_NO_HANDLER');
+  expect(bus).toHaveFailedWith('cartAdd', 'core:missing:handler');
 });
 ```
 

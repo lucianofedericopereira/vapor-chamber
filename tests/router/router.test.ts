@@ -313,11 +313,11 @@ describe('popstate', () => {
 });
 
 describe('errors & delivery', () => {
-  it('envelope unwrap accepts both shapes and throws coded errors', () => {
+  it('unwrap accepts a bare payload and { state }, and throws coded errors', () => {
     const payload = { routes: [{ name: 'a', path: '/a', component: 'A' }] };
     expect(unwrapRoutesPayload(payload)).toEqual(payload);
-    expect(unwrapRoutesPayload({ ok: true, state: payload })).toEqual(payload);
-    expect(() => unwrapRoutesPayload({ ok: false, error: 'x' })).toThrow(
+    expect(unwrapRoutesPayload({ state: payload })).toEqual(payload);
+    expect(() => unwrapRoutesPayload({ problem: { status: 500, code: 'x', detail: 'x' } })).toThrow(
       expect.objectContaining({ code: 'routes_load_failed' }),
     );
     expect(() => unwrapRoutesPayload({})).toThrow(expect.objectContaining({ code: 'invalid_routes_payload' }));

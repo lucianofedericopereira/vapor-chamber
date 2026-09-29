@@ -163,13 +163,8 @@ describe('history/optimistic - optional-shape arms', () => {
     expect(calls).toEqual(['do', 'undo']);
     // The trigger that was never configured is not a registered command.
     //
-    // This line used to read `expect(bus.getHandler?.('historyRedo') ?? null)
-    // .toBeNull()`. There is no `getHandler` on the bus - the accessors are
-    // `hasHandler` and `getUndoHandler` - so the optional call was `undefined`,
-    // `?? null` made it `null`, and the assertion was `expect(null).toBeNull()`:
-    // it could not fail, for any code, ever. It is the one thing in this test
-    // that was checking the thing the test is named for. Nothing caught it
-    // because `tests/` is not typechecked.
+    // `hasHandler`, a real accessor: an optional call on a method the bus does
+    // not have would read `undefined` and let the assertion pass for any code.
     expect(bus.hasHandler('historyRedo')).toBe(false);
     // ...and the configured one IS registered, so the line above is reading a
     // real difference rather than a bus with nothing on it.

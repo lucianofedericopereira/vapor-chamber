@@ -12,7 +12,7 @@
  */
 import { createReadStream, existsSync, statSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { extname, join, normalize, resolve } from 'node:path';
+import { extname, join, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repo = resolve(fileURLToPath(new URL('.', import.meta.url)), '..');
@@ -32,12 +32,12 @@ const TYPES = {
  * Minimal in-memory backend, so a static example that dispatches actually
  * completes instead of 404-ing on `/api/vc`. Same wire contract as
  * `sprinkled-blade/mock-server.mjs` and the Laravel controller:
- * `{ command, target, payload }` in, `{ ok, state }` out.
+ * `{ command, target, payload }` in, `{ state }` out, or a problem.
  */
 const cart = { count: 0, total: 0 };
 const commands = {
   cartAdd: (target, payload) => {
-    const qty = payload?.qty ?? payload?.quantity ?? 1;
+    const qty = payload?.qty ?? 1;
     cart.count += qty;
     cart.total += 19.99 * qty;
     return { ...cart, lastAdded: `#${target?.id ?? 1}` };
@@ -60,7 +60,7 @@ function api(req, res) {
     };
     // A failure is an RFC 9457 problem, as the reference controller answers it.
     const problem = (status, code, detail) =>
-      json(status, { type: `/problems/${code}`, status, detail, code }, 'application/problem+json');
+      json(status, { status, code, detail }, 'application/problem+json');
     try {
       const { command, target, payload } = JSON.parse(body || '{}');
       const fn = commands[command];
@@ -68,7 +68,7 @@ function api(req, res) {
         problem(404, 'unknown_command', `Unknown command: ${command}`);
         return;
       }
-      json(200, { ok: true, state: fn(target, payload) });
+      json(200, { state: fn(target, payload) });
     } catch (e) {
       console.error(e);
       problem(500, 'internal_error', 'Internal error');
@@ -94,7 +94,14 @@ const CATALOG = Array.from({ length: 47 }, (_, i) => ({
 
 createServer((req, res) => {
   const parsed = new URL(req.url || '/', 'http://localhost');
-  const url = decodeURIComponent(parsed.pathname);
+  let url;
+  try {
+    url = decodeURIComponent(parsed.pathname);
+  } catch {
+    // A malformed escape (`/%E0`) is the client's error, not a crash.
+    res.writeHead(400, { 'Cache-Control': 'no-store' }).end('Bad request');
+    return;
+  }
 
   // Paginated list - what a `load: "/api/items?page={page}"` row fetches.
   if (url === '/api/items') {
@@ -133,8 +140,8 @@ createServer((req, res) => {
   // One item - `load: "/api/items/{id}"`, a path param this time.
   if (url.startsWith('/api/items/')) {
     const item = CATALOG.find((row) => String(row.id) === url.slice('/api/items/'.length));
-    res.writeHead(item ? 200 : 404, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-    res.end(JSON.stringify(item ?? { error: 'not found' }));
+    res.writeHead(item ? 200 : 404, { 'Content-Type': item ? 'application/json' : 'application/problem+json', 'Cache-Control': 'no-store' });
+    res.end(JSON.stringify(item ?? { status: 404, code: 'not_found', detail: 'No such item' }));
     return;
   }
 
@@ -162,7 +169,9 @@ createServer((req, res) => {
     if (req.method === 'POST') { api(req, res); return; }
   }
   const target = join(repo, normalize(url));
-  if (!target.startsWith(repo)) {
+  // The repo itself or a path INSIDE it - a sibling directory whose name
+  // merely starts with the repo's is outside.
+  if (target !== repo && !target.startsWith(repo + sep)) {
     res.writeHead(403, { 'Cache-Control': 'no-store' }).end('Forbidden');
     return;
   }
@@ -179,5 +188,8 @@ createServer((req, res) => {
   createReadStream(file).pipe(res);
 }).listen(port, '127.0.0.1', () => {
   console.log(`Static host for examples -> http://localhost:${port}/`);
-  console.log(`  sprinkled-blade -> http://localhost:${port}/examples/sprinkled-blade/index.html`);
+  console.log(`  sprinkled-blade  -> http://localhost:${port}/examples/sprinkled-blade/index.html`);
+  console.log(`  pattern-1        -> http://localhost:${port}/examples/pattern-1-blade-cdn.html`);
+  console.log(`  directives       -> http://localhost:${port}/examples/feature-directives.html`);
+  console.log(`  router-demo      -> http://localhost:${port}/examples/router-demo/`);
 });

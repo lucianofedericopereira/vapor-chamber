@@ -57,8 +57,8 @@ only.
   order across `dispatch` / `query` / `emit` / `request` paths.
   Corrected by the perf audit (s27), measured with `%HaveSameMap`: that holds
   for `dispatch`, `query` and `request` on one bus type (pinned in
-  `tests/v8-shapes.test.ts` since v1.20.0 gave the sync `request` a `signal`
-  option that must not reach the command). `emit` builds
+  `tests/v8-shapes.test.ts`: the sync `request`'s `signal` option must not
+  reach the command). `emit` builds
   `{ action, target }` - deliberately, see its fast-path note below - and the
   async bus adds `signal`, so an async command is its own map. Padding emit to
   four fields was measured through the real bus and declined: a `'*'`
@@ -75,18 +75,14 @@ only.
 `bus.use(plugin)` rebuilds a single composed `runner` function once per
 plugin add/remove. Dispatch calls `runner(cmd, execute)` directly - no
 per-dispatch chain walk. Each plugin level does allocate one `next` closure
-per dispatch: the runners are re-entrant, so `retry()` calling `next()` once
-per attempt and deferred continuations (`debounce` calling it from a timer)
+per dispatch: the runners are re-entrant, so the bus's retry calling a
+transport level once per attempt and deferred continuations (`debounce` calling it from a timer)
 re-enter the chain at the right level. `buildRunner`'s PERF NOTE in
 `src/command-bus.ts` records what that costs on "3 plugins + 1 listener" and
 why correctness took it.
 
-This paragraph previously ended "no per-dispatch closure allocation", which
-stopped being true when the runners became re-entrant and stayed here
-unnoticed until the plugin-throw review.
-
 Each plugin call is also the boundary that turns a plugin's throw or rejected
-promise into a `VC_PLUGIN_THREW` result: an inline try in each runner, and on
+promise into a `plugin:failed:plugin` result: an inline try in each runner, and on
 the async runner a `.then` only when a plugin did not simply return its
 `next()` value. On "3 plugins + 1 listener" that boundary sits inside the
 self-control band (within noise) on both buses, measured by
@@ -99,8 +95,8 @@ call site near-monomorphic and understates the cost.
 `bus.on('cartAdd', fn)` (exact match) goes into a `Map<action, Listener[]>`
 for O(1) lookup at dispatch time. `bus.on('cart*', fn)` (wildcard) goes into
 a separate array; each entry carries its prefix, computed once in `on()`, so
-dispatch tests it with one `startsWith`. (This said "walked with
-`matchesPattern`" until v1.17.0 took that call off the dispatch path.)
+dispatch tests it with one `startsWith`, with no `matchesPattern` call on the
+dispatch path.
 
 Real-world impact (listener fan-out, 50 exact + 5 wildcards; the ops/sec are one earlier run on
 one host, the ratio is the latest `npm run bench`):
@@ -116,14 +112,9 @@ The default unique-ID generator is a per-process random prefix + monotonic
 counter. **Re-measured on Node 24 (2026-08-17, `hrtime` medians over 21x200k
 reps): ~12 ns per call vs ~104 ns for `crypto.randomUUID()` - ~8x.**
 
-This paragraph previously read "~30-50 ns per call ... was `crypto.randomUUID()`
-(~1-2 µs)", implying 20-60x. Those figures no longer describe any current
-runtime: modern V8/Node batch UUID entropy, so `randomUUID` got ~10x cheaper
-while the counter stayed put. The decision is unchanged and the direction still
-holds - only the margin is smaller. `src/command-bus.ts` was corrected when this
-was re-measured; this page and the bench comment were not, which is the drift
-this doc exists to prevent. **Always quote the runtime with the number** - an
-unqualified ns figure is exactly what let it drift unnoticed.
+**Always quote the runtime with the number**: modern V8/Node batch UUID
+entropy, so `randomUUID`'s cost moves between runtimes while the counter's
+does not.
 
 The **ratio at the dispatch level is bench-backed and unaffected**: <!-- vc:benchUidCounterVsUuid -->2.56<!-- /vc:benchUidCounterVsUuid -->x on the
 10k-dispatch hot path (the latest `npm run bench`; one earlier run on one host read
@@ -150,25 +141,18 @@ bundle (`createCommandBus` + `createHttpBridge` + `logger`):
 
 | | Bundle |
 |--|--|
-| Brotli | **<!-- vc:sizeConsumer -->6.2<!-- /vc:sizeConsumer --> KB** |
+| Brotli | **<!-- vc:sizeConsumer -->6.3<!-- /vc:sizeConsumer --> KB** |
 | Vapor probing references | 0 |
 
 That number is measured, not retyped: `scripts/measure-size.mjs` builds this
 exact consumer entry from `dist/` and publishes it as a row in
 [BUNDLE-SIZES.md](./BUNDLE-SIZES.md), and `npm run docs:stamp` republishes it
-here, with `lint:check` failing on a stale one. It previously read "16.7 KB raw
-/ 5.5 KB brotli" - roughly 18% under reality by the time anyone re-measured,
-which is what any hand-copied measurement eventually becomes.
+here, with `lint:check` failing on a stale one. A hand-copied measurement drifts.
 `tests/esm-treeshake.test.ts` builds the same consumer entry, checks that the
 Vapor registry drops out, and gates its size against a ceiling measured on a
-Vite production build (`NODE_ENV` defined, as a consumer ships it), and since
-v1.20.0 the row above is that same Vite build of the same entry, so the two
-numbers agree. The test logs every move with what bought the bytes.
-
-This paragraph previously said the test "gates the same artifact against a
-ceiling", true until the ceiling moved to a Vite build (2026-09-14) and true
-again since the row moved with it (v1.20.0; until then the row was an esbuild
-bundle with no define, which kept DEV-only branches that build folds out).
+Vite production build (`NODE_ENV` defined, as a consumer ships it), and the
+row above is that same Vite build of the same entry, so the two numbers agree.
+The test logs every move with what bought the bytes.
 
 Composables (`useCommand`, etc.) land in your bundle only if you import them.
 
@@ -334,10 +318,10 @@ Behavior:
   Tracking starts at the first `isLoading()` call on the bus (a before-hook is
   installed then), so a bus nobody asks per-key questions of pays nothing.
   Every start settles, pinned by `tests/command-loading-fixture.test.ts`: a
-  plugin that throws or rejects becomes a `VC_PLUGIN_THREW` result, and
+  plugin that throws or rejects becomes a `plugin:failed:plugin` result, and
   `onMissing: 'throw'` is settled before it is re-thrown - the two exits that
   once left a key true. The limit that remains: on a sealed bus the first call
-  throws `VC_CORE_SEALED` - call it before `seal()`.
+  throws `core:refused:bus` - call it before `seal()`.
 - **`{ signal }`** option forwards to the underlying bus dispatch (the v1.2.x
   AbortController integration), so cancellation works the same as
   `useCommand`.
@@ -378,7 +362,7 @@ Behavior:
 - **Pre-aborted signal** -> resolves immediately with `{ ok: false, error }`,
   handler is **not** called. The error is the explicit reason
   (`ac.abort(myError)`) if provided, otherwise a `BusError` with
-  `code === 'VC_CORE_ABORTED'`.
+  `code === 'core:aborted:dispatch'`.
 - **Mid-flight abort** -> handler observes `cmd.signal.aborted === true`. The
   handler is responsible for stopping its own work - the bus does not
   forcibly terminate it.
@@ -389,11 +373,9 @@ Behavior:
 - **Sync bus** accepts `{ signal }` for type uniformity but ignores it at
   runtime - sync dispatches are atomic.
 
-**Also cancelable** (this paragraph used to say the opposite - it listed these
-as "not yet supported, deferred to v1.3" long after they shipped in v1.2.x):
-`bus.request()` accepts `{ signal, timeout }` on both buses (the sync bus read
-only `timeout` until v1.20.0; its command carries no `signal`, so the signal
-settles the request and the responder is not told); `bus.dispatchBatch()`
+**Also cancelable**: `bus.request()` accepts `{ signal, timeout }` on both
+buses (on the sync bus the command carries no `signal`, so the signal settles
+the request and the responder is not told); `bus.dispatchBatch()`
 accepts `{ signal }` and, with `transactional: true`, rolls back
 already-succeeded commands on a mid-batch abort; the **WebSocket bridge**
 honours `cmd.signal` per dispatch. The **SSE bridge** is receive-only by design,
@@ -445,7 +427,6 @@ configureAlienSignals(alienSignal);
 | **Vue `shallowRef()` via `signal()` auto-detected** | **~40,000-62,000** | The default since v1.5.0 - ~4-7x the old deep-`ref()` path |
 | alien-signals via `configureAlienSignals` | ~10,400 | Opt-in reactive (non-Vue contexts) |
 | Vue deep `ref()` (the old v1.4 `signal()` default) | ~9,000 | Replaced by shallowRef - see §"reactive runtime notes" finding #5 |
-| Old closure getter/setter (v1.3, removed) | ~2,200 | 166x slower than plain object |
 
 The `shallowRef()` range spans runs: the absolute is machine-state sensitive, and the **ratio
 to the deep `ref()` it replaced is the robust claim**. It is also the signal-write cost only; end
@@ -498,9 +479,9 @@ audience, not by feature checklist.
 
 | Variant     | Audience                                                      | Brotli |
 |-------------|---------------------------------------------------------------|--------|
-| `core`      | Sprinkled JS on server-rendered pages (Blade / Rails / Django)| <!-- vc:sizeIifeCore -->7.9<!-- /vc:sizeIifeCore --> KB |
-| `elements`  | Embeddable widgets via custom elements                        | <!-- vc:sizeIifeElements -->8.4<!-- /vc:sizeIifeElements --> KB |
-| `full`      | SPAs that grew big enough to want everything                  | <!-- vc:sizeIifeFull -->11.8<!-- /vc:sizeIifeFull --> KB |
+| `core`      | Sprinkled JS on server-rendered pages (Blade / Rails / Django)| <!-- vc:sizeIifeCore -->8.0<!-- /vc:sizeIifeCore --> KB |
+| `elements`  | Embeddable widgets via custom elements                        | <!-- vc:sizeIifeElements -->8.5<!-- /vc:sizeIifeElements --> KB |
+| `full`      | SPAs that grew big enough to want everything                  | <!-- vc:sizeIifeFull -->12.0<!-- /vc:sizeIifeFull --> KB |
 
 _(Always-current measured sizes for every export: [BUNDLE-SIZES.md](./BUNDLE-SIZES.md), generated by `npm run size:doc` and CI-verified fresh.)_
 
@@ -735,7 +716,7 @@ superseded per-beta notes don't need their own section).
 > delta needs beta.14 re-run on the same host). Bench labels now read the running Vue version
 > dynamically (`VUE_VERSION`), so they self-track.
 
-> **beta.16 (unreleased):** no lib code change, so no path moved on our side. The full bench was
+> **beta.16:** no lib code change, so no path moved on our side. The full bench was
 > re-run against beta.16 on a dev host and is **green** - the Vue-independent rows (plain
 > `{ value }` ~368k ops/s, fast-lane ~28.6k, `bus.dispatch` ~1.83k) land on the recorded
 > baselines, confirming no regression; the Vue-reactive rows stay inside their recorded ranges. No
@@ -854,7 +835,6 @@ npx vitest bench --run tests/perf.bench.ts
 | `rehydrate` - 1000 commands, ignoreUnhandled skip path             | ~107,016    |
 | **Vue reactive integration (beta.14, requires vue devDep)**        |             |
 | `signal()` fallback - plain `{ value }` object (no Vue, no alien-signals) | ~372,198 |
-| `signal()` fallback - old closure getter/setter (v1.3, removed)   | ~2,208      |
 | alien-signals via `configureAlienSignals` (opt-in reactive)        | ~10,400     |
 | `signal()` write - Vue **shallowRef** auto-detected (v1.5.0 default)| ~40,000-62,000 |
 | `signal()` write - Vue deep `ref()` (old v1.4 default, for reference)| ~9,000     |

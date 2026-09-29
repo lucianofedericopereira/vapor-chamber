@@ -70,7 +70,7 @@ function buildBaseline(): void {
     }
     src = src.replace(shipped, baseline);
   }
-  src = src.replace(/from '\.\/dev'/g, "from '../../../src/dev'").replace(/from '\.\/dict'/g, "from '../../../src/dict'");
+  src = src.replace(/from '\.\/([\w-]+)'/g, "from '../../../src/$1'");
   mkdirSync(REF_DIR, { recursive: true });
   writeFileSync(BASELINE, src);
 }

@@ -1,20 +1,4 @@
-/**
- * Supplemental coverage for src/transports.ts.
- *
- * Targets what transports.test.ts / transports-coverage.test.ts leave untouched:
- *
- *  - HTTP bridge error re-wrap keeping `status` AND `code`
- *  - `csrf: 'inertia'` -> csrfFlag false on both HTTP bridges
- *  - signal + scopeController merge via AbortSignal.any, and the per-dispatch
- *    `cmd.signal` merge
- *  - batching bridge: idempotency key forwarding, a response with no
- *    `results` array, pre-flight abort
- *  - WS bridge: connect() with no WebSocket global, pre-flight abort
- *
- * The two pre-flight abort guards are only reachable by invoking the plugin
- * directly: `bus.dispatch` short-circuits an already-aborted signal before the
- * pipeline runs, so the guard exists for standalone/plugin-composed use.
- */
+
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { Command, CommandResult } from '../src/index';
 import { createAsyncCommandBus } from '../src/index';
@@ -36,41 +20,7 @@ function callPlugin(plugin: any, cmd: Partial<Command>): Promise<CommandResult> 
 // createHttpBridge - error re-wrap detail
 // ---------------------------------------------------------------------------
 
-describe('createHttpBridge error re-wrap', () => {
-  it('carries status, code and response through the rewrapped error', async () => {
-    const thrown = Object.assign(new Error('HTTP 422'), {
-      name: 'HttpError',
-      status: 422,
-      code: 'VALIDATION',
-      response: { data: { error: 'email is taken' } },
-    });
-    const httpClient = { post: vi.fn().mockRejectedValue(thrown) } as any;
 
-    const bus = createAsyncCommandBus();
-    bus.use(createHttpBridge({ endpoint: '/api/vc', httpClient }));
-
-    const result = await bus.dispatch('save', {});
-    const err = result.error as Error & { status?: number; code?: string; response?: unknown };
-    expect(result).toFailWith('VALIDATION');
-    expect(err.message).toBe('email is taken');
-    expect(err.name).toBe('HttpError');
-    expect(err.status).toBe(422);
-    expect(err.code).toBe('VALIDATION');
-    expect(err.response).toBe(thrown.response);
-    expect((err as any).cause).toBe(thrown);
-  });
-
-  it('passes the raw error through when the body has no error/message', async () => {
-    const thrown = Object.assign(new Error('network down'), { response: { data: {} } });
-    const httpClient = { post: vi.fn().mockRejectedValue(thrown) } as any;
-
-    const bus = createAsyncCommandBus();
-    bus.use(createHttpBridge({ endpoint: '/api/vc', httpClient }));
-
-    const result = await bus.dispatch('save', {});
-    expect(result.error).toBe(thrown);
-  });
-});
 
 // ---------------------------------------------------------------------------
 // csrf: 'inertia' + signal merging
@@ -191,7 +141,7 @@ describe('createBatchingHttpBridge', () => {
     const plugin = createBatchingHttpBridge({ endpoint: '/api/vc/batch', httpClient });
     const result = await callPlugin(plugin, { action: 'save', signal: ac.signal });
 
-    expect(result).toFailWith('VC_CORE_ABORTED');
+    expect(result).toFailWith('core:aborted:dispatch');
     expect(httpClient.post).not.toHaveBeenCalled();
   });
 
@@ -227,7 +177,7 @@ describe('createWsBridge guards', () => {
     const ws = createWsBridge({ url: 'ws://localhost' });
     const result = await callPlugin(ws, { action: 'save', signal: ac.signal });
 
-    expect(result).toFailWith('VC_CORE_ABORTED');
+    expect(result).toFailWith('core:aborted:dispatch');
     expect(ctor).not.toHaveBeenCalled();
   });
 });

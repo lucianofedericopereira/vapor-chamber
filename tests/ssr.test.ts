@@ -106,7 +106,7 @@ describe('createSSRPlugin', () => {
     expect(Object.keys(cmd)).toEqual(['action', 'target']);
   });
 
-  // Records on an ASYNC bus, where it used to record nothing at all.
+  // Records on an ASYNC bus too, where reading `.ok` off next() would record nothing.
   it('records on an async bus, the same as on a sync one', async () => {
     const syncBus = createCommandBus();
     const syncSsr = createSSRPlugin();
@@ -195,7 +195,7 @@ describe('rehydrate', () => {
     const results = rehydrate(bus, commands, { ignoreUnhandled: false });
     expect(results).toHaveLength(2);
     expect(results[0].ok).toBe(true);
-    expect(results[1]).toFailWith('VC_CORE_NO_HANDLER'); // no handler -> error
+    expect(results[1]).toFailWith('core:missing:handler'); // no handler -> error
   });
 
   it('filter option skips matching commands', () => {

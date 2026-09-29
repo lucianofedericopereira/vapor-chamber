@@ -16,11 +16,11 @@ import { describe, expect, it, vi } from 'vitest';
 import { createApp } from 'vue';
 import { usePagination } from '../../src/router/composables';
 import { createMemoryHistory } from '../../src/router/history';
-import { createRouter } from '../../src/router/index';
 import { ROUTER_KEY } from '../../src/router/keys';
 import { createRouteTable } from '../../src/router/table';
 import { defaultAffects, runLoaders, type LoaderHandlers } from '../../src/router/loaders';
 import type { RouteRecord } from '../../src/router/types';
+import { makeRouter } from './fixture';
 
 describe('route meta is the table declaration, not the caller to keep', () => {
   // Fresh objects per test on purpose: the freeze lands on the ROW's own meta,
@@ -109,13 +109,12 @@ describe('usePagination - a backend number is not a number', () => {
   }
 
   async function paginated(payload: unknown) {
-    const router = createRouter({
+    const router = makeRouter({
       history: createMemoryHistory('', '/list'),
       routes: [{ name: 'list', path: '/list', component: 'L', load: '/api/list' }],
       components: { L: { name: 'L' } },
       loaders: { url: async () => payload },
       links: false,
-      scroll: false,
     });
     await router.isReady();
     return router;
@@ -147,8 +146,8 @@ describe('usePagination - a backend number is not a number', () => {
     const router = await paginated({ items: [1], total: 100, per_page: 10, last_page: 10 });
     for (const window of [Number.NaN, 0, -5]) {
       const p = withRouter(router, () => usePagination({ window }));
-      // `Math.max(1, Math.floor(NaN))` is NaN, so the run between first and
-      // last used to vanish and the range collapsed to [1, last].
+      // `Math.max(1, Math.floor(NaN))` is NaN, which would make the run between
+      // first and last vanish and collapse the range to [1, last].
       expect(p.pageRange.value.length, String(window)).toBeGreaterThan(2);
       expect(p.pageRange.value.every((n) => Number.isFinite(n))).toBe(true);
     }

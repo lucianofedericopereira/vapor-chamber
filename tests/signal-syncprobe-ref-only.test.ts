@@ -5,8 +5,8 @@
  * internal syncProbe()/_vueRef entirely - that path only ever runs when
  * signal.ts is used standalone (transports/plugins/form, no chamber.ts
  * loaded). Every other test either has no __VUE__ (signal-race-warning.test.ts)
- * or goes through chamber.ts's own wiring, so neither branch here was
- * previously exercised on signal.ts's own probe.
+ * or goes through chamber.ts's own wiring, so this is the only place these
+ * branches run on signal.ts's own probe.
  *
  * Imports src/signal directly (not chamber) and stubs __VUE__ purely
  * synchronously - no async Vue-detection race involved, unlike chamber.ts's

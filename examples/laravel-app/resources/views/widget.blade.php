@@ -63,13 +63,8 @@
        comments, so a stamp marker placed in the URL renders literally and
        yields an invalid specifier - the version arrives wrapped in comment
        delimiters. Here the delimiters really are comments, textContent skips
-       them, and the URL is assembled at runtime.
-
-       (Deliberately described rather than shown: a marker written into prose is
-       still a marker to the stamper. An opening one with no matching close
-       makes its regex run to the NEXT close in the file and swallow whatever
-       lies between - which is exactly what happened to this span while it was
-       being written.) --}}
+       them, and the URL is assembled at runtime. (Described, not shown: a
+       marker written into prose is still a marker to the stamper.) --}}
   <span id="vc-vue-version" hidden><!-- vc:vueAligned -->3.6.0-rc.9<!-- /vc:vueAligned --></span>
 
   {{-- 3. Vue, as a MODULE. Vapor ships only as `esm-browser` - there is no
@@ -92,12 +87,21 @@
     // VaporChamber global in any variant.
     const defined = VaporChamber.defineWidget('vc-cart', {
       setup() {
+        const block = document.createElement('div');
         const button = document.createElement('button');
         button.textContent = 'Add coffee';
+        // The widget's own live region: a failure is said, not swallowed.
+        const status = document.createElement('p');
+        status.setAttribute('role', 'status');
+        block.append(button, status);
         button.addEventListener('click', async () => {
-          button.disabled = true;
+          // aria-disabled, not disabled: disabling the focused button would
+          // send a keyboard user's focus to <body>. A press in flight is ignored.
+          if (button.getAttribute('aria-disabled') === 'true') return;
+          button.setAttribute('aria-disabled', 'true');
           const result = await dispatch('cartAdd', { id: 1 }, { qty: 1 });
-          button.disabled = false;
+          button.removeAttribute('aria-disabled');
+          status.textContent = result.ok ? '' : result.error.message;
           if (!result.ok) return;
           // Bridge out of the shadow root to whatever the page uses.
           const host = button.getRootNode().host;
@@ -106,7 +110,7 @@
             lastAdded: result.value.lastAdded,
           });
         });
-        return button;
+        return block;
       },
     });
 

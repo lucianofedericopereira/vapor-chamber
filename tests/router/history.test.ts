@@ -129,7 +129,7 @@ describe('createMemoryHistory - state() and destroy()', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Previously uncovered branches: outside-base fallback, non-__vr state,
+// Branches: outside-base fallback, non-__vr state,
 // resolveBase window-pathname default
 // ---------------------------------------------------------------------------
 

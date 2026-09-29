@@ -4,17 +4,15 @@
  * Before: the JSDoc promised "cancels all pending timers/requests" and the
  * bus cancelled only its own throttle timers (and, since q2/1, settled its
  * waiting requests). debounce() and throttle() already exposed a dispose()
- * that nothing on the bus called, so their timers outlived the bus; retry()'s
- * backoff sleeps were untracked timers that re-called a chain whose handlers
- * were gone, up to maxAttempts. Now a plugin may carry dispose() (the Plugin
- * and AsyncPlugin types say so), the bus runs every installed one first, and
- * retry() ends a pending sleep as VC_CORE_ABORTED - a cleared timer alone
- * would have left that dispatch pending forever.
+ * that nothing on the bus called, so their timers outlived the bus. Now a
+ * plugin may carry dispose() (the Plugin and AsyncPlugin types say so), the bus
+ * runs every installed one first, and the bus's own retry ends a pending wait
+ * as core:aborted:dispatch - a cleared timer alone would have left that
+ * dispatch pending forever.
  */
 import { describe, expect, vi, afterEach } from 'vitest';
 import { createCommandBus, createAsyncCommandBus, type BusError, type CommandResult, type Plugin } from '../src/command-bus';
 import { debounce, throttle } from '../src/plugins-core';
-import { retry } from '../src/plugins-io';
 import { it } from '../src/vitest';
 
 afterEach(() => {
@@ -53,12 +51,11 @@ describe('dispose() runs plugin dispose()', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
-  it('ends a retry backoff mid-sleep as VC_CORE_ABORTED and stops the attempts', async () => {
+  it('ends a retry wait mid-sleep as core:aborted:dispatch and stops the attempts', async () => {
     vi.useFakeTimers();
-    const bus = createAsyncCommandBus();
+    const bus = createAsyncCommandBus({ retry: { baseDelay: 100, actions: { t: 'idempotent' } } });
     const handler = vi.fn(async () => { throw new Error('flaky'); });
     bus.register('t', handler);
-    bus.use(retry({ maxAttempts: 3, baseDelay: 100, isRetryable: () => true }));
     let result: CommandResult | undefined;
     bus.dispatch('t', 1).then((r) => { result = r; });
     await vi.advanceTimersByTimeAsync(0); // attempt 1 fails, the backoff sleep is armed
@@ -68,26 +65,24 @@ describe('dispose() runs plugin dispose()', () => {
     bus.dispose();
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(code(result)).toBe('VC_CORE_ABORTED');
+    expect(code(result)).toBe('core:aborted:dispatch');
     expect(vi.getTimerCount()).toBe(0);
     await vi.advanceTimersByTimeAsync(5000);
     expect(handler).toHaveBeenCalledTimes(1);
   });
 
-  it('retry() runs to its result when nothing disposes it, and a finished sleep leaves nothing behind', async () => {
+  it('the retry runs to its result when nothing disposes it, and a finished wait leaves nothing behind', async () => {
     vi.useFakeTimers();
-    const bus = createAsyncCommandBus();
+    const bus = createAsyncCommandBus({ retry: { baseDelay: 100, actions: { t: 'idempotent' } } });
     let calls = 0;
     bus.register('t', async () => { if (++calls < 2) throw new Error('flaky'); return 'ok'; });
-    const plugin = retry({ maxAttempts: 3, baseDelay: 100, isRetryable: () => true });
-    bus.use(plugin);
     let result: CommandResult | undefined;
     bus.dispatch('t', 1).then((r) => { result = r; });
     await vi.advanceTimersByTimeAsync(100);
 
     expect(result?.value).toBe('ok');
     expect(vi.getTimerCount()).toBe(0);
-    plugin.dispose(); // nothing pending: a no-op
+    bus.dispose(); // nothing pending: a no-op
     expect(vi.getTimerCount()).toBe(0);
   });
 
@@ -109,7 +104,8 @@ describe('dispose() runs plugin dispose()', () => {
 
   it('async bus: the same, and the plugins are gone afterwards', async ({ asyncBus: bus }) => {
     const spy = vi.fn();
-    bus.use(Object.assign((async (_c: unknown, next: () => CommandResult | Promise<CommandResult>) => next()) as any, { dispose: spy }));
+    const passThrough: Plugin = (_c, next) => next();
+    bus.use(Object.assign(passThrough, { dispose: spy }));
     bus.register('t', async () => 1);
     bus.dispose();
     expect(spy).toHaveBeenCalledTimes(1);

@@ -60,7 +60,7 @@ describe('useCommandGroup - query / emit / use / on / dispose', () => {
 
     // handler unregistered -> dispatch misses; plugin + listener gone too
     const r = getCommandBus().dispatch('cartAdd', {});
-    expect(r).toFailWith('VC_CORE_NO_HANDLER');
+    expect(r).toFailWith('core:missing:handler');
     expect(calls).toEqual([]);
   });
 });

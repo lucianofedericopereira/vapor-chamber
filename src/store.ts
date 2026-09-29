@@ -8,7 +8,7 @@
  *
  * Consumer docs are docs/store.md; docs/whitepaper.md 11.9 places this in the
  * composed surface, and its section 6 records why the package ships a state
- * layer at all, having previously argued it should not.
+ * layer at all.
  *
  *   const useCart = defineChamberStore('cart', {
  *     state: () => ({ items: [] as number[] }),
@@ -109,22 +109,27 @@ export type ChamberStore<S extends object, A extends Record<string, StoreAction<
  * `holders` is the count of live component scopes using this store, and it is
  * the whole reason this is an entry rather than the store alone. A store is
  * shared by construction - the registry hands the same object to every caller
- * of `useCart(bus)` - but disposal used to be wired to whichever scope happened
- * to create it FIRST. So:
+ * of `useCart(bus)` - so disposal cannot be wired to whichever scope happened
+ * to create it FIRST, or:
  *
  *   component A mounts   -> creates the store, registers the bus handlers
  *   component B mounts   -> gets the same store back
  *   component A unmounts -> $dispose(): handlers unregistered, registry cleared
  *   component B, still on screen, calls cart.add(2)
  *
- * B holds a live object whose every action now returns `ok: false` and whose
- * state never changes again. Silent - no throw, no warning, and B's own code is
- * blameless. Measured exactly that way in tests/store-form-sharing.test.ts,
- * which pins all three paths: first holder out, last holder out, and no scope
+ * B holds a live object whose every action returns `ok: false` and whose state
+ * never changes again - silently. tests/store-form-sharing.test.ts pins all
+ * three paths: first holder out, last holder out, and no scope
  * at all. Two components sharing a store is not an edge case, it is what a
  * store IS.
  */
-type StoreEntry = { store: unknown; offs: Array<() => void>; holders: number };
+type StoreEntry = {
+  store: unknown;
+  offs: Array<() => void>;
+  holders: number;
+  /** Held by a caller outside any scope, who owns `$dispose()` (docs/store.md). */
+  pinned?: boolean;
+};
 
 /** One registry per bus, so a per-request bus gets a per-request store set -
  *  the SSR isolation the shared-bus module global cannot give. Weak, so a
@@ -170,11 +175,17 @@ export function defineChamberStore<S extends object, A extends Record<string, St
      * `$dispose()` - the same contract every composable here has.
      */
     const join = (entry: StoreEntry): void => {
-      if (!getCurrentScope()) return;
+      // A caller outside any scope has no lifetime to hook: it PINS the store,
+      // and owns $dispose() (docs/store.md), so scoped holders leaving do not
+      // dispose it under that owner. tests/store-unscoped-holder.test.ts.
+      if (!getCurrentScope()) {
+        entry.pinned = true;
+        return;
+      }
       entry.holders++;
       onScopeDispose(() => {
         entry.holders--;
-        if (entry.holders <= 0) (entry.store as ChamberStore<S, A>).$dispose();
+        if (entry.holders <= 0 && !entry.pinned) (entry.store as ChamberStore<S, A>).$dispose();
       });
     };
 

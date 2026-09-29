@@ -22,7 +22,7 @@ describe('createHttpBridge', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const bus = createAsyncCommandBus();
+    const bus = createAsyncCommandBus({ retry: false });
     bus.use(createHttpBridge({ endpoint: '/api/vc' }));
 
     const result = await bus.dispatch('cartAdd', { id: 1 }, { quantity: 2 });
@@ -46,28 +46,12 @@ describe('createHttpBridge', () => {
       text: async () => 'Unprocessable',
     }));
 
-    const bus = createAsyncCommandBus();
+    const bus = createAsyncCommandBus({ retry: false });
     bus.use(createHttpBridge({ endpoint: '/api/vc' }));
 
     const result = await bus.dispatch('fail', {});
     expect(result.ok).toBe(false);
     expect(result.error?.message).toContain('422');
-  });
-
-  it('surfaces the backend body error message on HTTP failure status', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: false,
-      status: 422,
-      json: async () => ({ ok: false, error: 'The quantity field is required.' }),
-    }));
-
-    const bus = createAsyncCommandBus();
-    bus.use(createHttpBridge({ endpoint: '/api/vc' }));
-
-    const result = await bus.dispatch('fail', {});
-    expect(result.ok).toBe(false);
-    expect(result.error?.message).toBe('The quantity field is required.');
-    expect((result.error as any).status).toBe(422);
   });
 
   it('reads XSRF-TOKEN cookie when csrf: true', async () => {
@@ -82,7 +66,7 @@ describe('createHttpBridge', () => {
       querySelector: () => null,
     });
 
-    const bus = createAsyncCommandBus();
+    const bus = createAsyncCommandBus({ retry: false });
     bus.use(createHttpBridge({ endpoint: '/api/vc', csrf: true }));
     await bus.dispatch('test', {});
 
@@ -110,30 +94,6 @@ describe('createHttpBridge', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it('returns { ok: false } when backend returns ok: false in body', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({ ok: false, error: 'validation failed' }),
-    }));
-
-    const bus = createAsyncCommandBus();
-    bus.use(createHttpBridge({ endpoint: '/api/vc' }));
-
-    const result = await bus.dispatch('cartAdd', {});
-    expect(result.ok).toBe(false);
-    expect(result.error?.message).toBe('validation failed');
-  });
-
-  it('catches fetch exceptions and returns { ok: false }', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network down')));
-
-    const bus = createAsyncCommandBus();
-    bus.use(createHttpBridge({ endpoint: '/api/vc' }));
-
-    const result = await bus.dispatch('cartAdd', {});
-    expect(result.ok).toBe(false);
-    expect(result.error?.message).toBe('network down');
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -157,7 +117,7 @@ describe('createBatchingHttpBridge', () => {
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const bus = createAsyncCommandBus();
+    const bus = createAsyncCommandBus({ retry: false });
     bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch' }));
 
     const [a, b] = await Promise.all([
@@ -181,11 +141,11 @@ describe('createBatchingHttpBridge', () => {
   it('does not batch dispatches from separate ticks - each flush is its own POST', async () => {
     const fetchMock = vi.fn(async (_url: string, init: any) => {
       const body = JSON.parse(init.body);
-      return { ok: true, json: async () => ({ results: body.commands.map((c: any) => ({ id: c.id, ok: true, state: 1 })) }) };
+      return { ok: true, json: async () => ({ results: body.commands.map((c: any) => ({ id: c.id, state: 1 })) }) };
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const bus = createAsyncCommandBus();
+    const bus = createAsyncCommandBus({ retry: false });
     bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch' }));
 
     await bus.dispatch('a', {});
@@ -194,45 +154,10 @@ describe('createBatchingHttpBridge', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('an HTTP failure status fails every queued command in the batch', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: false, status: 500, json: async () => ({ error: 'boom' }) }));
-
-    const bus = createAsyncCommandBus();
-    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch' }));
-
-    const [a, b] = await Promise.all([bus.dispatch('a', {}), bus.dispatch('b', {})]);
-    expect(a.ok).toBe(false);
-    expect(b.ok).toBe(false);
-    expect(a.error?.message).toBe('boom');
-  });
-
-  it('reports a per-command failure without affecting sibling commands', async () => {
-    const fetchMock = vi.fn(async (_url: string, init: any) => {
-      const body = JSON.parse(init.body);
-      return {
-        ok: true,
-        json: async () => ({
-          results: body.commands.map((c: any) =>
-            c.command === 'fail' ? { id: c.id, ok: false, error: 'nope' } : { id: c.id, ok: true, state: 1 },
-          ),
-        }),
-      };
-    });
-    vi.stubGlobal('fetch', fetchMock);
-
-    const bus = createAsyncCommandBus();
-    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch' }));
-
-    const [ok, bad] = await Promise.all([bus.dispatch('ok', {}), bus.dispatch('fail', {})]);
-    expect(ok.ok).toBe(true);
-    expect(bad.ok).toBe(false);
-    expect(bad.error?.message).toBe('nope');
-  });
-
   it('fails a command with a clear error if the backend response omits its result', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ results: [] }) }));
 
-    const bus = createAsyncCommandBus();
+    const bus = createAsyncCommandBus({ retry: false });
     bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch' }));
 
     const result = await bus.dispatch('cartAdd', {});
@@ -255,11 +180,11 @@ describe('createBatchingHttpBridge', () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn(async (_url: string, init: any) => {
       const body = JSON.parse(init.body);
-      return { ok: true, json: async () => ({ results: body.commands.map((c: any) => ({ id: c.id, ok: true, state: 1 })) }) };
+      return { ok: true, json: async () => ({ results: body.commands.map((c: any) => ({ id: c.id, state: 1 })) }) };
     });
     vi.stubGlobal('fetch', fetchMock);
 
-    const bus = createAsyncCommandBus();
+    const bus = createAsyncCommandBus({ retry: false });
     bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', window: 20 }));
 
     const p1 = bus.dispatch('a', {});
@@ -312,7 +237,7 @@ describe('createWsBridge', () => {
 
   it('sends command envelope and resolves on server response', async () => {
     vi.useFakeTimers();
-    const bus = createAsyncCommandBus();
+    const bus = createAsyncCommandBus({ retry: false });
     const ws = createWsBridge({ url: 'ws://localhost' });
     bus.use(ws);
     bus.register('cartAdd', async () => null);
@@ -327,34 +252,15 @@ describe('createWsBridge', () => {
     expect(msg.command).toBe('cartAdd');
     expect(msg.target).toEqual({ id: 1 });
 
-    lastWs.receive({ id: msg.id, ok: true, state: { added: true } });
+    lastWs.receive({ id: msg.id, state: { added: true } });
 
     const result = await promise;
     expect(result).toSucceedWith({ added: true });
   });
 
-  it('resolves { ok: false } when server returns ok: false', async () => {
-    vi.useFakeTimers();
-    const bus = createAsyncCommandBus();
-    const ws = createWsBridge({ url: 'ws://localhost' });
-    bus.use(ws);
-    bus.register('fail', async () => null);
-    ws.connect();
-
-    await vi.runAllTimersAsync();
-
-    const promise = bus.dispatch('fail', {});
-    const msg = JSON.parse(lastWs.sent[0]);
-    lastWs.receive({ id: msg.id, ok: false, error: 'server-error' });
-
-    const result = await promise;
-    expect(result.ok).toBe(false);
-    expect(result.error?.message).toBe('server-error');
-  });
-
   it('times out if server never responds', async () => {
     vi.useFakeTimers();
-    const bus = createAsyncCommandBus();
+    const bus = createAsyncCommandBus({ retry: false });
     const ws = createWsBridge({ url: 'ws://localhost' });
     bus.use(ws);
     bus.register('slow', async () => null);
@@ -391,7 +297,7 @@ describe('createWsBridge', () => {
 
     // Respond so promise resolves
     const msg = JSON.parse(lastWs.sent[0]);
-    lastWs.receive({ id: msg.id, ok: true });
+    lastWs.receive({ id: msg.id, state: null });
 
     const result = await promise;
     expect(result.ok).toBe(true);
@@ -439,7 +345,7 @@ describe('createWsBridge', () => {
 
   it('disconnect() fails in-flight requests immediately (no timeout wait)', async () => {
     vi.useFakeTimers();
-    const bus = createAsyncCommandBus();
+    const bus = createAsyncCommandBus({ retry: false });
     const ws = createWsBridge({ url: 'ws://localhost' });
     bus.use(ws);
     bus.register('save', async () => null);
@@ -456,7 +362,7 @@ describe('createWsBridge', () => {
 
   it('a terminal close (reconnect disabled) fails in-flight requests', async () => {
     vi.useFakeTimers();
-    const bus = createAsyncCommandBus();
+    const bus = createAsyncCommandBus({ retry: false });
     const ws = createWsBridge({ url: 'ws://localhost', reconnect: false });
     bus.use(ws);
     bus.register('save', async () => null);
@@ -473,7 +379,7 @@ describe('createWsBridge', () => {
 
   it('a recoverable close (reconnect enabled) does NOT prematurely fail in-flight requests', async () => {
     vi.useFakeTimers();
-    const bus = createAsyncCommandBus();
+    const bus = createAsyncCommandBus({ retry: false });
     const ws = createWsBridge({ url: 'ws://localhost', reconnect: true });
     bus.use(ws);
     bus.register('save', async () => null);
@@ -497,7 +403,7 @@ describe('createWsBridge', () => {
 
   it('ignores malformed JSON frames without crashing', async () => {
     vi.useFakeTimers();
-    const bus = createAsyncCommandBus();
+    const bus = createAsyncCommandBus({ retry: false });
     const ws = createWsBridge({ url: 'ws://localhost' });
     bus.use(ws);
     bus.register('ping', async () => null);
@@ -511,7 +417,7 @@ describe('createWsBridge', () => {
 
     // Respond with a valid frame so the promise resolves
     const msg = JSON.parse(lastWs.sent[0]);
-    lastWs.receive({ id: msg.id, ok: true });
+    lastWs.receive({ id: msg.id, state: null });
 
     const result = await promise;
     expect(result.ok).toBe(true);

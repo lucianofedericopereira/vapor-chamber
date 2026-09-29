@@ -9,8 +9,9 @@
  *
  * So this loads the BUILT production bundle of examples/vapor-sfc into a DOM,
  * lets the app mount, clicks the `v-vc-command` control, and checks that the
- * directive responded: `vc-loading` on the element and the button disabled are
- * what `buildHandler` does at the start of a dispatch.
+ * directive responded: `vc-loading` on the element and `aria-disabled="true"`
+ * (busy, keeping keyboard focus - never `disabled`) are what `buildHandler`
+ * does at the start of a dispatch.
  *
  * It lives in scripts/ rather than tests/ on purpose: it depends on an
  * example's build output, so it would fail on a fresh clone before anything is
@@ -105,16 +106,16 @@ await new Promise((r) => setTimeout(r, 50));
 // What buildHandler does the moment a dispatch starts. If the directive never
 // mounted - the rc.9 defect - the click does nothing at all and neither holds.
 const loading = vc.classList.contains('vc-loading');
-const disabled = vc.disabled === true;
-if (!loading || !disabled) {
+const busy = vc.getAttribute('aria-disabled') === 'true';
+if (!loading || !busy) {
   fail(
     `the v-vc-command control did not respond to a click ` +
-      `(vc-loading=${loading}, disabled=${disabled}). The directive did not mount.`,
+      `(vc-loading=${loading}, aria-disabled=${busy}). The directive did not mount.`,
   );
 }
 
 // ---------------------------------------------------------------------------
-// v-vc-payload and v-vc-optimistic, end to end (v1.22.0)
+// v-vc-payload and v-vc-optimistic, end to end
 // ---------------------------------------------------------------------------
 //
 // WHY THESE TWO NEED THE SAME TREATMENT, and why asserting "it rendered" would

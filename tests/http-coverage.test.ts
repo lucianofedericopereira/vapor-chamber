@@ -354,8 +354,8 @@ describe('createHttpClient - 419 CSRF retry', () => {
     const onSessionExpired = vi.fn();
     // 419 -> refresh -> 419 again. 419 is CSRF expiry, not session expiry
     // (whitepaper 5.7): it is thrown as an HttpError, and only 401 fires
-    // onSessionExpired. clientRequest used to escalate here; it no longer does,
-    // matching postCommand and the contract (runWithRetry, one policy).
+    // onSessionExpired - clientRequest and postCommand alike (runWithRetry,
+    // one policy).
     (globalThis.fetch as any)
       .mockResolvedValueOnce(jsonResponse(419, { message: 'csrf' }))
       .mockResolvedValueOnce(mockResponse(200, {})) // csrf-cookie GET
@@ -365,7 +365,7 @@ describe('createHttpClient - 419 CSRF retry', () => {
 
     await expect(http.post('/api/cmd', {}, { onSessionExpired })).rejects.toMatchObject({
       name: 'HttpError',
-      status: 419,
+      response: { status: 419 },
     });
     expect(onSessionExpired).not.toHaveBeenCalled();
   });
@@ -466,14 +466,14 @@ describe('createHttpClient - safe.put/patch/delete', () => {
 
   it('safe.patch returns an error SafeResult on failure (never throws)', async () => {
     (globalThis.fetch as any).mockResolvedValue(
-      jsonResponse(422, { message: 'Validation failed', code: 'INVALID' }),
+      jsonResponse(422, { code: 'invalid', detail: 'Validation failed' }),
     );
     const http = createHttpClient();
 
     const result = await http.safe.patch('/api/users/1', { name: '' });
 
     expect(result.data).toBeNull();
-    expect(result.error).toMatchObject({ message: 'Validation failed', code: 'INVALID' });
+    expect(result.error).toEqual({ status: 422, code: 'invalid', detail: 'Validation failed' });
     expect(result.status).toBe(422);
     const [, init] = (globalThis.fetch as any).mock.calls[0];
     expect(init.method).toBe('PATCH');
@@ -509,9 +509,9 @@ describe('response cache - per-instance LRU', () => {
     expect(cache.get('key-50')).not.toBeNull();
   });
 
-  // Item 6: the maps used to be module-level, so every client shared one
-  // cache and one dedupe map - an instance illusion, and under concurrent SSR
-  // a cross-request leak (the key has no auth/cookie dimension).
+  // Per client, never module-level: a shared cache and dedupe map would be an
+  // instance illusion, and under concurrent SSR a cross-request leak (the key
+  // has no auth/cookie dimension).
   it('two caches are independent - one clear() cannot empty the other', () => {
     const a = createResponseCache();
     const b = createResponseCache();
@@ -616,8 +616,8 @@ describe('cached responses are immutable in dev (item 8)', () => {
     cache.set('json:/api/items', response, 60_000);
 
     const hit = cache.get('json:/api/items')?.data as typeof response;
-    // A consumer sorting/deleting in place used to silently rewrite the cache
-    // for every later hit. Now it throws at the mutation site.
+    // A consumer sorting/deleting in place would silently rewrite the cache
+    // for every later hit, so it throws at the mutation site.
     expect(() => {
       (hit.data.items as { id: number }[]).push({ id: 2 });
     }).toThrow();
@@ -635,10 +635,8 @@ describe('cached responses are immutable in dev (item 8)', () => {
 
 describe('readCsrfToken - the TTL cache hit', () => {
   it('serves a second read from cache without touching the DOM again', () => {
-    // The 5-minute cache. This used to be covered incidentally by the 419 path,
-    // which called readCsrfToken() a second time right after refreshCsrfOnce();
-    // that re-read has been removed (the refresh now returns the token), so the
-    // cache needs asserting on its own terms. It still matters for the ordinary
+    // The 5-minute cache, asserted on its own terms: the 419 path does not
+    // re-read the token (the refresh returns it), so nothing else covers it. It still matters for the ordinary
     // case: every csrf-enabled request inside the TTL reads from here.
     let domReads = 0;
     vi.stubGlobal('document', {
@@ -759,10 +757,8 @@ describe('doClientFetch - a Response with no headers', () => {
   // `headersToObject(raw.headers)` - the absent-headers arm. Some fetch
   // polyfills and hand-rolled doubles omit `headers` entirely.
   //
-  // This used to be split in two, with the second case PINNING a defect: the
-  // guard tolerated a missing `headers` while the json path immediately did an
-  // unguarded `raw.headers.get('content-type')`, so the default path still
-  // threw. Both paths are tolerant now, and both are asserted here.
+  // Both paths must tolerate a missing `headers` - the json path reads
+  // `content-type` from them - and both are asserted here.
   const headerless = (body: string) => ({
     ok: true,
     status: 200,
@@ -779,9 +775,9 @@ describe('doClientFetch - a Response with no headers', () => {
     expect(res.headers).toEqual({});
   });
 
-  it('no longer throws on the DEFAULT json path', async () => {
-    // Regression: this threw `TypeError: Cannot read properties of undefined
-    // (reading 'get')`. With no content-type to read, the response falls
+  it('does not throw on the DEFAULT json path', async () => {
+    // An unguarded read would throw `TypeError: Cannot read properties of
+    // undefined (reading 'get')`. With no content-type to read, the response falls
     // through to the non-JSON branch and yields the raw text - the same
     // graceful degradation any content-type-less response already gets.
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(headerless('{"fine":true}')));

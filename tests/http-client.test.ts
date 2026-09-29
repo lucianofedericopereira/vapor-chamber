@@ -200,11 +200,11 @@ describe('createHttpClient - baseURL', () => {
 // ---------------------------------------------------------------------------
 
 describe('createHttpClient - retry', () => {
-  it('GET retries on 500 (default retry: 2)', async () => {
+  it('GET retries on 503 (default retry: 2)', async () => {
     let attempts = 0;
     (globalThis.fetch as any).mockImplementation(async () => {
       attempts++;
-      if (attempts < 3) return jsonResponse(500, { error: 'server' });
+      if (attempts < 3) return jsonResponse(503, { detail: 'server' });
       return jsonResponse(200, { ok: true });
     });
 
@@ -229,7 +229,7 @@ describe('createHttpClient - retry', () => {
 
   // The missing negative case. RETRY_STATUS only governs the polite path
   // (Retry-After parsing); a status outside it is thrown *inside* the try and
-  // used to re-enter retry through the catch, which for a mutation means
+  // must not re-enter retry through the catch, which for a mutation would mean
   // re-sending it.
   it('POST with retry configured does NOT retry a 422', async () => {
     let attempts = 0;
@@ -257,11 +257,11 @@ describe('createHttpClient - retry', () => {
     expect(attempts).toBe(1); // was 3 - every backoff burned before surfacing
   });
 
-  it('still retries a 500 when retry is configured on a POST', async () => {
+  it('still retries a 503 when retry is configured on a POST', async () => {
     let attempts = 0;
     (globalThis.fetch as any).mockImplementation(async () => {
       attempts++;
-      if (attempts < 3) return jsonResponse(500, { error: 'server' });
+      if (attempts < 3) return jsonResponse(503, { detail: 'server' });
       return jsonResponse(200, { ok: true });
     });
 
@@ -651,14 +651,13 @@ describe('createHttpClient - safe mode', () => {
     expect(result.status).toBe(200);
   });
 
-  it('returns { data: null, error, status } on failure', async () => {
-    (globalThis.fetch as any).mockResolvedValue(jsonResponse(422, { message: 'Validation failed', code: 'INVALID' }));
+  it('returns the backend\'s problem on failure, its status added', async () => {
+    const errors = [{ pointer: '/payload/email', detail: 'Required.' }];
+    (globalThis.fetch as any).mockResolvedValue(jsonResponse(422, { code: 'invalid', detail: 'Validation failed', errors }));
     const http = createHttpClient();
 
     const result = await http.safe.post('/api/submit', {});
-    expect(result.data).toBeNull();
-    expect(result.error).toBeDefined();
-    expect(result.status).toBe(422);
+    expect(result).toEqual({ data: null, error: { status: 422, code: 'invalid', detail: 'Validation failed', errors }, status: 422 });
   });
 });
 

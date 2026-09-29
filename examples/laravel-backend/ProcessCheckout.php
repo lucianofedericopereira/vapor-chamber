@@ -21,7 +21,10 @@ class ProcessCheckout
 {
     public function __invoke(?array $target, ?array $payload, ?User $user): array
     {
-        validator($target ?? [], [
+        // The checkout form is the PAYLOAD: its field errors reach the client
+        // as `/payload/items/0/qty`-style pointers FormBus maps to fields.
+        // Dispatched as `dispatch('checkoutProcess', {}, { items, shippingMethod })`.
+        $input = validator($payload ?? [], [
             'items'           => 'required|array|min:1',
             'items.*.id'      => 'required|integer',
             'items.*.qty'     => 'required|integer|min:1',
@@ -30,8 +33,8 @@ class ProcessCheckout
 
         $order = Order::create([
             'user_id'         => $user?->id,
-            'items'           => $target['items'],
-            'shipping_method' => $target['shippingMethod'],
+            'items'           => $input['items'],
+            'shipping_method' => $input['shippingMethod'],
             'status'          => 'queued',
         ]);
 

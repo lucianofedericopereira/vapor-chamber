@@ -30,8 +30,7 @@
  * so `withVaporDirectives` takes its `node instanceof Element` path and applies
  * synchronously in the CURRENT scope - the component's setup scope. (A
  * non-element target - a component root or fragment - gets the detached
- * `EffectScope` instead; this header said "a detached scope" flatly until
- * v1.22.0, which was the other path's answer.) If a future RC started
+ * `EffectScope` instead.) If a future RC started
  * disposing that scope on deactivation, one of two things would follow, and
  * both are silent:
  *

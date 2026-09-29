@@ -25,7 +25,7 @@ import { createMcpHandler } from '../src/mcp';
 import { it } from '../src/vitest';
 
 // ---------------------------------------------------------------------------
-// 18 - agentOrigin across an await
+// 18 - the agent origin across an await
 // ---------------------------------------------------------------------------
 
 describe('item 18 - MCP origin attribution on an async bus', () => {

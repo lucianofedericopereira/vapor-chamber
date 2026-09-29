@@ -36,7 +36,7 @@ describe('createChamber', () => {
 
     expect(bus.dispatch('cartAdd', {}).ok).toBe(true);
     uninstall();
-    expect(bus.dispatch('cartAdd', {})).toFailWith('VC_CORE_NO_HANDLER');
+    expect(bus.dispatch('cartAdd', {})).toFailWith('core:missing:handler');
   });
 
   it('forwards RegisterOptions (undo) to bus.register', ({ bus }) => {

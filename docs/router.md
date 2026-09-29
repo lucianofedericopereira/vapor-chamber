@@ -76,9 +76,9 @@ createRouter({
 ```
 
 The primary setup, generated route rows with no blade rows, needs neither, and
-that is the point. The router used to construct the client for everyone, which
-put the whole client (CSRF, interceptors, retry, cache) in every consumer's
-bundle to serve two optional features. The outlet subpaths below follow the
+that is the point: a router that built the client for everyone would put the
+whole client (CSRF, interceptors, retry, cache) in every consumer's bundle to
+serve two optional features. The outlet subpaths below follow the
 same reasoning, and `tests/router/remote-boundary.test.ts` enforces this split
 the same way.
 
@@ -91,7 +91,9 @@ for a `{ url }` table, `blade_unconfigured` for a blade row.
 wants route-derived state writes a `computed` over it rather than subscribing:
 
 ```ts
-const productId = computed(() => Number(router.currentRoute.value.location.params.id));
+// `params: { id: 'int' }` on the row: the id is a number, and `/products/7x`
+// does not match the row at all.
+const productId = computed(() => router.currentRoute.value.location.params.id);
 const products  = computed(() => router.currentRoute.value.data.get('shop.products'));
 ```
 
@@ -245,12 +247,11 @@ Measured on the built `dist/` (`tests/router/vdom-boundary.test.ts` and
 Blade rows need no import from you: the router pulls `makeBladeComponent` in
 on demand, as a separate chunk, the first time it renders one.
 
-> **Breaking in v1.11.0:** `RouterOutlet`, `makeBladeComponent` and
-> `BladeHooks` moved from `vapor-chamber/router` to `vapor-chamber/router/vdom`,
-> and `app.use(router)` no longer registers `<RouterOutlet>` globally. Apps that
-> relied on the global registration must register it locally. It shipped in a
-> minor release deliberately: the router is experimental, and keeping deprecated
-> re-exports would reinstate the static reference this change exists to remove.
+> `RouterOutlet`, `makeBladeComponent` and `BladeHooks` live in
+> `vapor-chamber/router/vdom`, and `app.use(router)` does not register
+> `<RouterOutlet>` globally: register it locally where you render it. A global
+> registration or a re-export from the router entry would be the static
+> reference that pins Vue's vDOM runtime into every bundle.
 
 ## Pagination, productized
 
@@ -301,6 +302,11 @@ const crumbs = useBreadcrumbs(); // the matched parent chain, titled rows only,
   (`visibleTo`), so whatever the table holds is what the user may see.
 - **active/exact share `pathActivity()`** with `data-active` stamping - a
   Blade-rendered menu and a Vue-rendered menu can never disagree.
+- **`aria-current="page"` goes on the exact match only** (`exactActive`, or the
+  breadcrumb whose `current` is true), never on `active`, which also lights up a
+  section parent: a screen reader would then announce two current pages.
+  `stampActiveLinks` does it for plain anchors and leaves any other
+  `aria-current` value the page set (`"step"`, `"location"`) alone.
 - **Menu rows are static navigation**: `meta.menu` needs `meta.title` and a
   path without required params - loud in dev. Group rows become href-less section nodes.
 - Reactive to navigation **and** table swaps (`setRoutes` / `reload` - the
@@ -311,11 +317,11 @@ const crumbs = useBreadcrumbs(); // the matched parent chain, titled rows only,
 - **`router.setRouteData(name, value)`** - patch loader data directly: zero
   loader run, zero navigation, one frozen snapshot, fully reactive. For when
   fresh state is already in hand - a bus command's response
-  (`{ ok, state }` -> straight onto the page), a websocket push, an
+  (`{ state }` -> straight onto the page), a websocket push, an
   optimistic update.
 - **Preset-internal compile caches** - a prefix handler may pre-compile
   per-record closures (record identity -> fn); the SPI never sees it.
-- **Chamber http LRU** - in-box since v1.12.0:
+- **Chamber http LRU** - in-box:
   `fetchLoaders({ cache: true })`, or `{ ttl, staleTtl, serveStaleOnError }`
   for the full fresh/stale window. Off by default. A route row overrides the
   preset per record via `meta.cache` - `{ cache: { ttl: 3_600_000 } }` on a
@@ -341,8 +347,17 @@ const crumbs = useBreadcrumbs(); // the matched parent chain, titled rows only,
   `component` per row.
 - **dom.ts** is the single DOM point: page.js-checklist link interception
   (composed-path scan - crosses shadow roots), `data-active`/
-  `data-exact-active` stamping on Blade anchors, hover + idle preheat
-  (`meta.preheat` column).
+  `data-exact-active` stamping on Blade anchors (plus `aria-current="page"` on
+  the exact one), hover + idle preheat (`meta.preheat` column).
+- **Route changes reach assistive technology** (`announce.ts`). Each
+  client-side navigation is announced in an assertive live region:
+  `document.title`, else the first `<h1>`, else the path; not the initial load
+  and not a query-only change. `announce: false` turns it off, a function
+  returns the text. `focusOnNavigate: '<selector>'` also moves focus to a SMALL
+  element the app provides (a heading, a skip link), made focusable with
+  `tabindex="-1"` only if it is not. Rules from Next.js's route announcer and
+  Gatsby's user testing with disabled users (a large focused wrapper broke
+  magnification).
 - **Pure constructor** - IO/listeners begin at `start()` / `app.use()`.
 - **Dev-trusts-generator** - table validation runs in dev only; production
   trusts the generated rows like a migration.
@@ -367,10 +382,9 @@ component-level `provide(...)` -> `inject(...)` (which backs nested
 `<RouterOutlet>` depth) resolve correctly. So the composable surface and outlet
 nesting are **not** blocked on that roadmap item.
 
-**A Vapor-native outlet now ships** (experimental, v1.x), which supersedes what
-this section used to say. It read: *"what still ties the outlet to the vDOM
-runtime is its own render path"* - true of `outlet.ts`, and no longer true of
-the router as a whole. `vapor-chamber/router/vapor` exports the same
+**A Vapor-native outlet ships** (experimental, v1.x): `outlet.ts` renders
+through the vDOM, but the router as a whole does not have to.
+`vapor-chamber/router/vapor` exports the same
 `RouterOutlet` name built from Vapor's own helpers
 (`createDynamicComponent` for the branch, `createSlot` for the no-match
 fallback), so a pure-Vapor app renders routes with **no `vaporInteropPlugin`
@@ -383,7 +397,7 @@ import { RouterOutlet } from 'vapor-chamber/router/vapor';  // Vapor, no interop
 
 What it costs, and what it requires:
 
-- **Measured saving: <!-- vc:outletSaving -->21.14<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->67.4<!-- /vc:outletSavingRaw --> KB raw** against the same app
+- **Measured saving: <!-- vc:outletSaving -->21.18<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->67.4<!-- /vc:outletSavingRaw --> KB raw** against the same app
   rendering through the vDOM outlet plus interop - re-derived every test run by
   `tests/vapor/vapor-outlet-size.test.ts` from a Vite production build rather
   than quoted, with the baseline built by the same harness so the two arms
@@ -391,7 +405,7 @@ What it costs, and what it requires:
   >= <!-- vc:outletFloor -->15.0<!-- /vc:outletFloor --> KB, and the Vapor
   outlet's own machinery over a router-without-outlet floor stays
   <= <!-- vc:outletOwnArmCeiling -->5.0<!-- /vc:outletOwnArmCeiling --> KB
-  (measured <!-- vc:outletOwnArm -->4.21<!-- /vc:outletOwnArm --> KB). The
+  (measured <!-- vc:outletOwnArm -->4.13<!-- /vc:outletOwnArm --> KB). The
   subpath's own cost is <!-- vc:sizeRouterVapor -->0.4<!-- /vc:sizeRouterVapor --> KB brotli.
 - **Route components must be `defineVaporComponent` output** (Vapor-compiled
   SFCs are). This is a real constraint, not a convention: with no interop
@@ -437,8 +451,8 @@ Roadmap items this router does **not** depend on, by design:
 
 Still not usable here, though the reasons differ:
 
-- **KeepAlive** - the roadmap box is checked and, as of **rc.3**, the two
-  correctness issues this section used to list as open are closed:
+- **KeepAlive** - the roadmap box is checked and, as of **rc.3**, two
+  correctness issues are closed:
   [#15228](https://github.com/vuejs/core/issues/15228) (a cached child renders
   against a nullish prop) by
   [#15251](https://github.com/vuejs/core/pull/15251), which isolates cached
@@ -448,11 +462,8 @@ Still not usable here, though the reasons differ:
   `EffectScope`/`ReactiveEffect`. Nothing caches an inactive route's state
   here yet, so neither reaches this router today.
 
-  **A correction to what this section previously told you.** It said that
-  `tryKeepAliveHooks` in `chamber.ts` "hand-solves what #15237 proposes doing
-  natively, so if that lands the manual pause/resume becomes double-suppression
-  and should be removed in the same release." #15237 has landed, and that
-  instruction is wrong - following it would delete a working guard.
+  **Keep `tryKeepAliveHooks`** in `chamber.ts` even with #15237 landed: it is
+  not double-suppression, and removing it would delete a working guard.
   `tests/keepalive-pause-fixture.test.ts` measures why: Vue's pausing
   suppresses reactive effects owned by the deactivated scope (verified - a
   watcher in a paused scope does not run), while `tryKeepAliveHooks` guards a
@@ -535,7 +546,6 @@ depends on this - it is sugar, and skipping it costs nothing.
 ## Status
 
 Experimental, covered by the router node specs (`npm test`). The Vapor-native
-outlet that used to sit on this list **shipped** - see the Vapor interop section
-above. Next: a reference route generator + generated modules (E2E proof),
+outlet ships - see the Vapor interop section above. Next: a reference route generator + generated modules (E2E proof),
 browser playground, and a Vapor blade path (the one caveat the Vapor outlet
 does not close).

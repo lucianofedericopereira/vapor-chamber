@@ -1,5 +1,5 @@
 /**
- * Real-path A/B for VC_CORE_BEFORE_CANCEL, in the house three-arm shape
+ * Real-path A/B for core:refused:hook, in the house three-arm shape
  * (tests/plugin-throw-ab.test.ts): a baseline DERIVED from the shipped
  * src/command-bus.ts with the change reverted, a byte-identical second copy
  * of that baseline as the self-control, and the shipped source - every timed
@@ -19,7 +19,7 @@
  * READ EVERY ROW AGAINST ITS SELF-CONTROL ROW. NO TIMING THRESHOLD IS
  * ASSERTED; the printed table is the evidence. Asserted: the arms agree on
  * every non-throwing result, and differ where intended (a hook's throw is a
- * VC_CORE_BEFORE_CANCEL BusError on the shipped arm, the raw throw on the
+ * core:refused:hook BusError on the shipped arm, the raw throw on the
  * baseline). Numbers quoted anywhere come from three runs of:
  *
  *   NODE_ENV=production NODE_OPTIONS=--expose-gc npx vitest run tests/before-cancel-ab.test.ts --silent=false
@@ -94,7 +94,7 @@ const ROWS: Array<[string, (m: Mod) => number | Promise<number>]> = [
 ];
 const ROUNDS = 11;
 
-describe('VC_CORE_BEFORE_CANCEL - real path A/B', () => {
+describe('core:refused:hook - real path A/B', () => {
   it.skipIf(underCoverage)('agrees where nothing throws, differs where a hook throws, and measures both', async () => {
     mkdirSync(REF_DIR, { recursive: true });
     const arms: Record<string, Mod> = {};
@@ -126,7 +126,7 @@ describe('VC_CORE_BEFORE_CANCEL - real path A/B', () => {
     expect(await settled(arms.shipped)).toEqual(await settled(arms.pre));
 
     // --- intended difference: a hook's throw carries the code --------------------
-    for (const [m, expected] of [[arms.pre, undefined], [arms.shipped, 'VC_CORE_BEFORE_CANCEL']] as const) {
+    for (const [m, expected] of [[arms.pre, undefined], [arms.shipped, 'core:refused:hook']] as const) {
       for (const make of [() => m.createCommandBus(), () => m.createAsyncCommandBus()]) {
         const bus: any = make();
         bus.register('t', () => 1);
@@ -156,6 +156,6 @@ describe('VC_CORE_BEFORE_CANCEL - real path A/B', () => {
         expect(Number.isFinite(median(ratios))).toBe(true);
       }
     }
-    console.log(`\n  VC_CORE_BEFORE_CANCEL - real path, ${ROUNDS} rotated rounds, gc=${!!gc}, NODE_ENV=${process.env.NODE_ENV}; time ratios, >1 slower\n${lines.join('\n')}\n`);
+    console.log(`\n  core:refused:hook - real path, ${ROUNDS} rotated rounds, gc=${!!gc}, NODE_ENV=${process.env.NODE_ENV}; time ratios, >1 slower\n${lines.join('\n')}\n`);
   });
 });

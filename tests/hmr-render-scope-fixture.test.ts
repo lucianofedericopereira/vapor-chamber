@@ -4,8 +4,8 @@
  * rerenders, vue@3.6.0-rc.6.
  *
  * WHY THIS FILE EXISTS. rc.6's `9ab65a1` ("own each dev render generation with
- * a render scope for HMR") replaces the `instance.renderEffects` array that
- * `hmrRerender` used to stop one effect at a time with a fresh per-render
+ * a render scope for HMR") replaces the `instance.renderEffects` array
+ * `hmrRerender` stopped one effect at a time with a fresh per-render
  * `EffectScope` owning everything a dev render generation creates. Upstream's
  * own regression for it is titled "rerender should tear down element-nested
  * child components": a child mounted INSIDE an element, rather than returned as

@@ -5,11 +5,10 @@
  * The ESM build's DEV folds when a consumer's bundler replaces
  * `process.env.NODE_ENV` - both arms of the expression read false and the
  * minifier drops every `if (DEV)` branch with its warning string. That held for
- * one-chunk apps and failed for code-split ones: a minifier folds a constant
- * only inside the chunk that defines it, and the ESM build used to export ONE
- * shared DEV. In examples/vapor-island-cart the store chunk defined it
- * (`var t=!1`) and the Cart chunk imported it, so Cart shipped chamber.ts's
- * whole probe-path hint, dead at runtime (docs/rc-alignment-log.md s19.4).
+ * one-chunk apps and fails for code-split ones: a minifier folds a constant
+ * only inside the chunk that defines it, so ONE shared exported DEV would
+ * leave a chunk that imports it shipping every warning string, dead at runtime
+ * (examples/vapor-island-cart's Cart chunk did; docs/rc-alignment-log.md s19.4).
  *
  * scripts/build.mjs now derives DEV once per importing module, so no chunk
  * imports it from another. The two shapes below are the examples' own: one

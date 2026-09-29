@@ -63,8 +63,8 @@ describe('vapor-chamber/vapor under a real with-vapor Vue', () => {
   });
 
   it('the KeepAlive guard works through this entry, with nothing hand-wired', async () => {
-    // v1.17.0 found `hasInjectionContext` missing from the /vue wiring list,
-    // which silently disabled this guard in production bundles
+    // `hasInjectionContext` missing from the /vue wiring list silently
+    // disables this guard in production bundles
     // (`tests/vue-subpath-wiring-fixture.test.ts`). Since /vapor re-exports and
     // evaluates /vue, that name arrives through this entry too - and this is
     // the assertion that notices if it ever stops.

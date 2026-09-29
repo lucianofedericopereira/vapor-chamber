@@ -15,18 +15,16 @@
   <title>Vapor Chamber - Blade + CDN</title>
   <!-- The house style the other runnable examples use (feature-directives.html,
        sprinkled-blade, the Blade views): one system font, a bounded column,
-       bordered panels. This page had NO stylesheet at all and rendered as a
-       bare line of browser defaults, which made the zero-build pattern look
-       like the unfinished one rather than the smallest one. -->
+       bordered panels. -->
   <style>
     body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
     .panel { border: 1px solid #ddd; padding: 1rem 1.25rem; margin: 1rem 0; border-radius: 6px; }
     .panel h2 { margin-top: 0; font-size: 1rem; }
     .row { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
     button { padding: .5rem 1rem; cursor: pointer; border: 1px solid #888; border-radius: 6px; background: #fff; }
-    button:disabled { opacity: .5; cursor: wait; }
+    button[aria-disabled="true"] { opacity: .5; cursor: wait; }
     code { background: #f5f5f5; padding: .1rem .3rem; border-radius: 3px; font-size: .9em; }
-    .muted { color: #777; font-size: .85rem; }
+    .muted { color: #6b6b6b; font-size: .85rem; }
     /* Reserve the line so a failure does not shove the panel down under the
        cursor, and the counter's width so the digits do not jitter. */
     #error-msg { color: #c00; min-height: 1.4em; margin: .75rem 0 0; }
@@ -59,7 +57,7 @@
     <button id="clear-btn">Clear</button>
     <span id="cart-count">0 items</span>
   </div>
-  <p id="error-msg"></p>
+  <p id="error-msg" role="status"></p>
 </div>
 
 <!-- No npm, no build - one script tag. Three ways to serve that tag:
@@ -71,9 +69,7 @@
      3. CDN, unpinned - `npm/vapor-chamber/...` with no @version. Avoid: it
         resolves to whatever is published *now* and is edge-cached, so the page
         silently changes under you on every release, and it can never be run
-        against unreleased code. This example used to do that, which made it
-        the one example nobody could verify before publishing - and the one
-        that shipped broken.
+        against unreleased code.
 
      Local path so this file is runnable today:
        node examples/static-server.mjs
@@ -83,7 +79,7 @@
   const { bus, dispatch } = VaporChamber.createApp({
     transport: VaporChamber.http({
       endpoint: '/api/vc',
-      csrf: true,             // reads X-XSRF-TOKEN from cookie automatically
+      csrf: true,             // the meta tag, else the XSRF-TOKEN cookie, else a hidden input
     }),
   })
 
@@ -120,20 +116,24 @@
 
   // Wire up buttons. Note both go through the SAME dispatch path - a button
   // is just a call site; the transport decides where the command runs.
+  // `aria-disabled`, not `disabled`: disabling the focused button sends a
+  // keyboard user's focus to <body>. A press while one is in flight is ignored.
   const send = async (btn, action, target, payload) => {
-    btn.disabled = true
+    if (btn.getAttribute('aria-disabled') === 'true') return
+    btn.setAttribute('aria-disabled', 'true')
     const result = await dispatch(action, target, payload)
-    btn.disabled = false
+    btn.removeAttribute('aria-disabled')
     // The line always occupies its row (see #error-msg in the stylesheet), so
     // an error appearing or clearing never shoves the panel under the cursor.
-    // Toggling `display` would undo that. Same shape as sprinkled-blade's
+    // Toggling `display` would undo that. It is a live region (role="status"),
+    // so a screen reader hears the failure. Same shape as sprinkled-blade's
     // #status.
     const err = document.getElementById('error-msg')
     err.textContent = result.ok ? '' : (result.error?.message ?? 'Unknown error')
   }
 
   const addBtn = document.getElementById('add-btn')
-  addBtn.addEventListener('click', () => send(addBtn, 'cartAdd', { id: 1 }, { quantity: 1 }))
+  addBtn.addEventListener('click', () => send(addBtn, 'cartAdd', { id: 1 }, { qty: 1 }))
 
   // Clear resets the SERVER cart; the listener above then overwrites the
   // persisted copy with the server's zero. Without this, a restored count
@@ -144,23 +144,24 @@
 </script>
 
 <!--
-  Laravel backend (no Livewire):
+  Laravel backend (no Livewire) - the whole reference controller is
+  examples/laravel-backend/VaporChamberController.php; its shape:
 
-  // routes/api.php
-  Route::post('/vc', VaporChamberController::class);
+  // routes/web.php - the `web` group checks the CSRF token this page sends
+  Route::post('/api/vc', VaporChamberController::class)->middleware(['web']);
 
   // app/Http/Controllers/VaporChamberController.php
   public function __invoke(Request $request): JsonResponse
   {
-      $command = $request->input('command');
-      $payload = $request->input('payload');
-
-      $state = match ($command) {
-          'cartAdd' => $this->cartService->add($payload),
-          default    => abort(404),
+      $state = match ($request->input('command')) {
+          'cartAdd' => $this->cartService->add($request->input('payload')),
+          default   => null,
       };
-
-      return response()->json(['state' => $state]);
+      // A failure is an RFC 9457 problem, never an HTML error page.
+      return $state === null
+          ? response()->json(['status' => 404, 'code' => 'unknown_command', 'detail' => 'Unknown command'], 404,
+              ['Content-Type' => 'application/problem+json'])
+          : response()->json(['state' => $state]);
   }
 -->
 </body>

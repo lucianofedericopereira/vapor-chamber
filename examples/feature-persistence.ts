@@ -5,12 +5,9 @@
  * Loads and rehydrates on page reload.
  */
 
-import {
-  createCommandBus,
-  setCommandBus,
-  useCommandState,
-  persist,
-} from 'vapor-chamber'
+import { createCommandBus, setCommandBus, persist } from 'vapor-chamber'
+// Composables from the Vue entry, which wires Vue (the root would not).
+import { useCommandState } from 'vapor-chamber/vue'
 
 const bus = createCommandBus()
 setCommandBus(bus)

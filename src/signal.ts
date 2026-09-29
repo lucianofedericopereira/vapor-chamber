@@ -33,16 +33,13 @@ let _syncProbed = false;
 function syncProbe(): void {
   if (_syncProbed) return;
   _syncProbed = true;
-  /* v8 ignore next -- defensive: globalThis is unconditionally present in Node/browser/happy-dom */
-  if (typeof globalThis !== 'undefined') {
-    const vue = (globalThis as any).__VUE__;
-    // Prefer shallowRef - the library replaces signal values wholesale, so the
-    // deep-Proxy wrap ref() applies to objects/arrays is pure overhead here.
-    if (vue && typeof vue.shallowRef === 'function') {
-      _vueRef = vue.shallowRef;
-    } else if (vue && typeof vue.ref === 'function') {
-      _vueRef = vue.ref;
-    }
+  const vue = (globalThis as any).__VUE__;
+  // Prefer shallowRef - the library replaces signal values wholesale, so the
+  // deep-Proxy wrap ref() applies to objects/arrays is pure overhead here.
+  if (vue && typeof vue.shallowRef === 'function') {
+    _vueRef = vue.shallowRef;
+  } else if (vue && typeof vue.ref === 'function') {
+    _vueRef = vue.ref;
   }
 }
 

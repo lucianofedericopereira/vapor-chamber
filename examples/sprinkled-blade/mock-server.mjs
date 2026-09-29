@@ -2,13 +2,11 @@
  * Mock backend for the sprinkled-blade demo. Single endpoint that emulates
  * what your Laravel `VaporChamberController` (or Rails / Django equivalent)
  * would do: receive `{ command, target, payload }`, dispatch to a handler,
- * return `{ ok, state }`, or an RFC 9457 problem (`application/problem+json`)
+ * return `{ state }`, or an RFC 9457 problem (`application/problem+json`)
  * for a failure.
  *
  * Run:
- *   node mock-server.mjs
- *
- * Then open ./index.html (e.g. via `npx serve .`).
+ *   node mock-server.mjs     # serves the page and the API on :3001
  */
 
 import { readFileSync } from 'node:fs';
@@ -18,9 +16,14 @@ import { createServer } from 'node:http';
  *  because the client re-renders with the same shape after each dispatch. */
 const summary = (s) => `${s.count} items (total: $${s.total.toFixed(2)})`;
 
+/** A failure a handler declares: answered as its RFC 9457 problem. */
+class Problem extends Error {
+  constructor(status, code, detail) { super(detail); this.status = status; this.code = code; }
+}
+
 const handlers = {
   cartAdd: (target, payload, _state) => {
-    if (typeof target?.id !== 'number') throw new Error('Missing target.id');
+    if (typeof target?.id !== 'number') throw new Problem(422, 'invalid_target', 'The target needs a numeric id.');
     const qty = payload?.qty ?? 1;
     _state.count += qty;
     _state.total += 19.99 * qty;
@@ -95,7 +98,7 @@ const server = createServer((req, res) => {
 
   const problem = (status, code, detail) => {
     res.writeHead(status, { 'Content-Type': 'application/problem+json' });
-    res.end(JSON.stringify({ type: `/problems/${code}`, status, detail, code }));
+    res.end(JSON.stringify({ status, code, detail }));
   };
 
   if (req.method !== 'POST' || req.url !== '/api/vc') {
@@ -115,8 +118,9 @@ const server = createServer((req, res) => {
       }
       const result = fn(target, payload, state);
       res.writeHead(200, { 'Content-Type': 'application/json' });
-      res.end(JSON.stringify({ ok: true, state: result }));
+      res.end(JSON.stringify({ state: result }));
     } catch (e) {
+      if (e instanceof Problem) { problem(e.status, e.code, e.message); return; }
       console.error(e);
       problem(500, 'internal_error', 'Internal error');
     }
@@ -125,5 +129,5 @@ const server = createServer((req, res) => {
 
 server.listen(PORT, () => {
   console.log(`Mock backend listening on http://localhost:${PORT}/api/vc`);
-  console.log('Now open the demo with `npx serve .` and click "Add to cart".');
+  console.log(`Open http://localhost:${PORT} and click "Add to cart".`);
 });

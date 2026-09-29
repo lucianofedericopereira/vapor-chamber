@@ -1,5 +1,5 @@
 /**
- * Dev warning for the signal()-before-detection race (v1.6.0).
+ * Dev warning for the signal()-before-detection race.
  *
  * Vue detection is async (dynamic import in chamber.ts). A signal() created
  * before configureSignal() lands is a plain { value } object FOREVER - writes

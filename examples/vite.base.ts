@@ -9,15 +9,10 @@
  * WHAT IS SHARED is only what was already byte-identical in both configs, plus
  * one thing that should have been and was not:
  *
- *   define        The three Vue feature flags. `vapor-sfc` set them and
- *                 `vapor-island-cart` did not - an inconsistency, though a
- *                 cheap one: measured, adding them moves that example's entry
- *                 chunk 60.92 -> 60.88 kB raw and 22.63 -> 22.62 kB gzip, i.e.
- *                 about 40 bytes. Vapor components do not pull the Options-API
- *                 runtime in the first place, so this is shared to stop the two
- *                 configs disagreeing, NOT because it buys a bundle win. (It is
- *                 safe here: no `defineComponent`, `data()`, `methods:` or
- *                 Options-API lifecycle appears anywhere in that example's src.)
+ *   define        The three Vue feature flags, so the two configs agree (about
+ *                 40 bytes: Vapor components do not pull the Options-API
+ *                 runtime in the first place). Safe: no Options API appears in
+ *                 either example's src.
  *   build.target  es2022, as `vapor-sfc` already pinned.
  *   plugins       `vue()` and `vaporChamberHMR({ verbose: false })`, which keeps
  *                 bus state across HMR.
@@ -32,11 +27,6 @@
  *   plugin order  The array is composed by the CALLER. Both happen to use the
  *                 same order today, and imposing it here would silently reorder
  *                 the other example's hooks the day one of them needs to change.
- *
- * The historical notes about the removed `vue` alias stay in each example's own
- * config: the two verified it against different evidence (one on a single
- * chunk's content hash, the other across all four), and merging them would lose
- * which claim was checked where.
  */
 
 import type { UserConfig } from 'vite';
@@ -45,9 +35,7 @@ import { vaporChamberHMR } from 'vapor-chamber/vite';
 
 /**
  * Derived from the factories rather than written out: `@vitejs/plugin-vue`
- * returns a single `Plugin<Api>`, not an array, and hand-annotating that was
- * wrong on the first attempt - caught by `vue-tsc --noEmit`, which is exactly
- * why the examples run it before `vite build`.
+ * returns a single `Plugin<Api>`, not an array.
  */
 type SharedPlugins = { vue: ReturnType<typeof vue>; hmr: ReturnType<typeof vaporChamberHMR> };
 

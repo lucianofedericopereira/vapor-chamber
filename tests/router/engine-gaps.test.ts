@@ -16,11 +16,10 @@
  *  - setRouteData's dev warning for an unknown record name.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { createMemoryHistory } from '../../src/router/history';
-import { createRouter } from '../../src/router/index';
 import type { RouteRecord } from '../../src/router/types';
 import { routerError } from '../../src/router/errors';
 import { stubEnv } from '../../src/vitest-pure';
+import { makeRouter as fixtureRouter } from './fixture';
 
 const ROWS: RouteRecord[] = [
   { name: 'shell', path: '/', parent: null },
@@ -41,10 +40,8 @@ const ROWS: RouteRecord[] = [
 
 /** Router wired to a single `rows:` prefix handler - the loader under test. */
 function makeRouter(handler: (...args: any[]) => unknown, opts: Record<string, unknown> = {}) {
-  return createRouter({
-    history: createMemoryHistory('/'),
+  return fixtureRouter({
     routes: ROWS,
-    components: { Home: { name: 'Home' }, List: { name: 'List' } },
     loaders: { prefixes: { 'rows:': handler as any } },
     ...opts,
   });
@@ -433,10 +430,8 @@ describe('refetchAffected - stale guards', () => {
   it('discards a refetch whose location moved on beneath it', async () => {
     let calls = 0;
     let release!: (v: string) => void;
-    const router = createRouter({
-      history: createMemoryHistory('/'),
+    const router = fixtureRouter({
       routes: ROWS,
-      components: { Home: { name: 'Home' }, List: { name: 'List' } },
       loaders: {
         prefixes: {
           'rows:': () => {
@@ -500,8 +495,7 @@ describe('navigation error wrapping', () => {
     // - the wrap arm. Coded router errors pass through untouched (covered
     // elsewhere); a plain Error from a component chunk is the common real case
     // and had never reached this branch.
-    const router = createRouter({
-      history: createMemoryHistory('/'),
+    const router = fixtureRouter({
       routes: ROWS,
       components: {
         Home: { name: 'Home' },

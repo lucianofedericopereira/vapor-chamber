@@ -241,6 +241,43 @@ describe('stampActiveLinks', () => {
     expect(a4.hasAttribute('data-active')).toBe(false); // cross-origin, not routable
   });
 
+  // WAI-ARIA: the link to the current page carries aria-current="page", so a
+  // screen reader says "current page". Only the exact match is the page: an
+  // ancestor section link is active for styling (data-active) and is NOT
+  // marked, since "only mark one element in a set as current".
+  it('marks the exact match aria-current="page", and nothing else', () => {
+    document.body.innerHTML = `
+      <a id="a1" href="/admin/products">Products</a>
+      <a id="a2" href="/admin/products/7">Edit</a>
+      <a id="a3" href="/admin/orders">Orders</a>
+    `;
+    stampActiveLinks('/admin', '/products/7');
+    expect(document.getElementById('a1')!.getAttribute('aria-current')).toBeNull();
+    expect(document.getElementById('a2')!.getAttribute('aria-current')).toBe('page');
+    expect(document.getElementById('a3')!.getAttribute('aria-current')).toBeNull();
+  });
+
+  it('moves aria-current="page" when the route changes, and clears it off a non-routable link', () => {
+    document.body.innerHTML = `
+      <a id="a1" href="/admin/products">Products</a>
+      <a id="a2" href="/admin/orders">Orders</a>
+    `;
+    stampActiveLinks('/admin', '/products');
+    stampActiveLinks('/admin', '/orders');
+    expect(document.getElementById('a1')!.getAttribute('aria-current')).toBeNull();
+    expect(document.getElementById('a2')!.getAttribute('aria-current')).toBe('page');
+
+    document.body.innerHTML = `<a id="x" href="https://example.com/admin/orders" aria-current="page">Out</a>`;
+    stampActiveLinks('/admin', '/orders');
+    expect(document.getElementById('x')!.getAttribute('aria-current')).toBeNull();
+  });
+
+  it('leaves an aria-current the page set for another purpose alone', () => {
+    document.body.innerHTML = `<a id="s" href="/admin/checkout/2" aria-current="step">Step 2</a>`;
+    stampActiveLinks('/admin', '/orders');
+    expect(document.getElementById('s')!.getAttribute('aria-current')).toBe('step');
+  });
+
   it('clears stale stamps on a link that is no longer routable', () => {
     document.body.innerHTML = `<a id="a1" href="/admin/products" data-active data-exact-active>Products</a>`;
     stampActiveLinks('/admin', '/orders');

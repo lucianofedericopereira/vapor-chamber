@@ -1,11 +1,9 @@
 /**
  * Real-time Search Example
  *
- * Demonstrates: debounce plugin with sync bus, async-like behavior
- *
- * Note: The debounce plugin works with the sync bus. For truly async
- * handlers, you'd implement debounce at the application level or
- * create an async debounce plugin.
+ * Demonstrates: the debounce plugin. It runs on either bus: a debounced
+ * dispatch answers `{ pending: true }` at once, and the latest one runs after
+ * the quiet period.
  */
 
 import { createCommandBus, debounce, logger } from 'vapor-chamber';
@@ -30,7 +28,7 @@ bus.use(logger());
 // Debounce search queries - wait 300ms after typing stops
 bus.use(debounce(['searchQuery'], 300));
 
-// Handler - sync version (for async, use createAsyncCommandBus with custom debounce)
+// Handler
 bus.register('searchQuery', (cmd) => {
   const query = (cmd.target as string).toLowerCase();
 

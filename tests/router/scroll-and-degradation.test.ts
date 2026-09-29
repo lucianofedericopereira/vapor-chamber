@@ -15,25 +15,13 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createMemoryHistory, createWebHistory } from '../../src/router/history';
+import { createWebHistory } from '../../src/router/history';
 import { createRouter } from '../../src/router/index';
 import type { RouteRecord } from '../../src/router/types';
 import { stubGlobal } from '../../src/vitest-pure';
+import { makeRouter, ROWS } from './fixture';
 
-const ROWS: RouteRecord[] = [
-  { name: 'shell', path: '/', parent: null },
-  { name: 'home', path: '/', parent: 'shell', component: 'Home' },
-  { name: 'list', path: '/list', parent: 'shell', component: 'List' },
-];
 
-function makeRouter(opts: Record<string, unknown> = {}) {
-  return createRouter({
-    history: createMemoryHistory('/'),
-    routes: ROWS,
-    components: { Home: { name: 'Home' }, List: { name: 'List' } },
-    ...opts,
-  });
-}
 
 afterEach(() => {
   document.body.innerHTML = '';
@@ -48,7 +36,7 @@ describe('scroll on commit', () => {
     document.body.appendChild(anchor);
     const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
 
-    const router = makeRouter();
+    const router = makeRouter({ scroll: true });
     await router.isReady();
     // start() commits the initial route, which legitimately scrolls to the top
     // (no hash). Clear that first so the assertion below is about the push.
@@ -64,7 +52,7 @@ describe('scroll on commit', () => {
 
   it('falls back to the top when the hash matches nothing', async () => {
     const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
-    const router = makeRouter();
+    const router = makeRouter({ scroll: true });
     await router.isReady();
     await router.push('/list#nothing-here');
 
@@ -77,7 +65,7 @@ describe('scroll on commit', () => {
     // throws. Without the catch, any such link would break navigation itself,
     // not merely fail to scroll.
     const scrollTo = vi.spyOn(window, 'scrollTo').mockImplementation(() => {});
-    const router = makeRouter();
+    const router = makeRouter({ scroll: true });
     await router.isReady();
 
     await expect(router.push('/list#2024')).resolves.toBeNull();
@@ -107,10 +95,8 @@ describe('inline routes payload', () => {
     el.textContent = JSON.stringify({ routes: ROWS });
     document.body.appendChild(el);
 
-    const router = createRouter({
-      history: createMemoryHistory('/'),
+    const router = makeRouter({
       routes: { inline: '#vcr-routes' } as never,
-      components: { Home: { name: 'Home' }, List: { name: 'List' } },
     });
     await router.isReady();
 
@@ -124,8 +110,7 @@ describe('inline routes payload', () => {
     // so an SSR render that reaches it must say why. Without the guard this is
     // a ReferenceError from deep inside the constructor.
     using _document = stubGlobal('document', undefined);
-    const router = createRouter({
-      history: createMemoryHistory('/'),
+    const router = makeRouter({
       routes: { inline: '#routes' } as never,
       components: {},
     });
@@ -139,8 +124,7 @@ describe('inline routes payload', () => {
     // null - it runs only to learn `base` before the history is built, and a
     // missing element there is not yet fatal. `loadInlineTable` at start() is
     // where the absence actually matters, so that is where it reports.
-    const router = createRouter({
-      history: createMemoryHistory('/'),
+    const router = makeRouter({
       routes: { inline: '#not-present' } as never,
       components: {},
     });
@@ -155,8 +139,7 @@ describe('idle preheat', () => {
     // uncached; with none flagged the whole path is skipped, which is what the
     // existing tests exercised.
     const loaded: string[] = [];
-    const router = createRouter({
-      history: createMemoryHistory('/'),
+    const router = makeRouter({
       routes: [
         { name: 'shell', path: '/', parent: null },
         { name: 'home', path: '/', parent: 'shell', component: 'Home' },
@@ -184,13 +167,13 @@ describe('resolve() before the table is ready', () => {
     // No isReady() on purpose: a remote-table router renders links during the
     // window before start() resolves, and an href of `undefined` there is a
     // broken page.
-    const router = makeRouter();
+    const router = makeRouter({ scroll: true });
     expect(router.resolve('/definitely-not-a-route')).toContain('/definitely-not-a-route');
     router.destroy();
   });
 
   it('degrades to `path` for the object form, and to / when it has none', () => {
-    const router = makeRouter();
+    const router = makeRouter({ scroll: true });
     expect(router.resolve({ path: '/raw-object' } as never)).toContain('/raw-object');
     expect(router.resolve({ name: 'nope' } as never)).toContain('/');
     router.destroy();

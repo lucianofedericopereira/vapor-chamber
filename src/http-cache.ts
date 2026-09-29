@@ -11,15 +11,12 @@
  * `getAny` still finds it as a last resort for `cache.serveStaleOnError`.
  * Only LRU size pressure or an explicit `invalidate` removes it.
  *
- * PER-CLIENT, NOT MODULE-GLOBAL. Both maps used to be module-level, so every
- * `createHttpClient()` shared one cache and one dedupe map. That read as an
- * isolated instance while behaving as a global, and under concurrent SSR it
- * was a correctness hazard: the cache key is `responseType:fullUrl` with no
- * auth/header/cookie dimension, so user A's authenticated payload answered
- * user B's identical URL, and two concurrent requests for different users
- * collapsed into one in-flight promise. A fresh bus per request (whitepaper
- * section 14.2) did not give a fresh HTTP cache - now a fresh client does. This is
- * the same factory-closure shape the bus-level `cache()` plugin already uses.
+ * PER-CLIENT, NOT MODULE-GLOBAL. The cache key is `responseType:fullUrl` with
+ * no auth/header/cookie dimension, so under concurrent SSR a shared map lets
+ * user A's authenticated payload answer user B's identical URL, and collapses
+ * two users' concurrent requests into one in-flight promise. A fresh client
+ * per request (whitepaper section 14.2) is a fresh cache - the same
+ * factory-closure shape the bus-level `cache()` plugin uses.
  */
 
 import { DEV } from './dev';

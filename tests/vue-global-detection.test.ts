@@ -85,7 +85,7 @@ describe('the library-owned detection slot', () => {
   });
 
   it('survives the case that breaks __VUE__: Vue\'s marker already written', async () => {
-    // The exact ordering that used to lose detection outright - an app has
+    // The ordering that loses detection through __VUE__ - an app has
     // mounted (so __VUE__ is `true`), and the library is only imported after
     // that (a code-split chunk, a late island, an MPA page). The owned slot
     // still holds the namespace, so detection succeeds.

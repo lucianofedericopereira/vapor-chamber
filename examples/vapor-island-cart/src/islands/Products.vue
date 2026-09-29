@@ -1,20 +1,19 @@
 <script setup vapor lang="ts">
+import { announce } from 'vapor-chamber';
 import { bus, products } from '../store';
 
 // The emitter island. Each button dispatches a typed product straight onto the
 // shared bus via @click - no document listener, no closest(), no JSON.parse.
 //
-// Vue 3.6.0-rc.2 (#15127, BREAKING): compiler-vapor event delegation is now
-// opt-in via `@click.delegate`, not automatic - this three-item list got a
-// free shared document listener under the old default and now gets N direct
-// ones instead. Left as plain `@click` here: at this size .delegate has
-// nothing to win (vapor-chamber's own bench of the equivalent trade-off in
-// src/directives.ts shows the delegated path is marginally SLOWER to mount,
-// not faster - the payoff is standing listener count, not speed). For a
-// real catalog-sized list (hundreds/thousands of rows), add `.delegate` to
-// trade that mount cost for one shared listener instead of one per row.
+// Plain `@click`, one direct listener per row: compiler-vapor delegates only
+// with `@click.delegate` (#15127), and at this size delegation wins nothing
+// (the delegated path is marginally slower to mount; its payoff is standing
+// listener count). For a catalog-sized list, add `.delegate`.
 function add(p: (typeof products)[number]) {
-  bus.dispatch('cartAdd', p);
+  const result = bus.dispatch('cartAdd', p);
+  // The cart changes in another island, out of the pressed button's sight:
+  // say what changed (WCAG 4.1.3) through the library's shared live region.
+  if (result.ok) announce(`${p.name} added to the cart.`);
 }
 </script>
 

@@ -8,10 +8,10 @@
  *   - synthesize(): natural language -> dispatch via LLM tool use
  */
 
-import { createCommandBus, createAsyncCommandBus, _errResult, } from './command-bus';
+import { createCommandBus, createAsyncCommandBus, _errResult } from './command-bus';
 import { GLYPH_COMMAND, GLYPH_OK, GLYPH_WARN } from './glyphs';
 import { onSettled } from './settled';
-import type { CommandBus, AsyncCommandBus, Plugin, CommandResult, CommandBusOptions, CommandMap, BusErrorCode, BusSeverity, BusEmitter } from './command-bus';
+import type { CommandBus, AsyncCommandBus, Plugin, CommandResult, CommandBusOptions, AsyncCommandBusOptions, RetryDeclaration, CommandMap, BusSeverity } from './command-bus';
 
 // ---------------------------------------------------------------------------
 // Schema types - flat and explicit
@@ -40,6 +40,17 @@ export type ActionSchema = {
    * },
    */
   authorize?: string;
+  /**
+   * What the async bus's retry may do with this action (docs/plan-shape.md 4):
+   * `'idempotent'` (running it twice is safe: an uncertain failure is re-sent
+   * too, under one idempotency key), `false` (never re-sent) or an attempt
+   * count. Unset, the bus default: a transient failure is re-sent.
+   *
+   * @example
+   * cartAdd:      { retry: 'idempotent', target: { id: 'number' } },
+   * cartCheckout: { retry: false,        target: { cartId: 'number' } },
+   */
+  retry?: RetryDeclaration;
 };
 
 export type BusSchema = Record<string, ActionSchema>;
@@ -167,7 +178,7 @@ function normalizeSchema(schema: BusSchema): BusSchema {
 // ---------------------------------------------------------------------------
 
 // Required, not optional: both call sites below are inside `if (def.target)` /
-// `if (def.payload)`, so the old `fields?` signature carried a `!fields` guard
+// `if (def.payload)`, so an optional `fields?` would need a `!fields` guard
 // nothing could reach. Typechecked, not assumed - an unguarded caller fails to
 // compile rather than silently returning {}.
 function toProps(fields: FieldMap): Record<string, { type: string }> {
@@ -207,10 +218,9 @@ function runChecks(checks: CompiledChecks, value: Record<string, any>): string[]
     if (expected === 'array') {
       if (!Array.isArray(v)) errors.push(`${key}: expected array, got ${describe(v)}`);
     } else if (expected === 'object') {
-      // `'object'` used to be presence-checked ONLY - excluded from the array
-      // branch and from the typeof branch alike - so `{ filters: 'object' }`
-      // happily accepted `filters: 42`. Arrays do not satisfy `'object'`, per
-      // JSON Schema (and per `InferField`, which maps it to Record<string, any>).
+      // A plain object, not mere presence (`filters: 42` fails). Arrays do not
+      // satisfy `'object'`, per JSON Schema (and per `InferField`, which maps
+      // it to Record<string, any>).
       if (!isPlainObject(v)) errors.push(`${key}: expected object, got ${describe(v)}`);
     } else if (typeof v !== expected) {
       errors.push(`${key}: expected ${expected}, got ${typeof v}`);
@@ -279,15 +289,11 @@ export function schemaValidator(schema: BusSchema): Plugin {
   return (cmd, next) => {
     const c = compiled.get(cmd.action);
     if (!c) return next();
-    // A NON-OBJECT value must fail, not skip. Both guards used to read
-    // `typeof x === 'object'`, so a schema declaring required fields let
-    // `target: null` / `42` / `"oops"` - or `payload: "large"` against
-    // `{ qty: 'number' }` - bypass the whole block and reach the handler
-    // malformed: required-ness was enforced only for callers who already
-    // passed an object. This gate's most important caller is an LLM (the MCP
-    // layer forwards `args?.payload` raw), i.e. exactly the caller class most
-    // likely to send a string where an object belongs, into the check built to
-    // stop that.
+    // A NON-OBJECT value must fail, not skip: otherwise `target: null` / `42`
+    // / `"oops"` bypasses every required field and reaches the handler
+    // malformed. This gate's most important caller is an LLM (the MCP layer
+    // forwards `args?.payload` raw), the caller most likely to send a string
+    // where an object belongs.
     if (c.target && c.target.length > 0 && !isPlainObject(cmd.target)) {
       return fail(cmd.action, [`target: expected object, got ${describe(cmd.target)}`]);
     }
@@ -463,6 +469,12 @@ export type SchemaCommandBusOptions = CommandBusOptions & {
   validate?: boolean;
 };
 
+/**
+ * The async schema bus's options. Each action's `retry` joins
+ * `retry.actions`; a declaration given here for the same name wins.
+ */
+export type AsyncSchemaCommandBusOptions = AsyncCommandBusOptions & { validate?: boolean };
+
 export type SchemaCommandBus<M extends CommandMap = CommandMap> = CommandBus<M> & {
   toTools(provider?: 'anthropic' | 'openai'): AnthropicTool[] | OpenAITool[];
   synthesize(text: string, options?: SynthesizeOptions): Promise<CommandResult>;
@@ -492,10 +504,16 @@ export type AsyncSchemaCommandBus<M extends CommandMap = CommandMap> = AsyncComm
  */
 export function createAsyncSchemaCommandBus<S extends BusSchema>(
   schema:   S,
-  options?: SchemaCommandBusOptions,
+  options?: AsyncSchemaCommandBusOptions,
 ): AsyncSchemaCommandBus<InferMap<S>> {
   const normalized = normalizeSchema(schema);
-  const bus = createAsyncCommandBus<InferMap<S>>(options);
+  const retry = options?.retry;
+  const declared: Record<string, RetryDeclaration> = {};
+  for (const action in normalized) if (normalized[action].retry !== undefined) declared[action] = normalized[action].retry!;
+  const bus = createAsyncCommandBus<InferMap<S>>({
+    ...options,
+    retry: retry === false ? false : { ...retry, actions: { ...declared, ...retry?.actions } },
+  });
   if (options?.validate !== false) bus.use(schemaValidator(normalized) as any);
   return Object.assign(bus, {
     toTools:      (provider: 'anthropic' | 'openai' = 'anthropic') => toTools(normalized, provider),
@@ -554,13 +572,16 @@ export function createSchemaCommandBus<S extends BusSchema>(
  * Useful for generating documentation, i18n lookups, and LLM error handling.
  */
 export type ErrorCodeEntry = {
-  code: BusErrorCode;
+  /** `owner:condition:subject`; the owner is the code's first part. */
+  code: string;
+  /** The level a logger defaults to for this code; the logger decides. */
   severity: BusSeverity;
-  emitter: BusEmitter;
   /**
-   * Whether re-dispatching can plausibly succeed (transient failure, e.g.
-   * throttle/timeout) - false for permanent failures (validation, config).
-   * Must stay in sync with RETRYABLE_CODES in command-bus.ts (asserted in tests).
+   * Whether the async bus re-sends it for any action: a transient condition
+   * (`limited`, `timeout`). An uncertain one is re-sent only for an idempotent
+   * action or a keyed command, and reads false here. An outcome of the code's
+   * condition under RETRYABLE_CONDITIONS, not a judgement per row (asserted in
+   * tests/schema.test.ts).
    */
   retryable: boolean;
   /** Broad failure category for filtering, telemetry, and LLM error handling. */
@@ -577,7 +598,7 @@ export type ErrorCodeEntry = {
  * @example
  * import { ERROR_CODE_REGISTRY } from 'vapor-chamber';
  * // Lookup an error code
- * const entry = ERROR_CODE_REGISTRY.find(e => e.code === 'VC_CORE_NO_HANDLER');
+ * const entry = ERROR_CODE_REGISTRY.find(e => e.code === 'core:missing:handler');
  * console.log(entry?.fix); // "Register a handler with bus.register(action, handler)"
  *
  * @example
@@ -592,40 +613,40 @@ export type ErrorCodeEntry = {
 // barrel-import bundle).
 export const ERROR_CODE_REGISTRY: readonly ErrorCodeEntry[] = /* @__PURE__ */ Object.freeze([
   // Core
-  { code: 'VC_CORE_NO_HANDLER',       severity: 'error', emitter: 'core',     retryable: false, category: 'internal',   message: 'No handler registered for action',                  fix: 'Register a handler with bus.register(action, handler) before dispatching.' },
+  { code: 'core:missing:handler',       severity: 'error', retryable: false, category: 'internal',   message: 'No handler registered for action',                  fix: 'Register a handler with bus.register(action, handler) before dispatching.' },
   // Not emitted by the bus - see the note on this code in command-bus.ts. The
   // row stays because the code is public and a consumer may construct one, but
-  // its text must not promise a handler throw arrives as this code, which is
-  // what it said until v1.23.0.
-  { code: 'VC_CORE_HANDLER_THREW',     severity: 'error', emitter: 'core',     retryable: false, category: 'general',    message: 'Declared for a handler throw; the bus rethrows those unwrapped instead', fix: 'The bus does not emit this. A handler throw arrives as the handler\'s own error in result.error - read that. Only a BusError you construct yourself carries this code, and retry() will not re-dispatch it: pass your own isRetryable if you want that.' },
-  { code: 'VC_CORE_BEFORE_CANCEL',     severity: 'error', emitter: 'hook',     retryable: false, category: 'logic',      message: 'A beforeHook threw to cancel the dispatch',         fix: 'This is intentional cancellation. Check the beforeHook logic or remove the hook.' },
-  { code: 'VC_CORE_NAMING_VIOLATION',  severity: 'warn',  emitter: 'core',     retryable: false, category: 'validation', message: 'Action name does not match the naming pattern',     fix: 'Rename the action to match the pattern or adjust naming config in createCommandBus().' },
-  { code: 'VC_CORE_HANDLER_OVERWRITE', severity: 'info',  emitter: 'core',     retryable: false, category: 'internal',   message: 'A handler was overwritten without unregistering',   fix: 'Call the unregister function returned by register() before re-registering.' },
-  { code: 'VC_CORE_REQUEST_TIMEOUT',   severity: 'error', emitter: 'core',     retryable: true,  category: 'network',    message: 'request() timed out waiting for a response',        fix: 'Increase the timeout option or check that respond() is registered for this action.' },
-  { code: 'VC_CORE_THROTTLED',         severity: 'warn',  emitter: 'core',     retryable: true,  category: 'general',    message: 'Handler throttled, too many calls in window',       fix: 'Wait for the throttle window to pass. Check context.retryIn for the remaining wait time.' },
-  { code: 'VC_CORE_ABORTED',           severity: 'warn',  emitter: 'core',     retryable: false, category: 'general',    message: 'Dispatch aborted via its AbortSignal before completion', fix: 'Intentional cancellation (ac.abort()). Re-dispatch explicitly if the abort was premature.' },
-  { code: 'VC_VALIDATION_FAILED',      severity: 'error', emitter: 'plugin',   retryable: false, category: 'validation', message: 'Schema or per-action validation rejected the dispatch', fix: 'Fix the target/payload fields listed in the error message to match the declared schema.' },
+  // its text must not promise a handler throw arrives as this code.
+  { code: 'core:failed:handler',     severity: 'error', retryable: false, category: 'general',    message: 'Declared for a handler throw; the bus rethrows those unwrapped instead', fix: 'The bus does not emit this. A handler throw arrives as the handler\'s own error in result.error - read that. Only a BusError you construct yourself carries this code; the async bus does not re-send it (a bug would fail again).' },
+  { code: 'core:refused:hook',     severity: 'error', retryable: false, category: 'logic',      message: 'A beforeHook threw to cancel the dispatch',         fix: 'This is intentional cancellation. Check the beforeHook logic or remove the hook.' },
+  { code: 'core:invalid:name',  severity: 'warn',  retryable: false, category: 'validation', message: 'Action name does not match the naming pattern',     fix: 'Rename the action to match the pattern or adjust naming config in createCommandBus().' },
+  { code: 'core:already:handler', severity: 'info',  retryable: false, category: 'internal',   message: 'A handler was overwritten without unregistering',   fix: 'Call the unregister function returned by register() before re-registering.' },
+  { code: 'core:timeout:request',   severity: 'error', retryable: true,  category: 'network',    message: 'request() timed out waiting for a response',        fix: 'Increase the timeout option or check that respond() is registered for this action.' },
+  { code: 'core:limited:handler',         severity: 'warn',  retryable: true,  category: 'general',    message: 'Handler throttled, too many calls in window',       fix: 'Wait for the throttle window to pass. Check context.retryIn for the remaining wait time.' },
+  { code: 'core:aborted:dispatch',           severity: 'warn',  retryable: false, category: 'general',    message: 'Dispatch aborted via its AbortSignal before completion', fix: 'Intentional cancellation (ac.abort()). Re-dispatch explicitly if the abort was premature.' },
+  { code: 'validator:invalid:payload',      severity: 'error', retryable: false, category: 'validation', message: 'Schema or per-action validation rejected the dispatch', fix: 'Fix the target/payload fields listed in the error message to match the declared schema.' },
+  { code: 'validateSchemas:invalid:payload',    severity: 'error', retryable: false, category: 'validation', message: 'Schema or per-action validation rejected the dispatch', fix: 'Fix the target/payload fields listed in the error message to match the declared schema.' },
   // Plugins
-  { code: 'VC_PLUGIN_CIRCUIT_OPEN',    severity: 'error', emitter: 'plugin',   retryable: true,  category: 'network',    message: 'Circuit breaker is open due to consecutive failures', fix: 'Wait for resetTimeout to elapse. The circuit will transition to half-open and retry.' },
-  { code: 'VC_PLUGIN_RATE_LIMITED',    severity: 'error', emitter: 'plugin',   retryable: true,  category: 'general',    message: 'Rate limit exceeded for this action',               fix: 'Reduce call frequency or increase the max/window in rateLimit() options.' },
-  { code: 'VC_PLUGIN_CACHE_MISS',      severity: 'info',  emitter: 'plugin',   retryable: false, category: 'general',    message: 'Cache miss - handler will be called',               fix: 'This is informational. Increase TTL or warm the cache if needed.' },
-  { code: 'VC_PLUGIN_THREW',           severity: 'error', emitter: 'plugin',   retryable: false, category: 'internal',   message: 'A plugin threw or rejected in its own body',        fix: 'A pipeline bug, not a server failure: error.cause is the original and context.index is the plugin\'s place in the chain (0 = outermost). Make it return next() or an errResult instead of throwing.' },
+  { code: 'circuitBreaker:limited:action',    severity: 'error', retryable: true,  category: 'network',    message: 'Circuit breaker is open due to consecutive failures', fix: 'Wait for resetTimeout to elapse. The circuit will transition to half-open and retry.' },
+  { code: 'authGuard:refused:action',    severity: 'warn',  retryable: false, category: 'logic',      message: 'The action is protected and the user is not authenticated', fix: 'Sign in first, or remove the action from authGuard({ protected }).' },
+  { code: 'rateLimit:limited:action',    severity: 'error', retryable: true,  category: 'general',    message: 'Rate limit exceeded for this action',               fix: 'Reduce call frequency or increase the max/window in rateLimit() options.' },
+  { code: 'plugin:failed:plugin',           severity: 'error', retryable: false, category: 'internal',   message: 'A plugin threw or rejected in its own body',        fix: 'A pipeline bug, not a server failure: error.cause is the original and context.index is the plugin\'s place in the chain (0 = outermost). Make it return next() or an errResult instead of throwing.' },
   // Transports
-  { code: 'VC_TRANSPORT_REDIRECT',    severity: 'error', emitter: 'transport', retryable: false, category: 'logic',    message: 'The backend answered with a redirect instead of a result', fix: 'Pass an onRedirect handler to the bridge (e.g. Inertia\'s router.visit), or stop the backend redirecting this command.' },
-  { code: 'VC_TRANSPORT_PROTOCOL',    severity: 'error', emitter: 'transport', retryable: false, category: 'internal', message: 'A response the transport cannot match to its request',     fix: 'The backend must echo back the id it was sent for every batched command. Re-sending cannot fix it.' },
-  { code: 'VC_TRANSPORT_QUEUE_FULL',  severity: 'error', emitter: 'transport', retryable: false, category: 'general',  message: 'The offline send queue is full; the oldest command was dropped', fix: 'Raise maxQueueSize, or stop dispatching while the socket is down - context.command is the one dropped.' },
-  { code: 'VC_TRANSPORT_CLOSED',      severity: 'error', emitter: 'transport', retryable: false, category: 'network',  message: 'The socket closed or was torn down before the reply arrived',  fix: 'Reconnect and dispatch again. Re-sending on the dead socket cannot succeed, so retry() does not.' },
-  { code: 'VC_TRANSPORT_TIMEOUT',     severity: 'error', emitter: 'transport', retryable: true,  category: 'network',  message: 'No reply arrived within the transport\'s own timeout',          fix: 'Raise the bridge timeout option, or check the backend is answering. Transient, so retry() re-sends.' },
+  { code: 'transport:refused:redirect',    severity: 'error', retryable: false,category: 'logic',    message: 'The backend answered with a redirect instead of a result', fix: 'Pass an onRedirect handler to the bridge (e.g. Inertia\'s router.visit), or stop the backend redirecting this command.' },
+  { code: 'transport:lost:result',    severity: 'error', retryable: false, category: 'internal', message: 'A batch answered without this command\'s result: it may have run',     fix: 'The backend must answer every batched command by the id it was sent. The outcome is unknown, so it is re-sent only with an idempotency key.' },
+  { code: 'transport:lost:command',  severity: 'error', retryable: false, category: 'general',  message: 'The offline send queue is full; the oldest command was dropped', fix: 'Raise maxQueueSize, or stop dispatching while the socket is down - context.command is the one dropped.' },
+  { code: 'transport:lost:reply',      severity: 'error', retryable: false, category: 'network',  message: 'The socket closed or was torn down before the reply arrived',  fix: 'Reconnect and dispatch again. The outcome is unknown, so the async bus re-sends it only for an idempotent action or a keyed command.' },
+  { code: 'transport:timeout:reply',     severity: 'error', retryable: true,  category: 'network',  message: 'No reply arrived within the transport\'s own timeout',          fix: 'Raise the bridge timeout option, or check the backend is answering. Transient, so the async bus re-sends it.' },
   // Workflow
-  { code: 'VC_WORKFLOW_STEP_FAILED',       severity: 'error', emitter: 'workflow', retryable: false, category: 'logic',    message: 'A workflow step failed, running compensations',  fix: 'Check the step handler. Compensations run automatically for previous steps.' },
-  { code: 'VC_WORKFLOW_COMPENSATE_FAILED', severity: 'error', emitter: 'workflow', retryable: false, category: 'internal', message: 'A compensation step also failed',               fix: 'Manual intervention needed. Check the compensation handler for errors.' },
+  { code: 'workflow:failed:step',       severity: 'error', retryable: false, category: 'logic',    message: 'A workflow step failed, running compensations',  fix: 'Check the step handler. Compensations run automatically for previous steps.' },
+  { code: 'workflow:failed:compensation', severity: 'error', retryable: false, category: 'internal', message: 'A compensation step also failed',               fix: 'Manual intervention needed. Check the compensation handler for errors.' },
   // Hooks/Listeners
-  { code: 'VC_CORE_MAX_DEPTH',         severity: 'error', emitter: 'core',     retryable: false, category: 'logic',      message: 'Recursive dispatch depth exceeded',                 fix: 'A listener or reaction is re-dispatching in a loop. Break the cycle or add a guard condition.' },
-  { code: 'VC_CORE_SEALED',           severity: 'error', emitter: 'core',     retryable: false, category: 'logic',      message: 'Mutation attempted on a sealed bus',                fix: 'The bus was sealed with bus.seal(). Register all handlers/plugins before calling seal().' },
-  { code: 'VC_HOOK_ERROR',             severity: 'warn',  emitter: 'hook',     retryable: false, category: 'internal',   message: 'An afterHook threw (logged, not fatal)',            fix: 'Fix the error in your onAfter hook. Hook errors do not affect dispatch results.' },
-  { code: 'VC_LISTENER_ERROR',         severity: 'warn',  emitter: 'listener', retryable: false, category: 'internal',   message: 'An on() listener threw (logged, not fatal)',        fix: 'Fix the error in your on() listener. Listener errors do not affect dispatch results.' },
+  { code: 'core:exceeded:depth',         severity: 'error', retryable: false, category: 'logic',      message: 'Recursive dispatch depth exceeded',                 fix: 'A listener or reaction is re-dispatching in a loop. Break the cycle or add a guard condition.' },
+  { code: 'core:refused:bus',           severity: 'error', retryable: false, category: 'logic',      message: 'Mutation attempted on a sealed bus',                fix: 'The bus was sealed with bus.seal(). Register all handlers/plugins before calling seal().' },
+  { code: 'core:failed:hook',             severity: 'warn',  retryable: false, category: 'internal',   message: 'An afterHook threw (logged, not fatal)',            fix: 'Fix the error in your onAfter hook. Hook errors do not affect dispatch results.' },
+  { code: 'core:failed:listener',         severity: 'warn',  retryable: false, category: 'internal',   message: 'An on() listener threw (logged, not fatal)',        fix: 'Fix the error in your on() listener. Listener errors do not affect dispatch results.' },
   // Generic
-  { code: 'VC_UNKNOWN',                severity: 'error', emitter: 'core',     retryable: true,  category: 'general',    message: 'Unclassified error',                                fix: 'Check the error message and stack trace for details.' },
+  { code: 'core:unknown:error',                severity: 'error', retryable: false, category: 'general',    message: 'Unclassified error',                                fix: 'Check the error message and stack trace for details.' },
 ]);
 
 /**
@@ -637,7 +658,7 @@ export const ERROR_CODE_REGISTRY: readonly ErrorCodeEntry[] = /* @__PURE__ */ Ob
  *   console.log(entry?.fix); // actionable fix suggestion
  * }
  */
-export function getErrorEntry(code: BusErrorCode): ErrorCodeEntry | undefined {
+export function getErrorEntry(code: string): ErrorCodeEntry | undefined {
   return ERROR_CODE_REGISTRY.find(e => e.code === code);
 }
 
@@ -661,9 +682,9 @@ export function isRetryableCode(code: string): boolean | undefined {
  * const systemPrompt = `When the bus returns an error, use this table:\n${describeErrorCodes()}`;
  */
 export function describeErrorCodes(): string {
-  const lines = ['Error codes (code | severity | emitter | fix):'];
+  const lines = ['Error codes (code | severity | fix):'];
   for (const e of ERROR_CODE_REGISTRY) {
-    lines.push(`  ${e.code} | ${e.severity} | ${e.emitter} | ${e.fix}`);
+    lines.push(`  ${e.code} | ${e.severity} | ${e.fix}`);
   }
   return lines.join('\n');
 }

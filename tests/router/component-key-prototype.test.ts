@@ -22,8 +22,8 @@
 import { describe, expect, it } from 'vitest';
 import { isRouterError } from '../../src/router/errors';
 import { createMemoryHistory } from '../../src/router/history';
-import { createRouter } from '../../src/router/index';
 import type { RouteRecord } from '../../src/router/types';
+import { makeRouter as fixtureRouter } from './fixture';
 
 const POLLUTING_KEYS = ['constructor', 'toString', 'valueOf', 'hasOwnProperty', 'isPrototypeOf'];
 
@@ -33,13 +33,12 @@ const HOME: RouteRecord = { name: 'home', path: '/', component: 'Real' };
 
 function makeRouter(rows: readonly RouteRecord[]) {
   const errors: unknown[] = [];
-  const router = createRouter({
+  const router = fixtureRouter({
     history: createMemoryHistory(''),
     routes: [HOME, ...rows],
     // A real app map: a plain object literal, exactly what a consumer writes.
     components: { Real: { render: () => null } } as never,
     links: false,
-    scroll: false,
     onError: (error) => errors.push(error),
   });
   return { router, errors };

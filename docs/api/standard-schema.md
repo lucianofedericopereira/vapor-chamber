@@ -45,7 +45,7 @@ Use with `createAsyncCommandBus()`.
 
 ### StandardSchemaV1
 
-**Interface** - [src/plugins-schema.ts:45](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-schema.ts#L45)
+**Interface** - [src/plugins-schema.ts:48](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-schema.ts#L48)
 
 ```ts
 export interface StandardSchemaV1<Input = unknown, Output = Input> {
@@ -64,7 +64,7 @@ export interface StandardSchemaV1<Input = unknown, Output = Input> {
 
 ### StandardSchemaV1Issue
 
-**Interface** - [src/plugins-schema.ts:62](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-schema.ts#L62)
+**Interface** - [src/plugins-schema.ts:65](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-schema.ts#L65)
 
 ```ts
 export interface StandardSchemaV1Issue {
@@ -77,7 +77,7 @@ export interface StandardSchemaV1Issue {
 
 ### SchemaValidatorOptions
 
-**Type alias** - [src/plugins-schema.ts:71](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-schema.ts#L71)
+**Type alias** - [src/plugins-schema.ts:74](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-schema.ts#L74)
 
 ```ts
 export type SchemaValidatorOptions = {
@@ -91,7 +91,7 @@ export type SchemaValidatorOptions = {
   field?: 'target' | 'payload' | 'both' | ((cmd: Command) => unknown);
   /**
    * What to do on validation failure:
-   * - `'reject'` (default) - return `{ ok: false, error: BusError(VC_VALIDATION_FAILED) }`
+   * - `'reject'` (default) - return `{ ok: false, error }`, a `validateSchemas:invalid:payload` BusError,
    *   without invoking the handler
    * - `'warn'` - `console.warn` and continue to the handler with the
    *   original (un-coerced) command
@@ -106,7 +106,7 @@ export type SchemaValidatorOptions = {
 
 ### StandardSchemaV1Result
 
-**Type alias** - [src/plugins-schema.ts:58](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-schema.ts#L58)
+**Type alias** - [src/plugins-schema.ts:61](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-schema.ts#L61)
 
 ```ts
 export type StandardSchemaV1Result<Output> =

@@ -35,66 +35,66 @@ import type { McpTool } from './mcp';
  * the core `BusErrorCode` registry, and the bytes every app ships, do not move
  * for test tooling.
  *
- * - `VC_TEST_UNTAPPED`: a bus matcher received a bus that was never passed to
+ * - `test:missing:tap`: a bus matcher received a bus that was never passed to
  *   `tap()`, so nothing it dispatched was recorded. Fix: `tap(bus)` where the
  *   bus is created; the shared bus from `getCommandBus()` is tapped for you
  *   when `vapor-chamber/vitest` is a setup file.
- * - `VC_TEST_DUPLICATE_INSTANCE`: the bus came from a second copy of
+ * - `test:already:instance`: the bus came from a second copy of
  *   vapor-chamber, not the one the setup file tapped. Every assertion would
  *   otherwise report "nothing was dispatched". Fix: dedupe the install
  *   (`npm ls vapor-chamber`) so one copy is loaded.
- * - `VC_TEST_VITEST_MAJOR`: a warning, never a failure. This entry was released
+ * - `test:unexpected:version`: a warning, never a failure. This entry was released
  *   against Vitest 5 and meets a major it does not know. Fix: none needed if
  *   the suite passes; report a break if it does not.
- * - `VC_TEST_TAP_REMOVED`: the bus was tapped, then `clear()` or `dispose()`
+ * - `test:lost:tap`: the bus was tapped, then `clear()` or `dispose()`
  *   removed every hook, the tap's included, so later dispatches were not
  *   recorded. Raised only where a missed record could change the outcome.
  *   Fix: `tap(bus)` again after clearing.
- * - `VC_TEST_MCP_INVALID_FILES`: an MCP client passed `target.files` that is
+ * - `test:invalid:files`: an MCP client passed `target.files` that is
  *   not a list of up to 100 non-empty filters, or a filter starting with `-`.
  *   Fix: pass file filters relative to the project root.
- * - `VC_TEST_MCP_NO_RUN`: `getTestResults` before any `runTests`. Fix: call
+ * - `test:missing:run`: `getTestResults` before any `runTests`. Fix: call
  *   `runTests` first.
- * - `VC_TEST_MCP_NO_COVERAGE`: the coverage run wrote no report. Fix: install
+ * - `test:missing:coverage`: the coverage run wrote no report. Fix: install
  *   the provider the config names and check that the suite starts.
  */
 export type VcTestDiagnostic =
-  | 'VC_TEST_UNTAPPED'
-  | 'VC_TEST_DUPLICATE_INSTANCE'
-  | 'VC_TEST_VITEST_MAJOR'
-  | 'VC_TEST_TAP_REMOVED'
-  | 'VC_TEST_MCP_INVALID_FILES'
-  | 'VC_TEST_MCP_NO_RUN'
-  | 'VC_TEST_MCP_NO_COVERAGE';
+  | 'test:missing:tap'
+  | 'test:already:instance'
+  | 'test:unexpected:version'
+  | 'test:lost:tap'
+  | 'test:invalid:files'
+  | 'test:missing:run'
+  | 'test:missing:coverage';
 
 const DOCS = 'https://github.com/lucianofedericopereira/vapor-chamber/blob/main/docs/api/vitest-pure.md#vctestdiagnostic';
 
 const CATALOGUE: Record<VcTestDiagnostic, { why: string; fix: string }> = {
-  VC_TEST_UNTAPPED: {
+  'test:missing:tap': {
     why: 'this bus was never passed to tap(), so nothing dispatched on it was recorded',
     fix: 'wrap it where it is created: tap(createCommandBus()). The shared bus from getCommandBus() is tapped for you when vapor-chamber/vitest is a setup file',
   },
-  VC_TEST_DUPLICATE_INSTANCE: {
+  'test:already:instance': {
     why: 'this bus comes from a second copy of vapor-chamber, not the copy the setup file tapped',
     fix: 'load one copy: dedupe the install (npm ls vapor-chamber) so tests and the setup file resolve the same package',
   },
-  VC_TEST_VITEST_MAJOR: {
+  'test:unexpected:version': {
     why: 'vapor-chamber/vitest was released against Vitest 5 and is running on a major it does not know',
     fix: 'nothing if the suite passes; report the break if it does not',
   },
-  VC_TEST_TAP_REMOVED: {
+  'test:lost:tap': {
     why: 'this bus was tapped, then clear() or dispose() removed every hook, the tap included, so later dispatches were not recorded',
     fix: 'tap(bus) again after clear() or dispose(); it resumes recording into the same record',
   },
-  VC_TEST_MCP_INVALID_FILES: {
+  'test:invalid:files': {
     why: 'target.files must be a list of at most 100 non-empty file filters, none starting with "-"',
     fix: 'pass Vitest file filters relative to the project root, or omit target.files to run every test file',
   },
-  VC_TEST_MCP_NO_RUN: {
+  'test:missing:run': {
     why: 'no runTests call has finished in this server yet',
     fix: 'call runTests first',
   },
-  VC_TEST_MCP_NO_COVERAGE: {
+  'test:missing:coverage': {
     why: 'the coverage run wrote no report',
     fix: 'install the coverage provider the Vitest config names (npm i -D @vitest/coverage-v8) and check that the suite starts',
   },
@@ -103,16 +103,6 @@ const CATALOGUE: Record<VcTestDiagnostic, { why: string; fix: string }> = {
 /** A coded misuse diagnostic: `code` to switch on, `why`, `fix` and a `docs` link. */
 export class VcTestError extends Error {
   readonly code: VcTestDiagnostic;
-  /**
-   * Provenance, for `retry()`'s default predicate. Reachable, which is why it
-   * is here: `tryCatchHandler` returns `errResult(e)` with the thrown value
-   * UNWRAPPED (command-bus.ts:856), so a handler that throws one of these puts
-   * it straight into `result.error`. Without an emitter it took the status
-   * rule - no status, name not 'AbortError' - and was retried. With one it
-   * takes the code rule and is correctly permanent, since no `VC_TEST_*` code
-   * is in RETRYABLE_CODES. 'test' is what BusEmitter already declares for this.
-   */
-  readonly emitter = 'test';
   readonly why: string;
   readonly fix: string;
   readonly docs: string;
@@ -157,11 +147,11 @@ const taps = new WeakMap<object, TappedDispatch[]>();
  * production runs. The one observable difference is the hook itself
  * (`inspectBus(bus).afterHookCount` is 1 higher), measured to break nothing
  * across this repository's suite. A sealed bus refuses the hook with
- * `VC_CORE_SEALED`: tap before sealing.
+ * `core:refused:bus`: tap before sealing.
  *
  * `clear()` and `dispose()` remove every hook, this one included. Tapping the
  * bus again re-attaches it to the same record; until then a matcher whose
- * outcome a missed dispatch could change throws `VC_TEST_TAP_REMOVED`.
+ * outcome a missed dispatch could change throws `test:lost:tap`.
  *
  * The record grows for the life of the bus. What a matcher reads is the part
  * since the last {@link beginTest}, which is why a bus that outlives a test
@@ -326,9 +316,9 @@ function recordsOf(received: unknown): TappedDispatch[] {
     return boundary === undefined ? [] : log.slice(boundary.from);
   }
   if (installed !== undefined && typeof received === 'object' && received !== null && fromOtherInstance(installed, received)) {
-    throw new VcTestError('VC_TEST_DUPLICATE_INSTANCE');
+    throw new VcTestError('test:already:instance');
   }
-  throw new VcTestError('VC_TEST_UNTAPPED');
+  throw new VcTestError('test:missing:tap');
 }
 
 // ---------------------------------------------------------------------------
@@ -579,7 +569,7 @@ function toolValue(r: McpToolResult): unknown {
 // into no match, so that is `pass === false`: a failing assertion, or a
 // passing `.not`.
 function verdict(bus: unknown, pass: boolean, message: () => string) {
-  if (!pass && tapRemoved(bus as object)) throw new VcTestError('VC_TEST_TAP_REMOVED');
+  if (!pass && tapRemoved(bus as object)) throw new VcTestError('test:lost:tap');
   return { pass, message };
 }
 
@@ -587,7 +577,7 @@ function verdict(bus: unknown, pass: boolean, message: () => string) {
 // count read too low can match, the last one read can be the wrong one), so
 // after a removal no verdict of these matchers is trustworthy.
 function exactVerdict(bus: unknown, pass: boolean, message: () => string) {
-  if (tapRemoved(bus as object)) throw new VcTestError('VC_TEST_TAP_REMOVED');
+  if (tapRemoved(bus as object)) throw new VcTestError('test:lost:tap');
   return { pass, message };
 }
 

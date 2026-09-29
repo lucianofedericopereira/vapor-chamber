@@ -18,6 +18,7 @@ import { history } from '../src/plugins-core';
 import { circuitBreaker, metrics } from '../src/plugins-extra';
 import { StreamParser } from '../src/stream-parser';
 import { it } from '../src/vitest';
+import { wired } from '../src/testing';
 
 const NAN = Number('nope');
 
@@ -121,7 +122,7 @@ describe('windows that never closed', () => {
 
   it('idempotent still collapses a repeat under a NaN ttl', async () => {
     const { idempotent } = await import('../src/plugins-extra');
-    const plugin = idempotent({ ttl: Number('nope'), key: () => 'same' });
+    const plugin = wired(idempotent({ ttl: Number('nope'), key: () => 'same' }));
     let runs = 0;
     const run = () =>
       plugin({ action: 'orderCreate', target: 1, meta: {} } as never, () => {

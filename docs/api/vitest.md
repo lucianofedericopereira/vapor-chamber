@@ -23,7 +23,7 @@ import { ... } from 'vapor-chamber/vitest';
 
 ### beginTest
 
-**Function** - [src/vitest-pure.ts:240](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L240)
+**Function** - [src/vitest-pure.ts:230](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L230)
 
 ```ts
 beginTest() => void
@@ -51,7 +51,7 @@ beforeEach(beginTest);
 
 ### mcpClient
 
-**Function** - [src/vitest-pure.ts:450](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L450)
+**Function** - [src/vitest-pure.ts:440](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L440)
 
 ```ts
 mcpClient(handler: McpMessageHandler) => McpClient
@@ -72,7 +72,7 @@ expect(await mcp.call('orderDelete')).toBeToolError(/not permitted/);
 
 ### stubEnv
 
-**Function** - [src/vitest-pure.ts:399](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L399)
+**Function** - [src/vitest-pure.ts:389](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L389)
 
 ```ts
 stubEnv<N extends string>(name: N, value: EnvValue<N>) => Restore
@@ -86,7 +86,7 @@ restore puts back the value that was there, or deletes the variable.
 
 ### stubGlobal
 
-**Function** - [src/vitest-pure.ts:380](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L380)
+**Function** - [src/vitest-pure.ts:370](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L370)
 
 ```ts
 stubGlobal(name: string | symbol, value: unknown) => Restore
@@ -99,7 +99,7 @@ there, getters included, or deletes the name if there was none.
 
 ### tap
 
-**Function** - [src/vitest-pure.ts:170](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L170)
+**Function** - [src/vitest-pure.ts:160](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L160)
 
 ```ts
 tap<B extends Tappable>(bus: B) => B
@@ -112,11 +112,11 @@ The bus is the real one - no double, no wrapper - so a test exercises what
 production runs. The one observable difference is the hook itself
 (`inspectBus(bus).afterHookCount` is 1 higher), measured to break nothing
 across this repository's suite. A sealed bus refuses the hook with
-`VC_CORE_SEALED`: tap before sealing.
+`core:refused:bus`: tap before sealing.
 
 `clear()` and `dispose()` remove every hook, this one included. Tapping the
 bus again re-attaches it to the same record; until then a matcher whose
-outcome a missed dispatch could change throws `VC_TEST_TAP_REMOVED`.
+outcome a missed dispatch could change throws `test:lost:tap`.
 
 The record grows for the life of the bus. What a matcher reads is the part
 since the last {@link beginTest}, which is why a bus that outlives a test
@@ -138,7 +138,7 @@ A coded misuse diagnostic: `code` to switch on, `why`, `fix` and a `docs` link.
 
 ### McpClient
 
-**Interface** - [src/vitest-pure.ts:422](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L422)
+**Interface** - [src/vitest-pure.ts:412](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L412)
 
 ```ts
 export interface McpClient {
@@ -161,7 +161,7 @@ An MCP client for tests: what an agent does, without writing JSON-RPC envelopes.
 
 ### Restore
 
-**Interface** - [src/vitest-pure.ts:346](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L346)
+**Interface** - [src/vitest-pure.ts:336](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L336)
 
 ```ts
 export interface Restore {
@@ -180,7 +180,7 @@ the current test's after-hooks. Every Vitest mock is already disposable
 
 ### VaporChamberFixtures
 
-**Interface** - [src/vitest.ts:130](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest.ts#L130)
+**Interface** - [src/vitest.ts:134](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest.ts#L134)
 
 ```ts
 export interface VaporChamberFixtures {
@@ -195,7 +195,7 @@ The fixtures `test` and `it` add to Vitest's test context.
 
 ### VaporChamberMatchers
 
-**Interface** - [src/vitest-pure.ts:728](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L728)
+**Interface** - [src/vitest-pure.ts:718](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L718)
 
 ```ts
 export interface VaporChamberMatchers<R = unknown, T = unknown> {
@@ -232,7 +232,7 @@ it alone never types a matcher it did not register.
 
 ### ActionOf
 
-**Type alias** - [src/vitest-pure.ts:712](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L712)
+**Type alias** - [src/vitest-pure.ts:702](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L702)
 
 ```ts
 export type ActionOf<T> = string extends keyof MapOf<T> ? string : keyof MapOf<T> & string;
@@ -242,7 +242,7 @@ The actions a matcher accepts for received value `T`: the bus's own names when t
 
 ### EnvValue
 
-**Type alias** - [src/vitest-pure.ts:390](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L390)
+**Type alias** - [src/vitest-pure.ts:380](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L380)
 
 ```ts
 export type EnvValue<N extends string> = N extends 'DEV' | 'PROD' | 'SSR' ? boolean : string | undefined;
@@ -252,7 +252,7 @@ The value `stubEnv` accepts for `name`: a boolean for Vite's DEV, PROD and SSR, 
 
 ### ExpectedCode
 
-**Type alias** - [src/vitest-pure.ts:721](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L721)
+**Type alias** - [src/vitest-pure.ts:711](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L711)
 
 ```ts
 export type ExpectedCode = BusErrorCode | (string & {});
@@ -263,7 +263,7 @@ is accepted too, because a handler's throw reaches `result.error` as thrown.
 
 ### ExpectedPayload
 
-**Type alias** - [src/vitest-pure.ts:715](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L715)
+**Type alias** - [src/vitest-pure.ts:705](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L705)
 
 ```ts
 export type ExpectedPayload<T, A> = A extends keyof MapOf<T> ? PayloadOf<MapOf<T>, A> : unknown;
@@ -273,7 +273,7 @@ The payload a matcher accepts for action `A` on received value `T`.
 
 ### McpMessageHandler
 
-**Type alias** - [src/vitest-pure.ts:419](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L419)
+**Type alias** - [src/vitest-pure.ts:409](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L409)
 
 ```ts
 export type McpMessageHandler = (message: unknown) => Promise<object | null>;
@@ -283,7 +283,7 @@ A JSON-RPC 2.0 message handler, such as `createMcpHandler(bus, { actions })` ret
 
 ### McpToolResult
 
-**Type alias** - [src/vitest-pure.ts:416](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L416)
+**Type alias** - [src/vitest-pure.ts:406](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L406)
 
 ```ts
 export type McpToolResult = { content: { type: string; text: string }[]; isError?: boolean };
@@ -293,7 +293,7 @@ A `tools/call` result: text content blocks, and `isError` when the tool failed.
 
 ### Tappable
 
-**Type alias** - [src/vitest-pure.ts:147](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L147)
+**Type alias** - [src/vitest-pure.ts:137](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L137)
 
 ```ts
 export type Tappable = { onAfter(hook: (cmd: Command, result: CommandResult) => void): () => void };
@@ -307,40 +307,40 @@ What `tap()` needs: the after-hook. Sync, async and schema buses all have it.
 
 ```ts
 export type VcTestDiagnostic =
-  | 'VC_TEST_UNTAPPED'
-  | 'VC_TEST_DUPLICATE_INSTANCE'
-  | 'VC_TEST_VITEST_MAJOR'
-  | 'VC_TEST_TAP_REMOVED'
-  | 'VC_TEST_MCP_INVALID_FILES'
-  | 'VC_TEST_MCP_NO_RUN'
-  | 'VC_TEST_MCP_NO_COVERAGE';
+  | 'test:missing:tap'
+  | 'test:already:instance'
+  | 'test:unexpected:version'
+  | 'test:lost:tap'
+  | 'test:invalid:files'
+  | 'test:missing:run'
+  | 'test:missing:coverage';
 ```
 
 Codes of the misuse diagnostics this entry raises. A union of its own, so
 the core `BusErrorCode` registry, and the bytes every app ships, do not move
 for test tooling.
 
-- `VC_TEST_UNTAPPED`: a bus matcher received a bus that was never passed to
+- `test:missing:tap`: a bus matcher received a bus that was never passed to
   `tap()`, so nothing it dispatched was recorded. Fix: `tap(bus)` where the
   bus is created; the shared bus from `getCommandBus()` is tapped for you
   when `vapor-chamber/vitest` is a setup file.
-- `VC_TEST_DUPLICATE_INSTANCE`: the bus came from a second copy of
+- `test:already:instance`: the bus came from a second copy of
   vapor-chamber, not the one the setup file tapped. Every assertion would
   otherwise report "nothing was dispatched". Fix: dedupe the install
   (`npm ls vapor-chamber`) so one copy is loaded.
-- `VC_TEST_VITEST_MAJOR`: a warning, never a failure. This entry was released
+- `test:unexpected:version`: a warning, never a failure. This entry was released
   against Vitest 5 and meets a major it does not know. Fix: none needed if
   the suite passes; report a break if it does not.
-- `VC_TEST_TAP_REMOVED`: the bus was tapped, then `clear()` or `dispose()`
+- `test:lost:tap`: the bus was tapped, then `clear()` or `dispose()`
   removed every hook, the tap's included, so later dispatches were not
   recorded. Raised only where a missed record could change the outcome.
   Fix: `tap(bus)` again after clearing.
-- `VC_TEST_MCP_INVALID_FILES`: an MCP client passed `target.files` that is
+- `test:invalid:files`: an MCP client passed `target.files` that is
   not a list of up to 100 non-empty filters, or a filter starting with `-`.
   Fix: pass file filters relative to the project root.
-- `VC_TEST_MCP_NO_RUN`: `getTestResults` before any `runTests`. Fix: call
+- `test:missing:run`: `getTestResults` before any `runTests`. Fix: call
   `runTests` first.
-- `VC_TEST_MCP_NO_COVERAGE`: the coverage run wrote no report. Fix: install
+- `test:missing:coverage`: the coverage run wrote no report. Fix: install
   the provider the config names and check that the suite starts.
 
 ## Variables
@@ -356,18 +356,18 @@ expect(val: any, message?: string) => Chai.Assertion
 
 ### it
 
-**Variable** - [src/vitest.ts:148](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest.ts#L148)
+**Variable** - [src/vitest.ts:152](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest.ts#L152)
 
 ```ts
 it<ExtraContext extends TestScoped<VaporChamberFixtures>>(name: string | Function, fn?: import("vitest").TestFunction<ExtraContext> | undefined, options?: number) => void
-it<ExtraContext extends TestScoped<VaporChamberFixtures>>(name: string | Function, options?: { concurrent?: boolean | undefined; only?: boolean | undefined; skip?: boolean | undefined; todo?: boolean | undefined; fails?: boolean | undefined; timeout?: number | undefined; retry?: (number | { count?: number; delay?: number; condition?: RegExp | ((error: import("vitest").TestError) => boolean); }) | undefined; repeats?: number | undefined; tags?: (keyof import("vitest").TestTags extends never ? string[] | string : import("vitest").TestTags[keyof import("vitest").TestTags] | import("vitest").TestTags[keyof import("vitest").TestTags][]) | undefined; meta?: Partial<import("vitest").TaskMeta> | undefined; }, fn?: import("vitest").TestFunction<ExtraContext> | undefined) => void
+it<ExtraContext extends TestScoped<VaporChamberFixtures>>(name: string | Function, options?: { timeout?: number | undefined; concurrent?: boolean | undefined; only?: boolean | undefined; skip?: boolean | undefined; todo?: boolean | undefined; fails?: boolean | undefined; retry?: (number | { count?: number; delay?: number; condition?: RegExp | ((error: import("vitest").TestError) => boolean); }) | undefined; repeats?: number | undefined; tags?: (keyof import("vitest").TestTags extends never ? string[] | string : import("vitest").TestTags[keyof import("vitest").TestTags] | import("vitest").TestTags[keyof import("vitest").TestTags][]) | undefined; meta?: Partial<import("vitest").TaskMeta> | undefined; }, fn?: import("vitest").TestFunction<ExtraContext> | undefined) => void
 ```
 
 The same API as `test`, as Vitest's `it` is its `test`.
 
 ### matchers
 
-**Variable** - [src/vitest-pure.ts:609](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L609)
+**Variable** - [src/vitest-pure.ts:599](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L599)
 
 ```ts
 matchers: { toHaveBeenDispatched(this: MatcherContext, bus: unknown, action: string): { pass: boolean; message: () => string; }; toHaveBeenDispatchedWith(this: MatcherContext, bus: unknown, action: string, payload: unknown): { pass: boolean; message: () => string; }; toHaveBeenDispatchedTimes(this: MatcherContext, bus: unknown, action: string, times: number): { pass: boolean; message: () => string; }; toHaveBeenDispatchedOnce(this: MatcherContext, bus: unknown, action: string): { pass: boolean; message: () => string; }; toHaveBeenNthDispatchedWith(this: MatcherContext, bus: unknown, nth: number, action: string, payload: unknown): { pass: boolean; message: () => string; }; toHaveBeenLastDispatchedWith(this: MatcherContext, bus: unknown, action: string, payload: unknown): { pass: boolean; message: () => string; }; toHaveFailedWith(this: MatcherContext, bus: unknown, action: string, code: string): { pass: boolean; message: () => string; }; toSucceedWith(this: MatcherContext, received: unknown, value_0?: unknown): { pass: boolean; message: () => string; }; toFailWith(this: MatcherContext, received: unknown, code: string): { pass: boolean; message: () => string; }; toBeToolResult(this: MatcherContext, received: unknown, value_0?: unknown): { pass: boolean; message: () => string; }; toBeToolError(this: MatcherContext, received: unknown, expected?: string | RegExp): { pass: boolean; message: () => string; }; }
@@ -384,7 +384,7 @@ matchers read a `CommandResult` and compare codes, never message text.
 
 ```ts
 test<ExtraContext extends TestScoped<VaporChamberFixtures>>(name: string | Function, fn?: import("vitest").TestFunction<ExtraContext> | undefined, options?: number) => void
-test<ExtraContext extends TestScoped<VaporChamberFixtures>>(name: string | Function, options?: { concurrent?: boolean | undefined; only?: boolean | undefined; skip?: boolean | undefined; todo?: boolean | undefined; fails?: boolean | undefined; timeout?: number | undefined; retry?: (number | { count?: number; delay?: number; condition?: RegExp | ((error: import("vitest").TestError) => boolean); }) | undefined; repeats?: number | undefined; tags?: (keyof import("vitest").TestTags extends never ? string[] | string : import("vitest").TestTags[keyof import("vitest").TestTags] | import("vitest").TestTags[keyof import("vitest").TestTags][]) | undefined; meta?: Partial<import("vitest").TaskMeta> | undefined; }, fn?: import("vitest").TestFunction<ExtraContext> | undefined) => void
+test<ExtraContext extends TestScoped<VaporChamberFixtures>>(name: string | Function, options?: { timeout?: number | undefined; concurrent?: boolean | undefined; only?: boolean | undefined; skip?: boolean | undefined; todo?: boolean | undefined; fails?: boolean | undefined; retry?: (number | { count?: number; delay?: number; condition?: RegExp | ((error: import("vitest").TestError) => boolean); }) | undefined; repeats?: number | undefined; tags?: (keyof import("vitest").TestTags extends never ? string[] | string : import("vitest").TestTags[keyof import("vitest").TestTags] | import("vitest").TestTags[keyof import("vitest").TestTags][]) | undefined; meta?: Partial<import("vitest").TaskMeta> | undefined; }, fn?: import("vitest").TestFunction<ExtraContext> | undefined) => void
 ```
 
 Vitest's own `test`, extended with two fixtures through `test.extend`, the
@@ -431,7 +431,7 @@ shopTest('adding to the cart', ({ shop }) => {
 
 ### vc
 
-**Variable** - [src/vitest-pure.ts:485](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L485)
+**Variable** - [src/vitest-pure.ts:475](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-pure.ts#L475)
 
 ```ts
 vc: { tap: <B extends Tappable>(bus: B) => B; stubGlobal: (name: string | symbol, value: unknown) => Restore; stubEnv: <N extends string>(name: N, value: EnvValue<N>) => Restore; mcp: (handler: McpMessageHandler) => McpClient; }

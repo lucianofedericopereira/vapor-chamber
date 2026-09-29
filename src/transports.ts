@@ -1,20 +1,26 @@
 /**
  * vapor-chamber - Transport plugins
  *
- * v0.4.2 - Added: createHttpBridge, createWsBridge, createSseBridge.
- * v1.9.0 - Added: createBatchingHttpBridge.
- *
  * Transports are AsyncPlugin factories that forward commands to a backend.
  * Use with createAsyncCommandBus() for full async dispatch support.
  */
 
-import type { Command, CommandResult, AsyncPlugin, BaseBus, BusErrorCode } from './command-bus';
+import type { Command, CommandResult, AsyncPlugin, BaseBus, BusError, FailCode } from './command-bus';
 import { MAX_TIMEOUT_MS, countOption } from './bounds';
-import { matchesPattern, abortedResult, BusError, _okResult, _errResult, } from './command-bus';
-import { HttpError, postCommand } from './http';
-import type { HttpClient, HttpErrorName, HttpResponse } from './http';
+import { DEV } from './dev';
+import { matchesPattern, abortedResult, conditionOfStatus, _failures, _okResult, _errResult } from './command-bus';
+import { _parseRetryAfter, postCommand } from './http';
+import type { ProblemDetails } from './http-errors';
+import type { HttpClient, HttpError } from './http';
 import { signal } from './signal';
 import type { Signal } from './signal';
+
+/**
+ * What each bridge declares: it answers a command itself, over a wire, so the
+ * async bus's retry re-sends through it (docs/plan-shape.md 4) and the plugins
+ * outside see one dispatch.
+ */
+const TRANSPORT = { transport: true } as const;
 
 // ---------------------------------------------------------------------------
 // Shared protocol types
@@ -27,145 +33,80 @@ export type CommandEnvelope = {
   payload?: any;
 };
 
-/** The JSON shape expected from the backend */
+/**
+ * A command's answer, the same on every wire (docs/plan-failures-and-contract.md
+ * 4.4): `state` on success, `redirect` for a navigation, `problem` on failure,
+ * one of the three. A batched result and a WebSocket frame carry `id` beside
+ * it; a single command's failure is its non-2xx response's body.
+ */
 export type BackendResponse = {
-  ok?: boolean;
-  state?: any;
-  error?: string;
-  /**
-   * The backend's machine-readable failure code. Documented as reaching
-   * consumers as `HttpError.code`, and until now that was true only when the
-   * failure THREW: the envelope paths built a bare Error and dropped it, so a
-   * 200 carrying `{ ok: false, code }` - the shape this type admits - lost it,
-   * as did every batched failure, since `batch()` answers 200 and nothing
-   * throws.
-   */
-  code?: string;
-  /**
-   * A navigation the backend hands back instead of a result - see
-   * `onRedirect`. The reference controller puts it here when an action
-   * returns `['redirect' => url]`; on a batch it is per result.
-   */
+  state?: unknown;
+  /** A navigation the backend hands back instead of a result - see `onRedirect`. */
   redirect?: string;
-  /**
-   * RFC 9457: a failure answered as `application/problem+json`. Its `detail`
-   * becomes the error's message, ahead of `error` and `message`. `code` is read
-   * as an extension member - `type` is an opaque URI and nothing here derives
-   * a code from it.
-   */
-  detail?: string;
-  /**
-   * On a BATCHED result only: this command's failure as an RFC 9457 problem
-   * object. The batch answered 200, so the problem cannot be the response; it
-   * is the result's value. Read as a failure whether or not `ok: false` is
-   * also present.
-   */
   problem?: ProblemDetails;
 };
 
-/** An RFC 9457 problem details object, `code` as the extension member read. */
-export type ProblemDetails = {
-  type?: string;
-  title?: string;
-  status?: number;
-  detail?: string;
-  instance?: string;
-  code?: string;
-  [extension: string]: unknown;
-};
+
+
+// The transport's own failures, and a backend's: each through its own `fail`,
+// so neither can speak as the other (plan 4.5).
+const transportFail = _failures('transport');
+const transportError = (code: FailCode, message: string, action?: string, context?: Record<string, unknown>): BusError =>
+  transportFail(code, message, { action, context });
+const remoteFail = _failures('remote');
 
 /**
- * An error for a failure that arrived as DATA rather than as a throw.
- *
- * Carries the backend's `code`, which is the whole point: the catch path below
- * has copied it since v1.20.0 and the envelope paths did not, so the same
- * failure reached a consumer with or without `error.code` depending only on
- * whether the transport happened to throw.
- *
- * `.code` HERE IS THE BACKEND'S, and that is the line this file draws. What the
- * library codes itself goes through `transportError` below, as a `BusError`
- * whose `emitter` says so. Two kinds of failure, two kinds of object, and one
- * owner per field - because `defaultIsRetryable` used to tell them apart by
- * looking for a `VC_` prefix on a string a backend supplies.
- *
- * `emitter` is passed ONLY by the three sites where the refusal arrived inside a
- * 2xx, and its job there is to make an existing rule answer rather than to add
- * one. The server received, processed and refused, so re-sending cannot change
- * the answer - and `defaultIsRetryable` already says a transport error is
- * retried only when its code is one of RETRYABLE_CODES' six. A backend code
- * is not one of those, so the refusal is permanent with no verdict field, no
- * new code, and `.code` still the backend's.
- *
- * The two `!res.ok` sites are left WITHOUT it. A real HTTP status existed
- * there, and the status rule is the right judge: tagging them would make a 503
- * that resolved instead of throwing permanently non-retryable.
- *
- * Stamping `status: 200` or attaching the `response` would also have let the
- * status rule find a status, and both were rejected: the request succeeded, the
- * refusal is in the body, and saying otherwise is a lie a later reader cannot
- * detect.
- *
- * WHY NOT A `retryable` BOOLEAN, which this carried for one commit. It worked
- * and it measured 19 B raw / 17 B brotli DEARER on the full IIFE, but the
- * reason it went is the shape: a string-keyed field on an error object built
- * from a response body, which the predicate then obeys unconditionally. That is
- * the precondition that broke `.code` - a plausible wire field, added
- * additively over two releases until a backend controlled it. `emitter` is not
- * a plausible wire field: a backend has no reason to claim to be a subsystem of
- * this library, and it is written from string literals at every site in `src/`.
- * DO NOT add `retryable` to `BackendResponse`, and do not spread a body into an
- * error built here.
+ * The failure a backend declared: `remote:<condition>:<code>`, the condition
+ * from the problem's own `status` (else the response's), `detail` the message,
+ * the rest `context`. `retryIn` is the response's `Retry-After` (RFC 9110),
+ * never a body member: it is set after the spread, so a body cannot supply it.
  */
-function backendError(message: string, code?: string, emitter?: 'transport'): Error {
-  // `code` is assigned unconditionally, not behind a `!== undefined` guard.
-  // Every error this builds then leaves with ONE hidden class, the rule
-  // `okResult`/`errResult` already follow - and an absent `code` reads as
-  // `undefined` either way, since the guard only decided whether the key
-  // existed. MEASURED: dropping the guard is -14 B raw across all three IIFEs.
-  // `emitter` is assigned the same way and for the same reason.
-  const err = new Error(message) as Error & { code?: string; emitter?: string };
-  err.code = code;
-  err.emitter = emitter;
-  return err;
+function remoteProblem(p: ProblemDetails, status?: number, retryIn?: number): BusError {
+  const s = typeof p.status === 'number' ? p.status : status;
+  const { status: _status, code, detail, ...params } = p;
+  return remoteFail(
+    `${s === undefined ? 'unknown' : conditionOfStatus(s)}:${code ?? 'problem'}` as FailCode,
+    detail ?? (s === undefined ? 'The backend answered with no status.' : `HTTP ${s}`),
+    { context: { ...params, status: s, code, retryIn } },
+  );
+}
+
+/** A non-2xx: its problem, or, for a body that is not one, the status alone. */
+function answered(status: number, data: unknown, headers?: Record<string, string>): BusError {
+  const retryIn = _parseRetryAfter(headers?.['retry-after']);
+  return data !== null && typeof data === 'object' && !Array.isArray(data)
+    ? remoteProblem(data as ProblemDetails, status, retryIn)
+    : remoteFail(`${conditionOfStatus(status)}:http` as FailCode, `HTTP ${status}`, { context: { status, retryIn } });
 }
 
 /**
- * A result body's failure, or null when it succeeded - the one reading of
- * `BackendResponse` shared by the single bridge's 2xx, each batched result and
- * each WebSocket frame, so the three cannot disagree about what failed.
- *
- * An RFC 9457 `problem` fails the command whether or not `ok: false` rides
- * beside it (message from `detail`, then `title`; code from the problem, then
- * the result). Before v1.24.0 a batched or WebSocket result carrying only
- * `problem` resolved as a success whose value was undefined.
+ * Why a request produced no answer: the backend's non-2xx (the HTTP client
+ * throws it carrying the response), a timeout, the caller's abort, or no
+ * response at all. `lost` means the outcome is unknown.
  */
-function resultFailure(r: BackendResponse, fallback: string): Error | null {
-  const p = r.problem;
-  return p || r.ok === false
-    ? backendError((p ? p.detail ?? p.title : r.error) ?? fallback, p?.code ?? r.code, 'transport')
-    : null;
+function unanswered(e: unknown, action: string, signal?: AbortSignal): CommandResult {
+  const err = e as HttpError;
+  // The HttpClient contract: a failure carries its `response`, status included.
+  if (err.response) return _errResult(answered(err.response.status, err.response.data, err.response.headers));
+  if (err.name === 'TimeoutError') return _errResult(transportError('timeout:reply', err.message, action));
+  if (err.name === 'AbortError') return abortedResult(action, signal);
+  return _errResult(transportFail('lost:reply', `No response for "${action}".`, { action, cause: err }));
 }
 
+/** A redirect the backend answered with: the command fails, carrying the url. */
+const redirected = (url: string, action: string, handled: boolean): BusError =>
+  transportError('refused:redirect', `Redirected to ${url}.${DEV && !handled ? ' No onRedirect handler is configured.' : ''}`, action, { url });
+
 /**
- * The transport's OWN failure: no backend answered, or one answered something
- * the protocol cannot carry back to the caller who asked.
- *
- * This is the other half of `backendError`, and the split is the point. A
- * backend refusal carries the BACKEND's `code`; a transport failure carries
- * OURS, in a `BusError`, which is the class the core has minted every coded
- * error with since v1.0. Nothing new is declared here: `BusErrorCode` types the
- * code, `'transport'` has been a `BusEmitter` member and unused the whole time,
- * and `context` is where the core already puts a value a reader would inspect
- * rather than read - so a dropped command travels beside the sentence instead
- * of inside it.
- *
- * `emitter` is what makes the two kinds tellable apart, and it is the field the
- * `VC_` prefix was standing in for. A backend can put any string in `code`,
- * including `VC_CORE_THROTTLED`; nothing a backend sends reaches `emitter`,
- * because no transport ever copies a body field into it.
+ * An answer, by contract: a `problem` is the failure, a `redirect` a
+ * navigation, anything else the success, its `state` the value (absent when
+ * the handler returned nothing: JSON drops `undefined`).
  */
-const transportError = (code: BusErrorCode, message: string, action?: string, context?: Record<string, unknown>): BusError =>
-  new BusError(code, message, { emitter: 'transport', action, context });
+function answerOf(r: BackendResponse, action: string): CommandResult {
+  if (r.problem) return _errResult(remoteProblem(r.problem));
+  if (typeof r.redirect === 'string') return _errResult(redirected(r.redirect, action, false));
+  return _okResult(r.state);
+}
 
 // ---------------------------------------------------------------------------
 // createHttpBridge
@@ -199,14 +140,6 @@ export type HttpBridgeOptions = {
   headers?: Record<string, string>;
   /** Request timeout in ms. Default: 10_000 */
   timeout?: number;
-  /** Max retry attempts on 5xx / 429 / 408. Default: 0 */
-  retry?: number;
-  /**
-   * Actions that must never be retried regardless of the `retry` setting.
-   * Use for payment and other non-idempotent commands to prevent double execution.
-   * @example noRetry: ['paymentCharge', 'orderPlace']
-   */
-  noRetry?: string[];
   /** External AbortSignal (e.g. tied to component lifecycle) */
   signal?: AbortSignal;
   /**
@@ -221,13 +154,12 @@ export type HttpBridgeOptions = {
    *
    *   onRedirect: (url) => router.visit(url)
    *
-   * If not set, the redirect is surfaced as
-   * `{ ok: false, error: 'Backend redirect to /path (no onRedirect handler configured)' }`.
+   * Either way the command fails as `transport:refused:redirect`, the url in
+   * `error.context.url`.
    *
-   * BODY FIELD ONLY, and this used to claim otherwise. The previous wording
-   * promised it also fired for "a 3xx response with `Location` header" - it
-   * never did, and it cannot: `fetch` defaults to `redirect: 'follow'`, so the
-   * platform resolves a 3xx and hands the bridge the FINAL response. A backend
+   * BODY FIELD ONLY, never a 3xx with `Location`: `fetch` defaults to
+   * `redirect: 'follow'`, so the platform resolves a 3xx and hands the bridge
+   * the FINAL response. A backend
    * that wants this hook must say so in the body. Pinned by
    * `tests/transports-coverage.test.ts` ("does not call onRedirect for a
    * redirect STATUS without a body field").
@@ -269,25 +201,26 @@ export type HttpBridgeOptions = {
  * createHttpBridge - fetch-based transport plugin.
  *
  * Intercepts matching commands and forwards them to the backend as JSON.
- * The backend receives `{ command, target, payload }` and returns `{ ok, state }`
- * on success. A failure is an RFC 9457 problem (`application/problem+json`,
- * `detail` as the message, `code` as the code) or the older
- * `{ ok: false, error, code }`; both are read.
+ * The backend receives `{ command, target, payload }` and answers `{ state }`
+ * (or `{ redirect }`) on success, and a non-2xx RFC 9457 problem on failure,
+ * read as `remote:<condition of its status>:<code>` (docs/plan-failures-and-
+ * contract.md 4.4).
  *
  * Features: multi-source CSRF token reading (meta tag / cookie / hidden input),
  * automatic CSRF-expiry refresh on HTTP 419 (Laravel Sanctum convention by
  * default, configurable for other frameworks), session-expiry detection on
- * 401, Retry-After header support, request timeout, per-call AbortSignal,
- * jittered exponential backoff.
+ * 401, request timeout, per-call AbortSignal. It sends each command once and
+ * declares `transport: true`: the async bus re-sends through it by the
+ * failure's condition, after a declared Retry-After (docs/plan-shape.md 4).
  *
  * @example
- * const bus = createAsyncCommandBus()
- * bus.use(createHttpBridge({ endpoint: '/api/vc', csrf: true, retry: 2 }))
+ * const bus = createAsyncCommandBus({ retry: { actions: { 'cart*': 'idempotent' } } })
+ * bus.use(createHttpBridge({ endpoint: '/api/vc', csrf: true }))
  *
  * await bus.dispatch('cartAdd', product, { quantity: 2 })
  */
 export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
-  const { endpoint, actions, csrf = false, csrfCookieUrl, headers = {}, timeout = 10_000, retry = 0, noRetry = [], signal, onSessionExpired, onRedirect, scopeController, httpClient } = options;
+  const { endpoint, actions, csrf = false, csrfCookieUrl, headers = {}, timeout = 10_000, signal, onSessionExpired, onRedirect, scopeController, httpClient } = options;
   // `csrf: 'inertia'` means: don't read CSRF from the DOM ourselves -
   // Inertia's Axios already injects the token. The HTTP layer shape just
   // needs to know "skip CSRF", same as `csrf: false`. Inertia handles it
@@ -300,17 +233,23 @@ export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
         : signal) // fallback: prefer user signal if AbortSignal.any unavailable
     : scopeController?.signal ?? signal;
 
-  return async (cmd: Command, next: () => CommandResult | Promise<CommandResult>) => {
+  return Object.assign(async (cmd: Command, next: () => CommandResult | Promise<CommandResult>) => {
     if (actions?.length && !actions.some(p => matchesPattern(p, cmd.action))) return next();
 
     const envelope: CommandEnvelope = { command: cmd.action, target: cmd.target, payload: cmd.payload };
-    const effectiveRetry = noRetry.includes(cmd.action) ? 0 : retry;
 
     // Forward the idempotency key stamped by the `idempotent` plugin as an
     // `Idempotency-Key` header so the backend can reject duplicate writes - the
     // wire half of exactly-once. No-op (same `headers` ref) when unset.
     const idemKey = cmd.meta?.idempotencyKey;
-    const reqHeaders = idemKey ? { ...headers, 'Idempotency-Key': idemKey } : headers;
+    // A Structured Field String, as the draft requires (RFC 9651): quoted and
+    // printable ASCII. Percent-encoding (UTF-8) yields only unreserved ASCII and
+    // %XX, never `"` or `\`, so quoting is all it needs; it is reversible, so no
+    // two keys collide, and any backend recovers the exact key (rawurldecode).
+    // Raw, a target outside Latin-1 made a value Headers refuses and the
+    // request never left. A malformed key (a lone surrogate) makes this throw,
+    // which the bus reports as <plugin>:failed:plugin. tests/idempotency-header.test.ts.
+    const reqHeaders = idemKey ? { ...headers, 'Idempotency-Key': `"${encodeURIComponent(idemKey)}"` } : headers;
 
     // Merge bridge-level effectiveSignal with per-dispatch cmd.signal. The
     // dispatch-time signal (from `bus.dispatch(..., { signal })`) is
@@ -325,48 +264,26 @@ export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
     try {
       const res = httpClient
         ? await httpClient.post<BackendResponse>(endpoint, envelope, {
-            csrf: csrfFlag, csrfCookieUrl, headers: reqHeaders, timeout, retry: effectiveRetry, signal: perCallSignal, onSessionExpired,
+            csrf: csrfFlag, csrfCookieUrl, headers: reqHeaders, timeout, retry: 0, signal: perCallSignal, onSessionExpired,
           })
         : await postCommand<BackendResponse>(endpoint, envelope, {
-            csrf: csrfFlag, csrfCookieUrl, headers: reqHeaders, timeout, retry: effectiveRetry, signal: perCallSignal, onSessionExpired,
+            csrf: csrfFlag, csrfCookieUrl, headers: reqHeaders, timeout, retry: 0, signal: perCallSignal, onSessionExpired,
           });
 
-      // Backend redirect - a body field only (see onRedirect). Pass the URL
-      // to onRedirect (typically Inertia's `router.visit`) and resolve as a
-      // failed dispatch. If onRedirect isn't set, surface as a string error.
-      const redirectUrl = (res.data as any)?.redirect;
-      if (redirectUrl && typeof redirectUrl === 'string') {
-        if (onRedirect) {
-          onRedirect(redirectUrl);
-          return _errResult(transportError('VC_TRANSPORT_REDIRECT', `Redirected to ${redirectUrl}`, cmd.action, { url: redirectUrl }));
-        }
-        return _errResult(transportError('VC_TRANSPORT_REDIRECT', `Backend redirect to ${redirectUrl} (no onRedirect handler configured)`, cmd.action, { url: redirectUrl }));
+      if (!res.ok) return _errResult(answered(res.status, res.data, res.headers));
+      const d = (res.data ?? {}) as BackendResponse;
+      // A redirect is a body member (a browser's fetch cannot read a 3xx's
+      // Location): handed to onRedirect (typically Inertia's `router.visit`),
+      // and the command fails, carrying the url.
+      if (typeof d.redirect === 'string' && d.redirect) {
+        onRedirect?.(d.redirect);
+        return _errResult(redirected(d.redirect, cmd.action, !!onRedirect));
       }
-
-      if (!res.ok) {
-        const d = res.data as BackendResponse | undefined;
-        return _errResult(backendError((d as any)?.message ?? d?.error ?? `HTTP ${res.status}`, d?.code));
-      }
-
-      if (res.data?.ok === false) {
-        return _errResult(backendError(res.data.error ?? 'Backend error', res.data.code, 'transport'));
-      }
-
-      return _okResult(res.data?.state);
+      return answerOf(d, cmd.action);
     } catch (e) {
-      // postCommand throws HttpError on non-2xx with the parsed body attached.
-      // Surface the backend's own error/message (e.g. Laravel validation text)
-      // instead of the bare "HTTP 422" - the documented contract is that the
-      // failure body's `error` becomes `result.error.message`.
-      const src = e as Error & { response?: { data?: unknown }; status?: number; code?: string };
-      const body = src.response?.data as { error?: unknown; message?: unknown } | null | undefined;
-      const msg = body?.error ?? body?.message;
-      if (typeof msg === 'string' && msg.length > 0) {
-        return _errResult(new HttpError(src.name as HttpErrorName, msg, { status: src.status, response: src.response as HttpResponse, code: src.code, cause: src }));
-      }
-      return _errResult(src);
+      return unanswered(e, cmd.action, perCallSignal);
     }
-  };
+  }, TRANSPORT);
 }
 
 // ---------------------------------------------------------------------------
@@ -414,10 +331,9 @@ type QueuedBatchEntry = { id: string; cmd: Command; resolve: (result: CommandRes
  *
  * matched back against:
  *
- *   { results: [{ id, ok, state }, { id, ok: false, problem }, ...] }
+ *   { results: [{ id, state }, { id, redirect }, { id, problem }, ...] }
  *
- * A failed result carries an RFC 9457 `problem` object, or the older
- * `error`/`code` pair; both are read.
+ * A failed result carries its problem with the command's own `status`.
  *
  * Each queued command's own dispatch promise resolves independently - a
  * caller dispatches exactly as it would against createHttpBridge; the
@@ -431,7 +347,7 @@ type QueuedBatchEntry = { id: string; cmd: Command; resolve: (result: CommandRes
  * bus.dispatch('cartAdd', product, { quantity: 2 })
  */
 export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): AsyncPlugin {
-  const { endpoint, actions, csrf = false, csrfCookieUrl, headers = {}, timeout = 10_000, retry = 0, noRetry = [], signal, onSessionExpired, onRedirect, scopeController, httpClient, window: flushWindow = 'microtask' } = options;
+  const { endpoint, actions, csrf = false, csrfCookieUrl, headers = {}, timeout = 10_000, signal, onSessionExpired, onRedirect, scopeController, httpClient, window: flushWindow = 'microtask' } = options;
   const csrfFlag = csrf === 'inertia' ? false : csrf;
   const effectiveSignal = scopeController && signal
     ? (typeof AbortSignal.any === 'function' ? AbortSignal.any([signal, scopeController.signal]) : signal)
@@ -456,9 +372,6 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
        queue.push, and nothing but flush drains the queue */
     if (batch.length === 0) return;
 
-    // A batch containing any non-retryable command (payments, etc.) must not
-    // retry the whole request - retrying would resend that command too.
-    const effectiveRetry = batch.some(({ cmd }) => noRetry.includes(cmd.action)) ? 0 : retry;
 
     const commands: BatchedCommandEnvelope[] = batch.map(({ id, cmd }) => {
       const entry: BatchedCommandEnvelope = { id, command: cmd.action, target: cmd.target, payload: cmd.payload };
@@ -469,15 +382,14 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
     try {
       const res = httpClient
         ? await httpClient.post<BatchResponse>(endpoint, { commands }, {
-            csrf: csrfFlag, csrfCookieUrl, headers, timeout, retry: effectiveRetry, signal: effectiveSignal, onSessionExpired,
+            csrf: csrfFlag, csrfCookieUrl, headers, timeout, retry: 0, signal: effectiveSignal, onSessionExpired,
           })
         : await postCommand<BatchResponse>(endpoint, { commands }, {
-            csrf: csrfFlag, csrfCookieUrl, headers, timeout, retry: effectiveRetry, signal: effectiveSignal, onSessionExpired,
+            csrf: csrfFlag, csrfCookieUrl, headers, timeout, retry: 0, signal: effectiveSignal, onSessionExpired,
           });
 
       if (!res.ok) {
-        const d = res.data as BackendResponse | undefined;
-        const err = backendError((d as any)?.message ?? d?.error ?? `HTTP ${res.status}`, d?.code);
+        const err = answered(res.status, res.data, res.headers);
         for (const entry of batch) entry.resolve(_errResult(err));
         return;
       }
@@ -485,59 +397,28 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
       const byId = new Map((res.data?.results ?? []).map((r) => [r.id, r]));
       // `onRedirect` navigates, so it fires once per batch - two navigations
       // in one tick race. Every redirected command still fails on its own,
-      // carrying its own url. Until v1.23.0 this bridge accepted the option
-      // (its options extend HttpBridgeOptions) and never read it: a redirect
-      // result resolved as a success whose value was the redirect.
+      // carrying its own url.
       let navigated = false;
       for (const entry of batch) {
         const r = byId.get(entry.id);
         if (!r) {
-          entry.resolve(_errResult(transportError('VC_TRANSPORT_PROTOCOL', `[vapor-chamber] batch response missing a result for "${entry.cmd.action}" (id ${entry.id})`, entry.cmd.action, { id: entry.id })));
+          entry.resolve(_errResult(transportError('lost:result', `The batch answer is missing a result for "${entry.cmd.action}".`, entry.cmd.action, { id: entry.id })));
         } else if (typeof r.redirect === 'string' && r.redirect) {
-          const url = r.redirect;
           if (onRedirect && !navigated) {
             navigated = true;
-            onRedirect(url);
+            onRedirect(r.redirect);
           }
-          entry.resolve(_errResult(transportError('VC_TRANSPORT_REDIRECT', onRedirect ? `Redirected to ${url}` : `Backend redirect to ${url} (no onRedirect handler configured)`, entry.cmd.action, { url })));
+          entry.resolve(_errResult(redirected(r.redirect, entry.cmd.action, !!onRedirect)));
         } else {
-          const failure = resultFailure(r, 'Backend error');
-          entry.resolve(failure ? _errResult(failure) : _okResult(r.state));
+          entry.resolve(answerOf(r, entry.cmd.action));
         }
       }
     } catch (e) {
-      // Same error-unwrapping contract as createHttpBridge: surface the
-      // backend's own error/message instead of the bare "HTTP 422".
-      const src = e as Error & { response?: { data?: unknown }; status?: number; code?: string };
-      const body = src.response?.data as { error?: unknown; message?: unknown } | null | undefined;
-      const msg = body?.error ?? body?.message;
-      let err: Error = src;
-      if (typeof msg === 'string' && msg.length > 0) {
-        // The same fields createHttpBridge copies, and for the same reader:
-        // this used to keep the message alone, so retry()'s status rule had no
-        // status to read and a 422 batch was re-sent maxAttempts times
-        // (tests/retry-bridge-path.test.ts).
-        //
-        // MEASURED: extracting these two catch blocks into one shared HELPER
-        // costs +30 B raw on the full IIFE and +33 on core and elements. The
-        // abstraction was dearer than the duplication, and that verdict stands
-        // for a helper. It is not what happened here: both sites now call the
-        // `HttpError` CONSTRUCTOR, which the layer below had to have anyway, so
-        // the shared code is paid for once by `http.ts` rather than added.
-        //
-        // This note used to justify itself with "that bundle has two bytes of
-        // headroom", which read as a constraint that could expire. The headroom
-        // later became 115 and the sharing was tried on the strength of it; the
-        // numbers above are what came back. The byte cost was never about the
-        // headroom. Same shape as this file's chained-assignment entry, which
-        // measured one byte WORSE than two separate statements.
-        err = new HttpError(src.name as HttpErrorName, msg, { status: src.status, response: src.response as HttpResponse, code: src.code, cause: src });
-      }
-      for (const entry of batch) entry.resolve(_errResult(err));
+      for (const entry of batch) entry.resolve(unanswered(e, entry.cmd.action, effectiveSignal));
     }
   }
 
-  return (cmd: Command, next: () => CommandResult | Promise<CommandResult>) => {
+  return Object.assign((cmd: Command, next: () => CommandResult | Promise<CommandResult>) => {
     if (actions?.length && !actions.some((p) => matchesPattern(p, cmd.action))) return next();
     if (cmd.signal?.aborted) return Promise.resolve(abortedResult(cmd.action, cmd.signal));
 
@@ -546,7 +427,7 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
       queue.push({ id, cmd, resolve });
       scheduleFlush();
     });
-  };
+  }, TRANSPORT);
 }
 
 // ---------------------------------------------------------------------------
@@ -584,6 +465,7 @@ export type WsBridgeOptions = {
 };
 
 type PendingRequest = {
+  action: string;
   resolve: (result: CommandResult) => void;
   timeoutId: ReturnType<typeof setTimeout>;
 };
@@ -654,15 +536,13 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
         const dropped = queue.shift()!;
         // `!` on the pending lookup, not a guard: `settle()` removes an entry
         // from BOTH `pending` and `queue`, and `failAllPending()` clears both
-        // together - so a queued id always has a pending record. This was a
-        // runtime `if (req)` while settle() left dead entries in the queue; now
-        // that the two can no longer diverge, a miss here would mean the
-        // invariant broke, and throwing says so instead of silently dropping a
-        // caller's promise on the floor (it would hang until its own timeout).
+        // together - so a queued id always has a pending record. A miss would
+        // mean the invariant broke, and throwing says so instead of silently
+        // dropping a caller's promise (it would hang until its own timeout).
         const req = pending.get(dropped.id)!;
         clearTimeout(req.timeoutId);
         pending.delete(dropped.id);
-        req.resolve(_errResult(transportError('VC_TRANSPORT_QUEUE_FULL', `WS queue overflow: "${dropped.envelope.command}" dropped`, dropped.envelope.command, { dropped: dropped.envelope })));
+        req.resolve(_errResult(transportError('lost:command', `WS queue overflow: "${dropped.envelope.command}" dropped`, dropped.envelope.command, { dropped: dropped.envelope })));
       }
       queue.push({ id, envelope, timeout, queuedAt: Date.now() });
     }
@@ -681,7 +561,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
         const req = pending.get(id)!;
         clearTimeout(req.timeoutId);
         pending.delete(id);
-        req.resolve(_errResult(transportError('VC_TRANSPORT_TIMEOUT', `WS queued message "${envelope.command}" expired after ${elapsed}ms (timeout: ${timeout}ms)`, envelope.command, { elapsed, timeout })));
+        req.resolve(_errResult(transportError('timeout:reply', `WS queued message "${envelope.command}" expired after ${elapsed}ms (timeout: ${timeout}ms)`, envelope.command, { elapsed, timeout })));
         continue;
       }
       if (ws && ws.readyState === WebSocket.OPEN) {
@@ -710,7 +590,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
     const reqs = Array.from(pending.values());
     pending.clear();
     for (const req of reqs) {
-      req.resolve(_errResult(transportError('VC_TRANSPORT_CLOSED', reason)));
+      req.resolve(_errResult(transportError('lost:reply', reason)));
     }
   }
 
@@ -754,8 +634,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
         if (req) {
           clearTimeout(req.timeoutId);
           pending.delete(data.id);
-          const failure = resultFailure(data, 'WebSocket error');
-          req.resolve(failure ? _errResult(failure) : _okResult(data.state));
+          req.resolve(answerOf(data, req.action));
         }
       } catch {
         // ignore malformed frames
@@ -836,10 +715,11 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
       };
 
       const timeoutId = setTimeout(() => {
-        settle(_errResult(transportError('VC_TRANSPORT_TIMEOUT', `WS request "${cmd.action}" timed out after ${wsTimeout}ms`, cmd.action, { timeout: wsTimeout })));
+        settle(_errResult(transportError('timeout:reply', `WS request "${cmd.action}" timed out after ${wsTimeout}ms`, cmd.action, { timeout: wsTimeout })));
       }, wsTimeout);
 
       pending.set(id, {
+        action: cmd.action,
         resolve: settle,
         timeoutId,
       });
@@ -856,7 +736,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
     });
   };
 
-  return Object.assign(plugin, { connect, disconnect, isConnected, connected });
+  return Object.assign(plugin, { connect, disconnect, isConnected, connected }, TRANSPORT);
 }
 
 // ---------------------------------------------------------------------------

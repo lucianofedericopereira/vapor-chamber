@@ -37,13 +37,10 @@ cp "$HERE/config/vapor-chamber.php"         "$TARGET/config/"
 cp "$HERE/resources/views/cart.blade.php"   "$TARGET/resources/views/"
 cp "$HERE/resources/views/widget.blade.php" "$TARGET/resources/views/"
 
-# 4. Routes - REPLACE our block, don't just skip when present.
-#    The old guard was `grep -q VaporChamberController || append`, which is
-#    idempotent but not update-safe: a demo-app scaffolded before a route was
-#    added to this example kept the stale block forever, so `/widget` never
-#    appeared on a re-run and the only symptom was a 404. Dropping our block
-#    (marker to EOF) and re-appending makes a re-run pick up whatever this
-#    example currently defines. `perl -i`, not `sed -i`: macOS ships BSD sed,
+# 4. Routes - REPLACE our block, don't just skip when present: a skip would
+#    keep a stale block from an older scaffold forever (a route added since
+#    would 404). Dropping our block (marker to EOF) and re-appending makes a
+#    re-run pick up whatever this example currently defines. `perl -i`, not `sed -i`: macOS ships BSD sed,
 #    whose -i takes a mandatory suffix argument.
 WEB="$TARGET/routes/web.php"
 MARKER='vapor-chamber demo routes'

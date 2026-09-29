@@ -79,8 +79,7 @@
  * PICK THE BASELINE YOU SHIPPED AGAINST. An older RC is not a neutral choice:
  * it spans fixes that never reached users, so the comparison answers "how does
  * code we never ran differ from code we run", which is nobody's question. The
- * baseline that means something is the version the library previously
- * supported.
+ * baseline that means something is the version the library last supported.
  */
 
 import { describe, expect, it } from 'vitest';
@@ -278,11 +277,8 @@ describe.skipIf(!BASELINE)('Vue version A/B (same process, interleaved)', () => 
 
       // THE BAND IS MEASURED, NOT DECLARED.
       //
-      // This used to compare the ratio against a hardcoded 1.15 / 0.87, with a
-      // 0.13 control threshold beside it - one magic number wearing three hats
-      // (0.87 is 1/1.15, 0.13 is 1 - 1/1.15), and nothing had measured any of
-      // them. The comment on the assertion below even said 5% while the code
-      // said 15%.
+      // No hardcoded threshold: a fixed ratio (1.15 / 0.87 / 0.13 are one
+      // number three ways) measures nothing about this machine.
       //
       // The control already reports what this harness cannot tell apart on
       // this host, for this workload, in this run: two byte-identical builds

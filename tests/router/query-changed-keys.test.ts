@@ -20,9 +20,9 @@
 
 import { describe, expect, it } from 'vitest';
 import { createMemoryHistory } from '../../src/router/history';
-import { createRouter } from '../../src/router/index';
 import type { RouteRecord } from '../../src/router/types';
 import type { LoaderHandlers } from '../../src/router/index';
+import { makeRouter as fixtureRouter } from './fixture';
 
 const ROWS: RouteRecord[] = [
   {
@@ -44,13 +44,12 @@ function makeRouter() {
       },
     },
   };
-  const router = createRouter({
+  const router = fixtureRouter({
     history: createMemoryHistory(''),
     routes: ROWS,
     components: { Products: { render: () => null } } as never,
     loaders: handlers,
     links: false,
-    scroll: false,
     onError: () => {},
   });
   return { router, calls };

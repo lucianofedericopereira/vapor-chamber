@@ -1,82 +1,64 @@
 /**
- * Feature example: retry plugin - configurable backoff for failed dispatches
- * ==========================================================================
+ * Feature example: the async bus's retry
+ * ======================================
+ * On by default. The bus re-sends the call that produced the outcome - a
+ * handler, or a transport (the bridges) - so the plugins outside see one
+ * dispatch: a circuit breaker counts one, a rate limit spends one.
  */
 
-import { createAsyncCommandBus } from 'vapor-chamber'
-import { retry } from 'vapor-chamber'
+import { createAsyncCommandBus, createAsyncSchemaCommandBus, conditionOf } from 'vapor-chamber'
 import { createHttpBridge } from 'vapor-chamber/transports'
 
-// ─── Basic: retry all failed commands up to 3 times ──────────────────────────
+// ─── The default ──────────────────────────────────────────────────────────────
+//
+// A transient failure is re-sent for any action: `limited` (a 429 or 503, a
+// rate limit), `timeout`, and any failure declaring when to come back
+// (`Retry-After`, `context.retryIn`), after that wait. 3 attempts in total;
+// otherwise a jittered wait under 200ms, 400ms. A verdict (422, 404, 403, 409),
+// an abort and a redirect are never re-sent.
 
 const bus = createAsyncCommandBus()
-bus.use(retry({ maxAttempts: 3, strategy: 'exponential', baseDelay: 200 }))
-// Delays: 200ms, 400ms - then gives up
+bus.use(createHttpBridge({ endpoint: '/api/vc', csrf: true }))
 
-// ─── Fixed delay ──────────────────────────────────────────────────────────────
+// ─── Uncertain failures: declare what is safe to run twice ───────────────────
+//
+// No response, a 500 or a handler's throw may have landed: re-sending a write
+// could run it twice. The bus re-sends one only for an action declared
+// idempotent - it then stamps one Idempotency-Key on every attempt, so the
+// backend collapses them - or a command that already carries a key.
 
-bus.use(retry({ maxAttempts: 5, strategy: 'fixed', baseDelay: 500 }))
-// Delays: 500ms, 500ms, 500ms, 500ms
-
-// ─── Linear backoff ───────────────────────────────────────────────────────────
-
-bus.use(retry({ maxAttempts: 4, strategy: 'linear', baseDelay: 100 }))
-// Delays: 100ms, 200ms, 300ms
-
-// ─── Only retry specific actions ─────────────────────────────────────────────
-
-const apiBus = createAsyncCommandBus()
-apiBus.use(retry({
-  maxAttempts: 5,
-  baseDelay: 300,
-  actions: ['api*', 'webhook*'],   // glob patterns
-}))
-
-// Non-matching actions are not retried, even if they fail:
-apiBus.register('uiClick', () => { throw new Error('not retried') })
-
-// ─── Custom retryable predicate ───────────────────────────────────────────────
-
-const smartBus = createAsyncCommandBus()
-smartBus.use(retry({
-  maxAttempts: 4,
-  baseDelay: 200,
-  isRetryable: (error, attempt) => {
-    // Don't retry client errors (4xx) - only server/network errors
-    if (error.message.includes('400') || error.message.includes('422')) return false
-    if (error.message.includes('401') || error.message.includes('403')) return false
-    // Only retry up to attempt 2 for timeout errors
-    if (error.message.includes('timed out') && attempt > 2) return false
-    return true
+const shop = createAsyncCommandBus({
+  retry: {
+    actions: {
+      'cart*': 'idempotent',   // setting a quantity twice is setting it once
+      orderPay: false,         // never re-sent, whatever the failure
+      searchRun: 2,            // at most 2 attempts
+    },
   },
-}))
+})
+shop.use(createHttpBridge({ endpoint: '/api/vc', csrf: true }))
 
-// ─── Combined with HTTP bridge ────────────────────────────────────────────────
+// The same declarations on a schema, next to the action they describe:
+const schemaBus = createAsyncSchemaCommandBus({
+  cartSet: { retry: 'idempotent', target: { id: 'number' }, payload: { qty: 'number' } },
+  orderPay: { retry: false, target: { orderId: 'number' } },
+})
 
-const productionBus = createAsyncCommandBus()
+// ─── Bounds, and turning it off ──────────────────────────────────────────────
+//
+// Each bus also keeps a budget: when failures pile up (half of 10 tokens
+// spent, a success refunds a tenth), it returns them at once, so retries
+// cannot multiply the load on a backend that is down.
 
-productionBus.use(retry({
-  maxAttempts: 3,
-  strategy: 'exponential',
-  baseDelay: 500,
-  isRetryable: (err) => {
-    // Retry network and 5xx errors only
-    if (err.message.includes('fetch failed')) return true
-    if (err.message.includes('HTTP 5')) return true
-    return false
-  },
-}))
+const tuned = createAsyncCommandBus({ retry: { maxAttempts: 4, baseDelay: 500, maxDelay: 10_000 } })
+const once = createAsyncCommandBus({ retry: false })
 
-productionBus.use(createHttpBridge({
-  endpoint: '/api/vc',
-  csrf: true,
-  timeout: 10_000,
-}))
+// ─── Reading the outcome ─────────────────────────────────────────────────────
 
-// Flaky network? Commands are retried automatically with increasing delays.
-const result = await productionBus.dispatch('orderCreate', { items: [1, 2, 3] })
+const result = await shop.dispatch('orderCreate', { items: [1, 2, 3] })
 if (!result.ok) {
-  console.error('Order failed after all retries:', result.error?.message)
+  // `context.attempts` says how many sends were made, when more than one.
+  console.error(`Order failed (${conditionOf(result.error)}):`, result.error?.message)
 }
 
-export {}
+export { bus, schemaBus, tuned, once }

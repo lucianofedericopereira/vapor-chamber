@@ -3,10 +3,9 @@
  * drag the chamber http client in.
  *
  * Two optional features need one: a `{ url }` route table and blade rows. The
- * router used to build the client itself, so every consumer carried it - the
- * whole multi-method client, CSRF and retry and cache included - to support
- * code most apps never call. It moved to `vapor-chamber/router/remote`, which
- * is the same subpath-per-cost shape `./vdom` and `./vapor` already use.
+ * client - the whole multi-method client, CSRF and retry and cache included -
+ * lives in `vapor-chamber/router/remote`, the same subpath-per-cost shape
+ * `./vdom` and `./vapor` use, so a consumer that calls neither carries none.
  *
  * That is a property of the import graph, not of anyone's discipline, so it is
  * asserted the way the renderer boundaries are: build a consumer that calls

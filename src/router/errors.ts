@@ -1,10 +1,10 @@
 /**
  * vapor-chamber-router - the single error taxonomy.
  *
- * Mirrors vapor-chamber's HttpError convention: a plain Error narrowed by
- * `name`, with a machine-readable snake_case `code` (same style as the
- * Laravel `{ ok: false, error, code }` responses), the target location, and
- * the original `cause`. Handlers switch on `code`, never message text.
+ * A plain Error narrowed by `name`, with a machine-readable snake_case `code`,
+ * the target location, and the original `cause`. Handlers switch on `code`,
+ * never message text. (Joining the bus's `owner:condition:subject` model is
+ * planned work: docs/plan-shape.md, "After this plan".)
  *
  * This is ALSO the navigation result: `navigate()` resolves to
  * `RouterError | null` - null means committed. Refusals that are normal flow
@@ -50,9 +50,8 @@ export type RouterErrorCode =
   // render mode - raised by the Vapor outlet only (src/router/vapor.ts), which
   // refuses a non-Vapor component rather than silently restoring interop.
   | 'mode_mismatch'
-  // composable or outlet used with no router installed. The one failure in
-  // this router that used to throw a bare Error, i.e. the one a handler could
-  // not switch on. Message text is unchanged from that Error.
+  // composable or outlet used with no router installed - coded, like every
+  // other failure here, so a handler can switch on it.
   | 'no_router';
 
 export type RouterError = Error & {

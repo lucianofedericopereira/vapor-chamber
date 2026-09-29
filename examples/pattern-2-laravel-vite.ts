@@ -27,14 +27,16 @@ bus.onAfter((cmd, result) => {
 })
 
 // 3. Install HTTP transport - all unhandled commands go to the server.
-//    HTTP retry lives on the bridge, not in a retry() plugin: 408/429/5xx/timeouts only.
+//    The bus re-sends through it what re-sending can change (a 429, 503 or
+//    408; any Retry-After, after its wait) and never a verdict (422, 404, 403,
+//    409) or a redirect; a lost request or a 500 only for an action declared
+//    idempotent (createAsyncCommandBus({ retry: { actions } })). The plugins
+//    outside see one dispatch.
 bus.use(createHttpBridge({
   endpoint: '/api/vc',
   csrf: true,
   headers: { 'X-App-Version': '2.0.0' },
   timeout: 15_000,
-  retry: 2,
-  noRetry: ['orderPlace', 'paymentCharge'], // non-idempotent: never re-sent
 }))
 
 // 4. Install SSE for server push (real-time notifications)
@@ -76,7 +78,9 @@ window.addEventListener('beforeunload', () => sse.teardown())
  *
  * <template>
  *   <!-- With composable -->
- *   <button @click="dispatch('productFavorite', { id: product.id })" :disabled="loading.value">
+ *   <!-- aria-disabled, not :disabled - disabling the focused button would
+ *        send a keyboard user's focus to <body>. -->
+ *   <button @click="!loading.value && dispatch('productFavorite', { id: product.id })" :aria-disabled="loading.value">
  *     {{ loading.value ? '...' : '♥ Save' }}
  *   </button>
  *
@@ -86,26 +90,16 @@ window.addEventListener('beforeunload', () => sse.teardown())
  *     ♥ Save
  *   </button>
  *
- *   <p v-if="lastError.value" class="error">{{ lastError.value.message }}</p>
+ *   <p role="status" class="error">{{ lastError.value?.message }}</p>
  * </template>
  */
 
 /*
- * Laravel controller (no Livewire):
+ * Laravel backend (no Livewire): the reference controller,
+ * examples/laravel-backend/VaporChamberController.php - `{ state }` on success,
+ * an RFC 9457 problem on failure.
  *
- * // routes/api.php
- * Route::post('/vc', VaporChamberController::class);
- * Route::get('/vc/events', VaporChamberSseController::class);
- *
- * // app/Http/Controllers/VaporChamberController.php
- * public function __invoke(Request $request): JsonResponse
- * {
- *     return response()->json([
- *         'state' => $this->router->handle(
- *             $request->input('command'),
- *             $request->input('target'),
- *             $request->input('payload'),
- *         )
- *     ]);
- * }
+ * // routes/web.php - the `web` group checks the CSRF token the bridge sends
+ * Route::post('/api/vc', VaporChamberController::class)->middleware(['web']);
+ * Route::get('/api/vc/events', VaporChamberSseController::class)->middleware(['web']);
  */

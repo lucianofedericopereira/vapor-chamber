@@ -13,17 +13,13 @@
  * Two router features need to make a request: loading a `{ url }` route table,
  * and fetching a blade row's HTML. Both are optional, and the primary
  * documented setup - a generated route module with no blade rows - uses
- * neither. The router used to build the client itself, so every consumer paid
- * for it: measured at 8.5 KB raw / 3.4 KB brotli, about a quarter of the
- * subpath, for code most apps never execute.
+ * neither. A client built by the router would cost every consumer 8.5 KB raw /
+ * 3.4 KB brotli, about a quarter of the subpath, for code most apps never
+ * execute; a dynamic `import()` would still charge a bundler that does not code
+ * split. An import graph is the honest place to express "this costs extra",
+ * as `./vdom` and `./vapor` already do.
  *
- * Deferring it behind a dynamic `import()` fixed the startup cost but left it
- * in the graph, which still charges consumers whose bundler does not code
- * split, and left `createRouter` deciding a dependency on its caller's behalf.
- * An import graph is the honest place to express "this costs extra", and the
- * router already says so twice with `./vdom` and `./vapor`.
- *
- * The router core now takes these as ORDINARY OPTIONS. Nothing here is
+ * The router core takes these as ORDINARY OPTIONS. Nothing here is
  * privileged: `http` accepts any `HttpClient`, and `fetchBlade` accepts any
  * `(href) => Promise<string>`. These two helpers exist so the common case
  * stays two lines, not because the router requires them.
@@ -33,9 +29,8 @@ import { createHttpClient } from '../http';
 import type { HttpClient, HttpRequestConfig } from '../http';
 
 /**
- * The chamber http client, configured the way the router used to configure its
- * own: an `X-Vapor-Router` marker header so a backend can tell router traffic
- * from command traffic. Everything else is the client's own default, and any
+ * The chamber http client with an `X-Vapor-Router` marker header, so a backend
+ * can tell router traffic from command traffic. Everything else is the client's own default, and any
  * option you pass wins.
  */
 export function routerHttp(options: Partial<HttpRequestConfig> = {}): HttpClient {

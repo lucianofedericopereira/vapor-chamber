@@ -98,7 +98,7 @@ describe('createDirectivePlugin', () => {
   // The three NAMES are the public surface now that the selector lives in one.
   // `vc` must be absent: leaving it registered alongside would be the two
   // spellings this reshape removed, and nothing else in the suite would notice.
-  it('installs vc-command, vc-payload and vc-optimistic, and no longer installs vc', () => {
+  it('installs vc-command, vc-payload and vc-optimistic, and not vc', () => {
     expect(app.getDirective('vc-command')).toBeDefined();
     expect(app.getDirective('vc-payload')).toBeDefined();
     expect(app.getDirective('vc-optimistic')).toBeDefined();
@@ -486,7 +486,7 @@ describe('createDirectivePlugin factory', () => {
 // Why `order of v-vc-payload / v-vc-optimistic against v-vc-command` exists
 // ---------------------------------------------------------------------------
 //
-// Vapor got a holding slot in v1.22.0 so that
+// Vapor has a holding slot so that
 //
 //     <button v-vc-payload="p" v-vc-command="a">
 //

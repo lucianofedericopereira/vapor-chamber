@@ -9,8 +9,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { computed, createApp, effectScope, isRef, unref } from 'vue';
 import { isRouterError } from '../../src/router/errors';
-import { createMemoryHistory } from '../../src/router/history';
-import { createRouter } from '../../src/router/index';
 import {
   onBeforeLeave,
   useBreadcrumbs,
@@ -24,6 +22,7 @@ import {
 } from '../../src/router/composables';
 import { ROUTER_KEY } from '../../src/router/keys';
 import type { RouteRecord } from '../../src/router/types';
+import { makeRouter as fixtureRouter } from './fixture';
 
 const ROWS: RouteRecord[] = [
   { name: 'shell', path: '/', parent: null },
@@ -39,11 +38,9 @@ const ROWS: RouteRecord[] = [
 ];
 
 function makeRouter() {
-  return createRouter({
+  return fixtureRouter({
     base: '/admin',
-    history: createMemoryHistory('/admin'),
     routes: ROWS,
-    components: { Home: { name: 'Home' }, List: { name: 'List' } },
   });
 }
 
@@ -191,10 +188,8 @@ describe('useQueryParam is a real ref', () => {
     await router.isReady();
     withRouter(router, () => {
       const page = useQueryParam<number>('page');
-      // Regression: this used to be a plain object with a `value` accessor.
-      // isRef() false meant Vue did NOT unwrap it in templates, so this was
-      // the one composable whose templates needed `.value` - inconsistent with
-      // useRoute/useRouteData/useMenu, and a silent papercut.
+      // A real ref, so Vue unwraps it in templates like useRoute/useRouteData/
+      // useMenu (a plain object with a `value` accessor would need `.value`).
       expect(isRef(page)).toBe(true);
       expect(unref(page)).toBe(page.value);
       expect(typeof page.push).toBe('function');
@@ -246,9 +241,8 @@ describe('usePagination', () => {
 
   /** A router whose loader returns a fixed paginated envelope. */
   function pagedRouter(payload: unknown, template = '/api/items?page={page}') {
-    return createRouter({
+    return fixtureRouter({
       base: '/admin',
-      history: createMemoryHistory('/admin'),
       routes: PAGED.map((row) => ({ ...row, load: template })),
       components: { List: { name: 'List' } },
       loaders: { url: async () => payload },
@@ -339,9 +333,8 @@ describe('usePagination', () => {
         query: { p: { type: 'int', default: 1 } }, // no `history` declaration
       },
     ];
-    const router = createRouter({
+    const router = fixtureRouter({
       base: '/admin',
-      history: createMemoryHistory('/admin'),
       routes: CUSTOM,
       components: { List: { name: 'List' } },
       loaders: { url: async () => ({ items: [], total: 30, per_page: 10, last_page: 3 }) },
@@ -374,9 +367,8 @@ describe('usePagination', () => {
         query: { p: { type: 'int', default: 1, history: 'replace' } }, // explicit
       },
     ];
-    const router = createRouter({
+    const router = fixtureRouter({
       base: '/admin',
-      history: createMemoryHistory('/admin'),
       routes: DECLARED,
       components: { List: { name: 'List' } },
       loaders: { url: async () => ({ items: [], total: 30, per_page: 10, last_page: 3 }) },
@@ -482,9 +474,8 @@ describe('usePagination - extractor fallbacks and pageRange elisions', () => {
     },
   ];
   function pagedRouter(payload: unknown) {
-    return createRouter({
+    return fixtureRouter({
       base: '/admin',
-      history: createMemoryHistory('/admin'),
       routes: PAGED,
       components: { List: { name: 'List' } },
       loaders: { url: async () => payload },
@@ -661,6 +652,22 @@ describe('onBeforeLeave - allowing arms', () => {
     await router.push('/list');
     expect(router.currentRoute.value.location.name).toBe('list');
 
+    router.destroy();
+  });
+});
+
+describe('usePagination - page is a number whatever the route declares', () => {
+  it('reads ?page=2 as 2 on a route that declares no page param', async () => {
+    const router = fixtureRouter({
+      base: '/admin',
+      routes: [{ name: 'items', path: '/items', component: 'List', load: '/api/items' }],
+      components: { List: { name: 'List' } },
+      loaders: { url: async () => ({ items: [1, 2], total: 40, per_page: 2 }) },
+    });
+    await router.isReady();
+    await router.push('/items?page=2');
+    const pager = withRouter(router, () => usePagination());
+    expect(pager.page.value).toBe(2);
     router.destroy();
   });
 });

@@ -16,8 +16,8 @@
  * would pass for maps V8 still keeps apart.
  *
  * The last test pins the sync COMMAND's map the same way: dispatch, query
- * and request build one map, and the `signal` option request() takes since
- * v1.20.0 settles the request without becoming a field on it.
+ * and request build one map, and the `signal` option request() takes settles
+ * the request without becoming a field on it.
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';

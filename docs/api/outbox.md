@@ -17,7 +17,7 @@ import { ... } from 'vapor-chamber/outbox';
 
 ### createOutbox
 
-**Function** - [src/outbox.ts:334](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L334)
+**Function** - [src/outbox.ts:337](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L337)
 
 ```ts
 createOutbox(options?: OutboxOptions) => Outbox
@@ -64,7 +64,7 @@ if (result.ok && result.value?.queued) {
 
 ### indexedDbOutbox
 
-**Function** - [src/outbox.ts:138](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L138)
+**Function** - [src/outbox.ts:139](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L139)
 
 ```ts
 indexedDbOutbox(dbName?: string, storeName?: string) => OutboxStorage
@@ -90,7 +90,7 @@ await outbox.hydrate();
 
 ### localStorageOutbox
 
-**Function** - [src/outbox.ts:85](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L85)
+**Function** - [src/outbox.ts:86](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L86)
 
 ```ts
 localStorageOutbox(storageKey?: string) => OutboxStorage
@@ -113,7 +113,7 @@ const outbox = createOutbox({ storage: localStorageOutbox('vc:cart-outbox') });
 
 ### Outbox
 
-**Type alias** - [src/outbox.ts:267](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L267)
+**Type alias** - [src/outbox.ts:270](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L270)
 
 ```ts
 export type Outbox = {
@@ -145,9 +145,11 @@ export type Outbox = {
 };
 ```
 
+The object returned by {@link createOutbox}.
+
 ### OutboxFlushSummary
 
-**Type alias** - [src/outbox.ts:265](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L265)
+**Type alias** - [src/outbox.ts:267](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L267)
 
 ```ts
 export type OutboxFlushSummary = { replayed: number; failed: number; rejected: number };
@@ -158,7 +160,7 @@ flush. `rejected` counts records dropped as final (see `isRetryable`).
 
 ### OutboxOptions
 
-**Type alias** - [src/outbox.ts:195](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L195)
+**Type alias** - [src/outbox.ts:196](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L196)
 
 ```ts
 export type OutboxOptions = {
@@ -205,9 +207,9 @@ export type OutboxOptions = {
    * data. Pass `() => true` to block on every failure, or your own rule in
    * your backend's codes (`error.code`).
    *
-   * WHY IT EXISTS: before v1.23.0 every failure blocked, so one record
-   * the server refuses held the whole queue for good - each flush re-sent it,
-   * got the same answer, and the records behind it never left.
+   * WHY IT EXISTS: if every failure blocked, one record the server refuses
+   * would hold the whole queue for good - each flush re-sends it, gets the
+   * same answer, and the records behind it never leave.
    */
   isRetryable?: (error: Error, record: OutboxRecord) => boolean;
 };
@@ -215,7 +217,7 @@ export type OutboxOptions = {
 
 ### OutboxRecord
 
-**Type alias** - [src/outbox.ts:44](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L44)
+**Type alias** - [src/outbox.ts:45](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L45)
 
 ```ts
 export type OutboxRecord = {
@@ -244,7 +246,7 @@ A queued command awaiting replay. JSON-serializable by design - `target` and
 
 ### OutboxStorage
 
-**Type alias** - [src/outbox.ts:68](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L68)
+**Type alias** - [src/outbox.ts:69](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L69)
 
 ```ts
 export type OutboxStorage = {

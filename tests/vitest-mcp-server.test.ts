@@ -55,7 +55,7 @@ describe('the tools an agent sees', () => {
     const fresh = await createVitestMcp({ root });
     try {
       const client = mcpClient(createMcpHandler(fresh.bus, { actions: VITEST_MCP_ACTIONS }));
-      expect(await client.call('getTestResults')).toBeToolError(/VC_TEST_MCP_NO_RUN/);
+      expect(await client.call('getTestResults')).toBeToolError(/test:missing:run/);
     } finally {
       await fresh.close();
     }
@@ -133,7 +133,7 @@ describe('what an agent cannot pass', () => {
   it('target.files that is not a short list of filters, or a filter that reads as an option, is refused before anything runs', async () => {
     for (const files of ['tests', [1], [''], ['--config=/tmp/elsewhere.js'], ['-t'], Array.from({ length: 101 }, (_, i) => `f${i}`), ['x'.repeat(1001)]]) {
       for (const tool of ['runTests', 'getCoverageGaps']) {
-        expect(await mcp.call(tool, { target: { files } }), `${tool} ${JSON.stringify(files).slice(0, 40)}`).toBeToolError(/VC_TEST_MCP_INVALID_FILES/);
+        expect(await mcp.call(tool, { target: { files } }), `${tool} ${JSON.stringify(files).slice(0, 40)}`).toBeToolError(/test:invalid:files/);
       }
     }
   });
@@ -166,7 +166,7 @@ describe('getCoverageGaps', () => {
     try {
       const client = mcpClient(createMcpHandler(other.bus, { actions: VITEST_MCP_ACTIONS }));
       const result = await client.call('getCoverageGaps');
-      expect(result).toBeToolError(/VC_TEST_MCP_NO_COVERAGE/);
+      expect(result).toBeToolError(/test:missing:coverage/);
       expect(result.content[0].text).toContain('nowhere.js');
     } finally {
       await other.close();

@@ -55,9 +55,8 @@ describe('static fast path - cost', () => {
   // resolve loops enough to blow even the generous 20s override below, and
   // the printed numbers wouldn't be real timings anyway (instrumented code
   // paths, not the fast path being measured). The timeout, not the
-  // assertion, was the source of the flake. (It used to say "there is no
-  // assertion" - and there was not, only `expect(true).toBe(true)`. It now
-  // asserts the resolves it already performs, so the reporter can fail.)
+  // assertion, was the source of the flake. It asserts the resolves it
+  // performs, so the reporter can fail.
   it.skipIf(underCoverage)('measures build and resolve', () => {
     const rows: RouteRecord[] = [{ name: 'shell', path: '/', parent: null }];
     for (let i = 0; i < 300; i++) {

@@ -10,25 +10,18 @@
  *     'productSave':  'affected',      // or: the whole current load chain
  *   }));
  *
- * PLACEMENT, and why it is here rather than with the bus plugins. The first
- * decision put it bus-side with the router passed structurally, on the grounds
- * that `src/router` imports nothing from the bus and the root barrel imports
- * nothing from the router - so hosting it on the router would create an edge
- * that does not exist. That counted edges without weighing them, and the weights
- * are lopsided: the plugin needs `runLoaders` from the router, and there is no
- * public substitute (`reload()` reloads the TABLE, not data). Bus-side would
- * therefore have had to import a router module into the root barrel, which is
- * the one thing the constraint forbids outright. What it needs from the BUS is
- * a single function shape, `(cmd, next) => result`, which is declared inline
- * below and imports nothing. So the edge exists in exactly one direction, and
- * it is the cheap one.
+ * PLACEMENT, and why it is here rather than with the bus plugins. The plugin
+ * needs `runLoaders` from the router, and there is no public substitute
+ * (`reload()` reloads the TABLE, not data); bus-side, it would have to import
+ * a router module into the root barrel, which is forbidden. What it needs from
+ * the BUS is a single function shape, `(cmd, next) => result`, declared inline
+ * below, so the edge exists in exactly one direction, the cheap one.
  *
  * WHY `loaders` IS AN ARGUMENT. `createRouter` closes over its `LoaderHandlers`
  * and does not expose them, so the plugin cannot recover the preset the router
- * is using. Passing the same instance is the composition's one wiring cost. The
- * plan's sketch read `revalidateRoutes(router, MAP)`; it could not have, and the
- * two-argument form would have had to build a second preset - a second HTTP
- * client, a second cache - silently diverging from the router's.
+ * is using. Passing the same instance is the composition's one wiring cost; a
+ * plugin building its own would be a second HTTP client and a second cache,
+ * silently diverging from the router's.
  *
  * WHY THE PLUGIN OWNS ITS `isRevalidating`. `router.isRevalidating` is
  * `Readonly`, and its only writer is the engine's `trackRevalidation`, which is
@@ -90,20 +83,21 @@ export function revalidateRoutes(
 ): RevalidatePlugin {
   const flag = shallowRef(false);
   let disposed = false;
+  /** Every failure here is REPORTED, never thrown: the command it follows has
+   *  already succeeded, and a refresh must not take it down. */
+  const report = (error: unknown): void => {
+    if (options.onError) options.onError(error);
+    else console.error('[vapor-chamber-router] revalidateRoutes refresh failed', error);
+  };
 
   /**
    * One controller PER REFRESH, aborted only by a refresh that overlaps it.
    *
-   * A single shared controller made every revalidation cancel every other one,
-   * whatever it was refreshing. Two commands in a row - `cartAdd` then
-   * `wishlistAdd`, mapped to different records - meant the second aborted the
-   * first, the cart's fresh data was discarded, and nothing retried it. The
-   * command had succeeded, so the page kept showing stale data with no error
-   * anywhere: the exact outcome this plugin exists to prevent.
-   *
-   * Overlap is the right test, not identity. Two refreshes of the SAME record
-   * still must not both land - the later one wins, as before - while two
-   * refreshes of disjoint records have no reason to interfere.
+   * A shared controller would make every revalidation cancel every other:
+   * `cartAdd` then `wishlistAdd`, mapped to different records, would discard
+   * the cart's fresh data with no error anywhere. Two refreshes of the SAME
+   * record must not both land - the later one wins - while two refreshes of
+   * disjoint records have no reason to interfere.
    */
   type InFlight = { controller: AbortController; names: ReadonlySet<string> };
   const inFlight = new Set<InFlight>();
@@ -134,21 +128,26 @@ export function revalidateRoutes(
       records = leaf.loadChain;
     } else {
       // A name that is not in the current chain is a wiring mistake, and a
-      // silent no-op is exactly how it would survive to production - the same
-      // reasoning as setRouteData's dev warning, made unconditional because a
-      // revalidation map is written once and then trusted forever.
-      records = targets.map((name) => {
+      // silent no-op is exactly how it would survive to production - so it is
+      // reported as a coded error in every build (a revalidation map is written
+      // once and then trusted forever), and nothing is refreshed.
+      const found: TableRecord[] = [];
+      for (const name of targets) {
         const record = leaf.loadChain.find((r) => r.name === name);
         if (!record) {
-          throw routerError(
-            'unknown_route_name',
-            `revalidateRoutes: "${name}" is not a loader-bearing record of the current route (chain: ${
-              leaf.loadChain.map((r) => r.name).join(', ') || 'none'
-            })`,
+          report(
+            routerError(
+              'unknown_route_name',
+              `revalidateRoutes: "${name}" is not a loader-bearing record of the current route (chain: ${
+                leaf.loadChain.map((r) => r.name).join(', ') || 'none'
+              })`,
+            ),
           );
+          return;
         }
-        return record;
-      });
+        found.push(record);
+      }
+      records = found;
     }
     if (!records.length) return;
 
@@ -182,10 +181,8 @@ export function revalidateRoutes(
         for (const [name, value] of fresh) router.setRouteData(name, value);
       })
       .catch((error) => {
-        if (own.signal.aborted) return;
         // Stale data stays on screen - the command itself succeeded.
-        if (options.onError) options.onError(error);
-        else console.error('[vapor-chamber-router] revalidateRoutes refresh failed', error);
+        if (!own.signal.aborted) report(error);
       })
       .finally(() => {
         inFlight.delete(entry);
@@ -211,6 +208,7 @@ export function revalidateRoutes(
     return result;
   }) as RevalidatePlugin;
 
+  Object.defineProperty(plugin, 'id', { value: 'revalidateRoutes' });
   plugin.isRevalidating = flag;
   plugin.dispose = () => {
     disposed = true;

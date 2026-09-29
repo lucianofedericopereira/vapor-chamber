@@ -29,7 +29,7 @@ describe('vaporChamberHMR', () => {
     expect(code).toContain('import.meta.hot');
   });
 
-  it('shim imports the Vue-priming module BEFORE vapor-chamber (v1.6.0 fix)', async () => {
+  it('shim imports the Vue-priming module BEFORE vapor-chamber', async () => {
     const code: string = await plugin.load('\0virtual:vapor-chamber-hmr');
     const primeIdx = code.indexOf('virtual:vapor-chamber-hmr-vue-prime');
     const vcIdx = code.indexOf("from 'vapor-chamber'");
@@ -193,13 +193,10 @@ describe('vaporChamberHMR', () => {
     /**
      * SFCs are skipped, and the reason is not taste.
      *
-     * The test that used to sit here handed the transform a bare script
-     * FRAGMENT under a `.vapor.vue` id and asserted the shim import came back.
-     * It did - and it never once reached a browser. `enforce: 'pre'` means this
-     * plugin runs before @vitejs/plugin-vue and sees the RAW SFC, where a
-     * prepended import lands outside every block and compiler-sfc drops it
-     * without a word. The fixture agreed with the code instead of with Vite,
-     * which is this repo's most expensive recurring bug shape.
+     * A bare script FRAGMENT under a `.vapor.vue` id would come back with the
+     * shim import and prove nothing: `enforce: 'pre'` means this plugin runs
+     * before @vitejs/plugin-vue and sees the RAW SFC, where a prepended import
+     * lands outside every block and compiler-sfc drops it without a word.
      *
      * So this test parses a real SFC instead of trusting the transform's word:
      * whatever the plugin does to SFC text, the compiler is the one that

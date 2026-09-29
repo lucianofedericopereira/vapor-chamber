@@ -5,6 +5,7 @@
  */
 import { describe, expect } from 'vitest';
 import { idempotent } from '../src/plugins-extra';
+import { createAsyncCommandBus } from '../src/command-bus';
 import { it } from '../src/vitest';
 
 const tick = (ms = 0) => new Promise<void>((r) => setTimeout(r, ms));
@@ -47,7 +48,9 @@ describe('idempotent plugin', () => {
     expect(runs).toBe(2);
   });
 
-  it('does NOT cache failures - a retry after error runs again', async ({ asyncBus: bus }) => {
+  it('does NOT cache failures - a retry after error runs again', async () => {
+    // No bus retry: this is the dispatch after the failure, made by hand.
+    const bus = createAsyncCommandBus({ retry: false });
     let n = 0;
     bus.use(idempotent());
     bus.register('flaky', async () => {
@@ -113,7 +116,9 @@ describe('idempotent - done-cache eviction and rejection', () => {
     expect(runs).toBe(3);
   });
 
-  it('a thrown/rejected dispatch is not cached - the retry genuinely re-runs', async ({ asyncBus: bus }) => {
+  it('a thrown/rejected dispatch is not cached - the retry genuinely re-runs', async () => {
+    // No bus retry: this is the dispatch after the failure, made by hand.
+    const bus = createAsyncCommandBus({ retry: false });
     bus.use(idempotent());
     let attempts = 0;
     bus.register('flaky', async () => {

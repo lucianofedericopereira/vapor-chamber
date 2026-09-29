@@ -60,9 +60,9 @@ before that are not lost - the bus is created with:
 
 ```ts
 const bus = createCommandBus({
-  onMissing: 'buffer',     // queue commands with no handler yet (v1.5.0)
-  bufferTTL: 30_000,       // reap commands that wait > 30s (v1.6.0)
-  onBufferOverflow: (action, dropped) => console.warn(action, dropped), // v1.6.0
+  onMissing: 'buffer',     // queue commands with no handler yet
+  bufferTTL: 30_000,       // reap commands that wait > 30s
+  onBufferOverflow: (action, dropped) => console.warn(action, dropped),
 });
 ```
 
@@ -73,10 +73,8 @@ exactly this case.
 
 ## Run
 
-Needs **Node ≥ 22.12**, which is Astro 7's own floor and also the library's:
-the root `engines.node` is `>=22.12.0`. This note used to add that
-vapor-chamber itself ran on Node >= 20.19 and that only this example carried
-the higher bar - true once, and false since the root floor moved up.
+Needs **Node ≥ 22.12**, which is Astro 7's own floor and also the library's
+(the root `engines.node` is `>=22.12.0`).
 
 ```bash
 cd examples/exo-astro
@@ -90,7 +88,9 @@ directive - just static HTML plus one plain `<script>` module holding the bus
 and the scanner. The toolbar's audit only knows how to look for islands.
 
 Open `http://localhost:8890` and click "Add" **during the first 2 seconds** -
-watch the buffered clicks land when the hydration note flips to ✅. Then hit
+watch the buffered clicks land when the hydration note flips to ✅. Each
+change is also spoken through the library's shared live region (`announce()`),
+so a screen reader user hears what a sighted one sees change. Then hit
 "Details": that toggle is local `v-scope` state written by a bus handler, while
 the text inside it reads bus state through the same binding.
 

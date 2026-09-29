@@ -20,29 +20,34 @@
 namespace App\Actions\Cart;
 
 use App\Models\Cart;
+use App\Models\Product;
 use App\Models\User;
 
 class AddToCart
 {
     public function __invoke(?array $target, ?array $payload, ?User $user): array
     {
-        // Inline validation. Use a FormRequest if rules grow beyond a few lines.
-        validator($target ?? [], [
-            'id' => 'required|integer|exists:products,id',
-        ])->validate();
+        // The TARGET is identity: a product that does not exist is a missing
+        // resource (findOrFail -> 404 not_found), not a form-field error.
+        $product = Product::findOrFail((int) ($target['id'] ?? 0));
 
-        $qty = max(1, (int) ($payload['qty'] ?? 1));
+        // The PAYLOAD is the input: its field errors reach the client as
+        // `/payload/<field>` pointers. Use a FormRequest if rules grow.
+        $input = validator($payload ?? [], [
+            'qty' => 'sometimes|integer|min:1|max:99',
+        ])->validate();
+        $qty = (int) ($input['qty'] ?? 1);
 
         // Guest carts use a session-backed model; authenticated users get the
         // persisted user cart. Adapt to your data model.
         $cart = $user ? $user->cart() : Cart::session();
-        $cart->add($target['id'], $qty);
+        $cart->add($product->id, $qty);
 
         // Return shape your client UI consumes.
         return [
             'count' => $cart->count,
             'total' => $cart->total,
-            'lastAddedId' => $target['id'],
+            'lastAddedId' => $product->id,
         ];
     }
 }

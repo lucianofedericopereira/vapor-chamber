@@ -3,7 +3,8 @@
   ================================================================================
   Declarative dispatch straight from the template: no <script setup> wiring, no
   per-button click handler. The directive owns the whole interaction - dispatch,
-  in-flight state, disable-while-busy, error class, optimistic rollback.
+  in-flight state, busy-while-in-flight (aria-disabled, so keyboard focus
+  stays put), error class and announcement, optimistic rollback.
 
   RUNNABLE, no build step. From the repo root:
 
@@ -18,8 +19,7 @@
 
   This page uses the vDOM plugin. In a <script setup vapor> component the same
   three directives come from vapor-chamber/directives as `vcCommandVapor`,
-  `vcPayloadVapor` and `vcOptimisticVapor` (v1.22.0 - all three worked on vDOM
-  only before that). Import them aliased to the WHOLE camelCased directive name
+  `vcPayloadVapor` and `vcOptimisticVapor`. Import them aliased to the WHOLE camelCased directive name
   - vVcCommand, vVcPayload, vVcOptimistic - or register them app-wide with
   app.directive('vc-command', vcCommandVapor) and so on. A shorter alias
   compiles and silently stops being used.
@@ -36,9 +36,9 @@
   .panel h2 { margin-top: 0; font-size: 1rem; }
   .row { display: flex; gap: .75rem; align-items: center; flex-wrap: wrap; }
   button { padding: .5rem 1rem; cursor: pointer; border: 1px solid #888; border-radius: 6px; background: #fff; }
-  button:disabled { cursor: wait; }
+  button[aria-disabled="true"] { cursor: wait; }
   code { background: #f5f5f5; padding: .1rem .3rem; border-radius: 3px; font-size: .9em; }
-  .muted { color: #777; font-size: .85rem; }
+  .muted { color: #6b6b6b; font-size: .85rem; }
   /* The deliberate-delay note. Called out rather than left in the body copy
      because the thing it explains is indistinguishable from a hung button
      until you have read it. */
@@ -61,14 +61,16 @@
 <p class="muted">
   Every button below dispatches through <code>v-vc-command</code>. There is no
   click handler anywhere in this file - the directive adds
-  <code>.vc-loading</code> while a dispatch is in flight, disables the button,
-  adds <code>.vc-error</code> on failure, and runs optimistic rollbacks.
+  <code>.vc-loading</code> while a dispatch is in flight, marks the button
+  <code>aria-disabled</code> (a disabled button would lose keyboard focus),
+  adds <code>.vc-error</code> and announces the failure, and runs optimistic
+  rollbacks.
 </p>
 
 <p class="note-delay">
   <strong>Every dispatch on this page takes about 400ms, on purpose.</strong>
   The handlers below sleep before they answer, so the in-flight state lasts
-  long enough to watch. A button that dims, disables itself and grows a
+  long enough to watch. A button that dims, goes busy and grows a
   trailing <code>...</code> for a moment is working, not stuck: that window
   IS the thing being demonstrated. A real handler returns as fast as it can,
   and the same classes come and go too quickly to see.

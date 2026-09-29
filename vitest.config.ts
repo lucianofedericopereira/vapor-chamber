@@ -114,7 +114,7 @@ export default defineConfig({
     // `tests/vapor/**` needs `vue` aliased to the with-vapor build to run at
     // all - see vitest.vapor.config.ts. Running them here would fail on the
     // harness (two disconnected Vue instances), not on the code.
-    exclude: ['**/node_modules/**', '**/dist/**', 'tests/vapor/**'],
+    exclude: ['**/node_modules/**', '**/dist/**', 'tests/vapor/**', 'tests/browser/**'],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'json-summary', 'html'],

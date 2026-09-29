@@ -25,12 +25,14 @@ const redoCmd  = useAction('cartRedo');
         <span class="label">Last added</span>
         <span class="value last-added">{{ cart.lastAdded }}</span>
       </div>
-      <p v-if="clearCmd.error.value" class="cart-error">{{ clearCmd.error.value }}</p>
+      <p class="cart-error" role="alert">{{ clearCmd.error.value }}</p>
       <button class="btn-clear" @click="clearCmd.execute()">Clear cart</button>
     </div>
+    <!-- aria-disabled, not disabled: undoing the last step would disable the
+         focused button and send keyboard focus to <body>. -->
     <div class="cart-actions">
-      <button class="btn-undo" :disabled="cart.cantUndo" @click="undoCmd.execute()"><- Undo</button>
-      <button class="btn-redo" :disabled="cart.cantRedo" @click="redoCmd.execute()">-> Redo</button>
+      <button class="btn-undo" :aria-disabled="cart.cantUndo" @click="!cart.cantUndo && undoCmd.execute()"><- Undo</button>
+      <button class="btn-redo" :aria-disabled="cart.cantRedo" @click="!cart.cantRedo && redoCmd.execute()">-> Redo</button>
     </div>
   </section>
 </template>

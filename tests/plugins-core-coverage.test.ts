@@ -63,8 +63,8 @@ describe('plugins-core coverage - debounce', () => {
   it('catches a throwing debounced execution', () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.useFakeTimers();
-    // A throwing inner PLUGIN no longer reaches this catch - the runner converts
-    // it to VC_PLUGIN_THREW at its boundary. onMissing:'throw' is the throw that
+    // A throwing inner PLUGIN does not reach this catch - the runner converts
+    // it to plugin:failed:plugin at its boundary. onMissing:'throw' is the throw that
     // still crosses the chain by contract, so it is what exercises the catch.
     const bus = createCommandBus({ onMissing: 'throw' });
     bus.use(debounce(['act'], 100), { priority: 10 });                       // outer: defers next()

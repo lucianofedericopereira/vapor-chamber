@@ -1,221 +1,13 @@
 /**
  * vapor-chamber - I/O plugins (async/storage/network)
  *
- * retry, persist, createChannel
+ * persist, createChannel. Retry is the async bus's own (createAsyncCommandBus's
+ * `retry` option).
  */
 
-import { matchesPattern, RETRYABLE_CODES, _errResult, abortedResult, type Command, type CommandResult, type AsyncPlugin, type Plugin } from './command-bus';
+import type { Command, Plugin } from './command-bus';
 import { onSettled } from './settled';
-import { MAX_TIMEOUT_MS, countOption } from './bounds';
 import { DEV } from './dev';
-// Type-only import from ./http inside, so this pulls no HTTP code into a bundle.
-import { isRetryableStatus } from './http-errors';
-
-// ---------------------------------------------------------------------------
-// Retry plugin
-// ---------------------------------------------------------------------------
-
-export type RetryOptions = {
-  /**
-   * Maximum number of attempts (including the first). Default: 3.
-   * Floored at 1, so an unusable value still dispatches once - see the note at
-   * the clamp.
-   */
-  maxAttempts?: number;
-  /**
-   * Base delay in ms between retries. Default: 200. The computed delay is
-   * capped at `setTimeout`'s 32-bit ceiling; past it the backoff inverts.
-   */
-  baseDelay?: number;
-  /**
-   * Backoff strategy:
-   * - 'fixed'       - always wait baseDelay ms
-   * - 'linear'      - baseDelay * attempt
-   * - 'exponential' - baseDelay * 2^(attempt-1)
-   * Default: 'exponential'
-   */
-  strategy?: 'fixed' | 'linear' | 'exponential';
-  /**
-   * Which actions to retry. Glob patterns supported: '*', 'cart*'.
-   * Default: all actions.
-   */
-  actions?: string[];
-  /**
-   * Return true if the error is retryable.
-   *
-   * Default, three rules in order, after one exclusion: a user abort (an error
-   * named 'AbortError', such as the DOMException `fetch` rejects with when the
-   * dispatch's `signal` fires) is never retried. The caller cancelled; backing
-   * off would only delay the answer (tests/retry-bridge-path.test.ts). A
-   * timeout is a `TimeoutError`, not an abort, and stays retryable.
-   *
-   * - An error CARRYING an `emitter` property is retried only when its code is
-   *   transient per RETRYABLE_CODES (throttled, rate-limited, timeout,
-   *   circuit-open, ...) - known-permanent codes (validation, sealed bus, max
-   *   depth, ...) stop retrying immediately instead of wasting attempts.
-   *   Carrying the property, not being a `BusError`: that is what the check
-   *   tests, and a handler's own thrown object reaches `result.error`
-   *   unwrapped, so the two sets are not the same. This asked for a `VC_`
-   *   prefix on `.code` until v1.23.0, which a BACKEND could supply; see the
-   *   note on `defaultIsRetryable` for what changed and what did not. This
-   *   rule is also what makes a backend's refusal inside a 2xx permanent: the
-   *   transport tags it `emitter: 'transport'` and its code, being the
-   *   backend's, is not one of the six.
-   * - An error carrying an HTTP status (`error.status` or
-   *   `error.response.status`, both set by the HTTP bridge and the http
-   *   client) is retried only for 408, 429 and 5xx - the set the HTTP layer
-   *   retries itself. NARROWED after v1.19.0: any status used to be retried,
-   *   so retry() in front of `createHttpBridge` re-sent a 422 write
-   *   `maxAttempts` times while `postCommand` refused to re-send it once
-   *   (tests/retry-bridge-path.test.ts). A handler that throws a 4xx-status
-   *   error and wants it re-run must now pass its own predicate.
-   * - Every other error is retried. (Before v1.3 the default retried
-   *   everything; behavior for plain Errors is unchanged.)
-   *
-   * HTTP retry belongs on the bridge's own `retry` option, which also
-   * resends the same Idempotency-Key and honours Retry-After; keep this
-   * plugin for non-HTTP async work.
-   */
-  isRetryable?: (error: Error, attempt: number) => boolean;
-};
-
-/**
- * `setTimeout` stores its delay in a signed 32-bit int. Node clamps anything
- * larger to 1ms AND warns; browsers wrap. Either way the backoff INVERTS -
- * the longest waits become the shortest - so the cap is on correctness, not
- * taste. Measured with the defaults (200ms, exponential, 30 attempts): delays
- * reached 53,687,091,200ms and five of them were over the ceiling, i.e. the
- * final five retries fired back-to-back at the exact point the remote was
- * least able to take them.
- *
- * Capping here rather than at some friendlier number like 30s on purpose: this
- * only changes cases that were already broken, and never shortens a wait a
- * caller could actually have received.
- */
-
-function retryDelay(strategy: 'fixed' | 'linear' | 'exponential', base: number, attempt: number): number {
-  if (strategy === 'fixed') return Math.min(base, MAX_TIMEOUT_MS);
-  if (strategy === 'linear') return Math.min(base * attempt, MAX_TIMEOUT_MS);
-  return Math.min(base * Math.pow(2, attempt - 1), MAX_TIMEOUT_MS);
-}
-
-/**
- * Default isRetryable - the three rules are stated on RetryOptions.isRetryable.
- *
- * ONE FIELD, ONE OWNER, and until v1.23.0 `.code` had two. The first rule here
- * asked whether `.code` started with `VC_` and took a match as proof the library
- * had minted it, while both HTTP bridges copy the BACKEND's body code into that
- * same field - so a backend chose which branch ran. Measured in
- * tests/transport-code-owner.test.ts: `code: 'VC_CORE_THROTTLED'` on a 422 was
- * re-sent three times, after the HTTP layer had refused to re-send it once, and
- * `code: 'VC_VALIDATION_FAILED'` on a 503 suppressed a retry the status rule
- * would have allowed. No hostile backend is needed - `VC_` is a convention
- * nobody polices, and it has three claimants in this repo alone (`BusError`,
- * `VcTestError` in vitest-pure.ts, and any response body).
- *
- * `emitter` replaces the prefix because a backend cannot reach it: no transport
- * copies a body field into it, and `BusError`'s constructor sets it on every
- * instance (defaulting to 'core'), so it needed nothing added to be reliable.
- * `.code` did not move - it stays the backend's, which is what whitepaper 5.7
- * documents and what the catch path has delivered since v1.20.0.
- *
- * WHAT THE FIRST CHECK TESTS is that an `emitter` property is PRESENT, not that
- * the error is a `BusError`, and those are not the same set. A handler's throw
- * reaches `result.error` unwrapped - `tryCatchHandler` is
- * `catch (e) { return errResult(e as Error) }` - so a handler that throws an
- * object carrying `emitter` takes this branch. That is a different party from a
- * backend (the handler author is whoever configured `retry()`), so it is stated
- * rather than defended against. `VcTestError` was the one library class the
- * check missed and now carries `emitter: 'test'`, which is reachable by exactly
- * that route.
- *
- * THE RESIDUE, stated because it is the same defect shape in miniature. A 2xx
- * refusal is tagged `emitter: 'transport'` while its `.code` is the BACKEND's,
- * so a backend sending one of RETRYABLE_CODES' six exact strings gets that
- * refusal retried. Bounded and one-directional, where the `VC_` prefix was
- * unbounded and went both ways - and today every 2xx refusal is retried, so
- * this is strictly smaller than what it replaces. Pinned in
- * tests/transport-code-owner.test.ts so it is a known quantity rather than a
- * surprise.
- *
- * The status rule stays LAST of the two that read a field, and for the reason
- * it always did: a 4xx is the HTTP layer's own verdict that re-sending cannot
- * help, so this plugin must not overrule it.
- */
-function defaultIsRetryable(error: Error): boolean {
-  const e = error as { name?: unknown; code?: unknown; emitter?: unknown; status?: unknown; response?: { status?: unknown } };
-  if (e.emitter !== undefined) return RETRYABLE_CODES.has(e.code as string);
-  const status = e.status ?? e.response?.status;
-  // An abort's `code` is the NUMBER 20 (DOMException), so it always lands here.
-  return e.name !== 'AbortError' && (typeof status !== 'number' || isRetryableStatus(status));
-}
-
-/**
- * retry - async plugin that retries failed dispatches with configurable backoff.
- *
- * By default, permanent BusError codes (e.g. validation failures) are not
- * retried - see RetryOptions.isRetryable to customize.
- *
- * @example
- * const bus = createAsyncCommandBus()
- * bus.use(retry({ maxAttempts: 3, strategy: 'exponential', baseDelay: 200 }))
- */
-export function retry(options: RetryOptions = {}): AsyncPlugin & { dispose(): void } {
-  const {
-    maxAttempts: rawMaxAttempts = 3,
-    baseDelay = 200,
-    strategy = 'exponential',
-    actions,
-    isRetryable = defaultIsRetryable,
-  } = options;
-
-  // At least one attempt, always. `next()` is called ONLY inside the loop
-  // below, so a bound under 1 meant the command never reached its handler at
-  // all: the plugin returned its `lastResult` placeholder and every matching
-  // action failed with "No attempts made", which reads like an internal fault
-  // rather than a bad option. Measured at 0, -1 and NaN - handler ran 0 times
-  // in each case, silently disabling retry-covered actions.
-  //
-  // ../bounds owns the rule now: an unusable bound falls back to the documented
-  // 3, and the floor of 1 keeps a deliberate `maxAttempts: 0` running the
-  // command once rather than not at all.
-  const maxAttempts = countOption(rawMaxAttempts, 3, 1);
-
-  // The backoff sleeps pending right now, so dispose() - which the bus's own
-  // dispose() runs since v1.20.0 - can end them. Until then these timers were
-  // untracked: a disposed bus's retry kept re-calling a chain whose handlers
-  // were gone, up to maxAttempts. Clearing a timer alone would leave that
-  // dispatch's promise pending forever, so a sleep is woken with `false` and
-  // the loop returns VC_CORE_ABORTED. A sleep that runs out removes itself.
-  const sleeping = new Set<() => void>();
-
-  const plugin = (async (cmd: Command, next: () => CommandResult | Promise<CommandResult>): Promise<CommandResult> => {
-    if (actions?.length && !actions.some(p => matchesPattern(p, cmd.action))) return next();
-
-    let lastResult: CommandResult = _errResult(new Error('No attempts made'));
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      lastResult = await Promise.resolve(next());
-
-      if (lastResult.ok) return lastResult;
-
-      const error = lastResult.error ?? new Error('Unknown error');
-      if (attempt === maxAttempts || !isRetryable(error, attempt)) return lastResult;
-
-      const delay = retryDelay(strategy, baseDelay, attempt);
-      const slept = await new Promise<boolean>((resolve) => {
-        const wake = (): void => { clearTimeout(timer); resolve(false); };
-        const timer = setTimeout(() => { sleeping.delete(wake); resolve(true); }, delay);
-        sleeping.add(wake);
-      });
-      if (!slept) return abortedResult(cmd.action);
-    }
-
-    return lastResult;
-  }) as AsyncPlugin & { dispose(): void };
-  plugin.dispose = (): void => { for (const wake of sleeping) wake(); sleeping.clear(); };
-  return plugin;
-}
 
 // ---------------------------------------------------------------------------
 // Persistence plugin
@@ -264,7 +56,7 @@ export type PersistOptions<T = any> = {
    *
    * Use when the same state is touched by many rapid commands (form input,
    * scroll tracking, batched cart updates). Default: false (every successful
-   * dispatch saves immediately, matching pre-v1.2 behavior).
+   * dispatch saves immediately).
    *
    * @example
    * persist({ key: 'vc:cart', getState: () => cart.value, coalesce: true })
@@ -297,7 +89,7 @@ export function persist<T>(options: PersistOptions<T>): Plugin & {
 
   function getStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null {
     if (options.storage) return options.storage;
-    if (typeof globalThis !== 'undefined' && typeof (globalThis as any).localStorage !== 'undefined') {
+    if (typeof (globalThis as any).localStorage !== 'undefined') {
       return (globalThis as any).localStorage as Storage;
     }
     return null;
@@ -319,7 +111,7 @@ export function persist<T>(options: PersistOptions<T>): Plugin & {
       const state = deserialize(raw);
       if (state == null) return null;
       if (validate && !validate(state)) {
-        console.warn(`[vapor-chamber] persist: validation failed for key "${key}" - returning null. Persisted state may be stale after a deploy.`);
+        console.warn(`[vapor-chamber] persist: validation failed for key "${key}" - returning null.${DEV ? ' Persisted state may be stale after a deploy.' : ''}`);
         return null;
       }
       return state;
@@ -344,15 +136,15 @@ export function persist<T>(options: PersistOptions<T>): Plugin & {
     queueMicrotask(() => { _saveScheduled = false; save(); });
   }
 
-  const plugin: Plugin = (coalesce
-    ? (cmd: Command, next: () => CommandResult) => onSettled(next(), (result) => {
+  const plugin: Plugin = coalesce
+    ? (cmd, next) => onSettled(next(), (result) => {
         if (result.ok && (!filter || filter(cmd))) scheduleSave();
         return result;
       })
-    : (cmd: Command, next: () => CommandResult) => onSettled(next(), (result) => {
+    : (cmd, next) => onSettled(next(), (result) => {
         if (result.ok && (!filter || filter(cmd))) save();
         return result;
-      })) as unknown as Plugin;
+      });
 
   return Object.assign(plugin, { load, save, clear });
 }
@@ -399,10 +191,9 @@ type ChannelMessage = { __vc: true; event: string; data: any };
  * over a BroadcastChannel.
  *
  * WHAT CROSSES THE WIRE IS A FACT, NOT A COMMAND, and that is the whole design.
- * Until v1.22.0 this was a bus PLUGIN that re-broadcast every successful
- * dispatch and re-dispatched it in the receiving tab. That shape replicates
- * INTENT: each tab re-runs the handler and re-derives the outcome. Three things
- * fall out of it, all measured before this was rewritten:
+ * Re-dispatching each command in the receiving tab replicates INTENT: each tab
+ * re-runs the handler and re-derives the outcome. Three things fall out of
+ * that, measured:
  *
  *   - A handler that is not deterministic does not mirror. Two tabs running
  *     the same `cartAdd` minted `A-line-1-936891` and `B-line-1-675288` and
@@ -459,14 +250,11 @@ export function createChannel(options: ChannelOptions): {
 
   let bc: BroadcastChannel | null = null;
 
-  // Echo suppression is a plain boolean, and it is airtight here in a way it
-  // was not on the bus. The old plugin needed `_withOrigin` because a flag
-  // cleared in a `finally` holds only on a SYNC bus - on an async one the
-  // dispatch returns a pending promise and the chain runs a microtask later,
-  // after the flag is already back down. A lane `emit` has no such window: it
-  // is a tight indexed loop over the subscriber list with no promise, no
-  // plugin chain and no envelope, so it completes inside the `try`. The core's
-  // origin machinery is no longer involved at all.
+  // Echo suppression is a plain boolean, and it is airtight: a lane `emit` is
+  // a tight indexed loop over the subscriber list with no promise, no plugin
+  // chain and no envelope, so it completes inside the `try`. (A flag around a
+  // bus dispatch would not be: on the async bus the chain runs a microtask
+  // after the `finally` has lowered it.)
   let applying = false;
 
   function open(): void {

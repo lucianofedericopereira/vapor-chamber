@@ -15,13 +15,9 @@
  * The bridge is not a bus plugin, so it costs the dispatch path nothing.
  */
 
-import {
-  createCommandBus,
-  setCommandBus,
-  useCommandState,
-  createChannel,
-  persist,
-} from 'vapor-chamber'
+import { createCommandBus, setCommandBus, createChannel, persist } from 'vapor-chamber'
+// Composables from the Vue entry, which wires Vue (the root would not).
+import { useCommandState } from 'vapor-chamber/vue'
 import { createFastLane } from 'vapor-chamber/fast-lane'
 
 const bus = createCommandBus()

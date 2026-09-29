@@ -23,93 +23,74 @@ route, not one-per-command** - the action name is in the JSON body.
 
 **Response body** (success):
 ```json
-{ "ok": true, "state": { "...whatever your action returns..." } }
+{ "state": { "...whatever your action returns..." } }
 ```
+or `{ "redirect": "/login" }` for a navigation (see `onRedirect`).
 
-**Response body** (failure), an [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457)
-problem sent as `Content-Type: application/problem+json`:
+**Response body** (failure): an [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457)
+problem, sent with the status and `Content-Type: application/problem+json`,
+carrying the members the contract uses and nothing else. A 2xx whose body is
+`{ "problem": { ... } }` is read as the same failure, by the problem's own
+`status`, for a backend that cannot set the HTTP status:
 ```json
 {
-  "type": "https://example.test/problems/validation_failed",
-  "title": "Unprocessable Content",
   "status": 422,
-  "detail": "Human-readable message",
-  "code": "validation_failed"
+  "code": "validation_failed",
+  "detail": "The given data was invalid.",
+  "errors": [{ "pointer": "/payload/email", "detail": "The email has already been taken." }]
 }
 ```
 
-`state` becomes `result.value` on the client; `detail` becomes
-`result.error.message`, and `code`, an extension member, becomes
-`result.error.code`. HTTP status codes follow normal Laravel conventions:
-200 for success, 422 for a validation failure, 401 for an expired session,
-419 for an expired CSRF token, 500 for an unhandled exception.
+`state` becomes `result.value`. A failure becomes a `BusError` whose code is
+`remote:<condition>:<your code>`: the owner is the client's fact (the backend
+answered), the condition is what your `status` declares, read through one
+table that says only what RFC 9110 says of a status. `detail` is the message;
+`code`, `status`, `errors` and any other member are in `error.context`.
+`errors` points into the envelope the client sent (`/payload/<field>`, RFC
+6901), which is what `FormBus` puts on its fields. There is no `ok` flag, no
+`error` or `message`, no `type` or `title`: one member per fact.
 
-**What the client reads from a problem, and what it leaves alone.** Only
-`detail` and `code`. `type` is an opaque URI, so nothing derives a code from it;
-`title` and `status` are for other readers (curl, API tools, monitoring), and an
-app that keeps a registry of its codes can leave both out - every member of a
-problem is optional. The library parses any `+json` media type and asks for
-`application/problem+json` in `Accept` since v1.24.0.
+| Status | Condition |
+|---|---|
+| 404, 410 | `missing` |
+| 409 | `already` |
+| 401, 403, 419 | `refused` |
+| 429, 503 | `limited` |
+| 408, 504 | `timeout` |
+| 501, 502, 505 | `unexpected` |
+| any other 5xx | `failed` |
+| any other 4xx | `invalid` |
 
-**The previous shape still works**, on every path, so a backend can move one
-endpoint at a time:
-```json
-{ "ok": false, "error": "Human-readable message", "code": "validation_failed" }
-```
-A body carries one shape or the other: a problem's `detail`, or the older
-`error` (then `message`).
+So the status you send IS the declaration of what the failure is: 409 for a
+conflict with the current state, 429 or 503 for "come back later", 422 for
+input that broke a rule. A `Retry-After` header (RFC 9110) goes to
+`error.context.retryIn`.
 
-**On the batch endpoint** the response is a 200 and each failed command's
-problem rides on its own result, because RFC 9457 has no shape for several
-failures in one response:
+**On the batch endpoint** the response is a 200 and each command's answer rides
+on its own result, the problem carrying the command's own `status`:
 ```json
 { "results": [
-  { "id": "1", "ok": true, "state": { "count": 3 } },
-  { "id": "2", "ok": false, "problem": { "type": "https://example.test/problems/not_found",
-                                         "status": 404, "detail": "No such cart", "code": "not_found" } }
+  { "id": "1", "state": { "count": 3 } },
+  { "id": "2", "problem": { "status": 404, "code": "not_found", "detail": "No such cart" } }
 ] }
 ```
-`ok: false` beside `problem` is for clients older than v1.24.0, which read only
-`ok`; a current client treats a result with `problem` as a failure either way.
+A batched failure reads exactly as the same failure sent alone.
 
-`code` is optional and machine-readable, and it reaches the client on EVERY
-failure path as `result.error.code`. Branch on the string instead of parsing
-`error`:
+Branch on the code:
 
 ```js
-const result = await bus.dispatch('cartAdd', product, { quantity: 2 })
-if (!result.ok && result.error.code === 'stock_depleted') showRestockNotice()
+const result = await bus.dispatch('cartAdd', product, { qty: 2 })
+if (!result.ok && result.error.code === 'remote:limited:stock_depleted') showRestockNotice()
 ```
 
-That holds whether the failure arrived as a non-2xx (which throws an `HttpError`
-carrying `code`) or inside a 200 body, which is every batched command. Through
-v1.22.0 the second case dropped the field; both paths carry it as of v1.23.0, so
-the two are the same to a caller.
-
-**One consequence to know before choosing a code.** A failure delivered inside a
-2xx is treated as PERMANENT by the client's `retry()` plugin by default. A
-non-2xx is judged by its status instead - 408, 429 and 5xx are retried, every
-other 4xx is not. So a 422 and a `200 { ok: false }` both stop after one attempt.
-
-Know what "inside a 2xx" covers, though: on the batch endpoint it is EVERY
-failure, a crash included. `dispatchOne()` computes a status per command (500 for
-an unhandled exception) and `batch()` keeps only the body, so a batched
-`internal_error` arrives as a 200 refusal and is not retried by default. Which
-of your codes are worth re-sending is your application's rule, not the
-library's; pass it to `retry()`, scoped to the bridged actions:
-
-```js
-bus.use(retry({ actions: ['cart*'], isRetryable: (err) => err.code === 'internal_error' }))
-```
-
-The exception is worth stating because it is the one way a backend can surprise
-the client: the library reserves SIX of its own codes as transient -
-`VC_CORE_THROTTLED`, `VC_CORE_REQUEST_TIMEOUT`, `VC_TRANSPORT_TIMEOUT`,
-`VC_PLUGIN_CIRCUIT_OPEN`, `VC_PLUGIN_RATE_LIMITED` and `VC_UNKNOWN` - and
-sending one of those strings as YOUR `code` in a 2xx refusal makes `retry()`
-re-send it. Use your own namespace - `stock_depleted`,
-`validation_failed` - and the refusal stays permanent. `ERROR_CODE_REGISTRY` on
-the client is the full list if you need to check one.
+**Retries follow the condition.** The async bus re-sends through the bridge,
+on by default: a 429, 503, 504 or 408, and any status carrying `Retry-After`
+after the wait it declares; a 4xx verdict (422, 404, 403, 409) is not re-sent.
+A network failure (`transport:lost:reply`) or a 500 may have landed, so it is
+re-sent only for an action declared idempotent
+(`createAsyncCommandBus({ retry: { actions: { cartSet: 'idempotent' } } })`,
+or `retry: 'idempotent'` on the schema action) or a command carrying a key. A
+declared action sends one `Idempotency-Key` on every attempt.
 
 ---
 
@@ -148,7 +129,6 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
-use Symfony\Component\HttpFoundation\Response;
 
 class VaporChamberController extends Controller
 {
@@ -165,9 +145,16 @@ class VaporChamberController extends Controller
 
         try {
             $state = app($handler)($target, $payload, $request->user());
-            return response()->json(['ok' => true, 'state' => $state]);
+            return response()->json(['state' => $state]);
         } catch (ValidationException $e) {
-            return $this->problem($e->getMessage(), 422, 'validation_failed');
+            // Laravel's field map as the contract's errors: /payload/<field>,
+            // each segment escaped per RFC 6901 (~ -> ~0, / -> ~1).
+            $errors = [];
+            foreach ($e->errors() as $field => $messages) {
+                $segments = array_map(fn ($s) => str_replace(['~', '/'], ['~0', '~1'], $s), explode('.', $field));
+                $errors[] = ['pointer' => '/payload/'.implode('/', $segments), 'detail' => $messages[0]];
+            }
+            return $this->problem($e->getMessage(), 422, 'validation_failed', $errors);
         } catch (AuthorizationException $e) {
             return $this->problem($e->getMessage(), 403, 'forbidden');
         } catch (ModelNotFoundException $e) {
@@ -178,15 +165,13 @@ class VaporChamberController extends Controller
         }
     }
 
-    private function problem(string $detail, int $status, string $code): JsonResponse
+    private function problem(string $detail, int $status, string $code, array $errors = []): JsonResponse
     {
-        return response()->json([
-            'type' => url("/problems/{$code}"),
-            'title' => Response::$statusTexts[$status] ?? 'Error',
-            'status' => $status,
-            'detail' => $detail,
-            'code' => $code,
-        ], $status, ['Content-Type' => 'application/problem+json']);
+        $body = ['status' => $status, 'code' => $code, 'detail' => $detail];
+        if ($errors !== []) {
+            $body['errors'] = $errors;
+        }
+        return response()->json($body, $status, ['Content-Type' => 'application/problem+json']);
     }
 }
 ```
@@ -203,16 +188,20 @@ See [`examples/laravel-backend/AddToCart.php`](../../examples/laravel-backend/Ad
 namespace App\Actions\Cart;
 
 use App\Models\Cart;
+use App\Models\Product;
 use App\Models\User;
 
 class AddToCart
 {
     public function __invoke(?array $target, ?array $payload, ?User $user): array
     {
-        validator($target ?? [], ['id' => 'required|integer'])->validate();
+        // The target is identity: a missing product is a 404 (findOrFail).
+        $product = Product::findOrFail((int) ($target['id'] ?? 0));
+        // The payload is input: its field errors point at /payload/<field>.
+        $input = validator($payload ?? [], ['qty' => 'sometimes|integer|min:1'])->validate();
 
         $cart = $user?->cart() ?? Cart::session();
-        $cart->add($target['id'], $payload['qty'] ?? 1);
+        $cart->add($product->id, $input['qty'] ?? 1);
 
         return [
             'count' => $cart->count,
@@ -421,14 +410,12 @@ return ['redirect' => route('login')];
 
 The controller lifts exactly that shape - an array whose only key is
 `redirect` - to the top of the envelope (`{ redirect }`, and per result on the
-batch endpoint), which is where the bridges read it. Before v1.23.0 it was
-wrapped as `{ ok: true, state: { redirect } }` and `onRedirect` never fired: the
-dispatch succeeded with the URL as its value. A state that merely contains a
-`redirect` key among others is still returned as data.
+batch endpoint), which is where the bridges read it. A state that merely
+contains a `redirect` key among others is returned as data.
 
-`createBatchingHttpBridge` honours `onRedirect` too, as of v1.23.0 (it accepted
-the option before and ignored it). It navigates once per batch, with the first
-URL; every redirected command still fails with its own `error.context.url`.
+`createBatchingHttpBridge` honours `onRedirect` too. It navigates once per
+batch, with the first URL; every redirected command still fails with its own
+`error.context.url`.
 
 ```ts
 const bridge = createHttpBridge({
@@ -445,13 +432,13 @@ command the backend may redirect; branch on the code instead:
 
 ```ts
 const result = await dispatch('orderCancel', { id })
-if (!result.ok && result.error.code === 'VC_TRANSPORT_REDIRECT') return  // Inertia is navigating
+if (!result.ok && result.error.code === 'transport:refused:redirect') return  // Inertia is navigating
 ```
 
-Since v1.23.0 that error carries `code: 'VC_TRANSPORT_REDIRECT'` and
-`error.context.url`, so you can read the target without parsing the message, and
-`retry()` will not re-send it - a backend that redirects will redirect again, so
-re-sending only spends attempts. With no `onRedirect` configured the same code
+That error carries `code: 'transport:refused:redirect'` and `error.context.url`,
+so you can read the target without parsing the message. Its condition is
+`refused`, so the bus does not re-send it - a backend that
+redirects will redirect again, and `onRedirect` fires once. With no `onRedirect` configured the same code
 arrives with a message saying so, which is how a missing handler surfaces instead
 of a silent no-op.
 
@@ -626,8 +613,9 @@ class AnalyticsIsland extends Widget
 ```
 
 Inside `vc-search-bar`, the widget calls `emitDOMEvent(host, 'search-executed', { query })`.
-Filament's panel re-renders without a Livewire round-trip to the server
-unless you want one.
+The `#[On]` listener runs on the server, as every Livewire listener does: one
+Livewire request per event, and the panel re-renders with its answer. For an
+update that needs no server, listen in Alpine instead (Pattern 1).
 
 ### Pattern 4: vanilla DOM, no framework
 
@@ -759,7 +747,7 @@ class ProcessCheckout
     {
         $order = \App\Models\Order::create([
             'user_id' => $user?->id,
-            'items'   => $target['items'] ?? [],
+            'items'   => $payload['items'] ?? [],   // input rides in the payload
             'status'  => 'queued',
         ]);
 
@@ -804,8 +792,8 @@ class CancelOrder
 }
 ```
 
-The controller's `AuthorizationException` catch maps it to `403 + { ok:
-false, error: ... }`.
+The controller's `AuthorizationException` catch maps it to a 403 problem,
+`code: 'forbidden'`, which the client reads as `remote:refused:forbidden`.
 
 ---
 
@@ -832,7 +820,9 @@ class UpdateProfile
 ```
 
 The controller's `ValidationException` catch maps it to a 422 problem, `code:
-'validation_failed'`, with the validator's message as `detail`.
+'validation_failed'`, with the validator's message as `detail` and each field's
+first message in `errors` as `{ pointer: '/payload/<field>', detail }` - what
+`FormBus.setErrors` puts on its fields.
 
 ---
 
@@ -845,13 +835,20 @@ covers the client side of both:
   logical command, so the handler (and the request it makes) runs once. Concurrent
   duplicates share the first in-flight promise; repeats within the TTL return the
   cached result. Failures aren't cached, so a genuine retry still runs.
-- **On the wire** - `idempotent` stamps `cmd.meta.idempotencyKey`, and the HTTP
-  bridge forwards it as a standard `Idempotency-Key` request header. The backend
-  reads that header, replays the stored result for a key it has finished, and
+- **On the wire** - `idempotent` stamps `cmd.meta.idempotencyKey` (so does the
+  bus, for an action declared `'idempotent'` in its `retry` option: the
+  dispatch's id, one key for every attempt), and the HTTP
+  bridge forwards it as a standard `Idempotency-Key` request header: a Structured
+  Field String as the draft requires, the key percent-encoded and quoted
+  (`"save%3A%7B%22id%22%3A1%7D"`), which any character survives. The backend
+  unquotes and `rawurldecode`s it back to the exact key (the example
+  controller's `idempotencyKey()`; a value that is not a String is ignored, as
+  RFC 9651 ignores a field that fails to parse), replays the stored result for
+  a key it has finished, and
   answers **409** to a second request while the first with the same key is still
-  running - so even a retry that slips past the client lands once. The bridge
-  retries 408, 429 and 5xx and nothing else, so a 409 is never re-sent and the
-  client sees one outcome.
+  running, with `Retry-After: 1` - so a re-send lands once, and the bus waits
+  and comes back for the finished answer instead of settling as a conflict.
+  A 409 without `Retry-After` is `already` and is not re-sent.
 
 ```ts
 import { createAsyncCommandBus, idempotent } from 'vapor-chamber';
@@ -882,7 +879,7 @@ write) would miss the cache and run the action again, concurrently. The example
 controller therefore takes a lock on the key before the cache read and holds it
 for the whole run. From `dispatchOne()` in
 [`examples/laravel-backend/VaporChamberController.php`](../../examples/laravel-backend/VaporChamberController.php),
-line for line:
+abridged:
 
 ```php
         $cacheKey = $idempotencyKey ? "vc:idem:{$command}:{$idempotencyKey}" : null;
@@ -892,11 +889,11 @@ line for line:
         // attempt is still running (a client timeout on a slow write) misses
         // the cache and runs the action a second time, concurrently. The lock
         // is taken BEFORE the cache read and held for the whole run; a request
-        // that cannot get it is answered 409, a 4xx the bridge never retries,
+        // that cannot get it is answered 409 (`already`), which no re-send repeats,
         // so the client sees one outcome. 30s bounds a crashed holder.
         $lock = $cacheKey ? Cache::lock("vc:idem:lock:{$command}:{$idempotencyKey}", 30) : null;
         if ($lock && !$lock->get()) {
-            return $this->fail('A request with this Idempotency-Key is still running', 409, 'in_progress');
+            return $this->problem('A request with this Idempotency-Key is still running', 409, 'in_progress');
         }
 
         try {
@@ -905,7 +902,9 @@ line for line:
             }
 
             $state = app($handler)($target, $payload, $user);
-            $body = ['ok' => true, 'state' => $state];
+            $body = is_array($state) && array_keys($state) === ['redirect']
+                ? ['redirect' => $state['redirect']]
+                : ['state' => $state];
             if ($cacheKey) {
                 Cache::put($cacheKey, $body, self::IDEMPOTENCY_TTL_SECONDS);
             }
@@ -938,8 +937,8 @@ php artisan serve
 </script>
 ```
 
-The server log should show one `POST /api/vc`, and the browser console
-`{ ok: true, value: { count: 1, total: ... } }`.
+The server log should show one `POST /api/vc` answered `{ "state": { ... } }`,
+and the browser console the command's result, `{ ok: true, value: { count: 2, total: ... } }`.
 
 Once that round-trips, every other command on your bus uses identical
 plumbing: register the action class and add a line to

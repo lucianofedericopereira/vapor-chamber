@@ -7,9 +7,8 @@
  * rather than documented user-facing surface: these are the helpers a compiled
  * Vapor SFC calls. That was accepted as an explicit risk, on the condition
  * that the surface is pinned and small. This file is that pin, and it is
- * modelled on `tests/vue-bundler-vapor-exports.test.ts`, which exists because
- * the same question was previously answered by hand-quoting an export line and
- * got it wrong for two cycles.
+ * modelled on `tests/vue-bundler-vapor-exports.test.ts`: a hand-quoted export
+ * line is how such a question gets answered wrong.
  *
  * THE SURFACE IS NINE ITEMS, not "the compiler contract":
  *   - eight named imports reachable from bare `vue`, and

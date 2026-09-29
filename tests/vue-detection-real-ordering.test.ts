@@ -90,10 +90,9 @@ describe('real ordering: app mounts first, library loads second', () => {
     // Under a bundler (which is what vitest is here), `import('vue')` resolves,
     // so detection recovers a tick later.
     //
-    // CORRECTION: this comment used to read "the bundler case is genuinely
-    // unaffected". Narrow that to **the dev server**. In a production build the
-    // bare specifier does not resolve either, and the built `vapor-sfc` example
-    // was throwing on a page with Vapor bundled into it. Pinned separately in
+    // That holds under **the dev server** only. In a production build the bare
+    // specifier does not resolve either, so a built page with Vapor bundled
+    // into it would throw. Pinned separately in
     // `tests/vapor-sfc-prod-detection.test.ts`. Vitest resolves `vue`, which is
     // precisely why this suite could not see that half.
     await chamber.waitForVueDetection();

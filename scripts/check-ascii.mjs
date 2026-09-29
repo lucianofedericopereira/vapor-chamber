@@ -32,16 +32,11 @@ export const ROOTS = ['src', 'tests', 'scripts', 'bin', 'docs', 'examples', '.gi
 /**
  * Root-level files, DERIVED from the directory rather than listed.
  *
- * This was a hand-typed list of twelve names, and it was the FIFTH time a list
- * in this file came up short. `.gitignore` carried two em dashes and
- * `ascii: OK` was printed over them for as long as the list existed - a dotfile
- * has no extension, so it was on nobody's list and the test below could not see
- * it either. `tsconfig.tests.json` and `vitest.probes.config.ts` arrived in
- * v1.22.0 and were never opened for the same reason. Same failure as `.astro`,
- * `.sh` and `.tsx` below: the list has to be re-typed by whoever adds the next
- * file, and nothing says so.
+ * A hand-typed list misses whatever is added next (a dotfile has no extension
+ * and lands on nobody's list), and `ascii: OK` then prints over characters it
+ * never read.
  *
- * The root is read now, one level deep, and the only list left is what to LEAVE
+ * The root is read, one level deep, and the only list is what to LEAVE
  * OUT. That inverts the risk: a new root file is scanned by default, and an
  * exemption has to be written down with a reason, which is visible in a way a
  * missing name never is. Inclusion is decided by CONTENT, not by an alphabet -
@@ -157,14 +152,10 @@ const ALLOW = new Map([
 // Written as \u escapes, not literal characters, so this file (which defines
 // the forbidden set) stays ASCII itself.
 //
-// The second group is INVISIBLE characters, added after a zero-width space was
-// found doing real work in three files: it was being used to escape a
-// block-comment terminator inside a docblock (`@__PURE__` annotations in
-// build.mjs, the vite-ignore note in vite-hmr.ts, and - while writing the guard
-// that found them - check-doc-claims.mjs itself). The trick works, and that is
-// the problem: the character is undetectable by eye, survives copy-paste into
-// a consumer's code, and this set previously had no opinion about it while
-// banning an em dash. Rephrasing so the terminator is never written costs
+// The second group is INVISIBLE characters: a zero-width space can escape a
+// block-comment terminator inside a docblock, and the trick works - which is
+// the problem: the character is undetectable by eye and survives copy-paste
+// into a consumer's code. Rephrasing so the terminator is never written costs
 // nothing and leaves the source honest. NBSP and the BOM ride along for the
 // same reason - all three break things while looking like nothing.
 //

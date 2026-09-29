@@ -1,21 +1,12 @@
 /**
  * vapor-chamber - Vue 3.6+ Vapor-specific API
  *
- * Vue alignment history (one line per version - full per-item detail lives in
- * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log", section 9.2, the single
- * source of per-beta detail; this header records only changes to THIS file):
- *   rc.5 / rc.2 / rc.1 / beta.17 / beta.16 - pass-through. This file renders
- *          nothing; it forwards Vue's own define* functions, so rendering-side
- *          work (attrs fallthrough, interop, hydration) lands below it.
- *   v1.6.0 / beta.15 - lib-side: the define* wrappers and createVaporChamberApp
- *          gained an opt-in return generic (`<T = any>`) and `object`-typed
- *          options. Importing Vue's Vapor types here would put a hard `vue`
- *          type dependency on the main barrel and break Vue-less command-bus
- *          consumers, so callers opt in: `defineVaporComponent<MyComp>(opts)`.
- *   v1.5.0 / v1.4.0 / v1.3.0 - pass-through.
- *   v1.1.0 - Added: defineVaporCustomElement, defineVaporComponent,
- *          defineVaporAsyncComponent wrappers; useVaporAsyncCommand.
- *   v0.6.0 - Added: useVaporCommand. v0.4.0 - Added: createVaporChamberApp.
+ * This file renders nothing: it forwards Vue's own define* functions, so
+ * rendering-side work (attrs fallthrough, interop, hydration) lands below it.
+ * The wrappers and createVaporChamberApp take an opt-in return generic
+ * (`<T = any>`) and `object`-typed options: importing Vue's Vapor types here
+ * would put a hard `vue` type dependency on the main barrel and break Vue-less
+ * command-bus consumers, so callers opt in: `defineVaporComponent<MyComp>(opts)`.
  *
  * Separated from chamber.ts to keep the core composable module CDCC-compliant.
  */
@@ -47,7 +38,7 @@ import { DEV } from './dev';
  * negatives are how detection bugs survive.
  *
  * So the null stays - throwing would break the documented contract and the
- * tests that assert it - but it is no longer quiet. The call sites gate on
+ * tests that assert it - but it is not quiet. The call sites gate on
  * `DEV`, so the whole call (and every byte of message text) folds out of the
  * production IIFE builds; this helper is then unreferenced and tree-shaken.
  */
@@ -82,8 +73,9 @@ export function createVaporChamberApp<TApp = any>(
     // present-without-Vapor, or present-but-unreachable - three different
     // problems with three different fixes. vueDetectionHint() names which.
     throw new Error(
-      `[vapor-chamber] Vue 3.6+ with Vapor mode required. ${vueDetectionHint()} ` +
-      'For VDOM mode, use createApp() from vue instead.'
+      // The diagnosis ships (vueDetectionHint says why); the advice is DEV's.
+      `[vapor-chamber] Vue 3.6+ with Vapor mode required. ${vueDetectionHint()}` +
+      (DEV ? ' For VDOM mode, use createApp() from vue instead.' : '')
     );
   }
   return fn(rootComponent, rootProps) as TApp;
@@ -93,10 +85,8 @@ export function createVaporChamberApp<TApp = any>(
  * Returns the vaporInteropPlugin if available (Vue 3.6+).
  * Use this to enable mixed Vapor/VDOM component trees.
  *
- * Pass-through over Vue's plugin. Since beta.14 the returned reference is safe
- * to hold across HMR cycles (Vue no longer mutates the bridge), and since
- * beta.15 interop vnode reads are guarded against absent vnodes (per-beta
- * detail: CHANGELOG / whitepaper alignment log).
+ * Pass-through over Vue's plugin. The returned reference is safe to hold
+ * across HMR cycles (Vue does not mutate the bridge).
  *
  * @example
  * import { createApp } from 'vue';

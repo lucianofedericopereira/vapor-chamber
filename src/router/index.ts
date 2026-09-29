@@ -18,6 +18,7 @@
  * `createRouter()` is pure - IO and listeners begin at start()/app.use().
  */
 
+import { type AnnounceOption, installRouteAnnouncer } from './announce';
 import { DEV } from '../dev';
 // TYPE-ONLY. The client is never built here - it arrives via `options.http`,
 // or not at all. See the comment at `http` in createRouter below.
@@ -135,17 +136,28 @@ export type RouterOptions = {
   onError?: (error: unknown, to: RouteLocation) => void;
   /** Scroll to top after committed push navigations. Default: true. */
   scroll?: boolean;
+  /** Announce each client-side navigation to assistive technology, in an
+   *  assertive live region: `document.title`, else the first `<h1>`, else the
+   *  path. `false` turns it off; a function returns the text. Not on the
+   *  initial load or a query-only change. Default: true. See announce.ts. */
+  announce?: AnnounceOption;
+  /** CSS selector of a SMALL element (a heading, a skip link) to focus after
+   *  each client-side navigation; made focusable with tabindex="-1" only if it
+   *  is not already. Default: none (focus is not moved). See announce.ts. */
+  focusOnNavigate?: string;
 };
 
-/** Accept a bare RoutesPayload or the house envelope { ok: true, state }. */
+/**
+ * A routes payload, bare or as the wire contract answers it: `{ state }` on
+ * success, `{ problem }` (RFC 9457) for a failure.
+ */
 export function unwrapRoutesPayload(raw: unknown): RoutesPayload {
-  const candidate = raw as { ok?: boolean; state?: unknown; error?: string } & RoutesPayload;
-  if (candidate && typeof candidate === 'object' && 'ok' in candidate) {
-    if (candidate.ok !== true) {
-      throw routerError('routes_load_failed', `routes endpoint failed: ${candidate.error ?? 'unknown error'}`);
-    }
-    return candidate.state as RoutesPayload;
+  const answer = raw as { state?: unknown; problem?: { code?: string; detail?: string } } | null;
+  if (answer && typeof answer === 'object' && answer.problem) {
+    const { code, detail } = answer.problem;
+    throw routerError('routes_load_failed', `routes endpoint failed: ${detail ?? code ?? 'no detail'}`);
   }
+  const candidate = (answer && typeof answer === 'object' && 'state' in answer ? answer.state : raw) as RoutesPayload;
   if (!candidate || !Array.isArray(candidate.routes)) {
     throw routerError('invalid_routes_payload', 'routes payload has no routes array');
   }
@@ -184,10 +196,9 @@ export function createRouter<TName extends string = string>(options: RouterOptio
       : 'inline' in (source as { inline?: string })
         ? // An inline payload is already in the DOM, so read it NOW rather than
           // at start(): `base` has to be known before the history is created,
-          // and a payload-declared base that arrives later is a base that never
-          // applies. Without this, `{ inline }` + a payload base silently ran
-          // on base '' - every link fell outside the base, nothing was
-          // intercepted, and every in-app navigation was a full page load.
+          // and a payload-declared base that arrives later never applies - every
+          // link would fall outside base '', and every in-app navigation would
+          // be a full page load.
           readInlinePayload((source as { inline: string }).inline)
         : null;
 
@@ -204,13 +215,9 @@ export function createRouter<TName extends string = string>(options: RouterOptio
           base,
           hasWindow
             ? // The SAME normalizer `createMemoryHistory` applies to `base` on
-              // the line above. A private lookalike here disagreed with it on
-              // any base written with a trailing slash and no leading one:
-              // `'admin/'` normalized to `/admin/` for the strip and `/admin`
-              // for the history, so `stripBase('/admin/x', '/admin/')` returned
-              // null and the fallback seeded `'/'`. An embedded preview then
-              // rendered the wrong route, silently, and only in the branch that
-              // exists to keep embedded previews working.
+              // the line above: a lookalike that disagreed on `'admin/'` would
+              // make the strip return null and seed `'/'`, so an embedded
+              // preview would render the wrong route.
               (stripBase(window.location.pathname, normalizeBase(base)) ?? '/') + window.location.search + window.location.hash
             : '/',
         ));
@@ -219,12 +226,11 @@ export function createRouter<TName extends string = string>(options: RouterOptio
    *
    * Only two features need one - loading a `{ url }` route table and fetching a
    * blade row - and the primary documented setup, a generated route module with
-   * no blade rows, uses neither. Building it here put the whole client (CSRF,
-   * interceptors, retry, cache) in every consumer's graph: 8.5 KB raw / 3.4 KB
-   * brotli, about a quarter of this subpath, for code most apps never execute.
-   * Deferring it behind a dynamic import fixed the startup cost but still
-   * charged consumers whose bundler does not code split, and still had
-   * `createRouter` choosing a dependency on its caller's behalf.
+   * no blade rows, uses neither. Building it here would put the whole client
+   * (CSRF, interceptors, retry, cache) in every consumer's graph: 8.5 KB raw /
+   * 3.4 KB brotli, about a quarter of this subpath, for code most apps never
+   * execute - and a dynamic import would still charge a bundler that does not
+   * code split, with `createRouter` choosing a dependency for its caller.
    *
    * `vapor-chamber/router/remote` provides `routerHttp()` and `bladeFetcher()`
    * for the common case. Neither is privileged - any `HttpClient` works.
@@ -250,13 +256,10 @@ export function createRouter<TName extends string = string>(options: RouterOptio
     const cached = componentCache.get(key);
     if (cached !== undefined) return cached;
     // `Object.hasOwn`, not `components?.[key]`: `key` is `record.component`,
-    // which arrives in the ROUTES PAYLOAD - fetched over HTTP or inlined by the
-    // server, i.e. a string from outside. A plain-object lookup answered for
-    // keys nobody registered, so a row naming `constructor` resolved to
-    // `Object`, survived the missing-check below, failed `isComponentLike`,
-    // was called as a lazy import (`Object()` -> `{}`) and RENDERED as a blank
-    // component. A coded error turned into a silently empty outlet. Sixth site
-    // of the class in `../dict`.
+    // which arrives in the ROUTES PAYLOAD - a string from outside. A plain-object
+    // lookup answers for keys nobody registered: a row naming `constructor`
+    // would resolve to `Object`, be called as a lazy import and RENDER as a
+    // blank component instead of a coded error. See `../dict`.
     const entry = options.components && Object.hasOwn(options.components, key) ? options.components[key] : undefined;
     if (entry === undefined) {
       throw routerError('component_missing', `no component registered for key "${key}"`, { to });
@@ -446,9 +449,8 @@ export function createRouter<TName extends string = string>(options: RouterOptio
       // which never fires again on a bfcache restore (`pageshow` instead) -
       // onRestore below calls this again for any record still uncached.
       let stopIdlePreheat: (() => void) | null = null;
-      // ONE teardown, registered once and reading the current canceller. It
-      // used to push a fresh entry per arming, so every bfcache restore grew
-      // `teardowns` by one closure over an already-cancelled preheat run.
+      // ONE teardown, registered once and reading the current canceller - an
+      // entry per arming would grow `teardowns` on every bfcache restore.
       teardowns.push(() => stopIdlePreheat?.());
       const armIdlePreheat = () => {
         if (!hasWindow || !tableRef.value) return;
@@ -492,6 +494,15 @@ export function createRouter<TName extends string = string>(options: RouterOptio
         );
         const stampOnCommit = engine.afterEach(stamp);
         teardowns.push(stampOnCommit);
+      }
+
+      if (hasWindow) {
+        teardowns.push(
+          installRouteAnnouncer((hook) => engine.afterEach(hook), {
+            announce: options.announce,
+            focusOnNavigate: options.focusOnNavigate,
+          }),
+        );
       }
 
       await engine.navigate(history.location(), { replace: true });

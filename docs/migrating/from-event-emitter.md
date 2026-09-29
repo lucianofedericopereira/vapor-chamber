@@ -94,8 +94,8 @@ bus.register('cartAdd', (cmd) => addToCart(cmd.target));
 const result = bus.dispatch('cartAdd', { id: 42 });
 if (result.ok) console.log('added', result.value);
 
-// Plugins (logger, retry, debounce, throttle, persist, ...)
-bus.use(retry({ maxAttempts: 3 }));
+// Plugins (logger, debounce, throttle, persist, ...); the async bus retries on its own
+bus.use(logger());
 
 // Async + AbortController
 const asyncBus = createAsyncCommandBus();
@@ -149,8 +149,8 @@ matches the main bus - a listener removed mid-emit does not run) sits at
 **<!-- vc:benchFastLaneVsNano -->1.22<!-- /vc:benchFastLaneVsNano -->x**, while
 `createFastLane({ removal: 'snapshot' })` reaches
 **<!-- vc:benchFastLaneSnapshotVsNano -->1.32<!-- /vc:benchFastLaneSnapshotVsNano -->x**.
-The gap between those two modes is the price of the v1.12.0 unsub-during-emit
-identity guard, and the guard bought correctness.
+The gap between those two modes is the price of the unsub-during-emit identity
+guard, and the guard bought correctness.
 
 Single-handler `compile()` dispatch holds a different and much wider lead,
 **<!-- vc:benchCompileVsNano -->2.89<!-- /vc:benchCompileVsNano -->x nanoevents**,
@@ -159,9 +159,6 @@ and nothing above affects it. For the mode trade-off, see
 
 > These four ratios are **generated**, not typed: `npm run bench` writes them
 > through `scripts/bench-ratios-reporter.mjs`, and `npm run docs:stamp` publishes
-> them. This paragraph used to carry them by hand, with a warning that they had
-> no generator, and by the time anyone checked two had drifted: it described the
-> snapshot mode as "at parity (~0.9-1.0x)" while that mode measured consistently
-> ahead of nanoevents. Ratios rather than hz on purpose: an absolute hz figure is
+> them, so none is typed by hand. Ratios rather than hz on purpose: an absolute hz figure is
 > host state (rows here swing 20-30% run to run) and a same-run ratio is not.
 > Even a ratio moves a little, so read the second decimal as noise.

@@ -1,23 +1,21 @@
 // @vitest-environment happy-dom
 /**
- * `routerHttp()` - the client the router used to build for itself.
+ * `routerHttp()` - the router's HTTP client, in `vapor-chamber/router/remote`.
  *
- * Every other suite injects a stub client, so the REAL one was only ever
- * covered incidentally, back when `createRouter` constructed it for every
- * router whether or not anything used it. It now lives in
- * `vapor-chamber/router/remote` and is passed in like any other option, which
- * means nothing exercises it unless a test does so deliberately.
+ * Every other suite injects a stub client, and the router core never builds
+ * one (it is passed in like any other option), so nothing exercises the REAL
+ * client unless a test does so deliberately.
  *
  * Driven end to end against a stubbed `fetch`: the marker header reaches the
  * request, the payload becomes a usable table, and one client serves a reload.
- * The other half of the boundary - that the router core can no longer reach
- * this code at all - is remote-boundary.test.ts.
+ * The other half of the boundary - that the router core cannot reach this
+ * code at all - is remote-boundary.test.ts.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { isRouterError } from '../../src/router/errors';
 import { createMemoryHistory } from '../../src/router/history';
-import { createRouter } from '../../src/router/index';
 import { bladeFetcher, routerHttp } from '../../src/router/remote';
+import { makeRouter } from './fixture';
 
 const PAYLOAD = { routes: [{ name: 'home', path: '/', component: 'Home' }] };
 
@@ -41,13 +39,12 @@ describe('routerHttp', () => {
       return jsonResponse();
     }) as never;
 
-    const router = createRouter({
+    const router = makeRouter({
       history: createMemoryHistory(''),
       routes: { url: '/api/vc/routes' } as never,
       components: { Home: { name: 'Home' } },
       http: routerHttp(),
       links: false,
-      scroll: false,
       onError: () => {},
     });
     await router.isReady();
@@ -65,13 +62,12 @@ describe('routerHttp', () => {
   it('serves a reload from the same client', async () => {
     globalThis.fetch = vi.fn(async () => jsonResponse()) as never;
 
-    const router = createRouter({
+    const router = makeRouter({
       history: createMemoryHistory(''),
       routes: { url: '/api/vc/routes' } as never,
       components: { Home: { name: 'Home' } },
       http: routerHttp(),
       links: false,
-      scroll: false,
       onError: () => {},
     });
     await router.isReady();
@@ -88,14 +84,13 @@ describe('routerHttp', () => {
       return jsonResponse();
     }) as never;
 
-    const router = createRouter({
+    const router = makeRouter({
       history: createMemoryHistory(''),
       routes: { url: '/api/vc/routes' } as never,
       components: { Home: { name: 'Home' } },
       // Caller options win over the preset marker - it is a default, not a lock.
       http: routerHttp({ headers: { 'X-Vapor-Router': '0', 'X-Tenant': 'acme' } }),
       links: false,
-      scroll: false,
       onError: () => {},
     });
     await router.isReady();
@@ -137,12 +132,11 @@ describe('bladeFetcher with no client of its own', () => {
 describe('a { url } table with no client', () => {
   it('is a coded http_unconfigured, not a crash', async () => {
     const errors: unknown[] = [];
-    const router = createRouter({
+    const router = makeRouter({
       history: createMemoryHistory(''),
       routes: { url: '/api/vc/routes' } as never,
       components: { Home: { name: 'Home' } },
       links: false,
-      scroll: false,
       onError: (error) => errors.push(error),
     });
     await router.isReady().catch(() => {});

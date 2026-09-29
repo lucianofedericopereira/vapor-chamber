@@ -166,3 +166,12 @@ describe(`decodeQueryParam - the declaration is not the caller to keep`, () => {
     expect(decodeQueryParam(undefined, { type: 'array', default: 'x' })).toBe('x');
   });
 });
+
+describe('decodeQueryParam hands out copies, never the location it read', () => {
+  it('an array param is a copy: mutating it does not rewrite the parsed query', () => {
+    const query = parseQuery('?tag=a&tag=b');
+    const tags = decodeQueryParam(query.tag, { type: 'array' }) as string[];
+    tags.push('c');
+    expect(query.tag).toEqual(['a', 'b']);
+  });
+});

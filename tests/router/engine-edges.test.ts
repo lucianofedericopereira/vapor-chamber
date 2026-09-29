@@ -14,9 +14,9 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { createMemoryHistory } from '../../src/router/history';
-import { createRouter } from '../../src/router/index';
 import { isRouterError } from '../../src/router/errors';
 import type { RouteRecord } from '../../src/router/types';
+import { makeRouter as fixtureRouter } from './fixture';
 
 const ROWS: RouteRecord[] = [
   { name: 'shell', path: '/', parent: null },
@@ -30,20 +30,13 @@ const ROWS: RouteRecord[] = [
   },
 ];
 
-function makeRouter(opts: Record<string, unknown> = {}) {
-  return createRouter({
-    history: createMemoryHistory('/'),
-    routes: ROWS,
-    components: { Home: { name: 'Home' }, List: { name: 'List' } },
-    ...opts,
-  });
-}
+// The fixture's router on this file's table (its list page declares a query).
+const makeRouter = (opts: Record<string, unknown> = {}) => fixtureRouter({ routes: ROWS, ...opts });
 
 
 describe('resolve() shapes', () => {
   it('throws not_ready before the table is loaded', () => {
-    const router = createRouter({
-      history: createMemoryHistory('/'),
+    const router = fixtureRouter({
       // A remote source, so no table exists until start() resolves.
       routes: { url: '/routes.json' } as never,
       components: {},
@@ -183,8 +176,7 @@ describe('guards', () => {
     // Two targets that are BOTH away from the start: a redirect landing on the
     // location already committed is a duplicate and short-circuits, which
     // would end the chain before it could loop.
-    const router = createRouter({
-      history: createMemoryHistory('/'),
+    const router = fixtureRouter({
       routes: [
         { name: 'home', path: '/', component: 'Home' },
         { name: 'a', path: '/a', component: 'Home' },
@@ -253,8 +245,7 @@ describe('guards', () => {
 
 describe('navigating without a table', () => {
   it('reports not_ready instead of throwing out of push()', async () => {
-    const router = createRouter({
-      history: createMemoryHistory('/'),
+    const router = fixtureRouter({
       routes: { url: '/routes.json' } as never,
       components: {},
       http: { get: async () => { throw new Error('offline'); } } as never,
@@ -345,7 +336,7 @@ describe('post-commit failure', () => {
       throw new Error('scroll blew up');
     });
 
-    const router = makeRouter();
+    const router = makeRouter({ scroll: true });
     await router.isReady();
     const result = await router.push('/list');
 

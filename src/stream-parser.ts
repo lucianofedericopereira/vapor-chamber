@@ -67,12 +67,10 @@ const FORM_FEED = 0x0c;
 /**
  * The two-character JSON escapes, at module scope.
  *
- * This table used to be an object literal built INSIDE handleEscape, so a
- * fresh eight-entry object was allocated for every escape sequence in the
- * stream - in a parser whose stated inputs are LLM completions and large
- * exports, where escaped strings are the common case rather than the edge one.
- * A Map, built once: the lookup returns the mapped unit directly, so the
- * `in`-then-index double lookup goes too.
+ * Built once, not inside handleEscape: this parser's inputs are LLM
+ * completions and large exports, where escapes are the common case, so a
+ * per-escape table would allocate per escape. A Map returns the mapped unit
+ * in one lookup.
  */
 const SIMPLE_ESCAPES = new Map<number, number>([
   [LOWER_N, NEWLINE],
@@ -251,10 +249,8 @@ export class StreamParser {
    *
    * A body-less response (204, 304, a HEAD reply, or a hand-built
    * `new Response(null)`) is treated as an empty stream rather than a crash.
-   * The `!` here used to assert the body away and threw
-   * `Cannot read properties of null (reading 'getReader')` - an exception that
-   * escaped as a rejection instead of reaching `onError`, unlike every other
-   * failure in this parser. Ending immediately is exactly what a present but
+   * Asserting the body away would throw on `getReader`, as a rejection that
+   * skips `onError`. Ending immediately is exactly what a present but
    * zero-chunk body does: the read loop exits at once, the final
    * `decoder.decode()` contributes nothing, and `end()` runs - so this is the
    * same path, not a special case. `end()` still reports an unclosed structure

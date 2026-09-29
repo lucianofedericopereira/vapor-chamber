@@ -27,11 +27,9 @@ const FROZEN = 1_000_000;
  * derived from it.
  *
  * Both run under FAKE timers, so no real time passes and the exact value is
- * immaterial - these are names, not tuned numbers. They used to be `10` and
- * `25` against a real `setTimeout`, which asserted a cache HIT on the statement
- * immediately after the write: on a loaded machine a scheduling hiccup between
- * those two adjacent statements outlived the 10 ms TTL, the entry expired
- * early, and the test failed with nothing wrong with the cache.
+ * immaterial - these are names, not tuned numbers. Real timers would make a
+ * cache HIT asserted right after the write flaky: on a loaded machine a
+ * scheduling hiccup between two adjacent statements can outlive a short TTL.
  */
 const EXPIRY_TTL = 10;
 const PAST_EXPIRY = EXPIRY_TTL * 3;

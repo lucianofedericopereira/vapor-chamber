@@ -2,6 +2,571 @@
 
 All notable changes to this project will be documented in this file.
 
+## Unreleased
+
+### Changed (breaking): a failure's code is `owner:condition:subject`, and the owner comes from the wiring
+
+Every failure the library, a plugin or a transport raises is a `BusError` whose
+`code` says who raised it, what went wrong from a closed vocabulary (`missing`,
+`already`, `invalid`, `refused`, `limited`, `timeout`, `lost`, `aborted`,
+`exceeded`, `failed`, `unexpected`, `unknown`), and what it is about. The owner
+is never typed at a site: the bus hands each party a `fail` bound to its owner
+(`core` inside the bus, a plugin's declared `id`, `transport`, `remote` for a
+backend), so no party can raise under another's name. Designed from RFC 3463's
+`class.subject.detail`, AIP-193's (domain, reason), OpenTelemetry's scope bound
+at `getTracer(name)` and Temporal's runtime-only failure kinds
+(docs/plan-failures-and-contract.md 4.5).
+
+| Was | Is |
+|---|---|
+| `VC_CORE_NO_HANDLER` | `core:missing:handler` |
+| `VC_CORE_THROTTLED` | `core:limited:handler` (`register({ throttle })`), `throttle:limited:handler` (the plugin) |
+| `VC_CORE_REQUEST_TIMEOUT` | `core:timeout:request` |
+| `VC_CORE_MAX_DEPTH` / `VC_CORE_SEALED` / `VC_CORE_ABORTED` | `core:exceeded:depth` / `core:refused:bus` / `core:aborted:dispatch` |
+| `VC_CORE_BEFORE_CANCEL` | `core:refused:hook` |
+| `VC_PLUGIN_THREW` | `<plugin id>:failed:plugin` (`plugin:failed:plugin` when it declares none) |
+| `VC_PLUGIN_CIRCUIT_OPEN` / `VC_PLUGIN_RATE_LIMITED` | `circuitBreaker:limited:action` / `rateLimit:limited:action` |
+| `VC_VALIDATION_FAILED` | `validator:invalid:payload`, `validateSchemas:invalid:payload` |
+| `VC_TRANSPORT_TIMEOUT` / `_CLOSED` / `_QUEUE_FULL` | `transport:timeout:reply` / `transport:lost:reply` / `transport:lost:command` |
+| `VC_TRANSPORT_REDIRECT` / `_PROTOCOL` | `transport:refused:redirect` / `transport:lost:result` |
+| `VC_UNKNOWN` | `core:unknown:error`, no longer retryable |
+| `VC_TEST_*` (seven) | `test:missing:tap`, `test:already:instance`, `test:unexpected:version`, `test:lost:tap`, `test:invalid:files`, `test:missing:run`, `test:missing:coverage` |
+| a backend's failure (any path) | `remote:<condition of its status>:<its code>` (next entry) |
+
+**Migrating:** compare the new strings. `RETRYABLE_CODES` is
+`RETRYABLE_CONDITIONS` (`limited`, `timeout`); new `ownerOf(e)` and
+`conditionOf(e)` read the parts, `failureCondition(e)` any failure's.
+`BusError.severity`, `BusError.emitter` and the `BusEmitter` type are gone:
+whoever logs a failure decides its level (the catalogue's `severity` is the
+suggestion), and the owner is in the code. A hand-built `new BusError('limited:quota', ...)`
+is the app's (`app:limited:quota`). A plugin declares its owner as `id`
+(`Object.assign(fn, { id: 'myPlugin' })`) and receives its `fail` as a third
+argument; a plugin that calls another passes its own `fail` on; a plugin called
+outside a bus in a test is wrapped with the new `wired(plugin)`, exported
+from `vapor-chamber` beside `createTestBus` (not from `vapor-chamber/vitest`,
+whose pure entry imports nothing from the library at runtime).
+
+**What it closes.** A backend could make a permanent refusal retryable by
+sending one of six library code strings in a 2xx body (the residue stated in
+v1.23.0). The verdict is now the failure's condition: a backend's code is the
+subject, after the owner and the condition, so no string it sends can reach
+the verdict. `code` is read-only (a private field with a getter), so neither
+owner nor condition can be rewritten after the fact.
+
+**What else changed with it.**
+- `toJSON()` is the failure as an RFC 9457 problem with the members it needs:
+  `detail`, `code`, `action`, the context as extensions; `type` implicit. The
+  transports' reader reads that shape back, so a failure crossing a worker, a
+  channel or storage has one shape both ways.
+- The stack is decided once, by the constructor: only `failed` (a bug) captures
+  one; every expected refusal is control flow and skips it.
+- The catalogue lost its `emitter` column (the owner is the code's first part);
+  its `retryable` column is an outcome of the condition, asserted. The registry
+  sweep now asks which site MINTS each code: every minted code has a row, and
+  the eight declared-but-never-raised codes are listed with their reasons.
+- The test double mints as `core`, so a test reads the codes production does.
+
+**Speed** (three-arm A/B, production, 11 rotated rounds, against the previous
+tree; the self-control arm is the noise band): the happy path is unchanged,
+0.99-1.03x on bare, three-plugin, async, throttle/circuit/rateLimit passing and
+`retry` passing. Failures that used to capture a stack are 4-12x faster: no
+handler 0.086x, circuit open 0.097x, rate limit 0.101x, `retry` on a permanent
+refusal 0.26x. Refusals that already skipped it are within noise
+(1.02-1.07x). Locking `code` by `freeze` or a non-writable property cost 10-30%
+on those refusals and was not shipped.
+
+**Size**, measured on the new IIFE target (next entry), against the old code on
+that same target: full +79 / +57, core +12 / +58, elements +12 / +46 raw /
+brotli; the budgets are set to the new, lower numbers. The Blade consumer
+bundle (ESM) measures 6,328 brotli against 6,260; its ceiling moves to 6,340,
+with the steps in `tests/esm-treeshake.test.ts`.
+
+### Changed (breaking): one wire contract, and retries by it
+
+The answer to a command is the same shape on every wire
+(docs/plan-failures-and-contract.md 4.4): `{ state }` on success, `{ redirect }`
+for a navigation, an RFC 9457 problem on failure, with only the members it
+uses: `{ status, code, detail, errors? }`. A single command's failure is its
+non-2xx response; a batched result or a WebSocket frame is `{ id, ... }`. The
+client reads a problem as `remote:<condition of its status>:<code>`, the
+condition from a status table that says only what RFC 9110 says of a status,
+`detail` the message, everything else `error.context`. Removed, on both sides:
+`{ ok: false, error, code }`, the `ok` flag, `error` and `message` as message
+fields, `type` and `title`; `FormBus.setErrors` takes only
+`[{ pointer: '/payload/<field>', detail }]`, which the reference controller now
+sends for a `ValidationException` (it sent no field errors at all).
+
+Retries read the same contract (`failureCondition(error)`); who retries, and
+what, is the next section. A redirect (`transport:refused:redirect`) is never
+re-sent, and a batch that answers without a command's result
+(`transport:lost:result`, it may have run) is re-sent only with a key - 1.24
+re-sent neither, and `tests/wire-contract.test.ts` pins both. The bridges'
+`retry` and `noRetry` options are gone (a declaration of "safe to send again"
+replaces them). The outbox keeps a record whose answer declared a
+`Retry-After` and flushes again when that wait is over; `dispose()` ends the
+wait. `serialize()`'s lanes, the retry's waits and the outbox's wait are one
+module (`src/scheduler.ts`).
+
+No external consumers; the reference controller, the example servers, the
+guides and the tests moved with it (`tests/wire-contract.test.ts`).
+
+### Changed (breaking): the async bus retries, by class, and `retry()` / `retrying()` are gone
+
+The async bus re-sends the call that produced the outcome - a handler, or a
+plugin declaring `transport: true` (the three bridges do) - so the plugins
+outside see one dispatch (docs/plan-shape.md 4). On by default:
+
+- **By class.** Transient, always: `limited`, `timeout`, any failure declaring
+  `retryIn` (a `Retry-After`), after that wait. Uncertain - `lost`, `failed`
+  (a 500, a handler's throw), `unexpected`, `unknown`: the first attempt may
+  have landed - only for an action declared idempotent or a command carrying
+  an idempotency key. Never: a verdict, an abort, a depth bound, a library
+  bug, the bus's own `register({ throttle })` refusal (a throttle drops
+  repeats), an outbox replay (its scheduler owns it).
+- **Bounded.** 3 attempts; full jitter under `200ms * 2^n`, capped at 20s; a
+  declared wait clamped to the same cap. `dispose()` and the dispatch's own
+  signal end a wait (`core:aborted:dispatch`). A failure sent more than once
+  carries `context.attempts`.
+- **Budgeted per bus** (gRPC A6): 10 tokens, a failure costs one, a success
+  refunds a tenth, no retry below half.
+- **Declared.** `createAsyncCommandBus({ retry: { maxAttempts, baseDelay,
+  maxDelay, actions: { 'cart*': 'idempotent', orderPay: false, searchRun: 2 } } })`;
+  `retry: false` turns it off; `retry` on a schema action joins
+  `retry.actions`. An action declared idempotent gets its dispatch id as its
+  `Idempotency-Key`, one for every attempt.
+
+Migration: `bus.use(retry(opts))` and `bus.use(retrying(bridge))` go; use the
+bridge alone and declare on the bus. 1.24's `retry()` re-sent a 500 and a
+handler's plain throw by default; now declare the action `'idempotent'` for
+that. `RETRYABLE_CONDITIONS` is `limited` and `timeout`, and the registry's
+`retryable` column follows it (`core:unknown:error` reads false). The IIFEs'
+`connect()` and `createApp()` take the bus's `retry` option in place of
+`retry: n`. `conditionOfStatus` and `failureCondition` moved into the core
+(still exported from the root; no longer from `http-errors`). New types from the root: `AsyncCommandBusOptions`,
+`RetryOptions`, `RetryDeclaration`, `AsyncSchemaCommandBusOptions`. Size: the IIFEs
++114 to +136 B brotli, the policy now inside the async bus they create.
+The reference controller answers its `409 in_progress` (a key still running)
+with `Retry-After: 1`, so the bus's re-send comes back for the finished answer
+instead of settling as a conflict; the examples, guides and READMEs moved
+with it. `tests/retry-policy.test.ts`.
+
+### Changed: the IIFE bundles target 2022 browsers
+
+The `<script>`-tag builds target Chrome 100, Firefox 100 and Safari 16 (was
+Chrome 80, Firefox 75, Safari 13). Below that floor `?.`, `??`, class fields and
+private fields were lowered into helpers in every bundle; above it all three are
+native. Core IIFE 27,164 -> 25,923 raw, 7,992 -> 7,727 brotli, with the change
+above included. A page on an older browser keeps working with the previous
+release's IIFE. The ESM build (what apps bundle) was already es2022.
+
+### Changed: the async bus's `request()` settles one promise
+
+It raced three (the dispatch, the timer, the caller's abort); it now settles
+one through a single `done`, as the sync bus's `request()` does, and removes
+its dedup entry only while that entry is still its own. Measured on a request
+whose responder answers at once: 2,958 -> 2,293 ns. Settled results are
+unchanged (`tests/request-dispose-ab.test.ts`).
+
+### Changed (breaking): the HTTP client's `safe` helpers return the contract's problem
+
+`http.safe.*` resolved `error` to the response body as it came, or to
+`{ message, code }` built for the occasion. It is now the RFC 9457 problem the
+wire contract uses (`ProblemDetails`, now exported from `http-errors`): the
+backend's body with its `status` added, `detail` its sentence or
+`HTTP <status>`; with no response (a timeout, an abort, the network)
+`{ detail }` only. Read `error.detail` where you read `error.message`.
+
+`HttpError.status` is gone: it always equalled `response.status`, which the
+HttpClient contract already guarantees a failure carries. Read
+`error.response?.status`; `failureCondition` and the outbox's verdict read it
+there too, so a custom client's error is judged by its `response`, not by a
+bare `status` field.
+
+### Changed (breaking, types only): `Plugin` is typed for either bus
+
+`Plugin` declared `next: () => CommandResult` while installing on the async
+bus, where `next()` may be a promise; the built-in plugins escaped it with
+`as unknown as Plugin` and `const plugin: any`. It is now generic:
+`<R extends CommandResult | Promise<CommandResult>>(cmd, next: () => R, fail) => R | CommandResult`,
+a sync plugin on the sync bus and an async one on the async bus. A plugin that
+reads the result settles it through `onSettled` (now exported, with
+`MaybeAsyncResult`); reading `.ok` straight off `next()` no longer compiles as
+a `Plugin`, which is the defect it would be on the async bus. A plugin for one
+bus only is a `SyncPlugin` or an `AsyncPlugin`; `PluginParts` is what every
+plugin may carry (`dispose`, `id`). The async bus has one `use(AsyncPlugin)`
+(a `Plugin` fits it), `BaseBus.use` takes a `Plugin` rather than `any`, and
+the IIFEs' `connect({ plugins })` takes `AsyncPlugin[]`. No cast is left in the
+built-in plugins. It found the defect in two example plugins and in the
+README's timing example, all corrected.
+
+### Changed: every `limited` refusal declares when to come back
+
+`circuitBreaker()` and `rateLimit()` refuse with `context.retryIn`, as a
+throttle and a `Retry-After` already did: the time left until the circuit goes
+half-open, and until the oldest dispatch leaves the window. `retry()` waits
+that time instead of spending its attempts on refusals, and the outbox flushes
+again when it is over, whatever order the plugins are installed in. No new
+option and no shared state: the wait travels on the failure, where the
+contract already carries it.
+
+### Removed (breaking): `agentOrigin()` from `vapor-chamber/mcp`
+
+A no-op since v1.12.0, deprecated and "kept for one release": the core stamps
+`meta.origin === 'agent'` on MCP-driven dispatches itself. Delete the
+`bus.use(agentOrigin(), ...)` line. Its tests now assert the core's stamp.
+
+### Added: `failureCondition` from the package root
+
+A custom `isRetryable` reads the same condition the default rule does
+(`failureCondition(error)`: a library failure's own condition, an HTTP
+response's status through the status table, a timeout, an abort, `lost`),
+instead of matching statuses inside `error.message`, which is what
+`examples/feature-retry.ts` taught; it now uses it, and `retrying()` for the
+wire.
+
+### Changed (breaking, reference controller): an `Idempotency-Key` that is not a String is ignored
+
+The PHP controller accepted a raw, unquoted key "from a client that predates
+the quoting". A value that is not a Structured Field String fails to parse,
+and RFC 9651 ignores a field that fails to parse: the request runs with no
+key.
+
+### Fixed: the examples teach the current shapes
+
+Read in full, every example and companion: the Laravel app and backend, the
+Astro, island-cart, Vapor SFC and router demos, the patterns and the feature
+snippets. Old shapes replaced (`{ ok }` answers, `quantity`, a composable from
+the package root in a Vue component, `useCommand` inside React, statuses read
+out of `error.message`, a hand-rolled retry, uncoded plugin refusals, the
+PHP actions validating the target so a field error pointed at a payload field
+that did not exist); pressed buttons use `aria-disabled` instead of dropping
+keyboard focus with `disabled`; outcomes reach a live region or `announce()`;
+text colours meet 4.5:1 (WCAG 1.4.3); the static example server no longer
+crashes on a malformed URL.
+
+### Fixed: the sprinkled-Blade example is accessible
+
+It disabled the focused button while busy, which sends a keyboard user's focus
+to `<body>` (the defect `v-vc-command` avoids), wrote the backend's message
+into `innerHTML`, and its status line was not a live region. It now marks the
+button `aria-disabled` and ignores a press in flight, writes text, and
+announces the outcome (`role="status"`).
+
+### Changed: source comments carry the current reason, not the release history
+
+Release-by-release logs in module headers, "used to" narratives and version
+tags on comments are rewritten as the rule each one established, keeping the
+measurement or the test that pins it; the history stays in this file.
+
+### Fixed (router): typed params match only their type
+
+A row's `params: { id: 'int' }` compiled to `[^/]+` and cast with `parseInt`,
+so `/products/7x` and `/products/7.5` resolved product 7 and `/products/abc`
+handed an `int` param over as the string `'abc'`; a `bool` read anything but
+`1`/`true` as false. A typed param with no regex of its own now matches only
+its type (`int`: `-?\d+`, `bool`: `1|0|true|false`, case-insensitive like the
+rest of matching), so a URL that does not fit falls through to the next row.
+
+### Fixed (router): query params and pagination hand out values, not the location
+
+- `decodeQueryParam` returned a present array param by reference, so a
+  component's `tags.value.push(...)` rewrote the committed location's query
+  while the URL stayed as it was. It returns a copy, as it already did for a
+  declared default.
+- `usePagination()`'s `page` is a number even on a route that declares no
+  `page` param (it read `?page=2` as `'2'`); the route's own declaration still
+  wins.
+
+### Fixed (router): `revalidateRoutes` never fails the command it follows
+
+A revalidation map naming a record outside the current chain threw inside the
+plugin after the mutation had succeeded: on a sync bus the command came back
+as `plugin:failed:plugin`, on an async bus it was an unhandled rejection. The
+coded `unknown_route_name` error now goes to `onError` (default
+`console.error`) and the command's result passes through. The plugin declares
+`id: 'revalidateRoutes'`.
+
+### Changed (breaking, router): a routes endpoint answers by the wire contract
+
+`unwrapRoutesPayload` (the `{ url }` and `{ inline }` route sources) read the
+old `{ ok, state, error }` envelope. It accepts a bare payload, `{ state }`,
+or `{ problem }` - the last as a `routes_load_failed` carrying the problem's
+`detail`.
+
+### Fixed: `authGuard` refuses with a code
+
+Its refusal was a plain `Error`, the one library refusal without a code, so
+`retry()` re-sent an unauthenticated command and a circuit breaker counted it
+as a failing server. It is now `authGuard:refused:action`, raised through the
+plugin's own `fail` (`id: 'authGuard'`), and in `ERROR_CODE_REGISTRY`. A
+protected prefix matched the exact action name twice over; once is enough.
+
+### Fixed: a backend's failure opens the circuit breaker
+
+`circuitBreaker()` skipped every `failed` condition to ignore a plugin that
+threw, so a backend's 5xx (`remote:failed:<code>`) never counted and the
+circuit never opened on the failure it exists for. It now skips only a party's
+own throw, by the rule `retry()` already used (one internal predicate for
+both). A plugin that throws still neither counts nor resets the run.
+
+### Fixed: a history cleared while an undo is in flight stays cleared
+
+If the server refused an undo that was still pending when `clear()` ran, the
+revert pushed the command back into the undo stack of a history the user had
+just cleared. A revert now moves a command only if it is still where the undo
+put it. Found by the coverage pass; `tests/history-undo-lands.test.ts` (failed
+on the old code).
+
+### Fixed: `retry()` no longer builds an Error on every successful dispatch
+
+It opened each dispatch with `_errResult(new Error('No attempts made'))`, a
+stack capture on every call, success included, for a result that could never
+be returned (at least one attempt is guaranteed). Measured: `retry` alone
+48,857 ns per successful dispatch against 5,635 without it, 6,031 once fixed; a
+realistic chain (validator, idempotent, serialize, circuitBreaker, retry)
+halved, 69,001 to 34,135 ns. `tests/retry-happy-path.test.ts`.
+
+### Fixed: `register()`'s cleanup removes only what it registered
+
+It deleted whatever handler (and undo handler) held the action name when it
+ran. KeepAlive with a `max` sets up the new page and THEN evicts the old one,
+so the evicted page's cleanup deleted the handler of the page on screen:
+`dispatch` answered `core:missing:handler`. The whitepaper's rule ("the newest
+handler always wins regardless of teardown") was drawn from HMR, where the
+order is the other way round. `createTestBus()` had the same cleanup and now
+matches. `tests/register-ownership.test.ts` (5, all failed on the old code,
+including a real Vapor KeepAlive).
+
+### Fixed: a store held outside any scope is no longer disposed under its owner
+
+`docs/store.md` says the last holder out disposes and an unscoped caller owns
+`$dispose()`, but only scoped holders were counted: a module-level store was
+disposed by the first component that joined and left, its actions answered
+`ok: false`, and the next `useStore` built a fresh store with its state reset.
+A call outside any scope now pins the store until its owner disposes it.
+`tests/store-unscoped-holder.test.ts`.
+
+### Fixed: `useCommand().register` follows KeepAlive
+
+`useCommandHistory` and `useCommandError` paused for a KeepAlive deactivation;
+`useCommand`, the composable that registers handlers, did not, so after A -> B
+-> A the cached B's handler answered while A was on screen. A deactivated page
+now releases its handlers and takes them back when activated (register()'s
+cleanup removes only its own, above). Listeners (`on()`) are unchanged: whether
+a cached page keeps listening is still an open decision.
+`tests/usecommand-keepalive.test.ts`.
+
+### Fixed: errors match the library's own catalogue
+
+`validator()` refused with a plain `Error` (no code) although the catalogue
+declares a validation code for per-action validation; it now refuses with
+`validator:invalid:payload`, the message still the rule's own. One consequence: `retry()`'s
+default rule treated the uncoded error as retryable (no status), so a refused
+validation was retried; a coded permanent refusal is not. And three sites built
+the throttled and aborted refusals with a severity the catalogue contradicted
+(severity has since left the failure object; see the first entry). `tests/errors-match-catalogue.test.ts`.
+
+### Fixed: the `Idempotency-Key` header is a Structured Field String
+
+The draft this bridge follows makes the value a quoted, escaped String (RFC
+9651); it was sent raw. The key is the command plus its target as JSON, so it
+was unquoted and unescaped, and a target with any character outside Latin-1
+(an emoji, CJK text) made a value `Headers` refuses outright: the request never
+left. Now the key is percent-encoded (the web's own encoding, UTF-8) and
+quoted: only unreserved ASCII and `%XX`, so an sf-string with nothing left to
+escape, reversible, so no two keys collide. The reference controller unquotes
+and `rawurldecode`s it back to the exact key, the same one the batching bridge
+sends in the body, and still accepts a raw key from an older client. Two
+encodings were measured and dropped first: hand escaping plus `%uXXXX` (+63 B
+brotli on the Blade consumer bundle), and the same in one regex pass (+87).
+**Upgrade order: the backend first**, or a quoted key misses a cache written
+under the raw one for up to the replay window. `tests/idempotency-header.test.ts`;
+`docs/integrations/laravel.md` updated, and its "line for line" snippet
+corrected where it had drifted from the controller (`fail` -> `problem`, the
+redirect-aware success body).
+
+### Changed: error advice is DEV-only; one throttle gate
+
+Production error messages state the fact; the fix sentence is DEV's, and the
+catalogue (`ERROR_CODE_REGISTRY`, each code's `fix`) is where a production
+reader finds it (docs/plan-failures-and-contract.md, settled item 5). Touched:
+`core:refused:bus`, `core:exceeded:depth`, `core:timeout:request`,
+`core:missing:handler` (production is `No handler registered for "x".`), the
+naming-pattern violation, `createVaporChamberApp`'s VDOM tail and `persist`'s
+"stale after a deploy". Match on `.code`, never on `.message`; development
+builds read as before. `vueDetectionHint` still ships: it is a diagnosis, and a
+`<script>`-tag page only ever runs a production IIFE.
+
+`register(action, h, { throttle })` and the `throttle()` plugin were the same
+gate written twice; both use one now, so the plugin also skips the stack
+capture on its rejected path, the hot one. The refusal reads `"x" throttled.
+Retry in Nms.` from either (it said `Handler "x"` or `Action "x"`).
+
+These paid for this release's fixes without a raise (measured before the
+failure shape and the IIFE target in the first two entries): all three IIFE
+budgets went DOWN (full 41,172 / 12,303, core 27,164 / 7,992, elements 28,928 / 8,499
+raw / brotli) and the Blade consumer bundle measures 6,260 brotli, below
+v1.24.0's 6,363; its ceiling locks at 6,280.
+
+### Added: `announce()` - status messages for assistive technology; `vc-error` made semantic
+
+`announce(message, { assertive })` says something to a screen reader without
+moving focus (WCAG 4.1.3), through ONE shared pair of live regions per document
+(polite, assertive), created on first use: the pattern of Angular CDK's
+LiveAnnouncer and React Aria's `announce()`. A repeated message is heard again.
+`setAnnouncer(fn)` lets an app take the announcing over (its own status bar, its
+own words); `setAnnouncer(null)` hands it back. Exported from the root.
+
+Two features now speak through it instead of on their own:
+
+- **`v-vc-command` failures.** `vc-error` stays for styling, but a class is
+  invisible to a screen reader. A failed dispatch now also announces the
+  failure's message assertively, focus left where it is. The words are the
+  failure's own: since 1.24 a backend problem's `detail`, already localized.
+  An app that wants other words uses `setAnnouncer`.
+- **The router's page changes** use the shared assertive region; the router no
+  longer creates a region of its own.
+
+`tests/a11y-announce.test.ts` (7), `tests/browser/command-errors.browser.test.ts`
+(3; 2 failed on the old code). Size: `./directives` +0.2 KB brotli, `./router`
+unchanged, core unchanged, IIFEs unchanged.
+
+### Fixed: an undo the server refuses no longer reads as "undone"
+
+`useCommandHistory()` and the `history()` plugin moved their stacks before an
+undo or redo and never looked at the outcome. On an async bus, an undo the
+server refused left the history saying "undone": the command was no longer
+undoable, and a redo was offered for a change that never happened. For a
+screen-reader user, who cannot see that nothing changed, that is
+indistinguishable from success (WCAG 3.3.4).
+
+Now the stacks still move first, so anything observing the call sees what it
+always saw, and move BACK when the undo or redo does not land: a throw, a
+rejection, or a failed `CommandResult`, returned or resolved. While one is in
+flight, another press does nothing. The API is unchanged: `undo()` and
+`redo()` return the command at once, and a synchronous local undo behaves
+exactly as before. `tests/history-undo-lands.test.ts` (8; 6 failed on the old
+code). A first cut that moved the stacks only AFTER the call broke the pinned
+island-cart wiring (a listener on a redo's re-dispatch reads the redone state),
+which is why the order is move-then-revert.
+
+**One implementation.** The two histories each carried their own stacks,
+recording rule, undo and redo, so this defect existed twice. They now wrap one
+internal ledger (`src/ledger.ts`) and differ only where they genuinely differ:
+where a command is recorded, what else is skipped, how the stacks are exposed.
+The `history()` plugin's `bus` option is now typed `CommandBus |
+AsyncCommandBus`, what it already worked with at runtime.
+
+**Size:** full IIFE +787 raw / +278 brotli (budget raised, measured steps in
+`scripts/check-size.mjs`); core and elements IIFEs unchanged; ESM import
+everything 24.9 KB brotli either way. `tests/history-redo-ab.test.ts` now derives
+a ledger per arm, so its reverted baseline still reaches the code it times.
+
+### Added: FormBus takes the server's errors, and says what an element needs to make them accessible
+
+Most real form errors come from the server, not from client rules, and a form
+had no way to show them: `onSubmit` throwing a 422 made `submit()` reject, and
+its field errors were lost. Now:
+
+- `form.setErrors(errors)` takes an RFC 9457 problem's `errors` list
+  (`{ pointer, detail }`; `/email`, `#/payload/email` and `/address/city` all
+  resolve to their field) or a Laravel field map (`{ email: [...] }`). Each
+  error shows at once and clears when its own field changes; rule errors keep
+  working; `reset()` clears them; `submit()` clears them before validating,
+  since the server decides again.
+- `submit()` lands a field-carrying failure itself: when `onSubmit` throws an
+  error whose problem has `errors`, the fields are marked and it resolves
+  `false`. Any other failure still rejects, as before.
+- `form.aria(field)` gives `aria-invalid` and `aria-describedby`, set only while
+  the error is shown; `form.errorId(field)` is the message element's id, unique
+  per form (two forms on a page cannot produce duplicate ids);
+  `form.firstInvalid()` names the field to focus after a failed submit.
+
+The messages are the backend's, already localized; the form holds no strings.
+`tests/form-a11y.test.ts` (11; 10 failed on the old code), and in real Chromium
+`tests/browser/form-errors.browser.test.ts`: Playwright's role engine reads the
+field as invalid, described by the server's message.
+
+### Fixed: a `role="button"` element with `v-vc-command` works from the keyboard
+
+A `<div role="button">` carrying the directive answered pointer clicks only:
+not focusable, and Enter and Space did nothing (WCAG 2.1.1). A native
+`<button>` gets both from the platform; a role does not. The directive now gives
+a non-native `role="button"` element what the ARIA Authoring Practices ask of a
+button: `tabindex="0"` when it has none (removed again at teardown; a tabindex
+the app set is kept), Enter activates on key down, Space on key up with its page
+scroll prevented. Activation is `el.click()`, so it takes the same path as a
+pointer press. A key the app already handled (`defaultPrevented`) is left
+alone, and a native button still dispatches once per key.
+`tests/browser/command-keyboard.browser.test.ts` (6, real key presses through
+Playwright; 3 failed on the old code).
+
+### Added: route changes reach assistive technology
+
+A full page load announces the new page to a screen reader and restarts focus;
+a client-side navigation did neither. The router now announces each one in an
+assertive live region (`document.title`, else the first `<h1>`, else the path),
+skipping the initial load and query-only changes, and removes the region on
+`destroy()`. New options: `announce` (default `true`; `false`, or a function
+returning the text) and `focusOnNavigate` (a selector for a small element the
+app provides, focused after each navigation; made focusable only if it is not).
+Rules from Next.js's route announcer and Gatsby's user testing with disabled
+users. `tests/router/announce.test.ts` (7), and in real Chromium
+`tests/browser/route-announce.browser.test.ts`.
+
+**Behaviour change:** after the first navigation, the document gains the shared
+visually hidden live regions (`<div data-vc-announcer="assertive">`, see "Added:
+`announce()`" below); the router no longer creates a region of its own. Pass
+`announce: false` to opt out.
+
+### Added: `aria-current="page"` on the current link
+
+`stampActiveLinks` now sets `aria-current="page"` on the exactly-active anchor
+and removes it when the route moves on; an `aria-current` the page set for
+another purpose (`"step"`) is left alone. Section links that are only a prefix
+match keep `data-active` and are not marked, since ARIA asks for one current
+element per set. `MenuItem.exactActive` and `Breadcrumb.current` now say they
+are the fields to bind `aria-current` to; `MenuItem.active` says it is not.
+
+### Fixed: `v-vc-command` no longer takes keyboard focus away
+
+While a dispatch was in flight the directive set `disabled` on its button.
+HTML's focus fixup rule answers that by moving focus to `<body>`, so a keyboard
+user who pressed Enter on a command button was sent back to the top of the page
+on every dispatch, and focus did not return when the button was re-enabled.
+Measured in real Chromium, production build, with the new browser runner
+(`npm run test:browser`, `tests/browser/command-focus.browser.test.ts`): during
+the dispatch `{ disabled: true, focused: false }`, after it
+`{ disabled: false, focused: false }`. A zero-delay timeout read the opposite,
+because the rule runs during the next rendering update.
+
+Now a button in flight (a `<button>`, or any element with `role="button"`) gets
+`aria-disabled="true"`, restored to its previous value when it lands. A
+`role="button"` element used to get nothing at all in flight. Links are left as
+they were: their press is navigation. Not `aria-busy`: it tells assistive technology to hold off
+on the element's content, and a button's content is its accessible name. What `disabled` also did is
+kept by hand and pinned by the same file, each measured on the old code first:
+
+- the press that starts the dispatch does not submit a form (`preventDefault`);
+- no further press reaches any listener, the app's own included, until the
+  dispatch lands (a capture listener, attached only while in flight, so
+  `.delegate` still attaches nothing per element at rest);
+- the button works again once the dispatch lands.
+
+**Behaviour changes to check:**
+
+- CSS keyed on `:disabled` to show a button working stops matching during a
+  dispatch. Use `.vc-loading` (unchanged). Announcing progress in words is the
+  app's (a live region, in its own language).
+- A `disabled` the app sets is no longer cleared when a dispatch lands: the old
+  `finally` set `disabled = false` whatever the app had set.
+- Do not bind `:aria-disabled` on the element; `:disabled` is
+  now safe to bind (whitepaper, "A bound update overwrites what `v-vc-command`
+  writes by hand").
+
+`tests/directives-vapor-fixture.test.ts`'s identity test now also asserts the
+in-flight guard comes off after every dispatch.
+
 ## v1.24.0 - 2026-09-24
 
 ### Added: RFC 9457 problem documents are read on every path

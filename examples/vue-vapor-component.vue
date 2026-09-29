@@ -149,30 +149,34 @@ onUnmounted(unsubscribeStats);
   <div class="todo-app">
     <h1>Todo App</h1>
 
-    <!-- Add form -->
+    <!-- Add form. A labelled input (a placeholder is not a label), and
+         aria-disabled rather than disabled on buttons that can become
+         unavailable while focused: `disabled` would send keyboard focus to
+         <body>. addTodo() already ignores an empty text. -->
     <form @submit.prevent="addTodo" class="add-form">
+      <label for="new-todo" class="visually-hidden">New todo</label>
       <input
+        id="new-todo"
         :value="newTodoText.value"
         @input="newTodoText.value = ($event.target as HTMLInputElement).value"
         placeholder="What needs to be done?"
-        :disabled="loading.value"
       />
-      <button type="submit" :disabled="loading.value || !newTodoText.value.trim()">
+      <button type="submit" :aria-disabled="loading.value || !newTodoText.value.trim()">
         Add
       </button>
     </form>
 
-    <!-- Error display -->
-    <p v-if="lastError.value" class="error">
-      {{ lastError.value.message }}
+    <!-- Error display: a live region, so the failure is heard -->
+    <p class="error" role="alert">
+      {{ lastError.value?.message }}
     </p>
 
     <!-- Undo/Redo controls -->
     <div class="controls">
-      <button @click="undo" :disabled="!canUndo.value">
+      <button @click="canUndo.value && undo()" :aria-disabled="!canUndo.value">
         Undo
       </button>
-      <button @click="redo" :disabled="!canRedo.value">
+      <button @click="canRedo.value && redo()" :aria-disabled="!canRedo.value">
         Redo
       </button>
     </div>
@@ -182,18 +186,21 @@ onUnmounted(unsubscribeStats);
       <button
         @click="setFilter('all')"
         :class="{ active: todos.value.filter === 'all' }"
+        :aria-pressed="todos.value.filter === 'all'"
       >
         All ({{ stats.value.total }})
       </button>
       <button
         @click="setFilter('active')"
         :class="{ active: todos.value.filter === 'active' }"
+        :aria-pressed="todos.value.filter === 'active'"
       >
         Active ({{ stats.value.active }})
       </button>
       <button
         @click="setFilter('completed')"
         :class="{ active: todos.value.filter === 'completed' }"
+        :aria-pressed="todos.value.filter === 'completed'"
       >
         Completed ({{ stats.value.completed }})
       </button>
@@ -206,13 +213,15 @@ onUnmounted(unsubscribeStats);
         :key="todo.id"
         :class="{ done: todo.done }"
       >
-        <input
-          type="checkbox"
-          :checked="todo.done"
-          @change="toggleTodo(todo.id)"
-        />
-        <span>{{ todo.text }}</span>
-        <button @click="removeTodo(todo.id)" class="remove">
+        <label>
+          <input
+            type="checkbox"
+            :checked="todo.done"
+            @change="toggleTodo(todo.id)"
+          />
+          {{ todo.text }}
+        </label>
+        <button @click="removeTodo(todo.id)" class="remove" :aria-label="`Remove ${todo.text}`">
           &times;
         </button>
       </li>
@@ -230,6 +239,13 @@ onUnmounted(unsubscribeStats);
 </template>
 
 <style scoped>
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
+
 .todo-app {
   max-width: 500px;
   margin: 0 auto;
@@ -290,12 +306,12 @@ onUnmounted(unsubscribeStats);
   border-bottom: 1px solid #eee;
 }
 
-.todo-list li.done span {
+.todo-list li.done label {
   text-decoration: line-through;
-  color: #888;
+  color: #6b6b6b; /* 5.3:1 on white - greyed but readable */
 }
 
-.todo-list li span {
+.todo-list li label {
   flex: 1;
 }
 

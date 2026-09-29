@@ -13,9 +13,7 @@ import { decodeQueryParam, encodeQueryParam, resolveQueryHistory } from './url';
 
 export function useRouter(): Router {
   const router = inject<Router>(ROUTER_KEY);
-  // Coded, like every other failure here: this was the one throw a handler
-  // could not switch on. routerError prepends the same prefix, so the message
-  // is byte-identical to the bare Error it replaces.
+  // Coded, like every other failure here, so a handler can switch on it.
   if (!router) throw routerError('no_router', 'no router provided - did you app.use(router)?');
   return router;
 }
@@ -32,9 +30,8 @@ export function useRoute(): { readonly value: RouteLocation } {
  *
  * Being an actual ref matters: refs returned from `setup()` are AUTO-UNWRAPPED
  * in templates, so `{{ page }}` works and `.value` is script-only - exactly
- * like `useRoute()`, `useRouteData()` and every sibling composable. A
- * lookalike object with a `value` accessor does NOT unwrap, which made this
- * the one composable whose templates needed `.value`.
+ * like `useRoute()`, `useRouteData()` and every sibling composable (a
+ * lookalike object with a `value` accessor would not unwrap).
  */
 export type QueryParamHandle<T> = Ref<T> & {
   /** Write with an explicit pushState (back returns to the old value). */
@@ -51,11 +48,19 @@ export type QueryParamHandle<T> = Ref<T> & {
  * depends on the key refetch automatically.
  */
 export function useQueryParam<T = unknown>(key: string, def?: QueryParamDef): QueryParamHandle<T> {
-  const router = useRouter();
+  return bindQueryParam<T>(useRouter(), key, def, undefined);
+}
+
+/**
+ * The handle behind useQueryParam and usePagination: `def` overrides the
+ * route's declaration outright; `fallback` applies only when the route
+ * declares nothing for the key.
+ */
+function bindQueryParam<T>(router: Router, key: string, def: QueryParamDef | undefined, fallback: QueryParamDef | undefined): QueryParamHandle<T> {
   const definition = (): QueryParamDef => {
     if (def) return def;
     const matched = router.currentRoute.value.location.matched;
-    return matched[matched.length - 1]?.queryDefs[key] ?? {};
+    return matched[matched.length - 1]?.queryDefs[key] ?? fallback ?? {};
   };
   const write = (next: T | null, override?: 'push' | 'replace') => {
     const d = definition();
@@ -208,7 +213,9 @@ export function usePagination<T = unknown>(options: PaginationOptions<T> = {}): 
   const router = useRouter();
   const data = useRouteData<any>(options.recordName);
   const key = options.key ?? 'page';
-  const page = useQueryParam<number>(key);
+  // A number whatever the route declares: the route's own declaration wins,
+  // and a route that declares nothing still reads `?page=2` as 2.
+  const page = bindQueryParam<number>(router, key, undefined, { type: 'int', default: 1 });
 
   const pick = <R>(read: ((data: any) => R) | undefined, fallback: (data: any) => R): Ref<R> =>
     computed(() => (read ?? fallback)(data.value ?? {}));
@@ -216,14 +223,13 @@ export function usePagination<T = unknown>(options: PaginationOptions<T> = {}): 
   /**
    * Every number here comes from a BACKEND RESPONSE, and the extractors are
    * overridable, so neither the value nor the reader is this library's to trust.
-   * `Math.max` and `||` do not contain a NaN: `Math.max(1, NaN)` is NaN, and NaN
-   * propagated straight through to the UI - `pageRange` rendered a literal "NaN"
-   * as a page link and `hasNext` was permanently false. A response with
-   * `total: "many"` was enough, because `total` was never coerced at all.
+   * `Math.max` and `||` do not contain a NaN: `Math.max(1, NaN)` is NaN, which
+   * would reach the UI as a literal "NaN" page link and a `hasNext` stuck at
+   * false (a response with `total: "many"` is enough).
    *
    * `positive` is separate because zero means different things per field: an
    * empty result set legitimately has `total: 0`, while `perPage: 0` and
-   * `lastPage: 0` are nonsense that used to fall through the old `||`.
+   * `lastPage: 0` are nonsense.
    */
   const finite = (value: unknown, fallback: number): number => {
     const n = Number(value);
@@ -255,13 +261,9 @@ export function usePagination<T = unknown>(options: PaginationOptions<T> = {}): 
   const go = (next: number) => {
     const target = Math.min(Math.max(1, Math.trunc(positive(next, 1))), lastPage.value);
     // "`page` pushes by convention, so Back steps through pages" is a promise
-    // of THIS COMPOSABLE, but the convention it relied on
-    // (`resolveQueryHistory`) is keyed on the literal string 'page'. So
-    // `usePagination({ key: 'p' })` - or two paginated lists on one page with
-    // distinct keys, the realistic reason to pass `key` - silently made every
-    // go()/next() a replaceState, and Back skipped the whole pagination trail.
-    // The composable owns its convention, so it states it explicitly for any
-    // key.
+    // of THIS COMPOSABLE, for any key: `resolveQueryHistory`'s convention is
+    // keyed on the literal 'page', so `usePagination({ key: 'p' })` (two lists
+    // on one page) would otherwise replaceState and Back would skip the trail.
     //
     // A route's own `history` declaration still wins: it is more specific than
     // a composable default, so when the record declares one we write through
@@ -297,8 +299,8 @@ export function usePagination<T = unknown>(options: PaginationOptions<T> = {}): 
  */
 function buildPageRange(current: number, last: number, rawWindow: number): readonly number[] {
   // `window` is a caller option and reaches arithmetic that Math.max cannot
-  // rescue: `Math.max(1, Math.floor(NaN))` is NaN, and the whole range then
-  // collapsed to `[1, last]` with the run in between silently empty.
+  // rescue: `Math.max(1, Math.floor(NaN))` is NaN, which would collapse the
+  // range to `[1, last]`.
   const window = Number.isFinite(rawWindow) && rawWindow >= 1 ? Math.trunc(rawWindow) : 7;
   if (last <= window) return Array.from({ length: Math.max(0, Math.trunc(last)) }, (_, i) => i + 1);
 

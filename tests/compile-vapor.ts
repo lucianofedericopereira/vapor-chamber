@@ -1,14 +1,13 @@
 /**
  * Compile a Vapor template on the INSTALLED Vue and bind it to the real runtime.
  *
- * WHY THIS EXISTS. Every fixture that needs Vapor codegen used to write the
- * compiler's output out by hand - `withVaporDirectives(n0, [[dir, () => v,
- * "command", mods]])` and the like. A literal records a COMPILER RELEASE, and
- * the suite then keeps agreeing with that release forever. Vue 3.6.0-rc.9
- * #15490 is the proof: it turned the directive argument into a getter,
- * `v-vc-command` stopped mounting in every compiled template, and 2,431 tests
- * stayed green because no test asked the compiler what it emits. Anything that
- * goes through here is held to whatever the installed Vue actually produces.
+ * WHY THIS EXISTS. A hand-written copy of the compiler's output (for example
+ * `withVaporDirectives(n0, [[dir, () => v, "command", mods]])`) records one
+ * COMPILER RELEASE, and a suite built on it keeps agreeing with that release
+ * after the compiler moves on - Vue 3.6.0-rc.9 #15490 turned the directive
+ * argument into a getter, and only a fixture that asks the compiler notices.
+ * Anything that goes through here is held to whatever the installed Vue
+ * actually produces.
  *
  * `vue/compiler-sfc` is a `vue` export, so this costs no dependency, and it is
  * the same path a real SFC takes.

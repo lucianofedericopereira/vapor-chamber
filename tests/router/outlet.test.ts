@@ -9,28 +9,19 @@ import { describe, expect, it } from 'vitest';
 import { createApp, defineComponent, h } from 'vue';
 import { isRouterError } from '../../src/router/errors';
 import { createMemoryHistory } from '../../src/router/history';
-import { createRouter } from '../../src/router/index';
 import { RouterOutlet } from '../../src/router/outlet';
 import { ROUTER_KEY } from '../../src/router/keys';
-import type { RouteRecord } from '../../src/router/types';
+import { makeRouter as fixtureRouter } from './fixture';
 
-const ROWS: RouteRecord[] = [
-  { name: 'shell', path: '/', parent: null },
-  { name: 'home', path: '/', parent: 'shell', component: 'Home' },
-  { name: 'list', path: '/list', parent: 'shell', component: 'List' },
-];
-
-function makeRouter() {
-  return createRouter({
-    base: '/admin',
-    history: createMemoryHistory('/admin'),
-    routes: ROWS,
-    components: {
-      Home: defineComponent({ render: () => h('span', 'home-page') }),
-      List: defineComponent({ render: () => h('span', 'list-page') }),
-    },
-  });
-}
+// The fixture's router under /admin, with components that render text.
+const makeRouter = () => fixtureRouter({
+  base: '/admin',
+  history: createMemoryHistory('/admin'),
+  components: {
+    Home: defineComponent({ render: () => h('span', 'home-page') }),
+    List: defineComponent({ render: () => h('span', 'list-page') }),
+  },
+});
 
 describe('RouterOutlet', () => {
   it('renders the matched component at its depth', async () => {
@@ -70,8 +61,8 @@ describe('RouterOutlet', () => {
   it('reports that failure with a code, not just a message', () => {
     const host = document.createElement('div');
     const app = createApp({ render: () => h(RouterOutlet) });
-    // Handlers switch on `code` everywhere else in this router; this throw
-    // used to be a bare Error, so it was the one they could not.
+    // Handlers switch on `code` everywhere in this router, so this throw is
+    // coded too.
     let caught: unknown;
     try {
       app.mount(host);
@@ -86,9 +77,8 @@ describe('RouterOutlet - default slot', () => {
   it('renders the default slot when nothing matches at this depth', async () => {
     // A nested outlet past the end of the render chain: the fallback is what a
     // layout uses for "no child route selected".
-    const router = createRouter({
+    const router = fixtureRouter({
       base: '',
-      history: createMemoryHistory(''),
       routes: [{ name: 'home', path: '/', component: 'Home' }],
       components: { Home: defineComponent({ render: () => h(RouterOutlet, null, { default: () => h('em', 'empty') }) }) },
     });
@@ -107,11 +97,10 @@ describe('RouterOutlet - default slot', () => {
 
 describe('RouterOutlet - nothing to render and no slot', () => {
   it('renders null rather than failing when there is no match and no default slot', async () => {
-    const router = createRouter({
+    const router = fixtureRouter({
       base: '',
-      history: createMemoryHistory(''),
       routes: [{ name: 'home', path: '/', component: 'Home' }],
-      components: { Home: defineComponent({ render: () => h(RouterOutlet) }) }, // nested, past the chain
+      components: { Home: defineComponent({ render: () => h(RouterOutlet) }) }, // nested, past the chain,
     });
     await router.isReady();
 

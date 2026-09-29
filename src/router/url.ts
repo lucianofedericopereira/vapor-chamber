@@ -12,9 +12,9 @@ import type { QueryParamDef, QueryValues } from './types';
 /** Parse a search string ('?a=1&b=2', leading '?' optional) into QueryValues.
  *  Repeated keys collect into arrays. '+' decodes to space. */
 export function parseQuery(search: string): QueryValues {
-  // Prototype-free: the read below (`const existing = query[key]`) walks the
-  // chain on a `{}`, so `?constructor=1` came back "already set" and produced
-  // `[Object, '1']` instead of `'1'`. Rule and full evidence in `../dict`.
+  // Prototype-free: the read below (`const existing = query[key]`) would walk
+  // the chain on a `{}`, so `?constructor=1` would read as "already set" and
+  // produce `[Object, '1']` instead of `'1'`. Rule and evidence in `../dict`.
   // (vue-router v5 hardened its own query parsing the same way - different
   // codebase, same lesson, one call to take it.)
   const query: QueryValues = dict<string | string[]>();
@@ -72,16 +72,13 @@ function encodeQueryPart(part: string): string {
 export function decodeQueryParam(raw: string | string[] | undefined, def: QueryParamDef): unknown {
   const type = def.type ?? 'string';
   if (type === 'array') {
-    // `.slice()`, not the declaration's own array. `def` is a route row's query
-    // declaration, which lives in the compiled table for the router's whole
-    // life, so handing it out by reference made every absent-param read share
-    // one object with the table: a single `tags.value.push(...)` in a component
-    // rewrote the declared default, permanently, for every route and every
-    // later read. Same shape as the three shared caches this library already
-    // freezes (see ../freeze), and the cheapest possible fix - a copy of an
-    // array that is empty or near-empty by construction.
+    // Copies, never the arrays it read: the declared default lives in the
+    // compiled table for the router's whole life, and `raw` is the committed
+    // location's query. Handed out by reference, one `tags.value.push(...)` in
+    // a component would rewrite the table's default for every later read, or
+    // the location's query while the URL stays as it was.
     if (raw === undefined) return Array.isArray(def.default) ? def.default.slice() : (def.default ?? []);
-    return Array.isArray(raw) ? raw : [raw];
+    return Array.isArray(raw) ? raw.slice() : [raw];
   }
   const scalar = Array.isArray(raw) ? raw[raw.length - 1] : raw;
   if (scalar === undefined) return def.default;

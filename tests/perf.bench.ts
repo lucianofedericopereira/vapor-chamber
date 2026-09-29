@@ -51,13 +51,9 @@ function benchGroup(): (name: string, fn: () => unknown) => void {
 // ---------------------------------------------------------------------------
 
 // `useCommandHistory` observes the SHARED bus and takes no bus argument, so
-// these two benches must install their bus there. They previously passed one as
-// a second argument, which JS drops and no compiler objected to (tests are not
-// in any typecheck project): the history subscribed to the shared bus while the
-// loop dispatched on a local one, so the `onAfter` hook the first bench is named
-// for never fired and the second's `undo()`/`redo()` returned undefined on an
-// empty stack. Measured: `past.length` 0 after 10 dispatches. Both numbers the
-// whitepaper's rc.6 row quotes from this group came from that shape. Pinned by
+// these two benches must install their bus there: a bus passed as an argument
+// is dropped, the history then watches the shared bus while the loop dispatches
+// on another, and the bench measures an empty history. Pinned by
 // `tests/bench-harness.test.ts`.
 describe('origin-marker paths', () => {
   const bench = benchGroup();
@@ -168,12 +164,9 @@ describe('meta overhead - uid generator comparison', () => {
   const bench = benchGroup();
   // Default: counter + per-process random prefix. ~12ns per call vs ~104ns for
   // crypto.randomUUID (Node 24, 2026-08-17, hrtime medians over 21x200k reps -
-  // quote the runtime with the number). This comment previously said "~30-50ns
-  // per uid", a figure src/command-bus.ts retired when it was re-measured; the
-  // correction had not reached here or docs/performance.md. What this bench
-  // measures is the DISPATCH-level ratio (~2.5x), not the per-call one (~8x) -
-  // the rest of the dispatch dilutes it, and conflating the two is how the
-  // per-call absolute drifted unnoticed in the first place.
+  // quote the runtime with the number). What this bench measures is the
+  // DISPATCH-level ratio (~2.5x), not the per-call one (~8x): the rest of the
+  // dispatch dilutes it.
   bench('dispatch - default counter-based uid', () => {
     const bus = createCommandBus();
     bus.register('test', () => {});
@@ -216,7 +209,7 @@ describe('async dispatch throughput', () => {
   });
 
   // The async counterpart of "syncDispatch - 3 plugins + 1 listener": the
-  // plugin boundary (VC_PLUGIN_THREW) sits on this path, and the per-level
+  // plugin boundary (plugin:failed:plugin) sits on this path, and the per-level
   // work it adds is paid here, not on the bare row above.
   bench('asyncDispatch - 3 plugins + 1 listener', async () => {
     const bus = createAsyncCommandBus();
@@ -635,7 +628,7 @@ describe('SSR rehydrate throughput', () => {
 //
 // Reading these numbers:
 //   - "all 9 hooks" covers the full enter+leave lifecycle in one sequence.
-//   - "onMove x 10k" is the new baseline for the previously-broken move path.
+//   - "onMove x 10k" is the move path's baseline.
 //   - "onMove vs bus.dispatch" confirms the bridge adds only dispatch overhead.
 //
 // Baselines (v1.4.0, beta.13, 2026-05-28):
@@ -1061,16 +1054,6 @@ describe('signal path comparison - fallback vs alien-signals add-on vs Vue ref',
     if (sink < 0) console.log(sink);
   });
 
-  bench('closure getter/setter - old v1.3 fallback (historical comparison)', () => {
-    // Replaced in v1.4.0. The setter is a real function call - V8 cannot
-    // eliminate it, so this measures actual invocation cost.
-    let _v = 0;
-    const s = { get value() { return _v; }, set value(v: number) { _v = v; } };
-    let sink = 0;
-    for (let i = 0; i < 10_000; i++) { s.value = i; sink = s.value; }
-    if (sink < 0) console.log(sink);
-  });
-
   // ── with alien-signals add-on ──────────────────────────────────────────────
 
   bench('alien-signals via alienSignalAdapter - opt-in reactive path', () => {
@@ -1082,10 +1065,10 @@ describe('signal path comparison - fallback vs alien-signals add-on vs Vue ref',
     if (sink < 0) console.log(sink);
   });
 
-  // ── Vue auto-detected (v1.5.0: signal() wires shallowRef) ──────────────────
+  // ── Vue auto-detected (signal() wires shallowRef) ──────────────────────────
 
-  bench('Vue shallowRef via signal() - auto-detected (v1.5.0 default)', () => {
-    // What signal() returns when Vue is present: shallowRef (v1.5.0+). Goes
+  bench('Vue shallowRef via signal() - auto-detected (default)', () => {
+    // What signal() returns when Vue is present: shallowRef. Goes
     // through the signal() indirection, so V8 can't constant-fold it - this is
     // a reliable scalar-write measurement (~40-62k hz run-dependent, ~4-7x the old deep-ref ~9k).
     const s = signal(0);

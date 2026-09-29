@@ -1,47 +1,16 @@
 /**
  * Tier-1 branch mop-up - cheap, pure-logic branches reachable with plain calls
  * (no fetch/WS/storage mocks). Targets the leftover ternary/condition sides in
- * retryDelay, buildFullUrl, validateFields, and the Standard Schema validator.
+ * buildFullUrl, validateFields, and the Standard Schema validator.
  */
 import { describe, expect, vi, afterEach } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
-import { retry } from '../src/plugins-io';
 import { buildFullUrl } from '../src/http-query';
 import { schemaValidator } from '../src/schema';
 import { validateSchemasAsync, type StandardSchemaV1 } from '../src/plugins-schema';
 import { it } from '../src/vitest';
 
 afterEach(() => { vi.useRealTimers(); });
-
-// ── plugins-io: retryDelay 'linear' + missing-error fallback ──────────────────
-describe('branch mop-up - retry plugin', () => {
-  it("retries with the 'linear' backoff strategy", async () => {
-    vi.useFakeTimers();
-    const bus = createAsyncCommandBus();
-    let calls = 0;
-    bus.use(retry({ maxAttempts: 2, strategy: 'linear', baseDelay: 10 })); // plugins-io.ts:37
-    bus.register('flaky', async () => { calls++; throw new Error('boom'); });
-
-    const promise = bus.dispatch('flaky', {});
-    await vi.advanceTimersByTimeAsync(50); // past the linear delay (base * attempt)
-    const result = await promise;
-
-    expect(result.ok).toBe(false);
-    expect(calls).toBe(2); // retried once -> the linear delay ran between attempts
-  });
-
-  it('falls back to a generic error when a failed result carries no error field', async ({ asyncBus: bus }) => {
-    bus.use(retry({ maxAttempts: 1 }), { priority: 10 });
-    // Inner plugin returns a failed result WITHOUT an `error`, so retry hits
-    // `lastResult.error ?? new Error('Unknown error')` (plugins-io.ts:67).
-    // eslint-disable-next-line -- a result with no `error` is the point; see below
-    bus.use(((_cmd: unknown, _next: unknown) => ({ ok: false })) as never, { priority: 1 });
-    bus.register('x', async () => 'unused');
-
-    const result = await bus.dispatch('x', {});
-    expect(result.ok).toBe(false);
-  });
-});
 
 // ── http-query: buildFullUrl baseURL join branches ────────────────────────────
 describe('branch mop-up - buildFullUrl', () => {
@@ -125,7 +94,7 @@ describe('branch mop-up - Standard Schema validator', () => {
     bus.register('a', async () => 'ok');
     bus.use(validateSchemasAsync({ a: failingObjectPath() }));
     const r = await bus.dispatch('a', { x: 1 });
-    expect(r).toFailWith('VC_VALIDATION_FAILED');
+    expect(r).toFailWith('validateSchemas:invalid:payload');
     expect(r.error?.message).toContain('field.sub');
   });
 

@@ -171,7 +171,7 @@ describe.skipIf(!haveDist || !esbuild)('ESM tree-shake regression', () => {
       //
       // Taken anyway, because `meta.origin` is core surface, not an optional
       // -module concern: it is a documented field on every Command, and
-      // `agentOrigin`'s deprecation note already promises the CORE stamps it.
+      // the MCP layer relies on the CORE stamping it.
       // The payload-key mechanism could only mark payloads that hold keys, so
       // primitives and arrays arrived unattributed - an infinite cross-tab
       // broadcast loop in createChannel(), a double-recorded redo, and an MCP command
@@ -312,24 +312,52 @@ describe.skipIf(!haveDist || !esbuild)('ESM tree-shake regression', () => {
       // fewer), `||=` for the lazy Set (+1 here, -4 / -4 / -8 on the three
       // IIFEs), a forEach dispose line (+5, declined). What remains is the
       // feature: 3 B of headroom.
-      // 6_299 after q2/2: the VC_CORE_ABORTED message loses "before it ran",
+      // 6_299 after q2/2: the core:aborted:dispatch message loses "before it ran",
       // which was false for every mid-flight abort. The ceiling stays 6_310.
       // Ceiling 6_310 -> 6_360: a before-hook's throw is a
-      // VC_CORE_BEFORE_CANCEL result (q3/1). Measured on this consumer:
+      // core:refused:hook result (q3/1). Measured on this consumer:
       // 6_345 with the helper and both call sites (+46), 6_351 with the
       // stack-capture guard the cancelled path needed (+6, net of a dropped
       // explicit severity). 9 B of headroom.
       // Ceiling 6_360 -> 6_380: dispose() runs each installed plugin's
       // dispose() (cancel/1). The loop inlined in both dispose functions,
       // 6_351 -> 6_373 (+22; as a helper with typeof and .call +38, with an
-      // optional call +34). retry() is not in this bundle. 7 B of headroom.
+      // optional call +34). The retry plugin was not in this bundle. 7 B of headroom.
       // 6_376 after undo/1: the scoped-origin read in stampMeta (+3; the
       // history code that uses it is not in this bundle). Ceiling unchanged,
       // 4 B of headroom.
       // 6_363 after v1.24.0's RFC 9457 problem documents (+7 against the
       // published v1.23.0, one build each: the `+json` test, `detail` in
       // responseError, the wider Accept). Ceiling unchanged, 17 B of headroom.
-      expect(viteBr.length, `vite production brotli grew unexpectedly (${viteBr.length} bytes)`).toBeLessThan(6_380);
+      // Ceiling 6_380 -> 6_280 (Unreleased, Phase 0 of
+      // docs/plan-failures-and-contract.md). The fixes first measured 6_413
+      // (register()'s ownership-checked cleanup, the catalogue's severity on
+      // the throttled and aborted refusals, the Idempotency-Key as a
+      // Structured Field String), over the old ceiling. Not raised: advice
+      // moved to DEV (plan, settled item 5 - the fix text is the catalogue's)
+      // and register({ throttle }) and throttle() share one gate. Measured
+      // 6_260, below v1.24.0's 6_363. This LOWER ceiling locks it; 20 B of
+      // headroom.
+      // Ceiling 6_280 -> 6_340 (Unreleased, owner-by-wiring failures, plan
+      // 4.5). Measured 6_328 against 6_260, +68: `toJSON` with only the needed
+      // members (~25; a `type` docs URL would have cost 77 more and was left
+      // out), the stack decision made once in the constructor, the owner slot
+      // and each plugin's bound `fail`, the private `#code` and its getter, the
+      // `remote` refusal. Squeezed first: a shared `failsFor`, `pluginThrew`
+      // taking the runner's `fail`, `backendError` losing its dead `emitter`
+      // (-37 raw, 0 brotli: brotli already folded the repeats). 12 B headroom.
+      // Ceiling 6_340 -> 6_425 (Unreleased, the wire contract, plan 4.4 rev
+      // 21-22): the status table, the transport readers of one answer shape,
+      // net of the readers and catch paths they replaced. Measured 6_412
+      // against 6_328, after the redirect advice moved to DEV and
+      // `Retry-After` parsing lost its null. 13 B headroom.
+      // Ceiling 6_425 -> 6_440: the HTTP client's retry back to 1.24 (5xx
+      // retried, `X-RateLimit-Reset` as the wait's fallback). Measured 6_427.
+      // Ceiling 6_440 -> 6_460: the retry model (docs/plan-shape.md 4). The
+      // policy lives in the async bus, not in this bundle; what reaches it is
+      // the bridges' `transport` declaration and the status table's new home
+      // in the core. Measured 6_445 (+18).
+      expect(viteBr.length, `vite production brotli grew unexpectedly (${viteBr.length} bytes)`).toBeLessThan(6_460);
 
       // Symbol budget. These are all chamber.ts-only - should NOT appear in a
       // consumer bundle that doesn't import Vue composables.

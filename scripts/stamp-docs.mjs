@@ -72,10 +72,10 @@ const VALUES = {
  * over a real number. Only a source that exists can make a marker stale, which
  * is the property that keeps `--check` honest.
  *
- * This docblock previously said `docs/metrics.json` was committed, which is the
- * opposite of .gitignore:23 and hid the one cost worth knowing: a marker whose
- * source is absent renders exactly like a current one, and `--check` calls it
- * current having had nothing to compare it against. The twelve `vc:bench*`
+ * `docs/metrics.json` is NOT committed (.gitignore), which is the one cost
+ * worth knowing: a marker whose source is absent renders exactly like a
+ * current one, and `--check` calls it current having had nothing to compare
+ * it against. The twelve `vc:bench*`
  * markers are that set. Run `npm run bench` before trusting one.
  */
 function readJson(path) {
@@ -154,12 +154,7 @@ if (main) {
 /**
  * Bundle sizes, read from the GENERATED `docs/BUNDLE-SIZES.md`.
  *
- * README and docs/performance.md both carried hand-copied size tables. The
- * README's own footnote admitted what that costs - "this table had drifted low
- * on 7 of 9 rows before it was last reconciled" - and it had drifted again by
- * v1.16.0 (barrel 24.0 vs 24.4, router 12.3 vs 12.4, vue 7.4 vs 7.5, reactive
- * 5.2 vs 5.4, mcp 1.7 vs 1.9, and the performance.md IIFE table a whole release
- * behind at 7.0/7.4/10.2 vs 7.6/8.0/11.0).
+ * README and docs/performance.md quote size tables.
  *
  * A number a human retypes is a number that drifts, so these stop being
  * retyped. The source of truth stays `npm run size:doc`; this only republishes
@@ -207,8 +202,8 @@ if (sizes) {
   put('sizeRouterRemote', './router/remote');
   put('sizeRouterFetch', './router-fetch');
   // Vapor wiring deltas (Vue bundled) and the mitt comparison - rows of
-  // BUNDLE-SIZES since v1.20.0, so the README's "+N KB raw" and the migration
-  // guide's "~200 bytes" stop being retyped. The Raw variants carry the
+  // BUNDLE-SIZES, so the README's "+N KB raw" and the migration guide's
+  // "~200 bytes" are never retyped. The Raw variants carry the
   // minified figure the README quotes.
   putAll('sizeVaporEntry', 'vapor-chamber/vapor over that');
   putAll('sizeVaporCustomElement', '+ defineVaporCustomElement');

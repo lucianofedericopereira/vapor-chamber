@@ -15,7 +15,7 @@ import { ... } from 'vapor-chamber/directives';
 
 ### createDirectivePlugin
 
-**Function** - [src/directives.ts:781](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L781)
+**Function** - [src/directives.ts:825](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L825)
 
 ```ts
 createDirectivePlugin() => { install(app: any): void; }
@@ -37,7 +37,7 @@ the whole branch folds out of a production build.
 
 ### vcCommandVapor
 
-**Function** - [src/directives.ts:618](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L618)
+**Function** - [src/directives.ts:672](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L672)
 
 ```ts
 vcCommandVapor(el: Element, value?: () => unknown, _argument?: () => unknown, modifiers?: Record<string, boolean | undefined>) => (() => void) | undefined
@@ -53,8 +53,7 @@ through `onScopeDispose` and run on unmount. The third parameter is declared
 because Vue's call shape has four and the fourth is `modifiers`; it is named
 `_argument` and never read.
 
-WHICH SCOPE, because the two answers behave differently and this docblock
-said only the second one until v1.22.0. `withVaporDirectives` opens with
+WHICH SCOPE, because the two answers behave differently. `withVaporDirectives` opens with
 `if (node instanceof Element)` and applies synchronously in the CURRENT
 scope - so for an element target, which is what a compiled
 `<button v-vc-command>` produces and the only shape documented here, the
@@ -74,35 +73,27 @@ read rather than tracked with an effect on purpose: tracking needs
 of it would break this subpath for every Vue 3.5 consumer of the vDOM
 plugin.
 
-`v-vc-payload` and `v-vc-optimistic` WORK ON BOTH RENDERERS as of v1.22.0 -
-see {@link vcPayloadVapor} and {@link vcOptimisticVapor}, which record what
-the vDOM-only versions cost.
+`v-vc-payload` and `v-vc-optimistic` WORK ON BOTH RENDERERS - see
+{@link vcPayloadVapor} and {@link vcOptimisticVapor}.
 
-THE ARGUMENT IS NOT READ. Until v1.22.0 the argument carried the SELECTOR -
-it said which of `command` / `payload` / `optimistic` a binding was - and
-this function opened by comparing it to `'command'`. Vue's argument is a
-PARAMETER slot, and #15490 made it a getter precisely so a DYNAMIC argument
-can be reactive: Vue's own test compiles `v-custom:[data.arg]`, reads
-`arg()` inside a `watchEffect`, and expects the attribute to follow
-`data.arg`. A selector must not move, so the two requirements were in
-direct conflict - and the conflict cost a dead control in every compiled
-Vapor template on rc.9 with the whole suite green. The selector now lives
-in the NAME, where a name cannot be dynamic, and this function reads
-nothing from the slot at all.
+THE ARGUMENT IS NOT READ. Vue's argument is a PARAMETER slot, and #15490
+made it a getter so a DYNAMIC argument can be reactive (Vue's own test
+compiles `v-custom:[data.arg]` and expects the attribute to follow
+`data.arg`). A selector must not move, so it lives in the NAME, where a name
+cannot be dynamic; a selector in the argument was a dead control in every
+compiled Vapor template on rc.9, with the whole suite green.
 
-(Teardown never followed the selector rule and still must not - see the
-`beforeUnmount` note in the plugin below.)
+(Teardown does not follow the binding either - see the `beforeUnmount` note
+in the plugin below.)
 
 Ordering against a template `@click`, and what each of `buildHandler`'s
 three guards reads: see the measured note at the end of this file.
 
-THE LOCAL BINDING IS NAMED FOR THE WHOLE DIRECTIVE, which the rename moved.
-Vue resolves an SFC directive by camelCasing the full name, so `v-vc-command`
-looks for `vVcCommand`. Under the old spelling the directive was named `vc`
-and `command` was its argument, so the binding was `vVc`. An import still
-aliased to `vVc` compiles, type-checks and mounts NOTHING - a dead control,
-the same silent shape #15490 produced. `npm run check:example` catches it;
-it caught it here.
+THE LOCAL BINDING IS NAMED FOR THE WHOLE DIRECTIVE. Vue resolves an SFC
+directive by camelCasing the full name, so `v-vc-command` looks for
+`vVcCommand`; an import aliased to anything else (`vVc`) compiles,
+type-checks and mounts NOTHING - a dead control, the same silent shape
+#15490 produced. `npm run check:example` catches it.
 
 ```ts
 <script setup vapor>
@@ -117,7 +108,7 @@ import { vcCommandVapor as vVcCommand } from 'vapor-chamber/directives';
 
 ### vcOptimisticVapor
 
-**Function** - [src/directives.ts:758](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L758)
+**Function** - [src/directives.ts:802](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L802)
 
 ```ts
 vcOptimisticVapor(el: Element, value?: () => unknown) => () => void
@@ -129,15 +120,11 @@ The Vapor port of the vDOM `vc-optimistic` registration. The bound function
 receives the `Command` and returns a rollback function (or null); the
 rollback runs if the dispatch fails.
 
-THIS CLOSES A CAPABILITY GAP RATHER THAN ADDING A SPELLING. Until v1.22.0
-optimistic updates with rollback were UNAVAILABLE in a Vapor template:
-`state.optimisticFn` was set only by the vDOM registration, so a Vapor
-consumer who wrote `v-vc-optimistic` got Vue's "Failed to resolve directive"
-warning and no optimistic update. The alternative was to abandon
-`v-vc-command` for that button and hand-roll the dispatch, which also
-forfeits `vc-loading` / `vc-error`, disable-while-busy, the re-entrancy
-guard, the timeout and the modifiers - and cannot be done by adding an
-`@click` beside the directive, because since Vue 3.6.0-rc.9 `80b3a046` that
+Without it a Vapor template has no optimistic update with rollback: the
+alternative is to abandon `v-vc-command` for that button and hand-roll the
+dispatch, which forfeits `vc-loading` / `vc-error`, disable-while-busy, the
+re-entrancy guard, the timeout and the modifiers - and an `@click` beside
+the directive cannot do it, because since Vue 3.6.0-rc.9 `80b3a046` that
 handler registers FIRST and `buildHandler`'s guards let it veto the dispatch.
 
 Read at dispatch time, for the same reason as the payload.
@@ -156,7 +143,7 @@ const bump = (cmd) => { count.value++; return () => { count.value--; }; };
 
 ### vcPayloadVapor
 
-**Function** - [src/directives.ts:723](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L723)
+**Function** - [src/directives.ts:771](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L771)
 
 ```ts
 vcPayloadVapor(el: Element, value?: () => unknown) => () => void

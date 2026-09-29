@@ -2,10 +2,9 @@
  * A stubbed backend for the bridge and client suites: the reference
  * controller's two endpoints, with only `fetch` replaced.
  *
- * Each file that drove a real bridge used to write these itself - `json()`,
- * a `batchServer` reading `commands` back out of the POST, a `singleServer` -
- * and the copies were the same lines. One owner now, so the wire shape a test
- * asserts against is the one every other test answers with.
+ * One owner for `json()`, a `batchServer` reading `commands` back out of the
+ * POST and a `singleServer`, so the wire shape a test asserts against is the
+ * one every other test answers with.
  */
 
 import { vi } from 'vitest';

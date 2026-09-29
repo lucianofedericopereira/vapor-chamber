@@ -97,7 +97,7 @@ describe.skipIf(!haveDist || !esbuild)('vDOM boundary', () => {
     expect(imports).toContain('h');
   });
 
-  it('router entry no longer re-exports the vDOM components', async () => {
+  it('router entry does not re-export the vDOM components', async () => {
     const entryTypes = readFileSync(resolve(process.cwd(), 'dist', 'router', 'index.d.ts'), 'utf8');
     expect(entryTypes).not.toMatch(/\bRouterOutlet\b/);
     expect(entryTypes).not.toMatch(/\bmakeBladeComponent\b/);

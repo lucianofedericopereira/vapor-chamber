@@ -155,7 +155,7 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "vc-vitest-mcp": "./bin/vc-vitest-mcp.mjs"
+    "vc-vitest-mcp": "bin/vc-vitest-mcp.mjs"
   },
   "files": [
     "bin",
@@ -190,6 +190,7 @@
     "docs:check": "node scripts/stamp-docs.mjs --check",
     "test": "vitest run && vitest run -c vitest.vapor.config.ts",
     "test:vapor": "vitest run -c vitest.vapor.config.ts",
+    "test:browser": "vitest run -c vitest.browser.config.ts",
     "test:run": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -273,6 +274,7 @@
     "@biomejs/biome": "^2.5.8",
     "@types/node": "^26.2.0",
     "@vitejs/plugin-vue": "^6.0.8",
+    "@vitest/browser-playwright": "^5.0.1",
     "@vitest/coverage-v8": "^5.0.1",
     "@vue/devtools-api": "^8.1.5",
     "@vue/reactivity": "^3.6.0-rc.9",
@@ -283,6 +285,7 @@
     "happy-dom": "^20.11.2",
     "mitt": "^3.0.1",
     "nanoevents": "^9.1.0",
+    "playwright": "^1.63.0",
     "rxjs": "^7.8.2",
     "tiny-emitter": "^2.1.0",
     "typescript": "^6.0.3",

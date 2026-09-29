@@ -10,7 +10,7 @@
  * object's prototype was replaced.
  *
  * Reachable from a plain link - no privileged caller required. Same bug class
- * v1.15.0 fixed in the MCP `tools/call` gate (`Object.hasOwn`), which is why
+ * as the MCP `tools/call` gate (`Object.hasOwn`, src/dict.ts), which is why
  * this one is pinned rather than trusted to review.
  *
  * THE SECOND HALF OF THIS FILE exists because pinning `parseQuery` alone was
@@ -25,10 +25,10 @@
 import { describe, expect, it } from 'vitest';
 import { START_LOCATION } from '../../src/router/engine';
 import { createMemoryHistory } from '../../src/router/history';
-import { createRouter } from '../../src/router/index';
 import { defaultAffects } from '../../src/router/loaders';
 import type { RouteRecord } from '../../src/router/types';
 import { parseQuery, stringifyQuery } from '../../src/router/url';
+import { makeRouter as fixtureRouter } from './fixture';
 
 const POLLUTING_KEYS = ['constructor', 'toString', 'valueOf', 'hasOwnProperty', 'isPrototypeOf'];
 
@@ -106,12 +106,11 @@ const ROWS: RouteRecord[] = [
 ];
 
 function makeRouter() {
-  return createRouter({
+  return fixtureRouter({
     history: createMemoryHistory(''),
     routes: ROWS,
     components: { Products: { render: () => null } } as never,
     links: false,
-    scroll: false,
     onError: () => {},
   });
 }
@@ -199,7 +198,7 @@ describe('START_LOCATION', () => {
     expect(Object.isFrozen(START_LOCATION.matched)).toBe(true);
   });
 
-  it('refuses a write that used to poison every later router', () => {
+  it('refuses a write that would poison every later router', () => {
     expect(() => {
       (START_LOCATION.params as Record<string, unknown>).id = 'poisoned';
     }).toThrow();

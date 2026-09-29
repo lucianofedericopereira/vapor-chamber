@@ -182,9 +182,9 @@ describe('history plugin - undoAction/redoAction triggers', () => {
     bus.dispatch('cart.add', 2);
     expect(total).toBe(3);
 
-    // The footgun this API removes: dispatching the trigger used to be recorded
-    // into history itself, so the second undo popped the trigger (no-op) and the
-    // redo stack was wiped on every dispatch.
+    // The footgun this API removes: a trigger recorded into history itself
+    // would make the second undo pop the trigger (a no-op) and wipe the redo
+    // stack on every dispatch.
     bus.dispatch('cart.undo', {});
     bus.dispatch('cart.undo', {});       // second undo must also apply
     expect(total).toBe(0);
@@ -449,7 +449,7 @@ describe('throttle plugin', () => {
     const throttled = bus.dispatch('testAction', {});
 
     expect(handler).toHaveBeenCalledTimes(1);
-    expect(throttled).toFailWith('VC_CORE_THROTTLED');
+    expect(throttled).toFailWith('throttle:limited:handler');
     expect(throttled.error?.message).toContain('throttled');
   });
 
@@ -547,8 +547,10 @@ describe('authGuard plugin', () => {
     bus.register('shopCartAdd', () => 'added');
     bus.register('uiToast', () => 'toasted');
 
+    // A refusal owned by the plugin, as every library refusal is: retry() does
+    // not re-send it and a circuit breaker does not count it.
     const blocked = bus.dispatch('shopCartAdd', {});
-    expect(blocked.ok).toBe(false);
+    expect(blocked).toFailWith('authGuard:refused:action');
     expect(blocked.error?.message).toContain('Unauthorized');
 
     const allowed = bus.dispatch('uiToast', {});
@@ -626,9 +628,23 @@ describe('throttle plugin dispose()', () => {
     bus.use(t);
     bus.register('a', () => 1);
 
-    bus.dispatch('a', {}); // first call goes through, starts timer
-    t.dispose(); // cancel the timer
-    // No timer leak - test just verifies dispose exists and doesn't throw
+    expect(bus.dispatch('a', {})).toSucceedWith(1); // first call goes through, starts timer
+    expect(bus.dispatch('a', {})).toFailWith('throttle:limited:handler');
+    t.dispose(); // cancel the timer, forget the window
+    expect(bus.dispatch('a', {})).toSucceedWith(1);
+  });
+
+  it('refuses the same way register({ throttle }) does: one gate', ({ bus }) => {
+    bus.use(throttle(['a'], 10000));
+    bus.register('a', () => 1);
+    bus.register('b', () => 2, { throttle: 10000 });
+    // Same gate, same condition and subject; each refusal is its owner's.
+    for (const [action, owner] of [['a', 'throttle'], ['b', 'core']]) {
+      bus.dispatch(action, {});
+      const refused = bus.dispatch(action, {}).error as any;
+      expect(refused).toMatchObject({ code: `${owner}:limited:handler`, action });
+      expect(refused.message).toMatch(new RegExp(`^"${action}" throttled\\. Retry in \\d+ms\\.$`));
+    }
   });
 });
 

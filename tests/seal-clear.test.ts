@@ -3,16 +3,15 @@
  *
  * seal() exists for the command LEDGER - dispatch is the "do", the undo
  * handler the rollback - and for SECURITY: authGuard and every other plugin
- * stay in place. clear() on a sealed bus used to succeed and leave the bus
- * sealed: it deleted the undo handlers and every plugin, and nothing could be
- * put back until unsealBus(). history().undo() then found no inverse and fell
- * back to a data-only pop, so the ledger recorded a rollback that never ran.
+ * stay in place. A clear() that succeeded on a sealed bus would delete the undo
+ * handlers and every plugin with nothing able to put them back, and
+ * history().undo() would find no inverse and fall back to a data-only pop:
+ * the ledger would record a rollback that never ran.
  *
  * dispose() is teardown, not reconfiguration: it still works on a sealed bus
- * and leaves it sealed. The TestBus now behaves the same way. It used to
- * unseal on both clear() and dispose(), so a test could pass against the
- * harness and throw VC_CORE_SEALED against the real bus; and unsealBus()
- * reopens it, as it reopens a real bus.
+ * and leaves it sealed. The TestBus behaves the same way (a double that
+ * unsealed would pass a test the real bus fails), and unsealBus() reopens it,
+ * as it reopens a real bus.
  */
 import { describe, expect } from 'vitest';
 import { createCommandBus, createAsyncCommandBus, unsealBus, inspectBus, type BusError } from '../src/command-bus';
@@ -30,13 +29,13 @@ describe.each([
   ['sync', () => createCommandBus()],
   ['async', () => createAsyncCommandBus()],
 ] as const)('a sealed %s bus refuses clear()', (_kind, make) => {
-  it('throws VC_CORE_SEALED and keeps handlers, undo handlers and plugins', () => {
+  it('throws core:refused:bus and keeps handlers, undo handlers and plugins', () => {
     const bus: any = make();
     bus.register('pay', () => 'paid', { undo: () => {} });
     bus.use((_c: unknown, next: () => unknown) => next());
     bus.seal();
 
-    expect(thrownCode(() => bus.clear())).toBe('VC_CORE_SEALED');
+    expect(thrownCode(() => bus.clear())).toBe('core:refused:bus');
     expect(bus.hasHandler('pay')).toBe(true);
     expect(bus.getUndoHandler('pay')).toBeTypeOf('function');
     expect(inspectBus(bus).pluginCount).toBe(1);
@@ -72,7 +71,7 @@ describe('the ledger case: a stray clear() cannot turn a rollback into a no-op',
 
     bus.dispatch('pay', {});
     expect(balance).toBe(10);
-    expect(thrownCode(() => bus.clear())).toBe('VC_CORE_SEALED');
+    expect(thrownCode(() => bus.clear())).toBe('core:refused:bus');
     h.undo();
     expect(balance).toBe(0); // the rollback ran
   });
@@ -82,7 +81,7 @@ describe('the TestBus seals like the real bus', () => {
   it('a sealed TestBus refuses clear() and stays sealed', () => {
     const bus = createTestBus();
     bus.seal();
-    expect(thrownCode(() => bus.clear())).toBe('VC_CORE_SEALED');
+    expect(thrownCode(() => bus.clear())).toBe('core:refused:bus');
     expect(bus.isSealed()).toBe(true);
   });
 

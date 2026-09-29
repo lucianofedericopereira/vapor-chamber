@@ -11,7 +11,7 @@
  *
  * No `expect.extend` here: vitest.config.ts loads src/vitest.ts as a setup
  * file, so the matchers and the tapped shared bus arrive the way a consumer
- * gets them. VC_TEST_VITEST_MAJOR is the plugin's (tests/vitest-plugin.test.ts).
+ * gets them. test:unexpected:version is the plugin's (tests/vitest-plugin.test.ts).
  */
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -135,42 +135,42 @@ describe('A6 lazy import', () => {
 });
 
 describe('A8 misuse is coded and names the fix', () => {
-  it('VC_TEST_UNTAPPED: a matcher on an untapped bus throws, with the tap(bus) fix', () => {
+  it('test:missing:tap: a matcher on an untapped bus throws, with the tap(bus) fix', () => {
     const bus = createCommandBus();
     const e = thrown(() => expect(bus).toHaveBeenDispatched('cartAdd'));
     expect(e).toBeInstanceOf(VcTestError);
-    expect(e.code).toBe('VC_TEST_UNTAPPED');
+    expect(e.code).toBe('test:missing:tap');
     expect(e.fix).toContain('tap(createCommandBus())');
     expect(e.docs).toMatch(/docs\/api\/vitest-pure\.md#vctestdiagnostic$/);
     // The message carries all three, so a reporter shows the fix.
     expect(e.message).toContain(e.fix);
     expect(e.message).toContain(e.docs);
-    expect(thrown(() => expect(bus).toHaveFailedWith('cartAdd', 'VC_CORE_NO_HANDLER')).code).toBe('VC_TEST_UNTAPPED');
+    expect(thrown(() => expect(bus).toHaveFailedWith('cartAdd', 'core:missing:handler')).code).toBe('test:missing:tap');
   });
 
-  it('VC_TEST_UNTAPPED: .not on an untapped bus throws too, instead of passing vacuously', () => {
+  it('test:missing:tap: .not on an untapped bus throws too, instead of passing vacuously', () => {
     const bus = createCommandBus();
-    expect(thrown(() => expect(bus).not.toHaveBeenDispatched('cartAdd')).code).toBe('VC_TEST_UNTAPPED');
+    expect(thrown(() => expect(bus).not.toHaveBeenDispatched('cartAdd')).code).toBe('test:missing:tap');
   });
 
-  it('VC_TEST_UNTAPPED: a value that is not a bus at all', () => {
-    expect(thrown(() => expect(undefined).toHaveBeenDispatched('cartAdd')).code).toBe('VC_TEST_UNTAPPED');
+  it('test:missing:tap: a value that is not a bus at all', () => {
+    expect(thrown(() => expect(undefined).toHaveBeenDispatched('cartAdd')).code).toBe('test:missing:tap');
   });
 
-  it('VC_TEST_UNTAPPED, not DUPLICATE: an untapped bus of the same instance as the installed one', () => {
+  it('test:missing:tap, not DUPLICATE: an untapped bus of the same instance as the installed one', () => {
     _setInstalledBus(tap(createCommandBus()));
     try {
-      expect(thrown(() => expect(createCommandBus()).toHaveBeenDispatched('a')).code).toBe('VC_TEST_UNTAPPED');
+      expect(thrown(() => expect(createCommandBus()).toHaveBeenDispatched('a')).code).toBe('test:missing:tap');
       // A TestBus of the same instance shares its unseal symbol: still one instance.
-      expect(thrown(() => expect(createTestBus()).toHaveBeenDispatched('a')).code).toBe('VC_TEST_UNTAPPED');
+      expect(thrown(() => expect(createTestBus()).toHaveBeenDispatched('a')).code).toBe('test:missing:tap');
       // No symbols at all to compare is not evidence of a second copy.
-      expect(thrown(() => expect({}).toHaveBeenDispatched('a')).code).toBe('VC_TEST_UNTAPPED');
+      expect(thrown(() => expect({}).toHaveBeenDispatched('a')).code).toBe('test:missing:tap');
     } finally {
       _setInstalledBus(undefined);
     }
   });
 
-  it('VC_TEST_DUPLICATE_INSTANCE: a bus from a second module instance is named as such', async () => {
+  it('test:already:instance: a bus from a second module instance is named as such', async () => {
     // A query makes a second module id, so command-bus.ts evaluates again: a
     // second instance with its own symbols, exactly what a duplicated install
     // loads. Not vi.resetModules(): that would also give the NEXT test's shared
@@ -181,41 +181,41 @@ describe('A8 misuse is coded and names the fix', () => {
     _setInstalledBus(tap(createCommandBus()));
     try {
       const e = thrown(() => expect(foreign).toHaveBeenDispatched('cartAdd'));
-      expect(e.code).toBe('VC_TEST_DUPLICATE_INSTANCE');
+      expect(e.code).toBe('test:already:instance');
       expect(e.fix).toContain('npm ls vapor-chamber');
       // Control: the same foreign bus with nothing installed cannot be compared.
       _setInstalledBus(undefined);
-      expect(thrown(() => expect(foreign).toHaveBeenDispatched('cartAdd')).code).toBe('VC_TEST_UNTAPPED');
+      expect(thrown(() => expect(foreign).toHaveBeenDispatched('cartAdd')).code).toBe('test:missing:tap');
     } finally {
       _setInstalledBus(undefined);
     }
   });
 
-  it('VC_TEST_TAP_REMOVED: clear() drops the tap, and a failing assertion names it instead of "nothing was dispatched"', () => {
+  it('test:lost:tap: clear() drops the tap, and a failing assertion names it instead of "nothing was dispatched"', () => {
     const bus = tap(createCommandBus());
     bus.clear();
     bus.register('a', () => 1);
     bus.dispatch('a', null);
     const e = thrown(() => expect(bus).toHaveBeenDispatched('a'));
     expect(e).toBeInstanceOf(VcTestError);
-    expect(e.code).toBe('VC_TEST_TAP_REMOVED');
+    expect(e.code).toBe('test:lost:tap');
     expect(e.fix).toContain('tap(bus)');
-    expect(thrown(() => expect(bus).toHaveFailedWith('b', 'VC_CORE_NO_HANDLER')).code).toBe('VC_TEST_TAP_REMOVED');
+    expect(thrown(() => expect(bus).toHaveFailedWith('b', 'core:missing:handler')).code).toBe('test:lost:tap');
   });
 
-  it('VC_TEST_TAP_REMOVED: .not after dispose() throws too, instead of passing vacuously', async () => {
+  it('test:lost:tap: .not after dispose() throws too, instead of passing vacuously', async () => {
     const bus = tap(createAsyncCommandBus());
     bus.dispose();
-    expect(thrown(() => expect(bus).not.toHaveBeenDispatched('a')).code).toBe('VC_TEST_TAP_REMOVED');
-    expect(thrown(() => expect(bus).not.toHaveFailedWith('a', 'VC_CORE_NO_HANDLER')).code).toBe('VC_TEST_TAP_REMOVED');
+    expect(thrown(() => expect(bus).not.toHaveBeenDispatched('a')).code).toBe('test:lost:tap');
+    expect(thrown(() => expect(bus).not.toHaveFailedWith('a', 'core:missing:handler')).code).toBe('test:lost:tap');
   });
 
-  it('VC_TEST_TAP_REMOVED only where a missed record could change the outcome: records from before clear() still decide', () => {
+  it('test:lost:tap only where a missed record could change the outcome: records from before clear() still decide', () => {
     const bus = tap(createCommandBus());
     bus.dispatch('gone', null);
     bus.clear();
     expect(bus).toHaveBeenDispatched('gone');
-    expect(bus).toHaveFailedWith('gone', 'VC_CORE_NO_HANDLER');
+    expect(bus).toHaveFailedWith('gone', 'core:missing:handler');
     expect(failure(() => expect(bus).not.toHaveBeenDispatched('gone'))).toContain('expected "gone" to not be dispatched at all, but actually been dispatched 1 times');
   });
 
@@ -233,7 +233,7 @@ describe('A8 misuse is coded and names the fix', () => {
     expect(bus).not.toHaveBeenDispatchedWith('a', 3);
   });
 
-  it('VC_TEST_TAP_REMOVED, limit: a hook added after clear() hides the removal, and the matcher reports what it saw', () => {
+  it('test:lost:tap, limit: a hook added after clear() hides the removal, and the matcher reports what it saw', () => {
     const bus = tap(createCommandBus());
     bus.clear();
     bus.onAfter(() => {});
@@ -258,7 +258,7 @@ describe('tap(bus) over onAfter', () => {
     bus.dispatch('plain', null);
 
     expect(bus).toHaveBeenDispatchedWith('ok', { n: 2 });
-    expect(bus).toHaveFailedWith('missing', 'VC_CORE_NO_HANDLER');
+    expect(bus).toHaveFailedWith('missing', 'core:missing:handler');
     expect(bus).toHaveFailedWith('domain', 'OUT_OF_STOCK');
     // A failure lists every dispatch the way toHaveBeenCalledWith lists calls.
     const message = failure(() => expect(bus).toHaveBeenDispatched('nope'));
@@ -266,8 +266,8 @@ describe('tap(bus) over onAfter', () => {
     for (const nth of ['2nd', '3rd', '4th']) expect(message).toContain(`  ${nth} dispatch:\n\n`);
     expect(message).toContain('  4th dispatch:\n\n    Object {\n      "action": "plain",');
     expect(message).toContain('Number of dispatches: 4');
-    const failed = failure(() => expect(bus).toHaveFailedWith('domain', 'VC_CORE_NO_HANDLER'));
-    expect(failed).toContain('-   "code": "VC_CORE_NO_HANDLER",\n+   "code": "OUT_OF_STOCK",');
+    const failed = failure(() => expect(bus).toHaveFailedWith('domain', 'core:missing:handler'));
+    expect(failed).toContain('-   "code": "core:missing:handler",\n+   "code": "OUT_OF_STOCK",');
   });
 
   it('is idempotent: tapping twice records once', () => {
@@ -300,13 +300,13 @@ describe('tap(bus) over onAfter', () => {
     expect(failure(() => expect(bus).toHaveBeenDispatched('a'))).toContain('Number of dispatches: 0');
   });
 
-  it('a sealed bus refuses the tap with VC_CORE_SEALED, and stays untapped', () => {
+  it('a sealed bus refuses the tap with core:refused:bus, and stays untapped', () => {
     const bus = createCommandBus();
     bus.seal();
     const e = thrown(() => tap(bus));
     expect(e).toBeInstanceOf(BusError);
-    expect(e.code).toBe('VC_CORE_SEALED');
-    expect(thrown(() => expect(bus).toHaveBeenDispatched('a')).code).toBe('VC_TEST_UNTAPPED');
+    expect(e.code).toBe('core:refused:bus');
+    expect(thrown(() => expect(bus).toHaveBeenDispatched('a')).code).toBe('test:missing:tap');
   });
 });
 
@@ -373,7 +373,7 @@ describe('matchers', () => {
     expect(failure(() => expect(bus).not.toHaveBeenLastDispatchedWith('cartAdd', { qty: 2 }))).toContain('expected last "cartAdd" dispatch to not have payload: {"qty": 2}');
   });
 
-  it('counting and positional matchers throw VC_TEST_TAP_REMOVED either way: a missed dispatch changes a count in both directions', () => {
+  it('counting and positional matchers throw test:lost:tap either way: a missed dispatch changes a count in both directions', () => {
     const bus = tap(createCommandBus());
     bus.register('a', () => 1);
     bus.dispatch('a', null, 1);
@@ -384,7 +384,7 @@ describe('matchers', () => {
       () => expect(bus).toHaveBeenNthDispatchedWith(1, 'a', 1),
       () => expect(bus).toHaveBeenLastDispatchedWith('a', 1),
     ]) {
-      expect(thrown(run).code).toBe('VC_TEST_TAP_REMOVED');
+      expect(thrown(run).code).toBe('test:lost:tap');
     }
   });
 
@@ -418,15 +418,15 @@ describe('matchers', () => {
     bus.register('ok', () => 1);
     bus.dispatch('ok', null);
     bus.dispatch('gone', null);
-    expect(bus).toHaveFailedWith('gone', 'VC_CORE_NO_HANDLER');
+    expect(bus).toHaveFailedWith('gone', 'core:missing:handler');
     // A success never matches, whatever the code asked for.
-    expect(bus).not.toHaveFailedWith('ok', 'VC_CORE_NO_HANDLER');
-    expect(bus).not.toHaveFailedWith('gone', 'VC_CORE_SEALED');
-    expect(failure(() => expect(bus).toHaveFailedWith('gone', 'VC_CORE_SEALED'))).toContain(
-      'expected "gone" to have failed with VC_CORE_SEALED',
+    expect(bus).not.toHaveFailedWith('ok', 'core:missing:handler');
+    expect(bus).not.toHaveFailedWith('gone', 'core:refused:bus');
+    expect(failure(() => expect(bus).toHaveFailedWith('gone', 'core:refused:bus'))).toContain(
+      'expected "gone" to have failed with core:refused:bus',
     );
-    expect(failure(() => expect(bus).not.toHaveFailedWith('gone', 'VC_CORE_NO_HANDLER'))).toContain(
-      'expected "gone" not to have failed with VC_CORE_NO_HANDLER',
+    expect(failure(() => expect(bus).not.toHaveFailedWith('gone', 'core:missing:handler'))).toContain(
+      'expected "gone" not to have failed with core:missing:handler',
     );
   });
 
@@ -442,7 +442,7 @@ describe('matchers', () => {
     const failed = bus.dispatch('cartClear', null);
     expect(failed).not.toSucceedWith();
     expect(failure(() => expect(failed).toSucceedWith())).toContain(
-      'expected the dispatch to succeed, and it failed with VC_CORE_NO_HANDLER',
+      'expected the dispatch to succeed, and it failed with core:missing:handler',
     );
     expect(failure(() => expect(ok).not.toSucceedWith())).toContain('expected the dispatch not to succeed');
   });
@@ -451,15 +451,15 @@ describe('matchers', () => {
     const bus = createCommandBus();
     bus.register('ok', () => 7);
     const failed = bus.dispatch('gone', null);
-    expect(failed).toFailWith('VC_CORE_NO_HANDLER');
-    expect(failed).not.toFailWith('VC_CORE_SEALED');
+    expect(failed).toFailWith('core:missing:handler');
+    expect(failed).not.toFailWith('core:refused:bus');
     const ok = bus.dispatch('ok', null);
-    expect(ok).not.toFailWith('VC_CORE_NO_HANDLER');
-    expect(failure(() => expect(ok).toFailWith('VC_CORE_NO_HANDLER'))).toContain(
-      'expected the dispatch to fail with VC_CORE_NO_HANDLER, and it succeeded with 7',
+    expect(ok).not.toFailWith('core:missing:handler');
+    expect(failure(() => expect(ok).toFailWith('core:missing:handler'))).toContain(
+      'expected the dispatch to fail with core:missing:handler, and it succeeded with 7',
     );
-    expect(failure(() => expect(failed).not.toFailWith('VC_CORE_NO_HANDLER'))).toContain(
-      'expected the dispatch not to fail with VC_CORE_NO_HANDLER',
+    expect(failure(() => expect(failed).not.toFailWith('core:missing:handler'))).toContain(
+      'expected the dispatch not to fail with core:missing:handler',
     );
   });
 
@@ -470,7 +470,7 @@ describe('matchers', () => {
       const e = thrown(() => expect(received).toSucceedWith());
       expect(e).toBeInstanceOf(TypeError);
       expect(e.message).toContain('await the dispatch first');
-      expect(thrown(() => expect(received).not.toFailWith('VC_UNKNOWN'))).toBeInstanceOf(TypeError);
+      expect(thrown(() => expect(received).not.toFailWith('core:unknown:error'))).toBeInstanceOf(TypeError);
     }
     await pending;
   });
@@ -501,7 +501,7 @@ describe('C3 a failed test shows what it dispatched', () => {
     tap(createCommandBus()).dispatch('cartAdd', { id: 1 }, { qty: 2 });
     const task = failedTask('x');
     _explainFailure(task, chai);
-    expect(task.result.errors[0].message).toContain("{ action: 'cartAdd', target: { id: 1 }, payload: { qty: 2 }, ok: false, code: 'VC_CORE_NO_HANDLER' }");
+    expect(task.result.errors[0].message).toContain("{ action: 'cartAdd', target: { id: 1 }, payload: { qty: 2 }, ok: false, code: 'core:missing:handler' }");
     expect(chai.config.truncateThreshold).toBe(before);
   });
 
@@ -524,7 +524,7 @@ describe('C3 a failed test shows what it dispatched', () => {
     const [head, body] = task.result.errors[0].message.split('\n\nDispatched during this test:\n\n');
     expect(head).toBe('expected 1 to be 2');
     expect(body).toContain("  1st dispatch on getCommandBus():\n\n    { action: 'cartAdd', target: { id: 1 }, payload: { qty: 2 }, ok: true, value: 3 }");
-    expect(body).toContain("  2nd dispatch on getCommandBus():\n\n    { action: 'cartRemove', target: { id: 1 }, ok: false, code: 'VC_CORE_NO_HANDLER' }");
+    expect(body).toContain("  2nd dispatch on getCommandBus():\n\n    { action: 'cartRemove', target: { id: 1 }, ok: false, code: 'core:missing:handler' }");
     expect(body).toMatch(/Number of dispatches: 2$/);
   });
 

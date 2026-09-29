@@ -39,6 +39,7 @@ function onInput(e: Event) {
       :value="query"
       @input="onInput"
       placeholder="Type to search..."
+      aria-label="Search"
       style="padding: 0.4rem; width: 200px;"
     />
     <p>Open the console - <code>[searchExecute]</code> logs each dispatch.</p>

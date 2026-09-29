@@ -26,22 +26,19 @@ function mountAnalyticsIsland(el: HTMLElement, endpoint: string) {
   const bus = createAsyncCommandBus()
   bus.use(createHttpBridge({ endpoint, actions: ['analyticsLoad*'] }))
 
-  // Persist the selected period across page navigations.
-  // persist() is a sync plugin; on this async bus its save-on-dispatch hook
-  // would see an unresolved Promise, so save explicitly via onAfter instead
-  // and use the plugin object only for load()/save()/clear().
+  // Persist the selected period across page navigations: persist() saves
+  // after each successful `analyticsSetPeriod`, on either bus.
   const period = ref<'day' | 'week' | 'month'>('week')
   const periodPersist = persist({
     key: 'vc:analytics:period',
     getState: () => period.value,
+    filter: (cmd) => cmd.action === 'analyticsSetPeriod',
   })
   period.value = periodPersist.load() ?? 'week'
-  bus.onAfter((cmd, result) => {
-    if (cmd.action === 'analyticsSetPeriod' && result.ok) periodPersist.save()
-  })
+  bus.use(periodPersist)
 
   // Register local command handlers
-  bus.register('analyticsSetPeriod', (cmd) => {
+  bus.register('analyticsSetPeriod', async (cmd) => {
     period.value = cmd.target.period
     // Trigger data reload - forwarded to the backend by the HTTP bridge
     return bus.dispatch('analyticsLoadMetrics', { period: period.value })
@@ -49,6 +46,10 @@ function mountAnalyticsIsland(el: HTMLElement, endpoint: string) {
 
   return { bus, period }
 }
+
+// Mount once the widget's element is on the page.
+const el = document.getElementById('analytics-island')
+if (el?.dataset.endpoint) mountAnalyticsIsland(el, el.dataset.endpoint)
 
 /*
  * PHP: app/Filament/Widgets/AnalyticsWidget.php
@@ -80,7 +81,7 @@ function mountAnalyticsIsland(el: HTMLElement, endpoint: string) {
  *   const el = document.getElementById('analytics-island')
  *   if (el) {
  *     // If using IIFE/CDN approach inside Filament
- *     const { analytics } = VaporChamber.mount('#analytics-island', {
+ *     const { bus, dispatch } = VaporChamber.mount('#analytics-island', {
  *       transport: VaporChamber.http({ endpoint: el.dataset.endpoint }),
  *       state: { period: 'week', metrics: [] }
  *     })
@@ -98,6 +99,8 @@ function mountAnalyticsIsland(el: HTMLElement, endpoint: string) {
  * This pattern scales:
  * - Single chart widget -> one island, one bus
  * - Full dashboard section -> multiple islands, each with its own bus
- * - Cross-island coordination -> use createChannel() plugin with a shared channel
+ * - Cross-island coordination -> emit a DOM event (emitDOMEvent) the other
+ *   island listens to, or give the islands one shared bus for the facts they
+ *   share. (createChannel() is cross-TAB, over BroadcastChannel.)
  */
 export {}

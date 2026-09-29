@@ -36,11 +36,10 @@ function makeBareSpecifierUnresolvable(): void {
  * returns before its dynamic import. Net effect: the probe cannot wire
  * `untracked()`, while the subpath's real `@vue/reactivity` import still can.
  *
- * THE KEY SET IS DERIVED, NOT TRANSCRIBED. This used to be a hand-written list
- * of eight names mirroring `src/vue.ts`'s imports, which made it a staleness
- * trap: adding a name there and not here fails with vitest's "No X export is
- * defined on the vue mock" - a mock-maintenance error wearing the costume of a
- * product bug. v1.17.0's `hasInjectionContext` addition tripped exactly that.
+ * THE KEY SET IS DERIVED, NOT TRANSCRIBED. A hand-written list mirroring
+ * `src/vue.ts`'s imports would be a staleness trap: adding a name there and not
+ * here fails with vitest's "No X export is defined on the vue mock" - a
+ * mock-maintenance error wearing the costume of a product bug.
  *
  * Taking the keys from the real module removes the duplication at the source.
  * Every name `src/vue.ts` can legally import must exist on real `vue` anyway, so

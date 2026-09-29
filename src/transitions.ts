@@ -1,24 +1,11 @@
 /**
  * vapor-chamber - Transition integration
  *
- * Vue alignment history (one line per version - full per-item detail lives in
- * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log", section 9.2):
- *   rc.8 - pass-through, and a composition that did not work now does:
- *          VaporTransition's declared `on*` props merge across sources, so
- *          `<Transition v-bind="t" @enter="mine">` runs both hooks. rc.7 kept
- *          only the later-written source, which in that order dropped the
- *          bridge's onEnter. tests/transition-bind-merge-fixture.test.ts.
- *   rc.5 - pass-through; the only module rc.5 reaches at all (TransitionGroup
- *          internals). Idempotent here by construction - see `buildHooks`.
- *   rc.2 - pass-through; unblocks a prior failure mode (#15133).
- *   beta.17 / beta.16 - pass-through; beta.16 brings inherited onLeave correctness.
- *   v1.6.0 / beta.15 - pass-through (transition-group hook restore, key stability).
- *   v1.5.0 / beta.14 - pass-through (onMove suppressed for v-show-hidden children).
- *   v1.4.0 / beta.13 - pass-through (onMove for Vapor+VDOM component moves).
- *          Behaviour notes for all three live on the onMove() JSDoc, not here.
- *   v1.1.0 - module added: dispatches bus commands from <Transition> /
- *          <TransitionGroup> lifecycle hooks, enabling animation coordination
- *          through the command bus without direct DOM coupling.
+ * `VaporTransition` merges its declared `on*` props across sources, so
+ * `<Transition v-bind="t" @enter="mine">` runs both hooks
+ * (tests/transition-bind-merge-fixture.test.ts). The hooks are idempotent by
+ * construction (see `buildHooks`); onMove's behaviour notes are on its JSDoc.
+ * The history is in CHANGELOG.md and the whitepaper's section 9.2.
  *
  * Two entry points:
  *   createTransitionBridge - framework-agnostic factory (accepts BaseBus)
@@ -83,11 +70,9 @@ export type TransitionHooks = {
   /**
    * Dispatches `<namespace>Leave` and awaits an async handler before `done()`.
    *
-   * Vue 3.6.0-beta.16: now fires when a **non-v-show root is structurally removed
-   * after a v-show branch was shown**. Previously a latched `persisted` flag leaked
-   * onto the non-v-show root, so Vapor skipped the leave and this hook (and its
-   * `*Leave` command) never ran. The runtime now gates the carry-forward on an
-   * actual v-show marker, so the dispatch is no longer dropped in that sequence.
+   * Fires when a **non-v-show root is structurally removed after a v-show
+   * branch was shown** too (Vue gates its `persisted` carry-forward on an
+   * actual v-show marker, beta.16).
    */
   onLeave: (el: Element, done: () => void) => void;
   onAfterLeave: (el: Element) => void;
@@ -95,20 +80,13 @@ export type TransitionHooks = {
   /**
    * TransitionGroup-only: called when an element moves due to reorder.
    *
-   * Vue 3.6.0-beta.15: a move that was skipped (e.g. for a v-show-hidden child)
-   * no longer permanently drops the element's move hooks - they are restored, so
-   * a later genuine reorder of that same child dispatches `*Move` as normal. You
-   * do not need to re-register the `*Move` handler after a hidden item reappears.
+   * NOT called for elements hidden by v-show (display:none): the `*Move`
+   * command is never dispatched for invisible list items. A skipped move does
+   * not drop the element's move hooks, so a later genuine reorder of that child
+   * dispatches `*Move` as normal.
    *
-   * Vue 3.6.0-beta.14: NOT called for elements hidden by v-show (display:none).
-   * Vue's runtime skips the hook for v-show-hidden children, so the `*Move`
-   * command is never dispatched for invisible list items. Handlers that were
-   * guarding against spurious move events on hidden elements can remove that
-   * check.
-   *
-   * Vue 3.6.0-beta.13: fires correctly for both Vapor and VDOM component moves
-   * inside a Vapor TransitionGroup. Guaranteed to be called after all child
-   * updates have flushed - `el` is in its pre-move position, ready for the CSS
+   * Fires for both Vapor and vDOM component moves inside a Vapor
+   * TransitionGroup, after all child updates have flushed - `el` is in its pre-move position, ready for the CSS
    * move class to be applied. No `done()` callback; moves are CSS-only.
    */
   onMove: (el: Element) => void;
@@ -125,23 +103,11 @@ export type TransitionBridge = TransitionHooks & {
 // Internal: action name prefixing (same convention as useCommandGroup)
 // ---------------------------------------------------------------------------
 
-// camelCase namespace join ('modal' + 'enter' -> 'modalEnter').
-//
-// This carried a "DO NOT consolidate, settled, do not re-evaluate" note, on the
-// grounds that it sat on the per-hook dispatch hot path where a shared call
-// measured ~0.6-1.3% slower. That reasoning was sound but the premise no longer
-// holds, because the premise itself was the bug: the call did not need to be on
-// the dispatch path at all. `buildHooks` now resolves all nine names once at
-// construction (see there), so this runs 9 times per bridge instead of once per
-// hook fired.
-//
-// Consequence worth stating plainly, since the old note forbade exactly this:
-// the ~1% indirection argument no longer applies HERE, because a setup-time
-// call cannot cost a per-dispatch percentage. The right way to retire a
-// "don't merge, it costs 1%" constraint is to remove the hot path, not to pay
-// the 1%. The other two sites (useCommandGroup / createChamber) keep their own
-// copies until each is shown to be off its hot path the same way - createChamber
-// is already setup-only, useCommandGroup is not yet checked.
+// camelCase namespace join ('modal' + 'enter' -> 'modalEnter'). Off the
+// dispatch path: `buildHooks` resolves all nine names once at construction
+// (see there). useCommandGroup / createChamber keep their own copies until each
+// is shown to be off its hot path the same way (createChamber is setup-only;
+// useCommandGroup is not yet checked).
 function prefixed(namespace: string | undefined, hook: string): string {
   if (!namespace) return hook;
   return namespace + hook.charAt(0).toUpperCase() + hook.slice(1);
@@ -167,8 +133,8 @@ function buildHooks(
   // see the transition-bridge rows in tests/perf.bench.ts).
   //
   // This is also what makes `prefixed` safe to share: it is now a setup-time
-  // call, so the indirection that measured ~1% on the old per-dispatch path
-  // cannot appear here at all.
+  // call, so the indirection that measured ~1% on a per-dispatch path cannot
+  // appear here at all.
   const aBeforeEnter = prefixed(namespace, 'beforeEnter');
   const aEnter = prefixed(namespace, 'enter');
   const aAfterEnter = prefixed(namespace, 'afterEnter');
@@ -291,23 +257,20 @@ function buildHooks(
  * to `<Transition>`'s declared props and passes the rest through as
  * fallthrough ATTRIBUTES, which are stringified onto the transitioned element.
  * `phase` (a signal object) and `dispose` (a function) match no declared prop,
- * so both landed in the DOM. Measured before this change, on a real mounted
- * `<Transition v-bind="bridge">`:
+ * so enumerable, both would land in the DOM (on a real mounted
+ * `<Transition v-bind="bridge">`):
  *
  *     <div class="panel" phase="[object Object]" dispose="() => {}">hi</div>
  *
- * Shipped that way since v1.1.0. Every existing test called the hooks directly
- * on a mock element, so nothing ever rendered the bridge and nothing saw it -
- * the same shape of blind spot as the rc.4 KeepAlive bug, where a stand-in
- * fixture could only check the half already understood. The regression test is
- * therefore a REAL mount, not another direct call.
+ * The regression test is a REAL mount: a direct call on a mock element never
+ * renders the bridge.
  *
  * Non-enumerability is the minimal fix: it changes what SPREADING the bridge
  * yields, and nothing else. `t.phase.value`, `t.dispose()` and
  * `const { phase } = t` all read the property directly and are unaffected -
  * destructuring does not require enumerability. The one intentional casualty is
- * `{ ...bridge }`, which no longer carries `phase`/`dispose`; that is precisely
- * the operation that was putting them in the DOM.
+ * `{ ...bridge }`, which does not carry `phase`/`dispose`; that is precisely
+ * the operation that would put them in the DOM.
  *
  * Not solved by renaming or by a `hooks` sub-object: both would break the
  * documented `v-bind="t"` call site, and the point is to make the documented

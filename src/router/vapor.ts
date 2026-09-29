@@ -23,19 +23,17 @@
  * `tests/vapor/vapor-outlet-size.test.ts` re-measures it every run with Vite's
  * build API, the bundler consumers ship with, against a baseline derived by
  * the same harness; the stamped values live in docs/router.md
- * (`vc:outletSaving`, `vc:outletOwnArm`). Since the rc.8 cycle it asserts this
- * module's OWN cost over a router-without-outlet floor as well as a coarse
- * floor on the saving. esbuild, its previous bundler, keeps the hydration code
- * rc.8 moved to top level, and read the saving falling under 19.5 KB while
- * rolldown read it rising to 20.42.
+ * (`vc:outletSaving`, `vc:outletOwnArm`). It asserts this module's OWN cost
+ * over a router-without-outlet floor as well as a coarse floor on the saving,
+ * measured with the consumer's bundler (bundlers disagree on this number).
  *
  * WHAT IT DELIBERATELY DOES NOT DO
  *
  * - **No registry, no `configureVue()`.** Every Vue helper is a STATIC import
  *   from bare `vue`, as in every other router module. Registry access would
- *   re-import the failure class v1.17.0 shipped `/vapor` to kill: the probe
- *   cannot resolve in a production bundle, and a miss HERE would render an
- *   outlet as silently empty in production. A static import inverts the
+ *   bring back the failure class `/vapor` exists to avoid: the probe cannot
+ *   resolve in a production bundle, and a miss HERE would render an outlet as
+ *   silently empty in production. A static import inverts the
  *   failure mode: an upstream rename is a consumer BUILD error, never a
  *   runtime null.
  * - **No `package.json#sideEffects` entry.** Unlike `/vapor`, importing this
@@ -105,9 +103,8 @@ export const RouterOutlet = defineVaporComponent({
   name: 'RouterOutlet',
   setup(_props, { slots }) {
     const router = inject<Router>(ROUTER_KEY);
-    // Coded, matching ./outlet. `routerError` is already in this module's graph
-    // for mode_mismatch, and it prepends the same prefix this string used to
-    // carry inline, so the message is unchanged and the bytes do not grow.
+    // Coded, matching ./outlet (`routerError` is already in this module's graph
+    // for mode_mismatch, so it costs no bytes).
     if (!router) throw routerError('no_router', '<RouterOutlet> used without an installed router');
 
     const depth = inject<number>(OUTLET_DEPTH_KEY, 0);

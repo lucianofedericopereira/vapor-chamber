@@ -3,7 +3,7 @@
  *
  * Re-exports all plugins from split modules:
  *  - plugins-core: logger, validator, history, debounce, throttle, authGuard, optimistic, optimisticUndo
- *  - plugins-io:   retry, persist, createChannel
+ *  - plugins-io:   persist, createChannel
  */
 
 export {
@@ -20,10 +20,8 @@ export {
 } from './plugins-core';
 
 export {
-  retry,
   persist,
   createChannel,
-  type RetryOptions,
   type PersistOptions,
   type ChannelOptions,
 } from './plugins-io';

@@ -20,12 +20,8 @@ import { bladeFetcher } from '../../src/router/remote';
 import { createRouter, unwrapRoutesPayload } from '../../src/router/index';
 import type { RouteRecord } from '../../src/router/types';
 import { stubGlobal } from '../../src/vitest-pure';
+import { makeRouter, ROWS } from './fixture';
 
-const ROWS: RouteRecord[] = [
-  { name: 'shell', path: '/', parent: null },
-  { name: 'home', path: '/', parent: 'shell', component: 'Home' },
-  { name: 'list', path: '/list', parent: 'shell', component: 'List' },
-];
 
 afterEach(() => {
   document.body.innerHTML = '';
@@ -36,16 +32,20 @@ afterEach(() => {
 // ---------------------------------------------------------------------------
 
 describe('unwrapRoutesPayload', () => {
-  it('unwraps the house envelope { ok: true, state }', () => {
-    const payload = unwrapRoutesPayload({ ok: true, state: { routes: ROWS, base: '/admin' } });
+  it('unwraps the contract answer { state }', () => {
+    const payload = unwrapRoutesPayload({ state: { routes: ROWS, base: '/admin' } });
     expect(payload.base).toBe('/admin');
     expect(payload.routes).toHaveLength(3);
   });
 
-  it('throws with the envelope error when ok is false', () => {
-    expect(() => unwrapRoutesPayload({ ok: false, error: 'forbidden' })).toThrow(/forbidden/);
-    // Missing error string falls back to "unknown error".
-    expect(() => unwrapRoutesPayload({ ok: false })).toThrow(/unknown error/);
+  it('throws routes_load_failed with the problem detail, else its code', () => {
+    expect(() => unwrapRoutesPayload({ problem: { status: 403, code: 'forbidden', detail: 'Not yours' } })).toThrow(/Not yours/);
+    expect(() => unwrapRoutesPayload({ problem: { status: 403, code: 'forbidden' } })).toThrow(/forbidden/);
+    expect(() => unwrapRoutesPayload({ problem: {} })).toThrow(/no detail/);
+  });
+
+  it('a { state } without a routes array is not a payload', () => {
+    expect(() => unwrapRoutesPayload({ state: { nope: true } })).toThrow(/no routes array/);
   });
 
   it('rejects a bare payload with no routes array', () => {
@@ -65,9 +65,8 @@ describe('inline routes source', () => {
       JSON.stringify({ routes: ROWS, base: '/shop' }) +
       '</script>';
 
-    const router = createRouter({
+    const router = makeRouter({
       routes: { inline: '#routes' } as never,
-      components: { Home: { name: 'Home' }, List: { name: 'List' } },
       history: createMemoryHistory('/shop'),
     });
     await router.isReady();
@@ -78,10 +77,9 @@ describe('inline routes source', () => {
   });
 
   it('throws inline_routes_missing when the selector matches nothing', async () => {
-    const router = createRouter({
+    const router = makeRouter({
       routes: { inline: '#absent' } as never,
       components: {},
-      history: createMemoryHistory('/'),
     });
     await expect(router.isReady()).rejects.toThrow(/no inline routes element matches/);
     router.destroy();
@@ -89,10 +87,9 @@ describe('inline routes source', () => {
 
   it('throws inline_routes_missing for an empty element', async () => {
     document.body.innerHTML = '<script id="routes" type="application/json"></script>';
-    const router = createRouter({
+    const router = makeRouter({
       routes: { inline: '#routes' } as never,
       components: {},
-      history: createMemoryHistory('/'),
     });
     await expect(router.isReady()).rejects.toThrow(/no inline routes element matches/);
     router.destroy();
@@ -108,10 +105,8 @@ describe('remote routes source', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const http = { get: vi.fn().mockResolvedValue({ data: { routes: ROWS, base: '/from-payload' } }) } as any;
 
-    const router = createRouter({
+    const router = makeRouter({
       routes: { url: '/routes.json' } as never,
-      components: { Home: { name: 'Home' }, List: { name: 'List' } },
-      history: createMemoryHistory('/'),
       http,
     });
     await router.isReady();
@@ -126,10 +121,8 @@ describe('remote routes source', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const http = { get: vi.fn().mockResolvedValue({ data: { routes: ROWS, base: '/from-payload' } }) } as any;
 
-    const router = createRouter({
+    const router = makeRouter({
       routes: { url: '/routes.json' } as never,
-      components: { Home: { name: 'Home' }, List: { name: 'List' } },
-      history: createMemoryHistory('/'),
       base: '/explicit',
       http,
     });
@@ -141,10 +134,9 @@ describe('remote routes source', () => {
 
   it('wraps a transport failure as routes_load_failed', async () => {
     const http = { get: vi.fn().mockRejectedValue(new Error('502 bad gateway')) } as any;
-    const router = createRouter({
+    const router = makeRouter({
       routes: { url: '/routes.json' } as never,
       components: {},
-      history: createMemoryHistory('/'),
       http,
     });
 
@@ -156,10 +148,9 @@ describe('remote routes source', () => {
     // A payload with no routes array makes unwrapRoutesPayload throw a coded
     // error inside the try - it must not be re-wrapped as routes_load_failed.
     const http = { get: vi.fn().mockResolvedValue({ data: { nope: true } }) } as any;
-    const router = createRouter({
+    const router = makeRouter({
       routes: { url: '/routes.json' } as never,
       components: {},
-      history: createMemoryHistory('/'),
       http,
     });
 
@@ -181,10 +172,8 @@ describe('preheat wiring', () => {
   it('loads a lazy component when a hovered link resolves', async () => {
     document.body.innerHTML = '<a id="to-list" href="/list">list</a>';
     const lazy = vi.fn(async () => ({ name: 'List' }));
-    const router = createRouter({
-      routes: ROWS,
+    const router = makeRouter({
       components: { Home: { name: 'Home' }, List: lazy },
-      history: createMemoryHistory('/'),
     });
     await router.isReady();
 
@@ -201,10 +190,8 @@ describe('preheat wiring', () => {
   it('ignores a hovered link whose path resolves to nothing', async () => {
     document.body.innerHTML = '<a id="nowhere" href="/nowhere-at-all">gone</a>';
     const lazy = vi.fn(async () => ({ name: 'List' }));
-    const router = createRouter({
-      routes: ROWS,
+    const router = makeRouter({
       components: { Home: { name: 'Home' }, List: lazy },
-      history: createMemoryHistory('/'),
     });
     await router.isReady();
 
@@ -224,10 +211,8 @@ describe('inline routes injected after construction', () => {
     // createRouter's synchronous read (readInlinePayload) finds nothing, so
     // the table stays null and start() falls through to loadInlineTable -
     // the deferred-script / late-hydration ordering.
-    const router = createRouter({
+    const router = makeRouter({
       routes: { inline: '#late-routes' } as never,
-      components: { Home: { name: 'Home' }, List: { name: 'List' } },
-      history: createMemoryHistory('/'),
     });
 
     document.body.innerHTML =
@@ -249,10 +234,8 @@ describe('preheat racing a table swap', () => {
   it('bails when the path stops resolving during the hover delay', async () => {
     document.body.innerHTML = '<a id="to-list" href="/list">list</a>';
     const lazy = vi.fn(async () => ({ name: 'List' }));
-    const router = createRouter({
-      routes: ROWS,
+    const router = makeRouter({
       components: { Home: { name: 'Home' }, List: lazy },
-      history: createMemoryHistory('/'),
     });
     await router.isReady();
 
@@ -279,7 +262,7 @@ describe('createRouter - table source and base variants', () => {
     // Every other test passes `routes: ROWS` (the array arm). The object form
     // is the shape a Blade-inlined or fetched payload arrives in, and it may
     // carry a `base` alongside the rows.
-    const router = createRouter({
+    const router = makeRouter({
       history: createMemoryHistory('/admin'),
       routes: { routes: ROWS, base: '/admin' } as any,
       components: { Home: {}, List: {} },
@@ -293,8 +276,7 @@ describe('createRouter - table source and base variants', () => {
     // `tableRef.value?.records ?? noRecords` - the fallback arm. A remote
     // source has no table until start() resolves, so anything rendering a menu
     // during setup reads this.
-    const router = createRouter({
-      history: createMemoryHistory('/'),
+    const router = makeRouter({
       routes: { url: '/routes.json' } as any,
       components: {},
     });
@@ -306,9 +288,7 @@ describe('createRouter - table source and base variants', () => {
   it('setQuery before a route is matched finds no leaf defs', () => {
     // `matched[matched.length - 1]?.queryDefs ?? {}` - the `?? {}` arm needs an
     // EMPTY matched chain, which is exactly the pre-isReady() state.
-    const router = createRouter({
-      history: createMemoryHistory('/'),
-      routes: ROWS,
+    const router = makeRouter({
       components: { Home: {}, List: {} },
     });
     expect(router.currentRoute.value.location.matched).toEqual([]);
@@ -339,9 +319,7 @@ describe('createRouter - table source and base variants', () => {
     // `options.linksRoot ? document.querySelector(...) : null` - the
     // querySelector arm. Every other test omits linksRoot and takes `document`.
     document.body.innerHTML = `<nav id="side"><a href="/list">L</a></nav><a href="/list">outside</a>`;
-    const router = createRouter({
-      history: createMemoryHistory('/'),
-      routes: ROWS,
+    const router = makeRouter({
       components: { Home: {}, List: {} },
       linksRoot: '#side',
     } as any);
@@ -371,10 +349,8 @@ describe('preheat failure and idle arming', () => {
     const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
     process.on('unhandledRejection', onUnhandled);
     try {
-      const router = createRouter({
-        routes: ROWS,
+      const router = makeRouter({
         components: { Home: { name: 'Home' }, List: lazy },
-        history: createMemoryHistory('/'),
       });
       await router.isReady();
 
@@ -401,8 +377,7 @@ describe('preheat failure and idle arming', () => {
     // stubbed to fire inline so the schedule is deterministic.
     using _requestIdleCallback = stubGlobal('requestIdleCallback', (cb: () => void) => { cb(); });
     const heavy = vi.fn(async () => ({ name: 'Heavy' }));
-    const router = createRouter({
-      history: createMemoryHistory('/'),
+    const router = makeRouter({
       routes: [
         { name: 'home', path: '/', component: 'Home' },
         { name: 'heavy', path: '/heavy', component: 'Heavy', meta: { preheat: true } },
@@ -438,8 +413,7 @@ describe('bladeFetcher', () => {
     // arm. A server template that does not wrap its content in the configured
     // root must still yield its markup rather than an empty string.
     const http = htmlClient('<html><body><p id="from-body">legacy page</p></body></html>');
-    const router = createRouter({
-      history: createMemoryHistory('/'),
+    const router = makeRouter({
       routes: BLADE_ROWS,
       components: { Home: { name: 'Home' } },
       // No <main> in the response, and bladeRoot defaults to 'main'.
@@ -459,8 +433,7 @@ describe('bladeFetcher', () => {
     const raw = '<html><body><main id="m">parsed?</main></body></html>';
     const http = htmlClient(raw);
     using _DOMParser = stubGlobal('DOMParser', undefined);
-    const router = createRouter({
-      history: createMemoryHistory('/'),
+    const router = makeRouter({
       routes: BLADE_ROWS,
       components: { Home: { name: 'Home' } },
       fetchBlade: bladeFetcher({ http }),

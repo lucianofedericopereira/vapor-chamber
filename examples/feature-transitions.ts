@@ -88,7 +88,7 @@ drawer.onEnter(el, () => console.log('Drawer enter done() - Vue can proceed'))
  * import 'vapor-chamber/vue'
  * import { useTransitionCommand } from 'vapor-chamber/transitions'
  *
- * // Bind all 8 hooks to the bus with 'notification' namespace
+ * // Bind every transition hook to the bus under the 'notification' namespace
  * const notification = useTransitionCommand({ namespace: 'notification' })
  * </script>
  *

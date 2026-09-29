@@ -12,7 +12,7 @@
     .panel { border: 1px solid #ccc; border-radius: 8px; padding: 1rem 1.25rem; margin: 1rem 0; }
     .row { display: flex; justify-content: space-between; align-items: center; margin: .4rem 0; }
     button { padding: .4rem .9rem; border-radius: 6px; border: 1px solid #888; cursor: pointer; }
-    button:disabled { opacity: .5; cursor: wait; }
+    button[aria-disabled="true"] { opacity: .5; cursor: wait; }
     .err { color: #c00; }
     pre { background: #f5f5f5; padding: .5rem; border-radius: 4px; font-size: 12px; overflow: auto; }
   </style>
@@ -38,7 +38,7 @@
     <div class="row"><span>Total</span><strong>$<span id="total">{{ number_format(session('vc.cart.cents', 0) / 100, 2) }}</span></strong></div>
     <div class="row"><span>Last added</span><span id="last">{{ session('vc.cart.last', '-') }}</span></div>
     <button id="clear">Clear cart</button>
-    <p id="status"></p>
+    <p id="status" role="status"></p>
   </div>
 
   <div class="panel">
@@ -64,20 +64,26 @@
       $('last').textContent = state.lastAdded || '-';
     }
 
+    // A press runs one dispatch at a time. `aria-disabled`, not `disabled`:
+    // disabling the focused button sends a keyboard user's focus to <body>.
+    // The outcome goes to #status, a live region, as TEXT - the failure's
+    // message is the backend's sentence, never markup.
+    async function press(btn, action, target, payload, done) {
+      if (btn.getAttribute('aria-disabled') === 'true') return;
+      btn.setAttribute('aria-disabled', 'true');
+      const result = await dispatch(action, target, payload);
+      btn.removeAttribute('aria-disabled');
+      if (result.ok) render(result.value);
+      $('status').className = result.ok ? '' : 'err';
+      $('status').textContent = result.ok ? done(result.value) : result.error.message;
+    }
+
     document.querySelectorAll('[data-add]').forEach((btn) => {
-      btn.addEventListener('click', async () => {
-        btn.disabled = true;
-        const result = await dispatch('cartAdd', { id: Number(btn.dataset.add) }, { qty: 1 });
-        btn.disabled = false;
-        if (result.ok) { render(result.value); $('status').textContent = ''; }
-        else $('status').innerHTML = `<span class="err">${result.error.message}</span>`;
-      });
+      btn.addEventListener('click', () => press(btn, 'cartAdd', { id: Number(btn.dataset.add) }, { qty: 1 },
+        (cart) => `${cart.lastAdded} added. ${cart.count} item(s).`));
     });
 
-    $('clear').addEventListener('click', async () => {
-      const result = await dispatch('cartClear', {});
-      if (result.ok) render(result.value);
-    });
+    $('clear').addEventListener('click', (e) => press(e.currentTarget, 'cartClear', {}, undefined, () => 'Cart cleared.'));
   </script>
 </body>
 </html>

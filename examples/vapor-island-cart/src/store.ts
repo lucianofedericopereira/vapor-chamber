@@ -52,10 +52,9 @@ function fact(cents: number, count: number, lastAdded: string): CartFact {
 // Logger - cart.* only
 bus.use(logger({ filter: cmd => cmd.action.startsWith('cart') }));
 
-// History - bus-backed undo. `undoAction`/`redoAction` (v1.6.0) register the
-// trigger handlers AND exclude them from recording automatically - without
-// that, hand-wired `cart.undo` handlers get recorded into history themselves,
-// wiping the redo stack on every dispatch (undo works once, redo never enables).
+// History - bus-backed undo. `undoAction`/`redoAction` register the trigger
+// handlers AND exclude them from recording: a trigger recorded into history
+// would wipe the redo stack on every dispatch.
 // The filter keeps history scoped to the one undoable command.
 export const cartHistory = mkHistory({
   maxSize: 50,

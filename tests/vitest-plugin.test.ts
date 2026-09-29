@@ -116,14 +116,14 @@ describe('R4 the setup file is a package specifier', () => {
   });
 });
 
-describe('VC_TEST_VITEST_MAJOR (R13)', () => {
+describe('test:unexpected:version (R13)', () => {
   it('an unknown Vitest major warns once, with the catalogue message, and does not fail', async () => {
     const plugin = vaporChamberTest({ islands: false });
     const { ctx } = context({ version: '6.0.0' });
     await plugin.configureVitest(ctx);
     await plugin.configureVitest(ctx);
     expect(ctx.vitest.logger.warn).toHaveBeenCalledOnce();
-    expect(ctx.vitest.logger.warn).toHaveBeenCalledWith(new VcTestError('VC_TEST_VITEST_MAJOR', ' (Vitest 6.0.0)').message);
+    expect(ctx.vitest.logger.warn).toHaveBeenCalledWith(new VcTestError('test:unexpected:version', ' (Vitest 6.0.0)').message);
   });
 
   it('control: Vitest 5 warns nothing', async () => {

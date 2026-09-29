@@ -17,7 +17,7 @@ import { ... } from 'vapor-chamber/router/remote';
 
 ### bladeFetcher
 
-**Function** - [src/router/remote.ts:64](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/remote.ts#L64)
+**Function** - [src/router/remote.ts:59](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/remote.ts#L59)
 
 ```ts
 bladeFetcher(options?: BladeFetcherOptions) => (href: string) => Promise<string>
@@ -32,22 +32,21 @@ hand-roll a DOMParser call.
 
 ### routerHttp
 
-**Function** - [src/router/remote.ts:41](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/remote.ts#L41)
+**Function** - [src/router/remote.ts:36](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/remote.ts#L36)
 
 ```ts
 routerHttp(options?: Partial<HttpRequestConfig>) => HttpClient
 ```
 
-The chamber http client, configured the way the router used to configure its
-own: an `X-Vapor-Router` marker header so a backend can tell router traffic
-from command traffic. Everything else is the client's own default, and any
+The chamber http client with an `X-Vapor-Router` marker header, so a backend
+can tell router traffic from command traffic. Everything else is the client's own default, and any
 option you pass wins.
 
 ## Type aliases
 
 ### BladeFetcherOptions
 
-**Type alias** - [src/router/remote.ts:48](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/remote.ts#L48)
+**Type alias** - [src/router/remote.ts:43](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/remote.ts#L43)
 
 ```ts
 export type BladeFetcherOptions = {

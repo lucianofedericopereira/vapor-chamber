@@ -6,7 +6,7 @@
  *
  * WHAT IS MEASURED, as two separate changes so each carries its own row:
  *   - conversion: a plugin's throw or rejected promise becomes a
- *     VC_PLUGIN_THREW result at EACH plugin's boundary - an inline try in each
+ *     plugin:failed:plugin result at EACH plugin's boundary - an inline try in each
  *     runner's `nextFrom`, and on the async runner a `.then(undefined, ...)`
  *     only when the plugin did not simply return its `next()` value (the
  *     per-run `last` slot);
@@ -64,12 +64,11 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 // Per-file subdir: the whole dir is removed in afterAll, so it must be ours alone.
 const REF_DIR = resolve(HERE, '__ref', 'plugin-throw');
 
-const SHIPPED_ASYNC_NEXT = `      if (!plugin) return (last = execute());
-      let r: CommandResult | Promise<CommandResult>;
-      try { r = plugin(cmd, () => nextFrom(idx + 1)); }
-      catch (e) { return pluginThrew(e, cmd, plugin, idx); }
+const SHIPPED_ASYNC_NEXT = `      let r: CommandResult | Promise<CommandResult>;
+      try { r = plugin(cmd, next, fails[idx]); }
+      catch (e) { return pluginThrew(e, cmd, plugin, idx, fails[idx]); }
       return (last = r !== last && r != null && typeof (r as PromiseLike<CommandResult>).then === 'function'
-        ? (r as Promise<CommandResult>).then(undefined, (e: unknown) => pluginThrew(e, cmd, plugin, idx))
+        ? (r as Promise<CommandResult>).then(undefined, (e: unknown) => pluginThrew(e, cmd, plugin, idx, fails[idx]))
         : r);`;
 
 /** [shipped text, replacement], grouped by the change it undoes (or, for the declined arm, rewrites). */
@@ -79,11 +78,11 @@ const TRANSFORMS: Record<string, Array<[string, string]>> = {
       `      if (!plugin) return execute();
       // The boundary (see pluginThrew), inline so this runner keeps its OWN
       // plugin call site - tests/plugin-throw-ab.test.ts.
-      try { return plugin(cmd, () => nextFrom(idx + 1)); }
-      catch (e) { return pluginThrew(e, cmd, plugin, idx); }`,
-      '      return plugin ? plugin(cmd, () => nextFrom(idx + 1)) : execute();',
+      try { return plugin(cmd, () => nextFrom(idx + 1), fails[idx]); }
+      catch (e) { return pluginThrew(e, cmd, plugin, idx, fails[idx]); }`,
+      '      return plugin ? plugin(cmd, () => nextFrom(idx + 1), fails[idx]) : execute();',
     ],
-    [SHIPPED_ASYNC_NEXT, '      return plugin ? plugin(cmd, () => nextFrom(idx + 1)) : execute();'],
+    [SHIPPED_ASYNC_NEXT, '      return plugin(cmd, next, fails[idx]);'],
   ],
   settle: [
     [
@@ -99,14 +98,13 @@ const TRANSFORMS: Record<string, Array<[string, string]>> = {
   ],
   awaitPerLevel: [
     [
-      `    function nextFrom(idx: number): CommandResult | Promise<CommandResult> {
+      `    function level(idx: number, next: () => CommandResult | Promise<CommandResult>): CommandResult | Promise<CommandResult> {
       const plugin = plugins[idx];
 ${SHIPPED_ASYNC_NEXT}`,
-      `    async function nextFrom(idx: number): Promise<CommandResult> {
+      `    async function level(idx: number, next: () => CommandResult | Promise<CommandResult>): Promise<CommandResult> {
       const plugin = plugins[idx];
-      if (!plugin) return execute();
-      try { return await plugin(cmd, () => nextFrom(idx + 1)); }
-      catch (e) { return pluginThrew(e, cmd, plugin, idx); }`,
+      try { return await plugin(cmd, next, fails[idx]); }
+      catch (e) { return pluginThrew(e, cmd, plugin, idx, fails[idx]); }`,
     ],
   ],
   wrapEveryLevel: [
@@ -125,7 +123,7 @@ const ARMS: Record<string, string[]> = {
 /** Printed rows: [label, numerator arm, denominator arm]. */
 const PAIRS: Array<[string, string, string]> = [
   ['self-control', 'self', 'bare'],
-  ['conversion (VC_PLUGIN_THREW)', 'preSettle', 'bare'],
+  ['conversion (plugin:failed:plugin)', 'preSettle', 'bare'],
   ['settle (onMissing: throw)', 'shipped', 'preSettle'],
   ['total shipped', 'shipped', 'bare'],
   ['DECLINED try/await per level', 'declinedAwait', 'bare'],
@@ -145,7 +143,7 @@ function derive(groups: string[]): string {
       src = src.replace(shipped, replacement);
     }
   }
-  return src.replace(/from '\.\/dev'/g, "from '../../../src/dev'").replace(/from '\.\/dict'/g, "from '../../../src/dict'");
+  return src.replace(/from '\.\/([\w-]+)'/g, "from '../../../src/$1'");
 }
 
 afterAll(() => {
@@ -209,9 +207,8 @@ describe('plugin-throw work on the bus - real path A/B', () => {
     // EVERY timed arm is a derived copy written and loaded the same way -
     // `shipped` too, with nothing transformed. The src module itself is used
     // only for the equivalence checks: timing it against copies loaded by a
-    // different path compares two loading paths as well as two sources - a
-    // first cut did, and read the settle at 1.04-1.17x on every row, a cost
-    // that vanished once the arms were loaded alike.
+    // different path compares two loading paths as well as two sources (it
+    // reads as a 1.04-1.17x cost on every row that loading alike removes).
     const arms: Record<string, Mod> = {};
     const names = Object.keys(ARMS);
     const load = async (name: string, groups: string[]) => {
@@ -252,7 +249,7 @@ describe('plugin-throw work on the bus - real path A/B', () => {
       const s0 = arms.bare.createCommandBus(); s0.use(thrower); s0.register('t', () => 1);
       const s1 = shippedMod.createCommandBus(); s1.use(thrower); s1.register('t', () => 1);
       expect(() => s0.dispatch('t', 1)).toThrow('plugin bug');
-      expect((s1.dispatch('t', 1).error as any).code).toBe('VC_PLUGIN_THREW');
+      expect((s1.dispatch('t', 1).error as any).code).toBe('plugin:failed:plugin');
       // --- intended difference 2: onMissing 'throw' settles before it throws ----
       for (const [m, expected] of [[arms.preSettle, 0], [shippedMod, 1]] as const) {
         const bus = m.createCommandBus({ onMissing: 'throw' });

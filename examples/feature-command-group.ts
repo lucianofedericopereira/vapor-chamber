@@ -5,7 +5,10 @@
  * Each group operates on the same shared bus but with a namespace prefix.
  */
 
-import { createCommandBus, setCommandBus, useCommandGroup } from 'vapor-chamber'
+import { createCommandBus, setCommandBus } from 'vapor-chamber'
+// Composables from the Vue entry: it wires Vue, so their cleanup and
+// reactivity hold in a production build (the root would not).
+import { useCommandGroup } from 'vapor-chamber/vue'
 
 const bus = createCommandBus()
 setCommandBus(bus)
@@ -13,8 +16,6 @@ setCommandBus(bus)
 // ─── Cart feature ─────────────────────────────────────────────────────────────
 
 const cart = useCommandGroup('cart')
-
-const cartInitial = { items: [] as Array<{ id: number; qty: number }>, total: 0 }
 
 // Register namespaced handlers
 cart.register('add', (cmd) => {
@@ -65,7 +66,7 @@ telemetry.dispatch('event', { name: 'page_view', params: { page: '/shop' } })
 
 // Cross-namespace dispatch does NOT trigger handlers (isolated):
 orders.dispatch('add', { id: 99 })
-// -> dispatches 'ordersAdd' - no handler registered, dead-letter
+// -> dispatches 'ordersAdd' - no handler, so it fails as core:missing:handler
 
 // ─── Subscribe to a namespace with on() ───────────────────────────────────────
 

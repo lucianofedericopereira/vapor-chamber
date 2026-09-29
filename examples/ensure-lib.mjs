@@ -38,16 +38,9 @@ if (!existsSync(resolve(srcDist, 'index.js'))) {
 /**
  * Find the install the EXAMPLE would actually load, not the one it might have.
  *
- * This looked only in `<example>/node_modules/vapor-chamber`, which under npm
- * WORKSPACES does not exist: the dependency is hoisted to the repo root. So
- * the check failed on all three examples, every run printed
- * "vapor-chamber not installed yet - run `npm install` first" - which is both
- * false and alarming - and the script exited before doing any of its work.
- *
- * It got away with it because the hoisted entry is a SYMLINK back to the repo,
- * so the examples were already reading the live working tree and needed no
- * mirroring at all. The message was the only symptom, and it pointed the
- * reader at a fix ("run npm install") for a problem they did not have.
+ * Under npm WORKSPACES the dependency is hoisted to the repo root, so
+ * `<example>/node_modules/vapor-chamber` does not exist, and a check of that
+ * path alone would wrongly report "not installed".
  *
  * Resolving the way Node resolves answers the real question - where does this
  * example's `import 'vapor-chamber'` land - instead of guessing at a path.

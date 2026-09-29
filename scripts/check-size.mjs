@@ -333,9 +333,110 @@ const BUDGETS = {
   // bridge does NOT route through it: that put the `problem` branch into core
   // and elements for +128 raw / +65 brotli, for a shape a single bridge's 2xx
   // never carries - there a problem is the error RESPONSE, an HttpError.
-  'vapor-chamber.iife.min.js':          { rawMax: 40_549, brotliMax: 12_054 },
-  'vapor-chamber-core.iife.min.js':     { rawMax: 27_663, brotliMax: 8_114  },
-  'vapor-chamber-elements.iife.min.js': { rawMax: 29_427, brotliMax: 8_626  },
+  //
+  // Unreleased, undo that tells the truth (tests/history-undo-lands.test.ts):
+  // an undo or redo that does not land moves the stacks BACK, in the history()
+  // plugin and in useCommandHistory, which both carry the full IIFE. MEASURED
+  // against this budget: +787 raw / +278 brotli, full IIFE only (core and
+  // elements unchanged, at their budgets exactly). In two steps, each measured:
+  // the fix written into each history, 41,008 / 12,210 (+459 / +156); then ONE
+  // implementation (src/ledger.ts) shared by both instead, 41,336 / 12,332
+  // (+328 / +122 more). Accepted by the owner as "better architecture for
+  // free": on ESM, what modern apps ship, the two measured the same (import
+  // everything 24.9 KB brotli), and the IIFEs are a legacy bridge that does not
+  // decide a design. Squeezed before landing: one logging site in the shared
+  // helper instead of four template strings (-39 raw, +12 brotli; kept for the
+  // single site, not the bytes). The ledger's own cost is its options object,
+  // change callback and signal mirroring, which outweighed the lines it removed.
+  //
+  // Unreleased, Phase 0 of docs/plan-failures-and-contract.md, and all three
+  // budgets follow it DOWN. The fixes cost, measured one at a time on the core
+  // IIFE: the Idempotency-Key as a Structured Field String +116 / +48 (one
+  // regex pass was bigger, 6,479 on the ESM consumer, dropped), register()'s
+  // ownership-checked cleanup +58 / +17 (then one `drop` helper for both
+  // maps), validator()'s coded VC_VALIDATION_FAILED +58 / +15, the
+  // catalogue's `warn` severity on three refusals +48 / +14, retry()'s
+  // happy path -29 / -12. That put all three over (full 41,906 / 12,539).
+  // Paid for by rule, not by a raise:
+  //   - Advice only in DEV (plan, settled item 5). Five core messages
+  //     (sealed, max depth, request timeout, naming, no handler) and two
+  //     elsewhere (createVaporChamberApp's VDOM tail, persist's "stale after
+  //     a deploy") carried a fix sentence in production that the catalogue
+  //     (ERROR_CODE_REGISTRY `fix`) already holds. Production keeps the fact;
+  //     vueDetectionHint stays, it is a diagnosis. -454 raw on the full.
+  //   - One throttle gate (`_throttleGate`). register({ throttle }) and the
+  //     throttle() plugin were the same gate written twice; the plugin now
+  //     also skips the stack capture on its hot rejected path. -280 raw on
+  //     every IIFE.
+  // MEASURED: full 41,172 / 12,303, core 27,164 / 7,992, elements
+  // 28,928 / 8,499 - each below the budget it started from.
+  //
+  // Unreleased, owner-by-wiring failures (docs/plan-failures-and-contract.md
+  // 4.5) and the IIFE target raised to a 2022 floor (Chrome 100, Firefox 100,
+  // Safari 16; owner). Measured on the SAME 2022 target, the target alone took
+  // the old code to 39,351 / 11,835 full, 25,911 / 7,669 core, 27,617 / 8,169
+  // elements, because `?.`, `??`, class fields and private fields stop being
+  // lowered into helpers. The new failure shape on top of that: +79 / +57
+  // full, +12 / +58 core, +12 / +46 elements, with `toJSON` carrying only the
+  // members it needs (a `type` docs URL cost 113 / 77 more and was left out,
+  // `type` implicit). Squeezed on the way: a private `#owner` lowered to
+  // WeakMap helpers (~450 raw) until a `super()` inside `try/finally` was
+  // removed; freezing or a non-writable `code` cost 10-30% on the refusal
+  // path and was dropped for a private `#code` with a getter.
+  //
+  // Unreleased, the wire contract and retries by it (plan 4.4, rev 21-22):
+  // the status table, `failureCondition`, the transport readers of one answer
+  // shape, and `retrying()` on an engine shared with `retry()`, net of what
+  // they replaced (the old readers, both bridges' re-wrapping catch paths,
+  // `noRetry`). MEASURED from 39,322 / 11,892 full, 25,923 / 7,727 core,
+  // 27,629 / 8,215 elements: +994 / +275, +1,162 / +344, +1,162 / +357.
+  // Squeezed first: `Retry-After` parsed to undefined, not null (the
+  // `?? undefined` at each site went), and the redirect's "no onRedirect
+  // handler" advice DEV-only (settled item 5): -91 / -32 core.
+  //
+  // Unreleased, retries back to what 1.24 shipped (docs/plan-shape.md 1):
+  // re-sent unless a 4xx verdict, an abort, a depth bound or a plugin's own
+  // throw (the owner check pulls ownerOf into the IIFEs), a declared
+  // `Retry-After` honoured, 5xx retried again by the HTTP client, and
+  // `X-RateLimit-Reset` read again as the wait's fallback. MEASURED:
+  // +207 / +67 full, core and elements alike.
+  //
+  // Unreleased, one scheduler and one code path per bus operation: retry's
+  // waits on the shared scheduler (+79 / +25), paid for by the sync and async
+  // buses sharing use(), respond() and dispose(), the async request() settling
+  // one promise, debounce keeping one map, and the `typeof globalThis` guards
+  // gone (every target has it). MEASURED: -682 / -69 full, -579 / -50 core,
+  // -616 / -53 elements.
+  //
+  // Unreleased, one rule for a party's own throw (`_isBug`, retry and the
+  // circuit breaker), read off the code's owner prefix. MEASURED: -71 / -10
+  // full, -71 / -20 core, -71 / -12 elements.
+  //
+  // Unreleased, `HttpError.status` gone (its `response.status` is the one
+  // place a status lives), `applyVueModule`'s dead `vue &&` guards. MEASURED:
+  // -73 / -10 full, -34 / -11 core, -73 / -16 elements.
+  //
+  // Unreleased, `authGuard` refusing with its own coded failure (a fix: it was
+  // a plain Error that retry() re-sent and a breaker counted), paid for by the
+  // buses sharing their common members (`busParts`) and the IIFEs dropping a
+  // `bind` on an arrow. MEASURED: -354 / -32 full, -351 / -15 core, -351 / 0
+  // elements.
+  //
+  // Unreleased, a redirect is `transport:refused:redirect` (it was re-sent as
+  // `unexpected`, firing onRedirect per attempt). MEASURED: raw -3 in all
+  // three, brotli +2 full / -2 core / +3 elements - compression variance on a
+  // shorter string; a shared listener-error reporter was tried against it and
+  // measured +22 brotli (brotli folds the duplicate for free), so the two
+  // ceilings follow the measurement.
+  //
+  // Unreleased, the retry model (docs/plan-shape.md 4): the policy is the
+  // async bus's own, on by default, so every IIFE carries it (the bundles
+  // create an async bus); `retry()` and `retrying()` are gone from them, and
+  // the bridges declare `transport`. MEASURED: +163 / +129 full, +162 / +136
+  // core, +163 / +114 elements.
+  'vapor-chamber.iife.min.js':          { rawMax: 39_505, brotliMax: 12_245 },
+  'vapor-chamber-core.iife.min.js':     { rawMax: 26_418, brotliMax: 8_178  },
+  'vapor-chamber-elements.iife.min.js': { rawMax: 28_049, brotliMax: 8_660  },
 };
 
 const BR_OPTS = { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } };

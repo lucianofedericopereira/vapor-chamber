@@ -35,7 +35,8 @@ CI installs the root project alone (`npm ci --workspaces=false
 
 ## What to look for
 
-- **CartPanel** - the loading button disables only itself, not the whole page.
+- **CartPanel** - the loading button marks only itself busy (`aria-disabled`, so keyboard focus
+  stays on it), not the whole page.
   Each `useCommand` instance has its own `loading` signal.
 - **SearchPanel** - type at least 2 characters; watch the browser console for
   `[searchExecute]` lines. No reactive overhead per keystroke.

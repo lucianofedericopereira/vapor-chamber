@@ -34,7 +34,10 @@
  */
 
 import type { Command, CommandResult, Plugin, AsyncPlugin } from './command-bus';
-import { BusError } from './command-bus';
+import { _failures } from './command-bus';
+
+// The plugin's own failures; its declared name is their owner (plan 4.5).
+const schemaFail = _failures('validateSchemas');
 
 // ---------------------------------------------------------------------------
 // Standard Schema v1 - minimal interop types.
@@ -79,7 +82,7 @@ export type SchemaValidatorOptions = {
   field?: 'target' | 'payload' | 'both' | ((cmd: Command) => unknown);
   /**
    * What to do on validation failure:
-   * - `'reject'` (default) - return `{ ok: false, error: BusError(VC_VALIDATION_FAILED) }`
+   * - `'reject'` (default) - return `{ ok: false, error }`, a `validateSchemas:invalid:payload` BusError,
    *   without invoking the handler
    * - `'warn'` - `console.warn` and continue to the handler with the
    *   original (un-coerced) command
@@ -130,10 +133,7 @@ function rejectResult(action: string, message: string): CommandResult {
   return {
     ok: false,
     value: undefined,
-    error: new BusError('VC_VALIDATION_FAILED', `Validation failed for "${action}": ${message}`, {
-      emitter: 'plugin',
-      action,
-    }),
+    error: schemaFail('invalid:payload', `Validation failed for "${action}": ${message}`, { action }),
   };
 }
 

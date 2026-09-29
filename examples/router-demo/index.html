@@ -45,14 +45,11 @@
      text" / dark-mode browser extensions inject `a { color: ... !important }`,
      which overrides the tab text while leaving our background - producing a
      blue tab with black (extension-forced) text. This wins that fight so the
-     active tab stays legible regardless of extensions. (The tell-tale is a
-     `content.js` / "Ignoring unsupported entryTypes: longtask" console line -
-     that is the extension, not this page.) */
+     active tab stays legible regardless of extensions. */
   nav a[data-active] { background: #eef4ff; color: #1a4bd6 !important; }
   nav a[data-exact-active] { background: #1a4bd6; color: #fff !important; font-weight: 600; }
   /* Deep links opt out of the tab treatment: they are still stamped active
-     (same path), but styling them as tabs is what made two entries look
-     wrongly "both selected". */
+     (same path), and styled as tabs two entries would look "both selected". */
   .deeplinks { margin: -.5rem 0 1rem; }
   .deeplinks a { color: #1a4bd6; margin-right: .6rem; }
   .deeplinks a[data-active], .deeplinks a[data-exact-active] { background: none; color: #1a4bd6; font-weight: 400; }
@@ -60,18 +57,22 @@
   table { width: 100%; border-collapse: collapse; }
   th { text-align: left; font-size: .75rem; text-transform: uppercase; letter-spacing: .04em;
        color: #666; border-bottom: 1px solid #ddd; padding: .5rem 0; }
-  th a.sort { color: #666; text-decoration: none; cursor: pointer; white-space: nowrap; }
-  th a.sort:hover { color: #1a4bd6; }
+  th button.sort { color: #666; border: 0; background: none; padding: 0; font: inherit;
+                   text-transform: inherit; letter-spacing: inherit; cursor: pointer; white-space: nowrap; }
+  th button.sort:hover { color: #1a4bd6; }
   td { padding: .5rem .5rem; border-bottom: 1px solid #f4f4f4; }
   /* Zebra striping. nth-child(odd) rather than a class on each row: the rows
      are re-rendered from loader data on every page change, so the stripe must
      follow POSITION in the table, not identity of the item. */
   tbody tr:nth-child(odd) { background: #fafafa; }
   .right { text-align: right; font-variant-numeric: tabular-nums; }
-  .muted { color: #777; font-size: .85rem; }
+  .muted { color: #6b6b6b; font-size: .85rem; }
   .bar { display: flex; gap: .5rem; align-items: center; margin-top: .75rem; flex-wrap: wrap; }
   button { padding: .35rem .8rem; border: 1px solid #888; border-radius: 6px; background: #fff; cursor: pointer; }
-  button:disabled { opacity: .4; cursor: default; }
+  /* aria-disabled, not disabled: Prev on page 2 would otherwise disable the
+     focused button and send keyboard focus to <body>. */
+  button[aria-disabled="true"] { opacity: .4; cursor: default; }
+  button[aria-current="page"] { background: #1a4bd6; color: #fff; }
   /* Reserve the rows so pagination does not reflow the page under the cursor. */
   tbody { min-height: 22em; }
   .err { color: #c00; }
@@ -250,6 +251,8 @@
         rows: items, page, pageRange, total, lastPage, hasNext, hasPrev,
         next, prev, go, loading,
         sortArrow: (field) => (cur.value.field === field ? (cur.value.desc ? ' ▾' : ' ▴') : ''),
+        // The column's sort state, for assistive technology (the arrow is visual only).
+        ariaSort: (field) => (cur.value.field === field ? (cur.value.desc ? 'descending' : 'ascending') : 'none'),
         sortBy,
       };
     },
@@ -257,11 +260,13 @@
       <div class="panel">
         <h2>Products</h2>
         <table>
+          <!-- Sorting is an action, so a button, not a link; the header states
+               its sort order through aria-sort. -->
           <thead><tr>
-            <th><a href="#" class="sort" @click.prevent="sortBy('id')">#{{ sortArrow('id') }}</a></th>
-            <th><a href="#" class="sort" @click.prevent="sortBy('name')">Item{{ sortArrow('name') }}</a></th>
-            <th class="right"><a href="#" class="sort" @click.prevent="sortBy('price')">Price{{ sortArrow('price') }}</a></th>
-            <th class="right"><a href="#" class="sort" @click.prevent="sortBy('stock')">Stock{{ sortArrow('stock') }}</a></th>
+            <th :aria-sort="ariaSort('id')"><button class="sort" @click="sortBy('id')">#{{ sortArrow('id') }}</button></th>
+            <th :aria-sort="ariaSort('name')"><button class="sort" @click="sortBy('name')">Item{{ sortArrow('name') }}</button></th>
+            <th class="right" :aria-sort="ariaSort('price')"><button class="sort" @click="sortBy('price')">Price{{ sortArrow('price') }}</button></th>
+            <th class="right" :aria-sort="ariaSort('stock')"><button class="sort" @click="sortBy('stock')">Stock{{ sortArrow('stock') }}</button></th>
           </tr></thead>
           <tbody>
             <tr v-for="item in rows" :key="item.id">
@@ -273,13 +278,14 @@
           </tbody>
         </table>
         <div class="bar">
-          <button :disabled="!hasPrev" @click="prev()">Prev</button>
-          <!-- pageRange is windowed: first + last always shown, 0 = elision. -->
+          <button :aria-disabled="!hasPrev" @click="hasPrev && prev()">Prev</button>
+          <!-- pageRange is windowed: first + last always shown, 0 = elision.
+               The current page is aria-current, not disabled. -->
           <template v-for="(n, i) in pageRange" :key="i">
-            <span v-if="n === 0" class="muted">...</span>
-            <button v-else :disabled="n === page" @click="go(n)">{{ n }}</button>
+            <span v-if="n === 0" class="muted" aria-hidden="true">...</span>
+            <button v-else :aria-current="n === page ? 'page' : undefined" @click="go(n)">{{ n }}</button>
           </template>
-          <button :disabled="!hasNext" @click="next()">Next</button>
+          <button :aria-disabled="!hasNext" @click="hasNext && next()">Next</button>
           <span class="muted">
             page {{ page }} / {{ lastPage }} · {{ total }} items
             <span v-if="loading">· loading...</span>
@@ -336,7 +342,7 @@
     },
     template: `
       <div>
-        <p v-if="error" class="err">
+        <p v-if="error" class="err" role="alert">
           Navigation error: <code>{{ error.code }}</code>
           - {{ error.message }}
           <button @click="clear()">dismiss</button>

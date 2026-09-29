@@ -15,7 +15,7 @@
  *    parse errors, notification silence, and stop().
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { createMcpHandler, busToMcpTools, serveMcpStdio, agentOrigin } from '../src/mcp';
+import { createMcpHandler, busToMcpTools, serveMcpStdio } from '../src/mcp';
 import type { BusSchema } from '../src/schema';
 import { mcpClient } from '../src/vitest-pure';
 
@@ -85,15 +85,11 @@ describe('callTool', () => {
   });
 
   it('refuses a non-object payload instead of dispatching it unattributed', async () => {
-    // BEHAVIOR CHANGE. This used to assert the payload was forwarded
-    // untouched, on the reasoning that schema validation would reject it
-    // downstream. With a MOCKED dispatch that looked fine - but the mock is
-    // exactly what hid the problem: schema.ts only checks payload shape when
-    // the action declares payload fields, so against a REAL bus an action
-    // without a payload schema dispatched the bare value successfully, with
-    // `meta.origin === undefined`. The marker cannot ride on a primitive or
-    // array, so those agent commands were indistinguishable from local ones.
-    // See the end-to-end assertion in tests/mcp.test.ts.
+    // A MOCKED dispatch cannot show why: schema.ts checks payload shape only
+    // when the action declares payload fields, so against a REAL bus a bare
+    // value would dispatch with `meta.origin === undefined`, an agent command
+    // indistinguishable from a local one. The end-to-end assertion is in
+    // tests/mcp.test.ts.
     const dispatch = vi.fn(async (_action: string, _target: unknown, _payload?: unknown) => ({ ok: true as const, value: 1 }));
     const { mcp } = makeHandler({ dispatch });
 
@@ -175,14 +171,6 @@ describe('busToMcpTools', () => {
     const [tool] = busToMcpTools({ ping: { target: { id: 'number' } } } as unknown as BusSchema);
     expect(tool!.description).toBeUndefined();
     expect(tool!.inputSchema.required).toEqual(['target']);
-  });
-});
-
-describe('agentOrigin', () => {
-  it('is a pass-through no-op', () => {
-    const next = vi.fn(() => ({ ok: true, value: 1 }));
-    expect(agentOrigin()({ action: 'x' } as any, next as any)).toEqual({ ok: true, value: 1 });
-    expect(next).toHaveBeenCalledTimes(1);
   });
 });
 

@@ -1,96 +1,38 @@
 /**
  * vapor-chamber - Vite plugins: HMR (serve) and build-time Vue wiring (build)
  *
- * v1.20.0 - CHANGED (same release, later): `vaporChamberWire()` also runs under the dev server,
- *           where it only defines `__VC_WIRED__`. chamber.ts's DEV probe-path
- *           hint reads it, so a plugin user is no longer told to change imports
- *           the plugin already wires in the build. The redirect stays
- *           build-only, now on a measurement: over a pre-bundled install, a
- *           dev-time redirect put two chamber modules in the page. See the
- *           function's note.
- * v1.20.0 - ADDED: `vaporChamberWire()`, a second plugin, build-only. It
- *           resolves the bare 'vapor-chamber' specifier to a virtual module
- *           that imports 'vapor-chamber/vue' (or '/vapor') for its side effect
- *           and re-exports the real root, so an app importing its composables
- *           from the root is wired in production with no import changed (H1).
- *           Kept apart from `vaporChamberHMR`, which stays serve-only and
- *           unchanged: one runs where the probe cannot resolve, the other
- *           where it can. See the function's own note for the shape and why
- *           it does not run under the dev server.
- * v1.19.0 - CODE CHANGE, and the first one this file's own tests could not
- *           have found. The transform claimed `.vue` and `.vapor.vue` and had
- *           never delivered a shim to either: `enforce: 'pre'` puts it ahead of
- *           @vitejs/plugin-vue, so it prepended its import to RAW SFC text,
- *           where the block outside every block is discarded by compiler-sfc
- *           without a diagnostic. Proven against the real dev pipeline, not the
- *           unit fixture: `transformRequest('/src/CartPanel.vue')` on
- *           examples/vapor-sfc returns byte-identical output with this plugin
- *           and without it. SFCs are now skipped, and the fixture that
- *           "covered" them (a script fragment under a `.vapor.vue` id, which no
- *           SFC produces) is replaced by one that runs compiler-sfc.
- *           The same pass retired `lineShiftMap`: it fixed a one-line offset
- *           and, unmeasured, flattened every chained downstream map onto column
- *           zero. Injecting on the SAME line moves no line, so Vite's identity
- *           default is correct and the map is gone. See transform() for the
- *           three-way mappings measurement.
- * v1.17.0 - Vue 3.6.0-rc.6 HMR alignment. NO CODE CHANGE; two upstream fixes
- *           land underneath this shim and both are recorded because they change
- *           what a hot reload does to a bus, not what this plugin does.
- *           - per-render EffectScope (runtime-vapor: own each dev render
- *             generation with a render scope for HMR, 9ab65a1) - an HMR rerender
- *             now tears down child components mounted INSIDE an element, which
- *             the parent's block graph cannot reach and which previously stayed
- *             alive. Those children's setup() scopes are what `useCommand()`
- *             hangs its cleanup on, so before rc.6 every hot reload left the old
- *             generation's `on()` listeners subscribed to the bus this plugin
- *             preserves across the reload - measured on rc.5, one dispatch fired
- *             a listener once per generation ever rendered. The preserved bus is
- *             precisely what made the leak accumulate rather than vanish with a
- *             fresh bus, so it is this plugin's business even though the fix is
- *             upstream and needs nothing here.
- *             Fixture: tests/hmr-render-scope-fixture.test.ts.
- *           - hmr updating flag hygiene (hmr: cover vapor fast-path reload with
- *             the hmr updating flag and reset it on failed updates, 991a885) -
- *             a FAILED update now resets `isHmrUpdating` immediately instead of
- *             leaving it set forever. This corroborates the v1.5.0 decision
- *             below to wrap bus persistence in try/catch: upstream reached the
- *             same "a failed HMR pass must not leave global state latched"
- *             conclusion for its own flag.
- * v1.6.0 - CODE CHANGE: the injected shim now primes globalThis.__VUE__ from the
- *           consumer's 'vue' (via a companion virtual module that evaluates before
- *           'vapor-chamber') so the lib's synchronous Vue/Vapor detection works in
- *           Vite dev. Before this, the shim's top-of-module injection guaranteed
- *           vapor-chamber evaluated before any user code could prime detection, and
- *           the async probe (bare-specifier dynamic import) always fails in
- *           browsers - so createVaporChamberApp() threw on every dev page load
- *           whenever this plugin was active. Found by browser-verifying the
- *           vapor-sfc example. Non-Vue consumers unaffected (the priming module is
- *           emitted only when 'vue' resolves).
- * v1.5.0 - Vue 3.6.0-beta.14 HMR alignment:
- *           - dedupe HMR parent reloads (hmr: dedupe HMR parent reloads) - Vue now
- *             deduplicates parent reload events at the runtime level; the dispose
- *             shim mirrors this with a per-cycle guard so the bus is persisted at
- *             most once per HMR update regardless of how many parent reload events
- *             fire.
- *           - align child/parent reload timing (hmr: align child component HMR
- *             reload with parent rerender) - child component HMR reload is now
- *             synchronised with the parent rerender; bus restoration happens after
- *             the full parent subtree has settled.
- *           - preserve setup effects (runtime-vapor: preserve setup effects during
- *             hmr rerender) - watchers and computed effects created in setup() are
- *             maintained across HMR rerenders; bus handlers registered via
- *             watchEffect inside setup() survive a hot reload without re-registration.
- *           - restore HMR context on errors (runtime-vapor: restore hmr context on
- *             errors) - HMR context is recovered when an error occurs mid-reload;
- *             the shim wraps bus persistence in try/catch so a failed getCommandBus()
- *             call doesn't leave the module in an unrecoverable state.
- *           - update app instance on root reload (runtime-vapor: update app instance
- *             on root hmr reload) - the app instance on the root component is
- *             refreshed after a root HMR cycle; callers of createVaporChamberApp()
- *             no longer need to re-acquire the app reference after a root reload.
- * v1.1.0 - Vapor<->VDOM mode switching: tracks __vapor state during HMR reloads
- *           so components switching between Vapor and VDOM modes preserve bus state.
- * v0.5.0 - State-preserving hot module replacement.
+ * Two plugins (the history is in CHANGELOG.md):
+ *   - `vaporChamberHMR()`, serve-only: keeps the bus across hot reloads.
+ *   - `vaporChamberWire()`: in a build it resolves the bare 'vapor-chamber'
+ *     specifier to a virtual module that imports 'vapor-chamber/vue' (or
+ *     '/vapor') for its side effect and re-exports the real root, so an app
+ *     importing from the root is wired in production with no import changed.
+ *     Under the dev server it only defines `__VC_WIRED__`, which chamber.ts's
+ *     DEV probe hint reads: a dev-time redirect over a pre-bundled install put
+ *     two chamber modules in the page (see the function's note).
+ *
+ * The rules the HMR shim keeps:
+ *   - SCRIPTS ONLY. `enforce: 'pre'` runs ahead of @vitejs/plugin-vue, and
+ *     compiler-sfc discards text outside every block without a diagnostic, so
+ *     a shim prepended to an SFC is never delivered. The shim goes on the SAME
+ *     line as the first import, so no line moves and Vite's identity source
+ *     map stays correct (see transform()).
+ *   - It primes `globalThis.__VUE__` from the consumer's 'vue' through a
+ *     companion virtual module that evaluates before 'vapor-chamber': the
+ *     async probe's bare-specifier import cannot resolve in a browser, so
+ *     without it `createVaporChamberApp()` throws on every dev page load. The
+ *     module is emitted only when 'vue' resolves.
+ *   - The bus is persisted at most once per HMR update however many parent
+ *     reloads fire (Vue dedupes them too), and inside try/catch, so a failed
+ *     pass cannot latch global state (Vue resets its own `isHmrUpdating` flag
+ *     the same way, 991a885).
+ *   - `__vapor` is tracked across reloads, so a component switching render
+ *     mode keeps its bus state.
+ *   - The preserved bus is why a hot reload must tear down the old
+ *     generation's listeners: Vue's per-render EffectScope (rc.6, 9ab65a1)
+ *     disposes the setup scopes `useCommand()` hangs its cleanup on, and
+ *     without it one dispatch fired a listener once per generation ever
+ *     rendered (tests/hmr-render-scope-fixture.test.ts).
  *
  * Preserves the shared command bus (handlers, plugins, hooks) across Vite HMR
  * updates so that application state survives component hot-reloads.
@@ -195,9 +137,8 @@ export function vaporChamberHMR(options: VaporChamberHMROptions = {}): any {
      * The transform below can only reach an app THROUGH its own source, so an
      * app whose entry script never names the package - every bus call living in
      * SFCs, `main.ts` doing nothing but `createApp(App).mount()` - got no shim
-     * at all, and its bus was rebuilt from scratch on every hot reload. That was
-     * true of the SFC path in general until this release; it is now true only of
-     * this narrower case, which no amount of module matching can fix.
+     * at all, and its bus is rebuilt from scratch on every hot reload - a case
+     * no amount of module matching can fix.
      *
      * An HTML entry can, because Vite hands it to us directly. `head-prepend`
      * puts the tag ahead of the app's own module script, and module scripts run
@@ -227,10 +168,9 @@ export function vaporChamberHMR(options: VaporChamberHMROptions = {}): any {
       // module, so vapor-chamber evaluates before ANY user code - including
       // any user attempt to set globalThis.__VUE__. And in the browser the
       // lib's async probe (a `@vite-ignore`-annotated `import('vue')`) is a bare
-      // specifier import that always fails without an import map. Net effect
-      // (pre-v1.6.0): with this plugin active, Vue/Vapor detection could
-      // NEVER succeed in Vite dev - createVaporChamberApp() threw on every
-      // dev page load. This module fixes it at the right layer: it sets
+      // specifier import that always fails without an import map, so without
+      // this module Vue/Vapor detection could never succeed in Vite dev and
+      // createVaporChamberApp() would throw on every page load. It sets
       // globalThis.__VUE__ from the consumer's own 'vue' BEFORE the shim
       // imports 'vapor-chamber' (its module body runs first in DFS order),
       // so the lib's synchronous probe finds the real Vue module - alias
@@ -313,13 +253,10 @@ export { getCommandBus, setCommandBus, resetCommandBus };
       `.trim();
     },
 
-    // Transform: inject the HMR shim into every module that imports
-    // vapor-chamber. (The comment here used to say "only the app entry" while
-    // the predicate matched every non-node_modules file mentioning the
-    // package - harmless at runtime, since the module graph dedupes the
-    // virtual import, but it described a different design. The predicate is
-    // now an IMPORT match rather than a substring one, so a passing mention in
-    // a comment or a string literal no longer pulls the shim in.)
+    // Transform: inject the HMR shim into every module that IMPORTS
+    // vapor-chamber (an import match, not a substring one, so a mention in a
+    // comment or a string literal does not pull the shim in). The module graph
+    // dedupes the virtual import.
     transform(code: string, id: string) {
       // `apply: 'serve'` above is the real production guard; this stays as a
       // belt-and-braces check for anyone invoking the transform directly.
@@ -327,23 +264,12 @@ export { getCommandBus, setCommandBus, resetCommandBus };
       if (!IMPORTS_VAPOR_CHAMBER.test(code)) return;
       if (id.includes('node_modules')) return;
       if (id.includes(resolvedVirtualModuleId)) return;
-      // SCRIPTS ONLY. `.vue` and `.vapor.vue` used to be in this list, and the
-      // injection into them never once reached the browser: this plugin is
-      // `enforce: 'pre'`, so it runs BEFORE @vitejs/plugin-vue and sees the raw
-      // SFC text. Prepending an import there puts it outside every block, and
-      // compiler-sfc discards top-level text without a word. Verified against
-      // the real dev pipeline on examples/vapor-sfc - `transformRequest` output
-      // for CartPanel.vue is byte-identical with this plugin and without it.
-      //
-      // The test that "covered" the case handed the transform a bare script
-      // fragment under a `.vapor.vue` id, so it asserted on a string that no
-      // SFC would ever produce. Same bug class as every mocked integration in
-      // this repo's history: the fixture agreed with the code instead of with
-      // Vite. tests/vite-hmr.test.ts now runs a real SFC through plugin-vue.
-      //
-      // Nothing is lost by dropping them, because nothing was ever gained. The
-      // shim reaches the graph through the entry script, and the virtual module
-      // is a singleton, so one import anywhere is the whole mechanism.
+      // SCRIPTS ONLY. This plugin is `enforce: 'pre'`, so it runs BEFORE
+      // @vitejs/plugin-vue and would see raw SFC text, where an import lands
+      // outside every block and compiler-sfc discards it without a word
+      // (tests/vite-hmr.test.ts runs a real SFC through plugin-vue). The shim
+      // reaches the graph through the entry script, and the virtual module is
+      // a singleton, so one import anywhere is the whole mechanism.
       if (!id.match(/\.(ts|js|tsx|jsx)$/)) return;
 
       // Avoid double-injection
@@ -531,11 +457,11 @@ const ISLAND_PROJECT = 'vapor-chamber-islands';
 const ISLAND_INCLUDE = ['**/*.island.{test,spec}.*', '{test,tests}/islands/**'];
 /** The Vitest majors this release was verified against. */
 const VITEST_MAJORS = ['5'];
-// The VC_TEST_VITEST_MAJOR diagnostic, as src/vitest-pure.ts's VcTestError
+// The test:unexpected:version diagnostic, as src/vitest-pure.ts's VcTestError
 // would print it. Duplicated for the same reason as TEST_PROVIDED, and kept
 // equal by the same test file.
 const vitestMajorWarning = (version: string) =>
-  '[vapor-chamber/vitest] VC_TEST_VITEST_MAJOR: vapor-chamber/vitest was released against Vitest 5 and is running ' +
+  '[vapor-chamber/vitest] test:unexpected:version: vapor-chamber/vitest was released against Vitest 5 and is running ' +
   `on a major it does not know (Vitest ${version})\n  fix: nothing if the suite passes; report the break if it does not\n` +
   '  docs: https://github.com/lucianofedericopereira/vapor-chamber/blob/main/docs/api/vitest-pure.md#vctestdiagnostic';
 
@@ -590,7 +516,7 @@ function globToSource(root: string, glob: string): string {
  *   string is kept too, where Vite's own merge would have left ours last;
  * - `sharedBus.exclude`, handed to the setup file with `provide`;
  * - the island project (see `islands`);
- * - a one-time warning, `VC_TEST_VITEST_MAJOR`, on a Vitest major this release
+ * - a one-time warning, `test:unexpected:version`, on a Vitest major this release
  *   does not know. A warning, never a failure.
  * - one line on top of a run, `\\//  powered by vc-vitest-plugin`, in Vue's
  *   green and slate where the terminal has colors: on stderr, once per run,

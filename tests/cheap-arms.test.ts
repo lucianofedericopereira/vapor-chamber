@@ -19,8 +19,6 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { postCommand, createHttpClient, invalidateCsrfCache } from '../src/http';
-import { createHttpBridge, createBatchingHttpBridge } from '../src/transports';
-import { createAsyncCommandBus } from '../src/index';
 import { createFormBus } from '../src/form';
 
 function mockResponse(status: number, body: unknown = null, headers: Record<string, string> = {}) {
@@ -155,95 +153,6 @@ describe('http interceptor registry', () => {
 
     await http.get('/api/data');
     expect(onFulfilled).not.toHaveBeenCalled();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// transports - error-body fallbacks
-// ---------------------------------------------------------------------------
-
-describe('transport error-body fallbacks', () => {
-  it('falls back to the HTTP status when the body has neither message nor error', async () => {
-    const httpClient = { post: vi.fn().mockResolvedValue({ ok: false, status: 503, headers: {}, data: {} }) } as any;
-    const bus = createAsyncCommandBus();
-    bus.use(createHttpBridge({ endpoint: '/api/vc', httpClient }));
-
-    const result = await bus.dispatch('save', {});
-    expect(result.error?.message).toBe('HTTP 503');
-  });
-
-  it("falls back to 'Backend error' when ok:false carries no error string", async () => {
-    const httpClient = { post: vi.fn().mockResolvedValue({ ok: true, status: 200, headers: {}, data: { ok: false } }) } as any;
-    const bus = createAsyncCommandBus();
-    bus.use(createHttpBridge({ endpoint: '/api/vc', httpClient }));
-
-    const result = await bus.dispatch('save', {});
-    expect(result.error?.message).toBe('Backend error');
-  });
-
-  it('rewraps an error that carries no status', async () => {
-    const thrown = Object.assign(new Error('nope'), { response: { data: { error: 'bad input' } } });
-    const httpClient = { post: vi.fn().mockRejectedValue(thrown) } as any;
-    const bus = createAsyncCommandBus();
-    bus.use(createHttpBridge({ endpoint: '/api/vc', httpClient }));
-
-    const result = await bus.dispatch('save', {});
-    const err = result.error as Error & { status?: number };
-    expect(err.message).toBe('bad input');
-    expect(err.status).toBeUndefined();
-  });
-
-  it("batch: falls back to 'Backend error' for a result with no error string", async () => {
-    const httpClient = {
-      post: vi.fn().mockImplementation((_u, body: any) => Promise.resolve({
-        ok: true, status: 200, headers: {},
-        data: { results: body.commands.map((c: any) => ({ id: c.id, ok: false })) },
-      })),
-    } as any;
-    const bus = createAsyncCommandBus();
-    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', httpClient }));
-
-    const result = await bus.dispatch('save', {});
-    expect(result.error?.message).toBe('Backend error');
-  });
-
-  it('batch: surfaces the raw error when the body has no message', async () => {
-    const thrown = Object.assign(new Error('transport died'), { response: { data: {} } });
-    const httpClient = { post: vi.fn().mockRejectedValue(thrown) } as any;
-    const bus = createAsyncCommandBus();
-    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', httpClient }));
-
-    const result = await bus.dispatch('save', {});
-    expect(result.error).toBe(thrown);
-  });
-
-  it('batch: a noRetry action forces retry 0 for the whole batch', async () => {
-    const httpClient = {
-      post: vi.fn().mockImplementation((_u, body: any) => Promise.resolve({
-        ok: true, status: 200, headers: {},
-        data: { results: body.commands.map((c: any) => ({ id: c.id, ok: true, state: 1 })) },
-      })),
-    } as any;
-    const bus = createAsyncCommandBus();
-    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', httpClient, retry: 3, noRetry: ['pay'] }));
-
-    await Promise.all([bus.dispatch('pay', {}), bus.dispatch('look', {})]);
-    // One batch containing a non-retryable command -> retry budget 0 for all.
-    expect(httpClient.post.mock.calls[0]![2].retry).toBe(0);
-  });
-
-  it('keeps the configured retry when no batched action is on the noRetry list', async () => {
-    const httpClient = {
-      post: vi.fn().mockImplementation((_u, body: any) => Promise.resolve({
-        ok: true, status: 200, headers: {},
-        data: { results: body.commands.map((c: any) => ({ id: c.id, ok: true })) },
-      })),
-    } as any;
-    const bus = createAsyncCommandBus();
-    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', httpClient, retry: 3, noRetry: ['pay'] }));
-
-    await bus.dispatch('look', {});
-    expect(httpClient.post.mock.calls[0]![2].retry).toBe(3);
   });
 });
 

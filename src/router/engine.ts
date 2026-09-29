@@ -45,19 +45,18 @@ import { parseQuery, stringifyQuery } from './url';
  * sentinel. Both of its details are load-bearing:
  *
  * `Object.freeze` reaches one level, so the nested `params` / `query` / `meta`
- * stayed writable. `useRoute().value.params.id = 1` before the router was ready
- * therefore edited a global that every other router would go on to hand out.
- * Frozen unconditionally rather than under DEV like ../freeze: this is four
+ * are frozen too: otherwise `useRoute().value.params.id = 1` before the router
+ * is ready would edit a global every other router hands out. Frozen
+ * unconditionally rather than under DEV like ../freeze: this is four
  * empty objects frozen once at module load, so there is no per-commit cost to
  * weigh, and a shared constant is exactly where a silent write does the most
  * damage.
  *
  * `query` is a `dict()` because every OTHER query in this engine is - both arms
- * of resolveLocation, cleanQueryPatch, and setQuery all go out of their way to
- * stay prototype-free so that "a consumer must not have to know which branch
- * built the query". The one query the module shipped as a literal `{}` broke
- * that for the initial location: `route.query.constructor` answered before the
- * first navigation and stopped answering after it.
+ * of resolveLocation, cleanQueryPatch, and setQuery stay prototype-free so a
+ * consumer never has to know which branch built the query (a literal `{}` here
+ * would make `route.query.constructor` answer before the first navigation and
+ * not after it).
  */
 export const START_LOCATION: RouteLocation = Object.freeze({
   name: null,
@@ -126,9 +125,9 @@ export function createEngine(ctx: EngineContext) {
   let navController: AbortController | null = null;
   let refetchController: AbortController | null = null;
 
-  // `isLoading` is DERIVED, never assigned from a lane directly - two lanes
-  // writing one flag disagreed about who owned it, so a finishing navigation
-  // cleared the flag while a query refetch was still in flight.
+  // `isLoading` is DERIVED, never assigned from a lane directly: with two lanes
+  // writing one flag, a finishing navigation would clear it while a query
+  // refetch is still in flight.
   let navLoading = false;
   let refetchLoading = false;
   function syncLoading(): void {
@@ -317,9 +316,9 @@ export function createEngine(ctx: EngineContext) {
         if (cancelled()) return revert(routerError('cancelled', `navigation to "${to.fullPath}" superseded`, { to }), opts);
         if (verdict === false) return revert(routerError('aborted', `navigation to "${to.fullPath}" refused by guard`, { to }), opts);
         if (verdict && verdict !== true) {
-          // Two guards that redirect at each other used to recurse until the
-          // process gave up - async, so no stack overflow to point at, just a
-          // navigation that never resolved and a page that never moved.
+          // Bounded: two guards that redirect at each other would otherwise
+          // recurse forever - async, so no stack overflow to point at, just a
+          // navigation that never resolves.
           if (redirects >= MAX_REDIRECTS) {
             // Code unconditional, explanatory tail DEV-only - the same shape
             // the Vapor outlet uses for mode_mismatch. Handlers switch on
@@ -398,19 +397,18 @@ export function createEngine(ctx: EngineContext) {
    * *and* internal (the active-link stamp registers here). Two rules, both
    * learned elsewhere in this codebase:
    *
-   * - **Each hook is contained.** One throwing analytics hook used to be
-   *   enough to wrap a committed navigation as `component_load_failed`, fire
-   *   `ctx.onError`, and `revert()` the URL out from under a live snapshot.
-   *   The bus's `fanOutListeners` already does it this way (logs
-   *   "Listener error", not fatal).
+   * - **Each hook is contained.** One throwing analytics hook must not wrap a
+   *   committed navigation as `component_load_failed`, fire `ctx.onError`, and
+   *   `revert()` the URL out from under a live snapshot. The bus's
+   *   `fanOutListeners` does it the same way (logs "Listener error", not fatal).
    * - **Self-removal doesn't skip a neighbour, and doesn't re-run one either.**
    *   The unsubscribe closure splices this array, so the one-shot pattern
    *   (`const off = router.afterEach(() => { off(); ... })` - "scroll to top on
-   *   this next navigation") shifted it under a `for...of` iterator. Same
-   *   correction as `fanOutListeners`: the cursor moves by IDENTITY, not by
-   *   length. A hook that tears down a LATER sibling shrinks the array without
-   *   moving anything at or before `i`, so a bare `i -= shrinkage` re-ran the
-   *   hook that had just fired - its side effect twice per navigation.
+   *   this next navigation") would shift it under a `for...of` iterator. As in
+   *   `fanOutListeners`, the cursor moves by IDENTITY, not by length: a hook
+   *   that tears down a LATER sibling shrinks the array without moving anything
+   *   at or before `i`, and a bare `i -= shrinkage` would re-run the hook that
+   *   had just fired.
    */
   function runAfterHooks(to: RouteLocation, from: RouteLocation): void {
     for (let i = 0; i < afterHooks.length; i++) {
@@ -448,14 +446,10 @@ export function createEngine(ctx: EngineContext) {
   /**
    * Which query keys actually differ.
    *
-   * Compared element-wise, not through `String()`. Stringifying folded an
-   * ARRAY into a comma-joined scalar, so `?tag=a&tag=b` and `?tag=a,b` - two
-   * genuinely different queries, one repeated key versus one literal comma -
-   * compared EQUAL, and the loader that depends on `tag` never refetched.
-   *
-   * The equalities that were already true are kept deliberately: `'a'` still
-   * equals `['a']`, and `''`, `[]` and an absent key all still collapse
-   * together, so no consumer gains a refetch it did not have before.
+   * Compared element-wise, not through `String()`, which would fold an ARRAY
+   * into a comma-joined scalar: `?tag=a&tag=b` and `?tag=a,b` are different
+   * queries, and the loader that depends on `tag` must refetch. `'a'` equals
+   * `['a']`, and `''`, `[]` and an absent key collapse together.
    */
   function changedKeys(a: QueryValues, b: QueryValues): string[] {
     const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
@@ -505,12 +499,10 @@ export function createEngine(ctx: EngineContext) {
   ): void {
     const current = snapshot.value.location;
     // `Object.assign(dict(), ...)`, never `{ ...current.query }`: a SPREAD of a
-    // null-prototype object produces a plain one, which silently undid the
-    // uniformity resolveLocation and cleanQueryPatch go out of their way to
-    // hold - `location.query` was prototype-free after navigate() and plain
-    // after setQuery(), so `query.constructor` answered on one path and not the
-    // other, and a `__proto__` write here vanished through the inherited
-    // setter. Fifth site of the class in `../dict`.
+    // null-prototype object produces a plain one, so `location.query` would be
+    // prototype-free after navigate() and plain after setQuery(), and a
+    // `__proto__` write here would vanish through the inherited setter. See
+    // `../dict`.
     const merged: Record<string, unknown> = Object.assign(dict<string | string[]>(), current.query);
     let mode: 'push' | 'replace' = 'replace';
     for (const key of Object.keys(patch)) {
@@ -539,11 +531,8 @@ export function createEngine(ctx: EngineContext) {
    *  in hand: a bus command's response, a websocket push, an optimistic
    *  update. Snapshot rules preserved: one new frozen snapshot, reactive. */
   function setRouteData(recordName: string, value: unknown): void {
-    // A typo'd recordName used to create an orphan entry no outlet ever reads
-    // - silent, and off-brand for a router that dev-warns on malformed path
-    // segments and unmatched-URL loops. Dev-trusts-generator cuts the other
-    // way here: loud in dev, lenient in prod. Checked against the compiled
-    // table, which is at hand.
+    // A typo'd recordName creates an orphan entry no outlet ever reads, so it
+    // is loud in dev and lenient in prod, checked against the compiled table.
     if (DEV) {
       const table = ctx.getTable();
       if (table && !table.getRecord(recordName)) {

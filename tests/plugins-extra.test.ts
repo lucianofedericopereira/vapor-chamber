@@ -1,5 +1,5 @@
 import { describe, expect, vi } from 'vitest';
-import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';
+import { _failures, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { cache, circuitBreaker, rateLimit, metrics } from '../src/plugins-extra';
 import { stubEnv } from '../src/vitest-pure';
 import { it } from '../src/vitest';
@@ -203,7 +203,7 @@ describe('circuitBreaker', () => {
     bus.dispatch('op', {}); // trips
 
     const r = bus.dispatch('op', {});
-    expect(r).toFailWith('VC_PLUGIN_CIRCUIT_OPEN');
+    expect(r).toFailWith('circuitBreaker:limited:action');
     expect(r.error?.message).toContain('Circuit breaker is open');
     expect(handler).toHaveBeenCalledTimes(2); // not called when open
   });
@@ -283,11 +283,11 @@ describe('circuitBreaker', () => {
     expect(cb.getState('op')).toBe('open');
   });
 
-  // VC_PLUGIN_THREW is a pipeline bug, not the server failing: three plugin
+  // plugin:failed:plugin is a pipeline bug, not the server failing: three plugin
   // bugs must not lock an action out. It neither counts nor resets the
   // consecutive-failure run (tests/plugin-throw-fixture.test.ts has the
   // conversion itself).
-  it('does not count a VC_PLUGIN_THREW from a plugin inside it', () => {
+  it('does not count a plugin:failed:plugin from a plugin inside it', () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const bus = createCommandBus();
     bus.register('op', () => 'ok');
@@ -295,11 +295,11 @@ describe('circuitBreaker', () => {
     bus.use(cb, { priority: 10 });
     bus.use(() => { throw new Error('plugin bug'); }, { priority: 1 });
 
-    for (let i = 0; i < 5; i++) expect((bus.dispatch('op', {}).error as { code?: string }).code).toBe('VC_PLUGIN_THREW');
+    for (let i = 0; i < 5; i++) expect((bus.dispatch('op', {}).error as { code?: string }).code).toBe('plugin:failed:plugin');
     expect(cb.getState('op')).toBe('closed');
   });
 
-  it('a VC_PLUGIN_THREW does not reset a run of real failures either', () => {
+  it('a plugin:failed:plugin does not reset a run of real failures either', () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const bus = createCommandBus();
     bus.register('op', () => { throw new Error('server down'); });
@@ -317,15 +317,28 @@ describe('circuitBreaker', () => {
     expect(cb.getState('op')).toBe('open');
   });
 
+  // A backend's 5xx is what a breaker is for: `remote:failed:<code>` counts;
+  // only a library's own throw (a plugin bug) is skipped.
+  it("counts a backend's failure (remote:failed)", () => {
+    const bus = createCommandBus();
+    bus.register('op', () => { throw _failures('remote')('failed:server', 'HTTP 500'); });
+    const cb = circuitBreaker({ threshold: 2 });
+    bus.use(cb);
+
+    bus.dispatch('op', {});
+    bus.dispatch('op', {});
+    expect(cb.getState('op')).toBe('open');
+  });
+
   it('async bus: a rejecting plugin inside it is not counted', async () => {
     const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     const bus = createAsyncCommandBus();
     bus.register('op', async () => 'ok');
     const cb = circuitBreaker({ threshold: 2 });
-    bus.use(cb as any, { priority: 10 });
+    bus.use(cb, { priority: 10 });
     bus.use(() => Promise.reject(new Error('plugin bug')), { priority: 1 });
 
-    for (let i = 0; i < 4; i++) expect(((await bus.dispatch('op', {})).error as { code?: string }).code).toBe('VC_PLUGIN_THREW');
+    for (let i = 0; i < 4; i++) expect(((await bus.dispatch('op', {})).error as { code?: string }).code).toBe('plugin:failed:plugin');
     expect(cb.getState('op')).toBe('closed');
   });
 });
@@ -352,7 +365,7 @@ describe('rateLimit', () => {
     bus.dispatch('op', {});
     const r = bus.dispatch('op', {});
 
-    expect(r).toFailWith('VC_PLUGIN_RATE_LIMITED');
+    expect(r).toFailWith('rateLimit:limited:action');
     expect(r.error?.message).toContain('Rate limit exceeded');
   });
 
@@ -362,7 +375,7 @@ describe('rateLimit', () => {
     bus.use(rateLimit({ max: 1, window: 1000 }));
 
     expect(bus.dispatch('a', {}).ok).toBe(true);
-    expect(bus.dispatch('a', {})).toFailWith('VC_PLUGIN_RATE_LIMITED'); // over limit
+    expect(bus.dispatch('a', {})).toFailWith('rateLimit:limited:action'); // over limit
     expect(bus.dispatch('b', {}).ok).toBe(true);  // separate counter
   });
 
@@ -372,7 +385,7 @@ describe('rateLimit', () => {
     bus.use(rateLimit({ max: 1, window: 1000, actions: ['protected'] }));
 
     bus.dispatch('protected', {});
-    expect(bus.dispatch('protected', {})).toFailWith('VC_PLUGIN_RATE_LIMITED');
+    expect(bus.dispatch('protected', {})).toFailWith('rateLimit:limited:action');
     expect(bus.dispatch('free', {}).ok).toBe(true);
     expect(bus.dispatch('free', {}).ok).toBe(true);
   });
@@ -592,5 +605,51 @@ describe('cache - async bus', () => {
     const good = await bus.query('getUser', { id: 1 });
     expect(good).toSucceedWith('recovered');
     expect(handler).toHaveBeenCalledTimes(2);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// A `limited` refusal declares when to come back (`context.retryIn`), as a
+// throttle and a Retry-After do, so a caller and the outbox wait for it.
+// ---------------------------------------------------------------------------
+
+describe('a limited refusal declares when to come back', () => {
+  it('circuitBreaker: the time left until half-open', () => {
+    vi.useFakeTimers();
+    try {
+      const bus = createCommandBus();
+      bus.register('op', () => { throw new Error('down'); });
+      bus.use(circuitBreaker({ threshold: 1, resetTimeout: 1_000 }));
+      bus.dispatch('op', {});
+      vi.advanceTimersByTime(400);
+      expect((bus.dispatch('op', {}).error as { context?: { retryIn?: number } }).context?.retryIn).toBe(600);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('rateLimit: the time until the oldest dispatch leaves the window', () => {
+    vi.useFakeTimers();
+    try {
+      const bus = createCommandBus();
+      bus.register('op', () => 'ok');
+      bus.use(rateLimit({ max: 1, window: 1_000 }));
+      bus.dispatch('op', {});
+      vi.advanceTimersByTime(250);
+      expect((bus.dispatch('op', {}).error as { context?: { retryIn?: number } }).context?.retryIn).toBe(750);
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('an open breaker refuses at once: a plugin outside the call is not re-sent by the bus', async () => {
+    vi.useFakeTimers();
+    try {
+      const bus = createAsyncCommandBus();
+      let calls = 0;
+      bus.register('op', async () => { calls++; throw new Error('down'); });
+      bus.use(circuitBreaker({ threshold: 1, resetTimeout: 5_000 }));
+      await bus.dispatch('op', {}); // fails, opens
+      const refused = await bus.dispatch('op', {});
+      expect(refused).toFailWith('circuitBreaker:limited:action');
+      expect((refused.error as { context?: { retryIn?: number } }).context?.retryIn).toBe(5_000);
+      expect(calls).toBe(1);
+    } finally { vi.useRealTimers(); }
   });
 });

@@ -134,7 +134,7 @@ const OLD_ASYNC_REQUEST = `async function asyncRequest(s: AsyncState, action: st
 /** Lines the baseline drops, each with the number of times it must occur in the shipped source. */
 const REVERTS: Array<[string, number]> = [
   ['    waiting: null,\n', 2],
-  ['  if (s.waiting) for (const cancel of s.waiting) cancel();\n', 2],
+  ['  if (s.waiting) for (const cancel of s.waiting) cancel();\n', 1],
 ];
 
 /** Replace the span from `start` up to (not including) `end`; throws if either marker is missing. */
@@ -150,8 +150,8 @@ function replaceSpan(src: string, start: string, end: string, replacement: strin
 function derive(revert: boolean): string {
   let src = readFileSync(resolve(HERE, '../src/command-bus.ts'), 'utf8');
   if (revert) {
-    src = replaceSpan(src, 'function syncRequest(', 'function syncRespond(', OLD_SYNC_REQUEST);
-    src = replaceSpan(src, 'async function asyncRequest(', 'function asyncRespond(', OLD_ASYNC_REQUEST);
+    src = replaceSpan(src, 'function syncRequest(', 'function respond(', OLD_SYNC_REQUEST);
+    src = replaceSpan(src, 'async function asyncRequest(', 'function asyncClear(', OLD_ASYNC_REQUEST);
     for (const [line, n] of REVERTS) {
       const parts = src.split(line);
       if (parts.length - 1 !== n) {
@@ -259,7 +259,7 @@ describe('request() / dispose() - real path A/B', () => {
     expect(shipped.filter((v) => Array.isArray(v))).toEqual([['action', 'target', 'payload', 'meta'], ['action', 'target', 'payload', 'meta']]);
 
     // --- intended difference 1: dispose() settles a waiting request -----------
-    for (const [m, expected] of [[arms.pre, undefined], [arms.shipped, 'VC_CORE_ABORTED']] as const) {
+    for (const [m, expected] of [[arms.pre, undefined], [arms.shipped, 'core:aborted:dispatch']] as const) {
       for (const make of [() => m.createCommandBus(), () => m.createAsyncCommandBus()]) {
         const bus: any = make();
         bus.respond('q', () => new Promise(() => {}));
@@ -273,7 +273,7 @@ describe('request() / dispose() - real path A/B', () => {
     }
 
     // --- intended difference 2: the sync request honours its caller's signal ---
-    for (const [m, expectedCode, expectedCalls] of [[arms.pre, undefined, 1], [arms.shipped, 'VC_CORE_ABORTED', 0]] as const) {
+    for (const [m, expectedCode, expectedCalls] of [[arms.pre, undefined, 1], [arms.shipped, 'core:aborted:dispatch', 0]] as const) {
       const bus = m.createCommandBus();
       let calls = 0;
       bus.respond('q', () => { calls++; return 'answered'; });

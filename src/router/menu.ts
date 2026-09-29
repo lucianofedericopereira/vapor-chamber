@@ -36,8 +36,12 @@ export type MenuItem = {
   href: string | null;
   meta: Record<string, unknown>;
   /** Same semantics as data-active stamping; a parent also lights up when
-   *  any of its children is active. */
+   *  any of its children is active. For styling only: NOT the field for
+   *  `aria-current`, or a section and its child are both announced as the
+   *  current page. */
   active: boolean;
+  /** This item IS the page: bind `aria-current="page"` to this one
+   *  (`stampActiveLinks` does the same for plain links). */
   exactActive: boolean;
   children: readonly MenuItem[];
 };
@@ -49,7 +53,8 @@ export type Breadcrumb = {
   /** Absolute href; null when the crumb is not a link target (group rows,
    *  ancestors whose params the current location cannot supply). */
   href: string | null;
-  /** True on the last crumb - the page being shown. */
+  /** True on the last crumb - the page being shown. Bind
+   *  `aria-current="page"` to it. */
   current: boolean;
   meta: Record<string, unknown>;
 };

@@ -72,9 +72,8 @@ const result = bus.dispatch('cartAdd', { id: 42 });
 if (result.ok) console.log('added', result.value);
 else console.error(result.error);
 
-// Plugins - logger, retry, debounce, throttle, persist, ...
+// Plugins - logger, debounce, throttle, persist, ... (the async bus retries on its own)
 bus.use(logger());
-bus.use(retry({ maxAttempts: 3 }));
 
 // before/after hooks
 bus.onBefore((cmd) => { if (!authorized(cmd)) throw new Error('forbidden'); });
@@ -88,7 +87,7 @@ const result = await asyncBus.dispatch('orderCreate', cart);
 // AbortController
 const ac = new AbortController();
 asyncBus.dispatch('searchExecute', q, undefined, { signal: ac.signal });
-ac.abort();   // resolves with VC_CORE_ABORTED, handler observes cmd.signal
+ac.abort();   // resolves with core:aborted:dispatch, handler observes cmd.signal
 
 // Batch with rollback
 bus.dispatchBatch([
@@ -101,7 +100,7 @@ bus.dispatchBatch([
 ## Bundle size
 
 mitt is <!-- vc:sizeMitt -->0.2<!-- /vc:sizeMitt --> KB brotli. vapor-chamber's `core` IIFE variant is
-**<!-- vc:sizeIifeCore -->7.9<!-- /vc:sizeIifeCore --> KB brotli**, a couple
+**<!-- vc:sizeIifeCore -->8.0<!-- /vc:sizeIifeCore --> KB brotli**, a couple
 of orders of magnitude more; that difference pays for the extras above. For
 always-current per-export numbers, see [BUNDLE-SIZES.md](../BUNDLE-SIZES.md)
 (generated, CI-verified fresh) and prefer it over any figure quoted in prose.

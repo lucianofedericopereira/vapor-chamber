@@ -16,8 +16,8 @@
  *
  *     <div class="panel" phase="[object Object]" dispose="() => {}">hi</div>
  *
- * - on every consumer following the documented usage since v1.1.0. Fixed by
- * defining both as non-enumerable (see `assembleBridge` in src/transitions.ts).
+ * - on every consumer following the documented usage, unless both are defined
+ * non-enumerable (see `assembleBridge` in src/transitions.ts).
  *
  * This is the same lesson the rc.4 KeepAlive bug taught, applied preemptively:
  * a fixture that substitutes a mock for the integration it is reasoning about
@@ -95,7 +95,7 @@ describe('transition bridge bound to a real <Transition>', () => {
     expect(() => dispose()).not.toThrow();
 
     // The intentional casualty, pinned so it is a decision and not a surprise:
-    // spreading no longer carries them - which is the whole fix.
+    // spreading does not carry them - which is the whole fix.
     expect(Object.keys({ ...bridge })).not.toContain('phase');
     expect(Object.keys(bridge)).toEqual([
       'onBeforeEnter', 'onEnter', 'onAfterEnter', 'onEnterCancelled',

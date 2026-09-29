@@ -17,7 +17,7 @@ import { ... } from 'vapor-chamber/transitions';
 
 ### createTransitionBridge
 
-**Function** - [src/transitions.ts:352](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L352)
+**Function** - [src/transitions.ts:315](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L315)
 
 ```ts
 createTransitionBridge(options: TransitionBridgeOptions & { bus: BaseBus; }) => TransitionBridge
@@ -40,7 +40,7 @@ const t = createTransitionBridge({ bus, namespace: 'modal' });
 
 ### useTransitionCommand
 
-**Function** - [src/transitions.ts:397](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L397)
+**Function** - [src/transitions.ts:360](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L360)
 
 ```ts
 useTransitionCommand(options?: TransitionBridgeOptions) => TransitionBridge
@@ -71,7 +71,7 @@ Your own hooks compose with the spread: `<Transition v-bind="modal"
 
 ### TransitionBridge
 
-**Type alias** - [src/transitions.ts:117](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L117)
+**Type alias** - [src/transitions.ts:95](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L95)
 
 ```ts
 export type TransitionBridge = TransitionHooks & {
@@ -84,7 +84,7 @@ export type TransitionBridge = TransitionHooks & {
 
 ### TransitionBridgeOptions
 
-**Type alias** - [src/transitions.ts:60](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L60)
+**Type alias** - [src/transitions.ts:47](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L47)
 
 ```ts
 export type TransitionBridgeOptions = {
@@ -107,7 +107,7 @@ export type TransitionBridgeOptions = {
 
 ### TransitionHooks
 
-**Type alias** - [src/transitions.ts:77](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L77)
+**Type alias** - [src/transitions.ts:64](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L64)
 
 ```ts
 export type TransitionHooks = {
@@ -119,11 +119,9 @@ export type TransitionHooks = {
   /**
    * Dispatches `<namespace>Leave` and awaits an async handler before `done()`.
    *
-   * Vue 3.6.0-beta.16: now fires when a **non-v-show root is structurally removed
-   * after a v-show branch was shown**. Previously a latched `persisted` flag leaked
-   * onto the non-v-show root, so Vapor skipped the leave and this hook (and its
-   * `*Leave` command) never ran. The runtime now gates the carry-forward on an
-   * actual v-show marker, so the dispatch is no longer dropped in that sequence.
+   * Fires when a **non-v-show root is structurally removed after a v-show
+   * branch was shown** too (Vue gates its `persisted` carry-forward on an
+   * actual v-show marker, beta.16).
    */
   onLeave: (el: Element, done: () => void) => void;
   onAfterLeave: (el: Element) => void;
@@ -131,20 +129,13 @@ export type TransitionHooks = {
   /**
    * TransitionGroup-only: called when an element moves due to reorder.
    *
-   * Vue 3.6.0-beta.15: a move that was skipped (e.g. for a v-show-hidden child)
-   * no longer permanently drops the element's move hooks - they are restored, so
-   * a later genuine reorder of that same child dispatches `*Move` as normal. You
-   * do not need to re-register the `*Move` handler after a hidden item reappears.
+   * NOT called for elements hidden by v-show (display:none): the `*Move`
+   * command is never dispatched for invisible list items. A skipped move does
+   * not drop the element's move hooks, so a later genuine reorder of that child
+   * dispatches `*Move` as normal.
    *
-   * Vue 3.6.0-beta.14: NOT called for elements hidden by v-show (display:none).
-   * Vue's runtime skips the hook for v-show-hidden children, so the `*Move`
-   * command is never dispatched for invisible list items. Handlers that were
-   * guarding against spurious move events on hidden elements can remove that
-   * check.
-   *
-   * Vue 3.6.0-beta.13: fires correctly for both Vapor and VDOM component moves
-   * inside a Vapor TransitionGroup. Guaranteed to be called after all child
-   * updates have flushed - `el` is in its pre-move position, ready for the CSS
+   * Fires for both Vapor and vDOM component moves inside a Vapor
+   * TransitionGroup, after all child updates have flushed - `el` is in its pre-move position, ready for the CSS
    * move class to be applied. No `done()` callback; moves are CSS-only.
    */
   onMove: (el: Element) => void;
@@ -153,7 +144,7 @@ export type TransitionHooks = {
 
 ### TransitionPhase
 
-**Type alias** - [src/transitions.ts:58](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L58)
+**Type alias** - [src/transitions.ts:45](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L45)
 
 ```ts
 export type TransitionPhase = 'idle' | 'entering' | 'leaving';

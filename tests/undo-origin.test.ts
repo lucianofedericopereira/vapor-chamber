@@ -42,7 +42,7 @@ describe('history() plugin: dispatches inside an undo handler or a redo are not 
     expect(s.canRedo).toBe(true);
   });
 
-  it('async bus: the same, where the flag used to be cleared before the recorder ran', async ({ asyncBus: bus }) => {
+  it('async bus: the same, where a flag would be cleared before the recorder runs', async ({ asyncBus: bus }) => {
     const h = history({ bus: bus as unknown as CommandBus });
     bus.use(h as any);
     bus.register('comp', async () => 'compensated');

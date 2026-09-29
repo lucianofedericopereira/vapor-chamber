@@ -21,7 +21,7 @@ describe('runDispatch (via useCommand)', () => {
     setCommandBus(createCommandBus({ onMissing: 'throw' })); // dispatch throws on miss
     const { dispatch, loading, lastError } = useCommand();
     const r = dispatch('missing', {}) as any;
-    expect(r).toFailWith('VC_CORE_NO_HANDLER');
+    expect(r).toFailWith('core:missing:handler');
     expect(loading.value).toBe(false);
     expect(lastError.value).toBeInstanceOf(Error);
   });
@@ -55,7 +55,7 @@ describe('useSharedCommandState - error recording', () => {
   it('records a synchronously-thrown dispatch and decrements in-flight', () => {
     const shared = useSharedCommandState();
     const r = shared.dispatch('missing', {}) as any;
-    expect(r).toFailWith('VC_CORE_NO_HANDLER');
+    expect(r).toFailWith('core:missing:handler');
     expect(shared.errorCount.value).toBeGreaterThan(0);
     expect(shared.lastError.value).toBeInstanceOf(Error);
     expect(shared.inFlight.value).toBe(0);     // decrement ran in the catch

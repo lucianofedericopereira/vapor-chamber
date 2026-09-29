@@ -1,11 +1,11 @@
 /**
- * Tests for the MCP layer: busToMcpTools, createMcpHandler, agentOrigin, serveMcpStdio
+ * Tests for the MCP layer: busToMcpTools, createMcpHandler, the agent origin, serveMcpStdio
  */
 
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, it, expect, vi } from 'vitest';
-import { busToMcpTools, createMcpHandler, agentOrigin, serveMcpStdio, MCP_SERVER_VERSION } from '../src/mcp';
+import { busToMcpTools, createMcpHandler, serveMcpStdio, MCP_SERVER_VERSION } from '../src/mcp';
 import type { McpTool } from '../src/mcp';
 import { createSchemaCommandBus, createAsyncSchemaCommandBus } from '../src/schema';
 import type { BusSchema } from '../src/schema';
@@ -170,14 +170,12 @@ describe('createMcpHandler - tools/call', () => {
   });
 
   it('never lets an MCP dispatch reach a handler unattributed', async () => {
-    // Regression. `meta.origin` is derived by stampMeta from a `__origin` key
-    // in the PAYLOAD, so it can only mark objects and the absent case. A
-    // non-object payload used to be forwarded untouched on the reasoning that
-    // schema validation would reject it - but schema.ts only checks payload
-    // shape when the action DECLARES payload fields. `cartClear` declares
-    // none, so a bare string dispatched successfully with
-    // `meta.origin === undefined`: an agent-driven command that an audit
-    // filter on `origin === 'agent'` cannot see. MCP clients are untrusted by
+    // `meta.origin` is derived by stampMeta from a `__origin` key in the
+    // PAYLOAD, so it can only mark objects. A non-object payload must be
+    // refused: schema.ts checks payload shape only when the action DECLARES
+    // payload fields (`cartClear` declares none), so it would dispatch with
+    // `meta.origin === undefined` - an agent command an audit filter on
+    // `origin === 'agent'` cannot see. MCP clients are untrusted by
     // construction, so that gap is the security-relevant one.
     const seen: Array<{ action: string; origin: unknown }> = [];
     const bus = createSchemaCommandBus(cartSchema);
@@ -239,7 +237,7 @@ describe('createMcpHandler - tools/call', () => {
     const bus = createSchemaCommandBus(cartSchema); // no handlers registered
     const mcp = mcpClient(createMcpHandler(bus));
 
-    expect(await mcp.call('cartAdd', { target: { id: 1 }, payload: { qty: 1 } })).toBeToolError('VC_CORE_NO_HANDLER');
+    expect(await mcp.call('cartAdd', { target: { id: 1 }, payload: { qty: 1 } })).toBeToolError('core:missing:handler');
   });
 
   it('non-whitelisted action -> isError, and the handler is never invoked', async () => {
@@ -267,13 +265,12 @@ describe('createMcpHandler - tools/call', () => {
 });
 
 // ---------------------------------------------------------------------------
-// agentOrigin
+// meta.origin = 'agent'
 // ---------------------------------------------------------------------------
 
-describe('agentOrigin', () => {
+describe("meta.origin = 'agent'", () => {
   it("stamps meta.origin='agent' on MCP-driven dispatches only", async () => {
     const bus = makeBus();
-    bus.use(agentOrigin(), { priority: 150 });
     const origins: Array<string | undefined> = [];
     bus.on('cartAdd', (cmd) => origins.push(cmd.meta?.origin));
     const mcp = mcpClient(createMcpHandler(bus));
@@ -282,15 +279,14 @@ describe('agentOrigin', () => {
     bus.dispatch('cartAdd', { id: 1 }, { qty: 1 });
     // MCP-driven dispatch - stamped.
     await mcp.call('cartAdd', { target: { id: 2 }, payload: { qty: 2 } });
-    // Direct dispatch after the MCP call - flag was cleared, no stamp.
+    // Direct dispatch after the MCP call - no stamp.
     bus.dispatch('cartAdd', { id: 3 }, { qty: 3 });
 
     expect(origins).toEqual([undefined, 'agent', undefined]);
   });
 
-  it('clears the flag even when the MCP dispatch fails', async () => {
+  it('a failed MCP dispatch leaves no stamp behind', async () => {
     const bus = makeBus();
-    bus.use(agentOrigin(), { priority: 150 });
     bus.register('cartClear', () => {
       throw new Error('boom');
     });
@@ -353,10 +349,10 @@ describe('serveMcpStdio', () => {
 
 describe('createMcpHandler defaults', () => {
   it('the advertised server version tracks package.json', async () => {
-    // It sat at a hardcoded '1.7.0' for four releases, so every `initialize`
-    // handshake reported a version that no longer existed. This assertion is
-    // the release checklist: bump the package, this fails until the constant
-    // follows.
+    // A hardcoded version goes stale with the next release, and every
+    // `initialize` handshake then reports a version that does not exist. This
+    // assertion is the release checklist: bump the package, this fails until
+    // the constant follows.
     const pkg = JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8'));
     expect(MCP_SERVER_VERSION).toBe(pkg.version);
   });

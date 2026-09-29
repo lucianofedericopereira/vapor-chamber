@@ -7,7 +7,7 @@
   <style>
     body { font-family: system-ui, sans-serif; max-width: 720px; margin: 2rem auto; padding: 0 1rem; }
     button { padding: 0.5rem 1rem; cursor: pointer; }
-    button:disabled { opacity: 0.5; cursor: wait; }
+    button[aria-disabled="true"] { opacity: 0.5; cursor: wait; }
     .panel { border: 1px solid #ddd; padding: 1rem; margin: 1rem 0; border-radius: 6px; }
     .error { color: #c00; }
     .ok { color: #060; }

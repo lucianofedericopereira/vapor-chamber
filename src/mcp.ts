@@ -17,8 +17,7 @@
  *
  * const bus = createSchemaCommandBus(schema);
  * bus.register('cartAdd', (cmd) => addToCart(cmd.target.id, cmd.payload.qty));
- * // meta.origin='agent' arrives on its own - see agentOrigin() for why there
- * // is no bus.use() line here any more.
+ * // meta.origin='agent' is stamped by the core; nothing to install.
  *
  * // Wire to any transport (HTTP body, WebSocket message, test harness, ...):
  * const handle = createMcpHandler(bus, { actions: ['cartAdd', 'cart*'] });
@@ -31,7 +30,7 @@
 import { DEV } from './dev';
 import { countOption } from './bounds';
 import { BusError, matchesPattern, _withOrigin, _errResult } from './command-bus';
-import type { CommandResult, Plugin } from './command-bus';
+import type { CommandResult } from './command-bus';
 import type { ActionSchema, BusSchema, FieldMap } from './schema';
 
 // ---------------------------------------------------------------------------
@@ -110,31 +109,6 @@ function actionToMcpTool(name: string, def: ActionSchema): McpTool {
  */
 export function busToMcpTools(schema: BusSchema): McpTool[] {
   return Object.entries(schema).map(([name, def]) => actionToMcpTool(name, def));
-}
-
-// ---------------------------------------------------------------------------
-// agentOrigin - stamp meta.origin on MCP-driven dispatches
-// ---------------------------------------------------------------------------
-
-/**
- * @deprecated Since v1.12.0 `meta.origin === 'agent'` is stamped by the core,
- * from the `__origin` key {@link createMcpHandler} puts in the payload it
- * dispatches - so this plugin has nothing left to do and is a no-op kept for
- * one release.
- *
- * It used to work off a module-level boolean raised around the handler's
- * dispatch call, which was exact on a sync bus and wrong on an async one: any
- * LOCAL dispatch entering the plugin chain while an MCP tool call was awaiting
- * an async handler got stamped `'agent'` too. The doc admitted it ("advisory,
- * not a security boundary") - but the first thing anyone builds on `origin`
- * is an audit trail or a permission gate, which is exactly the consumer that
- * needs it exact, on exactly the bus type where it wasn't. A marker that
- * travels ON the dispatch cannot be misattributed by interleaving.
- *
- * Remove the `bus.use(agentOrigin(), ...)` line; the stamp arrives without it.
- */
-export function agentOrigin(): Plugin {
-  return (_cmd, next) => next();
 }
 
 // ---------------------------------------------------------------------------
@@ -220,9 +194,8 @@ function toolResult(text: string, isError?: boolean): object {
  *   - anything else with an `id` - JSON-RPC error `-32601` (method not found)
  *
  * Origin stamping: MCP-driven dispatches carry `meta.origin='agent'` on their
- * own, stamped onto the dispatch itself. Nothing to install. {@link agentOrigin}
- * is a pass-through kept for compatibility and records why the plugin shape was
- * wrong on an async bus.
+ * own, stamped onto the dispatch itself, so no local dispatch interleaved with
+ * an awaiting tool call can be misattributed. Nothing to install.
  *
  * @example
  * const handle = createMcpHandler(bus, { actions: ['cartGet', 'cartAdd'] });
@@ -275,19 +248,13 @@ export function createMcpHandler(
     // without a payload schema has no payload checks to fail. Stamping the
     // marker anyway keeps the audit trail hole-free.
     //
-    // A non-object payload is REFUSED rather than passed through. This used to
-    // forward it untouched, on the reasoning that "schemaValidator rejects that
-    // shape on its own" - which holds only for actions that DECLARE payload
-    // fields. `schema.ts` guards with `c.payload && c.payload.length > 0`, so
-    // an action with no payload schema (`cartClear`-shaped) has no such check,
-    // and a bare string sailed through. The marker cannot ride on a primitive
-    // or an array, so those dispatches reached handlers with
-    // `meta.origin === undefined` - indistinguishable from a local, non-agent
-    // command. MEASURED: `cartClear` + `{a:1}` stamped 'agent', `cartClear` +
-    // `'bare-string'` stamped nothing and still dispatched. An audit trail
-    // filtering on `origin === 'agent'` silently missed it, which is the
-    // "misattributed audit origins" failure stampMeta's docblock names - on a
-    // boundary that is untrusted by construction (see above).
+    // A non-object payload is REFUSED rather than passed through. The marker
+    // cannot ride on a primitive or an array, so such a dispatch would reach
+    // its handler with `meta.origin === undefined`, indistinguishable from a
+    // local command, and an audit trail filtering on `origin === 'agent'`
+    // would miss it. schemaValidator does not catch it for an action that
+    // declares no payload fields (`cartClear`-shaped), and this boundary is
+    // untrusted by construction (see above).
     //
     // Refusing costs nothing legitimate: `actionToMcpTool` only ever advertises
     // `payload` as `{ type: 'object' }`, so a non-object payload is already off

@@ -58,9 +58,6 @@
  * would make the gate non-deterministic, and its markers are never stamped here),
  * `check:example` (it drives an example build and belongs to the alignment
  * cycle, not to every commit), and `ab:vue` (needs a second Vue installed).
- * `check:tsc-gap` was listed here until v1.22.0 and is gone: the vue-tsc
- * template gap it tracked needed a directive ARGUMENT, and the reshape removed
- * the argument, so it could no longer report anything about this codebase.
  */
 
 import { spawnSync } from 'node:child_process';

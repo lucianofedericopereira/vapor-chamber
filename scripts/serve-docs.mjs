@@ -21,11 +21,10 @@ import { extname, join, normalize, resolve } from 'node:path';
 const ROOT = resolve('.');
 const args = process.argv.slice(2);
 const portFlag = args.indexOf('--port');
-// `--port` with no value, or a non-numeric one, used to reach `listen(NaN)` -
-// which binds a RANDOM port while the line below cheerfully prints
-// `http://127.0.0.1:NaN/`. The same degenerate-option shape swept out of src in
-// this cycle (see src/bounds.ts), in the one script whose whole job is telling
-// you where to point a browser.
+// `--port` with no value, or a non-numeric one, must not reach `listen(NaN)`,
+// which binds a RANDOM port while the line below prints
+// `http://127.0.0.1:NaN/` - the degenerate-option shape src/bounds.ts guards,
+// in the one script whose whole job is telling you where to point a browser.
 const rawPort = portFlag === -1 ? 8910 : Number(args[portFlag + 1]);
 const PORT = Number.isInteger(rawPort) && rawPort >= 0 && rawPort <= 65535 ? rawPort : 8910;
 

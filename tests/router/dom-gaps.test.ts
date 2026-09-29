@@ -142,11 +142,9 @@ describe('preheatIdle early returns', () => {
   });
 
   // The router RE-ARMS this on every bfcache restore (`armIdlePreheat` in
-  // src/router/index.ts), cancelling the previous run first. The adjacent line
-  // there already fixed one accumulation of exactly this shape - "it used to
-  // push a fresh entry per arming, so every bfcache restore grew `teardowns` by
-  // one closure" - so a cancel that leaves its own listeners attached puts the
-  // growth back one level down.
+  // src/router/index.ts), cancelling the previous run first, so a cancel that
+  // leaves its own listeners attached would grow them by one set per bfcache
+  // restore.
   it('cancel() detaches the abort listeners it attached', () => {
     const added: string[] = [];
     const removed: string[] = [];

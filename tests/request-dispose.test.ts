@@ -5,10 +5,10 @@
  * Before: dispose() cancelled only throttle timers. A request() still
  * waiting on its responder kept its timer (default 5000 ms), which held a
  * Node process open - SSR is dispose()'s named use case - and then resolved
- * as VC_CORE_REQUEST_TIMEOUT, which the registry marks retryable, inviting a
+ * as core:timeout:request, which the registry marks retryable, inviting a
  * retry against a bus whose responders were gone. Now each bus keeps one
  * cancel per waiting request (`waiting`, lazily null like `deferred`):
- * dispose() runs them, every waiting request settles as VC_CORE_ABORTED (not
+ * dispose() runs them, every waiting request settles as core:aborted:dispatch (not
  * retryable) with its timer cleared, and the next request() works. There is
  * no disposed state - the stance of Vue 3.6's EffectScope.stop() (rc.8,
  * @vue/reactivity), which polices nothing after stopping.
@@ -39,7 +39,7 @@ describe.each([
   ['sync', () => createCommandBus()],
   ['async', () => createAsyncCommandBus()],
 ] as const)('%s bus: dispose() settles waiting request()s', (_kind, make) => {
-  it('settles them as VC_CORE_ABORTED at once and clears their timers', async () => {
+  it('settles them as core:aborted:dispatch at once and clears their timers', async () => {
     vi.useFakeTimers();
     const bus: any = make();
     let seen: unknown = 'not called';
@@ -50,7 +50,7 @@ describe.each([
     bus.dispose();
     await vi.advanceTimersByTimeAsync(0); // flush microtasks; no time passes
 
-    expect(code(result)).toBe('VC_CORE_ABORTED');
+    expect(code(result)).toBe('core:aborted:dispatch');
     expect(vi.getTimerCount()).toBe(0);
     expect(seen).toBeUndefined(); // no caller signal, so the responder saw none
   });
@@ -66,7 +66,7 @@ describe.each([
     bus.dispose();
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(code(result)).toBe('VC_CORE_ABORTED');
+    expect(code(result)).toBe('core:aborted:dispatch');
     expect(vi.getTimerCount()).toBe(0);
     expect(caller.signal.aborted).toBe(false);
   });
@@ -106,7 +106,7 @@ describe('sync bus: request() honours the caller signal', () => {
 
     const r = await bus.request('q', {}, undefined, { signal: caller.signal });
 
-    expect(code(r)).toBe('VC_CORE_ABORTED');
+    expect(code(r)).toBe('core:aborted:dispatch');
     expect(responder).not.toHaveBeenCalled();
   });
 
@@ -121,7 +121,7 @@ describe('sync bus: request() honours the caller signal', () => {
     caller.abort();
     await vi.advanceTimersByTimeAsync(0);
 
-    expect(code(result)).toBe('VC_CORE_ABORTED');
+    expect(code(result)).toBe('core:aborted:dispatch');
     expect(vi.getTimerCount()).toBe(0);
   });
 

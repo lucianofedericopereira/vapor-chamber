@@ -9,7 +9,7 @@
  *  - CDCC-compliant function sizes
  *  - `AbortSignal.any` with manual fallback for older environments
  *  - Jitter on exponential backoff (avoids thundering herd)
- *  - `X-RateLimit-Reset` header as Retry-After fallback
+ *  - `Retry-After` honoured on any status (RFC 9110); `X-RateLimit-Reset` as its fallback for the wait
  *  - 419 CSRF refresh coalesces concurrent requests (no duplicate refreshes)
  *  - `session-expired` CustomEvent + configurable callback
  *  - `TimeoutError` distinct from `AbortError` (user abort vs timeout)
@@ -88,56 +88,17 @@ export type HttpResponse<T = unknown> = {
 export type HttpErrorName = 'HttpError' | 'TimeoutError' | 'AbortError';
 
 /**
- * A CLASS since v1.23.0, and a type - `Error & { ... }` - since v0.4.
- *
- * The type was why FOUR places built this shape by hand: `responseError` and
- * the timeout below, and the two catch blocks in `transports.ts` that
- * re-assemble it field by field to swap in the backend's own message. A type
- * cannot be called, so each site spelled the same four assignments out and each
- * was free to forget one. That is not hypothetical: the envelope paths dropped
- * `code` while the catch path kept it, and the two sat twelve lines apart in one
- * function (fixed in v1.23.0, `tests/envelope-code.test.ts`).
- *
- * Nothing about the shape moved: the same five fields under the same names, and
- * `HttpError` still names a type wherever it did, because a class declaration
- * declares one. `index.ts` re-exports it as a type only, so the constructor is
- * not new public surface and stays shakeable out of a barrel import.
- *
- * MEASURED, three shapes of the same consolidation, one build each. Brotli,
- * full / core / elements:
- *
- *     class (this)                 12,011 / 8,125 / 8,638
- *     plain factory function       12,030 / 8,128 / 8,645
- *     one Object.assign expression 12,021 / 8,131 / 8,642
- *
- * The class is smallest in all three. It is 34 B LARGER raw than either of the
- * others, in all three, and raw is the ceiling that absorbs toolchain drift
- * rather than the headline number - so brotli decides, as the budget comments in
- * `scripts/check-size.mjs` already say it does.
- *
- * It is also the only one of the three that can be extended: a factory returns
- * an intersection type nobody can subclass, and `Object.assign` returns a shape
- * with no identity at all. That is the tie-break the bytes did not need to make
- * here, and it is why this is a class rather than the cheapest expression.
- *
- * None of the three is a byte SAVING over the four hand-assembled sites - the
- * class costs +8 B brotli on full. What it buys is that a site can no longer
- * omit a field, which is the defect that produced `tests/envelope-code.test.ts`.
- *
- * `response`, `status` and `code` are assigned unconditionally rather than
- * behind a `!== undefined` guard, the shape `okResult`/`errResult` and
- * `backendError` already use, so two instances built here never differ. NOT a
- * claim that an HttpError has one hidden class for its whole life: `silent` is
- * stamped after construction at two call sites, and always was.
- *
- * `instanceof` is deliberately NOT part of what this buys. Using it to tell a
- * library error from a backend one was considered and dropped - `emitter` is
- * the field that answers that, and it answers it for a plain object too.
+ * The HTTP client's failure, for a request made with it directly: `name` says
+ * which (`HttpError` for an answered non-2xx, `TimeoutError`, `AbortError`),
+ * `response` is the answer (its `status` included), and `code` a problem
+ * body's `code`. On the bus the bridges read it by the wire contract into a
+ * `remote` or `transport` failure (docs/plan-failures-and-contract.md 4.4), and
+ * `failureCondition` reads its `response.status` through the status table. `silent` is
+ * stamped when the request asked to skip a global error handler.
  */
 export class HttpError extends Error {
   declare name: HttpErrorName;
   declare response?: HttpResponse;
-  declare status?: number;
   /** Machine-readable error code from response body (e.g. `'CART_ITEM_LIMIT_EXCEEDED'`). */
   declare code?: string;
   /** Set when the request's `silent: true` config opts the caller out of a global error handler/toast. */
@@ -146,16 +107,11 @@ export class HttpError extends Error {
   constructor(
     name: HttpErrorName,
     message: string,
-    opts: { response?: HttpResponse; status?: number; code?: string; cause?: Error } = {},
+    opts: { response?: HttpResponse; code?: string } = {},
   ) {
-    super(message, opts.cause ? { cause: opts.cause } : undefined);
+    super(message);
     this.name = name;
     this.response = opts.response;
-    // `status` is taken from the response when the caller does not say
-    // otherwise. The catch paths in `transports.ts` pass it explicitly because
-    // a custom `httpClient` may throw something carrying a status and no
-    // response, and deriving it would drop the one field `retry()` reads.
-    this.status = opts.status ?? opts.response?.status;
     this.code = opts.code;
   }
 }
@@ -164,7 +120,6 @@ export class HttpError extends Error {
 // Constants
 // ---------------------------------------------------------------------------
 
-const RETRY_AFTER_STATUS = [429, 503];
 const SESSION_EXPIRED_STATUS = [401]; // 419 is CSRF expiry, not session expiry
 const MAX_RETRY_AFTER_MS = 30_000;
 const CSRF_TTL_MS = 300_000; // 5 min
@@ -256,7 +211,7 @@ function readCsrfFromDom(): CsrfResult | null {
  * refresh fetch makes the backend set a fresh `XSRF-TOKEN` cookie (Laravel's
  * CSRF middleware sets it on every response), so after a refresh the cookie is
  * the live source. Fall back to the full DOM read for a page with no cookie
- * (a `@csrf` hidden-input form), so this is a superset of the old behaviour.
+ * (a `@csrf` hidden-input form).
  */
 function readCsrfAfterRefresh(): CsrfResult | null {
   const fromCookie = readCsrfFromCookie();
@@ -281,17 +236,11 @@ function refreshCsrfOnce(cookieUrl: string): Promise<CsrfResult> {
   // Coalesce: concurrent 419s share the single in-flight refresh promise -
   // waiters resolve/reject the instant it settles, no polling.
   //
-  // RETURNS the token rather than leaving callers to re-read it. Both call
-  // sites used to do `await refreshCsrfOnce(...); const fresh =
-  // readCsrfToken();` - and between those two statements sits a microtask
-  // boundary that several coalesced waiters resume across. A waiter that ran
-  // first could invalidate the cache (the exported `invalidateCsrfCache()`) or
-  // clear the DOM before a later waiter re-read, so the later one saw null and
-  // silently retried with no CSRF header. Handing back the value this function
-  // has already proven readable closes that window, makes the coalescing
-  // semantics exact (every waiter gets the SAME token), and removes the
-  // `if (fresh)` guard at both call sites - which was unreachable in ordinary
-  // flow anyway, because this function throws when no token is found.
+  // RETURNS the token rather than leaving callers to re-read it: a re-read
+  // after the await sits across a microtask boundary that several coalesced
+  // waiters resume across, and a waiter that ran first could invalidate the
+  // cache or clear the DOM, so a later one would retry with no CSRF header.
+  // Every waiter gets the SAME token; this throws when none is found.
   if (_csrfRefreshPromise) return _csrfRefreshPromise;
   _csrfRefreshPromise = (async () => {
     try {
@@ -322,19 +271,20 @@ function refreshCsrfOnce(cookieUrl: string): Promise<CsrfResult> {
 // Retry timing
 // ---------------------------------------------------------------------------
 
-function parseRetryAfter(header: string | null): number | null {
-  if (!header) return null;
+/** @internal - also read by the bridges (transports.ts), for `context.retryIn`. */
+export function _parseRetryAfter(header: string | null | undefined): number | undefined {
+  if (!header) return undefined;
   const seconds = Number(header);
   if (!Number.isNaN(seconds)) {
     const ms = seconds * 1000;
-    return ms <= MAX_RETRY_AFTER_MS ? ms : null;
+    return ms <= MAX_RETRY_AFTER_MS ? ms : undefined;
   }
   const date = Date.parse(header);
   if (!Number.isNaN(date)) {
     const ms = date - Date.now();
-    return ms > 0 && ms <= MAX_RETRY_AFTER_MS ? ms : null;
+    return ms > 0 && ms <= MAX_RETRY_AFTER_MS ? ms : undefined;
   }
-  return null;
+  return undefined;
 }
 
 /** Exponential backoff plus 0-200ms of jitter to avoid thundering herd. */
@@ -437,7 +387,7 @@ function handleSessionExpiry(status: number, url: string, onSessionExpired?: (s:
  *
  * Keys are lower-cased here, and this is the only place that should do it.
  * Every consumer reads this snapshot case-sensitively -
- * `res.headers['retry-after']` and `['x-ratelimit-reset']` in both retry
+ * `res.headers['retry-after']` in the retry
  * loops, `['content-disposition']` in the download path - so a `Headers` whose
  * `entries()` yields `Retry-After` makes all of them miss with NO error:
  * backoff silently not honoured, filename silently lost.
@@ -479,13 +429,11 @@ async function doFetch<T>(url: string, serialized: string, headers: Record<strin
  * The retry / timeout / CSRF-refresh / session-expiry loop, shared by
  * `postCommand` and `clientRequest`. The only per-caller difference is the
  * fetch itself (passed as `doRequest`) and whether thrown errors are stamped
- * `silent`. The two used to carry a near-identical copy of this loop.
+ * `silent`.
  *
  * ONE policy, correct for both (whitepaper 5.7): 401 = session expiry, fires
  * `onSessionExpired`; 419 = CSRF expiry, refreshed and retried ONCE and NEVER
- * escalated to session expiry. `clientRequest` previously escalated a 419 that
- * survived the refresh - that contradicted both the contract and `postCommand`,
- * and is gone (pre-1.0, no compat shim).
+ * escalated to session expiry.
  *
  * `headers` is the object the request sends; on a 419 the fresh token replaces
  * the stale one on it via `setCsrfHeader`, which clears the other csrf header
@@ -532,12 +480,12 @@ async function runWithRetry<T>(
           continue;
         }
 
-        // Retry on a retryable status - the one rule (http-errors.ts): 408/429/5xx.
-        if (isRetryableStatus(res.status) && attempt < retry) {
-          const retryAfter = res.headers['retry-after'] ?? res.headers['x-ratelimit-reset'] ?? null;
-          const wait = RETRY_AFTER_STATUS.includes(res.status)
-            ? (parseRetryAfter(retryAfter) ?? backoffMs(attempt))
-            : backoffMs(attempt);
+        // Retry what the response declares temporary (http-errors.ts): a
+        // transient status, or any status sent with Retry-After (RFC 9110),
+        // waiting what it says.
+        const retryAfter = res.headers['retry-after'] ?? res.headers['x-ratelimit-reset'];
+        if ((isRetryableStatus(res.status) || res.headers['retry-after'] !== undefined) && attempt < retry) {
+          const wait = _parseRetryAfter(retryAfter) ?? backoffMs(attempt);
           await sleepMs(wait, userSignal);
           continue;
         }
@@ -554,17 +502,14 @@ async function runWithRetry<T>(
       const err = e as HttpError;
       if (err.name === 'AbortError' && userSignal?.aborted) throw err;
       // A timeout-triggered abort is transient: it competes for the retry
-      // budget like a 5xx/429/408 instead of throwing on the first attempt.
+      // budget like a transient status instead of throwing on the first attempt.
       const failure = err.name === 'AbortError'
         ? new HttpError('TimeoutError', `"${url}" timed out after ${timeout}ms`)
         : err;
-      // A non-transient response thrown above re-enters here; do not retry it
-      // (a 422 must not re-send a mutation). isRetryableStatus above owns the
-      // retryable statuses.
-      if (failure.response && !classifyError(failure).transient) {
-        if (silent) failure.silent = true;
-        throw failure;
-      }
+      // A response thrown above was already judged by the status rule there;
+      // it re-enters here only to leave. Only no response at all (a network
+      // failure, a timeout) is retried from this path.
+      if (failure.response) throw failure; // stamped `silent` where it was thrown
       if (attempt >= retry) {
         if (silent) failure.silent = true;
         throw failure;
@@ -651,9 +596,16 @@ export type HttpRequestConfig = HttpConfig & {
   _csrfRetried?: boolean;
 };
 
+/**
+ * A `safe` helper's outcome: it never throws. `error` is the RFC 9457 problem
+ * the backend answered (its body, `status` added when the body has none), or,
+ * for a body that is not one, `{ status, detail: 'HTTP <status>' }`; with no
+ * response at all (a timeout, an abort, the network) `{ detail }` only.
+ * `status` is 0 when there was no response.
+ */
 export type SafeResult<T = unknown> = {
   data: T | null;
-  error: { message: string; code?: string; [key: string]: unknown } | null;
+  error: ProblemDetails | null;
   status: number;
 };
 
@@ -725,7 +677,7 @@ function createInterceptorManager<T>(): InterceptorManager<T> & { forEach(fn: (h
 
 import { MAX_TIMEOUT_MS } from './bounds';
 import { createResponseCache, CACHE_DEFAULT_TTL } from './http-cache';
-import { classifyError, isRetryableStatus } from './http-errors';
+import { classifyError, isRetryableStatus, type ProblemDetails } from './http-errors';
 import { buildFullUrl } from './http-query';
 
 // ---------------------------------------------------------------------------
@@ -999,12 +951,13 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
       return { data: response.data, error: null, status: response.status };
     } catch (err) {
       const e = err as HttpError;
-      const errorData = e.response?.data as any;
-      return {
-        data: null,
-        error: errorData && typeof errorData === 'object' ? errorData : { message: e.message, code: e.code },
-        status: e.status ?? e.response?.status ?? 0,
-      };
+      const res = e.response;
+      if (!res) return { data: null, error: { detail: e.message }, status: 0 };
+      const body = res.data;
+      // `e.message` is already the body's `detail`, else `HTTP <status>`; a
+      // null body spreads as nothing.
+      const problem = typeof body === 'object' && !Array.isArray(body) ? body as ProblemDetails | null : null;
+      return { data: null, error: { status: res.status, ...problem, detail: e.message }, status: res.status };
     }
   }
 

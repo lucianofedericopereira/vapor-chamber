@@ -5,7 +5,7 @@
  * own project). It is example code, but it is *published* example code, so it
  * gets the same treatment as the library: the contract is pinned by tests.
  *
- * Covered here: the four directives, scope resolution (local vs. atmosphere),
+ * Covered here: the five directives, scope resolution (local vs. atmosphere),
  * scan idempotence across a client-side page swap, and the example's headline
  * claim - clicks dispatched before handlers hydrate are replayed in order.
  */

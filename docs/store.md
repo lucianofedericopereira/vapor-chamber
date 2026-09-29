@@ -38,8 +38,7 @@ with no store-specific code.
 | ordered same-key writes | `serialize` plugin | nothing |
 | a devtools timeline | `vapor-chamber/devtools` | nothing |
 
-Cross-context mirroring is not on that list, and until v1.22.0 it was.
-`createChannel` mirrors
+Cross-context mirroring is not on that list: `createChannel` mirrors
 emitted FACTS over a BroadcastChannel: it takes a fast lane, not the bus, so no
 dispatch reaches it. Store state crosses tabs only if the app emits the fact it
 wants mirrored and the receiving tab applies it. That is a real cost, and it

@@ -2,7 +2,7 @@
  * AbortController integration - async bus + HTTP bridge propagation.
  *
  * Locks v1.2.x behavior:
- *   • Pre-aborted signal -> resolves immediately with VC_CORE_ABORTED, handler not invoked.
+ *   • Pre-aborted signal -> resolves immediately with core:aborted:dispatch, handler not invoked.
  *   • Mid-flight abort -> handler observes `cmd.signal.aborted === true`.
  *   • HTTP bridge auto-propagates `cmd.signal` to fetch - no manual wiring required.
  *   • After-hooks fire even for aborted dispatches (observability stays intact).
@@ -26,7 +26,7 @@ import { it } from '../src/vitest';
 const WS_TIMEOUT = 10_000;
 
 describe('AbortController - async dispatch', () => {
-  it('pre-aborted signal short-circuits with VC_CORE_ABORTED, handler is NOT called', async ({ asyncBus: bus }) => {
+  it('pre-aborted signal short-circuits with core:aborted:dispatch, handler is NOT called', async ({ asyncBus: bus }) => {
     const handler = vi.fn(async () => 'never');
     bus.register('hot', handler);
 
@@ -35,7 +35,7 @@ describe('AbortController - async dispatch', () => {
 
     const result = await bus.dispatch('hot', null, undefined, { signal: ac.signal });
 
-    expect(result).toFailWith('VC_CORE_ABORTED');
+    expect(result).toFailWith('core:aborted:dispatch');
     expect(handler).not.toHaveBeenCalled();
     expect(result.error).toBeInstanceOf(BusError);
   });
@@ -110,7 +110,7 @@ describe('AbortController - async dispatch', () => {
     expect(afterHook).toHaveBeenCalledOnce();
     const [cmd, result] = afterHook.mock.calls[0]!;
     expect(cmd.action).toBe('hot');
-    expect(result).toFailWith('VC_CORE_ABORTED');
+    expect(result).toFailWith('core:aborted:dispatch');
   });
 
   it('cmd.signal is undefined when no options.signal is passed (no leak from prior dispatch)', async ({ asyncBus: bus }) => {
@@ -185,7 +185,7 @@ describe('AbortController - sync bus accepts but ignores signal', () => {
 });
 
 describe('AbortController - bus.request() with signal', () => {
-  it('pre-aborted signal short-circuits with VC_CORE_ABORTED, responder NOT called', async ({ asyncBus: bus }) => {
+  it('pre-aborted signal short-circuits with core:aborted:dispatch, responder NOT called', async ({ asyncBus: bus }) => {
     const responder = vi.fn(async () => 'never');
     bus.respond('q', responder);
 
@@ -194,7 +194,7 @@ describe('AbortController - bus.request() with signal', () => {
 
     const result = await bus.request('q', { id: 1 }, undefined, { signal: ac.signal });
 
-    expect(result).toFailWith('VC_CORE_ABORTED');
+    expect(result).toFailWith('core:aborted:dispatch');
     expect(responder).not.toHaveBeenCalled();
     expect(result.error).toBeInstanceOf(BusError);
   });
@@ -219,7 +219,7 @@ describe('AbortController - bus.request() with signal', () => {
     ac.abort();
     const result = await pending;
 
-    expect(result).toFailWith('VC_CORE_ABORTED');
+    expect(result).toFailWith('core:aborted:dispatch');
     expect(result.error).toBeInstanceOf(BusError);
   });
 
@@ -247,7 +247,7 @@ describe('AbortController - bus.dispatchBatch() with signal', () => {
       { signal: ac.signal },
     );
 
-    expect(result).toFailWith('VC_CORE_ABORTED');
+    expect(result).toFailWith('core:aborted:dispatch');
     expect(result.results).toHaveLength(0);
     expect(handler).not.toHaveBeenCalled();
     expect(result.error).toBeInstanceOf(BusError);
@@ -284,7 +284,7 @@ describe('AbortController - bus.dispatchBatch() with signal', () => {
     ac.abort();
     const result = await pending;
 
-    expect(result).toFailWith('VC_CORE_ABORTED');
+    expect(result).toFailWith('core:aborted:dispatch');
     // At least one command should have completed before abort fired.
     expect(result.results.length).toBeGreaterThanOrEqual(1);
     // Not all four should have run (abort stopped further dispatch).
@@ -339,7 +339,7 @@ describe('AbortController - WS bridge propagation', () => {
 
     const result = await bus.dispatch('cartAdd', { id: 1 }, undefined, { signal: ac.signal });
 
-    expect(result).toFailWith('VC_CORE_ABORTED');
+    expect(result).toFailWith('core:aborted:dispatch');
     ws.disconnect();
   });
 
@@ -365,7 +365,7 @@ describe('AbortController - WS bridge propagation', () => {
     const result = await dispatchPromise;
     const elapsed = Date.now() - start;
 
-    expect(result).toFailWith('VC_CORE_ABORTED');
+    expect(result).toFailWith('core:aborted:dispatch');
     // Relative to the timeout under test, not a literal: the claim is "the
     // abort short-circuited" and a quarter of the ceiling proves it on any
     // machine. A fixed 500 ms proved it only on a fast one.

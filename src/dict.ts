@@ -13,7 +13,7 @@
  *
  * 1. **Reads answer for keys that were never set.** `obj[key] !== undefined`,
  *    `key in obj` and `obj[key]` all walk the prototype chain.
- *    - `mcp.ts` (fixed v1.15.0): `tools/call` admitted `constructor`,
+ *    - `mcp.ts`: `tools/call` admitted `constructor`,
  *      `__proto__`, `toString`, `hasOwnProperty` and `valueOf` as tool names
  *      that `tools/list` never advertised.
  *    - `router/url.ts` `parseQuery`: the repeated-key check saw inherited

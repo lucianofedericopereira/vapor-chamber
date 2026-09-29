@@ -85,10 +85,8 @@ function analyse(file: string): Page | null {
   const globals = [...src.matchAll(/VaporChamber\.([A-Za-z_$][\w$]*)/g)].map((m) => m[1]);
   // These pages are served from the REPO ROOT (examples/static-server.mjs), so
   // a leading `/` means repo root, not filesystem root - resolve it the way the
-  // browser will. `pattern-1-blade-cdn.html` previously used `../../dist/...`,
-  // which from `examples/` points ABOVE the repo and only worked because
-  // browsers clamp excess `..` to the origin root; it now uses `/dist/...` like
-  // its siblings, verified live at http://localhost:3000.
+  // browser will. (`../../dist/...` from `examples/` would point above the
+  // repo and work only because browsers clamp excess `..` to the origin root.)
   const src0 = script[1];
   // A Blade view is served by Laravel out of `public/`, and
   // `examples/laravel-app/setup.sh` copies the IIFEs from this repo's `dist/`

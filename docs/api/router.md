@@ -19,7 +19,7 @@ import { ... } from 'vapor-chamber/router';
 
 ### buildBreadcrumbs
 
-**Function** - [src/router/menu.ts:101](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/menu.ts#L101)
+**Function** - [src/router/menu.ts:106](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/menu.ts#L106)
 
 ```ts
 buildBreadcrumbs(location: RouteLocation, base?: string) => Breadcrumb[]
@@ -30,7 +30,7 @@ root-first - the page itself is the last crumb.
 
 ### buildMenu
 
-**Function** - [src/router/menu.ts:59](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/menu.ts#L59)
+**Function** - [src/router/menu.ts:64](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/menu.ts#L64)
 
 ```ts
 buildMenu(records: readonly TableRecord[], currentPath: string, base?: string) => MenuItem[]
@@ -56,13 +56,14 @@ replaceState with the CURRENT state is side-effect-free and authoritative.
 
 ### compilePath
 
-**Function** - [src/router/table.ts:66](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/table.ts#L66)
+**Function** - [src/router/table.ts:75](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/table.ts#L75)
 
 ```ts
-compilePath(path: string) => { segments: Segment[]; re: RegExp; keys: string[]; }
+compilePath(path: string, paramTypes?: Readonly<Record<string, ParamType>>) => { segments: Segment[]; re: RegExp; keys: string[]; }
 ```
 
-Compile one path pattern into segments + a matching RegExp.
+Compile one path pattern into segments + a matching RegExp; a typed param
+with no regex of its own matches its type's pattern.
 
 ### createMemoryHistory
 
@@ -76,7 +77,7 @@ In-memory history - tests and SSR. Same contract as createWebHistory.
 
 ### createRouter
 
-**Function** - [src/router/index.ts:176](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/index.ts#L176)
+**Function** - [src/router/index.ts:188](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/index.ts#L188)
 
 ```ts
 createRouter<TName extends string = string>(options: RouterOptions) => Router<TName>
@@ -84,7 +85,7 @@ createRouter<TName extends string = string>(options: RouterOptions) => Router<TN
 
 ### createRouteTable
 
-**Function** - [src/router/table.ts:128](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/table.ts#L128)
+**Function** - [src/router/table.ts:141](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/table.ts#L141)
 
 ```ts
 createRouteTable(rows: readonly RouteRecord[]) => RouteTable
@@ -111,7 +112,7 @@ Decode one raw query value through its declaration; falls back to
 
 ### defaultAffects
 
-**Function** - [src/router/loaders.ts:158](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/loaders.ts#L158)
+**Function** - [src/router/loaders.ts:156](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/loaders.ts#L156)
 
 ```ts
 defaultAffects(record: TableRecord, keys: readonly string[], handlers: LoaderHandlers) => boolean
@@ -125,7 +126,7 @@ URL templates depend only on the placeholders they mention. Override via
 
 ### encodeQueryParam
 
-**Function** - [src/router/url.ts:105](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/url.ts#L105)
+**Function** - [src/router/url.ts:102](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/url.ts#L102)
 
 ```ts
 encodeQueryParam(value: unknown, def: QueryParamDef) => string | string[] | null
@@ -147,7 +148,7 @@ Fill `{placeholders}` from path params first, then typed query params
 
 ### isRouterError
 
-**Function** - [src/router/errors.ts:80](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/errors.ts#L80)
+**Function** - [src/router/errors.ts:79](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/errors.ts#L79)
 
 ```ts
 isRouterError(error: unknown, code?: RouterErrorCode) => error is RouterError
@@ -165,7 +166,7 @@ normalizeBase(base?: string) => string
 
 ### onBeforeLeave
 
-**Function** - [src/router/composables.ts:145](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L145)
+**Function** - [src/router/composables.ts:150](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L150)
 
 ```ts
 onBeforeLeave(guard: (to: RouteLocation, from: RouteLocation) => boolean | void | Promise<boolean | void>) => () => void
@@ -189,7 +190,7 @@ Repeated keys collect into arrays. '+' decodes to space.
 
 ### pathActivity
 
-**Function** - [src/router/url.ts:129](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/url.ts#L129)
+**Function** - [src/router/url.ts:126](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/url.ts#L126)
 
 ```ts
 pathActivity(targetPath: string, currentPath: string) => { active: boolean; exact: boolean; }
@@ -203,7 +204,7 @@ Trailing-slash tolerant. exact = same path; active = exact or path prefix
 
 ### preheatIdle
 
-**Function** - [src/router/dom.ts:235](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/dom.ts#L235)
+**Function** - [src/router/dom.ts:245](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/dom.ts#L245)
 
 ```ts
 preheatIdle(factories: ReadonlyArray<() => Promise<unknown>>, options?: IdlePreheatOptions) => () => void
@@ -238,7 +239,7 @@ payloads can localize titles per request.
 
 ### resolveQueryHistory
 
-**Function** - [src/router/url.ts:143](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/url.ts#L143)
+**Function** - [src/router/url.ts:140](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/url.ts#L140)
 
 ```ts
 resolveQueryHistory(key: string, def: QueryParamDef | undefined, override?: "push" | "replace") => "push" | "replace"
@@ -252,7 +253,7 @@ How a query write lands in browser history. Ladder (first hit wins):
 
 ### revalidateRoutes
 
-**Function** - [src/router/revalidate.ts:85](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/revalidate.ts#L85)
+**Function** - [src/router/revalidate.ts:78](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/revalidate.ts#L78)
 
 ```ts
 revalidateRoutes(router: Router, loaders: LoaderHandlers, map: RevalidateMap, options?: RevalidateOptions) => RevalidatePlugin
@@ -260,7 +261,7 @@ revalidateRoutes(router: Router, loaders: LoaderHandlers, map: RevalidateMap, op
 
 ### routerError
 
-**Function** - [src/router/errors.ts:65](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/errors.ts#L65)
+**Function** - [src/router/errors.ts:64](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/errors.ts#L64)
 
 ```ts
 routerError(code: RouterErrorCode, message: string, extra?: { to?: RouteLocation; cause?: unknown; }) => RouterError
@@ -268,7 +269,7 @@ routerError(code: RouterErrorCode, message: string, extra?: { to?: RouteLocation
 
 ### runLoaders
 
-**Function** - [src/router/loaders.ts:116](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/loaders.ts#L116)
+**Function** - [src/router/loaders.ts:114](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/loaders.ts#L114)
 
 ```ts
 runLoaders(handlers: LoaderHandlers, records: readonly TableRecord[], location: RouteLocation, signal: AbortSignal, onRevalidate?: (recordName: string, revalidation: Promise<unknown>, location: RouteLocation) => void) => Promise<Map<string, unknown>>
@@ -279,7 +280,7 @@ failures throw coded RouterErrors (cause attached, abort -> 'cancelled').
 
 ### stampActiveLinks
 
-**Function** - [src/router/dom.ts:208](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/dom.ts#L208)
+**Function** - [src/router/dom.ts:215](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/dom.ts#L215)
 
 ```ts
 stampActiveLinks(base: string, currentPath: string, root?: ParentNode) => void
@@ -287,6 +288,11 @@ stampActiveLinks(base: string, currentPath: string, root?: ParentNode) => void
 
 Stamp `data-active` (prefix match) / `data-exact-active` (same path,
 trailing-slash tolerant) on every in-base anchor. Call after each commit.
+
+The exact match also gets `aria-current="page"`, which is what a screen
+reader announces as "current page" (WAI-ARIA 1.2). Only the exact match: a
+section link that is merely a prefix match is active for styling, not the
+page, and ARIA asks for one current element per set.
 
 ### stringifyQuery
 
@@ -311,17 +317,18 @@ Case-insensitive base prefix strip; null when pathname is outside base.
 
 ### unwrapRoutesPayload
 
-**Function** - [src/router/index.ts:141](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/index.ts#L141)
+**Function** - [src/router/index.ts:154](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/index.ts#L154)
 
 ```ts
 unwrapRoutesPayload(raw: unknown) => RoutesPayload
 ```
 
-Accept a bare RoutesPayload or the house envelope { ok: true, state }.
+A routes payload, bare or as the wire contract answers it: `{ state }` on
+success, `{ problem }` (RFC 9457) for a failure.
 
 ### useBreadcrumbs
 
-**Function** - [src/router/composables.ts:134](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L134)
+**Function** - [src/router/composables.ts:139](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L139)
 
 ```ts
 useBreadcrumbs() => { readonly value: readonly Breadcrumb[]; }
@@ -333,7 +340,7 @@ rows and ancestors whose params the location can't supply come href-less.
 
 ### useMenu
 
-**Function** - [src/router/composables.ts:124](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L124)
+**Function** - [src/router/composables.ts:129](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L129)
 
 ```ts
 useMenu() => { readonly value: readonly MenuItem[]; }
@@ -346,7 +353,7 @@ Reactive to navigation AND table swaps (setRoutes / reload).
 
 ### usePagination
 
-**Function** - [src/router/composables.ts:207](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L207)
+**Function** - [src/router/composables.ts:212](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L212)
 
 ```ts
 usePagination<T = unknown>(options?: PaginationOptions<T>) => Pagination<T>
@@ -368,7 +375,7 @@ nesting), which covers Laravel's paginator and most plain-JSON APIs.
 
 ### useQueryParam
 
-**Function** - [src/router/composables.ts:53](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L53)
+**Function** - [src/router/composables.ts:50](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L50)
 
 ```ts
 useQueryParam<T = unknown>(key: string, def?: QueryParamDef) => QueryParamHandle<T>
@@ -380,7 +387,7 @@ depends on the key refetch automatically.
 
 ### useRoute
 
-**Function** - [src/router/composables.ts:24](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L24)
+**Function** - [src/router/composables.ts:22](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L22)
 
 ```ts
 useRoute() => { readonly value: RouteLocation; }
@@ -390,7 +397,7 @@ Reactive current location (URL state - outlets read snapshot.render).
 
 ### useRouteData
 
-**Function** - [src/router/composables.ts:95](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L95)
+**Function** - [src/router/composables.ts:100](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L100)
 
 ```ts
 useRouteData<T = unknown>(recordName?: string) => { readonly value: T | undefined; }
@@ -402,7 +409,7 @@ layout ancestor also loads.
 
 ### useRouteError
 
-**Function** - [src/router/composables.ts:108](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L108)
+**Function** - [src/router/composables.ts:113](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L113)
 
 ```ts
 useRouteError() => { latestError: { readonly value: unknown; }; clear: () => void; }
@@ -423,7 +430,7 @@ useRouter() => Router
 
 ### AfterEachHook
 
-**Type alias** - [src/router/types.ts:162](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L162)
+**Type alias** - [src/router/types.ts:165](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L165)
 
 ```ts
 export type AfterEachHook = (to: RouteLocation, from: RouteLocation) => void;
@@ -431,7 +438,7 @@ export type AfterEachHook = (to: RouteLocation, from: RouteLocation) => void;
 
 ### Breadcrumb
 
-**Type alias** - [src/router/menu.ts:45](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/menu.ts#L45)
+**Type alias** - [src/router/menu.ts:49](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/menu.ts#L49)
 
 ```ts
 export type Breadcrumb = {
@@ -441,7 +448,8 @@ export type Breadcrumb = {
   /** Absolute href; null when the crumb is not a link target (group rows,
    *  ancestors whose params the current location cannot supply). */
   href: string | null;
-  /** True on the last crumb - the page being shown. */
+  /** True on the last crumb - the page being shown. Bind
+   *  `aria-current="page"` to it. */
   current: boolean;
   meta: Record<string, unknown>;
 };
@@ -449,7 +457,7 @@ export type Breadcrumb = {
 
 ### ComponentEntry
 
-**Type alias** - [src/router/types.ts:166](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L166)
+**Type alias** - [src/router/types.ts:169](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L169)
 
 ```ts
 export type ComponentEntry = unknown | (() => Promise<unknown>);
@@ -460,7 +468,7 @@ Component map entry: a component, or a lazy loader returning one
 
 ### ComponentMap
 
-**Type alias** - [src/router/types.ts:167](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L167)
+**Type alias** - [src/router/types.ts:170](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L170)
 
 ```ts
 export type ComponentMap = Record<string, ComponentEntry>;
@@ -483,7 +491,7 @@ for tests and SSR. Link handling lives in router/dom.ts, not here.
 
 ### IdlePreheatOptions
 
-**Type alias** - [src/router/dom.ts:222](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/dom.ts#L222)
+**Type alias** - [src/router/dom.ts:232](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/dom.ts#L232)
 
 ```ts
 export type IdlePreheatOptions = {
@@ -548,8 +556,12 @@ export type MenuItem = {
   href: string | null;
   meta: Record<string, unknown>;
   /** Same semantics as data-active stamping; a parent also lights up when
-   *  any of its children is active. */
+   *  any of its children is active. For styling only: NOT the field for
+   *  `aria-current`, or a section and its child are both announced as the
+   *  current page. */
   active: boolean;
+  /** This item IS the page: bind `aria-current="page"` to this one
+   *  (`stampActiveLinks` does the same for plain links). */
   exactActive: boolean;
   children: readonly MenuItem[];
 };
@@ -557,7 +569,7 @@ export type MenuItem = {
 
 ### NavigationGuard
 
-**Type alias** - [src/router/types.ts:157](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L157)
+**Type alias** - [src/router/types.ts:160](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L160)
 
 ```ts
 export type NavigationGuard = (
@@ -573,7 +585,7 @@ Navigation guard. Return:
 
 ### Pagination
 
-**Type alias** - [src/router/composables.ts:173](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L173)
+**Type alias** - [src/router/composables.ts:178](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L178)
 
 ```ts
 export type Pagination<T> = {
@@ -598,7 +610,7 @@ export type Pagination<T> = {
 
 ### PaginationOptions
 
-**Type alias** - [src/router/composables.ts:160](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L160)
+**Type alias** - [src/router/composables.ts:165](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L165)
 
 ```ts
 export type PaginationOptions<T> = {
@@ -667,7 +679,7 @@ Declaration for a typed query param (`?page=2` -> `useQueryParam('page')`).
 
 ### QueryParamHandle
 
-**Type alias** - [src/router/composables.ts:39](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L39)
+**Type alias** - [src/router/composables.ts:36](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/composables.ts#L36)
 
 ```ts
 export type QueryParamHandle<T> = Ref<T> & {
@@ -685,13 +697,12 @@ controls.
 
 Being an actual ref matters: refs returned from `setup()` are AUTO-UNWRAPPED
 in templates, so `{{ page }}` works and `.value` is script-only - exactly
-like `useRoute()`, `useRouteData()` and every sibling composable. A
-lookalike object with a `value` accessor does NOT unwrap, which made this
-the one composable whose templates needed `.value`.
+like `useRoute()`, `useRouteData()` and every sibling composable (a
+lookalike object with a `value` accessor would not unwrap).
 
 ### QueryPatch
 
-**Type alias** - [src/router/types.ts:66](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L66)
+**Type alias** - [src/router/types.ts:69](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L69)
 
 ```ts
 export type QueryPatch = Record<string, unknown | null | undefined>;
@@ -701,7 +712,7 @@ Writable query patch: null/undefined removes a key.
 
 ### QueryValues
 
-**Type alias** - [src/router/types.ts:63](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L63)
+**Type alias** - [src/router/types.ts:66](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L66)
 
 ```ts
 export type QueryValues = Record<string, string | string[]>;
@@ -711,7 +722,7 @@ Raw query values as parsed from the URL string.
 
 ### RenderEntry
 
-**Type alias** - [src/router/types.ts:121](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L121)
+**Type alias** - [src/router/types.ts:124](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L124)
 
 ```ts
 export type RenderEntry = {
@@ -745,7 +756,7 @@ export type ResolveBaseOptions = {
 
 ### RevalidateMap
 
-**Type alias** - [src/router/revalidate.ts:68](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/revalidate.ts#L68)
+**Type alias** - [src/router/revalidate.ts:61](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/revalidate.ts#L61)
 
 ```ts
 export type RevalidateMap = Record<string, readonly string[] | 'affected'>;
@@ -756,7 +767,7 @@ route's whole load chain. Patterns use the bus's glob shape (`cart*`).
 
 ### RevalidateOptions
 
-**Type alias** - [src/router/revalidate.ts:70](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/revalidate.ts#L70)
+**Type alias** - [src/router/revalidate.ts:63](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/revalidate.ts#L63)
 
 ```ts
 export type RevalidateOptions = {
@@ -768,7 +779,7 @@ export type RevalidateOptions = {
 
 ### RevalidatePlugin
 
-**Type alias** - [src/router/revalidate.ts:59](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/revalidate.ts#L59)
+**Type alias** - [src/router/revalidate.ts:52](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/revalidate.ts#L52)
 
 ```ts
 export type RevalidatePlugin = ((cmd: BusCommand, next: () => unknown) => unknown) & {
@@ -781,7 +792,7 @@ export type RevalidatePlugin = ((cmd: BusCommand, next: () => unknown) => unknow
 
 ### RouteLocation
 
-**Type alias** - [src/router/types.ts:104](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L104)
+**Type alias** - [src/router/types.ts:107](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L107)
 
 ```ts
 export type RouteLocation = {
@@ -804,7 +815,7 @@ A resolved, normalized location - what guards and useRoute() see.
 
 ### RouteLocationRaw
 
-**Type alias** - [src/router/types.ts:140](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L140)
+**Type alias** - [src/router/types.ts:143](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L143)
 
 ```ts
 export type RouteLocationRaw<TName extends string = string> =
@@ -825,7 +836,7 @@ as `createRouter<AdminRouteName>(...)` - typos become compile errors.
 
 ### RouteParams
 
-**Type alias** - [src/router/types.ts:69](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L69)
+**Type alias** - [src/router/types.ts:72](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L72)
 
 ```ts
 export type RouteParams = Record<string, string | number | boolean>;
@@ -913,10 +924,13 @@ export type RouteRecord = {
    * `{placeholders}` filled from path params, then typed query params.
    *   "/api/vc/products?page={page}&sort={sort}"
    * Fetched with an AbortController - a newer navigation aborts it. The
-   * response (house envelope or bare JSON) lands on `snapshot.data` atomically
-   * with the commit; `useRouteData()` reads it.
+   * loader's result lands on `snapshot.data` atomically with the commit;
+   * `useRouteData()` reads it.
    */
   load?: string | null;
+  /** Path param types. A typed param with no regex of its own matches only
+   *  its type (`int`: digits, `bool`: 1/0/true/false), so a URL that does not
+   *  fit falls through to the next row; the matched value is cast. */
   params?: Record<string, ParamType>;
   query?: Record<string, QueryParamDef>;
   /** Server data: permissions, titles, `preheat` flag, ... */
@@ -928,7 +942,7 @@ One route row, as emitted by a route generator against this schema.
 
 ### RouterError
 
-**Type alias** - [src/router/errors.ts:58](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/errors.ts#L58)
+**Type alias** - [src/router/errors.ts:57](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/errors.ts#L57)
 
 ```ts
 export type RouterError = Error & {
@@ -980,9 +994,8 @@ export type RouterErrorCode =
   // render mode - raised by the Vapor outlet only (src/router/vapor.ts), which
   // refuses a non-Vapor component rather than silently restoring interop.
   | 'mode_mismatch'
-  // composable or outlet used with no router installed. The one failure in
-  // this router that used to throw a bare Error, i.e. the one a handler could
-  // not switch on. Message text is unchanged from that Error.
+  // composable or outlet used with no router installed - coded, like every
+  // other failure here, so a handler can switch on it.
   | 'no_router';
 ```
 
@@ -1008,7 +1021,7 @@ export type RouterHistory = {
 
 ### RouterOptions
 
-**Type alias** - [src/router/index.ts:104](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/index.ts#L104)
+**Type alias** - [src/router/index.ts:105](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/index.ts#L105)
 
 ```ts
 export type RouterOptions = {
@@ -1045,12 +1058,21 @@ export type RouterOptions = {
   onError?: (error: unknown, to: RouteLocation) => void;
   /** Scroll to top after committed push navigations. Default: true. */
   scroll?: boolean;
+  /** Announce each client-side navigation to assistive technology, in an
+   *  assertive live region: `document.title`, else the first `<h1>`, else the
+   *  path. `false` turns it off; a function returns the text. Not on the
+   *  initial load or a query-only change. Default: true. See announce.ts. */
+  announce?: AnnounceOption;
+  /** CSS selector of a SMALL element (a heading, a skip link) to focus after
+   *  each client-side navigation; made focusable with tabindex="-1" only if it
+   *  is not already. Default: none (focus is not moved). See announce.ts. */
+  focusOnNavigate?: string;
 };
 ```
 
 ### RouteSnapshot
 
-**Type alias** - [src/router/types.ts:129](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L129)
+**Type alias** - [src/router/types.ts:132](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L132)
 
 ```ts
 export type RouteSnapshot = {
@@ -1068,7 +1090,7 @@ so a page never renders with the previous page's data.
 
 ### RoutesPayload
 
-**Type alias** - [src/router/types.ts:55](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L55)
+**Type alias** - [src/router/types.ts:58](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L58)
 
 ```ts
 export type RoutesPayload = {
@@ -1083,7 +1105,7 @@ Envelope for a delivered route table.
 
 ### RoutesSource
 
-**Type alias** - [src/router/index.ts:98](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/index.ts#L98)
+**Type alias** - [src/router/index.ts:99](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/index.ts#L99)
 
 ```ts
 export type RoutesSource =
@@ -1110,7 +1132,7 @@ export type RouteTable = {
 
 ### TableRecord
 
-**Type alias** - [src/router/types.ts:73](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L73)
+**Type alias** - [src/router/types.ts:76](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L76)
 
 ```ts
 export type TableRecord = {
@@ -1162,7 +1184,7 @@ interpolation (interpolateLoad) is the handler's choice.
 
 ### HARD_NAV_CODES
 
-**Variable** - [src/router/errors.ts:91](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/errors.ts#L91)
+**Variable** - [src/router/errors.ts:90](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/errors.ts#L90)
 
 ```ts
 HARD_NAV_CODES: ReadonlySet<RouterErrorCode>
@@ -1174,7 +1196,7 @@ chunk (stale hashes after a deploy) recovers via a full page load.
 
 ### START_LOCATION
 
-**Variable** - [src/router/engine.ts:62](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/engine.ts#L62)
+**Variable** - [src/router/engine.ts:61](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/engine.ts#L61)
 
 ```ts
 START_LOCATION: RouteLocation
@@ -1185,16 +1207,15 @@ object shared by every router in the process and exported publicly as a
 sentinel. Both of its details are load-bearing:
 
 `Object.freeze` reaches one level, so the nested `params` / `query` / `meta`
-stayed writable. `useRoute().value.params.id = 1` before the router was ready
-therefore edited a global that every other router would go on to hand out.
-Frozen unconditionally rather than under DEV like ../freeze: this is four
+are frozen too: otherwise `useRoute().value.params.id = 1` before the router
+is ready would edit a global every other router hands out. Frozen
+unconditionally rather than under DEV like ../freeze: this is four
 empty objects frozen once at module load, so there is no per-commit cost to
 weigh, and a shared constant is exactly where a silent write does the most
 damage.
 
 `query` is a `dict()` because every OTHER query in this engine is - both arms
-of resolveLocation, cleanQueryPatch, and setQuery all go out of their way to
-stay prototype-free so that "a consumer must not have to know which branch
-built the query". The one query the module shipped as a literal `{}` broke
-that for the initial location: `route.query.constructor` answered before the
-first navigation and stopped answering after it.
+of resolveLocation, cleanQueryPatch, and setQuery stay prototype-free so a
+consumer never has to know which branch built the query (a literal `{}` here
+would make `route.query.constructor` answer before the first navigation and
+not after it).

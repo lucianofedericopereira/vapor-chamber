@@ -26,7 +26,7 @@ afterEach(() => {
 });
 
 describe('the batching bridge honours onRedirect', () => {
-  it('a redirected command fails with VC_TRANSPORT_REDIRECT and onRedirect navigates', async () => {
+  it('a redirected command fails with transport:refused:redirect and onRedirect navigates', async () => {
     batchServer((command) => (command === 'logout' ? { redirect: '/login' } : { ok: true, state: { saved: true } }));
     const visits: string[] = [];
     const bus = createAsyncCommandBus();
@@ -37,7 +37,7 @@ describe('the batching bridge honours onRedirect', () => {
     expect(visits).toEqual(['/login']);
     expect(logout.ok).toBe(false);
     expect(logout.error).toBeInstanceOf(BusError);
-    expect(logout.error).toMatchObject({ code: 'VC_TRANSPORT_REDIRECT', emitter: 'transport', context: { url: '/login' } });
+    expect(logout.error).toMatchObject({ code: 'transport:refused:redirect', context: { url: '/login' } });
     expect(save).toMatchObject({ ok: true, value: { saved: true } });   // the sibling is untouched
   });
 
@@ -50,8 +50,8 @@ describe('the batching bridge honours onRedirect', () => {
     const [a, b] = await Promise.all([bus.dispatch('a', {}), bus.dispatch('b', {})]);
 
     expect(visits).toEqual(['/first']);
-    expect(a.error).toMatchObject({ code: 'VC_TRANSPORT_REDIRECT', context: { url: '/first' } });
-    expect(b.error).toMatchObject({ code: 'VC_TRANSPORT_REDIRECT', context: { url: '/second' } });
+    expect(a.error).toMatchObject({ code: 'transport:refused:redirect', context: { url: '/first' } });
+    expect(b.error).toMatchObject({ code: 'transport:refused:redirect', context: { url: '/second' } });
   });
 
   it('without onRedirect the redirect still fails the command, and says why', async () => {
@@ -61,8 +61,8 @@ describe('the batching bridge honours onRedirect', () => {
 
     const result = await bus.dispatch('logout', {});
 
-    expect(result.error).toMatchObject({ code: 'VC_TRANSPORT_REDIRECT', context: { url: '/login' } });
-    expect(result.error?.message).toMatch(/no onRedirect handler configured/);
+    expect(result.error).toMatchObject({ code: 'transport:refused:redirect', context: { url: '/login' } });
+    expect(result.error?.message).toMatch(/No onRedirect handler is configured/);
   });
 
   it('CONTROL: the single bridge answers the same field the same way', async () => {
@@ -74,6 +74,6 @@ describe('the batching bridge honours onRedirect', () => {
     const result = await bus.dispatch('logout', {});
 
     expect(visits).toEqual(['/login']);
-    expect(result.error).toMatchObject({ code: 'VC_TRANSPORT_REDIRECT', context: { url: '/login' } });
+    expect(result.error).toMatchObject({ code: 'transport:refused:redirect', context: { url: '/login' } });
   });
 });

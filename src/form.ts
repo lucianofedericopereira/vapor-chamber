@@ -1,7 +1,7 @@
 /**
  * vapor-chamber - Form Bus
  *
- * v0.5.0 - Reactive form state management built on the command bus.
+ * Reactive form state management built on the command bus.
  *
  * createFormBus wraps a command bus around a typed form, giving you:
  *   - Reactive values, errors, dirty, valid, and submitting state
@@ -84,6 +84,20 @@ export type FormBusOptions<T extends Record<string, any>> = {
   id?: string;
 };
 
+/**
+ * Errors from outside the form's rules, in the wire contract's one shape
+ * (docs/plan-failures-and-contract.md 4.4): a problem's `errors`, each a
+ * pointer into the envelope the client sent (`/payload/<field>`, RFC 6901)
+ * and its sentence.
+ */
+export type FormErrorsInput = ReadonlyArray<{ pointer: string; detail: string }>;
+
+/** What an element needs to make a field's error accessible (WCAG 3.3.1, 4.1.2). */
+export type FieldAria = {
+  'aria-invalid': 'true' | undefined;
+  'aria-describedby': string | undefined;
+};
+
 export type FormBus<T extends Record<string, any>> = {
   /** Reactive current field values. */
   values: Signal<T>;
@@ -109,6 +123,20 @@ export type FormBus<T extends Record<string, any>> = {
   submit(): Promise<boolean>;
   /** Reset all fields to their initial values and clear errors/touched state. */
   reset(): void;
+  /**
+   * Show errors from outside the rules (a server's answer), replacing earlier
+   * ones. Each marks its field touched, so it shows at once, and clears when
+   * that field changes; `submit()` clears them all, since the server decides
+   * again. `submit()` calls this itself when `onSubmit` throws an error whose
+   * problem carries `errors`.
+   */
+  setErrors(errors: FormErrorsInput): void;
+  /** `aria-invalid` / `aria-describedby` for a field, set only while its error is shown. */
+  aria<K extends keyof T>(field: K): FieldAria;
+  /** The id for the element holding a field's message: stable, unique per form, a valid id. */
+  errorId<K extends keyof T>(field: K): string;
+  /** The first field, in declaration order, whose error is shown - the one to focus after a failed submit. */
+  firstInvalid(): keyof T | undefined;
   /** Attach a plugin to the form's internal command bus. */
   use(plugin: Plugin, options?: PluginOptions): void;
   /** The underlying command bus - for advanced use (DevTools, testing). */
@@ -171,6 +199,36 @@ async function runRulesAsync<T extends Record<string, any>>(
   return errs;
 }
 
+let formSeq = 0;
+
+/**
+ * The form field a pointer names: `/payload/<field>` (RFC 6901, `~1` and `~0`
+ * unescaped), nested segments joined by dots, so `/payload/address/city` is
+ * `address.city`. A pointer outside the payload, or to no field, names none.
+ */
+function fieldOf(pointer: string, fields: object): string | undefined {
+  const segments = pointer.split('/');
+  if (segments[0] !== '' || segments[1] !== 'payload') return undefined;
+  const name = segments.slice(2).map((p) => p.replace(/~1/g, '/').replace(/~0/g, '~')).join('.');
+  return Object.hasOwn(fields, name) ? name : undefined;
+}
+
+/** The first error per field, for the fields the form has. */
+function normalizeErrors(input: FormErrorsInput, fields: object): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const e of input) {
+    const field = fieldOf(e.pointer, fields);
+    if (field !== undefined && !Object.hasOwn(out, field)) out[field] = e.detail;
+  }
+  return out;
+}
+
+/** The field errors a failure carries: a backend problem's `errors`, in its `context`. */
+function fieldErrorsOf(error: unknown): FormErrorsInput | undefined {
+  const errors = (error as { context?: { errors?: unknown } } | null)?.context?.errors;
+  return Array.isArray(errors) ? (errors as FormErrorsInput) : undefined;
+}
+
 function hasDiff<T extends Record<string, any>>(a: T, b: T): boolean {
   return Object.keys(b).some((k) => a[k] !== b[k]);
 }
@@ -220,6 +278,10 @@ export function createFormBus<T extends Record<string, any>>(
   const ACTION_TOUCH = `${id}Touch`;
   const ACTION_RESET = `${id}Reset`;
   const ACTION_VALIDATE = `${id}Validate`;
+  const ACTION_ERRORS = `${id}Errors`;
+  const domPrefix = `vc-${id}-${++formSeq}`;
+  /** Errors from outside the rules, by field; merged over the rule errors. */
+  let outside: Partial<Record<keyof T, string>> = {};
 
   // When reactive: false, use plain get/set wrappers instead of Vue signals.
   // Saves 7 signal allocations per form in headless/batch/SSR contexts.
@@ -251,7 +313,11 @@ export function createFormBus<T extends Record<string, any>>(
     const { field, value } = cmd.payload as { field: keyof T; value: T[keyof T] };
     const next = { ...values.value, [field]: value } as T;
     values.value  = next;
-    const errs    = runRulesSync(rules, next);
+    if (Object.hasOwn(outside, field)) {
+      outside = { ...outside };
+      delete outside[field];
+    }
+    const errs    = { ...runRulesSync(rules, next), ...outside };
     errors.value  = errs;
     isDirty.value = hasDiff(initial, next);
     isValid.value = Object.keys(errs).length === 0;
@@ -267,6 +333,7 @@ export function createFormBus<T extends Record<string, any>>(
 
   // ---- formReset ---------------------------------------------------------
   offs.push(bus.register(ACTION_RESET, () => {
+    outside = {};
     values.value   = { ...initial };
     errors.value   = {};
     touched.value  = {};
@@ -285,10 +352,21 @@ export function createFormBus<T extends Record<string, any>>(
     for (const k in initial) allTouched[k as keyof T] = true;
     touched.value = allTouched;
 
-    const errs   = runRulesSync(rules, values.value);
+    const errs   = { ...runRulesSync(rules, values.value), ...outside };
     errors.value = errs;
     isValid.value = Object.keys(errs).length === 0;
     return { valid: isValid.value, errors: errs };
+  }));
+
+  offs.push(bus.register(ACTION_ERRORS, (cmd) => {
+    outside = normalizeErrors(cmd.payload as FormErrorsInput, initial) as Partial<Record<keyof T, string>>;
+    const shown: Partial<Record<keyof T, boolean>> = { ...touched.value };
+    for (const k in outside) shown[k as keyof T] = true;
+    touched.value = shown;
+    const errs = { ...runRulesSync(rules, values.value), ...outside };
+    errors.value = errs;
+    isValid.value = Object.keys(errs).length === 0;
+    return errs;
   }));
 
   // ---- Public API --------------------------------------------------------
@@ -333,6 +411,7 @@ export function createFormBus<T extends Record<string, any>>(
     const allTouched: Partial<Record<keyof T, boolean>> = {};
     for (const k in initial) allTouched[k as keyof T] = true;
     touched.value = allTouched;
+    outside = {}; // the server decides again
 
     // ONE snapshot, validated and submitted. `values` is live state and this
     // function reads it across an await: validation ran against the values at
@@ -362,10 +441,39 @@ export function createFormBus<T extends Record<string, any>>(
     try {
       if (onSubmit) await onSubmit(snapshot);
       return true;
+    } catch (error) {
+      // A refusal that names its fields (a 422 problem's `errors`) lands on
+      // them and the submit reports false; anything else rejects as before.
+      const fieldErrors = fieldErrorsOf(error);
+      if (!fieldErrors || Object.keys(normalizeErrors(fieldErrors, initial)).length === 0) throw error;
+      setErrors(fieldErrors);
+      return false;
     } finally {
       isSubmitting.value = false;
       updateBusy();
     }
+  }
+
+  function setErrors(input: FormErrorsInput): void {
+    bus.dispatch(ACTION_ERRORS, {}, input);
+  }
+
+  function errorId<K extends keyof T>(field: K): string {
+    return `${domPrefix}-${String(field).replace(/[^\w-]/g, '-')}-error`;
+  }
+
+  function shownError<K extends keyof T>(field: K): string | undefined {
+    return touched.value[field] ? errors.value[field] : undefined;
+  }
+
+  function aria<K extends keyof T>(field: K): FieldAria {
+    const shown = shownError(field) !== undefined;
+    return { 'aria-invalid': shown ? 'true' : undefined, 'aria-describedby': shown ? errorId(field) : undefined };
+  }
+
+  function firstInvalid(): keyof T | undefined {
+    for (const k in initial) if (shownError(k as keyof T) !== undefined) return k as keyof T;
+    return undefined;
   }
 
   function use(plugin: Plugin, pluginOptions?: PluginOptions): void {
@@ -378,5 +486,5 @@ export function createFormBus<T extends Record<string, any>>(
     claimed?.delete(id);
   }
 
-  return { values, errors, touched, isDirty, isValid, isSubmitting, isValidating, isBusy, set, touch, submit, reset, use, bus, dispose };
+  return { values, errors, touched, isDirty, isValid, isSubmitting, isValidating, isBusy, set, touch, submit, reset, setErrors, aria, errorId, firstInvalid, use, bus, dispose };
 }

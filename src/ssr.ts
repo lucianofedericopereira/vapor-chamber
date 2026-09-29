@@ -1,38 +1,10 @@
 /**
  * vapor-chamber - SSR hydration plugin
  *
- * Vue alignment history (one line per version - full per-item detail lives in
- * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log", section 9.2):
- *   vNext / rc.2 - pass-through. Four hydration fixes land below rehydrate()'s command
- *            replay, which sits ABOVE Vue's DOM hydration and only ever hands it a
- *            more-correct DOM: slot anchor created for unwrapped interop slot content
- *            missing SSR `<!--[-->` markers (#15131 - e.g. a vapor component's slot
- *            invoked directly by a render function, as `RouterLink` does); vapor
- *            components now hydrate correctly when their hydration is DEFERRED past the
- *            root pass via `defineAsyncComponent`/`hydrateOnVisible()` through interop
- *            (#15132 - previously silently inert, no error); pending-async-component
- *            placeholder position preserved across Suspense/KeepAlive (#15147); the
- *            "logical child" cache resynced after mismatch-recovery node replacement
- *            (#15145). None of these are reachable from this module - it holds no DOM
- *            references, hydration anchors, or interop state, only replays bus commands
- *            after Vue's own hydration completes. No code change.
- *   vNext / beta.17 - pass-through. beta.17's lone hydration fix (#14972 - dynamic native
- *            element slots hydrated correctly, cf5eefa) sits in Vue's DOM hydration, below
- *            rehydrate()'s command replay; it only hands replay a more-correct DOM. No code change.
- *   vNext / beta.16 - pass-through. rehydrate() command replay sits ABOVE Vue's DOM
- *            hydration, so beta.16's 7 hydration fixes (dynamic props on mismatch-
- *            recreated nodes, static-text patching, exact tag-mismatch detection,
- *            clone-cache reuse, v-if empty-branch hydration, fragment warning text,
- *            empty-container full mount on createVaporSSRApp - which we do not wrap)
- *            are all below us; they only hand replay a more-correct DOM. They also
- *            reduce "Hydration text mismatch" dev-warnings - the lib keys off nothing
- *            there.
- *   v1.6.0 / beta.15 - pass-through (teleport mount-location tracking + disabled-
- *            target order keep rehydrate() command replay in document order).
- *   v1.4.0 / beta.13 - pass-through (5 hydration fixes: mismatch recovery,
- *            namespace preservation, allowed prop mismatches, teleport-range
- *            sibling walks, dev target validation).
- *   v1.1.0 - module added: dehydrate bus state on the server, rehydrate on client.
+ * rehydrate() replays bus commands ABOVE Vue's DOM hydration, after it
+ * completes: it holds no DOM references, hydration anchors or interop state,
+ * so Vue's hydration fixes land below it and only hand it a more-correct DOM.
+ * The history is in CHANGELOG.md and the whitepaper's section 9.2.
  *
  * Per the whitepaper (section 14): commands that ran on the server to populate initial
  * state need to replay on the client so reactive signals reflect the same values.
@@ -45,14 +17,10 @@
  * create the bus per request and pass it explicitly to your handlers and to
  * rehydrate()/dehydrate() - skip the shared-bus globals on the server entirely.
  *
- * The HTTP cache used to be this warning's undocumented sibling: it was a
- * module-level singleton, so a fresh bus per request did NOT give a fresh
- * cache, and the key (`responseType:fullUrl`) has no auth dimension - user A's
- * authenticated GET answered user B's identical URL. As of v1.12.0 the cache
- * and the in-flight dedupe map live in `createHttpClient()`'s closure, so the
- * rule for both hazards is now the same one: **create it per request**. A
- * client created once at module scope and shared across renders re-opens the
- * same hole by hand.
+ * The HTTP client has the same rule: its cache and in-flight dedupe map live
+ * in `createHttpClient()`'s closure, and the cache key has no auth dimension,
+ * so **create it per request** too. A client created once at module scope and
+ * shared across renders lets user A's authenticated GET answer user B's.
  *
  * @example Server entry
  * import { createCommandBus, setCommandBus, resetCommandBus } from 'vapor-chamber';
@@ -163,21 +131,10 @@ export function createSSRPlugin(options: SSRPluginOptions = {}): SSRPlugin {
   let droppedCount = 0;
   let capWarned = false;
 
-  // THROUGH `onSettled`, because `next()` returns a PROMISE on the async bus
-  // and `promise.ok` is `undefined`. This plugin used to read the return value
-  // as though it were the result, so on an async bus it recorded NOTHING:
-  // `dehydrate()` came back empty and the client rehydrated no state at all,
-  // with no error and no warning - it read exactly like a page that had no
-  // commands to record. Measured through the public API, sync bus against
-  // async bus, in tests/ssr.test.ts.
-  //
-  // src/settled.ts documents the same defect in five other plugins and the
-  // sweep that fixed them. It missed this one and the schema debug logger:
-  // the grep it describes was run over the `plugins-*.ts` family, and both of
-  // these are plugins that live outside it. That file's own closing line is
-  // that a rule applied by hand at each call site goes missing wherever nobody
-  // remembered it, which is what happened to the sweep itself.
-  const plugin: Plugin = (cmd: Command, next: () => CommandResult): CommandResult => onSettled(next(), (result) => {
+  // THROUGH `onSettled`: on the async bus `next()` is a promise, whose `.ok`
+  // is undefined, so reading it directly records nothing and `dehydrate()`
+  // comes back empty with no error (tests/ssr.test.ts, both buses).
+  const plugin: Plugin = (cmd, next) => onSettled(next(), (result) => {
     if (result.ok && (!filter || filter(cmd))) {
       if (recorded.length < maxCommands) {
         recorded.push({
@@ -186,9 +143,8 @@ export function createSSRPlugin(options: SSRPluginOptions = {}): SSRPlugin {
           ...(cmd.payload !== undefined ? { payload: cmd.payload } : {}),
         });
       } else {
-        // Dropping past the cap used to be completely silent: the client
-        // rehydrated partial state and nothing anywhere said so. Warn once
-        // (not per command - a blown cap means thousands) and keep a count.
+        // Past the cap the client rehydrates partial state, so say so: warn
+        // once (a blown cap means thousands) and keep a count.
         droppedCount++;
         if (!capWarned && DEV) {
           capWarned = true;

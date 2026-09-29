@@ -89,7 +89,7 @@ describe('plugin maps keyed by action name', () => {
       expect(result.value).toBe('ran');
     }
     bus.register('real', () => 'ran');
-    expect(bus.dispatch('real', {})).toFailWith('VC_VALIDATION_FAILED');
+    expect(bus.dispatch('real', {})).toFailWith('validateSchemas:invalid:payload');
   });
 
   it('validateSchemasAsync() does not validate against an inherited member', async ({ asyncBus: bus }) => {
@@ -101,7 +101,7 @@ describe('plugin maps keyed by action name', () => {
       expect(result.value).toBe('ran');
     }
     bus.register('real', async () => 'ran');
-    expect((await bus.dispatch('real', {}))).toFailWith('VC_VALIDATION_FAILED');
+    expect((await bus.dispatch('real', {}))).toFailWith('validateSchemas:invalid:payload');
   });
 });
 

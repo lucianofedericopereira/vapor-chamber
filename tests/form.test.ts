@@ -247,7 +247,7 @@ describe('createFormBus - bus injection', () => {
 });
 
 // ---------------------------------------------------------------------------
-// submit() races - `values` is live state, and submit() used to read it twice
+// submit() races - `values` is live state, so submit() must not read it twice
 // across an await.
 // ---------------------------------------------------------------------------
 

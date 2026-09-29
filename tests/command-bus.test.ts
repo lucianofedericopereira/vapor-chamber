@@ -8,7 +8,7 @@ describe('createCommandBus', () => {
     it('should return error when no handler registered', ({ bus }) => {
       const result = bus.dispatch('unknownAction', {});
 
-      expect(result).toFailWith('VC_CORE_NO_HANDLER');
+      expect(result).toFailWith('core:missing:handler');
       expect(result.error?.message).toContain('No handler');
     });
 
@@ -53,7 +53,7 @@ describe('createCommandBus', () => {
 
       unregister();
 
-      expect(bus.dispatch('testAction', {})).toFailWith('VC_CORE_NO_HANDLER');
+      expect(bus.dispatch('testAction', {})).toFailWith('core:missing:handler');
     });
 
     it('should replace existing handler', () => {
@@ -583,7 +583,7 @@ describe('syncQuery bare-bus fast path', () => {
 
   it('returns handleMissing when no handler on bare bus', ({ bus }) => {
     const r = bus.query('missing', {});
-    expect(r).toFailWith('VC_CORE_NO_HANDLER');
+    expect(r).toFailWith('core:missing:handler');
     expect(r.error?.message).toContain('No handler');
   });
 
@@ -640,7 +640,7 @@ describe('asyncDispatchBatch mid-flight abort', () => {
   //     handler are skipped during rollback."
   //   signal - "aborting mid-flight stops further commands from dispatching
   //     (the in-flight one runs to completion) and the batch result is
-  //     { ok: false, error: BusError('VC_CORE_ABORTED'), results: [...partial] }".
+  //     { ok: false, error: BusError('core:aborted:dispatch'), results: [...partial] }".
   //     (That doc line said `AbortError` until this pass - `abortedResult`
   //     deliberately substitutes a BusError so the code is queryable, and the
   //     doc had never been corrected to match. Fixed with this rewrite.)
@@ -671,7 +671,7 @@ describe('asyncDispatchBatch mid-flight abort', () => {
       { signal: ac.signal, transactional: true },
     );
 
-    expect(result).toFailWith('VC_CORE_ABORTED');
+    expect(result).toFailWith('core:aborted:dispatch');
     expect(log).toEqual(['a', 'b', 'undoB', 'undoA']); // reverse order; c never dispatched
     expect(result.results).toHaveLength(2); // partial results kept for inspection
     expect(result.rollbacks).toHaveLength(2);
@@ -700,7 +700,7 @@ describe('asyncDispatchBatch mid-flight abort', () => {
       { signal: ac.signal, transactional: true },
     );
 
-    expect(result).toFailWith('VC_CORE_ABORTED');
+    expect(result).toFailWith('core:aborted:dispatch');
     // 'noUndo' left its side effect in place - that is the contract, not a bug.
     expect(log).toEqual(['withUndo', 'noUndo', 'undoWithUndo']);
     expect(result.rollbacks).toHaveLength(1);
@@ -723,7 +723,7 @@ describe('asyncDispatchBatch mid-flight abort', () => {
       { signal: ac.signal, transactional: true },
     );
 
-    expect(result).toFailWith('VC_CORE_ABORTED');
+    expect(result).toFailWith('core:aborted:dispatch');
     expect(result.rollbacks).toEqual([]);
     expect(log).toEqual(['a', 'b']); // side effects persist, nothing undone
   });
@@ -744,7 +744,7 @@ describe('asyncDispatchBatch mid-flight abort', () => {
       { signal: ac.signal, transactional: false },
     );
 
-    expect(result).toFailWith('VC_CORE_ABORTED');
+    expect(result).toFailWith('core:aborted:dispatch');
     expect(result.rollbacks).toBeUndefined();
     expect(result.successCount).toBe(2); // both committed and stay committed
     expect(log).toEqual(['a', 'b']); // no undo ran; 'c' never dispatched
@@ -807,8 +807,9 @@ describe('asyncDispatchBatch mid-flight abort', () => {
 
 describe('per-instance throttle timers - async bus', () => {
   it('dispose clears a pending throttle timer (mirrors the sync-bus test above)', async () => {
-    const bus1 = createAsyncCommandBus();
-    const bus2 = createAsyncCommandBus();
+    // No retry: the refusal itself is under test, not the wait it declares.
+    const bus1 = createAsyncCommandBus({ retry: false });
+    const bus2 = createAsyncCommandBus({ retry: false });
 
     bus1.register('a', async () => 1, { throttle: 10000 });
     bus2.register('a', async () => 2, { throttle: 10000 });
@@ -826,7 +827,7 @@ describe('per-instance throttle timers - async bus', () => {
 
     // Bus2 is untouched - still throttled.
     const r3 = await bus2.dispatch('a', {});
-    expect(r3).toFailWith('VC_CORE_THROTTLED');
+    expect(r3).toFailWith('core:limited:handler');
     expect(r3.error?.message).toContain('throttled');
 
     bus2.dispose();
@@ -851,7 +852,7 @@ describe('async before-hook: plain synchronous throw + after-hooks registered', 
 
     const result = await bus.dispatch('act', {});
 
-    expect(result).toFailWith('VC_CORE_BEFORE_CANCEL');
+    expect(result).toFailWith('core:refused:hook');
     expect(result.error?.message).toBe('sync-blocked');
     expect(handlerRan).toBe(false);
     expect(afterCalls).toEqual([{ action: 'act', ok: false }]); // after-hook still fired

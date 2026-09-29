@@ -31,13 +31,12 @@ describe('createVaporChamberApp', () => {
     let message = '';
     try { createVaporChamberApp({}); } catch (e) { message = (e as Error).message; }
 
-    // Three different problems used to share one message: Vue absent, Vue
-    // present without the Vapor build, and Vue present but unreachable through
-    // either detection channel. The hint names which one applies.
+    // Three different problems, one message each: Vue absent, Vue present
+    // without the Vapor build, and Vue present but unreachable through either
+    // detection channel. The hint names which one applies.
     expect(message).toMatch(/configureVue\(/);
     expect(message).toContain('createApp()');
-    // No stale version literal: the message used to hardcode
-    // `vue@^3.6.0-beta.1`, which was four release lines out of date.
+    // No version literal in the message: one goes stale with every release.
     expect(message).not.toContain('beta.1');
   });
 });

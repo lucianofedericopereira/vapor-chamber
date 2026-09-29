@@ -118,7 +118,7 @@ function filtersOf(target: { files?: unknown } | undefined): string[] {
     Array.isArray(files) &&
     files.length <= MAX_FILTERS &&
     files.every((f) => typeof f === 'string' && f.length > 0 && f.length <= MAX_FILTER_LENGTH && !f.startsWith('-'));
-  if (!ok) throw new VcTestError('VC_TEST_MCP_INVALID_FILES');
+  if (!ok) throw new VcTestError('test:invalid:files');
   return files as string[];
 }
 
@@ -239,10 +239,10 @@ export async function createVitestMcp(options: VitestMcpOptions = {}): Promise<V
 
   // Queued too: an MCP client sends calls concurrently, and a runTests sent just
   // before must finish before its result is "the last run" (measured over stdio:
-  // unqueued, this answered VC_TEST_MCP_NO_RUN).
+  // unqueued, this answered test:missing:run).
   bus.register('getTestResults', () =>
     serial(async () => {
-      if (last === undefined) throw new VcTestError('VC_TEST_MCP_NO_RUN');
+      if (last === undefined) throw new VcTestError('test:missing:run');
       // `changed` was emptied when that run started, so it holds what changed since.
       const stale = [...changed].map((file) => relative(root, file));
       return { ...last, stale: stale.length > 0, changedSince: stale };
@@ -271,7 +271,7 @@ export async function createVitestMcp(options: VitestMcpOptions = {}): Promise<V
           child.on('close', () => done(text));
         });
         const report = join(dir, 'coverage-final.json');
-        if (!existsSync(report)) throw new VcTestError('VC_TEST_MCP_NO_COVERAGE', `: ${stderr.split('\n').map((line) => line.trim()).filter((line) => /error/i.test(line)).slice(0, 3).join(' | ')}`);
+        if (!existsSync(report)) throw new VcTestError('test:missing:coverage', `: ${stderr.split('\n').map((line) => line.trim()).filter((line) => /error/i.test(line)).slice(0, 3).join(' | ')}`);
         return { files: coverageGaps(JSON.parse(readFileSync(report, 'utf8')), root) };
       } finally {
         rmSync(dir, { recursive: true, force: true });

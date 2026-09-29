@@ -7,9 +7,9 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { createApp, defineComponent, h } from 'vue';
-import { createMemoryHistory } from '../../src/router/history';
 import { createRouter } from '../../src/router/index';
 import type { RouteRecord } from '../../src/router/types';
+import { makeRouter as fixtureRouter } from './fixture';
 
 const ROWS: RouteRecord[] = [
   { name: 'shell', path: '/', parent: null },
@@ -18,9 +18,8 @@ const ROWS: RouteRecord[] = [
 ];
 
 function makeRouter(overrides: Record<string, unknown> = {}) {
-  return createRouter({
+  return fixtureRouter({
     base: '/admin',
-    history: createMemoryHistory('/admin'),
     routes: ROWS,
     components: {
       Home: defineComponent({ render: () => h('span', 'home') }),
@@ -178,9 +177,8 @@ describe('createRouter - public methods', () => {
   // silently become true.
   it('after-hooks (and so active-link stamping) run on path changes only', async () => {
     document.body.innerHTML = '<a href="/admin/list">List</a><a href="/admin/">Home</a>';
-    const router = createRouter({
+    const router = fixtureRouter({
       base: '/admin',
-      history: createMemoryHistory('/admin'),
       routes: [
         { name: 'home', path: '/', component: 'Home' },
         { name: 'list', path: '/list', component: 'List', query: { q: {} } },

@@ -123,7 +123,7 @@ describe('vapor-chamber/reactive', () => {
 
       dispose();
       const result = bus.dispatch('inc', null);
-      expect(result).toFailWith('VC_CORE_NO_HANDLER');
+      expect(result).toFailWith('core:missing:handler');
     });
   });
 });

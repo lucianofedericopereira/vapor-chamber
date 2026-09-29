@@ -60,8 +60,9 @@ these areas get extra review:
 - **MCP server** (`mcp.ts`) - turns every schema action into an MCP tool, and a
   `tools/call` request dispatches through the bus. That is the widest exposure
   surface in the package: whatever reaches the handler can run a command.
-  Restrict the advertised set, and remember that advertising is not the gate -
-  v1.15.0 fixed a tool that was never advertised and was still callable. The
+  Restrict the advertised set, and remember that advertising is not the gate:
+  `tools/call` checks the action against its own whitelist (`Object.hasOwn`),
+  so a tool that is not advertised is not callable. The
   test-run server (`vitest-mcp.ts`) has the same shape and is dev-only.
 - **Offline outbox** (`outbox.ts#localStorageOutbox`) - persists the QUEUE of
   pending commands, as one JSON value in localStorage. Same storage caveat as

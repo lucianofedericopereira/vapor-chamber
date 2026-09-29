@@ -1,121 +1,90 @@
 /**
- * `ERROR_CODE_REGISTRY` calls itself "the single source of truth" and "the
- * complete registry of all BusError codes". Nothing checked either claim.
+ * `ERROR_CODE_REGISTRY` calls itself "the single source of truth" for the
+ * library's codes. This sweep checks that against what the source MINTS.
  *
- * WHY THIS FILE EXISTS. v1.23.0 added five codes to `BusErrorCode`, and the only
- * thing that would have caught a missing registry row was somebody remembering
- * to add one. The registry is what `getErrorEntry(code).fix` reads and what
- * `describeErrorCodes()` prints into an LLM system prompt, so a code with no row
- * is an error the library can emit and cannot explain - and it fails silently,
- * with `getErrorEntry` returning `undefined` at the moment a developer most
- * wants an answer.
+ * Since the owner-by-wiring shape (docs/plan-failures-and-contract.md 4.5) a
+ * failure is built by a `fail`-shaped call whose first argument is a literal
+ * `'condition:subject'`, so "which site mints this?" - the question the old
+ * union sweep could not ask - is a scan. Both sides come from source: the
+ * literals out of `src/`, the rows out of the exported registry. A code minted
+ * with no row fails; so does a row nothing mints, unless it is one of the codes
+ * declared on purpose and never raised (listed below, each with its reason).
  *
- * BOTH SIDES COME FROM SOURCE, which is what makes this a sweep rather than a
- * list to maintain. The codes are parsed out of the `BusErrorCode` union in
- * `src/command-bus.ts`; the rows are read from the exported registry. There is
- * no allowlist, nothing to update on a rename, and no judgement call - add a
- * code without a row, or a row without a code, and this fails immediately.
- *
- * It is a test rather than a `scripts/check-*.mjs` for the reason the other two
- * sweeps are: it needs the module's runtime value, and `tests/` is where
- * `dict-sweep` and `settled-sweep` already live.
- *
- * WHAT IT DOES NOT CATCH, stated because this session found one. A code can be
- * declared, registered, marked retryable and emitted by NOTHING -
- * `VC_CORE_HANDLER_THREW` is exactly that, and it passes here because it is
- * present on both sides. Catching that needs a third question ("which site mints
- * this?") and an allowlist for the codes deliberately never minted, which is a
- * different and costlier kind of check.
+ * The owner half is not scanned: it is the wiring's, not the site's. A row is
+ * matched on its `condition:subject`.
  */
 
-import { describe, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { describe, expect } from 'vitest';
 import { it } from '../src/vitest';
 import { ERROR_CODE_REGISTRY } from '../src/schema';
 
-const BUS = join(import.meta.dirname, '..', 'src', 'command-bus.ts');
+const SRC = join(import.meta.dirname, '..', 'src');
+const CONDITIONS = 'missing|already|invalid|refused|limited|timeout|lost|aborted|exceeded|failed|unexpected|unknown';
 
 /**
- * Comments out, string literals KEPT - the inverse of what `dict-sweep` needs.
- * The codes are the literals, and the union's own trailing comments name several
- * of them in prose (the `VC_CORE_HANDLER_THREW` note quotes it twice), so
- * scanning the raw text would collect a code per mention.
+ * Declared, catalogued and minted by no site - each for a stated reason, so
+ * adding one is a decision rather than a way to silence this sweep.
  */
-function withoutComments(text: string): string {
-  return text
-    .replace(/\/\*[\s\S]*?\*\//g, (m) => m.replace(/[^\n]/g, ' '))
-    .replace(/(^|[^:])\/\/[^\n]*/g, (_m, lead: string) => lead + ' ');
+const DECLARED_NOT_MINTED: Record<string, string> = {
+  'failed:handler': "a handler's throw reaches result.error raw (plan settled item 10)",
+  'invalid:name': 'the naming check throws a plain Error at register()',
+  'already:handler': 'the overwrite notice is a DEV console line',
+  'failed:hook': 'an after-hook throw is logged, not returned',
+  'failed:listener': 'a listener throw is logged, not returned',
+  'failed:step': 'workflow codes: declared for the workflow module',
+  'failed:compensation': 'workflow codes: declared for the workflow module',
+  'unknown:error': 'the fallback a reader classifies into, never raised',
+};
+
+function sourceFiles(dir: string): string[] {
+  return readdirSync(dir).flatMap((name) => {
+    const path = join(dir, name);
+    return statSync(path).isDirectory() ? sourceFiles(path) : path.endsWith('.ts') ? [path] : [];
+  });
 }
 
-/**
- * The `BusErrorCode` union's members, in declaration order.
- *
- * Bounded by the declaration rather than by the file: `RETRYABLE_CODES` sits 70
- * lines below and is a set of the same strings, so a file-wide scan would report
- * every code as declared whether the union listed it or not - which is the one
- * result this must never produce.
- */
-function declaredCodes(): string[] {
-  const source = withoutComments(readFileSync(BUS, 'utf8'));
-  const start = source.indexOf('export type BusErrorCode =');
-  if (start === -1) throw new Error('BusErrorCode declaration not found in src/command-bus.ts');
-  const end = source.indexOf(';', start);
-  if (end === -1) throw new Error('BusErrorCode declaration has no terminator');
-  return [...source.slice(start, end).matchAll(/'([A-Z_0-9]+)'/g)].map((m) => m[1]);
+/** Every `'condition:subject'` literal passed as a code, comments stripped. */
+function minted(): Set<string> {
+  const found = new Set<string>();
+  const literal = new RegExp(`(?:fail|refuse|Fail|transportError|\\))\\(\\s*'((?:${CONDITIONS}):[a-z]+)'`, 'g');
+  for (const file of sourceFiles(SRC)) {
+    const text = readFileSync(file, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+    for (const m of text.matchAll(literal)) found.add(m[1]);
+  }
+  return found;
 }
+
+const suffix = (code: string) => code.split(':').slice(1).join(':');
 
 describe('error-code registry sweep', () => {
-  const declared = declaredCodes();
-  const registered = ERROR_CODE_REGISTRY.map((e) => e.code as string);
+  const codes = minted();
+  const rows = new Set(ERROR_CODE_REGISTRY.map((e) => suffix(e.code)));
 
-  /**
-   * The control, and it is not decoration. A parse that collects nothing makes
-   * every assertion below vacuously true, which is the failure mode the repo's
-   * other sweeps were each written with once - `check-ascii` reported a clean
-   * tree while 48 arrows sat in 15 files. The floor is deliberately loose: it
-   * asserts the parse WORKED, not how many codes there happen to be, so adding
-   * or removing one does not edit this file.
-   */
-  it('parses the union and reads the registry', () => {
-    expect(declared.length, 'no codes parsed out of the BusErrorCode union').toBeGreaterThan(10);
-    expect(registered.length, 'no rows read from ERROR_CODE_REGISTRY').toBeGreaterThan(10);
-    // Every parsed code looks like one. A loose regex that swept up an unrelated
-    // SCREAMING_CASE literal would inflate the count above and pass.
-    for (const code of declared) expect(code, 'parsed a non-VC literal').toMatch(/^VC_/);
+  it('finds the mint sites and reads the registry', () => {
+    // A guard on the scan itself: an empty set would pass every check below.
+    expect(codes.size).toBeGreaterThan(10);
+    expect(ERROR_CODE_REGISTRY.length).toBeGreaterThan(10);
   });
 
-  it('every declared BusErrorCode has a registry row', () => {
-    const missing = declared.filter((code) => !registered.includes(code));
-    expect(missing, 'declared in BusErrorCode with no ERROR_CODE_REGISTRY entry - getErrorEntry() returns undefined for these').toEqual([]);
+  it('every minted code has a registry row', () => {
+    const missing = [...codes].filter((c) => !rows.has(c));
+    expect(missing, 'minted with no catalogue row').toEqual([]);
   });
 
-  it('every registry row is a declared BusErrorCode', () => {
-    const extra = registered.filter((code) => !declared.includes(code));
-    expect(extra, 'in ERROR_CODE_REGISTRY but not in the BusErrorCode union - a stale row, or a typo in one of the two').toEqual([]);
+  it('every registry row is minted, or declared-not-minted on purpose', () => {
+    const orphans = [...rows].filter((c) => !codes.has(c) && !(c in DECLARED_NOT_MINTED));
+    expect(orphans, 'catalogued but raised by nothing').toEqual([]);
+  });
+
+  it('a declared-not-minted code is really not minted', () => {
+    const nowMinted = Object.keys(DECLARED_NOT_MINTED).filter((c) => codes.has(c));
+    expect(nowMinted, 'now minted: remove it from DECLARED_NOT_MINTED').toEqual([]);
   });
 
   it('no code is registered twice', () => {
-    const seen = new Set<string>();
-    const duplicates = registered.filter((code) => !seen.add(code));
-    expect(duplicates, 'duplicate ERROR_CODE_REGISTRY rows - getErrorEntry() returns whichever comes first').toEqual([]);
+    const all = ERROR_CODE_REGISTRY.map((e) => e.code);
+    expect(all.length).toBe(new Set(all).size);
   });
 });
-
-/**
- * ARMING RUN, so this is not a check nobody has watched fail.
- *
- * Each direction was confirmed by hand before the file was committed:
- *
- *   - a code added to the union with no row      -> "every declared BusErrorCode
- *     has a registry row" fails and names it.
- *   - a row whose code is not in the union       -> "every registry row is a
- *     declared BusErrorCode" fails and names it.
- *   - the union's `export type BusErrorCode =`   -> `declaredCodes()` throws
- *     renamed                                      rather than returning [],
- *                                                  so a moved declaration cannot
- *                                                  read as a clean sweep.
- *
- * The third is the one worth keeping in mind on a refactor: this file finds the
- * union by its exact declaration text.
- */

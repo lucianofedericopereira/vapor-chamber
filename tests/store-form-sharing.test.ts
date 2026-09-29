@@ -57,7 +57,7 @@ describe('a store shared by two component scopes', () => {
 
     scopeA.stop();
     scopeB.stop();
-    expect((b.add(1) as { ok: boolean })).toFailWith('VC_CORE_NO_HANDLER');
+    expect((b.add(1) as { ok: boolean })).toFailWith('core:missing:handler');
 
     // A fresh scope gets a fresh store, not the disposed one.
     const scopeC = effectScope();
@@ -74,7 +74,7 @@ describe('a store shared by two component scopes', () => {
     const store = useCart(bus);
     expect((store.add(1) as { ok: boolean }).ok).toBe(true);
     store.$dispose();
-    expect((store.add(2) as { ok: boolean })).toFailWith('VC_CORE_NO_HANDLER');
+    expect((store.add(2) as { ok: boolean })).toFailWith('core:missing:handler');
   });
 });
 

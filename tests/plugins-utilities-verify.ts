@@ -8,6 +8,7 @@
 import {
   createCommandBus,
   BusError,
+  ownerOf,
   matchesPattern,
   commandKey,
   type Command,
@@ -233,7 +234,7 @@ function cachePlugin(opts: { ttl?: number; maxSize?: number } = {}) {
     if (!c) { c = { state: 'closed', failCount: 0, openedAt: 0 }; circuits.set(cmd.action, c); }
     if (c.state === 'open') {
       if (Date.now() - c.openedAt >= resetTimeout) c.state = 'half-open';
-      else return { ok: false, value: undefined, error: new BusError('VC_PLUGIN_CIRCUIT_OPEN', 'open', { emitter: 'plugin', action: cmd.action }) };
+      else return { ok: false, value: undefined, error: new BusError('limited:action', 'open', { action: cmd.action }) };
     }
     const result = next();
     if (result.ok) { if (c.state === 'half-open') { c.state = 'closed'; } c.failCount = 0; }
@@ -251,7 +252,7 @@ function cachePlugin(opts: { ttl?: number; maxSize?: number } = {}) {
   const blocked = bus.dispatch('flaky', 1);
   assert(!blocked.ok, 'circuit rejects when open');
   assert(blocked.error instanceof BusError, 'circuit BusError');
-  assert((blocked.error as BusError).code === 'VC_PLUGIN_CIRCUIT_OPEN', 'circuit error code');
+  assert((blocked.error as BusError).code === 'circuitBreaker:limited:action', 'circuit error code');
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -273,7 +274,7 @@ function cachePlugin(opts: { ttl?: number; maxSize?: number } = {}) {
     const cutoff = now - windowMs;
     while (timestamps.length > 0 && timestamps[0] <= cutoff) timestamps.shift();
     if (timestamps.length >= max) {
-      return { ok: false, value: undefined, error: new BusError('VC_PLUGIN_RATE_LIMITED', 'limited', { emitter: 'plugin', action: cmd.action }) };
+      return { ok: false, value: undefined, error: new BusError('limited:action', 'limited', { action: cmd.action }) };
     }
     timestamps.push(now);
     return next();
@@ -289,7 +290,7 @@ function cachePlugin(opts: { ttl?: number; maxSize?: number } = {}) {
   const r4 = bus.dispatch('api', 4);
   assert(!r4.ok, 'rateLimit blocks over max');
   assert(r4.error instanceof BusError, 'rateLimit BusError');
-  assert((r4.error as BusError).code === 'VC_PLUGIN_RATE_LIMITED', 'rateLimit code');
+  assert((r4.error as BusError).code === 'rateLimit:limited:action', 'rateLimit code');
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -329,8 +330,8 @@ function cachePlugin(opts: { ttl?: number; maxSize?: number } = {}) {
   const r = bus.dispatch('nope', {});
   assert(r.error instanceof BusError, 'no handler -> BusError');
   const be = r.error as BusError;
-  assert(be.code === 'VC_CORE_NO_HANDLER', 'error code');
-  assert(be.emitter === 'core', 'emitter');
+  assert(be.code === 'core:missing:handler', 'error code');
+  assert(ownerOf(be) === 'core', 'owner');
   assert(be.action === 'nope', 'action in error');
 
   // Throttle -> BusError
@@ -338,7 +339,7 @@ function cachePlugin(opts: { ttl?: number; maxSize?: number } = {}) {
   bus.dispatch('throttled', 1);
   const r2 = bus.dispatch('throttled', 1);
   assert(r2.error instanceof BusError, 'throttle -> BusError');
-  assert((r2.error as BusError).code === 'VC_CORE_THROTTLED', 'throttle code');
+  assert((r2.error as BusError).code === 'core:limited:handler', 'throttle code');
 
   // instanceof Error
   assert(be instanceof Error, 'BusError extends Error');

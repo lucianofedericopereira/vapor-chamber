@@ -58,13 +58,17 @@ Click "Add to cart" - you should see:
 
 - IIFE bundle works without a bundler - pure `<script>` tag.
 - `VaporChamber.connect()` is a one-line setup that wires HTTP transport +
-  CSRF token reading.
+  CSRF token reading. Its bus re-sends a transient failure (a 429, 503 or
+  timeout, after any `Retry-After`); `connect({ retry: { actions: { cartSet:
+  'idempotent' } } })` declares what is safe to send twice, `retry: false`
+  turns it off.
 - The CSRF token in `<meta name="csrf-token">` flows automatically into
   every dispatched command's `X-CSRF-TOKEN` header.
 - `bus.on('*', ...)` lets you tap every dispatch for telemetry / logging
   without modifying the call sites.
-- The backend contract (`{command, target, payload}` in, `{ok, state}` out)
-  is intentionally simple - easy to implement in any language.
+- The backend contract (`{command, target, payload}` in, `{ state }` out, or
+  an RFC 9457 problem for a failure) is intentionally simple - easy to
+  implement in any language.
 
 ## Mapping to a real Laravel / Rails / Django app
 

@@ -12,13 +12,19 @@ import { createAsyncCommandBus, setCommandBus } from 'vapor-chamber'
 import { createHttpBridge } from 'vapor-chamber/transports'
 import { createDirectivePlugin } from 'vapor-chamber/directives'
 import { createApp, h } from 'vue'
-import { createInertiaApp } from '@inertiajs/vue3'
+import { createInertiaApp, router } from '@inertiajs/vue3'
 
 // ASYNC bus (createHttpBridge is an async plugin) - it lives outside the
 // Inertia page lifecycle. `csrf: 'inertia'` defers token management to
 // Inertia's Axios instance instead of reading the DOM.
 const bus = createAsyncCommandBus()
-bus.use(createHttpBridge({ endpoint: '/api/vc', csrf: 'inertia' }))
+bus.use(createHttpBridge({
+  endpoint: '/api/vc',
+  csrf: 'inertia',
+  // A backend `{ redirect }` hands the navigation to Inertia; the dispatch
+  // still fails as transport:refused:redirect (there is no state to return).
+  onRedirect: (url) => router.visit(url),
+}))
 
 // Make it the shared bus - useCommand() in page components dispatches on
 // getCommandBus(), not on a provide()'d instance.
@@ -64,7 +70,8 @@ createInertiaApp({
  * <template>
  *   <div v-for="order in orders" :key="order.id">
  *     <span>{{ order.reference }}</span>
- *     <button @click="cancelOrder(order.id)" :disabled="loading.value">
+ *     <!-- aria-disabled, not :disabled: keyboard focus stays on the button -->
+ *     <button @click="!loading.value && cancelOrder(order.id)" :aria-disabled="loading.value">
  *       {{ loading.value ? 'Cancelling...' : 'Cancel' }}
  *     </button>
  *   </div>

@@ -1,12 +1,12 @@
 /**
  * Coverage tests for the LLM/schema helper functions in src/schema.ts.
  *
- * Targets previously-uncovered lines:
- *   - 90      toCamel: leading-uppercase lowercasing branch (via normalizeSchema)
- *   - 201     schemaLogger: target else-branch (no def.target / no cmd.target)
- *   - 208     schemaLogger: payload else-branch (payload present, no def.payload)
- *   - 383     createAsyncSchemaCommandBus: describe() arrow
- *   - 472-507 getErrorEntry, describeErrorCodes, busApiSchema
+ * Targets:
+ *   - toCamel: leading-uppercase lowercasing branch (via normalizeSchema)
+ *   - schemaLogger: target else-branch (no def.target / no cmd.target)
+ *   - schemaLogger: payload else-branch (payload present, no def.payload)
+ *   - createAsyncSchemaCommandBus: describe() arrow
+ *   - getErrorEntry, describeErrorCodes, busApiSchema
  */
 
 import { describe, expect, vi } from 'vitest';
@@ -90,7 +90,7 @@ describe('schemaLogger else branches', () => {
     expect(payloadCall?.[1]).toEqual({ reason: 'manual' });
   });
 
-  // Logs the real result on an ASYNC bus, where it used to log `undefined`.
+  // Logs the real result on an ASYNC bus too, not a pending promise's `.ok`.
   it('logs the settled value on an async bus, not a pending promise', async ({ asyncBus: bus }) => {
     vi.spyOn(console, 'groupCollapsed').mockImplementation(() => {});
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -139,21 +139,19 @@ describe('createAsyncSchemaCommandBus describe()', () => {
 
 describe('getErrorEntry', () => {
   it('returns the registry entry for a known code', () => {
-    const entry = getErrorEntry('VC_CORE_NO_HANDLER');
+    const entry = getErrorEntry('core:missing:handler');
 
     expect(entry).toBeDefined();
-    expect(entry?.code).toBe('VC_CORE_NO_HANDLER');
+    expect(entry?.code).toBe('core:missing:handler');
     expect(entry?.severity).toBe('error');
-    expect(entry?.emitter).toBe('core');
     expect(entry?.fix).toContain('bus.register');
   });
 
   it('returns the same frozen object instance held in the registry', () => {
-    const entry = getErrorEntry('VC_PLUGIN_RATE_LIMITED');
-    const fromRegistry = ERROR_CODE_REGISTRY.find(e => e.code === 'VC_PLUGIN_RATE_LIMITED');
+    const entry = getErrorEntry('rateLimit:limited:action');
+    const fromRegistry = ERROR_CODE_REGISTRY.find(e => e.code === 'rateLimit:limited:action');
 
     expect(entry).toBe(fromRegistry);
-    expect(entry?.emitter).toBe('plugin');
   });
 
   it('returns undefined for an unknown code', () => {
@@ -172,12 +170,12 @@ describe('describeErrorCodes', () => {
     const text = describeErrorCodes();
     const lines = text.split('\n');
 
-    expect(lines[0]).toBe('Error codes (code | severity | emitter | fix):');
+    expect(lines[0]).toBe('Error codes (code | severity | fix):');
     // header line + one line per registry entry
     expect(lines).toHaveLength(ERROR_CODE_REGISTRY.length + 1);
   });
 
-  it('includes every code with its severity, emitter, and fix', () => {
+  it('includes every code with its severity and fix', () => {
     const text = describeErrorCodes();
 
     for (const e of ERROR_CODE_REGISTRY) {
@@ -186,7 +184,7 @@ describe('describeErrorCodes', () => {
     }
     // spot-check the exact formatting of one row
     expect(text).toContain(
-      'VC_CORE_NO_HANDLER | error | core | Register a handler with bus.register(action, handler) before dispatching.'
+      'core:missing:handler | error | Register a handler with bus.register(action, handler) before dispatching.'
     );
   });
 });

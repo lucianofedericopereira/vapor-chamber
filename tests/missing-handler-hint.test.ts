@@ -1,13 +1,14 @@
 /**
- * VC_CORE_NO_HANDLER in DEV: the other cause, when a plugin could have taken it.
+ * core:missing:handler in DEV: the other cause, when a plugin could have taken it.
  *
  * A transport plugin forwards only the actions its `actions` filter matches;
  * any other falls through `next()` to the handler lookup, which then says
  * "Call bus.register(...) first" - the wrong fix when the action was meant for
  * the transport (docs/rc-alignment-log.md s10.1, B2). In DEV, a bus with at least one
- * plugin installed now names that cause too. Production keeps the shipped
- * string: the addition sits behind DEV, which the IIFEs fold at build and a
- * consumer's production build folds.
+ * plugin installed now names that cause too. Production carries the fact
+ * alone: all advice sits behind DEV, which the IIFEs fold at build and a
+ * consumer's production build folds, and the fix text is the catalogue's
+ * (ERROR_CODE_REGISTRY).
  *
  * The real bridge, not a stand-in: its filter is what decides whether the
  * dispatch reaches the handler lookup at all.
@@ -15,7 +16,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const HINT = "a transport plugin's `actions` filter did not match";
-const SHIPPED = 'No handler registered for "orderCancel". Call bus.register("orderCancel", handler) first.';
+const FACT = 'No handler registered for "orderCancel".';
+const SHIPPED = `${FACT} Call bus.register("orderCancel", handler) first.`;
 
 /** Fresh modules, so DEV is re-evaluated against the NODE_ENV of the case. */
 async function fresh() {
@@ -36,7 +38,7 @@ async function bridgedMiss() {
   return { result, fetchStub };
 }
 
-describe('VC_CORE_NO_HANDLER message', () => {
+describe('core:missing:handler message', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
@@ -47,7 +49,7 @@ describe('VC_CORE_NO_HANDLER message', () => {
     const { result, fetchStub } = await bridgedMiss();
     // Harness guard: the filter really let it through to the handler lookup.
     expect(fetchStub).not.toHaveBeenCalled();
-    expect(result).toFailWith('VC_CORE_NO_HANDLER');
+    expect(result).toFailWith('core:missing:handler');
     expect(result.error?.message.startsWith(SHIPPED)).toBe(true);
     expect(result.error?.message).toContain(HINT);
   });
@@ -58,9 +60,9 @@ describe('VC_CORE_NO_HANDLER message', () => {
     expect(result.error?.message).toBe(SHIPPED);
   });
 
-  it('production: the shipped string, unchanged', async () => {
+  it('production: the fact alone, the fix is the catalogue\'s (plan, settled item 5)', async () => {
     vi.stubEnv('NODE_ENV', 'production');
     const { result } = await bridgedMiss();
-    expect(result.error?.message).toBe(SHIPPED);
+    expect(result.error?.message).toBe(FACT);
   });
 });

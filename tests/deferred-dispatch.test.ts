@@ -77,12 +77,12 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
   it('query never buffers - it falls back to error', () => {
     const bus = createCommandBus({ onMissing: 'buffer' });
     const r = bus.query('missing', {});
-    expect(r).toFailWith('VC_CORE_NO_HANDLER');
+    expect(r).toFailWith('core:missing:handler');
   });
 
   it('default onMissing is unchanged (errors, no buffering)', ({ bus }) => {
     const r = bus.dispatch('nope', {});
-    expect(r).toFailWith('VC_CORE_NO_HANDLER');
+    expect(r).toFailWith('core:missing:handler');
   });
 
   it('async bus buffers and replays on register', async () => {
@@ -110,12 +110,10 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
     expect(dropped).toEqual([{ action: 'q', target: 1 }]);
   });
 
-  // The eviction used to run BEFORE the push, so an empty queue still
-  // satisfied `q.length >= limit` at a bound of 0: `shift()` returned
-  // undefined and the overflow callback dereferenced it, throwing out of
-  // `bus.dispatch()`. It was invisible without `onBufferOverflow`, because
-  // optional-chaining a call skips evaluating its arguments - so adding the
-  // observability hook was what made the bus throw.
+  // Evicting BEFORE the push would, at a bound of 0, let an empty queue
+  // satisfy `q.length >= limit`: `shift()` returns undefined and the overflow
+  // callback dereferences it, throwing out of `bus.dispatch()` - and only when
+  // `onBufferOverflow` is set (optional-chaining a call skips its arguments).
   it('bufferLimit: 0 buffers nothing instead of throwing', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const dropped: Array<{ action: string; target: any }> = [];

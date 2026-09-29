@@ -41,10 +41,13 @@ export type RouteRecord = {
    * `{placeholders}` filled from path params, then typed query params.
    *   "/api/vc/products?page={page}&sort={sort}"
    * Fetched with an AbortController - a newer navigation aborts it. The
-   * response (house envelope or bare JSON) lands on `snapshot.data` atomically
-   * with the commit; `useRouteData()` reads it.
+   * loader's result lands on `snapshot.data` atomically with the commit;
+   * `useRouteData()` reads it.
    */
   load?: string | null;
+  /** Path param types. A typed param with no regex of its own matches only
+   *  its type (`int`: digits, `bool`: 1/0/true/false), so a URL that does not
+   *  fit falls through to the next row; the matched value is cast. */
   params?: Record<string, ParamType>;
   query?: Record<string, QueryParamDef>;
   /** Server data: permissions, titles, `preheat` flag, ... */

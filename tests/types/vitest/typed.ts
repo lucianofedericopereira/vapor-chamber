@@ -15,7 +15,7 @@ const bus = tap(createCommandBus<Shop>());
 expect(bus).toHaveBeenDispatched('cartAdd');
 expect(bus).toHaveBeenDispatchedWith('cartAdd', { qty: 2 });
 expect(bus).not.toHaveBeenDispatched('cartClear');
-expect(bus).toHaveFailedWith('cartAdd', 'VC_CORE_NO_HANDLER');
+expect(bus).toHaveFailedWith('cartAdd', 'core:missing:handler');
 // A handler's own domain code is a legitimate code.
 expect(bus).toHaveFailedWith('cartAdd', 'OUT_OF_STOCK');
 // @ts-expect-error a typo in the action
@@ -23,12 +23,12 @@ expect(bus).toHaveBeenDispatched('cartAd');
 // @ts-expect-error a wrong payload shape
 expect(bus).toHaveBeenDispatchedWith('cartAdd', { qty: 'two' });
 // @ts-expect-error an action the map does not have
-expect(bus).toHaveFailedWith('orderCreate', 'VC_CORE_NO_HANDLER');
+expect(bus).toHaveFailedWith('orderCreate', 'core:missing:handler');
 
 const result = bus.dispatch('cartAdd', { id: 1 }, { qty: 2 });
 expect(result).toSucceedWith();
 expect(result).toSucceedWith(3);
-expect(result).toFailWith('VC_CORE_NO_HANDLER');
+expect(result).toFailWith('core:missing:handler');
 // @ts-expect-error the value is the action's result type
 expect(result).toSucceedWith('three');
 
@@ -89,7 +89,7 @@ export function fixtures() {
     const sync: CommandBus = bus;
     const other: AsyncCommandBus = asyncBus;
     expect(sync.dispatch('a', null)).toSucceedWith();
-    expect(await other.dispatch('a', null)).toFailWith('VC_CORE_NO_HANDLER');
+    expect(await other.dispatch('a', null)).toFailWith('core:missing:handler');
     // @ts-expect-error asyncBus is not the sync bus
     const wrong: CommandBus = asyncBus;
     void wrong;

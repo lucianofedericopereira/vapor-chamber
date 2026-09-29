@@ -181,18 +181,11 @@ await build({
   logLevel: 'warn',
   // TOP-LEVEL, because that is the only place Vite reads `define`.
   //
-  // A `define` block used to sit inside `build:` here, carrying
-  // `__VC_IIFE__: 'false'` and `__VC_DEV__: 'process.env.NODE_ENV !== "production"'`.
-  // Vite ignores that position, so it had never applied to the ESM output -
-  // verified in `dist/dev.js`, where even the bare `__VC_DEV__` sat
-  // unsubstituted. It was DELETED rather than hoisted, because hoisting it
-  // would change behaviour and that is a call to make deliberately: rolldown
-  // does substitute inside `typeof`, so a correctly-placed `__VC_DEV__` would
-  // fold `src/dev.ts` to a constant and discard its `typeof process` fallback -
-  // and that fallback is exactly what the ESM build wants to keep, since only
-  // the CONSUMER's bundler knows whether their build is a dev build. Deleting
-  // the dead block preserves today's behaviour and stops the config from
-  // describing something that never happened.
+  // `__VC_DEV__` is deliberately NOT defined for the ESM build: rolldown
+  // substitutes inside `typeof`, so defining it would fold `src/dev.ts` to a
+  // constant and discard its `typeof process` fallback - the one the ESM build
+  // keeps, since only the CONSUMER's bundler knows whether their build is a
+  // dev build.
   define: { __VC_IIFE__: 'false' },
   build: {
     lib: {
@@ -301,7 +294,12 @@ for (const v of iifeVariants) {
         emptyOutDir: false,
         minify: min,
         sourcemap: !min,
-        target: ['es2020', 'chrome80', 'firefox75', 'safari13'],
+        // A 2022 floor (owner, 2026-09-27; docs/rc-alignment-log.md 25.2 C4
+        // left the Safari 13 floor open). Below it `?.`, `??`, class fields and
+        // private fields were lowered into helpers in every bundle. The floor is
+        // where all three keep private fields native: Chrome 94 and Firefox 93
+        // still lowered them in this toolchain, 100 did not; Safari 16.
+        target: ['es2022', 'chrome100', 'firefox100', 'safari16'],
       },
       plugins: [licenseNotice()],
     });

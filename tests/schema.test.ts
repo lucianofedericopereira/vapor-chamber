@@ -18,7 +18,7 @@ import {
   type AnthropicTool,
   type BusSchema,
 } from '../src/schema';
-import { RETRYABLE_CODES } from '../src/command-bus';
+import { RETRYABLE_CONDITIONS } from '../src/command-bus';
 import { it } from '../src/vitest';
 
 
@@ -205,7 +205,7 @@ describe('synthesize', () => {
     const adapter = vi.fn(async () => ({ name: 'nonExistent', input: {} }));
 
     const result = await synthesize(cartSchema, bus, 'tell me a joke', { adapter });
-    expect(result).toFailWith('VC_CORE_NO_HANDLER');
+    expect(result).toFailWith('core:missing:handler');
   });
 });
 
@@ -603,14 +603,16 @@ describe('ERROR_CODE_REGISTRY retry metadata', () => {
     }
   });
 
-  it('stays in sync with RETRYABLE_CODES in command-bus', () => {
-    const fromRegistry = ERROR_CODE_REGISTRY.filter(e => e.retryable).map(e => e.code).sort();
-    expect([...RETRYABLE_CODES].sort()).toEqual(fromRegistry);
+  it('a row is retryable exactly when its condition is (the column is an outcome)', () => {
+    for (const e of ERROR_CODE_REGISTRY) {
+      expect(e.retryable, e.code).toBe(RETRYABLE_CONDITIONS.has(e.code.split(':')[1]));
+    }
   });
 
+
   it('isRetryableCode consults the registry, undefined for unknown codes', () => {
-    expect(isRetryableCode('VC_CORE_THROTTLED')).toBe(true);
-    expect(isRetryableCode('VC_CORE_MAX_DEPTH')).toBe(false);
+    expect(isRetryableCode('core:limited:handler')).toBe(true);
+    expect(isRetryableCode('core:exceeded:depth')).toBe(false);
     expect(isRetryableCode('NOT_A_CODE')).toBeUndefined();
   });
 });

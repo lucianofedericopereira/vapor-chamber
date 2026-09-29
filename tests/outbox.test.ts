@@ -371,7 +371,7 @@ describe('createOutbox - flush', () => {
   // that catch is reachable. It is not hypothetical - any plugin installed
   // downstream of the outbox (transport, auth, serializer) can throw on a
   // replay that happens minutes after the command was queued.
-  // Since VC_PLUGIN_THREW the runner converts that throw into a result, so
+  // Since plugin:failed:plugin the runner converts that throw into a result, so
   // this replay resolves `{ ok: false }` and fails the record the same way;
   // the rejection path is now `onMissing: 'throw'`, tested next.
   it('survives a replay through a THROWING downstream plugin, treating it as a failed record', async () => {
@@ -402,7 +402,7 @@ describe('createOutbox - flush', () => {
 
     // The rejection was caught and turned into a failed record - the flush
     // returned a summary instead of rejecting, and nothing was lost. (A
-    // VC_PLUGIN_THREW result now, not a rejection - the outcome is the same.)
+    // plugin:failed:plugin result now, not a rejection - the outcome is the same.)
     expect(first).toEqual({ replayed: 0, failed: 1, rejected: 0 });
     expect(runs).toEqual([]); // the handler never ran; the plugin threw first
     expect(outbox.pending.value).toBe(2);
@@ -440,8 +440,8 @@ describe('createOutbox - flush', () => {
     // `e instanceof Error ? e : new Error(String(e))` - the else arm. A plugin
     // that rejects with a string (or a framework that throws a plain object)
     // must not put a non-Error into the failure path.
-    // A real bus no longer rejects with a non-Error - a plugin's rejection
-    // becomes a VC_PLUGIN_THREW result - but flush(bus) takes any
+    // A real bus does not reject with a non-Error - a plugin's rejection
+    // becomes a plugin:failed:plugin result - but flush(bus) takes any
     // AsyncCommandBus, so the value comes from a foreign bus below.
     const storage = memoryStorage();
     let online = false;

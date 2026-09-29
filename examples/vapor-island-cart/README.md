@@ -22,8 +22,7 @@ The bus (`src/store.ts`) is wired with three plugins:
 - **`history`** - bus-backed undo/redo for `cartAdd` (`cartUndo` / `cartRedo`).
 - **`persist`** - restores the cart from `localStorage` on reload.
 
-Cross-tab mirroring is **not** a fourth plugin, and this README used to call it
-one. `createChannel` is not on the bus at all: it bridges a `createFastLane()`
+Cross-tab mirroring is **not** a fourth plugin. `createChannel` is not on the bus at all: it bridges a `createFastLane()`
 event channel to a `BroadcastChannel`, so no dispatch passes through it. What
 crosses between tabs is a FACT the handler emits - `lane.emit('cartChanged', ...)`
 with the values already computed - and the receiving tab applies those values
@@ -66,14 +65,14 @@ script, and this example's `predev`/`prebuild` hooks build it on demand if
   `client:idle` (`requestIdleCallback`). The demo markup uses `client:load`.
 - **Light-DOM custom elements** - the `.vue` islands have no `<style>`; with `shadowRoot: false`
   the page stylesheet (`src/style.css`) styles them directly.
-- **Undo/redo** - add a few items, then use <-/->. Buttons disable via reactive `cantUndo`/`cantRedo`.
+- **Undo/redo** - add a few items, then use <-/->. The buttons go `aria-disabled` via reactive
+  `cantUndo`/`cantRedo` (not `disabled`, which would drop keyboard focus on the last undo).
+- **Heard, not only seen** - each add is announced through the library's `announce()`.
 - **Cross-tab sync** - open the URL in two tabs and add items in one.
 
 ## Notes on the Vite config
 
-`vite.config.ts` has no `vue` alias. It used to point `vue` at a with-vapor build; since Vue rc.5,
-`vue.runtime.esm-bundler.js` re-exports `@vue/runtime-vapor` itself, and building this example with
-and without the alias gave byte-identical output (the export list is pinned by
-`tests/vue-bundler-vapor-exports.test.ts`). `vaporChamberHMR()` keeps bus state across HMR.
+`vite.config.ts` has no `vue` alias: `vue.runtime.esm-bundler.js` re-exports `@vue/runtime-vapor`
+itself (the export list is pinned by `tests/vue-bundler-vapor-exports.test.ts`). `vaporChamberHMR()` keeps bus state across HMR.
 
 Aligned with Vue <!-- vc:vueAligned -->3.6.0-rc.9<!-- /vc:vueAligned --> and the working-tree vapor-chamber (`vapor-chamber: file:../..`).

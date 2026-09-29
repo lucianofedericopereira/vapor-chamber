@@ -6,8 +6,9 @@
  *
  * The controller is intentionally thin - it dispatches to action classes
  * registered in config/vapor-chamber.php and converts exceptions into an
- * RFC 9457 problem ({ type, title, status, detail, code }), answered as
- * `application/problem+json`. A success stays { ok: true, state }. Laravel's own
+ * RFC 9457 problem ({ status, code, detail, errors? }), answered as
+ * `application/problem+json`. A success is { state } (or { redirect }). The
+ * wire contract is docs/plan-failures-and-contract.md 4.4. Laravel's own
  * ValidationException/AuthorizationException/ModelNotFoundException are
  * recognized by type; anything else that declares its own render() (any
  * RFC 9457-shaped exception from a package or the host app) has its
@@ -36,7 +37,6 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\ValidationException;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
-use Symfony\Component\HttpFoundation\Response;
 
 class VaporChamberController extends Controller
 {
@@ -53,13 +53,22 @@ class VaporChamberController extends Controller
             (string) $request->input('command', ''),
             $request->input('target'),
             $request->input('payload'),
-            $request->header('Idempotency-Key'),
+            $this->idempotencyKey($request->header('Idempotency-Key')),
             $request->user(),
         );
 
-        return $result['status'] >= 400
-            ? response()->json($result['body'], $result['status'], ['Content-Type' => 'application/problem+json'])
-            : response()->json($result['body'], $result['status']);
+        if ($result['status'] < 400) {
+            return response()->json($result['body'], $result['status']);
+        }
+        $headers = ['Content-Type' => 'application/problem+json'];
+        // A key still running: the client's re-send waits a second and comes
+        // back for the finished answer (the cache below), instead of settling
+        // as a conflict while the first attempt succeeds.
+        if (($result['body']['code'] ?? null) === 'in_progress') {
+            $headers['Retry-After'] = '1';
+        }
+
+        return response()->json($result['body'], $result['status'], $headers);
     }
 
     /**
@@ -73,13 +82,12 @@ class VaporChamberController extends Controller
      * mapping) - only the request/response envelope differs. One command's
      * failure never aborts its siblings; each result is reported by `id`.
      *
-     *   { results: [{ id, ok: true, state }, { id, ok: false, problem }, ...] }
+     *   { results: [{ id, state }, { id, redirect }, { id, problem }, ...] }
      *
      * A failed command's problem is the RESULT, not the response: the batch
      * answers 200 because the request succeeded, and RFC 9457 has no shape for
-     * several failures in one response. `ok: false` rides beside `problem` for
-     * clients older than v1.24.0, which read only `ok` and would otherwise take
-     * the result for a success.
+     * several failures in one response. The problem carries the command's own
+     * `status`, which the client reads the failure's condition from.
      */
     public function batch(Request $request): JsonResponse
     {
@@ -101,7 +109,7 @@ class VaporChamberController extends Controller
                 $request->user(),
             );
             $results[] = $result['status'] >= 400
-                ? ['id' => $id, 'ok' => false, 'problem' => $result['body']]
+                ? ['id' => $id, 'problem' => $result['body']]
                 : ['id' => $id, ...$result['body']];
         }
 
@@ -127,8 +135,10 @@ class VaporChamberController extends Controller
             return $this->problem("Unknown command: {$command}", 404, 'unknown_command');
         }
 
-        // Wire half of exactly-once: the JS `idempotent()` plugin (and the
-        // batching bridge, per queued command) stamps an Idempotency-Key.
+        // Wire half of exactly-once: an action declared idempotent on the JS bus
+        // (`retry: { actions: { cartSet: 'idempotent' } }`, one key for all its
+        // attempts) or the `idempotent()` plugin stamps an Idempotency-Key; the
+        // single bridge sends it as a header, the batching bridge per command.
         // Replay the cached response for a key we've already processed so a
         // network retry can't double-write (e.g. duplicate orders).
         $cacheKey = $idempotencyKey ? "vc:idem:{$command}:{$idempotencyKey}" : null;
@@ -138,8 +148,9 @@ class VaporChamberController extends Controller
         // attempt is still running (a client timeout on a slow write) misses
         // the cache and runs the action a second time, concurrently. The lock
         // is taken BEFORE the cache read and held for the whole run; a request
-        // that cannot get it is answered 409, a 4xx the bridge never retries,
-        // so the client sees one outcome. 30s bounds a crashed holder.
+        // that cannot get it is answered 409 with Retry-After (see __invoke), so
+        // the client's re-send returns for the one outcome. 30s bounds a crashed
+        // holder.
         $lock = $cacheKey ? Cache::lock("vc:idem:lock:{$command}:{$idempotencyKey}", 30) : null;
         if ($lock && !$lock->get()) {
             return $this->problem('A request with this Idempotency-Key is still running', 409, 'in_progress');
@@ -154,19 +165,18 @@ class VaporChamberController extends Controller
             // An action hands a navigation back by returning exactly
             // ['redirect' => url] (docs/integrations/laravel.md). Both bridges
             // read `redirect` at the top of the envelope - per result on a
-            // batch - so it is lifted there. Wrapped as `state` it was a
-            // success whose value happened to be a URL, and `onRedirect` never
-            // fired. Only that exact shape is lifted: a state that merely HAS
-            // a `redirect` key among others is data, not a navigation.
+            // batch - so it is lifted there; wrapped as `state` it would be a
+            // success whose value is a URL. Only that exact shape is lifted: a
+            // state that merely HAS a `redirect` key among others is data.
             $body = is_array($state) && array_keys($state) === ['redirect']
                 ? ['redirect' => $state['redirect']]
-                : ['ok' => true, 'state' => $state];
+                : ['state' => $state];
             if ($cacheKey) {
                 Cache::put($cacheKey, $body, self::IDEMPOTENCY_TTL_SECONDS);
             }
             return ['body' => $body, 'status' => 200];
         } catch (ValidationException $e) {
-            return $this->problem($e->getMessage(), 422, 'validation_failed');
+            return $this->problem($e->getMessage(), 422, 'validation_failed', $this->pointers($e->errors()));
         } catch (AuthorizationException $e) {
             return $this->problem($e->getMessage(), 403, 'forbidden');
         } catch (ModelNotFoundException $e) {
@@ -183,11 +193,9 @@ class VaporChamberController extends Controller
                 $rendered = $e->render($request);
                 if ($rendered instanceof JsonResponse) {
                     $data = $rendered->getData(true);
-                    // Its own `code` extension member when it has one; the
-                    // last segment of `type` otherwise, which is this
-                    // controller's convention, not the RFC's.
-                    $code = is_string($data['code'] ?? null) ? $data['code']
-                        : (is_string($data['type'] ?? null) ? basename($data['type']) : 'error');
+                    // Its own `code` extension member; without one it has no
+                    // identity to send, and none is made up from `type`.
+                    $code = is_string($data['code'] ?? null) ? $data['code'] : 'error';
                     return $this->problem($data['detail'] ?? $e->getMessage(), $rendered->getStatusCode(), $code);
                 }
             }
@@ -200,36 +208,68 @@ class VaporChamberController extends Controller
     }
 
     /**
-     * Failure shape: an RFC 9457 problem. `detail` becomes `result.error.message`
-     * on the JS side and `code` (an extension member) becomes `error.code`.
+     * The key from an Idempotency-Key header. The draft makes the value a
+     * Structured Field String (RFC 9651); the bridge sends the key
+     * percent-encoded and quoted, which needs no escaping, so unquoting and
+     * `rawurldecode` give back the exact key - the same one the batching
+     * bridge sends in the JSON body. A value that is not a String fails to
+     * parse, and RFC 9651 ignores a field that fails to parse: no key.
+     */
+    private function idempotencyKey(?string $header): ?string
+    {
+        if ($header !== null && strlen($header) >= 2 && $header[0] === '"' && str_ends_with($header, '"')) {
+            return rawurldecode(substr($header, 1, -1));
+        }
+
+        return null;
+    }
+
+    /**
+     * The failure, as the contract's RFC 9457 problem: `status`, `code` (its
+     * identity), `detail` (the sentence, `result.error.message` on the JS
+     * side), `errors` when there are field errors. `type` and `title` are not
+     * sent: `code` is the identity and `title` repeated the status.
      *
-     * For __invoke() it is the response, sent with the given status and
-     * `application/problem+json`; the client throws an HttpError carrying both.
-     * For batch() it is one result's `problem`, inside a 200 - one command's
-     * failure can't fail its siblings, and nothing throws on that path.
+     * The client reads the failure's condition from `status`, by the status
+     * table (`conditionOfStatus` in http-errors.ts): send the status that says
+     * what the failure is - 409 for a state conflict, 429 or 503 for "come back
+     * later", 422 for input that broke a rule. For __invoke() it is the
+     * response, sent with that status; for batch() it is one result's
+     * `problem`, inside a 200.
      *
-     * `type` is absolute, as RFC 9457 recommends: this app's `/problems/<code>`.
-     * The URI does not have to resolve to a page. `title` is the status's reason
-     * phrase; an app with a registry of its codes can send its own titles, or
-     * leave `title` and `status` out entirely - every member is optional, and
-     * the library reads only `detail` and `code`.
-     *
-     * One consequence worth knowing: a refusal delivered inside a batch's 200 is
-     * treated as PERMANENT by `retry()`, because the request succeeded and you
-     * refused in the body. Do not send one of the library's own retryable codes
-     * there (`VC_CORE_THROTTLED` and five others) unless you mean the client to
-     * try again - use your own namespace and the refusal stays permanent.
-     *
+     * @param list<array{pointer: string, detail: string}> $errors
      * @return array{body: array<string, mixed>, status: int}
      */
-    private function problem(string $detail, int $status, string $code): array
+    private function problem(string $detail, int $status, string $code, array $errors = []): array
     {
-        return ['body' => [
-            'type' => url("/problems/{$code}"),
-            'title' => Response::$statusTexts[$status] ?? 'Error',
-            'status' => $status,
-            'detail' => $detail,
-            'code' => $code,
-        ], 'status' => $status];
+        $body = ['status' => $status, 'code' => $code, 'detail' => $detail];
+        if ($errors !== []) {
+            $body['errors'] = $errors;
+        }
+
+        return ['body' => $body, 'status' => $status];
+    }
+
+    /**
+     * Laravel's field map as the contract's `errors`: one `{ pointer, detail }`
+     * per field, the pointer into the envelope the client sent
+     * (`/payload/<field>`, RFC 6901; a dotted key is a nested path), the
+     * field's first message.
+     *
+     * @param array<string, array<int, string>> $fields
+     * @return list<array{pointer: string, detail: string}>
+     */
+    private function pointers(array $fields): array
+    {
+        $errors = [];
+        foreach ($fields as $field => $messages) {
+            $segments = array_map(
+                static fn (string $s): string => str_replace(['~', '/'], ['~0', '~1'], $s),
+                explode('.', (string) $field),
+            );
+            $errors[] = ['pointer' => '/payload/'.implode('/', $segments), 'detail' => (string) ($messages[0] ?? '')];
+        }
+
+        return $errors;
     }
 }

@@ -73,8 +73,7 @@ function buildBaseline(): void {
   }
   const reverted = src
     .replace(SHIPPED_LINE, BASELINE_LINE)
-    .replace(/from '\.\/dev'/g, "from '../../../src/dev'")
-    .replace(/from '\.\/dict'/g, "from '../../../src/dict'");
+    .replace(/from '\.\/([\w-]+)'/g, "from '../../../src/$1'");
   mkdirSync(REF_DIR, { recursive: true });
   writeFileSync(BASELINE, reverted);
 }

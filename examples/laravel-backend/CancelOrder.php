@@ -19,12 +19,9 @@ class CancelOrder
 {
     public function __invoke(?array $target, ?array $payload, ?User $user): array
     {
-        validator($target ?? [], [
-            'id' => 'required|integer',
-        ])->validate();
-
-        // findOrFail throws ModelNotFoundException -> controller maps to 404.
-        $order = Order::findOrFail($target['id']);
+        // The target is identity: findOrFail throws ModelNotFoundException,
+        // which the controller answers 404 not_found.
+        $order = Order::findOrFail((int) ($target['id'] ?? 0));
 
         // Policy-based authorization. The 'cancel' ability lives in
         // App\Policies\OrderPolicy. Throws AuthorizationException -> 403.

@@ -98,7 +98,7 @@ describe('createHttpClient - download', () => {
 // ---------------------------------------------------------------------------
 
 describe('createHttpClient - safe fallbacks', () => {
-  it('wraps a non-object error body as { message, code }', async () => {
+  it('a body that is not a problem reads as { status, detail: HTTP <status> }', async () => {
     (globalThis.fetch as any).mockResolvedValue(
       mockResponse(500, 'plain text failure', { 'content-type': 'text/plain' }),
     );
@@ -106,18 +106,18 @@ describe('createHttpClient - safe fallbacks', () => {
 
     const result = await http.safe.get('/api/data', { retry: 0 });
     expect(result.data).toBeNull();
-    expect(result.error).toEqual({ message: 'HTTP 500', code: undefined });
+    expect(result.error).toEqual({ status: 500, detail: 'HTTP 500' });
     expect(result.status).toBe(500);
   });
 
-  it('reports status 0 on a network error with no response', async () => {
+  it('with no response, status 0 and the problem is { detail } only', async () => {
     (globalThis.fetch as any).mockRejectedValue(Object.assign(new TypeError('fetch failed'), { name: 'TypeError' }));
     const http = createHttpClient();
 
     const result = await http.safe.get('/api/data', { retry: 0 });
     expect(result.data).toBeNull();
     expect(result.status).toBe(0);
-    expect((result.error as any).message).toBeTruthy();
+    expect(result.error).toEqual({ detail: 'fetch failed' });
   });
 });
 
@@ -158,7 +158,7 @@ describe('createHttpClient - interceptor arms', () => {
     const http = createHttpClient();
     http.interceptors.response.use((r) => r); // fulfilled-only - no onRejected
 
-    await expect(http.get('/api/data', { retry: 0 })).rejects.toMatchObject({ status: 500 });
+    await expect(http.get('/api/data', { retry: 0 })).rejects.toMatchObject({ response: { status: 500 } });
   });
 
   it('request() without a method defaults to GET', async () => {

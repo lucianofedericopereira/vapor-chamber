@@ -31,7 +31,7 @@ Two shared helpers sit here rather than in each example:
 | [`feature-cross-tab-sync.ts`](./feature-cross-tab-sync.ts) | `createChannel` - a handler emits a fact, every other same-origin context applies it (BroadcastChannel) |
 | [`feature-error-boundary.ts`](./feature-error-boundary.ts) | `useCommandError` - component-scoped error boundary |
 | [`feature-persistence.ts`](./feature-persistence.ts) | `persist` plugin - localStorage / sessionStorage / custom storage (incl. IndexedDB) |
-| [`feature-retry.ts`](./feature-retry.ts) | `retry` plugin - configurable backoff for failed dispatches |
+| [`feature-retry.ts`](./feature-retry.ts) | The async bus's retry - the default by condition, per-action declarations (`'idempotent'`, `false`, a count), on a schema too |
 | [`feature-transitions.ts`](./feature-transitions.ts) | Transition-dispatched commands (the transitions bridge) |
 | [`feature-transports.ts`](./feature-transports.ts) | HTTP / WebSocket / SSE transport plugins |
 | [`feature-vite-hmr.ts`](./feature-vite-hmr.ts) | `vaporChamberHMR` - state-preserving Vite hot reload |
@@ -54,9 +54,9 @@ Two shared helpers sit here rather than in each example:
 |------|-------|
 | [`shopping-cart.ts`](./shopping-cart.ts) | Cart with validation, history, and undo/redo |
 | [`form-validation.ts`](./form-validation.ts) | Form validation with error handling |
-| [`async-api.ts`](./async-api.ts) | Async handlers with a hand-rolled retry wrapper (see `feature-retry.ts` for the built-in plugin) |
+| [`async-api.ts`](./async-api.ts) | Async handlers, an async logger plugin, and an idempotent read the bus re-sends |
 | [`realtime-search.ts`](./realtime-search.ts) | Debounced search queries |
-| [`custom-plugins.ts`](./custom-plugins.ts) | Analytics, auth-guard, rate-limiter plugins |
+| [`custom-plugins.ts`](./custom-plugins.ts) | Writing plugins for either bus: reading the result through `onSettled`, refusing with a coded failure through `fail` (and an `id`), declaring `retryIn` |
 | [`vue-vapor-component.vue`](./vue-vapor-component.vue) | Full Vue Vapor todo app |
 
 > The reactive composable is `useCommand` (`dispatch` + `loading`/`lastError` + `register`/`on`/`emit`,

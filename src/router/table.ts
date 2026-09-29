@@ -27,6 +27,14 @@ export type RouteTable = {
 const PARAM_RE = /^:([A-Za-z_][A-Za-z0-9_]*)(\(([^)]+)\))?(\?)?$/;
 
 /**
+ * What a typed param matches when the row gives no regex of its own. A value
+ * that does not fit the type does not match the row, so the URL falls through
+ * to the next row (or to unmatched, and the server): `/products/7x` is never
+ * product 7, and an `int` param is never handed over as a string.
+ */
+const TYPE_PATTERN: Partial<Record<ParamType, string>> = { int: '-?\\d+', bool: '(?:1|0|true|false)' };
+
+/**
  * Render a compiled record's segments into a path, or report the first
  * required param the caller failed to supply.
  *
@@ -62,8 +70,9 @@ export function renderSegments(
   return { path: path || '/' };
 }
 
-/** Compile one path pattern into segments + a matching RegExp. */
-export function compilePath(path: string): {
+/** Compile one path pattern into segments + a matching RegExp; a typed param
+ *  with no regex of its own matches its type's pattern. */
+export function compilePath(path: string, paramTypes: Readonly<Record<string, ParamType>> = {}): {
   segments: Segment[];
   re: RegExp;
   keys: string[];
@@ -82,7 +91,8 @@ export function compilePath(path: string): {
     const m = PARAM_RE.exec(raw);
     if (m) {
       const name = m[1] as string;
-      const pattern = m[3] ?? '[^/]+';
+      const type = paramTypes[name];
+      const pattern = m[3] ?? (type && TYPE_PATTERN[type]) ?? '[^/]+';
       const optional = m[4] === '?';
       segments.push({ kind: 'param', name, pattern, optional });
       keys.push(name);
@@ -112,14 +122,17 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.+*?^${}()[\]/\\|]/g, '\\$&');
 }
 
-function castParam(value: string, type: ParamType | undefined): string | number | boolean {
+/** A matched segment as its declared type, or undefined when it does not fit
+ *  (a row's own regex can admit more than its type): the row then does not
+ *  match, as with the type's default pattern. */
+function castParam(value: string, type: ParamType | undefined): string | number | boolean | undefined {
   switch (type) {
-    case 'int': {
-      const n = Number.parseInt(value, 10);
-      return Number.isNaN(n) ? value : n;
+    case 'int':
+      return /^-?\d+$/.test(value) ? Number(value) : undefined;
+    case 'bool': {
+      const flag = value.toLowerCase();
+      return flag === '1' || flag === 'true' ? true : flag === '0' || flag === 'false' ? false : undefined;
     }
-    case 'bool':
-      return value === '1' || value === 'true';
     default:
       return value;
   }
@@ -148,16 +161,14 @@ export function createRouteTable(rows: readonly RouteRecord[]): RouteTable {
       renderChain: [],
       loadChain: [],
       queryDefs: {},
-      ...compilePath(row.path),
+      ...compilePath(row.path, row.params),
     };
     // `meta` is the ROW's object, and the table hands the same one to every
     // consumer for the router's whole life: `location.meta` is it, so are
     // `MenuItem.meta` and `Breadcrumb.meta`. A component that stashes a
-    // computed title on `route.meta` therefore rewrites the table. That is the
-    // contract ../freeze already enforces for the three shared caches, and its
-    // own docblock says the failure mode is a list applied by hand missing a
-    // site - this is the fourth, now on that list. Dev-only, like the others:
-    // the mutation throws where it happens, and production pays nothing.
+    // computed title on `route.meta` therefore rewrites the table. Frozen as
+    // ../freeze freezes the shared caches - dev-only, like them: the mutation
+    // throws where it happens, and production pays nothing.
     if (DEV) freezeDeep(record.meta);
     records.push(record);
     byName.set(record.name, record);
@@ -180,11 +191,9 @@ export function createRouteTable(rows: readonly RouteRecord[]): RouteTable {
   const rowByName = new Map(rows.map((row) => [row.name, row]));
   for (const record of records) {
     const chain: TableRecord[] = [];
-    // A cyclic parent chain (`a.parent = b`, `b.parent = a`) used to spin here
-    // FOREVER: a synchronous `for (; r; r = r.parent)` with no terminator, in a
-    // constructor, on the main thread. No error, no stack, no partial render -
-    // the tab locks. Measured as exactly that: it held a vitest worker until the
-    // run was killed at 120s.
+    // A cyclic parent chain (`a.parent = b`, `b.parent = a`) would spin a
+    // `for (; r; r = r.parent)` walk FOREVER, synchronously, on the main
+    // thread: no error, no stack, the tab locks.
     //
     // Every other malformed-table case in this file is loud in dev and lenient
     // in prod, and a hang is the one failure where that split matters most:
@@ -244,16 +253,23 @@ export function createRouteTable(rows: readonly RouteRecord[]): RouteTable {
     const exact = staticByPath.get(staticKey(path));
     if (exact) return { record: exact, params: {} };
 
-    for (const record of records) {
+    scan: for (const record of records) {
       if (record.group) continue; // pure groups never match a URL themselves
       const m = record.re.exec(path);
       if (!m) continue;
       const params: RouteParams = {};
-      record.keys.forEach((key, i) => {
+      for (let i = 0; i < record.keys.length; i++) {
+        const key = record.keys[i] as string;
         const raw = m[i + 1];
-        if (raw === undefined) return; // optional param not present
-        params[key] = key === 'pathMatch' ? raw : castParam(decodePathPart(raw), record.paramTypes[key]);
-      });
+        if (raw === undefined) continue; // optional param not present
+        if (key === 'pathMatch') {
+          params[key] = raw;
+          continue;
+        }
+        const value = castParam(decodePathPart(raw), record.paramTypes[key]);
+        if (value === undefined) continue scan; // does not fit its type: not this row
+        params[key] = value;
+      }
       return { record, params };
     }
     return null;

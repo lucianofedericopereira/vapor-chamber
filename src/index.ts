@@ -8,7 +8,7 @@
  *
  *   OPTIONAL (tree-shaken when unused):
  *     plugins      - logger, validator, history, debounce, throttle, authGuard, optimistic
- *     plugins-io   - retry, persist, createChannel
+ *     plugins-io   - persist, createChannel
  *     chamber      - Vue composables: useCommand, useCommandGroup, useCommandState, ...
  *     chamber-vapor - Vue 3.6+ Vapor-specific API (requires Vue 3.6)
  *     http         - postCommand, createHttpClient, CSRF token reading
@@ -40,37 +40,7 @@
  *   'vapor-chamber/iife-core'       - IIFE bundle (no Vapor custom-element, no Suspense paths)
  *   'vapor-chamber/iife-elements'   - IIFE bundle (core + Vapor custom-element)
  *
- * Changelog:
- *   v0.3.0 - Naming convention, wildcard listeners, request/response, authGuard, optimistic
- *   v0.4.0 - Vue 3.6 Vapor alignment, defineVaporCommand, onScopeDispose
- *   v0.4.1 - useCommandGroup, useCommandError
- *   v0.4.2 - Transport layer, retry/persist/sync plugins
- *   v0.4.3 - createTestBus snapshot/time-travel
- *   v0.5.0 - camelCase naming, HTTP client, CDCC splits, createFormBus, schema/LLM layer
- *   v0.6.0 - onBefore, once, offAll, BaseBus, commandKey; BatchResult successCount/failCount;
- *             form async validation (isValidating, isBusy); HttpError.code; noRetry;
- *             WS maxQueueSize; LlmAdapter; 419!=401 fix; CSRF refresh error propagation;
- *             WS queue expiry on reconnect; async request dedup; directive dispatch timeout;
- *             signal detection sync probe (globalThis.__VUE__); waitForVueDetection();
- *             passthroughHandlers fix in TestBus; Vue >=3.6.0-beta.1 peer dep;
- *             useVaporCommand() composable; Vapor directive compat warning;
- *             tryAutoCleanup dev warning; Vite HMR .vapor.vue support;
- *             FormBus reactive:false headless mode; HttpBridge scopeController;
- *             WsBridge reactive connected signal
- *   v1.1.0 - Vue 3.6.0-beta.10 alignment: defineVaporCustomElement, defineVaporComponent,
- *             defineVaporAsyncComponent wrappers; useVaporAsyncCommand for Suspense-aware
- *             async dispatch; createTransitionBridge + useTransitionCommand; persist validate
- *             option; improved Vapor/VDOM interop awareness; HMR vapor<->vdom switch
- *   v1.2.0 - Vue 3.6.0-beta.11 alignment: peerDep bumped; defineVaporComponent
- *             JSDoc documents generics (#14770) + emits-vs-attrs split; build
- *             pipeline migrated from custom esbuild script to Vite programmatic
- *             API (scripts/build.mjs); IIFE split into three sized variants
- *             (full / core / elements) mirroring Vue's tree-shake axes; tsc
- *             now emits types only (`emitDeclarationOnly`)
- *   v1.0.0 - bus.query() CQRS read-only dispatch; bus.emit() domain events;
- *             Command.meta auto-stamped metadata (ts, id, correlationId, causationId);
- *             bus.registeredActions() introspection; TestBus.onBefore fires for real;
- *             TestBus.query/emit/registeredActions parity
+ * History: CHANGELOG.md.
  */
 
 // -- CORE ---------------------------------------------------------------------
@@ -85,12 +55,18 @@ export {
   buildRunner,
   matchesPattern,
   BusError,
-  RETRYABLE_CODES,
+  RETRYABLE_CONDITIONS,
+  conditionOf,
+  conditionOfStatus,
+  failureCondition,
+  ownerOf,
   type CommandPool,
   type BusInspection,
   type BusErrorCode,
+  type Condition,
+  type FailCode,
+  type Fail,
   type BusSeverity,
-  type BusEmitter,
   type BaseBus,
   type Command,
   type CommandResult,
@@ -101,6 +77,8 @@ export {
   type AsyncHandler,
   type Plugin,
   type AsyncPlugin,
+  type SyncPlugin,
+  type PluginParts,
   type Hook,
   type AsyncHook,
   type BeforeHook,
@@ -111,6 +89,9 @@ export {
   type BatchResult,
   type DeadLetterMode,
   type CommandBusOptions,
+  type AsyncCommandBusOptions,
+  type RetryOptions,
+  type RetryDeclaration,
   type NamingConvention,
   type RegisterOptions,
   type Listener,
@@ -120,8 +101,12 @@ export {
   type ResultOf,
 } from './command-bus';
 
+// Settling what `next()` gave a plugin, on either bus: what a `Plugin` uses to
+// read the result (see Plugin).
+export { onSettled, type MaybeAsyncResult } from './settled';
+
 // Testing utilities (CORE - zero runtime deps, for test environments only)
-export { createTestBus, type TestBus, type RecordedDispatch } from './testing';
+export { createTestBus, wired, type TestBus, type RecordedDispatch } from './testing';
 
 // -- UTILITIES ----------------------------------------------------------------
 // Declarative patterns for common bus usage. Tree-shaken when unused.
@@ -171,12 +156,10 @@ export {
   authGuard,
   optimistic,
   optimisticUndo,
-  retry,
   persist,
   createChannel,
   type HistoryState,
   type OptimisticUndoOptions,
-  type RetryOptions,
   type PersistOptions,
   type ChannelOptions,
 } from './plugins';
@@ -191,7 +174,7 @@ export {
   setCommandBus,
   resetCommandBus,
   useCommand,
-  // v1.8.0: typed command contract - augment GlobalCommands for typed dispatch
+  // typed command contract - augment GlobalCommands for typed dispatch
   type GlobalCommands,
   type SharedCommandMap,
   useSharedCommandState,
@@ -199,14 +182,13 @@ export {
   useCommandState,
   type UseCommandStateOptions,
   useCommandHistory,
-  // v0.4.1
   useCommandGroup,
   useCommandError,
-  // v1.1.0: CQRS read-side composable
+  // CQRS read-side composable
   useCommandQuery,
-  // v0.4.0: Vue 3.6 Vapor detection
+  // Vue 3.6 Vapor detection
   isVaporAvailable,
-  // v0.6.0: Await Vue detection for guaranteed signal availability
+  // Await Vue detection for guaranteed signal availability
   waitForVueDetection,
   // Hand the library Vue's namespace explicitly - the reliable channel when
   // neither automatic one can reach it (no-bundler pages especially).
@@ -221,7 +203,7 @@ export {
   createVaporChamberApp,
   getVaporInteropPlugin,
   defineVaporCommand,
-  // v1.1.0: Vue 3.6+ Vapor APIs
+  // Vue 3.6+ Vapor APIs
   defineVaporCustomElement,
   defineVaporComponent,
   defineVaporAsyncComponent,
@@ -233,7 +215,7 @@ export {
   readCsrfToken,
   invalidateCsrfCache,
   postCommand,
-  // v1.1.0: Multi-method HTTP client
+  // Multi-method HTTP client
   createHttpClient,
   type HttpConfig,
   type HttpResponse,
@@ -247,12 +229,14 @@ export {
   type InterceptorManager,
 } from './http';
 
-// The two named HTTP failure rules (see http-errors.ts): what may be re-sent,
-// and what a cached response may stand in for. Zero cost when unimported.
+// The HTTP contract (see http-errors.ts): what a status declares, what may be
+// re-sent, what a cached response may stand in for, and the problem shape.
+// Zero cost when unimported.
 export {
   classifyError,
   isRetryableStatus,
   type ErrorClassification,
+  type ProblemDetails,
 } from './http-errors';
 
 // Transport plugins - optional; prefer 'vapor-chamber/transports' to avoid pulling http.ts
@@ -271,7 +255,6 @@ export {
   type EchoChannelType,
   type CommandEnvelope,
   type BackendResponse,
-  type ProblemDetails,
 } from './transports';
 
 // Transition integration - optional; prefer 'vapor-chamber/transitions'
@@ -294,6 +277,11 @@ export {
   type SSRPlugin,
   type RehydrateOptions,
 } from './ssr';
+
+// Status messages for assistive technology (WCAG 4.1.3): one shared pair of
+// live regions per document, used by the directive and the router; an app can
+// announce through it too, or take it over.
+export { announce, setAnnouncer, type AnnounceOptions, type Announcer } from './a11y';
 
 // Vue directive - optional, requires Vue; prefer 'vapor-chamber/directives'
 export { createDirectivePlugin } from './directives';
@@ -330,12 +318,13 @@ export {
   type FieldMap,
   type FieldType,
   type InferMap,
-  // v1.8.0: typed command contract
+  // typed command contract
   defineSchema,
   type CommandsOf,
   type SchemaCommandBus,
   type AsyncSchemaCommandBus,
   type SchemaCommandBusOptions,
+  type AsyncSchemaCommandBusOptions,
   type SynthesizeOptions,
   type LlmAdapter,
   type AnthropicTool,
@@ -343,12 +332,12 @@ export {
   type ToolCallInput,
   schemaValidator,
   describeSchema,
-  // v1.0: Error code registry and API schema for LLMs
+  // Error code registry and API schema for LLMs
   ERROR_CODE_REGISTRY,
   getErrorEntry,
   describeErrorCodes,
   busApiSchema,
   type ErrorCodeEntry,
-  // v1.8.0: retryable/category metadata
+  // retryable/category metadata
   isRetryableCode,
 } from './schema';

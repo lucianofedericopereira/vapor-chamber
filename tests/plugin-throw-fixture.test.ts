@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 /**
  * FIXTURE - a plugin that throws, or returns a rejected promise, becomes an
- * errResult with code `VC_PLUGIN_THREW`.
+ * errResult with code `plugin:failed:plugin`.
  *
  * The bus's contract is "dispatch always returns a result". Before this, a
  * plugin that threw in its own body escaped `buildRunner` / `buildAsyncRunner`
@@ -28,8 +28,7 @@ import {
   type CommandResult,
   createAsyncCommandBus,
   createCommandBus,
-  type Plugin,
-} from '../src/command-bus';
+  type SyncPlugin, ownerOf } from '../src/command-bus';
 import { createTestBus } from '../src/testing';
 import { stubEnv } from '../src/vitest-pure';
 import { it } from '../src/vitest';
@@ -46,17 +45,17 @@ afterEach(() => { errSpy.mockRestore(); });
 const boom = new Error('plugin blew up');
 
 function expectThrew(r: CommandResult, action: string, cause: unknown = boom): void {
-  expect(r).toFailWith('VC_PLUGIN_THREW');
+  expect(r).toFailWith('plugin:failed:plugin');
   expect(r.error).toBeInstanceOf(BusError);
   const e = r.error as BusError;
-  expect(e.code).toBe('VC_PLUGIN_THREW');
-  expect(e.emitter).toBe('plugin');
+  expect(e.code).toBe('plugin:failed:plugin');
+  expect(ownerOf(e)).toBe('plugin');
   expect(e.action).toBe(action);
   expect(e.cause).toBe(cause);
 }
 
 describe('sync bus - a throwing plugin', () => {
-  it('dispatch returns VC_PLUGIN_THREW with the original as cause, and does not throw', () => {
+  it('dispatch returns plugin:failed:plugin with the original as cause, and does not throw', () => {
     const bus = createCommandBus();
     bus.register('act', () => 'ok');
     bus.use(() => { throw boom; });
@@ -70,7 +69,7 @@ describe('sync bus - a throwing plugin', () => {
     bus.register('act', () => 'ok');
     const seen: string[] = [];
     let viaNext: CommandResult | undefined;
-    const outer: Plugin = (_cmd, next) => {
+    const outer: SyncPlugin = (_cmd, next) => {
       try { viaNext = next(); return viaNext; }
       finally { seen.push('outer cleanup'); }
     };
@@ -114,7 +113,7 @@ describe('sync bus - a throwing plugin', () => {
     bus.register('act', () => 'ok');
     bus.use(() => { throw boom; });
     bus.dispatch('act', 1);
-    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('VC_PLUGIN_THREW'), boom);
+    expect(errSpy).toHaveBeenCalledWith(expect.stringContaining('plugin:failed:plugin'), boom);
     expect(String(errSpy.mock.calls[0][0])).toContain('"act"');
   });
 
@@ -126,7 +125,7 @@ describe('sync bus - a throwing plugin', () => {
     bus.register('act', () => 'ok');
     bus.use(() => { throw boom; });
     const r = bus.dispatch('act', 1);
-    expect((r.error as { code?: string }).code).toBe('VC_PLUGIN_THREW');
+    expect((r.error as { code?: string }).code).toBe('plugin:failed:plugin');
     expect(r.error?.cause).toBe(boom);
     expect(errSpy).not.toHaveBeenCalled();
     vi.resetModules();
@@ -137,7 +136,7 @@ describe('sync bus - a throwing plugin', () => {
     bus.use((_c, next) => next());
     let caught: unknown;
     try { bus.dispatch('nobody', 1); } catch (e) { caught = e; }
-    expect((caught as BusError).code).toBe('VC_CORE_NO_HANDLER');
+    expect((caught as BusError).code).toBe('core:missing:handler');
     expect(errSpy).not.toHaveBeenCalled();
   });
 
@@ -148,7 +147,7 @@ describe('sync bus - a throwing plugin', () => {
     bus.on('*', (_c, r) => { star.push(r); });
     bus.onAfter((_c, r) => { after.push(r); });
     expect(() => bus.dispatch('nobody', 1)).toThrow('No handler');
-    expect(star.map((r) => (r.error as BusError).code)).toEqual(['VC_CORE_NO_HANDLER']);
+    expect(star.map((r) => (r.error as BusError).code)).toEqual(['core:missing:handler']);
     expect(after).toEqual(star);
 
     const recovered = { ok: false, value: undefined, error: new Error('recovered') } as CommandResult;
@@ -180,14 +179,14 @@ describe('sync bus - a throwing plugin', () => {
 });
 
 describe('async bus - a throwing or rejecting plugin', () => {
-  it('a synchronous throw resolves to VC_PLUGIN_THREW, never rejects', async () => {
+  it('a synchronous throw resolves to plugin:failed:plugin, never rejects', async () => {
     const bus = createAsyncCommandBus();
     bus.register('act', async () => 'ok');
     bus.use(() => { throw boom; });
     expectThrew(await bus.dispatch('act', 1), 'act');
   });
 
-  it('a rejected promise resolves to VC_PLUGIN_THREW, never rejects', async () => {
+  it('a rejected promise resolves to plugin:failed:plugin, never rejects', async () => {
     const bus = createAsyncCommandBus();
     bus.register('act', async () => 'ok');
     bus.use(() => Promise.reject(boom));
@@ -215,7 +214,7 @@ describe('async bus - a throwing or rejecting plugin', () => {
     expect(star).toBe(r);
   });
 
-  it('a pass-through plugin above a rejecting one still resolves VC_PLUGIN_THREW (the inner level converted it)', async () => {
+  it('a pass-through plugin above a rejecting one still resolves plugin:failed:plugin (the inner level converted it)', async () => {
     // The pass-through returns its next() promise unwrapped - the level below
     // already converted - so this pins that skipping the wrap loses nothing.
     const bus = createAsyncCommandBus();
@@ -237,7 +236,7 @@ describe('async bus - a throwing or rejecting plugin', () => {
   it("onMissing: 'throw' is NOT relabeled: it still rejects NO_HANDLER through a plugin", async () => {
     const bus = createAsyncCommandBus({ onMissing: 'throw' });
     bus.use((_c, next) => next());
-    await expect(bus.dispatch('nobody', 1)).rejects.toMatchObject({ code: 'VC_CORE_NO_HANDLER' });
+    await expect(bus.dispatch('nobody', 1)).rejects.toMatchObject({ code: 'core:missing:handler' });
     expect(errSpy).not.toHaveBeenCalled();
   });
 
@@ -248,8 +247,8 @@ describe('async bus - a throwing or rejecting plugin', () => {
     bus.on('*', (_c, r) => { star.push(r); });
     // An async after-hook: the settle awaits it before re-throwing.
     bus.onAfter(async (_c, r) => { after.push(r); });
-    await expect(bus.dispatch('nobody', 1)).rejects.toMatchObject({ code: 'VC_CORE_NO_HANDLER' });
-    expect(star.map((r) => (r.error as BusError).code)).toEqual(['VC_CORE_NO_HANDLER']);
+    await expect(bus.dispatch('nobody', 1)).rejects.toMatchObject({ code: 'core:missing:handler' });
+    expect(star.map((r) => (r.error as BusError).code)).toEqual(['core:missing:handler']);
     expect(after).toEqual(star);
 
     const recovered = { ok: false, value: undefined, error: new Error('recovered') } as CommandResult;

@@ -69,11 +69,11 @@ describe('fetchLoaders', () => {
     expect(router.currentRoute.value.location.name).toBe('home');
   });
 
-  it('retries a flaky loader on 500 (the retry/timeout/CSRF handling this fix was for)', async () => {
+  it('retries a flaky loader on 503 (the retry/timeout/CSRF handling this fix was for)', async () => {
     let attempts = 0;
     (globalThis.fetch as any).mockImplementation(async () => {
       attempts++;
-      return attempts < 2 ? jsonResponse({ error: 'flaky' }, false, 500) : jsonResponse({ items: [1] });
+      return attempts < 2 ? jsonResponse({ detail: 'flaky' }, false, 503) : jsonResponse({ items: [1] });
     });
 
     vi.useFakeTimers();

@@ -9,20 +9,34 @@ import { it } from '../src/vitest';
 
 const tick = (ms = 0) => new Promise<void>((r) => setTimeout(r, ms));
 
+/**
+ * A handler that must still be in flight when the test acts waits on a gate
+ * the test opens, not on a timer: under load a handler's timer can expire
+ * before the test's own tick, and the dispatch settles too early.
+ */
+function gate(): { wait: Promise<void>; open: () => void } {
+  let open!: () => void;
+  const wait = new Promise<void>((r) => { open = r; });
+  return { wait, open };
+}
+
 describe('supersede plugin', () => {
   it('aborts the previous in-flight dispatch for the same key', async ({ asyncBus: bus }) => {
     const abortedTerms: string[] = [];
+    const held = gate();
     bus.use(supersede());
     bus.register('search', async (cmd) => {
       const term = (cmd.payload as any).term;
       cmd.signal?.addEventListener('abort', () => abortedTerms.push(term));
-      await tick(10);
+      await held.wait;
       return term;
     });
 
     const first = bus.dispatch('search', {}, { term: 'a' });
     await tick(0); // let the first dispatch register its abort listener
     const second = bus.dispatch('search', {}, { term: 'ab' }); // same key ('search:{}') supersedes it
+    await tick(0);
+    held.open();
 
     const [r1, r2] = await Promise.all([first, second]);
     expect(abortedTerms).toEqual(['a']);
@@ -66,49 +80,60 @@ describe('supersede plugin', () => {
 
   it('honors a custom key and skips superseding on a null key', async ({ asyncBus: bus }) => {
     let aborts = 0;
+    let held = gate();
     bus.use(supersede({ key: (cmd) => (cmd.target as any).lane ?? null }));
     bus.register('act', async (cmd) => {
       cmd.signal?.addEventListener('abort', () => { aborts++; });
-      await tick(5);
+      await held.wait;
       return 1;
     });
 
     const first = bus.dispatch('act', { lane: 'x' });
     await tick(0);
     const second = bus.dispatch('act', { lane: 'x' }); // same lane -> supersedes
+    await tick(0);
+    held.open();
     await Promise.all([first, second]);
     expect(aborts).toBe(1);
 
     aborts = 0;
-    await Promise.all([
+    held = gate();
+    const both = Promise.all([
       bus.dispatch('act', { lane: null }),
       bus.dispatch('act', { lane: null }), // null key -> never superseded
     ]);
+    await tick(0);
+    held.open();
+    await both;
     expect(aborts).toBe(0);
   });
 
   it('actions filter scopes which commands are superseded', async ({ asyncBus: bus }) => {
     let aborts = 0;
+    const held = gate();
     bus.use(supersede({ actions: ['search*'] }));
     bus.register('ping', async (cmd) => {
       cmd.signal?.addEventListener('abort', () => { aborts++; });
-      await tick(5);
+      await held.wait;
       return 1;
     });
 
     const first = bus.dispatch('ping', {});
     await tick(0);
     const second = bus.dispatch('ping', {});
+    await tick(0);
+    held.open();
     await Promise.all([first, second]);
     expect(aborts).toBe(0); // 'ping' not in scope -> not superseded
   });
 
   it('merges with a caller-supplied signal - either source can abort', async ({ asyncBus: bus }) => {
     let sawAbort = false;
+    const held = gate();
     bus.use(supersede());
     bus.register('search', async (cmd) => {
       cmd.signal?.addEventListener('abort', () => { sawAbort = true; });
-      await tick(10);
+      await held.wait;
       return 1;
     });
 
@@ -116,6 +141,7 @@ describe('supersede plugin', () => {
     const p = bus.dispatch('search', {}, {}, { signal: ctrl.signal });
     await tick(0);
     ctrl.abort(); // the CALLER's signal fires - not a supersede - and must still propagate
+    held.open();
     await p;
     expect(sawAbort).toBe(true);
   });

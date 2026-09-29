@@ -196,17 +196,15 @@ describe('typed path params', () => {
     { name: 'plain', path: '/plain/:slug', component: 'Plain' },
   ]);
 
-  it('casts an int param and falls back to the raw string when unparsable', () => {
+  it('casts an int param', () => {
     expect(typed.resolve('/post/42')?.params.id).toBe(42);
-    // Not a number - the raw segment survives rather than becoming NaN.
-    expect(typed.resolve('/post/abc')?.params.id).toBe('abc');
   });
 
-  it("treats '1' and 'true' as true and everything else as false", () => {
+  it("casts a bool param: '1' and 'true' are true, '0' and 'false' false", () => {
     expect(typed.resolve('/flag/1')?.params.on).toBe(true);
     expect(typed.resolve('/flag/true')?.params.on).toBe(true);
     expect(typed.resolve('/flag/0')?.params.on).toBe(false);
-    expect(typed.resolve('/flag/nope')?.params.on).toBe(false);
+    expect(typed.resolve('/flag/false')?.params.on).toBe(false);
   });
 
   it('leaves untyped params as strings', () => {
@@ -308,5 +306,49 @@ describe('cyclic parent chains', () => {
     expect(chain).toContain('a');
     // A wrong page beats a frozen tab: the route still resolves.
     expect(table.resolve('/a')?.record.name).toBe('a');
+  });
+});
+
+describe('typed params match only values of their type', () => {
+  const t = createRouteTable([
+    { name: 'product', path: '/products/:id', component: 'P', params: { id: 'int' } },
+    { name: 'flag', path: '/flags/:on', component: 'F', params: { on: 'bool' } },
+    { name: 'slug', path: '/products/:slug', component: 'S' },
+  ]);
+
+  it('an int param takes digits only: /products/7x is not product 7', () => {
+    expect(t.resolve('/products/7')?.params).toEqual({ id: 7 });
+    expect(t.resolve('/products/-3')?.params).toEqual({ id: -3 });
+    // Falls through to the next row instead of reading a garbage URL as id 7.
+    expect(t.resolve('/products/7x')?.record.name).toBe('slug');
+    expect(t.resolve('/products/7.5')?.record.name).toBe('slug');
+    expect(t.resolve('/products/abc')?.record.name).toBe('slug');
+  });
+
+  it('a bool param takes 1/0/true/false only', () => {
+    expect(t.resolve('/flags/true')?.params).toEqual({ on: true });
+    expect(t.resolve('/flags/0')?.params).toEqual({ on: false });
+    expect(t.resolve('/flags/banana')).toBeNull();
+  });
+
+  it('an explicit regex that admits a non-integer still yields no string int', () => {
+    const loose = createRouteTable([
+      { name: 'p', path: '/p/:id(.+)', component: 'P', params: { id: 'int' } },
+      { name: 'q', path: '/p/:slug', component: 'Q' },
+    ]);
+    expect(loose.resolve('/p/12')?.params).toEqual({ id: 12 });
+    expect(loose.resolve('/p/abc')?.record.name).toBe('q');
+  });
+
+  it('an explicit regex that admits a non-flag still yields no guessed bool', () => {
+    const loose = createRouteTable([{ name: 'f', path: '/f/:on(.+)', component: 'F', params: { on: 'bool' } }]);
+    expect(loose.resolve('/f/TRUE')?.params).toEqual({ on: true });
+    expect(loose.resolve('/f/banana')).toBeNull();
+  });
+
+  it('an explicit regex still wins over the type default', () => {
+    const custom = createRouteTable([{ name: 'p', path: '/p/:id(\\d{3})', component: 'P', params: { id: 'int' } }]);
+    expect(custom.resolve('/p/123')?.params).toEqual({ id: 123 });
+    expect(custom.resolve('/p/12')).toBeNull();
   });
 });

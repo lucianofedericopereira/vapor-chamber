@@ -5,11 +5,9 @@
  * Replaces ad-hoc try/catch blocks scattered across components.
  */
 
-import {
-  createCommandBus,
-  setCommandBus,
-  useCommandError,
-} from 'vapor-chamber'
+import { createCommandBus, setCommandBus } from 'vapor-chamber'
+// Composables from the Vue entry, which wires Vue (the root would not).
+import { useCommandError } from 'vapor-chamber/vue'
 
 const bus = createCommandBus()
 setCommandBus(bus)
@@ -63,7 +61,7 @@ console.log('Auth errors:', authErrors.errors.value.length)    // -> 1
 
 /*
  * <script setup lang="ts">
- * import { useCommand, useCommandError } from 'vapor-chamber'
+ * import { useCommand, useCommandError } from 'vapor-chamber/vue'
  *
  * // Per-component error state - cleared on unmount automatically
  * const { dispatch, loading } = useCommand()
@@ -74,11 +72,12 @@ console.log('Auth errors:', authErrors.errors.value.length)    // -> 1
  *
  * <template>
  *   <div>
- *     <button @click="dispatch('checkoutSubmit', formData)" :disabled="loading.value">
+ *     <!-- aria-disabled, not :disabled: keyboard focus stays on the button -->
+ *     <button @click="!loading.value && dispatch('checkoutSubmit', formData)" :aria-disabled="loading.value">
  *       {{ loading.value ? 'Processing...' : 'Pay now' }}
  *     </button>
  *
- *     <div v-if="latestError.value" class="error-banner">
+ *     <div v-if="latestError.value" class="error-banner" role="alert">
  *       <p>{{ latestError.value.message }}</p>
  *       <button @click="clearErrors">Dismiss</button>
  *     </div>
@@ -91,7 +90,7 @@ console.log('Auth errors:', authErrors.errors.value.length)    // -> 1
 bus.dispatch('orderSubmit', {})
 
 // The global `errors` list kept capturing after clearErrors() above, so its
-// first entry is the line-57 cartAdd failure.
+// first entry is the cartAdd failure from the filtered section.
 const entry = errors.value[0]
 console.log('Error action:', entry.cmd.action)    // 'cartAdd'
 console.log('Error message:', entry.error.message) // 'Product ID is required'

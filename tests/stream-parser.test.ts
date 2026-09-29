@@ -163,9 +163,8 @@ describe('StreamParser - chunked / streamed input', () => {
   });
 
   // A 204, a 304, a HEAD reply or a hand-built `new Response(null)` all carry
-  // a null body. That used to throw `Cannot read properties of null (reading
-  // 'getReader')` out of stream() as a rejection - the one failure in this
-  // parser that bypassed onError entirely.
+  // a null body, which must end the stream rather than reject out of stream()
+  // past onError.
   it('treats a body-less response as an empty stream', async () => {
     const errors: unknown[] = [];
     let ended = false;
@@ -248,7 +247,7 @@ describe('StreamParser - object/array lifecycle callbacks', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Number-format error paths + uppercase exponent (previously uncovered states)
+// Number-format error paths + uppercase exponent
 // ---------------------------------------------------------------------------
 
 describe('number edge states', () => {

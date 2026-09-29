@@ -44,7 +44,7 @@ describe('validateSchemas - sync', () => {
     expect(ok.ok).toBe(true);
 
     const bad = bus.dispatch('inc', -1);
-    expect(bad).toFailWith('VC_VALIDATION_FAILED');
+    expect(bad).toFailWith('validateSchemas:invalid:payload');
     expect(bad.error).toBeInstanceOf(BusError);
     expect(bad.error?.message).toMatch(/must be positive/);
   });
@@ -83,7 +83,7 @@ describe('validateSchemas - sync', () => {
     expect(r.ok).toBe(true);
 
     const bad = bus.dispatch('act', 'whatever-target', { not: 'id' });
-    expect(bad).toFailWith('VC_VALIDATION_FAILED');
+    expect(bad).toFailWith('validateSchemas:invalid:payload');
   });
 
   it('field: custom function extracts a slice', ({ bus }) => {
@@ -94,7 +94,7 @@ describe('validateSchemas - sync', () => {
     ));
 
     expect(bus.dispatch('act', { count: 5 }).ok).toBe(true);
-    expect(bus.dispatch('act', { count: -1 })).toFailWith('VC_VALIDATION_FAILED');
+    expect(bus.dispatch('act', { count: -1 })).toFailWith('validateSchemas:invalid:payload');
   });
 
   it('rejects with a clear error when given an async schema on the sync plugin', ({ bus }) => {
@@ -104,7 +104,7 @@ describe('validateSchemas - sync', () => {
     }));
 
     const r = bus.dispatch('act', 5);
-    expect(r).toFailWith('VC_VALIDATION_FAILED');
+    expect(r).toFailWith('validateSchemas:invalid:payload');
     expect(r.error?.message).toMatch(/async schema/);
   });
 });
@@ -118,7 +118,7 @@ describe('validateSchemasAsync - async bus', () => {
     expect(ok).toSucceedWith(7);
 
     const bad = await bus.dispatch('act', -1);
-    expect(bad).toFailWith('VC_VALIDATION_FAILED');
+    expect(bad).toFailWith('validateSchemas:invalid:payload');
   });
 });
 

@@ -19,10 +19,10 @@ import StatusBar from './StatusBar.vue';
 // async handler's promise is wrapped as a plain ok-value - rejections escape
 // as unhandled and lastError never fires.
 const bus = createAsyncCommandBus();
-setCommandBus(bus as any); // share it: useCommand/useSharedCommandState pick it up
+setCommandBus(bus); // share it: useCommand/useSharedCommandState pick it up
 
 // Stateful fake server: the cart accumulates across dispatches, so the UI's
-// confirmed totals actually move. (Was stateless - total stuck at $19.99.)
+// confirmed totals actually move.
 const serverCart = { count: 0, cents: 0 };
 bus.register('cartAdd', async (cmd) => {
   await new Promise(r => setTimeout(r, 250));

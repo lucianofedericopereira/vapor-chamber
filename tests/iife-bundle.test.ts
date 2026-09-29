@@ -79,7 +79,7 @@ describe.skipIf(!haveAll)('IIFE variants - audience-based contracts', () => {
         'createCommandBus', 'createAsyncCommandBus',
         'createApp', 'connect',
         'http',
-        'logger', 'validator', 'debounce', 'throttle', 'authGuard', 'retry',
+        'logger', 'validator', 'debounce', 'throttle', 'authGuard',
       ]);
     });
 
@@ -106,7 +106,7 @@ describe.skipIf(!haveAll)('IIFE variants - audience-based contracts', () => {
         'createCommandBus', 'createAsyncCommandBus',
         'createApp', 'connect',
         'http',
-        'logger', 'validator', 'debounce', 'throttle', 'authGuard', 'retry',
+        'logger', 'validator', 'debounce', 'throttle', 'authGuard',
         'defineVaporCustomElement', 'defineWidget', 'emitDOMEvent',
       ]);
     });
@@ -137,7 +137,7 @@ describe.skipIf(!haveAll)('IIFE variants - audience-based contracts', () => {
         'http', 'ws', 'sse',
         // all plugins
         'logger', 'validator', 'history', 'debounce', 'throttle',
-        'authGuard', 'optimistic', 'retry', 'persist', 'createChannel',
+        'authGuard', 'optimistic', 'persist', 'createChannel',
         // widget surface
         'defineVaporCustomElement', 'defineWidget', 'emitDOMEvent',
         // full Vapor surface

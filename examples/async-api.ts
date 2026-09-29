@@ -4,7 +4,7 @@
  * Demonstrates: async command bus, async plugins, error handling
  */
 
-import { createAsyncCommandBus, type AsyncPlugin } from 'vapor-chamber';
+import { BusError, createAsyncCommandBus, type AsyncPlugin } from 'vapor-chamber';
 
 // Types
 interface User {
@@ -14,7 +14,11 @@ interface User {
 }
 
 // Create async bus
-const bus = createAsyncCommandBus();
+// The bus re-sends what re-sending can change (a timeout, a 429 or 503, a
+// declared Retry-After) and never a verdict such as a 422. A plain throw may
+// have landed, so it is re-sent only for an action declared idempotent: a
+// read is, whatever it returns.
+const bus = createAsyncCommandBus({ retry: { baseDelay: 1000, actions: { userFetch: 'idempotent' } } });
 
 // Async logger plugin
 const asyncLogger: AsyncPlugin = async (cmd, next) => {
@@ -35,35 +39,6 @@ const asyncLogger: AsyncPlugin = async (cmd, next) => {
 };
 
 bus.use(asyncLogger);
-
-// Retry plugin - retries failed commands up to 3 times
-const retryPlugin: AsyncPlugin = async (cmd, next) => {
-  const maxRetries = 3;
-
-  for (let attempt = 1; attempt <= maxRetries; attempt++) {
-    const result = await next();
-
-    if (result.ok) {
-      return result;
-    }
-
-    if (attempt < maxRetries) {
-      console.log(`Attempt ${attempt} failed, retrying in ${attempt}s...`);
-      await new Promise(r => setTimeout(r, attempt * 1000));
-    }
-  }
-
-  return { ok: false, error: new Error('Max retries exceeded') };
-};
-
-// Only apply retry to specific actions
-const retryableActions = ['userFetch', 'userUpdate'];
-bus.use(async (cmd, next) => {
-  if (retryableActions.includes(cmd.action)) {
-    return retryPlugin(cmd, next);
-  }
-  return next();
-});
 
 // Simulated API (replace with real fetch in production)
 const fakeUsers: User[] = [
@@ -89,7 +64,9 @@ bus.register('userFetch', async (cmd) => {
 
   const user = fakeUsers.find(u => u.id === id);
   if (!user) {
-    throw new Error(`User ${id} not found`);
+    // A VERDICT, so a coded failure: `missing` is never re-sent, where a
+    // plain throw (the "Network error" above) is, for this idempotent read.
+    throw new BusError('missing:user', `User ${id} not found`, { context: { id } });
   }
 
   return user;
@@ -121,7 +98,7 @@ bus.register('userUpdate', async (cmd) => {
 
   const user = fakeUsers.find(u => u.id === id);
   if (!user) {
-    throw new Error(`User ${id} not found`);
+    throw new BusError('missing:user', `User ${id} not found`, { context: { id } });
   }
 
   Object.assign(user, updates);
@@ -149,9 +126,9 @@ async function main() {
   const updateResult = await bus.dispatch('userUpdate', { id: 1 }, { name: 'Alice Smith' });
   console.log('Result:', updateResult);
 
-  console.log('\n--- Fetching non-existent user ---');
+  console.log('\n--- Fetching non-existent user (not retried: a verdict) ---');
   const notFoundResult = await bus.dispatch('userFetch', { id: 999 });
-  console.log('Result:', notFoundResult);
+  console.log('Result:', notFoundResult.ok ? notFoundResult.value : (notFoundResult.error as BusError | undefined)?.code); // 'app:missing:user'
 }
 
 main().catch(console.error);

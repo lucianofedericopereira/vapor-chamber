@@ -15,6 +15,7 @@ import { createCommandBus, createAsyncCommandBus } from '../src/index';
 import { rateLimit, metrics, serialize, idempotent, supersede } from '../src/plugins-extra';
 import type { Command } from '../src/index';
 import { it } from '../src/vitest';
+import { wired } from '../src/testing';
 
 afterEach(() => {
   vi.useRealTimers();
@@ -41,7 +42,7 @@ describe('rateLimit window compaction', () => {
     expect(bus.dispatch('tap', {}).ok).toBe(true);
     expect(bus.dispatch('tap', {}).ok).toBe(true);
     expect(bus.dispatch('tap', {}).ok).toBe(true);
-    expect(bus.dispatch('tap', {})).toFailWith('VC_PLUGIN_RATE_LIMITED'); // over the limit
+    expect(bus.dispatch('tap', {})).toFailWith('rateLimit:limited:action'); // over the limit
 
     // ...then let all three expire: head walks past them and, being more than
     // half the array, triggers the slice-compaction.
@@ -76,7 +77,7 @@ describe('metrics eviction', () => {
 
 describe('serialize lane resilience', () => {
   it('absorbs a throwing command and still runs the next same-key command', async () => {
-    const plugin = serialize();
+    const plugin = wired(serialize());
     const c = cmd('save');
 
     await expect(
@@ -95,7 +96,7 @@ describe('serialize lane resilience', () => {
 
 describe('idempotent', () => {
   it('leaves cmd.meta untouched with stampMeta:false', async () => {
-    const plugin = idempotent({ stampMeta: false });
+    const plugin = wired(idempotent({ stampMeta: false }));
     const c = cmd('orderCreate');
     await plugin(c, () => ({ ok: true, value: 1 }) as any);
     expect((c.meta as any).idempotencyKey).toBeUndefined();
@@ -105,7 +106,7 @@ describe('idempotent', () => {
     vi.useFakeTimers();
     vi.setSystemTime(2_000_000);
 
-    const plugin = idempotent({ ttl: 1000 });
+    const plugin = wired(idempotent({ ttl: 1000 }));
     let runs = 0;
     const next = () => ({ ok: true, value: ++runs }) as any;
 
@@ -123,13 +124,11 @@ describe('idempotent', () => {
   });
 
   it('maxKeys: 0 remembers nothing, matching cache({ maxSize: 0 })', async () => {
-    // This used to assert the opposite - that the entry still landed and a
-    // repeat was served from cache - because eviction removed ONE oldest key
-    // before inserting, which on an empty map removed nothing. That made
-    // `maxKeys: 0` a one-entry cache while `cache({ maxSize: 0 })` stored
-    // nothing: the same word meaning opposite things in one module. Eviction
-    // now runs down to the bound after the insert, as cache() does.
-    const plugin = idempotent({ maxKeys: 0 });
+    // Eviction runs down to the bound AFTER the insert, as cache() does:
+    // evicting one key before inserting would, on an empty map, evict nothing
+    // and make `maxKeys: 0` a one-entry cache while `cache({ maxSize: 0 })`
+    // stores nothing - one word, opposite meanings, in one module.
+    const plugin = wired(idempotent({ maxKeys: 0 }));
     const first = await plugin(cmd('orderCreate'), () => ({ ok: true, value: 1 }) as any);
     expect(first.value).toBe(1);
     const repeat = await plugin(cmd('orderCreate'), () => ({ ok: true, value: 2 }) as any);
@@ -141,7 +140,7 @@ describe('idempotent', () => {
   // absent. In cache() the same value produced the opposite failure - the
   // eviction walk never broke, so it dropped everything and reported size 0.
   it('a NaN maxKeys remembers nothing instead of growing unbounded', async () => {
-    const plugin = idempotent({ maxKeys: Number('nope'), ttl: 60_000 });
+    const plugin = wired(idempotent({ maxKeys: Number('nope'), ttl: 60_000 }));
     const run = (target: number, value: number) =>
       plugin({ action: 'orderCreate', target, meta: {} } as any, () => ({ ok: true, value }) as any);
 
@@ -161,7 +160,7 @@ describe('idempotent', () => {
     // previous key and the plugin quietly behaved as a 1-entry cache. cache()
     // clamps `maxSize` for the same class of reason (there, a negative bound
     // hung the eviction loop outright).
-    const plugin = idempotent({ maxKeys: -5 });
+    const plugin = wired(idempotent({ maxKeys: -5 }));
     const first = await plugin(cmd('orderCreate'), () => ({ ok: true, value: 1 }) as any);
     expect(first.value).toBe(1);
     const repeat = await plugin(cmd('orderCreate'), () => ({ ok: true, value: 2 }) as any);
@@ -169,7 +168,7 @@ describe('idempotent', () => {
   });
 
   it('evicts oldest first down to maxKeys', async () => {
-    const plugin = idempotent({ maxKeys: 2 });
+    const plugin = wired(idempotent({ maxKeys: 2 }));
     const run = (target: string, value: number) =>
       plugin({ action: 'orderCreate', target, meta: {} } as any, () => ({ ok: true, value }) as any);
 
@@ -184,7 +183,7 @@ describe('idempotent', () => {
   });
 
   it('clears inflight on rejection and does not cache the failure', async () => {
-    const plugin = idempotent();
+    const plugin = wired(idempotent());
     await expect(
       Promise.resolve(plugin(cmd('orderCreate'), () => Promise.reject(new Error('backend down')))),
     ).rejects.toThrow('backend down');

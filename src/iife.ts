@@ -22,6 +22,7 @@ import {
   createCommandBus,
   createAsyncCommandBus,
   type CommandBusOptions,
+  type AsyncCommandBusOptions,
 } from './command-bus';
 import {
   logger,
@@ -31,7 +32,6 @@ import {
   throttle,
   authGuard,
   optimistic,
-  retry,
   persist,
   createChannel,
 } from './plugins';
@@ -51,7 +51,7 @@ import {
   getVaporInteropPlugin,
 } from './chamber-vapor';
 import { useSharedCommandState, useCommand, configureVue } from './chamber';
-import type { AsyncPlugin, Plugin } from './command-bus';
+import type { AsyncPlugin } from './command-bus';
 
 // ---------------------------------------------------------------------------
 // createApp - convenience entry point for CDN usage
@@ -66,11 +66,13 @@ export type CreateAppOptions = {
   /**
    * Plugins to install on the bus (sync or async).
    */
-  plugins?: Plugin[];
+  plugins?: AsyncPlugin[];
   /**
    * Dead-letter mode. Default: 'error'
    */
   onMissing?: CommandBusOptions['onMissing'];
+  /** The bus's retry (on by default); `{ actions: { cartAdd: 'idempotent' } }` declares, `false` turns it off. */
+  retry?: AsyncCommandBusOptions['retry'];
 };
 
 /**
@@ -86,7 +88,7 @@ function createApp(options: CreateAppOptions = {}): {
   bus: ReturnType<typeof createAsyncCommandBus>;
   dispatch: ReturnType<typeof createAsyncCommandBus>['dispatch'];
 } {
-  const bus = createAsyncCommandBus({ onMissing: options.onMissing ?? 'error' });
+  const bus = createAsyncCommandBus({ onMissing: options.onMissing ?? 'error', retry: options.retry });
 
   if (options.plugins) {
     for (const plugin of options.plugins) bus.use(plugin as AsyncPlugin);
@@ -95,7 +97,7 @@ function createApp(options: CreateAppOptions = {}): {
     bus.use(options.transport);
   }
 
-  return { bus, dispatch: bus.dispatch.bind(bus) };
+  return { bus, dispatch: bus.dispatch };
 }
 
 // ---------------------------------------------------------------------------
@@ -138,13 +140,9 @@ function mount(selector: string, options: MountOptions = {}): {
  * Available in every variant so the same call site works regardless of which
  * IIFE bundle is loaded.
  */
-function connect(options: HttpBridgeOptions & { plugins?: Plugin[]; onMissing?: CommandBusOptions['onMissing'] }) {
-  const { plugins, onMissing, ...httpOptions } = options;
-  return createApp({
-    transport: createHttpBridge({ csrf: true, ...httpOptions }),
-    plugins,
-    onMissing,
-  });
+function connect(options: HttpBridgeOptions & Omit<CreateAppOptions, 'transport'>) {
+  const { plugins, onMissing, retry, ...httpOptions } = options;
+  return createApp({ transport: createHttpBridge({ csrf: true, ...httpOptions }), plugins, onMissing, retry });
 }
 
 /**
@@ -215,7 +213,6 @@ const VaporChamber = {
   throttle,
   authGuard,
   optimistic,
-  retry,
   persist,
   createChannel,
 
@@ -242,9 +239,7 @@ const VaporChamber = {
 } as const;
 
 // Assign to globalThis so it's accessible as window.VaporChamber in browsers
-if (typeof globalThis !== 'undefined') {
-  (globalThis as any).VaporChamber = VaporChamber;
-}
+(globalThis as any).VaporChamber = VaporChamber;
 
 // Default export only: the IIFE build assigns the DEFAULT export to the
 // `VaporChamber` global, so the API object lands directly on window

@@ -25,6 +25,7 @@ import {
   createCommandBus,
   createAsyncCommandBus,
   type CommandBusOptions,
+  type AsyncCommandBusOptions,
 } from './command-bus';
 import {
   logger,
@@ -32,33 +33,30 @@ import {
   debounce,
   throttle,
   authGuard,
-  retry,
 } from './plugins';
 import { createHttpBridge, type HttpBridgeOptions } from './transports';
 import { defineVaporCustomElement } from './chamber-vapor';
 import { configureVue } from './chamber';
-import type { AsyncPlugin, Plugin } from './command-bus';
+import type { AsyncPlugin } from './command-bus';
 
 export type CreateAppOptions = {
   transport?: AsyncPlugin;
-  plugins?: Plugin[];
+  plugins?: AsyncPlugin[];
   onMissing?: CommandBusOptions['onMissing'];
+  /** The bus's retry (on by default); `{ actions: { cartAdd: 'idempotent' } }` declares, `false` turns it off. */
+  retry?: AsyncCommandBusOptions['retry'];
 };
 
 function createApp(options: CreateAppOptions = {}) {
-  const bus = createAsyncCommandBus({ onMissing: options.onMissing ?? 'error' });
-  if (options.plugins) for (const p of options.plugins) bus.use(p as AsyncPlugin);
+  const bus = createAsyncCommandBus({ onMissing: options.onMissing ?? 'error', retry: options.retry });
+  if (options.plugins) for (const p of options.plugins) bus.use(p);
   if (options.transport) bus.use(options.transport);
-  return { bus, dispatch: bus.dispatch.bind(bus) };
+  return { bus, dispatch: bus.dispatch };
 }
 
-function connect(options: HttpBridgeOptions & { plugins?: Plugin[]; onMissing?: CommandBusOptions['onMissing'] }) {
-  const { plugins, onMissing, ...httpOptions } = options;
-  return createApp({
-    transport: createHttpBridge({ csrf: true, ...httpOptions }),
-    plugins,
-    onMissing,
-  });
+function connect(options: HttpBridgeOptions & Omit<CreateAppOptions, 'transport'>) {
+  const { plugins, onMissing, retry, ...httpOptions } = options;
+  return createApp({ transport: createHttpBridge({ csrf: true, ...httpOptions }), plugins, onMissing, retry });
 }
 
 /**
@@ -96,11 +94,8 @@ function connect(options: HttpBridgeOptions & { plugins?: Plugin[]; onMissing?: 
  *
  * A Vapor component returns a BLOCK - real DOM nodes - not a vnode. On a page
  * with no build step there is no compiler to turn a template into one, so build
- * the nodes directly. This example used to read
- * `setup(props) { return () => h('span', ...) }`, which is wrong twice over on
- * the page it is written for: `h` is not on the `VaporChamber` global in any
- * variant (so the snippet threw `h is not defined`), and `h()` produces a vnode,
- * which is the vDOM shape Vapor replaced. Pinned by
+ * the nodes directly: `h()` is not on the `VaporChamber` global in any variant,
+ * and it produces a vnode, the vDOM shape Vapor replaced. Pinned by
  * `tests/vapor/widget-shape.test.ts`, which mounts a real widget.
  *
  * @example
@@ -207,7 +202,6 @@ const VaporChamber = {
   debounce,
   throttle,
   authGuard,
-  retry,
   // Widget surface (the variant's identity)
   defineVaporCustomElement,
   defineWidget,
@@ -233,9 +227,7 @@ const VaporChamber = {
   configureVue,
 } as const;
 
-if (typeof globalThis !== 'undefined') {
-  (globalThis as any).VaporChamber = VaporChamber;
-}
+(globalThis as any).VaporChamber = VaporChamber;
 
 // Default export only: the IIFE build assigns the DEFAULT export to the
 // `VaporChamber` global, so the API object lands directly on window

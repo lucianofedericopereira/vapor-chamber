@@ -7,12 +7,11 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { defineComponent, h } from 'vue';
-import { createMemoryHistory } from '../../src/router/history';
-import { createRouter } from '../../src/router/index';
 import { bladeFetcher } from '../../src/router/remote';
 import { isRouterError } from '../../src/router/errors';
 import type { HttpClient } from '../../src/http';
 import type { RouteRecord } from '../../src/router/types';
+import { makeRouter } from './fixture';
 
 const ROWS: RouteRecord[] = [
   { name: 'shell', path: '/', parent: null },
@@ -30,9 +29,8 @@ function fakeHttp(get: (url: string, config?: unknown) => Promise<{ data: unknow
 describe('blade rows', () => {
   it('wraps fetched HTML into a component via a custom fetchBlade', async () => {
     const fetchBlade = vi.fn(async () => '<p>server html</p>');
-    const router = createRouter({
+    const router = makeRouter({
       base: '/admin',
-      history: createMemoryHistory('/admin'),
       routes: ROWS,
       components: HOME,
       fetchBlade,
@@ -48,9 +46,8 @@ describe('blade rows', () => {
 
   it('surfaces blade_fetch_failed when the fetch rejects', async () => {
     const onError = vi.fn();
-    const router = createRouter({
+    const router = makeRouter({
       base: '/admin',
-      history: createMemoryHistory('/admin'),
       routes: ROWS,
       components: HOME,
       fetchBlade: async () => {
@@ -68,13 +65,12 @@ describe('blade rows', () => {
     const get = vi.fn(async () => ({
       data: '<html><body><main><h1>Hi</h1></main><footer>skip</footer></body></html>',
     }));
-    const router = createRouter({
+    const router = makeRouter({
       base: '/admin',
-      history: createMemoryHistory('/admin'),
       routes: ROWS,
       components: HOME,
-      // bladeFetcher lives in vapor-chamber/router/remote now: the router core
-      // no longer builds an http client for a feature most tables never use.
+      // bladeFetcher lives in vapor-chamber/router/remote: the router core
+      // builds no http client for a feature most tables never use.
       fetchBlade: bladeFetcher({ http: fakeHttp(get) }),
     });
     await router.isReady();
@@ -87,9 +83,8 @@ describe('blade rows', () => {
 describe('table loaders', () => {
   it('loads a remote table from { url }; reload() refetches', async () => {
     const get = vi.fn(async () => ({ data: { routes: ROWS, base: '/admin' } }));
-    const router = createRouter({
+    const router = makeRouter({
       base: '/admin',
-      history: createMemoryHistory('/admin'),
       routes: { url: '/api/routes' },
       components: HOME,
       http: fakeHttp(get),
@@ -105,9 +100,8 @@ describe('table loaders', () => {
 
   it('remote table load failure dispatches routes_load_failed', async () => {
     const onError = vi.fn();
-    const router = createRouter({
+    const router = makeRouter({
       base: '/admin',
-      history: createMemoryHistory('/admin'),
       routes: { url: '/api/routes' },
       components: {},
       http: fakeHttp(async () => {
@@ -131,9 +125,8 @@ describe('table loaders', () => {
     const saved = globalThis.process;
     const onError = vi.fn();
     const get = vi.fn(async () => ({ data: { routes: ROWS, base: '/admin' } }));
-    const router = createRouter({
+    const router = makeRouter({
       base: '/admin',
-      history: createMemoryHistory('/admin'),
       routes: { url: '/api/routes' },
       components: HOME,
       http: fakeHttp(get),
@@ -158,9 +151,8 @@ describe('table loaders', () => {
     el.textContent = JSON.stringify({ routes: ROWS });
     document.body.appendChild(el);
 
-    const router = createRouter({
+    const router = makeRouter({
       base: '/admin',
-      history: createMemoryHistory('/admin'),
       routes: { inline: '#vcr-routes' },
       components: HOME,
     });
@@ -182,9 +174,8 @@ describe('component resolution', () => {
   it('loads a lazy (async import) component once and caches it', async () => {
     const Lazy = defineComponent({ render: () => h('span', 'lazy') });
     const loader = vi.fn(async () => ({ default: Lazy }));
-    const router = createRouter({
+    const router = makeRouter({
       base: '/admin',
-      history: createMemoryHistory('/admin'),
       routes: LAZY_ROWS,
       components: { ...HOME, Lazy: loader },
     });
@@ -198,11 +189,10 @@ describe('component resolution', () => {
   });
 
   it('surfaces component_missing for an unregistered component key', async () => {
-    const router = createRouter({
+    const router = makeRouter({
       base: '/admin',
-      history: createMemoryHistory('/admin'),
       routes: LAZY_ROWS,
-      components: HOME, // no 'Ghost'
+      components: HOME, // no 'Ghost',
     });
     await router.isReady();
 

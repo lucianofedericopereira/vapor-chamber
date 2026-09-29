@@ -24,30 +24,37 @@ panels, Reverb realtime, queued commands).
 - **`__invoke($target, $payload, $user)` signature.** `$target` is the
   `target` argument of `bus.dispatch(action, target, payload)`; `$payload` is
   the optional `payload` argument; `$user` is the authenticated user (or null).
+- **The target is identity, the payload is input.** Look the target up with
+  `findOrFail` (a missing one is a 404); validate the payload, so a field error
+  points at `/payload/<field>`, the one pointer spelling FormBus maps.
 - **Return any JSON-serializable shape** - it becomes the client's
   `result.value`.
 - **Throw framework exceptions** for failure paths. The controller answers
-  each as an RFC 9457 problem (`application/problem+json`, `{ type, title,
-  status, detail, code }`):
-  - `ValidationException` -> 422, `code: 'validation_failed'`
+  each as an RFC 9457 problem (`application/problem+json`, `{ status, code,
+  detail, errors? }`):
+  - `ValidationException` -> 422, `code: 'validation_failed'`, the field
+    errors as `errors: [{ pointer: '/payload/<field>', detail }]`
   - `AuthorizationException` -> 403, `code: 'forbidden'`
   - `ModelNotFoundException` -> 404, `code: 'not_found'`
   - An exception with its own `render()` -> its status, `detail`, and `code`
-    (or the last segment of its `type`)
   - Anything else -> 500, `code: 'internal_error'`, `detail: 'Internal error'`
     (and `report()`s the original)
 
   On the batch endpoint the same problem rides on the command's own result,
-  `{ id, ok: false, problem }`, inside a 200.
+  `{ id, problem }`, inside a 200; a success is `{ id, state }`.
 
 ## Idempotency (double-submit protection)
 
-When the JS side enables the `idempotent()` plugin, retried or replayed commands
-carry an `Idempotency-Key` header. The controller honors it with a short-lived
-cache (TTL 60s, matching the JS plugin's default): a second POST with the same
-key replays the cached response instead of running the action again, so a
-network retry can't create a duplicate order. No setup is needed beyond a
-working Laravel cache store.
+An action declared idempotent on the JS bus
+(`createAsyncCommandBus({ retry: { actions: { cartSet: 'idempotent' } } })`, or
+`retry: 'idempotent'` on the schema action) carries one `Idempotency-Key` on
+every attempt the bus re-sends; the `idempotent()` plugin stamps one too, and
+the outbox replays with its record's key. The controller honors it with a
+short-lived cache (TTL 60s): a second POST with the same key replays the cached
+response instead of running the action again, so a re-send can't create a
+duplicate order. A re-send that arrives while the first is still running gets
+409 with `Retry-After: 1`, and the bus comes back for the finished answer. No
+setup is needed beyond a working Laravel cache store.
 
 ## Smoke test
 
@@ -64,5 +71,6 @@ php artisan serve
 </script>
 ```
 
-Server log: one `POST /api/vc` with JSON body. Browser console:
-`{ ok: true, value: { count: 1, total: ... } }`.
+Server log: one `POST /api/vc` with JSON body; the answer is
+`{ "state": { "count": 2, ... } }`. Browser console: the command's result,
+`{ ok: true, value: { count: 2, total: ... } }`.

@@ -38,30 +38,39 @@ const REF_DIR = resolve(HERE, '__ref', 'history-redo');
 /**
  * [shipped text, replacement]: the fix, reverted - the recorder back on a
  * `_replaying` flag alone, no origin check, the undo handler and the redo
- * dispatch bracketed by the flag. Since undo/1 the shipped plugin has no flag
+ * dispatch bracketed by the flag. Since undo/1 the shipped code has no flag
  * at all (a scoped origin covers both windows on both buses), so the baseline
  * re-creates it: the pre-q4 code, text for text.
+ *
+ * The recording rule and undo/redo live in src/ledger.ts, shared by the
+ * history() plugin and useCommandHistory, so the transforms apply to the
+ * ledger, and each arm
+ * gets its OWN derived ledger that its plugins-core copy imports. Loading the
+ * shipped ledger from a reverted arm would time the same code twice.
  */
-// biome-ignore-start lint/suspicious/noTemplateCurlyInString: source text matched against src/plugins-core.ts byte for byte, not templates
+// biome-ignore-start lint/suspicious/noTemplateCurlyInString: source text matched against src/ledger.ts byte for byte, not templates
 const REVERT_FIX: Array<[string, string]> = [
-  ["      origin !== 'redo' && origin !== 'undo' && result.ok &&", '      !_replaying && result.ok &&'],
   [
-    '  const plugin: Plugin = ((cmd: Command, next: () => CommandResult) => onSettled(next(), (result) => {',
-    '  let _replaying = false;\n  const plugin: Plugin = ((cmd: Command, next: () => CommandResult) => onSettled(next(), (result) => {',
+    "      if (origin === 'redo' || origin === 'undo' || !result.ok || skip?.(cmd) || (filter && !filter(cmd))) return;",
+    '      if (_replaying || !result.ok || skip?.(cmd) || (filter && !filter(cmd))) return;',
+  ],
+  ['  let inFlight = false;\n', '  let inFlight = false;\n  let _replaying = false;\n'],
+  [
+    "        () => (handler ? _withOriginScope('undo', () => handler(cmd)) : undefined));",
+    '        () => { _replaying = true; try { return handler ? handler(cmd) : undefined; } finally { _replaying = false; } });',
   ],
   [
-    "            try { _withOriginScope('undo', () => undoHandler(cmd)); }\n            catch (e) { console.error(`[vapor-chamber] Undo handler error for \"${cmd.action}\":`, e); }",
-    '            _replaying = true;\n            try { undoHandler(cmd); }\n            catch (e) { console.error(`[vapor-chamber] Undo handler error for "${cmd.action}":`, e); }\n            finally { _replaying = false; }',
-  ],
-  [
-    "          try { _withOriginScope('redo', () => bus.dispatch(cmd.action, cmd.target, cmd.payload)); }\n          catch (e) { console.error(`[vapor-chamber] Redo dispatch error for \"${cmd.action}\":`, e); }",
-    '          _replaying = true;\n          try { bus.dispatch(cmd.action, cmd.target, cmd.payload); }\n          catch (e) { console.error(`[vapor-chamber] Redo dispatch error for "${cmd.action}":`, e); }\n          finally { _replaying = false; }',
+    "        () => (bus ? _withOriginScope('redo', () => bus.dispatch(cmd.action, cmd.target, cmd.payload)) : undefined));",
+    '        () => { _replaying = true; try { return bus ? bus.dispatch(cmd.action, cmd.target, cmd.payload) : undefined; } finally { _replaying = false; } });',
   ],
 ];
 // biome-ignore-end lint/suspicious/noTemplateCurlyInString: end of the verbatim-source block
 
-function derive(revert: boolean): string {
-  let src = readFileSync(resolve(HERE, '../src/plugins-core.ts'), 'utf8');
+const toSrc = (src: string): string => src.replace(/from '\.\/([\w-]+)'/g, "from '../../../src/$1'");
+
+/** The arm's ledger: shipped, or with the fix reverted. */
+function deriveLedger(revert: boolean): string {
+  let src = readFileSync(resolve(HERE, '../src/ledger.ts'), 'utf8');
   if (revert) {
     for (const [shipped, replacement] of REVERT_FIX) {
       if (!src.includes(shipped)) {
@@ -73,7 +82,16 @@ function derive(revert: boolean): string {
       src = src.replace(shipped, replacement);
     }
   }
-  return src.replace(/from '\.\/([\w-]+)'/g, "from '../../../src/$1'");
+  return toSrc(src);
+}
+
+/** The arm's plugins-core: shipped text, importing the arm's own ledger. */
+function derivePlugins(ledgerModule: string): string {
+  const src = readFileSync(resolve(HERE, '../src/plugins-core.ts'), 'utf8');
+  if (!src.includes("from './ledger'")) {
+    throw new Error("history-redo-ab: plugins-core no longer imports './ledger' - the arms would not reach the derived ledger.");
+  }
+  return toSrc(src).replace("from '../../../src/ledger'", `from './${ledgerModule}'`);
 }
 
 afterAll(() => {
@@ -128,8 +146,9 @@ describe('history() async-redo fix - real path A/B', () => {
     mkdirSync(REF_DIR, { recursive: true });
     const arms: Record<string, Mod> = {};
     const load = async (name: string, revert: boolean) => {
+      writeFileSync(resolve(REF_DIR, `ledger-${name}.ts`), deriveLedger(revert));
       const file = resolve(REF_DIR, `history-redo-${name}.ts`);
-      writeFileSync(file, derive(revert));
+      writeFileSync(file, derivePlugins(`ledger-${name}`));
       arms[name] = await import(/* @vite-ignore */ file);
     };
     await load('pre', true);

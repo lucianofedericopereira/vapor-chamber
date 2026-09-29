@@ -1,41 +1,22 @@
 /**
  * vapor-chamber - Directive plugin (opt-in, 0KB when not imported)
  *
- * Vue alignment history (one line per version - full per-item detail lives in
- * CHANGELOG.md and the whitepaper's "Vue 3.6 alignment log", section 9.2):
- *   v1.22.0 - LIB-SIDE: THE SELECTOR MOVED OUT OF THE ARGUMENT AND INTO THE
- *          NAME. `v-vc:command` is now `v-vc-command`, matching
- *          `v-vc-payload` and `v-vc-optimistic`, which were always spelled
- *          that way. The three registered names are `vc-command`,
- *          `vc-payload`, `vc-optimistic`; nothing here reads the argument at
- *          all. Vue's argument is a PARAMETER slot, so using it as a SELECTOR
- *          was a category error - see {@link vcCommandVapor}.
- *   rc.9 - BREAKING upstream, adopted: the directive ARGUMENT became a getter
- *          (#15490), so compiler-vapor emitted `() => ("command")` where rc.8
- *          emitted `"command"`. The old string comparison had made
- *          v-vc:command a dead control in every compiled Vapor template.
- *          Resolved by the v1.22.0 reshape above.
- *   v1.20.0 - LIB-SIDE: `vcCommandVapor`, v-vc:command's Vapor registration -
- *          the function shape `withVaporDirectives` calls, over the same
- *          buildHandler. The install-time "not ported to Vapor" warning is
- *          gone with it.
- *   rc.5 - pass-through. Two upstream commits independently reached rules this
- *          file already applied (direct listeners, per-Document delegation).
- *   rc.2 - pass-through; Vue's compiled `@click` delegation flips to opt-in
- *          (#15127). LIB-SIDE: v-vc:command gains its own `.delegate` opt-in.
- *   beta.17 / beta.16 - pass-through. LIB-SIDE in beta.16: v-vc:command honors
- *          event modifiers (.stop/.prevent/.self/.left/.middle/.right/.capture/
- *          .once/.passive), which the direct listener had been dropping.
- *   v1.6.0 / beta.15 - buildHandler() skips dispatch on disabled /
- *          aria-disabled / in-flight elements, mirroring #14948 for the DIRECT
- *          listener this directive attaches.
- *   v1.4.0 / beta.13 - pass-through (shared event invoker wrapping).
- *   v0.4.4 - Added: v-vc:command, v-vc:optimistic directives.
- *
- * TEARDOWN IS KEYED TO WHAT WAS MOUNTED, never to the current binding. A
- * standing rule, not history: the argument that exposed it is gone and the
- * rule is not. See the `beforeUnmount` note in the plugin below, which
- * records what it cost to learn.
+ * The rules this file keeps (the history is in CHANGELOG.md and the
+ * whitepaper's Vue 3.6 alignment log, section 9.2):
+ *   - THE NAME CARRIES THE SELECTOR: `vc-command`, `vc-payload`,
+ *     `vc-optimistic`. Vue's directive argument is a parameter slot (a getter
+ *     in compiled Vapor, #15490), so nothing here reads it - see
+ *     {@link vcCommandVapor}.
+ *   - `vcCommandVapor` is the function shape `withVaporDirectives` calls, over
+ *     the same `buildHandler` as the vDOM hooks.
+ *   - Direct listeners, one per element, per Document; `.delegate` opts in to
+ *     delegation, as Vue's compiled `@click` does (#15127).
+ *   - Event modifiers are honoured (.stop/.prevent/.self/.left/.middle/.right/
+ *     .capture/.once/.passive).
+ *   - `buildHandler()` skips dispatch on a disabled, aria-disabled or
+ *     in-flight element, as Vue does for its own listeners (#14948).
+ *   - TEARDOWN IS KEYED TO WHAT WAS MOUNTED, never to the current binding. See
+ *     the `beforeUnmount` note in the plugin below.
  *
  * Provides a Vue plugin that installs three directives for declarative command
  * dispatch directly in templates, combining dispatch + loading + error
@@ -59,16 +40,13 @@
  *   Cancel order
  * </button>
  *
- * THE SPELLING HAS ONE FORM, and the second line of the first example is why
- * it is worth saying. It used to read `:v-vc:payload`, a bound attribute
- * literally named `v-vc:payload` - which is not a directive at all, and would
- * have rendered as an attribute. The colon form resolved `v-vc:payload` to the
- * directive named `vc` with the argument `payload`, whose `mounted` returned
- * early, so it was inert wherever it was written. There is no colon form now:
- * the name carries the selector and a wrong name fails to resolve loudly.
+ * THE SPELLING HAS ONE FORM: `v-vc-payload`, never `:v-vc-payload` (a bound
+ * attribute of that name, not a directive) nor a colon form. The name carries
+ * the selector, so a wrong name fails to resolve loudly.
  */
 
 import { DEV } from './dev';
+import { announce } from './a11y';
 import { getCommandBus } from './chamber';
 import type { Command, CommandMap, CommandResult } from './command-bus';
 import { _errResult } from './command-bus';
@@ -97,6 +75,10 @@ type DirectiveState = {
   loading: boolean;
   error: Error | null;
   handler: (event: Event) => void;
+  /** Keyboard activation added to a non-native `role="button"` element; see wireKeyboard. */
+  keys?: { down: (event: KeyboardEvent) => void; up: (event: KeyboardEvent) => void };
+  /** The directive made the element focusable, so teardown takes it back. */
+  addedTabindex?: boolean;
   rollback?: (() => void) | null;
   /** Timeout in ms for async dispatch. Default: 30_000 */
   timeout: number;
@@ -109,14 +91,9 @@ type DirectiveState = {
   /** Allowed mouse buttons from `.left`/`.middle`/`.right` (0/1/2). Empty = any. */
   buttons?: number[];
   /** The exact options object `addEventListener` was called with, kept so
-   *  `removeEventListener` is handed THE SAME ONE. Only `capture` is matched
-   *  by the platform, so the pair used to get away with being different
-   *  shapes - mount passed an options object, teardown rebuilt
-   *  `{ capture: true }` or `undefined` - and a test comparing the two calls
-   *  had to compare capture flags rather than arguments. That works until
-   *  someone adds an option on the mount side and not the other, at which
-   *  point removal silently stops matching and the listener stays attached
-   *  with no error. One object, both calls, nothing to keep in sync. */
+   *  `removeEventListener` is handed THE SAME ONE: two shapes built apart
+   *  drift the moment one side gains an option, and removal then silently
+   *  stops matching and the listener stays attached. */
   listenerOpts?: AddEventListenerOptions;
   /** `.delegate` - dispatched via the shared document-level listener instead of
    *  a direct one on this element. See "Opt-in delegation" below. */
@@ -143,35 +120,15 @@ const stateMap = new WeakMap<Element, DirectiveState>();
  *
  * writes the payload into state that the command then throws away: the button
  * dispatches, with no payload, silently. That is the same dead-control shape
- * #15490 produced and v1.22.0 removed, and an attribute order a consumer has
- * no reason to think matters is a bad place to reintroduce it. MEASURED both
- * ways before this existed - see the note at the end of
- * tests/directives-vapor-fixture.test.ts.
+ * #15490 produced (tests/directives-vapor-fixture.test.ts measures both
+ * orders).
  *
- * IT COVERS vDOM TOO AS OF THIS CHANGE, and the paragraph that stood here said
- * the opposite: that the vDOM half "needs nothing equivalent", because its
- * `updated` hook re-applies the binding after any re-render, so a payload
- * registered against absent state lands on the next patch. Every word of that
- * is true and it is not the whole question, because it answers for the SECOND
- * click and the element is clickable before the first. MEASURED on vDOM, first
- * click, no re-render since mount:
- *
- *     <button v-vc-command  v-vc-payload>     payload {qty:3}   delivered
- *     <button v-vc-payload  v-vc-command>     payload undefined DROPPED
- *     <button v-vc-optimistic v-vc-command>   optimistic never ran
- *
- * and after one unrelated re-render both start working. So the cost was a
- * silently wrong first dispatch, and on a page with no reactive state - the
- * Blade/sprinkled shape this library exists to serve - there is no next patch
- * and it never works at all. Worse, it made one public spelling mean two
- * things: `v-vc-payload` before `v-vc-command` is order-independent on Vapor
- * and was dead on vDOM, which is the exact asymmetry v1.22.0 section 4a set
- * out to close, reopened from the other side.
- *
- * The claim was the reason nobody looked, which is why it is recorded here
- * rather than deleted: an `updated` hook is not a substitute for arriving in
- * the right order, and the next person to reason from "the patch will fix it"
- * should meet the measurement instead.
+ * IT COVERS vDOM TOO. The vDOM `updated` hook re-applies the binding after a
+ * re-render, but that answers for the SECOND click: measured on the first
+ * click with no re-render since mount, `v-vc-payload` before `v-vc-command`
+ * dropped the payload and `v-vc-optimistic` before it never ran. On a page
+ * with no reactive state (the Blade/sprinkled shape) there is no next patch at
+ * all, so an `updated` hook is not a substitute for arriving in order.
  *
  * Keyed by element and weak, so an element that never gets a command takes its
  * unclaimed slot with it when it is collected.
@@ -304,11 +261,17 @@ function removeDelegatedElement(doc: Document | null): void {
 // CSS classes added to the element:
 //   vc-loading  - while the dispatch is in flight
 //   vc-error    - when the last dispatch failed
+// Both are for styling only; a screen reader cannot see a class. What they
+// mean is also said semantically: in flight, `aria-disabled` on a button (see
+// markBusy); on failure, the failure's message announced through the
+// document's shared live region (src/a11y.ts), focus left where it is.
 //
 // DO NOT put `:class` or `v-bind:class` on an element carrying this directive,
-// and do not bind `:disabled` on it either. The directive writes both directly:
-// `classList.add`/`remove` for the two classes above, and `el.disabled` on a
-// button. Vue diffs a binding against ITS OWN previous value, not against the
+// and do not bind `:aria-disabled` on it either. The directive writes them
+// directly: `classList.add`/`remove` for the two classes above, and
+// `aria-disabled` on a button while it is in flight (never `disabled`, which
+// sends keyboard focus to <body>; see markBusy).
+// Vue diffs a binding against ITS OWN previous value, not against the
 // DOM, so the next update of that binding overwrites what the directive wrote
 // and the control silently stops showing that it is working. Nothing throws.
 // A STATIC `class="..."` attribute is fine and was measured so: it is applied
@@ -328,6 +291,44 @@ const ERROR_CLASS = 'vc-error';
 function parseJson(s: string | null | undefined): any {
   if (!s) return undefined;
   try { return JSON.parse(s); } catch { return undefined; }
+}
+
+/** Swallows every press while a dispatch is in flight: no listener, no default action. */
+function inFlightGuard(event: Event): void {
+  event.preventDefault();
+  event.stopImmediatePropagation();
+}
+
+/**
+ * Mark a button busy for the length of one dispatch and return the undo.
+ *
+ * Not `disabled`: HTML's focus fixup rule answers it by moving a keyboard
+ * user's focus to <body>, for good (tests/browser/command-focus.browser.test.ts,
+ * real Chromium). What `disabled` would do is kept by hand, pinned by the same
+ * file: `preventDefault` stops
+ * the press that started the dispatch from submitting a form, and a capture
+ * listener lets no further press reach any listener until the dispatch lands.
+ * The listener exists only while in flight, so `.delegate` still attaches
+ * nothing per element at rest. `aria-disabled` is restored to exactly what it
+ * was, so a value the app set survives the dispatch.
+ *
+ * NOT `aria-busy`: it tells assistive technology to
+ * hold off on the element's CONTENT, and a button's content is its accessible
+ * name, so a screen reader can stop reading the label of the button the user
+ * is on - while it announces nothing at the press. Saying "saving" in words is
+ * the app's to do (a live region, in its own language); styling uses
+ * `vc-loading`.
+ */
+function markBusy(el: HTMLElement, event: Event): () => void {
+  event.preventDefault();
+  const ariaDisabled = el.getAttribute('aria-disabled');
+  el.setAttribute('aria-disabled', 'true');
+  el.addEventListener('click', inFlightGuard, true);
+  return () => {
+    el.removeEventListener('click', inFlightGuard, true);
+    if (ariaDisabled === null) el.removeAttribute('aria-disabled');
+    else el.setAttribute('aria-disabled', ariaDisabled);
+  };
 }
 
 function buildHandler(el: Element, state: DirectiveState): (event: Event) => void {
@@ -368,7 +369,12 @@ function buildHandler(el: Element, state: DirectiveState): (event: Event) => voi
     state.error = null;
     el.classList.add(LOADING_CLASS);
     el.classList.remove(ERROR_CLASS);
-    if (el instanceof HTMLButtonElement) el.disabled = true;
+    // A button to assistive technology: native, or by role. A link is not -
+    // its press is navigation - and keeps its own behaviour.
+    const busy = el instanceof HTMLButtonElement ||
+      (typeof el.getAttribute === 'function' && el.getAttribute('role') === 'button')
+      ? markBusy(el as HTMLElement, event)
+      : null;
 
     const payload = state.payload ?? parseJson((el as HTMLElement).dataset?.vcPayload);
     const target = state.target ?? parseJson((el as HTMLElement).dataset?.vcTarget) ?? {};
@@ -415,17 +421,71 @@ function buildHandler(el: Element, state: DirectiveState): (event: Event) => voi
       // Always reset loading state - prevents stuck buttons
       state.loading = false;
       el.classList.remove(LOADING_CLASS);
-      if (el instanceof HTMLButtonElement) el.disabled = false;
+      busy?.();
     }
 
     if (!resolved.ok) {
       state.error = resolved.error ?? null; // undefined -> null for state.error (Error | null); the branch is type-required
       el.classList.add(ERROR_CLASS);
+      // `vc-error` is for styling; a screen reader cannot see a class. A failed
+      // command is a status message (WCAG 4.1.3): announced through the
+      // document's shared live region, focus left where it is, in the failure's
+      // own words (a backend problem's `detail`, localized). An app
+      // that wants other words takes the announcing over (a11y.ts, setAnnouncer).
+      if (state.error?.message) announce(state.error.message, { assertive: true });
       if (rollback) {
         try { rollback(); } catch { /* ignore */ }
       }
     }
   };
+}
+
+/**
+ * True for an element that says it is a button but gets none of a button's
+ * keyboard behaviour from the platform: `role="button"` on anything that is not
+ * natively activatable (a <button>, an <input>, a link with href, <summary>).
+ */
+function needsKeyboard(el: Element): el is HTMLElement {
+  if (typeof el.getAttribute !== 'function' || el.getAttribute('role') !== 'button') return false;
+  if (typeof HTMLElement === 'undefined' || !(el instanceof HTMLElement)) return false;
+  if (el instanceof HTMLButtonElement || el instanceof HTMLInputElement) return false;
+  if (el instanceof HTMLAnchorElement && el.hasAttribute('href')) return false;
+  return el.tagName !== 'SUMMARY';
+}
+
+/**
+ * Give a non-native `role="button"` element what a <button> has (WCAG 2.1.1,
+ * ARIA Authoring Practices, button pattern): focusable, Enter activates on key
+ * down, Space on key up with its page scroll prevented. Activation is
+ * `el.click()`, so it takes exactly the path a pointer press takes (modifiers,
+ * the in-flight state, the app's own click listeners). A key the app already
+ * handled (`defaultPrevented`) is left alone, and so is a key from a focusable
+ * element inside this one. tests/browser/command-keyboard.browser.test.ts.
+ */
+function wireKeyboard(el: HTMLElement, state: DirectiveState): void {
+  if (!el.hasAttribute('tabindex')) {
+    el.tabIndex = 0;
+    state.addedTabindex = true;
+  }
+  let spaceDown = false;
+  const down = (event: KeyboardEvent): void => {
+    if (event.defaultPrevented || event.target !== el) return;
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      if (!event.repeat) el.click();
+    } else if (event.key === ' ') {
+      event.preventDefault();
+      spaceDown = true;
+    }
+  };
+  const up = (event: KeyboardEvent): void => {
+    if (event.key !== ' ' || !spaceDown) return;
+    spaceDown = false;
+    if (!event.defaultPrevented) el.click();
+  };
+  el.addEventListener('keydown', down);
+  el.addEventListener('keyup', up);
+  state.keys = { down, up };
 }
 
 /**
@@ -441,7 +501,7 @@ function mountCommand(
 ): void {
   // One v-vc-command per element: the state is keyed by element. A render
   // function can list the directive twice (a template cannot), and a second
-  // mount used to overwrite the first's state and strand its listener - so
+  // mount would overwrite the first's state and strand its listener - so
   // detach whatever the element carries first, and the last binding wins.
   unmountCommand(el);
 
@@ -496,10 +556,7 @@ function mountCommand(
     // delegated path, `listenerOpts` on the direct one - and a property added
     // after the literal transitions V8's hidden class, once per mount, on
     // whichever path the element took. Declaring them here costs the literal
-    // two `undefined` slots and gives both paths the same map. The direct path
-    // used to be transition-free (it carried `capture` in the literal and
-    // wrote nothing afterwards); when `capture` became `listenerOpts` the
-    // transition moved onto it, which is what this restores.
+    // two `undefined` slots and gives both paths the same map.
     delegatedDoc: undefined,
     listenerOpts: undefined,
     // Same rule, same reason: all four in the literal - the Vapor getters AND
@@ -513,6 +570,7 @@ function mountCommand(
 
   state.handler = buildHandler(el, state);
   stateMap.set(el, state);
+  if (needsKeyboard(el)) wireKeyboard(el, state);
 
   if (delegate) {
     state.delegatedDoc = addDelegatedElement(el);
@@ -536,6 +594,11 @@ function unmountCommand(el: Element): void {
   } else {
     el.removeEventListener('click', state.handler, state.listenerOpts);
   }
+  if (state.keys) {
+    el.removeEventListener('keydown', state.keys.down as EventListener);
+    el.removeEventListener('keyup', state.keys.up as EventListener);
+  }
+  if (state.addedTabindex) el.removeAttribute('tabindex');
   stateMap.delete(el);
 }
 
@@ -554,8 +617,7 @@ function unmountCommand(el: Element): void {
  * because Vue's call shape has four and the fourth is `modifiers`; it is named
  * `_argument` and never read.
  *
- * WHICH SCOPE, because the two answers behave differently and this docblock
- * said only the second one until v1.22.0. `withVaporDirectives` opens with
+ * WHICH SCOPE, because the two answers behave differently. `withVaporDirectives` opens with
  * `if (node instanceof Element)` and applies synchronously in the CURRENT
  * scope - so for an element target, which is what a compiled
  * `<button v-vc-command>` produces and the only shape documented here, the
@@ -575,35 +637,27 @@ function unmountCommand(el: Element): void {
  * of it would break this subpath for every Vue 3.5 consumer of the vDOM
  * plugin.
  *
- * `v-vc-payload` and `v-vc-optimistic` WORK ON BOTH RENDERERS as of v1.22.0 -
- * see {@link vcPayloadVapor} and {@link vcOptimisticVapor}, which record what
- * the vDOM-only versions cost.
+ * `v-vc-payload` and `v-vc-optimistic` WORK ON BOTH RENDERERS - see
+ * {@link vcPayloadVapor} and {@link vcOptimisticVapor}.
  *
- * THE ARGUMENT IS NOT READ. Until v1.22.0 the argument carried the SELECTOR -
- * it said which of `command` / `payload` / `optimistic` a binding was - and
- * this function opened by comparing it to `'command'`. Vue's argument is a
- * PARAMETER slot, and #15490 made it a getter precisely so a DYNAMIC argument
- * can be reactive: Vue's own test compiles `v-custom:[data.arg]`, reads
- * `arg()` inside a `watchEffect`, and expects the attribute to follow
- * `data.arg`. A selector must not move, so the two requirements were in
- * direct conflict - and the conflict cost a dead control in every compiled
- * Vapor template on rc.9 with the whole suite green. The selector now lives
- * in the NAME, where a name cannot be dynamic, and this function reads
- * nothing from the slot at all.
+ * THE ARGUMENT IS NOT READ. Vue's argument is a PARAMETER slot, and #15490
+ * made it a getter so a DYNAMIC argument can be reactive (Vue's own test
+ * compiles `v-custom:[data.arg]` and expects the attribute to follow
+ * `data.arg`). A selector must not move, so it lives in the NAME, where a name
+ * cannot be dynamic; a selector in the argument was a dead control in every
+ * compiled Vapor template on rc.9, with the whole suite green.
  *
- * (Teardown never followed the selector rule and still must not - see the
- * `beforeUnmount` note in the plugin below.)
+ * (Teardown does not follow the binding either - see the `beforeUnmount` note
+ * in the plugin below.)
  *
  * Ordering against a template `@click`, and what each of `buildHandler`'s
  * three guards reads: see the measured note at the end of this file.
  *
- * THE LOCAL BINDING IS NAMED FOR THE WHOLE DIRECTIVE, which the rename moved.
- * Vue resolves an SFC directive by camelCasing the full name, so `v-vc-command`
- * looks for `vVcCommand`. Under the old spelling the directive was named `vc`
- * and `command` was its argument, so the binding was `vVc`. An import still
- * aliased to `vVc` compiles, type-checks and mounts NOTHING - a dead control,
- * the same silent shape #15490 produced. `npm run check:example` catches it;
- * it caught it here.
+ * THE LOCAL BINDING IS NAMED FOR THE WHOLE DIRECTIVE. Vue resolves an SFC
+ * directive by camelCasing the full name, so `v-vc-command` looks for
+ * `vVcCommand`; an import aliased to anything else (`vVc`) compiles,
+ * type-checks and mounts NOTHING - a dead control, the same silent shape
+ * #15490 produced. `npm run check:example` catches it.
  *
  * @example
  * <script setup vapor>
@@ -623,14 +677,8 @@ export function vcCommandVapor(
 ): (() => void) | undefined {
   // `value` IS OPTIONAL, because `<button v-vc-command>` is valid template
   // syntax - it compiles with no errors - and Vue then passes `undefined`
-  // here. This used to be declared required and went straight to `value()`,
-  // so that template threw `TypeError: value is not a function` at mount.
-  //
-  // The type said it could not happen: Vue's own `VaporDirective` declares
-  // `value?: () => Value`, and a required parameter here is not assignable to
-  // it. There is a test asserting exactly that assignment - and `tests/` was
-  // never typechecked, so it had never once been checked. Widening the
-  // parameter is what makes the declaration true and the crash impossible.
+  // here (Vue's own `VaporDirective` declares `value?: () => Value`). Calling
+  // it unguarded throws `TypeError: value is not a function` at mount.
   if (value === undefined) {
     if (DEV) {
       console.warn(
@@ -731,15 +779,11 @@ export function vcPayloadVapor(el: Element, value?: () => unknown): () => void {
  * receives the `Command` and returns a rollback function (or null); the
  * rollback runs if the dispatch fails.
  *
- * THIS CLOSES A CAPABILITY GAP RATHER THAN ADDING A SPELLING. Until v1.22.0
- * optimistic updates with rollback were UNAVAILABLE in a Vapor template:
- * `state.optimisticFn` was set only by the vDOM registration, so a Vapor
- * consumer who wrote `v-vc-optimistic` got Vue's "Failed to resolve directive"
- * warning and no optimistic update. The alternative was to abandon
- * `v-vc-command` for that button and hand-roll the dispatch, which also
- * forfeits `vc-loading` / `vc-error`, disable-while-busy, the re-entrancy
- * guard, the timeout and the modifiers - and cannot be done by adding an
- * `@click` beside the directive, because since Vue 3.6.0-rc.9 `80b3a046` that
+ * Without it a Vapor template has no optimistic update with rollback: the
+ * alternative is to abandon `v-vc-command` for that button and hand-roll the
+ * dispatch, which forfeits `vc-loading` / `vc-error`, disable-while-busy, the
+ * re-entrancy guard, the timeout and the modifiers - and an `@click` beside
+ * the directive cannot do it, because since Vue 3.6.0-rc.9 `80b3a046` that
  * handler registers FIRST and `buildHandler`'s guards let it veto the dispatch.
  *
  * Read at dispatch time, for the same reason as the payload.
@@ -817,28 +861,14 @@ export function createDirectivePlugin(): { install(app: any): void } {
           }
         },
 
-        // NO GUARD OF ANY KIND, and the rule outlived the thing that exposed
-        // it. Teardown is keyed to what was MOUNTED on the element, never to
-        // the current binding.
-        //
-        // WHAT IT COST TO LEARN, kept because the rule is easier to
-        // reintroduce than to rediscover. `mounted` and `updated` used to
-        // guard on `binding.arg !== 'command'` and this hook did too. Vue
-        // passes the LATEST binding here, so with a dynamic argument
-        // (`v-vc:[kind]`) that had moved off `command` since mount, the guard
-        // returned and the listener was never detached: a click on the element
-        // after `app.unmount()` still dispatched, for the life of the page.
-        // Measured in both modes - `.delegate` stranded the shared document
-        // listener, and a direct listener survived on any element that
-        // outlived its component.
-        //
-        // The route is UNREACHABLE as of v1.22.0: the selector is in the name,
-        // there is no argument, and nothing can move off `command`. The rule
-        // still stands and must not be softened into an equivalent guard on
-        // anything else the current binding happens to say - teardown answers
-        // to the mount, not to the present. `unmountCommand` already no-ops
-        // when the element carries no state, so having no guard remains both
-        // the fix and the smaller code.
+        // NO GUARD OF ANY KIND. Teardown is keyed to what was MOUNTED on the
+        // element, never to the current binding: Vue passes the LATEST
+        // binding here, so a guard on anything the binding says can return
+        // early after it changed, and the listener then outlives
+        // `app.unmount()` (measured in both modes: `.delegate` strands the
+        // shared document listener, a direct one survives on any element that
+        // outlives its component). `unmountCommand` already no-ops when the
+        // element carries no state.
         beforeUnmount(el: Element) {
           unmountCommand(el);
         },
@@ -897,7 +927,7 @@ export function createDirectivePlugin(): { install(app: any): void } {
  * one template with both compilers: rc.8 emitted `_withVaporDirectives` then
  * `_on`, rc.9 emits `_on` then `_withVaporDirectives`. So a template handler
  * now gets to veto the dispatch, and `buildHandler`'s three guards are what
- * read its verdict. They are deliberate since v1.6.0, mirroring Vue's #14948
+ * read its verdict. They are deliberate, mirroring Vue's #14948
  * for the DIRECT listener this directive attaches, and they stay.
  *
  * WHAT EACH GUARD READS, measured per element type rather than restated:

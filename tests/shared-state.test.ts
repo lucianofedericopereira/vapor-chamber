@@ -186,7 +186,7 @@ describe('useSharedCommandState - async dispatch path', () => {
 
     const result = await s.dispatch('slow', null, undefined, { signal: ac.signal });
 
-    expect(result).toFailWith('VC_CORE_ABORTED');
+    expect(result).toFailWith('core:aborted:dispatch');
     expect(handler).not.toHaveBeenCalled();
     s.dispose();
   });
@@ -213,7 +213,7 @@ describe('useSharedCommandState - disposal', () => {
   });
 });
 
-describe('useSharedCommandState - bus-wide error observation (v1.6.0)', () => {
+describe('useSharedCommandState - bus-wide error observation', () => {
   it('records errors from dispatches made OUTSIDE its own dispatch wrapper', ({ bus }) => {
     setCommandBus(bus as any);
     const shared = useSharedCommandState();

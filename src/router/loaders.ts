@@ -89,12 +89,10 @@ export function interpolateLoad(
 /**
  * LONGEST prefix wins, not the first one registered.
  *
- * Returning the first match made overlapping prefixes resolve by object key
- * order: register `'rows:'` and `'rows:archived:'` and every
- * `rows:archived:...` load went to the general handler, or not, depending on
- * which key happened to be written first. Nothing in the SPI hints that
- * registration order is load-bearing, and the specific handler is what a caller
- * registering a longer prefix is asking for.
+ * The first match would resolve overlapping prefixes by object key order:
+ * with `'rows:'` and `'rows:archived:'` registered, a `rows:archived:...` load
+ * would reach the general handler or not depending on which key was written
+ * first. The specific handler is what a longer prefix asks for.
  *
  * One pass, no sort: prefix maps hold a handful of entries and this runs per
  * record per navigation.
@@ -159,8 +157,8 @@ export function defaultAffects(record: TableRecord, keys: readonly string[], han
   const template = record.load as string;
   if (matchPrefix(template, handlers)) {
     // `Object.hasOwn`, not `in`: query keys come from the URL, and `in` walks
-    // the prototype chain - `?toString=` / `?valueOf=` reported as DECLARED and
-    // refetched this record's loader for a key it never declared. See `../dict`.
+    // the prototype chain - `?toString=` would read as DECLARED and refetch
+    // this record's loader. See `../dict`.
     return keys.some(
       (key) => Object.hasOwn(record.queryDefs, key) || key === 'page' || key === 'per_page' || key === 'sort',
     );
