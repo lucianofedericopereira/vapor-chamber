@@ -35,7 +35,7 @@
  * Run a session through scripts/ab/session.sh, after the owner's "go".
  */
 import { execFileSync, spawn } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { loadavg, tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -68,8 +68,10 @@ export function parseArgs(argv) {
   return { distA: pos[0], distB: pos[1], workload: pos[2], ...opt };
 }
 
-async function bundler() {
-  const work = mkdtempSync(join(repo, 'node_modules', '.cache', 'vc-ab-'));
+export async function bundler(cacheRoot = join(repo, 'node_modules', '.cache')) {
+  // A fresh `npm ci` (CI) has no node_modules/.cache yet.
+  mkdirSync(cacheRoot, { recursive: true });
+  const work = mkdtempSync(join(cacheRoot, 'vc-ab-'));
   const out = mkdtempSync(join(tmpdir(), 'vc-ab-out-'));
   let seq = 0;
   return {

@@ -35,7 +35,8 @@ for c in "$@"; do
   fi
   if [ -n "$prev" ]; then
     echo "  differs from $prev:"
-    diff -rq "$OUT/$prev" "$OUT/$c" | grep -v '\.map \|\.d\.ts ' | awk '{ print "    " $2 }' || true
+    # `Files A and B differ` names A; `Only in DIR: file` names a file one build lacks.
+    diff -rq "$OUT/$prev" "$OUT/$c" | grep -v '\.map\b\|\.d\.ts\b' | awk '/^Files/ { print "    " $2 } /^Only in/ { sub(/:$/, "", $3); print "    only in " $3 "/" $4 }' || true
   fi
   prev=$c
 done

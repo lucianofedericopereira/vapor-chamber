@@ -1,7 +1,9 @@
 // The A/B tool's verdicts on synthetic replicates, and one real run of it.
-import { resolve } from 'node:path';
+import { existsSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { main, parseArgs } from '../scripts/ab/ab.mjs';
+import { bundler, main, parseArgs } from '../scripts/ab/ab.mjs';
 import { collect, combineLengths, fitLine, judge, judgeControl, rng, signFlipP } from '../scripts/ab/stats.mjs';
 
 type Spec = { a: number; b: number; proc?: number; arm?: number; off?: number; bias?: (first: string) => number; aFirst?: number };
@@ -121,6 +123,15 @@ describe('ab stats: pieces', () => {
     expect(() => parseArgs(['a', 'b'])).toThrow(/usage/);
     expect(() => parseArgs(['a', 'b', 'w', '--bogus=1'])).toThrow(/unknown option/);
     expect(() => parseArgs(['a', 'b', 'w', '--lengths=3'])).toThrow(/lengths/);
+  });
+});
+
+describe('ab tool: a fresh install', () => {
+  it('bundles with no node_modules/.cache yet, as after npm ci on CI', async () => {
+    const root = join(mkdtempSync(join(tmpdir(), 'vc-ab-fresh-')), 'node_modules', '.cache');
+    const b = await bundler(root);
+    expect(existsSync(root)).toBe(true);
+    b.dispose();
   });
 });
 
