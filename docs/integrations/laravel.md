@@ -53,8 +53,9 @@ table that says only what RFC 9110 says of a status. `detail` is the message;
 | Status | Condition |
 |---|---|
 | 404, 410 | `missing` |
-| 409 | `already` |
-| 401, 403, 419 | `refused` |
+| 409, 412 | `conflict` |
+| 401, 419 | `unauthenticated` |
+| 403 | `refused` |
 | 429, 503 | `limited` |
 | 408, 504 | `timeout` |
 | 501, 502, 505 | `unexpected` |
@@ -62,7 +63,8 @@ table that says only what RFC 9110 says of a status. `detail` is the message;
 | any other 4xx | `invalid` |
 
 So the status you send IS the declaration of what the failure is: 409 for a
-conflict with the current state, 429 or 503 for "come back later", 422 for
+conflict with the current state, 401 or 419 for "sign in, then try again", 403
+for "not allowed", 429 or 503 for "come back later", 422 for
 input that broke a rule. A `Retry-After` header (RFC 9110) goes to
 `error.context.retryIn`.
 
@@ -332,6 +334,7 @@ only `Failed to fetch`; Firefox at least names the header.
     'X-XSRF-TOKEN',        // <- Flow B (Sanctum cookie)
     'Idempotency-Key',     // <- with idempotent() or the outbox
 ],
+'exposed_headers' => ['Location', 'Retry-After'],   // <- pollWith reads them
 'supports_credentials' => true,   // required for the cookie flows
 ```
 
@@ -393,9 +396,11 @@ async function cancelOrder(id: number) {
 }
 ```
 
-`createHttpBridge` **ships** both `csrf: 'inertia'` and `onRedirect`.
-`csrf: 'inertia'` defers token management to Inertia's Axios instance instead
-of reading the meta tag. `onRedirect(url)` is called when the backend returns a
+`createHttpBridge` takes `csrf: true` and `onRedirect` in an Inertia app.
+`csrf: true` reads the token from the page; with no meta tag it reads the
+`XSRF-TOKEN` cookie Laravel sets and sends it as `X-XSRF-TOKEN`. The bridge
+makes its own requests, so an Axios interceptor of the app does not reach
+them. `onRedirect(url)` is called when the backend returns a
 `{ redirect: '/path' }` field **in the JSON body**; wire it to
 `router.visit(url)` so Inertia takes the navigation.
 
@@ -420,7 +425,7 @@ batch, with the first URL; every redirected command still fails with its own
 ```ts
 const bridge = createHttpBridge({
   endpoint: '/api/vc',
-  csrf: 'inertia',
+  csrf: true,
   onRedirect: (url) => router.visit(url),
 });
 ```
@@ -588,7 +593,7 @@ embed a Vapor widget in a Filament widget's view and listen with `#[On(...)]`:
 // app/Filament/Widgets/AnalyticsIsland.php
 class AnalyticsIsland extends Widget
 {
-    protected static string $view = 'filament.widgets.analytics-island';
+    protected string $view = 'filament.widgets.analytics-island'; // Filament 4+: an instance property
 
     public ?string $latestQuery = null;
 
@@ -656,7 +661,7 @@ inside a Filament panel as **reactive islands**, each with its own bus.
 // app/Filament/Widgets/AnalyticsWidget.php
 class AnalyticsWidget extends Widget
 {
-    protected static string $view = 'filament.widgets.analytics-island';
+    protected string $view = 'filament.widgets.analytics-island'; // Filament 4+: an instance property
 
     public function getViewData(): array
     {
@@ -762,8 +767,34 @@ class ProcessCheckout
 ```
 
 On the client, pair it with the lib's `optimistic` plugin (apply the UI change
-immediately, roll back on failure), a polling `orderStatusCheck` command, or
-both; or push the final state via Reverb.
+immediately, roll back on failure), or push the final state via Reverb.
+
+To follow the job instead, answer **202 Accepted** (RFC 9110 15.3.3): the action
+returns exactly `['accepted' => ['location' => $url, 'retryAfter' => 2]]`, the
+example controller answers 202 with `Location` and `Retry-After`, and the
+status monitor at that URL answers 202 while the job runs, then `{ state }` or a
+problem. On the client, `pollWith` follows it; the dispatch resolves at once,
+and the end arrives as `<action>$done`:
+
+```ts
+import { pollWith } from 'vapor-chamber';
+
+bus.use(pollWith({ bus, actions: ['orderProcess'] }));
+bus.on('orderProcess$done', (e) => {
+  const { result } = e.target;   // { ok, value } or { ok: false, error }
+});
+```
+
+```php
+// routes/api.php - the status monitor
+Route::get('/jobs/{order}', fn (Order $order) => $order->status === 'queued'
+    ? response()->json((object) [], 202, ['Retry-After' => '2'])
+    : response()->json(['state' => $order->only(['id', 'status'])]));
+```
+
+A batch result has no status of its own, so `accepted` works on the single
+endpoint. Cross-origin, list `Location` and `Retry-After` in `exposed_headers`
+(CORS, below): the browser hides any other response header from JS.
 
 ---
 
@@ -837,18 +868,17 @@ covers the client side of both:
   cached result. Failures aren't cached, so a genuine retry still runs.
 - **On the wire** - `idempotent` stamps `cmd.meta.idempotencyKey` (so does the
   bus, for an action declared `'idempotent'` in its `retry` option: the
-  dispatch's id, one key for every attempt), and the HTTP
-  bridge forwards it as a standard `Idempotency-Key` request header: a Structured
-  Field String as the draft requires, the key percent-encoded and quoted
-  (`"save%3A%7B%22id%22%3A1%7D"`), which any character survives. The backend
-  unquotes and `rawurldecode`s it back to the exact key (the example
-  controller's `idempotencyKey()`; a value that is not a String is ignored, as
-  RFC 9651 ignores a field that fails to parse), replays the stored result for
-  a key it has finished, and
+  dispatch's id, one key for every attempt). Every bridge sends it in the
+  envelope, `meta.idempotencyKey`, on a single request, a batch and a
+  WebSocket alike; that is where the backend reads it (the example
+  controller's `idempotencyKey()`). A single request also carries the standard
+  `Idempotency-Key` header (a Structured Field String, the key percent-encoded
+  and quoted) for gateways and middleware that read it. The backend replays the
+  stored result for a key it has finished, and
   answers **409** to a second request while the first with the same key is still
   running, with `Retry-After: 1` - so a re-send lands once, and the bus waits
   and comes back for the finished answer instead of settling as a conflict.
-  A 409 without `Retry-After` is `already` and is not re-sent.
+  A 409 without `Retry-After` is `conflict` and is not re-sent.
 
 ```ts
 import { createAsyncCommandBus, idempotent } from 'vapor-chamber';
@@ -870,7 +900,7 @@ commands locally while `idempotent` collapses identical ones. `key` is a
 function of the command and defaults to `cmd.action`, which serializes each
 action against itself. Together they give exactly-once semantics on the client.
 
-The only backend contract is the standard one: honor the `Idempotency-Key` header
+The only backend contract: honor `meta.idempotencyKey`
 (persist the key with its result; return the stored result on a repeat), and
 never run the same key twice at once. A cache alone cannot guarantee the second
 part. It stores the result only after the action succeeds, so a retry that
@@ -889,7 +919,7 @@ abridged:
         // attempt is still running (a client timeout on a slow write) misses
         // the cache and runs the action a second time, concurrently. The lock
         // is taken BEFORE the cache read and held for the whole run; a request
-        // that cannot get it is answered 409 (`already`), which no re-send repeats,
+        // that cannot get it is answered 409 (`conflict`), which no re-send repeats,
         // so the client sees one outcome. 30s bounds a crashed holder.
         $lock = $cacheKey ? Cache::lock("vc:idem:lock:{$command}:{$idempotencyKey}", 30) : null;
         if ($lock && !$lock->get()) {

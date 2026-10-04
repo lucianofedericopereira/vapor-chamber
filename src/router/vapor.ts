@@ -39,7 +39,7 @@
  * - **No `package.json#sideEffects` entry.** Unlike `/vapor`, importing this
  *   subpath wires nothing; it only exports a component.
  * - **No blade rows.** `makeBladeComponent` is `defineComponent`/`h`, so a
- *   blade row reaching this outlet is a `mode_mismatch` throw. Blade rows
+ *   blade row reaching this outlet is an `invalid:component` throw. Blade rows
  *   render through `./vdom` plus `vaporInteropPlugin`.
  * - **No interop fallback.** Falling back silently would restore the whole
  *   cost the module exists to avoid; the guard below refuses instead.
@@ -58,7 +58,7 @@
  * without re-running `npm run size:doc`.
  */
 
-import { createDynamicComponent, createSlot, defineVaporComponent, inject, provide } from 'vue';
+import { createDynamicComponent, createIf, createSlot, defineVaporComponent, inject, provide } from 'vue';
 import { DEV } from '../dev';
 import { routerError } from './errors';
 import { OUTLET_DEPTH_KEY, ROUTER_KEY } from './keys';
@@ -88,7 +88,7 @@ function vaporComponentOf(entry: RenderEntry): unknown {
   // blade one is the documented v1 caveat made loud at the exact moment a
   // consumer hits it.
   throw routerError(
-    'mode_mismatch',
+    'invalid:component',
     `route "${entry.record.name}" is not a Vapor component${
       DEV
         ? entry.record.blade
@@ -99,33 +99,58 @@ function vaporComponentOf(entry: RenderEntry): unknown {
   );
 }
 
+/** The `createIf` flags compiler-vapor emits for a single-root `v-if` with a single-root `v-else`, keyed. */
+const IF_ELSE_SLOT = 261;
+
 export const RouterOutlet = defineVaporComponent({
   name: 'RouterOutlet',
-  setup(_props, { slots }) {
+  setup(_props, ctx) {
+    const { slots } = ctx;
     const router = inject<Router>(ROUTER_KEY);
     // Coded, matching ./outlet (`routerError` is already in this module's graph
-    // for mode_mismatch, so it costs no bytes).
-    if (!router) throw routerError('no_router', '<RouterOutlet> used without an installed router');
+    // for invalid:component, so it costs no bytes).
+    if (!router) throw routerError('missing:router', '<RouterOutlet> used without an installed router');
 
     const depth = inject<number>(OUTLET_DEPTH_KEY, 0);
     provide(OUTLET_DEPTH_KEY, depth + 1);
 
-    // Built once in setup, never inside the branch getter: `createSlot` reads
-    // the current scope owner and allocates a fragment per call, so one call
-    // per navigation would leak fragments and defeat branch keying. Gated on
-    // the slot existing because an empty slot fragment still owns an anchor
-    // node, so the no-slot no-match case must reach `createDynamicComponent`
-    // as a LITERAL null, which is what renders a true empty branch. The two
-    // helpers are mutually exclusive per branch, not composable.
-    //
-    // `slots` is the ninth item of the dependency surface: Vapor's `setup`
-    // receives the component INSTANCE as its second argument, and there is no
-    // public slot-existence helper to ask instead.
-    const fallback = slots.default ? createSlot('default') : null;
+    const entryAt = () => router.currentRoute.value.render[depth];
+    // A literal null when nothing matches: that is what renders a true empty
+    // branch, with the fragment's own anchor as the only node left.
+    const matched = () =>
+      createDynamicComponent(() => {
+        const entry = entryAt();
+        return entry ? vaporComponentOf(entry) : null;
+      });
 
-    return createDynamicComponent(() => {
-      const entry = router.currentRoute.value.render[depth];
-      return entry ? vaporComponentOf(entry) : fallback;
-    });
+    // With a default slot, the no-match branch is the slot, and it is created
+    // INSIDE a `createIf` branch: each time the branch is entered, in that
+    // branch's scope. Removing a fragment stops its scope, so a slot built
+    // once in setup and handed back after a child route had replaced it came
+    // back as its last DOM with no effect behind it (the reactive-slot arm of
+    // tests/vapor/vapor-outlet.test.ts). This is the call compiler-vapor emits
+    // for `<component :is="c" v-if="c" /><slot v-else />`, flags included;
+    // tests/vapor/vapor-outlet-helpers.test.ts recompiles that template and
+    // compares. Without a slot there is no `createIf`: an empty slot fragment
+    // still owns an anchor node, and the empty branch must stay one node.
+    //
+    // "With a default slot" includes one that may appear LATER. A conditional
+    // slot, `<template v-if="on" #default>`, compiles to a dynamic source in
+    // the raw slots' `$` list, and while its condition is off `slots.default`
+    // is undefined. Read once in setup, that sent the outlet down the no-slot
+    // path for its whole life (the conditional-slot arm of the same test). So
+    // `$` being present is enough to take the slot path; `createSlot` follows
+    // the source from there.
+    //
+    // `slots` and `rawSlots` are the two property reads in the dependency
+    // surface: Vapor's `setup` receives the component INSTANCE as its second
+    // argument, and there is no public slot-existence helper to ask instead.
+    // `rawSlots` is not in the typed setup context, hence the cast and the
+    // `?.`: handed a narrower object, the outlet falls back to the setup-time
+    // read, it does not throw. tests/vapor/vapor-outlet-helpers.test.ts pins
+    // both reads.
+    return slots.default || (ctx as { rawSlots?: { $?: unknown } }).rawSlots?.$
+      ? createIf(entryAt, matched, () => createSlot('default'), IF_ELSE_SLOT)
+      : matched();
   },
 });

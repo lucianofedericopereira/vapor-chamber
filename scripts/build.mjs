@@ -194,6 +194,7 @@ await build({
         'transports': 'src/transports.ts',
         'directives': 'src/directives.ts',
         'transitions':'src/transitions.ts',
+        'transitions/vapor':  'src/transitions/vapor.ts',
         'ssr':        'src/ssr.ts',
         'vite-hmr':   'src/vite-hmr.ts',
         'vitest':     'src/vitest.ts',
@@ -211,6 +212,7 @@ await build({
         'stream-parser': 'src/stream-parser.ts',
         'devtools':   'src/devtools.ts',
         'store':      'src/store.ts',
+        'store/core': 'src/store/core.ts',
         'router/index':       'src/router/index.ts',
         'router/vdom':        'src/router/vdom.ts',
         'router/vapor':       'src/router/vapor.ts',
@@ -276,6 +278,12 @@ for (const v of iifeVariants) {
         // These are production artifacts, so dev diagnostics fold away
         // entirely - branch AND message strings.
         __VC_DEV__: 'false',
+        // A <script>-tag page is never a wired build: the guard folds to the
+        // probe it has always run, and its text does not ship.
+        __VC_WIRED_BUILD__: 'false',
+        // The build profile: performance, the default. The guard in
+        // chamber.ts's trackLoading folds out with its text.
+        __VC_LEAN__: 'false',
       },
       build: {
         lib: {

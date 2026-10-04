@@ -27,8 +27,8 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { createMemoryHistory } from '../../src/router/history';
-import { createRouter } from '../../src/router/index';
+import { createMemoryHistory } from '@router/history';
+import { createRouter } from '@router/index';
 import {
   useBreadcrumbs,
   useMenu,
@@ -38,8 +38,8 @@ import {
   useRouteData,
   useRouteError,
   useRouter,
-} from '../../src/router/composables';
-import type { RouteRecord } from '../../src/router/types';
+} from '@router/composables';
+import type { RouteRecord } from '@router/types';
 
 // Pulled from the alias target, so this is the SAME module instance the router
 // imports as bare `vue` - the whole point of this config.

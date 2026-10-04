@@ -4,9 +4,9 @@
  * rehydrate() replays bus commands ABOVE Vue's DOM hydration, after it
  * completes: it holds no DOM references, hydration anchors or interop state,
  * so Vue's hydration fixes land below it and only hand it a more-correct DOM.
- * The history is in CHANGELOG.md and the whitepaper's section 9.2.
+ * The history is in CHANGELOG.md and the whitepaper's appendix B.
  *
- * Per the whitepaper (section 14): commands that ran on the server to populate initial
+ * Per the whitepaper (section 12): commands that ran on the server to populate initial
  * state need to replay on the client so reactive signals reflect the same values.
  * This plugin automates the dehydrate/rehydrate pattern as a first-class plugin.
  *
@@ -49,8 +49,11 @@
 
 import { DEV } from './dev';
 import type { Command, CommandResult, Plugin, BaseBus } from './command-bus';
-import { _errResult } from './command-bus';
+import { _errResult, _failures } from './command-bus';
 import { onSettled } from './settled';
+
+/** rehydrate()'s own refusals; the plugin's are `ssr` too (its id). */
+const ssrFail = _failures('ssr');
 
 // ---------------------------------------------------------------------------
 // Types
@@ -177,7 +180,7 @@ export function createSSRPlugin(options: SSRPluginOptions = {}): SSRPlugin {
     return droppedCount;
   }
 
-  return { plugin, dehydrate, clear, size, dropped };
+  return { plugin: Object.assign(plugin, { id: 'ssr' }), dehydrate, clear, size, dropped };
 }
 
 // ---------------------------------------------------------------------------
@@ -228,12 +231,11 @@ export function rehydrate(
               'Use `await rehydrateAsync(bus, commands)` instead.',
           );
         }
-        results.push({
-          ok: false,
-          error: new Error(
-            `[vapor-chamber] rehydrate() cannot replay "${cmd.action}" on an async bus - use rehydrateAsync()`,
-          ),
-        });
+        results.push(_errResult(ssrFail(
+          'invalid:bus',
+          `[vapor-chamber] rehydrate() cannot replay "${cmd.action}" on an async bus - use rehydrateAsync()`,
+          { action: cmd.action },
+        )));
         continue;
       }
       results.push(result);

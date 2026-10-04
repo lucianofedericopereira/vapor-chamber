@@ -103,8 +103,9 @@ function countTasks(fileTasks) {
 /**
  * PROVENANCE, recorded rather than assumed. The counts are only comparable to
  * what the docs claim when the run was complete: `dist/` present (8 files skip
- * without it) and coverage on (2 more skip without it, and it is the run
- * docs/COVERAGE.md describes). stamp-docs ignores data that says otherwise, so
+ * without it) and coverage on (the run docs/COVERAGE.md describes; the tests
+ * that only measure time skip in it, as in any run without VC_TIMING,
+ * tests/under-coverage.ts). stamp-docs ignores data that says otherwise, so
  * an ordinary `npm run test:run` can write this file freely without making the
  * next `lint:check` fail - which is exactly what it did before this existed.
  */

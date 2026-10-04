@@ -72,9 +72,9 @@ function assertBehaviours(o: OutletObservations) {
   expect(o.nullBranch.residual).toHaveLength(1);
   expect(o.nullBranch.residual[0]).toMatch(/^anchor:/);
 
-  // (c) default-slot fallback at a depth with no entry. The slot is built once
-  // in setup and only when it exists; the no-slot case above must stay a
-  // literal null, which is why (b) and (c) are separate scenarios.
+  // (c) default-slot fallback at a depth with no entry. The slot branch exists
+  // only when a slot was passed; the no-slot case above must stay a literal
+  // null, which is why (b) and (c) are separate scenarios.
   expect(o.fallback.text).toBe('no child route');
   expect(o.fallback.elementCount).toBe(1);
 
@@ -109,10 +109,32 @@ function assertBehaviours(o: OutletObservations) {
 
   // (f) the mode guard, both causes. Asserted on `code` and never on message
   // text, per the router's error convention.
-  expect(o.guard.vdom.name).toBe('RouterError');
-  expect(o.guard.vdom.code).toBe('mode_mismatch');
-  expect(o.guard.blade.name).toBe('RouterError');
-  expect(o.guard.blade.code).toBe('mode_mismatch');
+  expect(o.guard.vdom.name).toBe('BusError');
+  expect(o.guard.vdom.code).toBe('router:invalid:component');
+  expect(o.guard.blade.name).toBe('BusError');
+  expect(o.guard.blade.code).toBe('router:invalid:component');
+
+  // (g) a reactive default slot stays reactive across a child route. It was
+  // built once in setup and handed back after Vue had removed it, and removing
+  // a fragment stops its scope: the slot came back as its last DOM, with the
+  // value it had when it left and no effect behind it.
+  expect(o.liveSlot.beforeChild).toBe('on');
+  expect(o.liveSlot.flippedBeforeChild).toBe('off');
+  expect(o.liveSlot.whileChild).toBe('about');
+  expect(o.liveSlot.afterRoundTrip).toBe('off');
+  expect(o.liveSlot.flippedAfterRoundTrip).toBe('on');
+  expect(o.liveSlot.afterSecondRoundTrip).toBe('on');
+  expect(o.liveSlot.slotElements).toBe(1);
+
+  // (h) a conditional default slot that is off when the outlet is created
+  // shows once its condition turns on. The outlet used to read `slots.default`
+  // once, in setup, and a conditional slot is a dynamic source: undefined
+  // while off, so the outlet took the no-slot path for its whole life.
+  expect(o.lateSlot.offAtMount).toEqual({ text: '', elements: 0 });
+  expect(o.lateSlot.turnedOn).toBe('late fallback');
+  expect(o.lateSlot.whileChild).toBe('about');
+  expect(o.lateSlot.backWithSlotOff).toBe('');
+  expect(o.lateSlot.turnedOnAgain).toBe('late fallback');
 }
 
 /**

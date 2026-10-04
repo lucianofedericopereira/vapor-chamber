@@ -23,26 +23,18 @@ function callPlugin(plugin: any, cmd: Partial<Command>): Promise<CommandResult> 
 
 
 // ---------------------------------------------------------------------------
-// csrf: 'inertia' + signal merging
+// csrf forwarding + signal merging ('inertia' removed, log s35.124)
 // ---------------------------------------------------------------------------
 
-describe('csrf: inertia and signal merging', () => {
-  it('sends csrf:false for csrf:"inertia" on the HTTP bridge', async () => {
-    const httpClient = { post: vi.fn().mockResolvedValue({ ok: true, status: 200, headers: {}, data: { ok: true, state: 1 } }) } as any;
-    const bus = createAsyncCommandBus();
-    bus.use(createHttpBridge({ endpoint: '/api/vc', csrf: 'inertia', httpClient }));
-
-    await bus.dispatch('save', {});
-    expect(httpClient.post.mock.calls[0]![2].csrf).toBe(false);
-  });
-
-  it('sends csrf:false for csrf:"inertia" on the batching bridge', async () => {
-    const httpClient = { post: vi.fn().mockResolvedValue({ ok: true, status: 200, headers: {}, data: { results: [] } }) } as any;
-    const bus = createAsyncCommandBus();
-    bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', csrf: 'inertia', httpClient }));
-
-    await bus.dispatch('save', {});
-    expect(httpClient.post.mock.calls[0]![2].csrf).toBe(false);
+describe('csrf forwarding and signal merging', () => {
+  it('passes csrf through to the client on both bridges', async () => {
+    for (const [make, data] of [[createHttpBridge, { state: 1 }], [createBatchingHttpBridge, { results: [] }]] as const) {
+      const httpClient = { post: vi.fn().mockResolvedValue({ ok: true, status: 200, headers: {}, data }) } as any;
+      const bus = createAsyncCommandBus();
+      bus.use((make as typeof createHttpBridge)({ endpoint: '/api/vc', csrf: true, httpClient }));
+      await bus.dispatch('save', {});
+      expect(httpClient.post.mock.calls[0]![2].csrf).toBe(true);
+    }
   });
 
   it('merges scopeController with the bridge signal', async () => {
@@ -118,8 +110,8 @@ describe('createBatchingHttpBridge', () => {
 
     const commands = httpClient.post.mock.calls[0]![1].commands;
     expect(commands).toHaveLength(2);
-    expect(commands.find((c: any) => c.command === 'pay').idempotencyKey).toBe('key-1');
-    expect(commands.find((c: any) => c.command === 'look').idempotencyKey).toBeUndefined();
+    expect(commands.find((c: any) => c.command === 'pay').meta.idempotencyKey).toBe('key-1');
+    expect(commands.find((c: any) => c.command === 'look').meta).toBeUndefined();
   });
 
   it('fails every entry when the response carries no results array', async () => {
@@ -145,12 +137,14 @@ describe('createBatchingHttpBridge', () => {
     expect(httpClient.post).not.toHaveBeenCalled();
   });
 
-  it('passes non-matching actions straight to next()', async () => {
+  it('declares its actions: the bus never runs it on another', async () => {
     const httpClient = { post: vi.fn() } as any;
     const plugin = createBatchingHttpBridge({ endpoint: '/api/vc/batch', actions: ['cart*'], httpClient });
-
-    const result = await callPlugin(plugin, { action: 'unrelated' });
-    expect(result).toEqual({ ok: true, value: 'next' });
+    expect(plugin.actions).toEqual(['cart*']);
+    const bus = createAsyncCommandBus();
+    bus.register('unrelated', async () => 'local');
+    bus.use(plugin);
+    expect((await bus.dispatch('unrelated', 0)).value).toBe('local');
     expect(httpClient.post).not.toHaveBeenCalled();
   });
 });

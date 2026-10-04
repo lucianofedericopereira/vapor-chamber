@@ -312,15 +312,22 @@ export function createFormBus<T extends Record<string, any>>(
   offs.push(bus.register(ACTION_SET, (cmd) => {
     const { field, value } = cmd.payload as { field: keyof T; value: T[keyof T] };
     const next = { ...values.value, [field]: value } as T;
-    values.value  = next;
-    if (Object.hasOwn(outside, field)) {
-      outside = { ...outside };
-      delete outside[field];
+    // The other three writes are in the `finally`: a sync subscriber that
+    // throws on `values` does not leave them stale (pinned by
+    // tests/form-throwing-subscriber.test.ts, which also pins that one
+    // throwing on `errors` or `isDirty` still does).
+    try {
+      values.value = next;
+    } finally {
+      if (Object.hasOwn(outside, field)) {
+        outside = { ...outside };
+        delete outside[field];
+      }
+      const errs = { ...runRulesSync(rules, next), ...outside };
+      errors.value = errs;
+      isDirty.value = hasDiff(initial, next);
+      isValid.value = Object.keys(errs).length === 0;
     }
-    const errs    = { ...runRulesSync(rules, next), ...outside };
-    errors.value  = errs;
-    isDirty.value = hasDiff(initial, next);
-    isValid.value = Object.keys(errs).length === 0;
     return next;
   }));
 
@@ -423,10 +430,13 @@ export function createFormBus<T extends Record<string, any>>(
     const snapshot = { ...values.value } as T;
 
     // Run all rules - awaits async validators too
-    // Set isValidating so the UI can show loading state during async validation
-    isValidating.value = true;
-    updateBusy();
+    // Set isValidating so the UI can show loading state during async validation.
+    // The write is inside the try, as `isSubmitting`'s is below: a sync
+    // subscriber that throws on it cannot leave the flag stuck on true (pinned
+    // by tests/form-throwing-subscriber.test.ts).
     try {
+      isValidating.value = true;
+      updateBusy();
       const errs = await runRulesAsync(rules, snapshot);
       errors.value = errs;
       isValid.value = Object.keys(errs).length === 0;
@@ -436,9 +446,9 @@ export function createFormBus<T extends Record<string, any>>(
     }
     if (!isValid.value) return false;
 
-    isSubmitting.value = true;
-    updateBusy();
     try {
+      isSubmitting.value = true;
+      updateBusy();
       if (onSubmit) await onSubmit(snapshot);
       return true;
     } catch (error) {

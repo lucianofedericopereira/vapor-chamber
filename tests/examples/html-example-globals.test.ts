@@ -46,15 +46,17 @@
  * which bundle it loads and why - prose that names `VaporChamber` methods it
  * does not call.
  *
- * Skipped when `dist/` is absent, matching the other `dist-*` suites.
+ * Fails when `dist/` is absent, as every suite that reads the build does
+ * (tests/require-dist.ts).
  */
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { requireDist } from '../require-dist';
 
 const root = process.cwd();
-const haveDist = existsSync(join(root, 'dist', 'index.js'));
+requireDist(existsSync(join(root, 'dist', 'index.js')));
 
 /** Every server-rendered view that could carry a `<script src>`: plain HTML and Blade. */
 function findViews(dir: string, out: string[] = []): string[] {
@@ -104,7 +106,7 @@ function analyse(file: string): Page | null {
   };
 }
 
-describe.skipIf(!haveDist)('HTML examples call real IIFE globals', () => {
+describe('HTML examples call real IIFE globals', () => {
   const pages = findViews(join(root, 'examples'))
     .map(analyse)
     .filter((p): p is Page => p !== null && p.globals.length > 0);

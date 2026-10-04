@@ -7,10 +7,10 @@
 
 import { describe, expect, it } from 'vitest';
 import { createApp, defineComponent, h } from 'vue';
-import { isRouterError } from '../../src/router/errors';
-import { createMemoryHistory } from '../../src/router/history';
-import { RouterOutlet } from '../../src/router/outlet';
-import { ROUTER_KEY } from '../../src/router/keys';
+import { isRouterError } from '@router/errors';
+import { createMemoryHistory } from '@router/history';
+import { RouterOutlet } from '@router/outlet';
+import { ROUTER_KEY } from '@router/keys';
 import { makeRouter as fixtureRouter } from './fixture';
 
 // The fixture's router under /admin, with components that render text.
@@ -69,7 +69,7 @@ describe('RouterOutlet', () => {
     } catch (error) {
       caught = error;
     }
-    expect(isRouterError(caught, 'no_router')).toBe(true);
+    expect(isRouterError(caught, 'router:missing:router')).toBe(true);
   });
 });
 

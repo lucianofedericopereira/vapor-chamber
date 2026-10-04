@@ -2,7 +2,7 @@
 /**
  * The production half of the redirect-loop diagnostic (router/engine.ts `DEV`).
  *
- * A guard chain that never settles is bounded and reported as `redirect_loop`.
+ * A guard chain that never settles is bounded and reported as `router:exceeded:redirects`.
  * The CODE is unconditional - handlers switch on it, so it cannot be dev-only -
  * but the explanatory tail naming the hop count and the likely cause is gated,
  * because this module sits on the shared side of the Vapor outlet size guard
@@ -31,8 +31,8 @@ const ROWS = [
  *  the start, since a redirect onto the committed location is a duplicate and
  *  would end the chain before it could loop. */
 async function bootLoopingRouter() {
-  const { createRouter } = await import('../../src/router/index');
-  const { createMemoryHistory } = await import('../../src/router/history');
+  const { createRouter } = await import('@router/index');
+  const { createMemoryHistory } = await import('@router/history');
 
   const router = createRouter({
     history: createMemoryHistory(''),
@@ -48,14 +48,14 @@ async function bootLoopingRouter() {
   return router;
 }
 
-describe('redirect_loop diagnostic', () => {
+describe('router:exceeded:redirects diagnostic', () => {
   it('names the hop count and the likely cause in dev', async () => {
     vi.resetModules();
     const router = await bootLoopingRouter();
 
     const result = (await router.push('/a')) as { code?: string; message?: string };
 
-    expect(result?.code).toBe('redirect_loop');
+    expect(result?.code).toBe('router:exceeded:redirects');
     expect(result?.message).toContain('redirect loop navigating to');
     expect(result?.message).toContain('hops');
     router.destroy();
@@ -70,7 +70,7 @@ describe('redirect_loop diagnostic', () => {
 
     // The bound and the code are the contract and are unchanged; only the
     // human-facing tail is gone.
-    expect(result?.code).toBe('redirect_loop');
+    expect(result?.code).toBe('router:exceeded:redirects');
     expect(result?.message).toContain('redirect loop navigating to');
     expect(result?.message).not.toContain('hops');
     router.destroy();

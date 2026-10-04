@@ -434,9 +434,109 @@ const BUDGETS = {
   // create an async bus); `retry()` and `retrying()` are gone from them, and
   // the bridges declare `transport`. MEASURED: +163 / +129 full, +162 / +136
   // core, +163 / +114 elements.
-  'vapor-chamber.iife.min.js':          { rawMax: 39_505, brotliMax: 12_245 },
-  'vapor-chamber-core.iife.min.js':     { rawMax: 26_418, brotliMax: 8_178  },
-  'vapor-chamber-elements.iife.min.js': { rawMax: 28_049, brotliMax: 8_660  },
+  //
+  // Unreleased, the 1.26 bug fixes (log s35.42), raised to measured by the
+  // owner (2026-10-01); each fix built at its own commit. MEASURED:
+  // isLoading across its last holder and on a sealed bus (B3+B4) +178 / +60
+  // full; Retry-After by RFC 9110's grammar (B8) -9 / +21 full, -9 / +14
+  // core, -9 / +15 elements (shorter code, worse brotli); persist() throwing
+  // without getState (B12) +61 / +13 full; the root probe's
+  // __VC_WIRED_BUILD__ guard and the probe-free shared bus (B1+B2+B11)
+  // -4 / -3 full, 0 core, -3 / 0 elements (the IIFEs define the flag false).
+  // The router and HTTP-cache fixes (B5, B6) are in no IIFE. Then the
+  // shared-state observer subscribed in its literal (no placeholder): -15 / -2
+  // full.
+  //
+  // Unreleased, the perf-1.26 audit (log s35.44), raised to measured by the
+  // owner (2026-10-01: "iife is justified", speed over size). MEASURED, full
+  // only: useSharedCommandState dispose() counted once per holder (a bug fix)
+  // +19 / +9; useCommand().dispatch and query without a thunk (M-g,
+  // 0.915-0.934x, -2.7 to -3.9 ns, log s35.53) +27 / +5. The filter loop (C1)
+  // is in no IIFE. Then warnUnwired's cheap test outside the build flag's
+  // `typeof` (V-e: composable creation back to v1.25.0's speed, was 7-8%
+  // slower) +0 / +8. Then per-key isLoading tracking: a slot's signal only
+  // once read (D1, tracked dispatch -3.6 to -6.1 ns, log s35.53) +35 / +4; the
+  // start -> settle pairing in a Map, not a WeakMap (D2, -24 to -26 ns) -4 / +8.
+  // Then (log s35.60) isLoading's slots by action, then target, no key string
+  // per dispatch (item 4a, tracked dispatch 0.892-0.905x, -15 to -18 ns)
+  // +199 / +51. Then (log s35.62) the build profile and isLoading option b
+  // behind it: an unread slot kept at 0 while its action's bucket holds 256
+  // or fewer (the IIFEs are performance; 0.848-0.865x, -21 to -22 ns in the
+  // constant form, log s35.61) +43 / +14. Then (log s35.66) isLoading option
+  // c: on a sync bus the start -> settle pairing is an identity-checked stack,
+  // not the Map (tracked dispatch 0.645x, -44 ns on top of b; owner: speed
+  // over a size this small) +427 / +107. Then (log s35.67) three correctness
+  // fixes, owner: raised to measured, built one at a time (full / core /
+  // elements): query nests on the depth counter (a self-querying handler
+  // overflowed the stack) +122 / +19, +123 / +11, +123 / +7; async depth by
+  // parent, not by dispatches in flight (17 concurrent were refused; three
+  // endless loops) +451 / +161, +452 / +140, +451 / +146; one fan-out rule,
+  // the listeners that existed when a dispatch started (a skip and a double
+  // call) +129 / +40, +128 / +59, +128 / +69.
+  // Then (log s35.70) a store's $reset as a command: the naming check skips a
+  // name with `$` (the library's), owner: raised to measured, +17 / +15 full,
+  // +17 / +4 core, +17 / +3 elements (the store is in no IIFE).
+  // Then (log s35.77) every plugin factory declares its id, the owner of its
+  // failures (shape rule 3), owner: "no sweat size increase", raised to
+  // measured: +119 / +18 full, +59 / +11 core, +59 / +7 elements (the ids of
+  // logger, history, debounce, optimistic, optimisticUndo, persist and the
+  // bridges' shared TRANSPORT marker).
+  // Then (log s35.79) the conditions `conflict` (409, 412) and
+  // `unauthenticated` (401, 419) in the status table, owner: "no sweat size
+  // increase", raised to measured: +27 / -2 full, +27 / +11 core, +27 / -2
+  // elements (brotli budgets kept where they shrank).
+  // Then (log s35.80) a problem's RFC 9457 `type`, the docs URL of its
+  // condition (the 83-character prefix barely compresses), owner: "no sweat
+  // size increase", raised to measured: +180 / +78 full, +180 / +75 core,
+  // +180 / +80 elements.
+  // Then (log s35.81) meta's `idempotencyKey` slot, present from stampMeta
+  // (one meta map whether a command is keyed or not), raised to measured:
+  // +22 / +9 full, +22 / +2 core, +22 / +7 elements.
+  // Then (log s35.82) HttpResponse carries Fetch's `url` and `redirected`
+  // (#17), raised to measured: +34 / +11 full, +34 / +8 core, +34 / +9
+  // elements.
+  // Then (log s35.83) a 304 resolves when a request opts in
+  // (`resolveNotModified`), and a GET joins another in flight only when its
+  // headers match (a plain read received a conditional read's 304), raised
+  // to measured: +80 / +32 full, +80 / +38 core, +80 / +35 elements.
+  // Then (log s35.89) a Retry-After past 30 s is read as declared (RFC 9110:
+  // a minimum, no ceiling in the grammar): the parser keeps only the timer
+  // bound, the HTTP client ends a request on a wait over its 30 s, and the
+  // async bus returns a declared wait over maxDelay instead of re-sending
+  // early. Owner: raised to measured ("no sweat"): +58 / -6 full, +58 / +12
+  // core, +58 / +23 elements (full's brotli budget kept where it shrank).
+  // Then (log s35.100) Retry-After's HTTP-date read by RFC 9110 5.6.7: the
+  // three forms, all GMT (asctime was read as local time), anything else
+  // ignored, a two-digit year its next occurrence. Owner: "worth the rise",
+  // raised to measured: +570 / +286 full, +571 / +264 core, +571 / +250
+  // elements. Attributed first, three variants built: asctime-as-GMT alone
+  // +62 / +43 full (still takes ISO, `10/1/2026`, made-up names); a shape
+  // gate over Date.parse +151 / +91 (still takes a made-up weekday, V8's
+  // two-digit years); the rest is the names, the RFC's year rule and the
+  // GMT arithmetic no Date.parse gives.
+  // Then the 1.26 dependency update within ranges (vite 8.2.2 -> 8.3.2, vitest
+  // 5.0.3, ...), no library code changed: full IIFE brotli +3 from the
+  // minifier's output, raw, core and elements unchanged. Owner: raised to
+  // measured ("3 B is nothing").
+  // Then canUndo beside undo in register() (log s35.113). Owner: raised to measured.
+  // Then every undo a command, <action>$undo, and $ commands kept local (log s35.114). Owner: raised to measured.
+  // Then an app's $ name refused, the naming check coded (log s35.117). Owner: raised to measured.
+  // Then authGuard's unauthenticated code, problemOf (log s35.119-121). Owner: raised to measured.
+  // Then the HTTP client's failures as the core's BusError, one answer reader, one retry rule (log s35.131). Owner: raised to measured.
+  // Then one JSON body reader, status first, and a 2xx that is not the envelope failing (log s35.132). Owner: raised to measured.
+  // Then meta.response (log s35.136). Owner: raised to measured.
+  // Then one command envelope on every wire (log s35.138). Owner: raised to measured.
+  // Then meta.request (log s35.139). Owner: raised to measured.
+  // Then P1, a chain per action for plugins that declare actions (log s35.141). Owner: raised to measured.
+  // Then a sync dispatch with no plugin skips the runner (log s35.143). Owner: raised to measured.
+  'vapor-chamber.iife.min.js':          { rawMax: 44_504, brotliMax: 13_850 },
+  // Then (log s35.107) BusError and its vocabulary moved to src/failure.ts so
+  // the router raises the core's failure without importing the bus. A pure
+  // move: raw bytes identical in all three IIFEs once the import sits where
+  // the code was; brotli moves with the arrangement: full -8 (budget kept),
+  // core +5, elements +7. Owner: raised to measured ("size no issue").
+  'vapor-chamber-core.iife.min.js':     { rawMax: 30_280, brotliMax: 9_430  },
+  'vapor-chamber-elements.iife.min.js': { rawMax: 31_892, brotliMax: 9_909  },
 };
 
 const BR_OPTS = { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } };

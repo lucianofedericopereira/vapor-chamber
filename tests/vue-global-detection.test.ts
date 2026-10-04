@@ -1,5 +1,5 @@
 /**
- * Covers the `globalThis.__VUE__` synchronous probe path in chamber.ts - the
+ * Covers the `globalThis.__VAPOR_CHAMBER_VUE__` synchronous probe path in chamber.ts - the
  * MPA / script-tag scenario where Vue is a page global rather than an ESM import.
  * Exercises applyVueModule's full Vapor-surface detection (createVaporApp,
  * vaporInteropPlugin, defineVapor* ) which the real beta.14 ESM `vue` doesn't
@@ -33,8 +33,15 @@ describe('Vue-as-global (script-tag / MPA) sync probe', () => {
     vi.resetModules();
   });
 
-  it('wires the full Vapor surface from globalThis.__VUE__ at module load', async () => {
+  it('does not read a namespace on __VUE__: that key is Vue\'s', async () => {
     vi.stubGlobal('__VUE__', mockVue);
+    vi.resetModules();
+    const chamber = await import('../src/chamber');
+    expect(chamber.getVaporAppFn()).not.toBe(mockVue.createVaporApp);
+  });
+
+  it('wires the full Vapor surface from globalThis.__VAPOR_CHAMBER_VUE__ at module load', async () => {
+    vi.stubGlobal('__VAPOR_CHAMBER_VUE__', mockVue);
     vi.resetModules();
     const chamber = await import('../src/chamber');
 

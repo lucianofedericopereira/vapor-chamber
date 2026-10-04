@@ -34,7 +34,7 @@
  */
 
 import type { Command, CommandResult, Plugin, AsyncPlugin } from './command-bus';
-import { _failures } from './command-bus';
+import { _errResult, _failures } from './command-bus';
 
 // The plugin's own failures; its declared name is their owner (plan 4.5).
 const schemaFail = _failures('validateSchemas');
@@ -130,11 +130,7 @@ function compileSchemas(
 }
 
 function rejectResult(action: string, message: string): CommandResult {
-  return {
-    ok: false,
-    value: undefined,
-    error: schemaFail('invalid:payload', `Validation failed for "${action}": ${message}`, { action }),
-  };
+  return _errResult(schemaFail('invalid:payload', `Validation failed for "${action}": ${message}`, { action }));
 }
 
 /**
@@ -150,7 +146,7 @@ export function validateSchemas(
   const { field = 'target', onInvalid = 'reject' } = options;
   const compiled = compileSchemas(schemas);
 
-  return (cmd, next) => {
+  const plugin: Plugin = (cmd, next) => {
     const schema = compiled.get(cmd.action);
     if (schema === undefined) return next();
 
@@ -177,6 +173,7 @@ export function validateSchemas(
     }
     return next();
   };
+  return Object.assign(plugin, { id: 'validateSchemas' });
 }
 
 /**
@@ -190,7 +187,7 @@ export function validateSchemasAsync(
   const { field = 'target', onInvalid = 'reject' } = options;
   const compiled = compileSchemas(schemas);
 
-  return async (cmd, next) => {
+  const plugin: AsyncPlugin = async (cmd, next) => {
     const schema = compiled.get(cmd.action);
     if (schema === undefined) return next();
 
@@ -207,4 +204,5 @@ export function validateSchemasAsync(
     }
     return next();
   };
+  return Object.assign(plugin, { id: 'validateSchemas' });
 }

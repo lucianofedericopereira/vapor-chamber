@@ -29,7 +29,7 @@
  */
 import { afterAll, describe, expect, it } from 'vitest';
 import { _configureClock, createCommandBus } from '../src/command-bus';
-import { underCoverage } from './under-coverage';
+import { runTiming } from './under-coverage';
 
 const REAL_NOW = Date.now;
 afterAll(() => { _configureClock(); });
@@ -129,7 +129,7 @@ function median(xs: number[]): number {
 }
 
 describe('meta.ts clock source - real dispatch path A/B', () => {
-  it.skipIf(underCoverage)('measures what Date.now() costs inside a real dispatch', () => {
+  it.skipIf(!runTiming)('measures what Date.now() costs inside a real dispatch', () => {
     const cached = makeCachedClock();
     const N = 2_000;
     const cases: Array<{ key: string; mode: Mode; iters: number }> = [

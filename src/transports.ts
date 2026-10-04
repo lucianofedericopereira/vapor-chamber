@@ -5,33 +5,52 @@
  * Use with createAsyncCommandBus() for full async dispatch support.
  */
 
-import type { Command, CommandResult, AsyncPlugin, BaseBus, BusError, FailCode } from './command-bus';
+import type { Command, CommandResult, AsyncPlugin, BaseBus, BusError, FailCode, MetaResponse } from './command-bus';
 import { MAX_TIMEOUT_MS, countOption } from './bounds';
 import { DEV } from './dev';
-import { matchesPattern, abortedResult, conditionOfStatus, _failures, _okResult, _errResult } from './command-bus';
-import { _parseRetryAfter, postCommand } from './http';
+import { abortedResult, BusError as BusErrorClass, _failures, _okResult, _errResult, _isLibraryAction } from './command-bus';
+import { _answered, _remoteProblem, postCommand } from './http';
+import type { HttpClient } from './http';
 import type { ProblemDetails } from './http-errors';
-import type { HttpClient, HttpError } from './http';
 import { signal } from './signal';
 import type { Signal } from './signal';
 
 /**
  * What each bridge declares: it answers a command itself, over a wire, so the
  * async bus's retry re-sends through it (docs/plan-shape.md 4) and the plugins
- * outside see one dispatch.
+ * outside see one dispatch. Its id is the owner every bridge failure already
+ * carries (`transport:lost:reply`, ...), so a bridge has one owner name.
  */
-const TRANSPORT = { transport: true } as const;
+const TRANSPORT = { transport: true, id: 'transport' } as const;
 
 // ---------------------------------------------------------------------------
 // Shared protocol types
 // ---------------------------------------------------------------------------
 
-/** The JSON shape sent to the backend endpoint */
+/**
+ * A command on every wire (docs/plan-failures-and-contract.md 4.4): `id` where
+ * answers are multiplexed (a batch, a WebSocket), as on the answer side; `meta`
+ * only with a fact a backend can use. Log s35.138.
+ */
 export type CommandEnvelope = {
+  id?: string;
   command: string;
   target: any;
   payload?: any;
+  meta?: EnvelopeMeta;
 };
+
+/** The part of a command's meta that crosses the wire. */
+export type EnvelopeMeta = { idempotencyKey?: string; correlationId?: string; causationId?: string };
+
+// One literal: JSON drops the undefined members, so the wire has only what is set.
+function envelopeOf(cmd: Command, id?: string): CommandEnvelope {
+  const m = cmd.meta;
+  const meta = m && (m.idempotencyKey ?? m.correlationId ?? m.causationId) !== undefined
+    ? { idempotencyKey: m.idempotencyKey, correlationId: m.correlationId, causationId: m.causationId }
+    : undefined;
+  return { id, command: cmd.action, target: cmd.target, payload: cmd.payload, meta };
+}
 
 /**
  * A command's answer, the same on every wire (docs/plan-failures-and-contract.md
@@ -51,46 +70,26 @@ export type BackendResponse = {
 // The transport's own failures, and a backend's: each through its own `fail`,
 // so neither can speak as the other (plan 4.5).
 const transportFail = _failures('transport');
+const remoteFail = _failures('remote');
 const transportError = (code: FailCode, message: string, action?: string, context?: Record<string, unknown>): BusError =>
   transportFail(code, message, { action, context });
-const remoteFail = _failures('remote');
-
 /**
- * The failure a backend declared: `remote:<condition>:<code>`, the condition
- * from the problem's own `status` (else the response's), `detail` the message,
- * the rest `context`. `retryIn` is the response's `Retry-After` (RFC 9110),
- * never a body member: it is set after the spread, so a body cannot supply it.
- */
-function remoteProblem(p: ProblemDetails, status?: number, retryIn?: number): BusError {
-  const s = typeof p.status === 'number' ? p.status : status;
-  const { status: _status, code, detail, ...params } = p;
-  return remoteFail(
-    `${s === undefined ? 'unknown' : conditionOfStatus(s)}:${code ?? 'problem'}` as FailCode,
-    detail ?? (s === undefined ? 'The backend answered with no status.' : `HTTP ${s}`),
-    { context: { ...params, status: s, code, retryIn } },
-  );
-}
-
-/** A non-2xx: its problem, or, for a body that is not one, the status alone. */
-function answered(status: number, data: unknown, headers?: Record<string, string>): BusError {
-  const retryIn = _parseRetryAfter(headers?.['retry-after']);
-  return data !== null && typeof data === 'object' && !Array.isArray(data)
-    ? remoteProblem(data as ProblemDetails, status, retryIn)
-    : remoteFail(`${conditionOfStatus(status)}:http` as FailCode, `HTTP ${status}`, { context: { status, retryIn } });
-}
-
-/**
- * Why a request produced no answer: the backend's non-2xx (the HTTP client
- * throws it carrying the response), a timeout, the caller's abort, or no
- * response at all. `lost` means the outcome is unknown.
+ * Why a request produced no answer. The http client throws the core's failure
+ * already read (`_answered`, log s35.131), and the bridge passes it on as it
+ * is - the failure a direct call sees. The one translation left: the caller's
+ * abort of a dispatch is the bus's (`core:aborted:dispatch`). A custom client
+ * that throws something else is read by its `response`, else as no reply.
  */
 function unanswered(e: unknown, action: string, signal?: AbortSignal): CommandResult {
-  const err = e as HttpError;
-  // The HttpClient contract: a failure carries its `response`, status included.
-  if (err.response) return _errResult(answered(err.response.status, err.response.data, err.response.headers));
-  if (err.name === 'TimeoutError') return _errResult(transportError('timeout:reply', err.message, action));
-  if (err.name === 'AbortError') return abortedResult(action, signal);
-  return _errResult(transportFail('lost:reply', `No response for "${action}".`, { action, cause: err }));
+  if (signal?.aborted || (e as BusError)?.code === 'transport:aborted:request') return abortedResult(action, signal);
+  if (e instanceof BusErrorClass) return _errResult(e);
+  // A custom client's failure: its `response`, else the platform's exception
+  // names (`AbortSignal.timeout()` throws a TimeoutError), else no reply.
+  const err = e as { name?: unknown; message?: string; response?: { status: number; data: unknown; headers?: Record<string, string> } } | null;
+  if (err?.response) return _errResult(_answered(err.response.status, err.response.data, err.response.headers));
+  if (err?.name === 'TimeoutError') return _errResult(transportError('timeout:reply', String(err.message), action));
+  if (err?.name === 'AbortError') return abortedResult(action, signal);
+  return _errResult(transportFail('lost:reply', `No response for "${action}".`, { action, cause: e }));
 }
 
 /** A redirect the backend answered with: the command fails, carrying the url. */
@@ -102,8 +101,12 @@ const redirected = (url: string, action: string, handled: boolean): BusError =>
  * navigation, anything else the success, its `state` the value (absent when
  * the handler returned nothing: JSON drops `undefined`).
  */
+// What `meta.response` holds: the objects the client already built, no copy.
+const responseOf = (res: { status: number; headers?: Record<string, string>; url?: string; redirected?: boolean }): MetaResponse =>
+  ({ status: res.status, headers: res.headers ?? {}, url: res.url, redirected: res.redirected });
+
 function answerOf(r: BackendResponse, action: string): CommandResult {
-  if (r.problem) return _errResult(remoteProblem(r.problem));
+  if (r.problem) return _errResult(_remoteProblem(r.problem));
   if (typeof r.redirect === 'string') return _errResult(redirected(r.redirect, action, false));
   return _okResult(r.state);
 }
@@ -122,12 +125,11 @@ export type HttpBridgeOptions = {
    *     as the appropriate header. Works with any server-rendered framework
    *     that exposes a token via one of those three sources - Laravel Blade,
    *     Rails, Django, .NET MVC, custom stacks. Auto-refreshes on HTTP 419.
-   *   - `'inertia'` - defer token management to Inertia's Axios instance.
-   *     The bridge will skip its own CSRF reading and rely on the consumer's
-   *     `@inertiajs/inertia` axios setup to inject the token. Use this when
-   *     vapor-chamber dispatches share an HTTP layer with Inertia routes.
+   *     An Inertia app on Laravel uses `true` too: with no meta tag it reads
+   *     the XSRF-TOKEN cookie Laravel sets. The bridge makes its own requests,
+   *     which no Axios interceptor of the app touches.
    */
-  csrf?: boolean | 'inertia';
+  csrf?: boolean;
   /**
    * URL to fetch on a CSRF-expiry response (HTTP 419) to obtain a fresh
    * token. The default targets the Laravel Sanctum SPA convention because
@@ -221,11 +223,6 @@ export type HttpBridgeOptions = {
  */
 export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
   const { endpoint, actions, csrf = false, csrfCookieUrl, headers = {}, timeout = 10_000, signal, onSessionExpired, onRedirect, scopeController, httpClient } = options;
-  // `csrf: 'inertia'` means: don't read CSRF from the DOM ourselves -
-  // Inertia's Axios already injects the token. The HTTP layer shape just
-  // needs to know "skip CSRF", same as `csrf: false`. Inertia handles it
-  // upstream via its own request interceptor.
-  const csrfFlag = csrf === 'inertia' ? false : csrf;
   // Merge external signal + scope controller signal for automatic cancellation
   const effectiveSignal = scopeController && signal
     ? (typeof AbortSignal.any === 'function'
@@ -234,22 +231,28 @@ export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
     : scopeController?.signal ?? signal;
 
   return Object.assign(async (cmd: Command, next: () => CommandResult | Promise<CommandResult>) => {
-    if (actions?.length && !actions.some(p => matchesPattern(p, cmd.action))) return next();
+    if (_isLibraryAction(cmd.action)) return next();
 
-    const envelope: CommandEnvelope = { command: cmd.action, target: cmd.target, payload: cmd.payload };
+    const envelope = envelopeOf(cmd);
 
     // Forward the idempotency key stamped by the `idempotent` plugin as an
     // `Idempotency-Key` header so the backend can reject duplicate writes - the
-    // wire half of exactly-once. No-op (same `headers` ref) when unset.
+    // wire half of exactly-once. With neither it nor a plugin's
+    // `meta.request` headers, the bridge's own `headers` go as they are.
     const idemKey = cmd.meta?.idempotencyKey;
+    const added = cmd.meta?.request?.headers;
     // A Structured Field String, as the draft requires (RFC 9651): quoted and
     // printable ASCII. Percent-encoding (UTF-8) yields only unreserved ASCII and
     // %XX, never `"` or `\`, so quoting is all it needs; it is reversible, so no
     // two keys collide, and any backend recovers the exact key (rawurldecode).
     // Raw, a target outside Latin-1 made a value Headers refuses and the
     // request never left. A malformed key (a lone surrogate) makes this throw,
-    // which the bus reports as <plugin>:failed:plugin. tests/idempotency-header.test.ts.
-    const reqHeaders = idemKey ? { ...headers, 'Idempotency-Key': `"${encodeURIComponent(idemKey)}"` } : headers;
+    // which the bus reports as transport:failed:plugin. tests/idempotency-header.test.ts.
+    let reqHeaders = headers;
+    if (idemKey || added) {
+      reqHeaders = { ...headers, ...added };
+      if (idemKey) reqHeaders['Idempotency-Key'] = `"${encodeURIComponent(idemKey)}"`;
+    }
 
     // Merge bridge-level effectiveSignal with per-dispatch cmd.signal. The
     // dispatch-time signal (from `bus.dispatch(..., { signal })`) is
@@ -264,13 +267,18 @@ export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
     try {
       const res = httpClient
         ? await httpClient.post<BackendResponse>(endpoint, envelope, {
-            csrf: csrfFlag, csrfCookieUrl, headers: reqHeaders, timeout, retry: 0, signal: perCallSignal, onSessionExpired,
+            csrf, csrfCookieUrl, headers: reqHeaders, timeout, retry: 0, signal: perCallSignal, onSessionExpired,
           })
         : await postCommand<BackendResponse>(endpoint, envelope, {
-            csrf: csrfFlag, csrfCookieUrl, headers: reqHeaders, timeout, retry: 0, signal: perCallSignal, onSessionExpired,
+            csrf, csrfCookieUrl, headers: reqHeaders, timeout, retry: 0, signal: perCallSignal, onSessionExpired,
           });
 
-      if (!res.ok) return _errResult(answered(res.status, res.data, res.headers));
+      if (!res.ok) return _errResult(_answered(res.status, res.data, res.headers));
+      if (cmd.meta) cmd.meta.response = responseOf(res);
+      // The envelope is an object, or nothing (no state).
+      if (res.data !== null && res.data !== undefined && (typeof res.data !== 'object' || Array.isArray(res.data))) {
+        return _errResult(remoteFail('unexpected:json', `The reply for "${cmd.action}" is not the JSON envelope.`, { action: cmd.action }));
+      }
       const d = (res.data ?? {}) as BackendResponse;
       // A redirect is a body member (a browser's fetch cannot read a 3xx's
       // Location): handed to onRedirect (typically Inertia's `router.visit`),
@@ -283,7 +291,7 @@ export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
     } catch (e) {
       return unanswered(e, cmd.action, perCallSignal);
     }
-  }, TRANSPORT);
+  }, TRANSPORT, { actions });
 }
 
 // ---------------------------------------------------------------------------
@@ -309,7 +317,6 @@ export type BatchingHttpBridgeOptions = HttpBridgeOptions & {
   window?: 'microtask' | number;
 };
 
-type BatchedCommandEnvelope = { id: string; command: string; target: any; payload?: any; idempotencyKey?: string };
 // `{ id } & BackendResponse`, not a restatement of it. Spelled out by hand
 // until now, which is why `code` had to be added in two places instead of one
 // - and how the two shapes would have drifted again at the next field. The WS
@@ -348,7 +355,6 @@ type QueuedBatchEntry = { id: string; cmd: Command; resolve: (result: CommandRes
  */
 export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): AsyncPlugin {
   const { endpoint, actions, csrf = false, csrfCookieUrl, headers = {}, timeout = 10_000, signal, onSessionExpired, onRedirect, scopeController, httpClient, window: flushWindow = 'microtask' } = options;
-  const csrfFlag = csrf === 'inertia' ? false : csrf;
   const effectiveSignal = scopeController && signal
     ? (typeof AbortSignal.any === 'function' ? AbortSignal.any([signal, scopeController.signal]) : signal)
     : scopeController?.signal ?? signal;
@@ -368,32 +374,32 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
     const batch = queue;
     queue = [];
     scheduled = false;
-    /* v8 ignore next -- defensive: flush is only ever scheduled right after a
-       queue.push, and nothing but flush drains the queue */
-    if (batch.length === 0) return;
 
-
-    const commands: BatchedCommandEnvelope[] = batch.map(({ id, cmd }) => {
-      const entry: BatchedCommandEnvelope = { id, command: cmd.action, target: cmd.target, payload: cmd.payload };
-      if (cmd.meta?.idempotencyKey) entry.idempotencyKey = cmd.meta.idempotencyKey;
-      return entry;
-    });
+    const commands = batch.map(({ id, cmd }) => envelopeOf(cmd, id));
+    // One request: its commands' `meta.request` headers merged in queue order.
+    let batchHeaders = headers;
+    for (const { cmd } of batch) {
+      const added = cmd.meta?.request?.headers;
+      if (added) batchHeaders = { ...batchHeaders, ...added };
+    }
 
     try {
       const res = httpClient
         ? await httpClient.post<BatchResponse>(endpoint, { commands }, {
-            csrf: csrfFlag, csrfCookieUrl, headers, timeout, retry: 0, signal: effectiveSignal, onSessionExpired,
+            csrf, csrfCookieUrl, headers: batchHeaders, timeout, retry: 0, signal: effectiveSignal, onSessionExpired,
           })
         : await postCommand<BatchResponse>(endpoint, { commands }, {
-            csrf: csrfFlag, csrfCookieUrl, headers, timeout, retry: 0, signal: effectiveSignal, onSessionExpired,
+            csrf, csrfCookieUrl, headers: batchHeaders, timeout, retry: 0, signal: effectiveSignal, onSessionExpired,
           });
 
       if (!res.ok) {
-        const err = answered(res.status, res.data, res.headers);
+        const err = _answered(res.status, res.data, res.headers);
         for (const entry of batch) entry.resolve(_errResult(err));
         return;
       }
 
+      const response = responseOf(res);
+      for (const entry of batch) if (entry.cmd.meta) entry.cmd.meta.response = response;
       const byId = new Map((res.data?.results ?? []).map((r) => [r.id, r]));
       // `onRedirect` navigates, so it fires once per batch - two navigations
       // in one tick race. Every redirected command still fails on its own,
@@ -419,7 +425,7 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
   }
 
   return Object.assign((cmd: Command, next: () => CommandResult | Promise<CommandResult>) => {
-    if (actions?.length && !actions.some((p) => matchesPattern(p, cmd.action))) return next();
+    if (_isLibraryAction(cmd.action)) return next();
     if (cmd.signal?.aborted) return Promise.resolve(abortedResult(cmd.action, cmd.signal));
 
     return new Promise<CommandResult>((resolve) => {
@@ -427,7 +433,7 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
       queue.push({ id, cmd, resolve });
       scheduleFlush();
     });
-  }, TRANSPORT);
+  }, TRANSPORT, { actions });
 }
 
 // ---------------------------------------------------------------------------
@@ -530,7 +536,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
 
   function send(id: string, envelope: CommandEnvelope, timeout: number): void {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ id, ...envelope }));
+      ws.send(JSON.stringify(envelope));
     } else {
       if (queue.length >= maxQueueSize) {
         const dropped = queue.shift()!;
@@ -565,7 +571,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
         continue;
       }
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ id, ...envelope }));
+        ws.send(JSON.stringify(envelope));
       } else {
         // Socket closed mid-flush - re-queue the remainder so they either go
         // out on reconnect or settle via failAllPending/expiry, instead of
@@ -594,17 +600,6 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
     }
   }
 
-  function scheduleReconnect(): void {
-    /* v8 ignore next -- defensive: scheduleReconnect's only call site (onclose)
-       already guards with this exact condition before calling it */
-    if (!reconnect || intentionalClose || reconnectCount >= maxReconnects) return;
-    reconnectCount++;
-    const delay = reconnectDelay * reconnectCount;
-    reconnectTimer = setTimeout(() => {
-      connect();
-    }, delay);
-  }
-
   function connect(): void {
     if (typeof WebSocket === 'undefined') return;
     // Already connecting/connected - a second socket would orphan the first
@@ -622,9 +617,15 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
 
     ws.onopen = () => {
       reconnectCount = 0;
-      connected.value = true;
-      flushQueue();
-      onConnect?.();
+      // Here, in onclose and in disconnect(): the bookkeeping is in the
+      // `finally`, so a sync subscriber of `connected` that throws cannot skip
+      // it (pinned by tests/ws-bridge-throwing-subscriber.test.ts).
+      try {
+        connected.value = true;
+      } finally {
+        flushQueue();
+        onConnect?.();
+      }
     };
 
     ws.onmessage = (event) => {
@@ -642,17 +643,20 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
     };
 
     ws.onclose = (event) => {
-      connected.value = false;
-      // This socket is dead - drop the reference (unless a newer socket already
-      // replaced it) so the connect() liveness guard lets the next attempt through.
-      if (ws === socket) ws = null;
-      onDisconnect?.(event);
-      // Reconnect if we still can; otherwise this close is terminal - fail any
-      // in-flight requests now rather than leaving them to hang until timeout.
-      if (!intentionalClose && reconnect && reconnectCount < maxReconnects) {
-        scheduleReconnect();
-      } else {
-        failAllPending('WebSocket connection closed before response');
+      try {
+        connected.value = false;
+      } finally {
+        // This socket is dead - drop the reference (unless a newer socket already
+        // replaced it) so the connect() liveness guard lets the next attempt through.
+        if (ws === socket) ws = null;
+        onDisconnect?.(event);
+        // Reconnect if we still can; otherwise this close is terminal - fail any
+        // in-flight requests now rather than leaving them to hang until timeout.
+        if (!intentionalClose && reconnect && reconnectCount < maxReconnects) {
+          reconnectTimer = setTimeout(connect, reconnectDelay * ++reconnectCount);
+        } else {
+          failAllPending('WebSocket connection closed before response');
+        }
       }
     };
 
@@ -663,16 +667,19 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
 
   function disconnect(): void {
     intentionalClose = true;
-    connected.value = false;
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer);
-      reconnectTimer = null;
+    try {
+      connected.value = false;
+    } finally {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer);
+        reconnectTimer = null;
+      }
+      // Fail any in-flight requests immediately - the caller explicitly tore the
+      // connection down; don't make them wait out the per-request timeout.
+      failAllPending('WebSocket disconnected');
+      ws?.close();
+      ws = null;
     }
-    // Fail any in-flight requests immediately - the caller explicitly tore the
-    // connection down; don't make them wait out the per-request timeout.
-    failAllPending('WebSocket disconnected');
-    ws?.close();
-    ws = null;
   }
 
   function isConnected(): boolean {
@@ -680,7 +687,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
   }
 
   const plugin: AsyncPlugin = async (cmd: Command, next: () => CommandResult | Promise<CommandResult>): Promise<CommandResult> => {
-    if (actions?.length && !actions.some(p => matchesPattern(p, cmd.action))) {
+    if (_isLibraryAction(cmd.action)) {
       return next();
     }
 
@@ -732,11 +739,11 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
         cmd.signal.addEventListener('abort', abortHandler);
       }
 
-      send(id, { command: cmd.action, target: cmd.target, payload: cmd.payload }, wsTimeout);
+      send(id, envelopeOf(cmd, id), wsTimeout);
     });
   };
 
-  return Object.assign(plugin, { connect, disconnect, isConnected, connected }, TRANSPORT);
+  return Object.assign(plugin, { connect, disconnect, isConnected, connected }, TRANSPORT, { actions });
 }
 
 // ---------------------------------------------------------------------------

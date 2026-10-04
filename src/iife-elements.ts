@@ -98,6 +98,12 @@ function connect(options: HttpBridgeOptions & Omit<CreateAppOptions, 'transport'
  * and it produces a vnode, the vDOM shape Vapor replaced. Pinned by
  * `tests/vapor/widget-shape.test.ts`, which mounts a real widget.
  *
+ * ## A function set on a property
+ *
+ * `el.onSave = fn` hands `setup(props)` the function itself, from Vue
+ * 3.6.0-rc.10. rc.9 called it as a prop getter and delivered what it returned.
+ * Pinned by the same file.
+ *
  * @example
  * <script src=".../vapor-chamber-elements.iife.min.js"></script>
  * <script type="module">

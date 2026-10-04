@@ -45,9 +45,10 @@ import zlib from 'node:zlib';
 import { build, createServer, type ViteDevServer } from 'vite';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { vaporChamberWire } from '../src/vite-hmr';
+import { requireDist } from './require-dist';
 
 const dist = (f: string) => resolve(process.cwd(), 'dist', f);
-const haveDist = existsSync(dist('index.js')) && existsSync(dist('vue.js')) && existsSync(dist('vapor.js'));
+requireDist(existsSync(dist('index.js')) && existsSync(dist('vue.js')) && existsSync(dist('vapor.js')));
 
 /** What src/vue.ts passes to configureVue() - the list that must reach a built app. */
 const VUE_NAMES = [
@@ -128,7 +129,7 @@ function importsFrom(code: string, spec: string): string[] {
 const br = (s: string) =>
   zlib.brotliCompressSync(Buffer.from(s), { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11 } }).length;
 
-describe.skipIf(!haveDist)('vaporChamberWire in a real Vite production build', () => {
+describe('vaporChamberWire in a real Vite production build', () => {
   it('control: without it, a root-only consumer imports nothing from vue', async () => {
     const code = await bundle([]);
     // The composable is on a live path - this is a real consumer, not dead code.
@@ -154,10 +155,13 @@ describe.skipIf(!haveDist)('vaporChamberWire in a real Vite production build', (
     );
   });
 
-  it("entry: 'vapor' also wires the three Vapor names", async () => {
+  it("entry: 'vapor' also wires the Vapor names, the async one only where it is used", async () => {
     const wired = await bundle([vaporChamberWire({ entry: 'vapor' })]);
     expect(importsFrom(wired, '@vue/reactivity')).toEqual(expect.arrayContaining(TRACKING));
-    expect(importsFrom(wired, 'vue')).toEqual(expect.arrayContaining([...VUE_NAMES, ...VAPOR_NAMES]));
+    expect(importsFrom(wired, 'vue')).toEqual(expect.arrayContaining([...VUE_NAMES, 'createVaporApp', 'defineVaporComponent']));
+    // This consumer defines no async component, so Vue's stays out (decision 6,
+    // tests/vapor-async-wire.test.ts, which also runs one that does).
+    expect(importsFrom(wired, 'vue')).not.toContain('defineVaporAsyncComponent');
   });
 });
 
@@ -171,12 +175,31 @@ describe('vaporChamberWire - the plugin object', () => {
     // dev-server half lives in that hook.
     expect(plugin.apply).toBeUndefined();
 
-    expect(plugin.config({}, { command: 'build', mode: 'production' })).toBeUndefined();
+    // In a build it defines __VC_WIRED_BUILD__, which folds the root's probe
+    // (tests/root-probe-builds.test.ts).
+    // Both carry the build profile, performance by default
+    // (tests/isloading-profile.test.ts).
+    expect(plugin.config({}, { command: 'build', mode: 'production' })).toEqual({ define: { __VC_WIRED_BUILD__: 'true', __VC_LEAN__: 'false' } });
     expect(await plugin.resolveId.call(ctx, 'vapor-chamber', '/app/main.js')).toMatch(/^\0/);
 
     const dev = vaporChamberWire();
-    expect(dev.config({}, { command: 'serve', mode: 'development' })).toEqual({ define: { __VC_WIRED__: 'true' } });
+    expect(dev.config({}, { command: 'serve', mode: 'development' })).toEqual({ define: { __VC_WIRED__: 'true', __VC_LEAN__: 'false' } });
     expect(await dev.resolveId.call(ctx, 'vapor-chamber', '/app/main.js')).toBeUndefined();
+  });
+
+  it("profile: 'lean' defines __VC_LEAN__ true, in a build and under serve; 'performance' is the default", () => {
+    const build = { command: 'build' as const, mode: 'production' };
+    const serve = { command: 'serve' as const, mode: 'development' };
+    expect(vaporChamberWire({ profile: 'lean' }).config({}, build)).toEqual({ define: { __VC_WIRED_BUILD__: 'true', __VC_LEAN__: 'true' } });
+    expect(vaporChamberWire({ profile: 'lean' }).config({}, serve)).toEqual({ define: { __VC_WIRED__: 'true', __VC_LEAN__: 'true' } });
+    expect(vaporChamberWire({ profile: 'performance' }).config({}, build)).toEqual(vaporChamberWire().config({}, build));
+    expect(vaporChamberWire({ profile: 'performance' }).config({}, serve)).toEqual(vaporChamberWire().config({}, serve));
+  });
+
+  it("leaves an app's own __VC_LEAN__ define alone, whatever the profile", () => {
+    const user = { define: { __VC_LEAN__: 'true' } };
+    expect(vaporChamberWire().config(user, { command: 'build' })).toEqual({ define: { __VC_WIRED_BUILD__: 'true' } });
+    expect(vaporChamberWire({ profile: 'lean' }).config({ define: { __VC_LEAN__: 'false' } }, { command: 'serve' })).toEqual({ define: { __VC_WIRED__: 'true' } });
   });
 
   it('leaves every other specifier alone, subpaths included', async () => {
@@ -280,7 +303,7 @@ async function crawl(server: ViteDevServer, entry: string): Promise<Map<string, 
 const chamberModules = (graph: Map<string, string>) =>
   [...graph].filter(([, code]) => code.includes(CHAMBER_MARK)).map(([url]) => url);
 
-describe.skipIf(!haveDist)('vaporChamberWire under a real Vite dev server, package pre-bundled', () => {
+describe('vaporChamberWire under a real Vite dev server, package pre-bundled', () => {
   beforeAll(() => {
     devRoot = makeDevProject();
   });

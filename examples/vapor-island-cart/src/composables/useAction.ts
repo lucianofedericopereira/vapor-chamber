@@ -8,8 +8,9 @@ import { bus } from '../store';
 // shadowing the library's useCommand(), which takes no arguments and uses
 // the shared bus.
 //
-// The sync bus never throws - missing handlers and handler exceptions come
-// back as { ok: false, error } - so read the returned result instead of
+// The sync bus never throws - a failure comes back as { ok: false, error }:
+// a missing handler as a BusError coded `core:missing:handler`, a handler's
+// throw as its own error, unwrapped - so read the returned result instead of
 // wrapping dispatch in try/catch.
 //
 // NOTE the `untracked()` wrapper, which is the point of this file as an

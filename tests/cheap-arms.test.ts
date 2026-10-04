@@ -5,7 +5,7 @@
  *
  *  - http: a page with NO CSRF token - the common case
  *    for a read-only app; an empty JSON body; an unparsable
- *    content-disposition; a Retry-After beyond the sanity ceiling;
+ *    content-disposition; a Retry-After beyond the in-request bound;
  *    interceptors registered with onRejected only; eject() of an
  *    already-ejected id.
  *  - transports: backend failure bodies carrying `error` but no `message`, or
@@ -102,17 +102,17 @@ describe('http response fallbacks', () => {
     expect(result.filename).toBe('download');
   });
 
-  it('ignores a Retry-After beyond the sanity ceiling', async () => {
+  it('ends the request on a Retry-After beyond the in-request bound, never retrying sooner', async () => {
     const fetchMock = globalThis.fetch as any;
-    // 7 days in seconds - must NOT be honoured as a wait; backoff applies.
+    // 7 days in seconds: not slept inside a request, and not cut short to a
+    // backoff either (Retry-After is a minimum). tests/retry-after-long.test.ts.
     fetchMock
       .mockResolvedValueOnce(mockResponse(429, { e: 1 }, { 'content-type': 'application/json', 'retry-after': '604800' }))
       .mockResolvedValueOnce(jsonResponse(200, { ok: true }));
 
     const started = Date.now();
-    const res = await createHttpClient().get('/api/data', { retry: 1 });
-    expect(res.status).toBe(200);
-    // Backoff, not a week.
+    await expect(createHttpClient().get('/api/data', { retry: 1 })).rejects.toMatchObject({ context: { status: 429 } });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(Date.now() - started).toBeLessThan(5000);
   });
 });

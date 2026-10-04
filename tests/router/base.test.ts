@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeBase, resolveBase, stripBase } from '../../src/router/history';
+import { normalizeBase, resolveBase, stripBase } from '@router/history';
 
 describe('resolveBase - concept: prefix?, locale?, or explicit baseurl', () => {
   const locales = ['it', 'en'];

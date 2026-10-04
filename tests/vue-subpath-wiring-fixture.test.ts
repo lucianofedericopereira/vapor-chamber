@@ -22,7 +22,7 @@
  * example `hasInjectionContext`.
  * `tryKeepAliveHooks` gates on it *specifically because* `getCurrentInstance()`
  * returns null inside a Vapor component by design - the rc.4 finding, recorded
- * in whitepaper §9 and ROADMAP. With the entry unset the gate falls back to
+ * in the whitepaper's appendix B and ROADMAP. With the entry unset the gate falls back to
  * `getCurrentInstance()` and goes inert, so `useCommandHistory` /
  * `useCommandError` record commands dispatched into a DEACTIVATED KeepAlive
  * view: a command dispatched while the component was deactivated would come

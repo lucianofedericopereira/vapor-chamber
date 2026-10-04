@@ -8,11 +8,11 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { isRouterError } from '../../src/router/errors';
-import { createMemoryHistory } from '../../src/router/history';
-import { createRouter } from '../../src/router/index';
-import type { LoaderHandlers } from '../../src/router/loaders';
-import type { RouteRecord } from '../../src/router/types';
+import { isRouterError } from '@router/errors';
+import { createMemoryHistory } from '@router/history';
+import { createRouter } from '@router/index';
+import type { LoaderHandlers } from '@router/loaders';
+import type { RouteRecord } from '@router/types';
 
 const ROWS: RouteRecord[] = [
   { name: 'shell', path: '/', parent: null },
@@ -37,7 +37,7 @@ const ROWS: RouteRecord[] = [
 ];
 
 describe('REPRO: query change during an in-flight navigation', () => {
-  it('does not cancel the pending path navigation', async () => {
+  it('a query COMMIT supersedes the pending path navigation, on purpose and told (s35.120)', async () => {
     // gate the /remote loader so the navigation stays in flight
     let releaseRemote!: () => void;
     const remoteGate = new Promise<void>((resolve) => {
@@ -89,17 +89,15 @@ describe('REPRO: query change during an in-flight navigation', () => {
     releaseRemote();
     const result = await pending;
 
-    // ---- MEASURED on rc.2 (fails until the lanes get separate controllers) --
-    //   remoteAborted    : true            <- the query refetch killed it
-    //   push() result    : 'cancelled'
-    //   committed route  : 'products'      <- never went to /remote
-    //   history location : '/products?name=abc'
-    //   onError calls    : 0               <- silent, nothing surfaced
-    expect(remoteAborted).toBe(false);
-    expect(isRouterError(result, 'cancelled')).toBe(false);
-    expect(result).toBeNull(); // null = committed
-    expect(router.currentRoute.value.location.name).toBe('remote');
-    expect(history.location()).toBe('/remote');
+    // rc.2's bug: the shared controller aborted /remote by accident. The lanes
+    // stay separate; since s35.120 the query COMMIT supersedes the pending
+    // navigation through supersede(), the latest request winning (Router 2's
+    // rule): otherwise /remote committed over the query and lost it. The push
+    // answers aborted:navigation, normal flow, not an onError.
+    expect(remoteAborted).toBe(true);
+    expect(isRouterError(result, 'router:aborted:navigation')).toBe(true);
+    expect(router.currentRoute.value.location.name).toBe('products');
+    expect(history.location()).toBe('/products?name=abc');
     expect(onError).not.toHaveBeenCalled();
   });
 

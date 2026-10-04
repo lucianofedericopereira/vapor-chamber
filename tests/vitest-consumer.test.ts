@@ -27,10 +27,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
 import ts from 'typescript';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { requireDist } from './require-dist';
 
 const REPO = process.cwd();
 const dist = (f: string) => resolve(REPO, 'dist', f);
-const haveDist = existsSync(dist('vitest.js')) && existsSync(dist('vitest-pure.js')) && existsSync(dist('index.d.ts'));
+requireDist(existsSync(dist('vitest.js')) && existsSync(dist('vitest-pure.js')) && existsSync(dist('index.d.ts')));
 
 // ---------------------------------------------------------------------------
 // Consumer projects
@@ -341,7 +342,6 @@ let withoutVitest: Promise<{ status: number; output: string }>;
 let hazardControl: Promise<{ status: number; output: string }>;
 
 beforeAll(() => {
-  if (!haveDist) return;
   // Every promise gets a handler now, so a rejection surfaces in its own test
   // rather than as an unhandled rejection while the others still run.
   const settle = <T>(p: Promise<T>) => {
@@ -482,7 +482,7 @@ afterAll(() => {
 // Assertions
 // ---------------------------------------------------------------------------
 
-describe.skipIf(!haveDist)('A1 adoption', () => {
+describe('A1 adoption', () => {
   it('setupFiles: [vapor-chamber/vitest], globals false: a matcher on getCommandBus() passes', async () => {
     const outcomes = await setupPath;
     expect(failedIn(outcomes, 'tests/adoption.test.js')).toEqual([]);
@@ -511,7 +511,7 @@ describe.skipIf(!haveDist)('A1 adoption', () => {
   });
 });
 
-describe.skipIf(!haveDist)('C3 a failed test shows what it dispatched', () => {
+describe('C3 a failed test shows what it dispatched', () => {
   it('a test failing on an unrelated toBe lists its dispatches, as Vitest lists spy calls', async () => {
     const [outcome] = failedIn(await setupPath, 'tests/explain.test.js');
     expect(outcome?.failure).toContain('expected 1 to be 2');
@@ -527,7 +527,7 @@ describe.skipIf(!haveDist)('C3 a failed test shows what it dispatched', () => {
   });
 });
 
-describe.skipIf(!haveDist)('the vc-vitest-plugin line, in a real run', () => {
+describe('the vc-vitest-plugin line, in a real run', () => {
   const LINE = ' \\\\//  powered by vc-vitest-plugin';
 
   it('the plugin with a terminal reporter: the line once, on stderr, before the run', async () => {
@@ -558,7 +558,7 @@ describe.skipIf(!haveDist)('the vc-vitest-plugin line, in a real run', () => {
   });
 });
 
-describe.skipIf(!haveDist)('vc-vitest-mcp, started as an MCP client starts it', () => {
+describe('vc-vitest-mcp, started as an MCP client starts it', () => {
   const text = (reply: any) => reply.result.content[0].text as string;
 
   it('every stdout line is a JSON-RPC message, although the project config prints and a test logs', async () => {
@@ -616,7 +616,7 @@ describe('docs/integrations/vitest.md: every block is checked', () => {
   });
 });
 
-describe.skipIf(!haveDist)('docs/integrations/vitest.md: the samples run', () => {
+describe('docs/integrations/vitest.md: the samples run', () => {
   for (const [name, run] of [['config:setup', () => docSetup], ['config:plugin', () => docPlugin]] as const) {
     it(`under the ${name} block as vitest.config.ts, every test block passes`, async () => {
       const outcomes = await run();
@@ -640,7 +640,7 @@ describe.skipIf(!haveDist)('docs/integrations/vitest.md: the samples run', () =>
   });
 });
 
-describe.skipIf(!haveDist)('A4 types, without skipLibCheck', () => {
+describe('A4 types, without skipLibCheck', () => {
   it('typed bus: valid matcher calls compile; a typo, a wrong payload and a wrong value do not', async () => {
     // Exit 0 is only possible if every expected-error directive met its error.
     const { status, output } = await typed;
@@ -686,7 +686,7 @@ function augmentedModules(text: string): string[] {
   return source.statements.filter(ts.isModuleDeclaration).map((m) => m.name.text);
 }
 
-describe.skipIf(!haveDist)('A5 packaging', () => {
+describe('A5 packaging', () => {
   it('dist/vitest.js keeps import("vapor-chamber") external, never bundled', () => {
     // beforeEach's, then the bus and asyncBus fixtures'.
     expect(emittedImports('vitest.js').dynamics).toEqual(['vapor-chamber', 'vapor-chamber', 'vapor-chamber']);
@@ -730,7 +730,7 @@ describe.skipIf(!haveDist)('A5 packaging', () => {
   });
 });
 
-describe.skipIf(!haveDist)('A10 identity', () => {
+describe('A10 identity', () => {
   it('one module instance in node, happy-dom, server.deps.inline, vmThreads, happy-dom plus inline', async () => {
     const outcomes = await matrix;
     expect(failedIn(outcomes, 'tests/identity.test.js')).toEqual([]);
@@ -763,7 +763,7 @@ describe.skipIf(!haveDist)('A10 identity', () => {
   });
 });
 
-describe.skipIf(!haveDist)('A11 setup-file merge, in a real Vitest', () => {
+describe('A11 setup-file merge, in a real Vitest', () => {
   it('a string setupFiles runs after ours, and both run', async () => {
     const outcomes = await pluginPath;
     expect(failedIn(outcomes, 'tests/order.test.js')).toEqual([]);
@@ -771,7 +771,7 @@ describe.skipIf(!haveDist)('A11 setup-file merge, in a real Vitest', () => {
   });
 });
 
-describe.skipIf(!haveDist)('A12 pure is pure (runtime)', () => {
+describe('A12 pure is pure (runtime)', () => {
   it('importing /pure alone registers no matcher and no hook', async () => {
     const outcomes = await noIntegration;
     expect(failedIn(outcomes, 'tests/pure.test.js')).toEqual([]);
@@ -779,7 +779,7 @@ describe.skipIf(!haveDist)('A12 pure is pure (runtime)', () => {
   });
 });
 
-describe.skipIf(!haveDist)('A13 island project', () => {
+describe('A13 island project', () => {
   it('only *.island.test.* and tests/islands/** run in the island project', async () => {
     const outcomes = await pluginPath;
     // Each file exactly once: a file in both projects would appear twice, and

@@ -1,239 +1,122 @@
 <!--
   Vue Vapor Component Example
 
-  Demonstrates: useCommand, useCommandState, useCommandHistory composables
+  Demonstrates: a store with undo (defineChamberStore + useCommandHistory), a
+  validator on its command, and the composables' results read in a template.
 
-  Works in Vapor (`<script setup vapor>` with Vue 3.6+) and VDOM alike - the
-  composables never touch getCurrentInstance(), so only the script attribute
-  differs between the two modes.
+  Works in Vapor (`<script setup vapor>` with Vue 3.6+) and VDOM alike - only
+  the script attribute differs between the two modes.
+
+  Templates unwrap TOP-LEVEL refs, so a composable's result is kept as an
+  object here (`cmd.loading.value`, `hist.canUndo.value`): a nested `.value`
+  is the same at runtime and for vue-tsc.
 -->
 
 <script setup lang="ts">
-import { onUnmounted } from 'vue';
+import { computed, ref } from 'vue';
 // The bus and its plugins need no Vue, so they come from the package root.
 import { getCommandBus, validator } from 'vapor-chamber';
 // The composables come from the Vue entry, which wires Vue at build time.
-// From the root they would lose reactivity and cleanup once built.
-import {
-  useCommand,
-  useCommandState,
-  useCommandHistory,
-  signal
-} from 'vapor-chamber/vue';
+import { useCommand, useCommandHistory } from 'vapor-chamber/vue';
+import { defineChamberStore } from 'vapor-chamber/store';
 
-// Get shared bus and add validation
-const bus = getCommandBus();
-bus.use(validator({
-  'todoAdd': (cmd) => {
-    if (!cmd.target?.trim()) return 'Todo text cannot be empty';
-    return null;
-  }
-}));
-
-// Dispatch with loading/error state
-const { dispatch, loading, lastError } = useCommand();
-
-// Todo interface
 interface Todo {
   id: number;
   text: string;
   done: boolean;
 }
 
-interface TodoState {
-  items: Todo[];
-  filter: 'all' | 'active' | 'completed';
-}
-
-// Reactive state managed by commands
-const { state: todos } = useCommandState<TodoState>(
-  { items: [], filter: 'all' },
-  {
-    'todoAdd': (state, cmd) => ({
-      ...state,
-      items: [...state.items, {
-        id: Date.now(),
-        text: cmd.target as string,
-        done: false
-      }]
-    }),
-
-    'todoToggle': (state, cmd) => ({
-      ...state,
-      items: state.items.map(t =>
-        t.id === cmd.target ? { ...t, done: !t.done } : t
-      )
-    }),
-
-    'todoRemove': (state, cmd) => ({
-      ...state,
-      items: state.items.filter(t => t.id !== cmd.target)
-    }),
-
-    'todoClearCompleted': (state) => ({
-      ...state,
-      items: state.items.filter(t => !t.done)
-    }),
-
-    'todoFilter': (state, cmd) => ({
-      ...state,
-      filter: cmd.target as TodoState['filter']
-    })
-  }
-);
-
-// Undo/redo for todo actions
-const { canUndo, canRedo, undo, redo } = useCommandHistory({
-  filter: (cmd) => cmd.action.startsWith('todo') && cmd.action !== 'todoFilter'
+// The todos are a store: every change is a command (`todoAdd`, ...), and with
+// `undo: true` each one can be undone through the history below.
+const useTodos = defineChamberStore('todo', {
+  state: () => ({ items: [] as Todo[] }),
+  actions: {
+    add: (s, text: string) => ({ items: [...s.items, { id: Date.now(), text, done: false }] }),
+    toggle: (s, id: number) => ({ items: s.items.map((t) => (t.id === id ? { ...t, done: !t.done } : t)) }),
+    remove: (s, id: number) => ({ items: s.items.filter((t) => t.id !== id) }),
+    clearCompleted: (s) => ({ items: s.items.filter((t) => !t.done) }),
+  },
+  undo: true,
 });
 
-// Computed filtered items - access todos.value properties directly without
-// destructuring, so reads always go through the signal getter and remain reactive.
-function getFilteredItems() {
-  switch (todos.value.filter) {
-    case 'active': return todos.value.items.filter(t => !t.done);
-    case 'completed': return todos.value.items.filter(t => t.done);
-    default: return todos.value.items;
-  }
-}
+const bus = getCommandBus();
+bus.use(validator({
+  todoAdd: (cmd) => (String(cmd.target ?? '').trim() ? null : 'Todo text cannot be empty'),
+}));
 
-// Form state - must be a signal so v-model triggers reactivity
-const newTodoText = signal('');
+const todos = useTodos(bus);
+const cmd = useCommand();
+const hist = useCommandHistory({ filter: (c) => c.action.startsWith('todo') });
 
-// Actions
+// The filter is the view's own state, not the store's: a store write the
+// history does not record would leave the last step not undoable (canUndo).
+const filter = ref<'all' | 'active' | 'completed'>('all');
+const newTodoText = ref('');
+
+const visible = computed(() => {
+  const items = todos.state.value.items;
+  if (filter.value === 'active') return items.filter((t) => !t.done);
+  if (filter.value === 'completed') return items.filter((t) => t.done);
+  return items;
+});
+const stats = computed(() => {
+  const items = todos.state.value.items;
+  const active = items.filter((t) => !t.done).length;
+  return { total: items.length, active, completed: items.length - active };
+});
+
 function addTodo() {
-  if (!newTodoText.value.trim()) return;
-
-  // dispatch() is typed CommandResult | Promise<CommandResult> (the shared bus
-  // may be sync or async) - this app's shared bus is sync, so narrow with an
-  // instanceof check that also keeps an async bus working.
-  const result = dispatch('todoAdd', newTodoText.value.trim());
-  if (!(result instanceof Promise) && result.ok) {
-    newTodoText.value = '';
-  }
+  // Dispatched through useCommand, so its loading and lastError track it.
+  const result = cmd.dispatch('todoAdd', newTodoText.value.trim());
+  if (!(result instanceof Promise) && result.ok) newTodoText.value = '';
 }
-
-function toggleTodo(id: number) {
-  dispatch('todoToggle', id);
-}
-
-function removeTodo(id: number) {
-  dispatch('todoRemove', id);
-}
-
-function clearCompleted() {
-  dispatch('todoClearCompleted', null);
-}
-
-function setFilter(filter: TodoState['filter']) {
-  dispatch('todoFilter', filter);
-}
-
-// Stats as a reactive signal - updated after every todo command so the template
-// reads a single signal instead of re-running filter() for every binding.
-const stats = signal({ total: 0, active: 0, completed: 0 });
-
-// Store the unsubscribe so the hook is removed when the component unmounts.
-const unsubscribeStats = bus.onAfter((cmd) => {
-  if (!cmd.action.startsWith('todo')) return;
-  const items = todos.value.items;
-  const active = items.filter(t => !t.done).length;
-  stats.value = { total: items.length, active, completed: items.length - active };
-});
-
-// Wire cleanup to the component lifecycle so the hook doesn't leak.
-onUnmounted(unsubscribeStats);
 </script>
 
 <template>
   <div class="todo-app">
     <h1>Todo App</h1>
 
-    <!-- Add form. A labelled input (a placeholder is not a label), and
-         aria-disabled rather than disabled on buttons that can become
-         unavailable while focused: `disabled` would send keyboard focus to
-         <body>. addTodo() already ignores an empty text. -->
+    <!-- A labelled input (a placeholder is not a label), and aria-disabled
+         rather than disabled on buttons that can become unavailable while
+         focused: `disabled` would send keyboard focus to <body>. -->
     <form @submit.prevent="addTodo" class="add-form">
       <label for="new-todo" class="visually-hidden">New todo</label>
-      <input
-        id="new-todo"
-        :value="newTodoText.value"
-        @input="newTodoText.value = ($event.target as HTMLInputElement).value"
-        placeholder="What needs to be done?"
-      />
-      <button type="submit" :aria-disabled="loading.value || !newTodoText.value.trim()">
-        Add
-      </button>
+      <input id="new-todo" v-model="newTodoText" placeholder="What needs to be done?" />
+      <button type="submit" :aria-disabled="cmd.loading.value || !newTodoText.trim()">Add</button>
     </form>
 
-    <!-- Error display: a live region, so the failure is heard -->
-    <p class="error" role="alert">
-      {{ lastError.value?.message }}
-    </p>
+    <!-- A live region, so the failure is heard -->
+    <p class="error" role="alert">{{ cmd.lastError.value?.message }}</p>
 
-    <!-- Undo/Redo controls -->
     <div class="controls">
-      <button @click="canUndo.value && undo()" :aria-disabled="!canUndo.value">
-        Undo
-      </button>
-      <button @click="canRedo.value && redo()" :aria-disabled="!canRedo.value">
-        Redo
-      </button>
+      <button @click="hist.canUndo.value && hist.undo()" :aria-disabled="!hist.canUndo.value">Undo</button>
+      <button @click="hist.canRedo.value && hist.redo()" :aria-disabled="!hist.canRedo.value">Redo</button>
     </div>
 
-    <!-- Filter tabs -->
     <div class="filters">
-      <button
-        @click="setFilter('all')"
-        :class="{ active: todos.value.filter === 'all' }"
-        :aria-pressed="todos.value.filter === 'all'"
-      >
-        All ({{ stats.value.total }})
+      <button @click="filter = 'all'" :class="{ active: filter === 'all' }" :aria-pressed="filter === 'all'">
+        All ({{ stats.total }})
       </button>
-      <button
-        @click="setFilter('active')"
-        :class="{ active: todos.value.filter === 'active' }"
-        :aria-pressed="todos.value.filter === 'active'"
-      >
-        Active ({{ stats.value.active }})
+      <button @click="filter = 'active'" :class="{ active: filter === 'active' }" :aria-pressed="filter === 'active'">
+        Active ({{ stats.active }})
       </button>
-      <button
-        @click="setFilter('completed')"
-        :class="{ active: todos.value.filter === 'completed' }"
-        :aria-pressed="todos.value.filter === 'completed'"
-      >
-        Completed ({{ stats.value.completed }})
+      <button @click="filter = 'completed'" :class="{ active: filter === 'completed' }" :aria-pressed="filter === 'completed'">
+        Completed ({{ stats.completed }})
       </button>
     </div>
 
-    <!-- Todo list -->
     <ul class="todo-list">
-      <li
-        v-for="todo in getFilteredItems()"
-        :key="todo.id"
-        :class="{ done: todo.done }"
-      >
+      <li v-for="todo in visible" :key="todo.id" :class="{ done: todo.done }">
         <label>
-          <input
-            type="checkbox"
-            :checked="todo.done"
-            @change="toggleTodo(todo.id)"
-          />
+          <input type="checkbox" :checked="todo.done" @change="todos.toggle(todo.id)" />
           {{ todo.text }}
         </label>
-        <button @click="removeTodo(todo.id)" class="remove" :aria-label="`Remove ${todo.text}`">
-          &times;
-        </button>
+        <button @click="todos.remove(todo.id)" class="remove" :aria-label="`Remove ${todo.text}`">&times;</button>
       </li>
     </ul>
 
-    <!-- Clear completed -->
-    <button
-      v-if="stats.value.completed > 0"
-      @click="clearCompleted"
-      class="clear-completed"
-    >
-      Clear completed ({{ stats.value.completed }})
+    <button v-if="stats.completed > 0" @click="todos.clearCompleted()" class="clear-completed">
+      Clear completed ({{ stats.completed }})
     </button>
   </div>
 </template>

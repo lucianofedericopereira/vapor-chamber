@@ -11,7 +11,7 @@
  *
  * In-box preset: `vapor-chamber/router-fetch` (plain JSON backends). Any other
  * backend convention is a preset returning LoaderHandlers. A load with no
- * matching handler is a coded 'load_failed'.
+ * matching handler is a coded `router:missing:loader`.
  */
 
 import { isRouterError, routerError } from './errors';
@@ -34,6 +34,13 @@ export type LoaderContext = {
    * page.
    */
   revalidate: (fresh: Promise<unknown>) => void;
+  /**
+   * True when this run refreshes data the page already shows because it is
+   * known to be out of date (`revalidateRoutes` after a mapped command); false
+   * on a navigation or a query refetch. A loader that caches reads past its
+   * cache when it is true, or it hands back the copy from before the change.
+   */
+  refresh: boolean;
 };
 
 /** Handles `load` values under a registered prefix
@@ -110,7 +117,7 @@ function matchPrefix(template: string, handlers: LoaderHandlers): [string, Prefi
 }
 
 /** Run every loader in a record chain. Results keyed by record name;
- *  failures throw coded RouterErrors (cause attached, abort -> 'cancelled'). */
+ *  failures throw coded RouterErrors (cause attached, abort -> `aborted:navigation`). */
 export async function runLoaders(
   handlers: LoaderHandlers,
   records: readonly TableRecord[],
@@ -118,6 +125,8 @@ export async function runLoaders(
   signal: AbortSignal,
   /** Wired by createRouter - see LoaderContext.revalidate. */
   onRevalidate?: (recordName: string, revalidation: Promise<unknown>, location: RouteLocation) => void,
+  /** See LoaderContext.refresh. */
+  refresh = false,
 ): Promise<Map<string, unknown>> {
   const results = new Map<string, unknown>();
   await Promise.all(
@@ -126,6 +135,7 @@ export async function runLoaders(
       const prefixed = matchPrefix(template, handlers);
       const ctx: LoaderContext = {
         revalidate: (fresh) => onRevalidate?.(record.name, fresh, location),
+        refresh,
       };
       try {
         if (prefixed) {
@@ -133,15 +143,15 @@ export async function runLoaders(
         } else if (handlers.url) {
           results.set(record.name, await handlers.url(template, location, record, signal, ctx));
         } else {
-          throw routerError('load_failed', `no loader handler for "${template}" - register a preset`, {
+          throw routerError('missing:loader', `no loader handler for "${template}" - register a preset`, {
             to: location,
           });
         }
       } catch (cause) {
-        if (signal.aborted) throw routerError('cancelled', `load aborted for "${record.name}"`, { to: location });
+        if (signal.aborted) throw routerError('aborted:navigation', `load aborted for "${record.name}"`, { to: location });
         throw isRouterError(cause)
           ? cause
-          : routerError('load_failed', `loader failed for "${record.name}" (${template})`, { to: location, cause });
+          : routerError('failed:loader', `loader failed for "${record.name}" (${template})`, { to: location, cause });
       }
     }),
   );

@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  A command bus built for <a href="https://github.com/vuejs/core">Vue Vapor</a> - a <!-- vc:sizeCore -->3.7<!-- /vc:sizeCore --> KB brotli dispatch core with opt-in batteries, each 0 KB until imported. Vue <!-- vc:vueAligned -->3.6.0-rc.9<!-- /vc:vueAligned --> aligned. LGPL-2.1.
+  A command bus built for <a href="https://github.com/vuejs/core">Vue Vapor</a> - a <!-- vc:sizeCore -->4.4<!-- /vc:sizeCore --> KB brotli dispatch core with opt-in batteries, each 0 KB until imported. Vue <!-- vc:vueAligned -->3.6.0-rc.10<!-- /vc:vueAligned --> aligned. LGPL-2.1.
 </p>
 
 ---
@@ -35,17 +35,17 @@ A small core, and batteries you only pay for if you import them.
 
 | | |
 |---|---|
-| **Core** (the bus) | dispatch/query/emit, plugin pipeline, wildcard listeners - framework-agnostic, no Vue import, **<!-- vc:sizeCore -->3.7<!-- /vc:sizeCore --> KB brotli** |
+| **Core** (the bus) | dispatch/query/emit, plugin pipeline, wildcard listeners - framework-agnostic, no Vue import, **<!-- vc:sizeCore -->4.4<!-- /vc:sizeCore --> KB brotli** |
 | **Vue composables** | `useCommand`, `useCommandState`, shared state, `defineVaporCommand`, full Vapor wrappers |
 | **Router** (opt-in) | URL-addressed reads for Vue 3.6 over a server catch-all - route tables and loaders as data |
 | **Plugins** (opt-in) | logger, validator, history (undo/redo), debounce, throttle, persist, serialize, idempotent, auth guard; retry is the async bus's own |
 | **Transports** (opt-in) | HTTP bridge, batching HTTP, WebSocket, SSE, Laravel Echo/Reverb |
 | **Extras** (opt-in) | SSR dehydrate/rehydrate, form bus, HTTP client, streaming JSON parser, schema validation, transitions, devtools, Vite HMR, testing, MCP server, offline outbox |
 
-- **Vue <!-- vc:vueAligned -->3.6.0-rc.9<!-- /vc:vueAligned --> aligned** - signals, `onScopeDispose`, `getCurrentScope`, alien-signals internals; tracked per release in the [CHANGELOG](CHANGELOG.md)
+- **Vue <!-- vc:vueAligned -->3.6.0-rc.10<!-- /vc:vueAligned --> aligned** - signals, `onScopeDispose`, `getCurrentScope`, alien-signals internals; tracked per release in the [CHANGELOG](CHANGELOG.md)
 - **No runtime dependency**; `alien-signals` is an optional peer, installed only by apps that use the `vapor-chamber/alien-signals` connector; unimported modules tree-shake to zero
 - **ESM-only**, plus three IIFE `<script>` drop-ins for no-bundler pages
-- **<!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% coverage on all four axes** - statements, branches, functions and lines, across **<!-- vc:tests -->2615<!-- /vc:tests --> tests** in <!-- vc:testFiles -->189<!-- /vc:testFiles --> files ([full table](docs/COVERAGE.md)). Not a sampled figure: every branch in the measured surface is taken by a test
+- **<!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% coverage on all four axes** - statements, branches, functions and lines, across **<!-- vc:tests -->3102<!-- /vc:tests --> tests** in <!-- vc:testFiles -->268<!-- /vc:testFiles --> files ([full table](docs/COVERAGE.md)). Not a sampled figure: every branch in the measured surface is taken by a test
 
 ## Contents
 
@@ -61,7 +61,7 @@ npm install vapor-chamber        # npm registry (releases may lag the repo)
 npm install github:lucianofedericopereira/vapor-chamber
 ```
 
-**Requirements:** Node ≥22.12. Vue is an **optional** peer dep - ≥3.5 for composables, ≥<!-- vc:vueAligned -->3.6.0-rc.9<!-- /vc:vueAligned -->
+**Requirements:** Node ≥22.12. Vue is an **optional** peer dep - ≥3.5 for composables, ≥<!-- vc:vueAligned -->3.6.0-rc.10<!-- /vc:vueAligned -->
 for the full Vapor surface. The core bus runs without Vue entirely. Vite ≥5 and `@vitejs/plugin-vue`
 ≥5 are needed only for the `vapor-chamber/vite` plugins (HMR, `vaporChamberWire()`) and Vapor SFC support.
 
@@ -91,6 +91,8 @@ classic `<script>` tags use the [IIFE variants](#iife--cdn-variants).
 - **Performance & tuning** - [docs/performance.md](docs/performance.md): what's optimized by
   default, the tuning knobs (`persist({ coalesce: true })`, `configureUid`, `configureSignal`),
   variant selection, benchmark snapshot.
+- **Timestamps** - [docs/timestamps.md](docs/timestamps.md): every timestamp the library
+  produces and its form (epoch ms inside the process, RFC 3339 text at a boundary).
 - **API reference** - [docs/api/](docs/api/): every published `exports` subpath, generated from
   the compiler by `npm run docs` and committed, so an added or changed export shows up in the diff.
 
@@ -227,9 +229,9 @@ pins Vue's virtual-DOM runtime into your bundle. It therefore lives behind its o
 
 | entry | bindings retained from `vue` | brotli |
 |---|---|--:|
-| `vapor-chamber/router` | `computed customRef getCurrentScope inject onScopeDispose shallowRef` | <!-- vc:sizeRouter -->10.1<!-- /vc:sizeRouter --> KB |
-| `vapor-chamber/router/vdom` | `defineComponent h inject provide` | <!-- vc:sizeRouterVdom -->0.4<!-- /vc:sizeRouterVdom --> KB |
-| `vapor-chamber/router/vapor` | `createDynamicComponent createSlot defineVaporComponent inject provide` | <!-- vc:sizeRouterVapor -->0.4<!-- /vc:sizeRouterVapor --> KB |
+| `vapor-chamber/router` | `computed customRef getCurrentScope inject onScopeDispose shallowRef` | <!-- vc:sizeRouter -->10.5<!-- /vc:sizeRouter --> KB |
+| `vapor-chamber/router/vdom` | `defineComponent h inject provide` | <!-- vc:sizeRouterVdom -->0.7<!-- /vc:sizeRouterVdom --> KB |
+| `vapor-chamber/router/vapor` | `createDynamicComponent createIf createSlot defineVaporComponent inject provide` | <!-- vc:sizeRouterVapor -->0.7<!-- /vc:sizeRouterVapor --> KB |
 
 A Vapor app that never renders an outlet pays nothing for the vDOM runtime. Blade rows take a
 `fetchBlade` from you (`bladeFetcher()` from `vapor-chamber/router/remote` is the in-box one);
@@ -239,11 +241,11 @@ demand, as its own chunk, the first time it renders one.
 **A pure-Vapor app can skip the vDOM renderer entirely** (experimental, v1.x):
 `vapor-chamber/router/vapor` exports the same `RouterOutlet` name built from Vapor's own helpers,
 so rendering a route needs no `vaporInteropPlugin`. The startup chunk of a Vite production build
-comes out **<!-- vc:outletSaving -->21.18<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->67.4<!-- /vc:outletSavingRaw --> KB raw** smaller than the same
+comes out **<!-- vc:outletSaving -->22.03<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->70.4<!-- /vc:outletSavingRaw --> KB raw** smaller than the same
 app rendering through the vDOM outlet plus interop, a baseline derived by the same harness
 (`tests/vapor/vapor-outlet-size.test.ts`).
 Route components on it must be `defineVaporComponent` output - anything else throws a coded
-`mode_mismatch` rather than silently re-installing interop - and **blade rows still require the
+`router:invalid:component` rather than silently re-installing interop - and **blade rows still require the
 vDOM outlet**, since `makeBladeComponent` is itself `defineComponent`/`h`.
 
 **Vapor interop, measured on rc.4** (not inferred from the roadmap): provide/inject works in Vapor
@@ -361,6 +363,9 @@ bus.register('cartAdd', handler);    // ✓
 bus.register('cart_add', handler);   // ✗ throws
 ```
 
+Names containing `$` are the library's (a store's `cart$reset`) and are not
+checked against the pattern.
+
 </details>
 
 <details>
@@ -386,6 +391,22 @@ A `Plugin` runs on either bus, so `next()` may be a promise: read the result
 through `onSettled`, which stays synchronous on the sync bus. The type enforces
 it (`result.ok` straight off `next()` does not compile). A plugin for one bus
 only is a `SyncPlugin` (its `next()` is always a result) or an `AsyncPlugin`.
+
+A plugin that answers without calling `next()` builds its result with `ok(value)`
+or `err(error)`, the bus's own factories, so every result keeps one hidden class.
+A refusal is `err(fail(code, message))`: `fail`, the third argument, mints the
+failure's owner from the plugin's `id`. `countOption(value, fallback)` is the
+library's rule for a numeric option (NaN falls back to the default, negatives
+clamp, fractions truncate):
+
+```typescript
+import { err, type Plugin } from 'vapor-chamber';
+
+const qtyGuard: Plugin = Object.assign(
+  (cmd, next, fail) => cmd.payload?.qty > 0 ? next() : err(fail('invalid:payload', 'qty must be positive')),
+  { id: 'qtyGuard' },  // the code reads qtyGuard:invalid:payload
+);
+```
 
 Execution is by priority (highest first), then registration order:
 
@@ -487,12 +508,19 @@ A plugin's failures carry its declared `id` as the owner (`throttle:limited:hand
 `remote:<condition of its status>:<its code>`, inside a 2xx `{ problem }` too.
 The async bus's retry re-sends a transient failure (`limited`, `timeout`, a
 declared `retryIn`, after that wait) and, for an action declared idempotent, an
-uncertain one; never a verdict (`invalid`, `refused`, `missing`, `already`), an
-abort, a depth bound or a plugin's own throw. `ERROR_CODE_REGISTRY` is the full table, with fix
+uncertain one; never a verdict (`invalid`, `refused`, `missing`, `already`,
+`conflict`), an expired session (`unauthenticated`: sign in, then dispatch
+again), an abort, a depth bound or a plugin's own throw. A status maps to one
+condition: 404/410 `missing`, 409/412 `conflict`, 401/419 `unauthenticated`,
+403 `refused`, 429/503 `limited`, 408/504 `timeout`. The conditions read 1:1
+against gRPC's canonical codes (`docs/plan-failures-and-contract.md` 4.2).
+`ERROR_CODE_REGISTRY` is the full table, with fix
 suggestions; production messages state the fact and leave the fix to it.
 
-`plugin:failed:plugin` (or `<id>:failed:plugin`) means a plugin threw or
-rejected: `cause` is the original, `context.index` its place in the chain. It is
+`<id>:failed:plugin` means a plugin threw or rejected: `cause` is the original,
+`context.index` its place in the chain. Every built-in plugin declares its id
+(`serialize:failed:plugin`; the bridges are `transport`, like their other
+failures); a plugin of yours without one reads `plugin:failed:plugin`. It is
 a bug in the pipeline, not a failing server: the bus does not re-run it, and
 `circuitBreaker` neither counts it nor resets on it.
 
@@ -657,7 +685,7 @@ bus.use(validator({
   cartAdd: (cmd) => cmd.target?.id ? null : 'Product must have an ID',   // null = valid
 }));
 
-// history - optionally bus-backed, so undo() executes registered inverse handlers
+// history - optionally bus-backed, so undo() dispatches <action>$undo, which runs the registered inverse
 const historyPlugin = history({ maxSize: 100, bus });
 bus.use(historyPlugin);
 historyPlugin.undo();
@@ -736,6 +764,9 @@ cartPersist.save();    // force
 cartPersist.clear();
 bus.use(persist({ key: 'vc:cart', getState, storage: sessionStorage }));   // custom backend
 ```
+
+`getState` is required: `persist()` throws a `TypeError` at setup without it, since every save
+would otherwise fail and nothing would be stored.
 
 **createChannel** - mirror emitted facts to other tabs via `BroadcastChannel`. What crosses
 is what a handler computed, not the command that caused it, so the receiving tab
@@ -903,7 +934,7 @@ Two levels over the same retry/timeout/CSRF machinery:
 <summary><b>Client usage, caching, and error classification</b></summary>
 
 ```typescript
-import { createHttpClient } from 'vapor-chamber';
+import { createHttpClient, problemOf } from 'vapor-chamber';
 
 const http = createHttpClient({ baseURL: '/api', csrf: true });
 
@@ -912,7 +943,7 @@ await http.post('/cart', { itemId: 1, qty: 2 });
 await http.delete('/cart/1');
 
 const result = await http.safe.post('/login', credentials);   // never throws
-if (result.error) console.log(result.error.detail);           // the RFC 9457 problem: status, code, detail, errors
+if (result.error) console.log(problemOf(result.error)?.errors); // a BusError; problemOf reads its RFC 9457 problem
 
 await http.download('/export/csv', 'products.csv');
 
@@ -928,9 +959,10 @@ const adminHttp = http.create({ baseURL: '/admin/api' });   // shares intercepto
 package root:
 
 - `isRetryableStatus(status)` - *may the HTTP client send this request again?* True for 408, 429
-  and every 5xx. The client retries those (by default 2 retries for GET, 0 for mutations), and
-  honours `Retry-After` on any status; a network failure or a timeout competes for the same
-  budget instead of always failing on the first attempt. Any other 4xx is sent once.
+  and every 5xx. The client re-sends by the bus's one rule (by default 2 retries for GET, 0 for
+  mutations): 408, 429, 503, 504 and a timeout for any method; every other 5xx and no response only
+  for an idempotent method or a request with an `Idempotency-Key`. `Retry-After` is honoured on
+  any status. Any other 4xx is sent once.
 - `failureCondition(error)` - *what went wrong, by contract?* A library failure's own condition,
   an HTTP response's status through the status table, a timeout, an abort, `lost` for no
   response. The async bus's retry and the outbox judge a failure by it.
@@ -938,7 +970,9 @@ package root:
   for a timeout, a network failure (no response) or a 5xx, and false for every 4xx, 408 and 429
   included, so `serveStaleOnError` does not serve stale data for them.
 
-`TimeoutError` stays distinct from a caller-triggered `AbortError`, and an abort is never retried.
+Every failure is the core's `BusError`, the one a bridge returns for the same answer:
+`remote:<condition>:<code>`, `transport:timeout:reply`, `transport:lost:reply`, or the caller's
+`transport:aborted:request`, which is never retried.
 
 **Caching (GET only)** - `cache: true` for a flat TTL, or an object for more:
 
@@ -953,6 +987,12 @@ if (res.revalidation) { const fresh = await res.revalidation; }
 // Business errors (4xx) are never masked this way.
 await http.get('/dashboard/stats', { cache: { ttl: 30_000, serveStaleOnError: true } });
 ```
+
+A write that succeeds (`post`, `put`, `patch`, `delete`) drops the cached entry for exactly its
+URL, as RFC 9111 asks, so the next `get` of that URL fetches. `invalidateCache(pattern)` and
+`clearCache()` also cover reads already on the wire: such a read still answers its callers, but it
+is not stored, and a read made after the invalidation fetches again instead of joining it
+(`tests/http-cache-writes.test.ts`).
 
 **`silent`** - per-request opt-out for a host-provided global error handler:
 
@@ -1050,11 +1090,11 @@ static entry has no such failure mode. It is a separate subpath from `vapor-cham
 the Vapor names do not exist on Vue 3.5, where importing them by name is a build error.
 
 It wires `createVaporApp`, `defineVaporComponent` and `defineVaporAsyncComponent`, which add
-**+<!-- vc:sizeVaporEntryRaw -->4.4<!-- /vc:sizeVaporEntryRaw --> KB** raw over hand-wiring `createVaporApp`, re-measured on every run with Vue
+**+<!-- vc:sizeVaporEntryRaw -->4.5<!-- /vc:sizeVaporEntryRaw --> KB** raw over hand-wiring `createVaporApp`, re-measured on every run with Vue
 bundled (the Vapor wiring table in [docs/BUNDLE-SIZES.md](docs/BUNDLE-SIZES.md); the whitepaper's
 rc.6 row has the measurement on the `examples/vapor-sfc` app that decided the split).
 `defineVaporCustomElement` (+<!-- vc:sizeVaporCustomElementRaw -->6.8<!-- /vc:sizeVaporCustomElementRaw --> KB raw)
-and `vaporInteropPlugin` (+<!-- vc:sizeVaporInteropRaw -->84.2<!-- /vc:sizeVaporInteropRaw --> KB raw - it pulls the whole VDOM interop renderer) are left out on
+and `vaporInteropPlugin` (+<!-- vc:sizeVaporInteropRaw -->89.4<!-- /vc:sizeVaporInteropRaw --> KB raw - it pulls the whole VDOM interop renderer) are left out on
 purpose, since a static import is retained whether your app calls it or not. If you use either,
 one line adds it, and it merges with what the entry already wired:
 
@@ -1084,9 +1124,26 @@ export default defineConfig({
 3.6 app should not pay for. The redirect runs in builds only: the dev server resolves the runtime
 lookup by itself, and a redirect there, over a pre-bundled install, would put two copies of the
 library in the page (measured). In dev the plugin only defines `__VC_WIRED__`, which keeps the DEV
-warning above from telling you to change imports the plugin already handles. It adds to the app
-exactly what importing the subpath would, and both halves are pinned against real Vite runs in
-`tests/vite-wire-plugin.test.ts`. On other bundlers, import from the subpath.
+warning above from telling you to change imports the plugin already handles. In a build it also
+defines `__VC_WIRED_BUILD__`, which removes the root's runtime lookup from the bundle. It adds to
+the app exactly what importing the subpath would, and both halves are pinned against real Vite
+runs in `tests/vite-wire-plugin.test.ts`.
+
+**On esbuild or webpack, import from the subpath and add one define.** Both bundlers resolve the
+root's runtime `import('vue')` to the whole Vue namespace, so without the define every app that
+uses the composables ships all of Vue and webpack warns "Critical dependency".
+Once the app imports `vapor-chamber/vue` (or `/vapor`) the lookup is dead code, and the define
+says so:
+
+```ts
+// esbuild
+define: { __VC_WIRED_BUILD__: 'true' }
+// webpack
+new webpack.DefinePlugin({ __VC_WIRED_BUILD__: 'true' })
+```
+
+Leave it out only for an app that imports the composables from the root and wires nothing: there
+the lookup is what finds Vue (`tests/root-probe-builds.test.ts`).
 
 The bus itself (`createCommandBus`, `getCommandBus`, plugins, transports) still comes from the
 package root: it works with no Vue in the tree, so it is not part of a Vue-wiring entry.
@@ -1216,8 +1273,8 @@ Minified, comment-free, brotli q=11. Always-current per-export table:
 **[docs/BUNDLE-SIZES.md](docs/BUNDLE-SIZES.md)** (`npm run size:doc`); `npm run size:check` fails CI
 on any regression past budget.
 
-The two that matter: the dispatch core is **<!-- vc:sizeCore -->3.7<!-- /vc:sizeCore --> KB** and the import-everything barrel is
-<!-- vc:sizeBarrel -->25.5<!-- /vc:sizeBarrel --> KB. The main entries, and why the numbers are
+The two that matter: the dispatch core is **<!-- vc:sizeCore -->4.4<!-- /vc:sizeCore --> KB** and the import-everything barrel is
+<!-- vc:sizeBarrel -->30.1<!-- /vc:sizeBarrel --> KB. The main entries, and why the numbers are
 machine-stamped rather than retyped:
 
 <details>
@@ -1225,21 +1282,21 @@ machine-stamped rather than retyped:
 
 | Entry | brotli |
 |---|--:|
-| dispatch core (`createCommandBus`, tree-shaken) | **<!-- vc:sizeCore -->3.7<!-- /vc:sizeCore --> KB** |
-| `vapor-chamber` (main barrel, import-*everything*) | <!-- vc:sizeBarrel -->25.5<!-- /vc:sizeBarrel --> KB |
-| `vapor-chamber/router` | <!-- vc:sizeRouter -->10.1<!-- /vc:sizeRouter --> KB |
-| `vapor-chamber/router/vdom` | <!-- vc:sizeRouterVdom -->0.4<!-- /vc:sizeRouterVdom --> KB |
-| `vapor-chamber/router/vapor` | <!-- vc:sizeRouterVapor -->0.4<!-- /vc:sizeRouterVapor --> KB |
-| `vapor-chamber/router/remote` | <!-- vc:sizeRouterRemote -->3.5<!-- /vc:sizeRouterRemote --> KB |
-| `vapor-chamber/router-fetch` | <!-- vc:sizeRouterFetch -->3.9<!-- /vc:sizeRouterFetch --> KB |
-| `vapor-chamber/vue` | <!-- vc:sizeVue -->7.2<!-- /vc:sizeVue --> KB |
-| `vapor-chamber/vapor` | <!-- vc:sizeVapor -->7.5<!-- /vc:sizeVapor --> KB |
-| `vapor-chamber/reactive` | <!-- vc:sizeReactive -->5.1<!-- /vc:sizeReactive --> KB |
-| `vapor-chamber/transports` | <!-- vc:sizeTransports -->4.6<!-- /vc:sizeTransports --> KB |
+| dispatch core (`createCommandBus`, tree-shaken) | **<!-- vc:sizeCore -->4.4<!-- /vc:sizeCore --> KB** |
+| `vapor-chamber` (main barrel, import-*everything*) | <!-- vc:sizeBarrel -->30.1<!-- /vc:sizeBarrel --> KB |
+| `vapor-chamber/router` | <!-- vc:sizeRouter -->10.5<!-- /vc:sizeRouter --> KB |
+| `vapor-chamber/router/vdom` | <!-- vc:sizeRouterVdom -->0.7<!-- /vc:sizeRouterVdom --> KB |
+| `vapor-chamber/router/vapor` | <!-- vc:sizeRouterVapor -->0.7<!-- /vc:sizeRouterVapor --> KB |
+| `vapor-chamber/router/remote` | <!-- vc:sizeRouterRemote -->4.8<!-- /vc:sizeRouterRemote --> KB |
+| `vapor-chamber/router-fetch` | <!-- vc:sizeRouterFetch -->5.2<!-- /vc:sizeRouterFetch --> KB |
+| `vapor-chamber/vue` | <!-- vc:sizeVue -->8.3<!-- /vc:sizeVue --> KB |
+| `vapor-chamber/vapor` | <!-- vc:sizeVapor -->8.6<!-- /vc:sizeVapor --> KB |
+| `vapor-chamber/reactive` | <!-- vc:sizeReactive -->5.9<!-- /vc:sizeReactive --> KB |
+| `vapor-chamber/transports` | <!-- vc:sizeTransports -->5.3<!-- /vc:sizeTransports --> KB |
 | `vapor-chamber/outbox` | <!-- vc:sizeOutbox -->2.6<!-- /vc:sizeOutbox --> KB |
-| `vapor-chamber/mcp` | <!-- vc:sizeMcp -->1.8<!-- /vc:sizeMcp --> KB |
-| `vapor-chamber/ssr` | <!-- vc:sizeSsr -->0.6<!-- /vc:sizeSsr --> KB |
-| `vapor-chamber/store` | <!-- vc:sizeStore -->0.7<!-- /vc:sizeStore --> KB |
+| `vapor-chamber/mcp` | <!-- vc:sizeMcp -->1.9<!-- /vc:sizeMcp --> KB |
+| `vapor-chamber/ssr` | <!-- vc:sizeSsr -->0.9<!-- /vc:sizeSsr --> KB |
+| `vapor-chamber/store` | <!-- vc:sizeStore -->1.8<!-- /vc:sizeStore --> KB |
 
 **Rows are not additive** - every row includes the shared core, which your bundle carries once.
 `vapor-chamber` is the barrel measured import-everything; your bundler drops what you don't use.
@@ -1257,9 +1314,9 @@ Three `<script>`-tag drop-ins. Pick by audience, not feature checklist.
 
 | Variant | Audience | Min | Brotli | Gzip |
 |---|---|--:|--:|--:|
-| **core** | Sprinkled JS on server-rendered pages (Blade, Rails, Django, WordPress). You dispatch user actions to a backend over HTTP. | <!-- vc:sizeIifeCoreRaw -->25.8<!-- /vc:sizeIifeCoreRaw --> KB | <!-- vc:sizeIifeCore -->8.0<!-- /vc:sizeIifeCore --> KB | <!-- vc:sizeIifeCoreGzip -->8.8<!-- /vc:sizeIifeCoreGzip --> KB |
-| **elements** | Embeddable widgets (chat bubbles, checkout buttons, third-party drop-ins). You ship a `<vc-widget>` custom element. | <!-- vc:sizeIifeElementsRaw -->27.4<!-- /vc:sizeIifeElementsRaw --> KB | <!-- vc:sizeIifeElements -->8.5<!-- /vc:sizeIifeElements --> KB | <!-- vc:sizeIifeElementsGzip -->9.3<!-- /vc:sizeIifeElementsGzip --> KB |
-| **full** | SPAs that grew big enough to want everything (realtime, undo/redo, persistence, full Vapor surface). | <!-- vc:sizeIifeFullRaw -->38.6<!-- /vc:sizeIifeFullRaw --> KB | <!-- vc:sizeIifeFull -->12.0<!-- /vc:sizeIifeFull --> KB | <!-- vc:sizeIifeFullGzip -->13.2<!-- /vc:sizeIifeFullGzip --> KB |
+| **core** | Sprinkled JS on server-rendered pages (Blade, Rails, Django, WordPress). You dispatch user actions to a backend over HTTP. | <!-- vc:sizeIifeCoreRaw -->29.6<!-- /vc:sizeIifeCoreRaw --> KB | <!-- vc:sizeIifeCore -->9.2<!-- /vc:sizeIifeCore --> KB | <!-- vc:sizeIifeCoreGzip -->10.2<!-- /vc:sizeIifeCoreGzip --> KB |
+| **elements** | Embeddable widgets (chat bubbles, checkout buttons, third-party drop-ins). You ship a `<vc-widget>` custom element. | <!-- vc:sizeIifeElementsRaw -->31.1<!-- /vc:sizeIifeElementsRaw --> KB | <!-- vc:sizeIifeElements -->9.7<!-- /vc:sizeIifeElements --> KB | <!-- vc:sizeIifeElementsGzip -->10.7<!-- /vc:sizeIifeElementsGzip --> KB |
+| **full** | SPAs that grew big enough to want everything (realtime, undo/redo, persistence, full Vapor surface). | <!-- vc:sizeIifeFullRaw -->43.5<!-- /vc:sizeIifeFullRaw --> KB | <!-- vc:sizeIifeFull -->13.5<!-- /vc:sizeIifeFull --> KB | <!-- vc:sizeIifeFullGzip -->14.9<!-- /vc:sizeIifeFullGzip --> KB |
 
 <details>
 <summary><b>What's in each variant</b>, plus drop-in examples</summary>
@@ -1331,6 +1388,7 @@ vapor-chamber/transports       -> HTTP + WebSocket + SSE + Echo bridges
 vapor-chamber/directives       -> v-vc-command, v-vc-payload, v-vc-optimistic (both renderers)
 vapor-chamber/vite             -> Vite HMR plugin + vaporChamberWire() (build-time Vue wiring)
 vapor-chamber/transitions      -> Vue <Transition> hooks -> bus dispatch bridge
+vapor-chamber/transitions/vapor -> VcTransition, a bus-driven transition (Vapor; Vue 3.6 only)
 vapor-chamber/ssr              -> SSR dehydrate/replay helpers
 vapor-chamber/devtools         -> Vue DevTools integration
 vapor-chamber/stream-parser    -> incremental JSON parser for streamed bodies
@@ -1343,6 +1401,7 @@ vapor-chamber/reactive         -> opt-in DEEP reactivity (core signal() is shall
 vapor-chamber/outbox           -> offline outbox: durable queue + ordered replay
 vapor-chamber/mcp              -> zero-dep MCP server from your schema bus
 vapor-chamber/store            -> experimental state layer: every mutation is a command
+vapor-chamber/store/core       -> the same store with no Vue (signal() or alien-signals)
 vapor-chamber/iife[-core|-elements] -> IIFE bundles
 ```
 
@@ -1370,8 +1429,8 @@ optional and tree-shaken when unimported.
    form.ts · schema.ts · devtools.ts · directives.ts · vite-hmr.ts
 ```
 
-**Coverage:** <!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% statements · <!-- vc:covBranches -->100.0<!-- /vc:covBranches -->% branches · <!-- vc:covFunctions -->100.0<!-- /vc:covFunctions -->% functions · <!-- vc:covLines -->100.0<!-- /vc:covLines -->% lines across **<!-- vc:tests -->2615<!-- /vc:tests --> tests**
-(<!-- vc:testFiles -->189<!-- /vc:testFiles --> files). Per-file table:
+**Coverage:** <!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% statements · <!-- vc:covBranches -->100.0<!-- /vc:covBranches -->% branches · <!-- vc:covFunctions -->100.0<!-- /vc:covFunctions -->% functions · <!-- vc:covLines -->100.0<!-- /vc:covLines -->% lines across **<!-- vc:tests -->3102<!-- /vc:tests --> tests**
+(<!-- vc:testFiles -->268<!-- /vc:testFiles --> files). Per-file table:
 [docs/COVERAGE.md](docs/COVERAGE.md); run `npm run test:coverage` for live numbers.
 
 ## Testing
@@ -1466,7 +1525,7 @@ app.mount('#app');
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
 | `onMissing` | `'error' \| 'throw' \| 'ignore' \| 'buffer' \| fn` | `'error'` | Behavior when no handler is registered |
-| `naming` | `{ pattern: RegExp, onViolation?: string }` | - | Enforce naming convention on actions |
+| `naming` | `{ pattern: RegExp, onViolation?: string }` | - | Enforce naming convention on actions (names containing `$` are the library's and not checked) |
 
 </details>
 
@@ -1510,7 +1569,7 @@ app.mount('#app');
 | `useCommandError(options?)` | Reactive error boundary for failed dispatches |
 | `getCommandBus()` | Get the shared bus |
 | `untracked(fn)` | Run a **raw-bus** dispatch without its handler's reads becoming dependencies of the surrounding effect. The composables above already do this - you only need it when calling `getCommandBus()` directly from inside a `watchEffect` / `computed`. No-op without Vue. **Import from `vapor-chamber/vue`** in a Vue app: from the package root it degrades to a pass-through in a production build |
-| `setCommandBus(bus)` / `resetCommandBus()` | Set / reset the shared bus (useful in tests) |
+| `setCommandBus(bus)` / `resetCommandBus()` | Set / reset the shared bus (useful in tests). Set it before anything calls `getCommandBus()`: replacing the bus that call already created and handed out splits the app between two buses, and warns in development |
 | `configureSignal(fn)` | Inject a custom signal factory (auto-detected in Vue 3.6+) |
 | `isVaporAvailable()` | True if Vue 3.6+ Vapor mode is detected |
 | `createVaporChamberApp(component, props?)` | Create a Vapor app instance (requires Vue 3.6+) |
@@ -1525,7 +1584,7 @@ app.mount('#app');
 
 ## Design Goals
 
-1. **Minimal** - <!-- vc:sizeCore -->3.7<!-- /vc:sizeCore --> KB brotli core, no runtime dependency; `alien-signals` is an optional peer the library never imports, so nothing bundles it unless you do
+1. **Minimal** - <!-- vc:sizeCore -->4.4<!-- /vc:sizeCore --> KB brotli core, no runtime dependency; `alien-signals` is an optional peer the library never imports, so nothing bundles it unless you do
 2. **Vapor-native** - built for signals, not vDOM
 3. **Composable** - plugins for everything
 4. **Type-safe** - full TypeScript, one schema as the source of truth

@@ -4,7 +4,7 @@
  * Demonstrates: writing custom plugins for various use cases
  */
 
-import { createCommandBus, onSettled, type Plugin, type Command } from 'vapor-chamber';
+import { createCommandBus, err, onSettled, type Plugin, type Command } from 'vapor-chamber';
 
 // ============================================
 // Plugin 1: Analytics
@@ -33,13 +33,15 @@ function authGuardPlugin(
   isAuthenticated: () => boolean,
   protectedPrefixes: string[]
 ): Plugin {
-  // A plugin refuses through the `fail` it is handed: the code reads
-  // `authGuard:refused:action`, owned by the plugin's `id`.
+  // A plugin refuses with `err(fail(...))`: `fail`, the third argument, mints
+  // the code (`authGuard:unauthenticated:action`, owned by the plugin's `id`:
+  // no session is `unauthenticated`, sign in then retry), and
+  // `err` builds the bus's own result shape.
   const plugin: Plugin = (cmd, next, fail) => {
     const isProtected = protectedPrefixes.some(p => cmd.action.startsWith(p));
 
     if (isProtected && !isAuthenticated()) {
-      return { ok: false, error: fail('refused:action', `Unauthorized: ${cmd.action} requires authentication`, { action: cmd.action }) };
+      return err(fail('unauthenticated:action', `Unauthorized: ${cmd.action} requires authentication`, { action: cmd.action }));
     }
 
     return next();
@@ -87,7 +89,7 @@ function rateLimiterPlugin(
     if (requests.length >= maxRequests) {
       // `retryIn` declares when to come back: a caller and the outbox wait for it.
       const retryIn = requests[0] + windowMs - now;
-      return { ok: false, error: fail('limited:action', `Rate limit exceeded. Max ${maxRequests} requests per ${windowMs}ms`, { action: cmd.action, context: { retryIn } }) };
+      return err(fail('limited:action', `Rate limit exceeded. Max ${maxRequests} requests per ${windowMs}ms`, { action: cmd.action, context: { retryIn } }));
     }
 
     requests.push(now);

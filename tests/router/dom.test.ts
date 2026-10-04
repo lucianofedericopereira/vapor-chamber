@@ -10,7 +10,7 @@
  * verification at all beyond code review.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { installDomIntegration, preheatIdle, stampActiveLinks } from '../../src/router/dom';
+import { installDomIntegration, preheatIdle, stampActiveLinks } from '@router/dom';
 
 function clickAnchor(anchor: HTMLAnchorElement, init: MouseEventInit = {}): MouseEvent {
   const event = new MouseEvent('click', { bubbles: true, cancelable: true, button: 0, ...init });
@@ -170,6 +170,33 @@ describe('installDomIntegration - hover preheat', () => {
 
     expect(preheat).toHaveBeenCalledWith('/products');
     teardown();
+    vi.useRealTimers();
+  });
+
+  // The hover handler exists only when `preheat` was given, which is why it
+  // carries no "no preheat" branch of its own.
+  it('registers no hover listener at all when preheat is not provided', () => {
+    using addSpy = vi.spyOn(document, 'addEventListener');
+    const teardown = installDomIntegration({ base: '/admin', canHandle: () => true, navigate: vi.fn() });
+
+    expect(addSpy).not.toHaveBeenCalledWith('mouseover', expect.anything());
+    expect(addSpy).not.toHaveBeenCalledWith('mouseout', expect.anything());
+    teardown();
+  });
+
+  it('stops preheating after teardown', () => {
+    vi.useFakeTimers();
+    const anchor = document.createElement('a');
+    anchor.href = '/admin/products';
+    document.body.appendChild(anchor);
+    const preheat = vi.fn();
+    const teardown = installDomIntegration({ base: '/admin', canHandle: () => true, navigate: vi.fn(), preheat });
+    teardown();
+
+    anchor.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+    vi.advanceTimersByTime(100);
+
+    expect(preheat).not.toHaveBeenCalled();
     vi.useRealTimers();
   });
 });

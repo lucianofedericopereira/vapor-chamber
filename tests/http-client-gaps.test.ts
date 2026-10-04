@@ -17,6 +17,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createHttpClient, invalidateCsrfCache } from '../src/http';
+import { problemOf } from '../src/http-errors';
 
 function mockResponse(status: number, body: unknown = null, headers: Record<string, string> = {}) {
   return {
@@ -106,18 +107,20 @@ describe('createHttpClient - safe fallbacks', () => {
 
     const result = await http.safe.get('/api/data', { retry: 0 });
     expect(result.data).toBeNull();
-    expect(result.error).toEqual({ status: 500, detail: 'HTTP 500' });
+    expect(result.error?.code).toBe('remote:failed:http');
+    expect(problemOf(result.error)).toEqual({ status: 500, detail: 'HTTP 500' });
     expect(result.status).toBe(500);
   });
 
-  it('with no response, status 0 and the problem is { detail } only', async () => {
+  it('with no response, status 0, transport:lost:reply and no problem', async () => {
     (globalThis.fetch as any).mockRejectedValue(Object.assign(new TypeError('fetch failed'), { name: 'TypeError' }));
     const http = createHttpClient();
 
     const result = await http.safe.get('/api/data', { retry: 0 });
     expect(result.data).toBeNull();
     expect(result.status).toBe(0);
-    expect(result.error).toEqual({ detail: 'fetch failed' });
+    expect(result.error?.code).toBe('transport:lost:reply');
+    expect(problemOf(result.error)).toBeUndefined();
   });
 });
 
@@ -158,7 +161,7 @@ describe('createHttpClient - interceptor arms', () => {
     const http = createHttpClient();
     http.interceptors.response.use((r) => r); // fulfilled-only - no onRejected
 
-    await expect(http.get('/api/data', { retry: 0 })).rejects.toMatchObject({ response: { status: 500 } });
+    await expect(http.get('/api/data', { retry: 0 })).rejects.toMatchObject({ context: { status: 500 } });
   });
 
   it('request() without a method defaults to GET', async () => {

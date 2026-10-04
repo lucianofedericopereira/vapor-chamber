@@ -15,7 +15,8 @@
  * chamber.ts back into transports/plugins consumers. Investigate the
  * import graph before bumping the budget.
  *
- * Skips when dist/ hasn't been built or esbuild is unavailable.
+ * Fails when dist/ hasn't been built (tests/require-dist.ts); skips when
+ * esbuild is unavailable.
  */
 import { describe, it, expect } from 'vitest';
 import { build as viteBuild } from 'vite';
@@ -23,9 +24,10 @@ import { existsSync, mkdtempSync, writeFileSync, readFileSync, rmSync } from 'no
 import { tmpdir } from 'node:os';
 import { resolve, join } from 'node:path';
 import { brotliCompressSync, constants } from 'node:zlib';
+import { requireDist } from './require-dist';
 
 const dist = (f: string) => resolve(process.cwd(), 'dist', f);
-const haveDist = existsSync(dist('index.js')) && existsSync(dist('transports.js'));
+requireDist(existsSync(dist('index.js')) && existsSync(dist('transports.js')));
 
 // Try to load esbuild's JS API. It's a transitive dep via Vite, so it's
 // almost always available in dev/CI; if not, we skip the test cleanly.
@@ -36,7 +38,7 @@ try {
   esbuild = null;
 }
 
-describe.skipIf(!haveDist || !esbuild)('ESM tree-shake regression', () => {
+describe.skipIf(!esbuild)('ESM tree-shake regression', () => {
   it('typical Blade consumer bundle stays under its brotli ceiling + drops Vapor registry', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'vc-treeshake-'));
     const entry = join(dir, 'consumer.mjs');
@@ -357,7 +359,44 @@ describe.skipIf(!haveDist || !esbuild)('ESM tree-shake regression', () => {
       // policy lives in the async bus, not in this bundle; what reaches it is
       // the bridges' `transport` declaration and the status table's new home
       // in the core. Measured 6_445 (+18).
-      expect(viteBr.length, `vite production brotli grew unexpectedly (${viteBr.length} bytes)`).toBeLessThan(6_460);
+      // Ceiling 6_460 -> 6_648, to the measured size (owner, log s35.67):
+      // three correctness fixes, measured one at a time from 6_453: query
+      // nests on the depth counter +4; async depth by parent, not by
+      // dispatches in flight (17 concurrent were refused; three endless
+      // loops) +126; one fan-out rule, the listeners that existed when a
+      // dispatch started (a skip and a double call) +64.
+      // Ceiling 6_648 -> 6_661, to the measured size (owner: "12 B is
+      // acceptable", log s35.77): every plugin declares its id, the owner of
+      // its failures. In this bundle: logger's id and the bridges' shared
+      // TRANSPORT id. Measured alone (brotli is not additive): neither <=
+      // 6_647, TRANSPORT only 6_648, logger only 6_664, both 6_660.
+      // Ceiling 6_661 -> 6_671, to the measured size (owner: "no sweat size
+      // increase", log s35.79): the status table's two new conditions
+      // (409/412 conflict, 401/419 unauthenticated, 403 refused alone),
+      // measured 6_670.
+      // Ceiling 6_671 -> 6_765, to the measured size (owner: "no sweat size
+      // increase", log s35.80): a problem's RFC 9457 `type`, the docs URL of
+      // its condition (+93: the 83-character prefix barely compresses; plan
+      // 7.2 item 16 measured 77 for a code-level URL in 2026-09).
+      // Ceiling 6_765 -> 6_770, to the measured size (log s35.81): meta's
+      // `idempotencyKey` slot, present from stampMeta (one meta map), +4.
+      // Ceiling 6_770 -> 6_779, to the measured size (log s35.82): the
+      // response's `url` and `redirected` from Fetch (#17), +9.
+      // Ceiling 6_779 -> 6_810, to the measured size (log s35.83): a 304
+      // resolved on opt-in, and the GET dedupe key carrying the request's
+      // headers (a plain read was joined to a conditional one), +31.
+      // Ceiling 6_810 -> 6_812, to the measured size (owner: "no sweat", log
+      // s35.89): a Retry-After past 30 s read as declared, the client ending
+      // a request on a wait over its own 30 s instead of the parser dropping
+      // it. Measured 6_811 (+2).
+      // Ceiling 6_812 -> 7_084, to the measured size (owner: "worth the
+      // rise", log s35.100): Retry-After's HTTP-date read by RFC 9110 5.6.7,
+      // the three forms in GMT and nothing else; the attribution is beside
+      // BUDGETS in scripts/check-size.mjs. Measured 7_083 (+272).
+      // Raised to measured for canUndo (s35.113), undo as a command and $ commands kept local (s35.114), an app's $ name refused (s35.117).
+      // Raised to measured for the client's failures as the core's BusError, one answer reader, one retry rule (s35.131).
+      // Raised to measured for one JSON body reader and a 2xx that is not the envelope failing (s35.132).
+      expect(viteBr.length, `vite production brotli grew unexpectedly (${viteBr.length} bytes)`).toBeLessThan(7_756);
 
       // Symbol budget. These are all chamber.ts-only - should NOT appear in a
       // consumer bundle that doesn't import Vue composables.

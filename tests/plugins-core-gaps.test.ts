@@ -344,10 +344,13 @@ describe('history - sync behaviour the async redo fix must not move', () => {
     expect(seen).toEqual([
       ['cartAdd', 1, true, false],
       ['cartAdd', 2, true, false],
+      ['cartAdd$undo', 1, true, true], // the undo, a command (s35.114)
       ['cartUndo', 1, true, true],
       ['cartAdd', 2, true, false], // re-dispatched by the redo
       ['cartRedo', 2, true, false],
+      ['cartAdd$undo', 1, true, true],
       ['cartUndo', 1, true, true],
+      ['cartAdd$undo', 0, false, true],
       ['cartUndo', 0, false, true],
       ['cartAdd', 1, true, true], // re-dispatched by the redo
       ['cartRedo', 1, true, true],

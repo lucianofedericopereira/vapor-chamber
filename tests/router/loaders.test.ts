@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { defaultAffects, interpolateLoad, runLoaders } from '../../src/router/loaders';
-import { createRouteTable } from '../../src/router/table';
-import type { RouteLocation } from '../../src/router/types';
+import { defaultAffects, interpolateLoad, runLoaders } from '@router/loaders';
+import { createRouteTable } from '@router/table';
+import type { RouteLocation } from '@router/types';
 
 function locationWith(
   query: Record<string, string | string[]>,
@@ -70,23 +70,23 @@ describe('runLoaders - the SPI', () => {
     expect(results.get('orders')).toEqual({ hit: '/api/vc/orders?page={page}' });
   });
 
-  it('no matching handler -> coded load_failed', async () => {
+  it('no matching handler -> coded router:missing:loader', async () => {
     await expect(runLoaders({}, [orders], locationWith({}), new AbortController().signal)).rejects.toMatchObject({
-      code: 'load_failed',
+      code: 'router:missing:loader',
     });
   });
 
-  it('handler failure wraps with cause; aborted signal becomes "cancelled"', async () => {
+  it('handler failure wraps with cause; aborted signal becomes router:aborted:navigation', async () => {
     const boom = new Error('boom');
     await expect(
       runLoaders({ url: async () => Promise.reject(boom) }, [orders], locationWith({}), new AbortController().signal),
-    ).rejects.toMatchObject({ code: 'load_failed', cause: boom });
+    ).rejects.toMatchObject({ code: 'router:failed:loader', cause: boom });
 
     const aborted = new AbortController();
     aborted.abort();
     await expect(
       runLoaders({ url: async () => Promise.reject(new Error('x')) }, [orders], locationWith({}), aborted.signal),
-    ).rejects.toMatchObject({ code: 'cancelled' });
+    ).rejects.toMatchObject({ code: 'router:aborted:navigation' });
   });
 });
 

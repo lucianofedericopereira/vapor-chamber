@@ -22,17 +22,19 @@
  * check, not a behavior test - running these pages needs a browser and a static
  * server (`node examples/static-server.mjs`), which is out of scope here.
  *
- * Skipped when `dist/` is absent, matching `tests/dist-*.test.ts`: a fresh
- * clone has no build, and this must not fail before `npm run build` has run.
+ * Fails when `dist/` is absent, as every suite that reads the build does
+ * (tests/require-dist.ts): it used to skip, and a skipped check read green in
+ * a CI job that never built. Run `npm run build` first.
  */
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { requireDist } from '../require-dist';
 
 const root = process.cwd();
-const haveDist = existsSync(join(root, 'dist', 'index.js'));
+requireDist(existsSync(join(root, 'dist', 'index.js')));
 
 /** Every .html under examples/, at any depth, ignoring node_modules and build output. */
 function findHtml(dir: string, out: string[] = []): string[] {
@@ -64,7 +66,7 @@ function extractDistImports(file: string): Ref[] {
   return refs;
 }
 
-describe.skipIf(!haveDist)('HTML examples import real exports from dist', () => {
+describe('HTML examples import real exports from dist', () => {
   const htmlFiles = findHtml(join(root, 'examples'));
   const refs = htmlFiles.flatMap(extractDistImports);
 

@@ -66,10 +66,10 @@ export function buildMenu(records: readonly TableRecord[], currentPath: string, 
   if (DEV) {
     for (const record of menued) {
       if (typeof record.meta.menu !== 'number') {
-        throw routerError('bad_menu_row', `route "${record.name}": meta.menu must be a number (the menu position)`);
+        throw routerError('invalid:menu', `route "${record.name}": meta.menu must be a number (the menu position)`);
       }
       if (typeof record.meta.title !== 'string') {
-        throw routerError('bad_menu_row', `menu route "${record.name}" needs meta.title (an i18n key)`);
+        throw routerError('invalid:menu', `menu route "${record.name}" needs meta.title (an i18n key)`);
       }
     }
   }
@@ -133,7 +133,7 @@ function menuPath(record: TableRecord): string {
       path += `/${segment.value}`;
     } else if (DEV && segment.kind === 'param' && !segment.optional) {
       throw routerError(
-        'bad_menu_row',
+        'invalid:menu',
         `menu route "${record.name}" has a required param ":${segment.name}" - menu rows must be static`,
       );
     }

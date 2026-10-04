@@ -35,7 +35,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import type * as ShippedMod from '../src/command-bus';
-import { underCoverage } from './under-coverage';
+import { runTiming } from './under-coverage';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // Per-file subdir: the whole dir is removed in afterAll, so it must be ours alone.
@@ -213,7 +213,7 @@ const ROWS: Array<[string, (m: Mod) => number | Promise<number>]> = [
 const ROUNDS = 11;
 
 describe('request() / dispose() - real path A/B', () => {
-  it.skipIf(underCoverage)('agrees on every settled result and the sync command shape, differs where intended, and measures request()', async () => {
+  it('agrees on every settled result and the sync command shape, differs where intended, and measures request()', async () => {
     mkdirSync(REF_DIR, { recursive: true });
     const arms: Record<string, Mod> = {};
     const load = async (name: string, revert: boolean) => {
@@ -283,6 +283,9 @@ describe('request() / dispose() - real path A/B', () => {
       expect(r.error?.code).toBe(expectedCode);
       expect(calls).toBe(expectedCalls);
     }
+
+    // Timing runs on `npm run test:timing` only, never instrumented (tests/under-coverage.ts).
+    if (!runTiming) return;
 
     // --- measurement --------------------------------------------------------
     const order = Object.keys(arms);

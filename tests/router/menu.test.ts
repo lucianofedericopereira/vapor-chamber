@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { isRouterError } from '../../src/router/errors';
-import { buildBreadcrumbs, buildMenu } from '../../src/router/menu';
-import { createRouteTable } from '../../src/router/table';
-import type { RouteRecord } from '../../src/router/types';
-import { pathActivity } from '../../src/router/url';
+import { isRouterError } from '@router/errors';
+import { buildBreadcrumbs, buildMenu } from '@router/menu';
+import { createRouteTable } from '@router/table';
+import type { RouteRecord } from '@router/types';
+import { pathActivity } from '@router/url';
 import { makeRouter } from './fixture';
 
 /** An admin-shaped table: a menued section GROUP with menued children, a
@@ -99,7 +99,7 @@ describe('buildMenu', () => {
       buildMenu(dynamic, '/');
       expect.unreachable('dynamic menu row accepted');
     } catch (error) {
-      expect(isRouterError(error, 'bad_menu_row')).toBe(true);
+      expect(isRouterError(error, 'router:invalid:menu')).toBe(true);
     }
   });
 
@@ -132,9 +132,9 @@ describe('buildMenu', () => {
 
       vi.stubEnv('NODE_ENV', 'production');
       vi.resetModules();
-      const prod = await import('../../src/router/menu');
+      const prod = await import('@router/menu');
 
-      // Both of these throw bad_menu_row in dev - see the test above.
+      // Both of these throw router:invalid:menu in dev - see the test above.
       expect(() => prod.buildMenu(badPosition, '/')).not.toThrow();
       expect(prod.buildMenu(badPosition, '/').map((item) => item.name)).toEqual(['x']);
 

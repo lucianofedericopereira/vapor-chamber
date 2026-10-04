@@ -68,7 +68,8 @@ The mechanics the decision leaves open, settled from the code:
    command on is not retried there. The plugins outside see one dispatch - the
    property `retrying()` has today, whose engine moves into the runner.
 2. **Bounds.** 3 attempts in total; full jitter over `base * 2^n` (base 200 ms),
-   capped at 20 s; a declared `retryIn` honoured, clamped to the cap.
+   capped at 20 s (`maxDelay`); a declared `retryIn` is waited as declared,
+   and one longer than the cap is not re-sent: the failure is returned with it.
 3. **The budget, per bus** (gRPC A6): 10 tokens; a retryable failure costs 1, a
    success refunds 0.1; a retry runs only while more than half remain.
 4. **The class rule.** Final never (the verdict conditions, `aborted`,
@@ -87,4 +88,4 @@ The mechanics the decision leaves open, settled from the code:
 1.25.0 ends with section 4. For 1.26, recorded in the larger plan: chained actions,
 `BusSchema` `fails`, the PHP package, wire compression (tables, handshake,
 CBOR), the debug mode and the fuse, `Retry-After` for a batched command, the
-remaining accessibility items, `HttpError` and `RouterError` joining.
+remaining accessibility items. (`HttpError` and `RouterError` joining: done, s35.131.)

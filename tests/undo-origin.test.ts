@@ -68,6 +68,7 @@ describe('history() plugin: dispatches inside an undo handler or a redo are not 
       bus.register('act', () => { if (nested) bus.dispatch('child', 1); return 'a'; }, { undo: () => {} });
       await bus.dispatch('act', 1);
       h.undo();
+      await tick(); // an undo is a command: async on the async bus (s35.114)
       nested = true;
       h.redo();
       await tick();
@@ -86,7 +87,7 @@ describe('history() plugin: dispatches inside an undo handler or a redo are not 
     bus.dispatch('act', 1);
     h.undo();
     h.redo();
-    expect(seen).toEqual([['act', undefined], ['comp', 'undo'], ['act', 'redo']]);
+    expect(seen).toEqual([['act', undefined], ['comp', 'undo'], ['act$undo', 'undo'], ['act', 'redo']]);
   });
 });
 

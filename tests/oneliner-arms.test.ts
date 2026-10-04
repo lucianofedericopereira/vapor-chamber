@@ -16,11 +16,11 @@ import { describe, it, expect, vi } from 'vitest';
 import { createTransitionBridge } from '../src/transitions';
 import { createReaction } from '../src/utilities';
 import { createCommandBus, createAsyncCommandBus } from '../src/index';
-import { encodeQueryParam } from '../src/router/url';
-import { resolveBase } from '../src/router/history';
+import { encodeQueryParam } from '@router/url';
+import { resolveBase } from '@router/history';
 import { rehydrate } from '../src/ssr';
-import { buildMenu } from '../src/router/menu';
-import { createRouteTable } from '../src/router/table';
+import { buildMenu } from '@router/menu';
+import { createRouteTable } from '@router/table';
 
 
 // ---------------------------------------------------------------------------

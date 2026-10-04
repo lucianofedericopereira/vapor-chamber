@@ -2,6 +2,1125 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.26.0 - 2026-10-04
+
+### Fixed (the 1.26 evaluation's bug list)
+
+Each fix has a test that failed before it; the record is
+`docs/rc-alignment-log.md`, section 35.42.
+
+- **esbuild and webpack shipped all of Vue to every app using the
+  composables.** The root finds Vue at runtime through `import('vue')`, which
+  both bundlers resolve to the whole namespace, even in an app wired through
+  `vapor-chamber/vue`. That lookup now sits behind a build flag,
+  `__VC_WIRED_BUILD__`: `vaporChamberWire()` defines it in a Vite build, and an
+  esbuild or webpack app that imports its composables from `vapor-chamber/vue`
+  (or `/vapor`) adds `define: { __VC_WIRED_BUILD__: 'true' }`. With it the
+  lookup leaves the bundle, and so does webpack's "Critical dependency"
+  warning. Without it nothing changes, which keeps a root-only Vue app working
+  on the Vite dev server, esbuild and webpack. `tests/root-probe-builds.test.ts`.
+- **`getCommandBus()` no longer loads Vue in a Vue-less app.** The shared bus
+  (`getCommandBus`, `setCommandBus`, `resetCommandBus`) moved to a module
+  without the lookup; every import path is unchanged.
+- **`router.destroy()` cancels the navigation in flight.** A navigation held
+  on a lazy component or a guard used to commit after the router was
+  destroyed, writing the history; it now answers `cancelled`, `isLoading`
+  returns to false, and a cancelled Back navigation walks no history.
+  `tests/router/destroy-cancels-navigation.test.ts`.
+- **The HTTP client's cache respects writes and invalidations.** A read on the
+  wire across `invalidateCache()` or `clearCache()` is returned but not
+  stored, and a later read fetches instead of joining it; a successful
+  `post` / `put` / `patch` / `delete` drops the cached entry for its URL.
+  `tests/http-cache-writes.test.ts`.
+- **`revalidateRoutes` re-reads past the loader cache.** With
+  `fetchLoaders({ cache })` a refresh after a command put the pre-command
+  data back on the page. The loader context gains `refresh` (true for a
+  refresh, false on a navigation), and `fetchLoaders` reads past its cache
+  then. `tests/router-fetch/revalidate-past-cache.test.ts`.
+- **`useSharedCommandState().isLoading` across a route change, and on a
+  sealed bus.** A key in flight when the last holder left read false for the
+  next one; it now reads lit until the command settles. On a sealed bus,
+  `isLoading()` threw `core:refused:bus` whenever tracking had to start after
+  `seal()`; it now works there, and the bus stays sealed.
+  `tests/shared-state-handover.test.ts`.
+- **`Retry-After` is read by RFC 9110's grammar**: digits, or an HTTP-date.
+  `-5`, `1.5`, `1e1`, `0x10` and `+3` were read as waits (-5,000 ms for
+  `-5`); they are ignored now. `tests/retry-after-grammar.test.ts`.
+- **`persist()` without `getState` throws a `TypeError` at setup.** It used to
+  build a plugin that failed every save and stored nothing.
+  `tests/persist-requires-getstate.test.ts`.
+
+The IIFE size budgets were raised to the measured sizes (owner, 2026-10-01);
+the per-fix ledger is in `scripts/check-size.mjs`.
+
+### Faster, and two more fixes (the perf-1.26 audit)
+
+Every speed figure is a process-replicated A/B of the built `dist/` (10
+processes per comparison, a per-function A/A gate), measured with
+`npm run ab` at two call lengths and recorded in `docs/rc-alignment-log.md`,
+sections 35.44 and 35.53; the method is `docs/V8-RULES.md`, rules 12 to 18.
+Against v1.25.0 no measured path is slower.
+
+- **`useCommand().dispatch` and `useCommandQuery().query` allocate no
+  closure per call**: 0.915-0.934x, 2.7-3.9 ns less per dispatch.
+- **A scoped plugin's `actions` filter allocates nothing per dispatch**
+  (`cache`, `circuitBreaker`, `rateLimit`, `metrics`, `serialize`,
+  `idempotent`, `supersede`, the outbox): 0.979-0.986x on a chain of four
+  scoped plugins and a listener, 4.6-6.6 ns.
+- **Per-key `isLoading` tracking is about a quarter cheaper per dispatch**
+  (about 192 -> 146 ns): a key gets its reactive flag only when `isLoading()`
+  reads it (0.969-0.982x, 3.6-6.1 ns), a dispatch is matched to its settle
+  through a `Map` (0.858-0.871x, 24-26 ns), and the keys are a map by action,
+  then by target, so a dispatch builds no key string (0.892-0.905x, 15-18 ns;
+  log section 35.60).
+- **Fixed: `isLoading` keys could collide across the `:`.** The action
+  `'a:b'` with target `'c'` and the action `'a'` with target `'b:c'` shared a
+  flag. They no longer do; every other key equality is unchanged (`1` and
+  `'1'` still share one, as in `commandKey`). `tests/isloading-keys.test.ts`.
+- **A build profile, and `isLoading` keeps idle slots for reuse in it.**
+  `vaporChamberWire({ profile: 'lean' })` trades speed for memory; the
+  default, `'performance'`, trades memory for speed. It is ONE build-time
+  switch for every such trade, and it costs nothing per call: the plugin
+  defines `__VC_LEAN__`, so the choice folds out of the build. **The plugin's
+  output changes for every user:** with no option it now also defines
+  `__VC_LEAN__: 'false'`, in a build and under the dev server, unless the
+  app's config defines `__VC_LEAN__` itself (an esbuild or webpack app can
+  define it with one line). The IIFE builds are performance. The first trade:
+  in performance, a key nobody reads keeps its slot when it settles while its
+  action holds 256 or fewer, so its next dispatch allocates nothing
+  (0.848-0.865x, 21-22 ns per tracked dispatch, log section 35.61); lean drops
+  it at once, as before. `tests/isloading-profile.test.ts`.
+- **A tracked dispatch on a sync bus is faster again: 0.645x, 44 ns less.**
+  `isLoading` matched each dispatch's start to its settle through a Map keyed
+  by the command; on a sync bus, where commands settle innermost first, it is
+  a stack now, still matched by identity, so a settle with no start (a query,
+  an emit) takes nothing. In every profile (log section 35.66). The async bus
+  keeps the Map. `tests/isloading-nesting.test.ts`.
+- **Composable creation is back to v1.25.0's speed.** The build-flag check
+  added for the Vue lookup above ran on every creation, 7-9% of it, in any
+  build that does not define the flag; a cheap test now comes first.
+- **Fixed: `useSharedCommandState().dispose()` called twice by one holder**
+  (by hand, then by its scope) released the shared state under the next
+  holder, whose `isLoading()` then never lit; before that change it could
+  split the state in two. Each holder now counts out once.
+  `tests/shared-state-dispose-twice.test.ts`.
+- **Fixed: the HTTP cache dropped more than it had to.** An invalidation of
+  one URL, and every successful write, kept every cacheable read then in
+  flight from being stored, whatever its URL. Only a read of the invalidated
+  URL is kept from being stored now. `tests/http-cache-unrelated-invalidation.test.ts`.
+
+The full IIFE budget was raised to the measured size again (owner: speed over
+size); the ledger is in `scripts/check-size.mjs`.
+
+### Fixed: dispatch depth, and listeners changed during a dispatch
+
+Each fix has a test that failed before it; the record is
+`docs/rc-alignment-log.md`, section 35.67.
+
+- **An async bus refused concurrent dispatches as if they were nested.** Its
+  depth counted dispatches in flight, so the 17th of 17 parallel, unnested
+  dispatches failed with `core:exceeded:depth`. Depth is now nesting, on both
+  buses: a dispatch is its parent's depth + 1, where the parent is the
+  dispatch whose handler, hook or listener started it. This also stops three
+  loops the old counter let run forever or overflow: a listener or after-hook
+  that re-dispatches its own action, and an async query that queries itself.
+  A loop through your own `await` is not followed.
+- **A sync `query()` that queried itself overflowed the stack.** Queries now
+  count on the same depth as dispatches and stop at 16. A query costs about
+  1.5 ns more for it, as a dispatch already does.
+- **A listener could be skipped, or run twice, when listeners changed during
+  a dispatch.** One that removed an earlier peer and added one skipped the
+  next; one that removed itself and a later peer re-ran the one before it.
+  A dispatch, `emit`, the fast lane's `'live'` emit and `createTestBus()` now
+  call the listeners that existed when they started: one removed during it
+  does not run, one added during it runs from the next (the rule of DOM's
+  `EventTarget`). **This changes one behaviour:** a listener added during a
+  dispatch used to run in that same dispatch. Listener fan-out measured
+  0.964-0.974x.
+
+The IIFE budgets and the Blade-consumer ceiling were raised to the measured
+sizes (owner: correctness first); the per-fix ledger is in
+`scripts/check-size.mjs` and `tests/esm-treeshake.test.ts`.
+
+### Fixed: a deduped GET obeyed another caller's signal
+
+A GET joining one already in flight for the same URL (the client's `dedupe`,
+on by default) shared the first caller's request with its abort: the first
+caller's `signal` rejected every caller, and a joining caller's own `signal`
+was ignored. With `supersede` and a handler passing `cmd.signal` to
+`http.get()`, the newest dispatch joined the request the plugin had just
+aborted and failed as well. Each caller's signal now rejects its own promise
+only; the fetch is cancelled once every caller holding it has aborted (a
+caller without a signal holds it until it lands), and a GET made after that
+starts a fresh request. A GET with no signal costs what it cost.
+`dist/http.js` +1,407 B raw / +266 brotli, in no IIFE.
+`tests/http-dedupe-signal.test.ts`; log section 35.46.
+
+### Fixed: a store's `$reset()` was seen by no plugin
+
+`$reset()` wrote the store's state directly, so `persist` never saved it and
+the next reload brought back the state from before the reset; `history`, the
+devtools and every listener missed it too. It now dispatches `<id>$reset`
+(`cart$reset`), registered beside the store's actions, and returns the
+dispatch result. Changed with it: on an async bus the reset lands when the
+returned promise settles, not at the call; a plugin can refuse it;
+`inspectBus().actions` lists it. Action names containing `$` are reserved for
+the library, and a bus's `naming` rule no longer checks them (the check runs
+only once a name has failed the pattern). `dist/store.js` +147 B raw / +36
+brotli; the IIFEs +17 raw and +3 to +15 brotli, from the naming check.
+`tests/store-reset-command.test.ts`; log section 35.70. `$reset()` goes back
+to what `state()` returns, so a `state()` that reads storage resets to the
+saved record; `docs/store.md` shows loading it through an action instead (log
+section 35.72).
+
+### Added: a development warning when the shared bus is replaced after use
+
+`getCommandBus()` still creates a bus when none was set, the normal path of
+a sync app. `setCommandBus()` replacing that bus after it was handed out now
+warns, once, in development: code that already called `getCommandBus()`
+keeps the old bus, so dispatches and listeners split between two buses with
+no error. Setting the same bus again (the HMR shim) or setting after
+`resetCommandBus()` stays quiet, and the `vapor-chamber/vitest` setup file
+now resets before it installs each test's bus. No IIFE byte changes (the
+warning folds out); `dist/shared-bus.js` +602 B raw / +202 brotli before a
+consumer's production build drops it. `tests/shared-bus-fallback-warning.test.ts`;
+log section 35.73.
+
+### Added: `ok`, `err` and `countOption` for app plugins
+
+A plugin that answers without calling `next()` had to build its own
+`{ ok: false, error }`, a different hidden class from the bus's results, so
+every `result.ok` site that saw both went polymorphic. The root now exports
+the bus's own two factories as `ok(value)` and `err(error)` (the same
+functions, not copies), and a refusal reads `err(fail(code, message))`, with
+`fail`, the plugin's third argument, minting the owner from its `id`. It also
+exports `countOption(value, fallback, min?, max?)`, the library's rule for a
+numeric option: NaN falls back to the default, negatives clamp, fractions
+truncate, `Infinity` passes. `examples/custom-plugins.ts` uses them. No IIFE
+byte changes; `dist/index.js` +47 B raw / +18 brotli.
+`tests/plugin-result-factories.test.ts`; log section 35.74.
+
+### Fixed: two failures built a result of their own shape
+
+`schemaValidator`'s rejection and `rehydrate()`'s refusal of an async bus
+returned `{ ok: false, error }`, two fields, a different hidden class from
+every other result, so a `result.ok` site that saw them went polymorphic.
+Both now come from the bus's own factory (same error, same message; the
+result gains `value: undefined` like every other failure). The check that
+guards this read one line at a time and missed a literal written over
+several lines; it now reads both (it found these two and a third,
+`validateSchemas`, whose three fields already matched). No IIFE byte changes;
+`dist/ssr2.js` -21 B brotli, `dist/plugins-schema.js` -4.
+`tests/v8-shapes.test.ts`; log section 35.76.
+
+### Changed: every built-in plugin names itself in its failures
+
+A built-in plugin that threw was reported as `plugin:failed:plugin`, which
+does not say which one. Every bus-plugin factory now declares its id, the
+owner of the failures it reports: a throw reads `serialize:failed:plugin`,
+`logger:failed:plugin` and so on. The three bridges are `transport`, like
+their other failures (`transport:lost:reply`), and both schema validators
+`validateSchemas`. A plugin of yours without an `id` still reads
+`plugin:failed:plugin`. Refusal codes do not change. `getErrorEntry()` and
+`isRetryableCode()` answer for any `<id>:failed:plugin` with the
+`plugin:failed:plugin` entry (before, a named plugin's throw had none).
+`tests/plugin-ids.test.ts` holds the 25 ids; log section 35.77.
+
+### Changed: four failures that carried no code now do
+
+Four failures the library builds were a plain `Error` with no code, so they
+read as condition `failed`, a bug: `schemaValidator`'s rejection is now
+`schemaValidator:invalid:payload`, `rehydrate()` given an async bus
+`ssr:invalid:bus`, `synthesize()` without an adapter
+`schema:missing:adapter`, and a `v-vc-command` dispatch that outlives its
+timeout `directive:timeout:dispatch` (a transient condition). Messages are
+unchanged, and each code is in `ERROR_CODE_REGISTRY`, as is
+`throttle:limited:handler`, which `throttle()` raised but the registry
+lacked. An outbox `isRetryable` rule can now tell a schema rejection
+(`invalid`) from a bug. No IIFE byte changes. `tests/errors-match-catalogue.test.ts`
+(which also fails on any new uncoded failure); log section 35.78.
+
+### Changed: two new conditions, `unauthenticated` and `conflict`
+
+Two distinctions gRPC's canonical codes draw were hidden in our vocabulary.
+A 401 or 419 (an expired session or CSRF token) now reads `unauthenticated`
+instead of `refused`, which keeps 403 alone; a 409 or 412 (the target's state
+is not the one the request assumed) reads `conflict` instead of `already`. **A
+backend failure's code changes with it** (`remote:already:in_progress` is now
+`remote:conflict:in_progress`, `remote:refused:...` from a 401 is
+`remote:unauthenticated:...`): a rule that matches those strings must follow.
+Behaviour is the same: both are final for the bus's retry; the outbox still
+drops a 409/412 (a verdict) and keeps a 401/419 (replayed after sign-in),
+now read from the condition instead of a status check (`dist/outbox.js` -36 B
+brotli). The conditions read 1:1 against gRPC's codes in
+`docs/plan-failures-and-contract.md` 4.2. IIFEs +27 B raw, brotli +11 core,
+-2 full and elements. Log section 35.79.
+
+### Changed: a failure on the wire carries an RFC 9457 `type`
+
+A failure serialized as a problem (`toJSON()`, what crosses a worker, a
+channel, storage or a server) left `type` implicit, `about:blank`, which RFC
+9457 reads as "nothing beyond the HTTP status"; and an RFC client must ignore
+extensions it does not know, so it dropped `code`, the only identity. `type`
+is now the URI of the failure's condition,
+`https://github.com/lucianofedericopereira/vapor-chamber/blob/main/docs/errors.md#<condition>`,
+which resolves for every failure, the library's, your plugins' and your
+backend's alike. `code` stays the exact identity; a backend's own `type` is
+kept. `docs/errors.md` is new and generated from `ERROR_CODE_REGISTRY` by
+`npm run docs`: one section per condition, its meaning, its retry default,
+its gRPC reading and the codes under it. IIFEs +75 to +80 B brotli; the
+Blade bundle +93. `tests/problem-type.test.ts`; log section 35.80.
+
+### Faster: a sync dispatch with listeners and no plugin
+
+A bus with listeners or hooks but no plugin called its handler through the
+empty plugin runner, two closures a dispatch. It now calls it directly, as the
+bare path does. With `useSharedCommandState` and `isLoading`: 235 -> 207 ns a
+dispatch. Log 35.143.
+
+### Changed (breaking): a plugin declares its `actions`; the bus skips it elsewhere
+
+Every scoped plugin (`cache`, `circuitBreaker`, `rateLimit`, `metrics`,
+`serialize`, `idempotent`, `supersede`, `debounce`, `throttle`,
+`optimisticUndo`, the outbox, the bridges, `pollWith`) declares `actions`, and
+the bus runs it only on those, one chain per action: a plugin that does not
+match costs nothing (four that miss: 232 -> 114 ns a dispatch). A plugin of
+your own declares `actions` the same way. `debounce`, `throttle` and
+`optimisticUndo` take patterns now, as the others. A plugin called outside a
+bus no longer filters. `tests/plugin-manifest.test.ts`; log 35.141.
+
+### Added: `pollWith`, a 202 Accepted followed to its end
+
+`bus.use(pollWith({ bus }))`: a command answered 202 with a `Location`
+resolves at once; `pollWith` polls the status monitor (each `Retry-After`) and
+emits `<action>$done` with `{ command, result }`. The reference controller
+answers 202 for an action returning `['accepted' => ...]`.
+`tests/poll-with.test.ts`; log 35.140.
+
+### Added: `meta.request`, headers a plugin adds to the request
+
+A bus plugin sets `cmd.meta.request = { headers }` (names lowercase) and the
+HTTP bridges send them: a tracing plugin writes a W3C `traceparent` with
+`bus.use()`, no bridge option. A batch merges its commands' headers in queue
+order. `tests/meta-request.test.ts`; log 35.139.
+
+### Changed (breaking): one command envelope on every wire
+
+`{ id?, command, target, payload?, meta? }` on a single request, a batch item
+and a WebSocket frame: `id` where answers are multiplexed, `meta` with
+`idempotencyKey`, `correlationId` and `causationId` when set. A backend reads
+the key from `meta` (the batch's top-level `idempotencyKey` is gone); a single
+request still sends the `Idempotency-Key` header. The WebSocket bridge now
+sends the key. `tests/wire-envelope.test.ts`; log 35.138.
+
+### Removed (breaking): `CommandsOf` and the `window.__VUE__` fallback
+
+`CommandsOf` was a second name for `InferMap`; use `InferMap`. A Vue namespace
+is read from `window.__VAPOR_CHAMBER_VUE__` (or `configureVue()`), no longer
+from `window.__VUE__`, which is Vue's key. Log 35.137.
+
+### Added: `meta.response`, the response a bridged command's reply arrived in
+
+The HTTP bridges kept a reply's status, headers, `url` and `redirected` only on
+failure. Now `cmd.meta.response` holds them for the 2xx a reply arrived in
+(Fetch's member names, header names lowercase); `undefined` for a local
+handler; a non-2xx answer stays the error's. A 202 is readable as accepted,
+not finished (RFC 9110 15.3.3). `tests/meta-response.test.ts`; log 35.136.
+
+### Changed (breaking): the HTTP client's failures are the core's `BusError`
+
+The client and the bridges give the same failure for the same answer, retried
+by the async bus's rule (`retryClass`). `HttpError` is removed.
+
+| Before | Now |
+| --- | --- |
+| `HttpError` for a non-2xx | `remote:<condition of the status>:<code>` (`http` when the body has no code) |
+| `error.response.status`, `error.response.data` | `error.context.status`, `problemOf(error)` |
+| `TimeoutError` | `transport:timeout:reply` |
+| `AbortError` (also a deduped read's caller) | `transport:aborted:request` |
+| a network failure (`TypeError`) | `transport:lost:reply`, the `TypeError` as `cause` |
+| a body that is not the JSON it declared (`SyntaxError`) | `remote:unexpected:json` |
+| no CSRF token after the 419 refresh | `transport:missing:csrf` |
+| `error.silent` | `error.context.silent` |
+| `http.safe.*` `error`: the problem object | the `BusError`; `problemOf(error)` reads its problem |
+| a POST with no response re-sent | sent once, unless it carries an `Idempotency-Key` |
+| a non-2xx whose body is not its declared JSON: the client's `SyntaxError` | the status decides on every path: `remote:<condition>:http` |
+| a 2xx that is not the JSON envelope (an HTML login page, an array) on a bridge: a success | `remote:unexpected:json`, the command fails |
+| an empty 2xx body | no data on every path, a success (unchanged) |
+
+`tests/http-one-shape.test.ts`; log sections 35.131-35.133.
+
+### Fixed: `history` could not undo a store action; `undo: true` makes it
+
+`history` reverses a command only through an inverse registered with it, and
+a store registered its actions with none: `undo()` left the state as it was
+and `redo()` ran the action again. The docs, and the v1.18.0 entry ("`history`
+undoes it"), said otherwise. `defineChamberStore(id, { ..., undo: true })`
+registers each action and `$reset` with an inverse that puts back the state
+the action replaced, run as the `<action>$undo` command like every undo (entry
+below), so persist stores the undone state and a reload keeps it; history does
+not record it. Off by default, and a store without it registers and runs
+exactly as before. `tests/store-undo.test.ts`; log section 35.112.
+
+### Added: `vapor-chamber/store/core`, the store with no Vue
+
+The store, for an app on the bus without Vue: the same implementation as
+`vapor-chamber/store` (actions as commands, `$reset`, undo, `$onField`,
+`share`, the coded refusals) over the library's `signal()`, which is a plain
+`{ value }` or, with `configureAlienSignals()`, a reactive signal. No
+component scope, so the caller owns `$dispose()`; `fieldRef` stays in the Vue
+entry. The built entry imports no Vue. `tests/store-core.test.ts`; log section
+35.130.
+
+### Added: a store shared across tabs, `share`
+
+`defineChamberStore(id, { ..., share: lane })`, with the lane bridged by
+`createChannel({ lane, events: ['<id>$state'] })`: each local write sends the
+new state with a version, and other tabs apply a newer one through the
+`<id>$sync` command (origin `'sync'`, which `history` and `useCommandHistory`
+now do not record). Every tab ends on the same state, concurrent writes
+included; a received state is not sent back. It shares state, not commands,
+so a non-deterministic handler cannot make tabs disagree (the reason the old
+sync plugin was removed). A store without it writes exactly as before.
+`tests/store-share.test.ts`; log section 35.129.
+
+### Added: a store's field events, `$onField` and `fieldRef`
+
+`store.$onField(key, fn)` calls `fn` with a field's new value each time a write
+changes it; `fieldRef(store, key)` (from `vapor-chamber/store`) is that field as
+a read-only Vue ref, so a component reading one field re-renders only when it
+changes. A store nobody subscribes to writes exactly as before. With several
+readers it is cheaper on every write than a `computed` per field; with one, a
+`computed` is slightly cheaper (docs/store.md). `$onField` is a store member an
+action cannot take. `tests/store-field-events.test.ts`; log section 35.125.
+
+### Removed: `csrf: 'inertia'` on the HTTP bridges
+
+It sent no CSRF token at all: the bridges make their own requests, which no
+Axios interceptor of the app touches, and Inertia 3 ships no Axios. On Laravel
+13 a tokenless POST passes only from the same origin. An Inertia app uses
+`csrf: true`, which reads the `XSRF-TOKEN` cookie Laravel sets when the page
+has no meta tag. `csrf` is now a boolean; passing `'inertia'` is a type error.
+`tests/csrf-option.test-d.ts`; log section 35.124.
+
+### Fixed: `vaporChamberHMR()` no longer trips the shared-bus warning
+
+On first load its shim read the shared bus, which created one, so an app
+calling `setCommandBus()` in its setup got the "replaced the bus
+getCommandBus() had created" warning on every dev server start. It now reads
+no bus until a hot update stores it. `tests/hmr-shim-first-load.test.ts`;
+log section 35.123.
+
+### Added: `problemOf(error)`, the backend's problem behind a failure
+
+A loader failure is `router:failed:loader` with the http client's error as
+its cause, and an app dug through `cause` for the backend's RFC 9457 problem.
+`problemOf(error)` (root export) walks the cause chain and returns that
+problem: a `remote:` failure, from a bridge or the http client (entry above),
+gives its members. `undefined` when no backend answered. Plan 8d.2;
+`tests/problem-of.test.ts`; log section 35.121.
+
+### Changed: a query change wins over a page navigation still in flight
+
+On a page, `push('/list')` held by a slow guard or loader, then
+`setQuery({ q: 'x' })` (or a query-only `push`): the query committed, then
+`/list` committed over it and the change was lost, its history entry left
+behind. The query change now supersedes the pending navigation, as a newer
+navigation does: the query commits on the page on screen and the pending
+`push` answers `router:aborted:navigation` (normal flow, not `onError`). A
+query refetch still never aborts a page navigation.
+`tests/router/query-during-navigation.test.ts`; log section 35.120.
+
+### Changed: `authGuard` refuses with `authGuard:unauthenticated:action`
+
+No session is `unauthenticated` (sign in, then the same request), not
+`refused` (a rule said no): the code was `authGuard:refused:action`. A rule
+matching the old code must follow. `tests/plugins.test.ts`; log section 35.119.
+
+### Changed: an app's `$` name is refused; the naming check is coded; `router:failed:history`
+
+Names with `$` are the library's (`<id>$reset`, `<action>$undo`), and the
+bridges keep them local, so an app's would have been silently never sent.
+`register()` now refuses one (`core:invalid:name`), whatever the naming rule,
+and so does `createTestBus`; a store refuses a `$` in its id or an action key
+when defined (`store:invalid:name`). The naming check's violation in `throw`
+mode is the same `core:invalid:name` (it was a plain `Error`). A history the
+app supplies that throws writing the URL is `router:failed:history` (it was
+reported as a component failure, which hard-navigated). A store with
+`undo: true` keeps its last 256 steps in a ring instead of weak maps: its
+action cost drops from about +800 ns to about +60 ns. `createTestBus` registers
+`<action>$undo` like the real bus. `tests/library-names.test.ts`; log sections
+35.117, 35.118.
+
+### Changed: reads answer plain JSON; `unwrapRoutesPayload` is `readRoutesPayload`
+
+A read (a loader, the routes table) answers the body itself, and a failure
+is a non-2xx `application/problem+json`; the command envelope (`{ state }`, a
+`{ problem }` on a 2xx) is not a read's shape. The loader preset already read
+plain JSON, but the routes reader also accepted `{ state }` and a 2xx
+`{ problem }`, guessing between two shapes. It now reads the bare
+`{ routes, base? }` only: an envelope is `router:unexpected:routes`, a failed
+fetch `router:failed:routes` with the client's error as its cause. The
+export is renamed to say what it does. A backend that wrapped its routes table
+in `{ state }` returns the table itself. `tests/router/routes-plain-json.test.ts`;
+log section 35.115.
+
+### Changed: every undo is a command, `<action>$undo`
+
+`register(action, handler, { undo })` also registers `<action>$undo`, and every
+undo runs through it: `history` / `useCommandHistory`, `optimisticUndo`'s
+rollback and a transactional batch's rollback. Before, each called the inverse
+directly, so no listener, devtools timeline or persist heard an undo. The
+command's target is the command it reverses (the inverse still receives that
+command), its origin `'undo'`, its `causationId` that command's id. A plugin
+can refuse it like any command: history then keeps the step, and a refused
+rollback is reported (`rollbacks`, `onRollbackError`). `$undo` names show in
+`registeredActions()` and `inspectBus().actions`. On the async bus an undo is
+now async like every dispatch, so a `redo()` in the same tick as an `undo()`
+does nothing (one undo or redo in flight at a time, as before). The library's
+`$` commands (`$undo`, `$reset`) are local: no bridge sends them and the outbox
+never queues them, whatever their `actions` patterns. Log section 35.114.
+
+### Added: `canUndo` beside `undo` in `register()`
+
+`register(action, handler, { undo, canUndo })`: `canUndo(cmd)` says whether
+the inverse can still run for that recorded command. `history().getState()`
+and `useCommandHistory()` report `canUndo` from it for the command on top, and
+`undo()` does nothing while it is false. Without it, `canUndo` is "the history
+is not empty", as before. A store defined with `undo: true` uses it: an undo
+waits while a change the history did not record has moved the state.
+`tests/undo-check.test.ts`, `tests/store-undo.test.ts`; log section 35.113.
+
+### Changed: the router follows the core's failure model
+
+The entries above gave every failure the library raises one shape: a
+`BusError` coded `owner:condition:subject`, listed in `ERROR_CODE_REGISTRY`,
+read by `conditionOf` / `failureCondition`, a stack only for `failed`, an RFC
+9457 problem at a boundary. The router was the one part left outside it: its
+failure was a plain `Error` named `RouterError` with a snake_case code that
+no registry listed and no core reader understood (`failureCondition` read
+every one as `failed`). It now uses the same model, owner `router`: nothing
+here is a router feature, each change below is what the core's rules give
+it. **Every code changes**, and a handler that matches them must follow:
+
+| before | now |
+|---|---|
+| `unmatched` | `router:missing:route` |
+| `aborted` (a guard returned false) | `router:refused:guard` |
+| `cancelled` (superseded, destroy) | `router:aborted:navigation` |
+| `not_ready` | `router:missing:routes` |
+| `unknown_route_name` | `router:missing:record` |
+| `redirect_loop` | `router:exceeded:redirects` |
+| `duplicate_route` | `router:already:route` |
+| `unknown_parent` | `router:missing:parent` |
+| `cyclic_parent` | `router:invalid:parent` |
+| `missing_param` | `router:missing:param` |
+| `bad_menu_row` | `router:invalid:menu` |
+| `invalid_path` | `router:invalid:path` |
+| `invalid_routes_payload` | `router:unexpected:routes` |
+| `routes_load_failed` | `router:failed:routes`; `reload()` without a `{ url }` source: `router:missing:url` |
+| `inline_routes_missing` | `router:missing:inline` |
+| `component_missing` | `router:missing:component` |
+| `component_load_failed` | `router:failed:component`; a guard that throws: `router:failed:guard` |
+| `load_failed` | `router:failed:loader`; a `load` no handler serves: `router:missing:loader` |
+| `blade_unconfigured` | `router:missing:fetchBlade` |
+| `http_unconfigured` | `router:missing:http` |
+| `blade_fetch_failed` | `router:failed:blade` |
+| `mode_mismatch` | `router:invalid:component` |
+| `no_router` | `router:missing:router` |
+
+Also changed: `isRouterError(error, code)` takes the full code; `error.name`
+is `BusError`; the navigation target is `error.context.to` (was `error.to`);
+the message has no `[vapor-chamber-router]` prefix (the code names the
+source); only a `failed` code captures a stack, so a superseded navigation or
+a guard's refusal no longer pays for one; `toJSON()` gives the RFC 9457
+problem every failure gives. Read as conditions, three router codes were two
+failures each, and are split: `router:missing:url`, `router:missing:loader`
+(nothing was tried, so not `failed`) and `router:failed:guard`.
+`HARD_NAV_CODES` follows the plan's rule, a route, component or server HTML
+that is missing or failed, and so gains `router:missing:component`: an
+unregistered component key now hands the URL to the server, as an unmatched
+one does. A guard that throws no longer hard-navigates: it was reported as a
+component load failure, and a reload cannot fix a guard bug. `router` +0.3 KB
+brotli, `router/vdom` and `router/vapor` +0.3 KB each (they now carry
+`BusError`), `router-fetch` +0.3 KB, the root entry +1.4 KB brotli for the 26
+registry rows (tree-shaken unless you read the registry).
+`tests/router/router-codes.test.ts`; log section 35.108.
+
+### Changed: Vue's async Vapor code only in apps that use it (`vaporChamberWire({ entry: 'vapor' })`)
+
+`vapor-chamber/vapor` handed Vue's `defineVaporAsyncComponent` to the
+registry so the root's wrapper could reach it, which kept Vue's async
+component code in every `/vapor` app, whether it defined an async component
+or not. In a Vite build with `vaporChamberWire({ entry: 'vapor' })` the root's
+`defineVaporAsyncComponent` is now `/vapor`'s, which calls Vue's directly, and
+the registry is not seeded: an app that never defines an async component
+ships none of Vue's async code, and one that does gets a component in
+production as before. Every other build (esbuild, webpack, Vite without the
+plugin) keeps the seed and today's behaviour. `vapor-chamber/vapor`'s
+`defineVaporAsyncComponent` is its own function now (it never returns null),
+no longer the root's. `./vite` +0.1 KB brotli, `./vapor` unchanged in brotli.
+`tests/vapor-async-wire.test.ts`, `tests/vapor-async-seed.test.ts`; log
+section 35.109.
+
+### Faster for keyed commands: `meta.idempotencyKey` is always there
+
+A command's `meta` gained `idempotencyKey` only when `idempotent()`, the outbox
+or the async retry stamped one, which moved every keyed command onto a second
+hidden class. It is now a slot of every `meta`, `undefined` until stamped, so
+keyed and plain commands share one shape (`'idempotencyKey' in cmd.meta` is
+now always true; JSON still drops it while undefined). A plain dispatch
+measured unchanged (B/A 1.000-1.008, ~22 ns). IIFEs +2 to +9 B brotli.
+`tests/v8-shapes.test.ts`; log section 35.81.
+
+### Added: `HttpResponse.url` and `redirected`
+
+The HTTP client dropped two members Fetch gives every response, so an app
+its server redirected could not learn where it ended up. `createHttpClient()`
+and `postCommand()` now set `url` (the final URL, after redirects) and
+`redirected`. Both are optional in the type, for an app that passes its own
+`httpClient` to a bridge. IIFEs +8 to +11 B brotli.
+`tests/http-response-url.test.ts` (a real local server: a stub has no url);
+log section 35.82.
+
+### Added: `resolveNotModified`, a 304 that resolves; fixed: a GET joined to another with different headers
+
+A 304 answers a conditional request the app sent itself (`If-None-Match`,
+`If-Modified-Since`), and the client threw it like any non-2xx; no plugin or
+interceptor could change that. With `resolveNotModified: true`, per request
+or per client (and on `postCommand`), it resolves as it is: `status` 304,
+`ok` false, the empty body. Off by default, so code catching it is unchanged.
+
+Fixed with it: two GETs of one URL shared one request whatever their
+headers, so a plain read that started while a conditional one was in flight
+received that read's 304 (and a read with another `Authorization` or
+`Accept-Language` got the first one's answer). A GET now joins one in flight
+only when its headers match, and an opted-in read never joins one that is
+not. IIFEs +32 to +38 B brotli. `tests/http-not-modified.test.ts` (a real
+local server); log section 35.83.
+
+### Fixed: the router re-review
+
+Each fix has a test that failed before it; the record is
+`docs/rc-alignment-log.md`, sections 35.90 onward.
+
+- **Two quick Backs during a slow page ended a page off.** A navigation the
+  user superseded walked the history back by its own step, which the router
+  then read as a third navigation: the page settled on the first Back's page
+  with the address bar elsewhere. A cancelled navigation now walks nothing
+  (vue-router does the same); a refused or failed one still walks back.
+  `tests/router/superseded-navigation-history.test.ts`; log section 35.90.
+- **A navigation to the page on screen let a pending one commit after it.**
+  On `/`, a click to a slow `/list` and then a click back to `/` ended on
+  `/list`, with `push('/')` having answered null; Forward back to the page
+  during a held Back committed the Back's page under the Forward's address.
+  The page on screen, asked for again, now supersedes the navigation in
+  flight like any newer one (it answers `cancelled`, its loaders abort);
+  with nothing in flight it still changes nothing.
+  `tests/router/navigation-to-current-page.test.ts`, and both cases in real
+  Chromium, `tests/browser/router-history.browser.test.ts`; log section 35.91.
+- **`router.destroy()` during `start()` left a live router behind.** With a
+  `{ url }` table, a destroy while the table loaded let start() go on to
+  register its history, link and announcer listeners and commit the first
+  navigation after the teardowns had run, so a link click still navigated
+  it; a destroy during the first navigation left the idle preheat's window
+  listeners in place. start() now stops at both points.
+  `tests/router/destroy-during-start.test.ts`; log section 35.92.
+- **Inline routes that were not JSON failed with a plain `SyntaxError`.** The
+  one inline failure with no code; it is now `invalid_routes_payload`, the
+  parse error as its `cause`. `tests/router/inline-routes-json.test.ts`; log
+  section 35.93.
+- **One hidden class for every `RouterError`.** `to` and `cause` were added
+  only when given, so the errors the navigation path builds came in up to
+  four shapes; both are now always own properties, `undefined` when not
+  given (`'to' in error` is now always true; reading either is unchanged).
+  `tests/router/router-error-shape.test.ts`; log section 35.94.
+- **Docs corrected to the code.** The `vapor-chamber/router/vapor` row of the
+  retained-bindings tables (README, docs/router.md) now lists `createIf`;
+  `RouteLocation.path` is documented as the path as in the URL
+  (percent-encoded, params decoded), not "decoded"; an untested "~20us per
+  navigation" figure is gone from docs/router.md.
+  `tests/router/location-path-encoding.test.ts`,
+  `tests/router/vapor-boundary.test.ts`; log section 35.95.
+### Changed: `OutboxRecord.queuedAt` is an RFC 3339 string
+
+The outbox stamped each queued record with `Date.now()`, an epoch number
+that says neither its unit nor its zone, on a record that leaves the
+process (storage, or a backend a custom `OutboxStorage` syncs to). It is now
+`new Date().toISOString()`, RFC 3339 in UTC with milliseconds
+(`2026-10-02T17:41:19.250Z`), and the type is `string`.
+`Date.parse(record.queuedAt)` gives the milliseconds back. The outbox never
+reads the field, so replay is unchanged; a record persisted with a number
+still hydrates and replays. `dist/outbox.js` +17 B brotli, no IIFE change.
+`tests/outbox.test.ts`; log section 35.84.
+
+### Changed: the outbox drops a record a validator rejects at replay
+
+The outbox's default `isRetryable` kept every failure the library or a
+plugin raised, so a queued command that `validator()` or `schemaValidator()`
+rejected stayed at the head of the queue for good: the outbox captures before
+any validator runs, the same record gets the same `invalid` answer on every
+flush, and every record behind it waited for ever. Such a failure (condition
+`invalid`) is now final: the record is dropped, `'outboxRejected'` reports it
+with its error, and the flush moves on, as a live dispatch would have been
+refused. Every other failure the library raised is still kept: a handler not
+registered yet, a plugin that threw, an `authGuard` refusal (replayed after
+sign-in). A rule of your own (`isRetryable`) is unchanged. `dist/outbox.js`
++13 B brotli, no IIFE change. `tests/outbox.test.ts`; log section 35.85.
+
+### Fixed: two outbox defects around `Retry-After`
+
+Both have a test in `tests/wire-contract.test.ts` that failed before.
+
+- **`Retry-After: 0` looped.** A kept record is flushed again after the wait
+  its answer declared. With a wait of zero the outbox re-flushed at once, got
+  the same answer, and re-flushed again: 500 requests with no time passing
+  between them, in the test. A scheduled re-flush now waits at least one
+  second. The record still drains by itself when the backend recovers.
+- **A `409` that declared a `Retry-After` was dropped as a verdict.** A
+  `409` for a request still in progress, sent with `Retry-After`, says when
+  to come back. Any answer that declares a `Retry-After` now keeps the
+  record, and the outbox flushes again then. A `409` with no `Retry-After` is
+  rejected as before (`remote:conflict:...`).
+
+`autoFlush`'s documentation said "No timers"; the `Retry-After` wait is one,
+and the text says so. `dist/outbox.js` +22 B brotli, no IIFE change. Log
+section 35.86.
+
+### Changed: the outbox backs off while a backend keeps answering `Retry-After`
+
+A backend that answered every replay with `Retry-After: 1` was asked once a
+second for as long as it stayed busy: 601 requests over a 10-minute outage.
+The outbox's scheduled re-flush now doubles its wait while the answer
+repeats (1 s, 2 s, 4 s, ...) and stops growing at 30 s: 24 requests over the
+same outage, and the record drains a second after the backend recovers in
+that run, always within 30 s. A declared wait longer than the schedule wins
+(`Retry-After` is a minimum). A successful replay starts it over at 1 s. A
+`flush()` or an `'online'` event during a wait replaces that wait instead of
+starting a second timer. `dist/outbox.js` +36 B brotli, no IIFE change.
+`tests/wire-contract.test.ts`; log section 35.87.
+
+### Fixed: three ways a store broke without a word
+
+From a re-review of `vapor-chamber/store`, each with a test that failed before
+(`tests/store-review.test.ts`):
+
+- **An action named like a store member replaced it.** `actions: { state }`
+  left `store.state` a function, so `store.state.value` read `undefined`;
+  `actions: { $reset }` was overwritten by the library's own reset.
+  `defineChamberStore` now throws for an action key `$id`, `state`, `url`,
+  `$reset` or `$dispose`, naming it.
+- **A store with `url` fields called without a router left its handlers on
+  the bus.** The error came after they were registered, so nothing could
+  unregister them, and the next call (with the router) registered over them
+  with a warning per action. The check now comes first.
+- **A stale `$dispose()` removed the newer store.** After a store was
+  disposed and its id taken again, a second `$dispose()` of the old one, or a
+  scope that held the old one ending late, deleted the new store from the
+  registry: the next `useStore` built a third store over its handlers, and
+  the second one's state stopped changing. `$dispose()` now removes only its
+  own entry.
+
+`dist/store.js` +90 B brotli, no IIFE change. Log section 35.88.
+
+### Changed: the store's refusals carry codes
+
+Every failure the library raises is `owner:condition:subject`; the store's
+three setup refusals were plain `Error`s. They are now `store:missing:bus`
+(`useStore()` with no bus), `store:missing:router` (url fields, no router) and
+`store:already:member` (an action named like a store member), each in
+`ERROR_CODE_REGISTRY` and `docs/errors.md`; the messages are unchanged.
+`dist/store.js` now imports `./command-bus.js` beside `vue` (no probe, and
+every store user loads it already for the bus). `dist/store.js` +51 B
+brotli, `dist/index.js` +146 (the registry entries); no IIFE change.
+`tests/store-review.test.ts`; log section 35.88b.
+
+### Fixed: a `Retry-After` over 30 seconds was ignored, and a long one was cut short
+
+`Retry-After` is the minimum time to wait (RFC 9110). The parser dropped any
+value over 30 s, a policy of the HTTP client living where every caller reads,
+so: the HTTP client retried a `Retry-After: 120` at once on its own backoff;
+the outbox saw no wait, and a `409` sent with `Retry-After: 120` was rejected
+as a verdict; and the async bus re-sent a declared wait longer than its
+`maxDelay` (20 s) at `maxDelay`, sooner than asked. The parser now reads what
+was declared (ignoring only a wait no timer can hold, over about 24.8 days),
+and each caller keeps its own policy: the HTTP client does not sleep a
+declared wait over 30 s inside one request (the request fails, the header on
+the failure), the async bus returns a declared wait longer than `maxDelay`
+instead of re-sending early, and the outbox waits it out. IIFEs brotli -6
+full, +12 core, +23 elements. `tests/retry-after-long.test.ts`; log section
+35.89.
+
+### Fixed: a `Retry-After` date is read as GMT, and only an HTTP-date is read
+
+`Retry-After` may carry a date instead of seconds, and RFC 9110 names three
+forms for it, all in GMT. The client read the date with `Date.parse`, which
+takes the oldest of them (`Sun Nov  6 08:49:37 1994`, no zone written) as
+LOCAL time - three hours late on a machine at UTC-3 - and takes any other
+date it understands too (`2026-10-01T12:00:10Z`, `10/1/2026`, a numeric
+offset, lowercase or made-up day names). It now reads the three HTTP-date
+forms only, each as GMT, and ignores anything else, as it already ignored a
+malformed number of seconds. A two-digit year (the obsolete second form)
+reads as its next occurrence. IIFEs +250 to +286 B brotli, the Blade bundle
++272. `tests/retry-after-grammar.test.ts`; log section 35.100.
+
+### Fixed: a store defined again takes over, as a handler registered again does
+
+A second `defineChamberStore` with an id a store still held got the first
+store back: without its own actions, running the old reducers, with no
+word. A store created when its module loads kept its first definition
+through every hot reload, so edited reducers never applied. Now a different
+definition takes over, the rule `register()` follows for a handler: it builds
+its own store and registers its actions over the old ones (in development,
+`register()` warns for each one, which is how two modules claiming one id
+show), and the old store's `$dispose()` removes only what it still owns. The
+same definition called again still returns the one store. A component that
+holds a store was not affected: Vue disposes it before a reload. `dist/store.js`
++16 B brotli, no IIFE change. `tests/store-redefine.test.ts`,
+`tests/vapor/store-hmr.test.ts`; log section 35.101.
+
+### Changed: the store's refusals read like the core's
+
+A store's three setup refusals (`store:already:member`, `store:missing:bus`,
+`store:missing:router`) now have the shape every core failure has: the
+message states the fact, every value in it is also in `error.context`
+(`id`, the `key`, the url `fields`), and the advice on what to do next is
+printed in development only - production carries the fact, and the fix lives
+in the catalogue (`getErrorEntry(code).fix`). The `[vapor-chamber]` prefix
+went with it; no core failure carries one. Codes unchanged. A consumer's
+production build of `vapor-chamber/store` is 108 B brotli smaller.
+`tests/store-review.test.ts`; log section 35.102.
+
+### Docs: loading saved state into a store, from storage or from the server
+
+`docs/store.md` has one pattern for it: a store has no setter, so saved state
+enters through an action the store declares (`load: (s, saved) => saved ?? s`),
+called with `persist().load()` or with the state the server put in the page.
+From the server, send the state rather than the commands that built it:
+replaying commands re-runs every reducer on the client, and one that is not
+deterministic ends somewhere else. `__origin: 'replay'` in the payload marks
+the load as restored state for listeners. No code change.
+`tests/store-load-saved.test.ts`; log section 35.103.
+
+### Changed: development dependencies updated within their ranges
+
+No major version: vite 8.3.2, vitest 5.0.3 (with its coverage and browser
+packages), @vitejs/plugin-vue 6.0.9, vue-tsc 3.3.12, astro 7.3.5 (the
+exo-astro example), biome 2.5.15, happy-dom 20.14.5, @types/node 26.6.4.
+`npm audit fix` cleared `devalue`; `http-cache-semantics`, reached only
+through the exo-astro example's astro, has no fixed version. The library's
+own dependencies are unchanged (it has none at run time). The full IIFE is 3 B
+brotli larger from the minifier's output; no library code changed.
+
+### Docs: the whitepaper rewritten
+
+`docs/whitepaper.md` now describes the library as it is: 17 sections and a new
+one, Performance and V8 (how a speed claim is measured here, and the findings
+in ns and ratios). The origins, the Vue 3.6 alignment log (beta.8 to rc.10)
+and the passages in which the document corrected itself moved verbatim to an
+appendix, "Notes and history". Six wrong statements were corrected (among
+them: `retry` listed as a plugin, naming called "enforced", an example passing
+a `plugins` option `createCommandBus` does not have) and seven unbacked
+figures dropped or replaced by stamped ones; the record is
+`docs/rc-alignment-log.md`, section 35.68.
+
+### Docs: the peer bench ratios restamped
+
+The 16 ratios against mitt and nanoevents in `docs/performance.md`, the
+migration guides and the ROADMAP had drifted with Node and the peers'
+versions, not with this library's code. Each is now the median of 5
+`npm run bench` runs from a clean tree (Node 24.21, mitt 3.0.1, nanoevents
+9.1.0). The default fast lane's fan-out no longer reads ahead of nanoevents:
+it is about level (0.91-1.03 across runs), and the guide says so. Log section
+35.56.
+
+Then nanoevents left the docs, the bench and the dev dependencies (owner). Its
+lead came from a micro-loop emitting one constant name, which V8 specialises:
+with four varying names it emits at about half this library's speed with no
+listeners, and its plain-object table throws on `emit('constructor')`. The docs
+compare this library with itself and with mitt, which has a migration guide.
+Log sections 35.57 and 35.58.
+
+Then a ratio against another library became a range, not one value: `npm run
+bench:bands` runs the bench N times and stamps each peer ratio as its min-max,
+with the Node and peer versions, and each of this library's own ratios as the
+median; a single `npm run bench` no longer moves a doc. eventemitter3, the
+EventEmitter guide's peer, is now compared too, and the docs say what the
+bench says: the general bus's `emit` is behind it on fan-out (0.78-0.82x),
+the fast lane level with it (0.94-1.04x). Two hand-typed figures are now
+stamped: `bus.emit` on fan-out, 1.44-1.54x mitt ("~1.5x" held), and mitt's
+emit against `bus.dispatch`, 1.64-2.04x (it said "~3x"). Log section 35.69.
+
+### CI: a speed check that checks
+
+The job named "bench smoke (no regression vs baseline)" compared against
+nothing; it is now "bench (report only)". A new job, `perf-ab`, builds the
+pushed commit and its base and compares them with the repository's A/B tool
+(`npm run ab:ci`) over five workloads: it fails on a measured regression, and
+on a run too noisy to have measured anything. Verified locally: identical
+builds pass, and a seeded +37-41 ns per dispatch fails on every row of the
+dispatch workload. Log section 35.59.
+
+With no base to build, `perf-ab` now skips and says why, where it failed with
+no message: an all-zero base (the push that creates the branch) or one a
+force-push dropped from the checkout. `scripts/ab/build-dists.sh` also prints
+git's error when it cannot check a commit out. Log section 35.71.
+
+### `VcTransition`: a transition for Vapor, driven by the bus (new subpath, experimental)
+
+`vapor-chamber/transitions/vapor` exports `VcTransition`. It imports nothing of
+Vue's transition. The component owns the condition: the content is rendered
+while `show` is true, and when `show` turns false it stays in the DOM until the
+`<namespace>Leave` command has answered. The look comes from command handlers;
+there are no CSS classes.
+
+```vue
+<VcTransition :show="open" namespace="modal" :bus="bus">
+  <Panel />
+</VcTransition>
+```
+
+- **The same six actions as `createTransitionBridge`**, under the same names:
+  `modalBeforeEnter`, `modalEnter`, `modalAfterEnter`, `modalBeforeLeave`,
+  `modalLeave`, `modalAfterLeave` (`beforeEnter` and so on with no namespace).
+  The target is the first element of the content. `AfterLeave` is dispatched
+  once the element is out of the document.
+- **What is awaited is the dispatch**, as in the bridge. An async bus returns
+  a promise and the transition waits for it, for at most `timeout`
+  milliseconds (default 30,000): a handler that never settles cannot strand
+  the element, and one that rejects, or a missing one, does not stop it either.
+  A sync bus answers at once, whatever its handler returned, so there the
+  element leaves at once.
+- **`:bus` is optional**; without it the shared bus is used. The shared bus is
+  a sync bus: for a leave that must be waited for, pass an async bus.
+- **Reopening during a leave cancels the leave.** `<namespace>LeaveCancelled`
+  is dispatched, the same element enters again, and the older answer is
+  ignored. Closing during an enter dispatches `<namespace>EnterCancelled` and
+  then the leave commands. Those are the bridge's two cancelled actions, in the
+  order Vue calls them for a `v-show`; a sync bus never produces one, since
+  nothing is ever waiting on it.
+- **Mounting dispatches nothing**, unless `appear` is set: then content that
+  is there at mount gets the three enter commands.
+- Vapor only, Vue >= 3.6, like `vapor-chamber/router/vapor`. It is named by the
+  rule now recorded in `docs/decisions.md`: `Vc` + the name of the Vue piece it
+  stands in for, opt-in, never a swap of Vue's own name.
+
+Why it exists, measured on Vue 3.6.0-rc.10 in a Vite production bundle: Vue's
+`VaporTransition` adds 4,400 B brotli to a Vapor app, 1,127 B of it CSS class
+machinery that a command-driven transition never uses and no exported piece
+lets a bundle leave out; with the bridge it is 4,737 B. `VcTransition` adds
+428 B brotli (1,106 B minified) to an app that already uses the shared bus and
+the five Vue helpers it is built from (`createIf`, `shallowRef`, `watch`,
+`nextTick`, `onScopeDispose`), and 2,534 B to one that uses none of the five.
+A show and hide cycle on a sync bus takes 0.39 of the time
+`<Transition :css="false">` with the bridge takes (7.4 against 19.1
+microseconds, production build, 15 interleaved rounds).
+
+`createTransitionBridge` and `useTransitionCommand` are unchanged: they remain
+the way to drive Vue's own `<Transition>` from the bus, on Vapor and on vDOM.
+
+`tests/vapor/vc-transition.test.ts` runs every behaviour above twice, on the
+dev build and against an executed production bundle, from templates compiled on
+the installed Vue. `tests/vapor/vc-transition-helpers.test.ts` pins what the
+module takes from Vue.
+
+### Vue 3.6.0-rc.10 alignment
+
+85 commits in `v3.6.0-rc.9..v3.6.0-rc.10`, the full log. Eighty-three were read
+in full at source; the other two are the Vitest 5 chore and the release commit,
+closed on their touched files. The peer range narrows to
+`>=3.5.0 || >=3.6.0-rc.10` for `vue` and `@vue/reactivity`; both Vapor examples
+are repinned and rebuilt. The alignment itself changed nothing in `src` except
+two comments; the outlet fix below is separate. The cycle record is
+`docs/rc-alignment-log.md`, section 35.
+
+**What the bump gives you, each pinned by a test that fails on rc.9.**
+
+- **`createDirectivePlugin()` on a Vapor child of a vDOM parent.** With
+  `vaporInteropPlugin`, `<VaporChild v-vc-command="act" />` kept its listener on
+  the child's first root. When a root `v-if` / `v-else` replaced that element,
+  the new one dispatched nothing, the detached one still did, and a `.delegate`
+  registration never released its document listener. On rc.10 the directive
+  follows the root. `tests/interop-vdom-directive-fixture.test.ts`.
+- **A function set on a widget property arrives as the function.**
+  `el.onSave = fn` on a `defineWidget` element was called as a prop getter on
+  rc.9, and `setup(props)` received what it returned.
+  `tests/vapor/widget-shape.test.ts`.
+- **`:onClick="fn"` beside `v-vc-command` in a Vapor template is a listener.**
+  On rc.9 it compiled to a property write and never ran. It now runs before the
+  directive and can veto the dispatch the way `@click` does.
+  `tests/directives-vapor-fixture.test.ts`.
+
+**Upgrade notes.**
+
+- **Server and client on the same RC.** rc.10 changes what the server renders:
+  a slot outlet showing its fallback is wrapped in `<!--(-->` ... `<!--)-->`,
+  and a Vapor `<TransitionGroup>` keeps its children's fragment markers. An
+  rc.9 client does not know the new marker. This is Vue's format, not this
+  library's: `vapor-chamber/ssr` holds no DOM and is unchanged.
+- **Rows that register one action.** When rows join a keyed list that already
+  has rows, rc.10 creates them in source order; rc.9 created them last to
+  first. `register()` is last-wins, so if several rows register the same action
+  the owner is now the LAST inserted row, and `on()` listeners run in source
+  order. One row per action is unaffected.
+- **A function as a widget property** is no longer called for you. If you
+  relied on `el.value = () => compute()` being evaluated, pass the value.
+- **A function as a ROOT prop is still a getter**, on both RCs:
+  `createVaporChamberApp(App, { onSave: fn })` calls `fn`. Pass
+  `{ onSave: () => fn }`.
+
+**Measured.** `npm run ab:vue -- 3.6.0-rc.9`, five runs: scope create and
+dispose 1.027x under a 4.0% floor, ref write 0.997x under a 1.5% floor. Both
+read SAME. Vue's Vapor runtime grew: the hand-wired `createVaporApp` minimum
+went from 15.1 to 16.0 KB brotli, `+ vaporInteropPlugin` from 26.4 to 28.0, and
+the Vapor outlet's own machinery from 4.13 to 4.58 against a ceiling of 5.0.
+Every vapor-chamber export row is unchanged.
+
+**Found and not fixed**, recorded with a reproduction in log section 35.10: vDOM
+`<Transition mode="out-in">` throws when `done()` is called synchronously. A
+plain `onLeave(el, done) { done() }` does it with no bridge involved; the
+transition bridge on a sync bus is one way to reach it. It is on rc.9 as well,
+and on Vue 3.5.43, in real Chromium as under happy-dom (log section 35.16).
+Reported upstream as vuejs/core#15727; a fix is proposed in vuejs/core#11824,
+and on that pull request's own build every arm of the reproduction renders,
+while the default mode and `in-out` are unchanged (log section 35.39). The
+limit is now documented on `createTransitionBridge`: with the bridge, vDOM
+`out-in` needs an async bus until a Vue release carries the fix.
+
+### Fixed: the Vapor `RouterOutlet`'s default slot went dead after a child route
+
+`vapor-chamber/router/vapor`. A default slot is what the outlet shows when no
+route matches at its depth. If that slot held anything reactive (a `{{ }}`, a
+`v-if`), it stopped updating once a child route had been shown and the outlet
+returned to the slot: it came back with the DOM it had when it left, and no
+later change reached it. A static slot was unaffected, which is why the fixture
+never saw it.
+
+The outlet built the slot once in `setup` and handed the same block back. Vue
+stops a fragment's scope when it removes it, so the second time there was no
+effect behind the nodes. The slot is now created each time the no-match branch
+is entered, through `createIf`, which is the call compiler-vapor emits for
+`<component :is="c" v-if="c" /><slot v-else />`. An outlet with no default
+slot is unchanged and still leaves one anchor node.
+
+Cost, measured: the module alone grows 49 bytes minified, 30 brotli, and its
+`BUNDLE-SIZES.md` row does not move at the table's resolution (0.4 KB brotli).
+In an app that has no `v-if` of its own, `createIf` joins the bundle and the
+outlet's own machinery goes from 4.58 to 4.74 KB brotli against the 5.0
+ceiling; an app that already uses `v-if` pays only the module's 30 bytes.
+`tests/vapor/vapor-outlet.test.ts` has the reactive-slot arm, on the dev build
+and on an executed production build; it failed on both before the fix.
+
+### Fixed: a conditional default slot on the Vapor `RouterOutlet` never appeared if it started off
+
+`vapor-chamber/router/vapor`. With
+
+```vue
+<RouterOutlet>
+  <template v-if="ready" #default>No page here</template>
+</RouterOutlet>
+```
+
+and `ready` false when the outlet was created, the fallback never showed: not
+when `ready` turned true, and not after a child route had come and gone. The
+same template with `ready` true at the start worked, and so did an
+unconditional slot. It is on v1.25.0 and Vue 3.6.0-rc.9 as well.
+
+The outlet read `slots.default` once, in `setup`, to decide whether it had a
+fallback. A conditional slot is a dynamic slot source, and while its condition
+is off there is no `slots.default`, so the outlet took the no-slot path for its
+whole life. It now takes the slot path whenever the slots it was given carry a
+dynamic source, and `createSlot` follows the source from there. An outlet with
+no slot at all is unchanged.
+
+Cost, measured: 18 bytes brotli in the module (471 to 489); its
+`BUNDLE-SIZES.md` row and the outlet guard's own-arm number do not move (0.4 and
+4.74 KB). `tests/vapor/vapor-outlet.test.ts` has the conditional-slot arm, on
+the dev build and on an executed production build; it failed on both before the
+fix. The outlet now reads one more property off what Vapor hands `setup`
+(`rawSlots`, beside `slots`); `tests/vapor/vapor-outlet-helpers.test.ts` pins
+it on the installed Vue, and if it is ever absent the outlet falls back to the
+old behaviour and does not throw.
+
+### Documented: a function as a root prop is a getter
+
+`createVaporChamberApp(App, rootProps)` passes `rootProps` to Vue as raw props,
+where a function is a getter. `{ onSave: fn }` calls `fn` and hands the
+component its return value; write `{ onSave: () => fn }`. The docblock now says
+so, with a test (`tests/vapor/vapor-subpath-wiring.test.ts`). Nothing changed
+in behaviour.
+
+### Fixed: a throwing sync subscriber left `useCommand`'s `loading` stuck on true
+
+`useCommand().dispatch` and `useCommandQuery().query` open by writing
+`loading = true` and `lastError = null`. A synchronous subscriber of either
+signal that throws (a raw `effect`, a `flush: 'sync'` watcher) throws out of
+that write, and the two writes sat before the `try`. The error escaped
+`dispatch`, the handler never ran, and `loading` stayed true until the next
+dispatch.
+
+Both writes are now inside the `try`. The subscriber's error comes back as a
+failed `CommandResult`, `lastError` holds it, `loading` ends false, and the
+handler still does not run. A dispatch with no throwing subscriber is
+unchanged. `tests/rundispatch-throwing-subscriber.test.ts` has one test per
+write; both failed before. Cost: `dist/chamber.js` +4 bytes raw, -1 brotli;
+39.9 against 38.8 ns per call in an interleaved A/B, no slower.
+
+### Fixed: the same throwing subscriber, at the other sites that write a signal before their bookkeeping
+
+The shape above was found at five more sites. Each fix is the same move, the
+write goes inside the existing `try` or after the bookkeeping, and each has a
+test on real Vue `effect`s that failed first. A path with no throwing
+subscriber is unchanged at every one: same writes, same order.
+
+- **`useVaporAsyncCommand().dispatch`.** The promise rejected with the
+  subscriber's error and `loading` stayed true. It now resolves a failed
+  `CommandResult`, `lastError` holds the error and `loading` ends false.
+  `tests/vapor-async-throwing-subscriber.test.ts`. `dist/chamber-vapor.js`
+  +4 bytes raw, +2 brotli; 120.4 against 120.4 ns per awaited call.
+- **`createFormBus`, `set()`.** A subscriber throwing on `values` left
+  `errors`, `isDirty` and `isValid` unwritten: an invalid value read as valid.
+  The three writes now happen whatever the `values` subscriber does. Still
+  open: a subscriber that throws on `errors` or on `isDirty` skips the writes
+  after it; covering those measured up to 5% slower per `set` and was not
+  landed.
+- **`createFormBus`, `submit()`.** A subscriber throwing when `isValidating` or
+  `isSubmitting` turned true left that flag true for good. `submit()` still
+  rejects with the subscriber's error; the flag and `isBusy` now end false and
+  the next `submit()` runs. `tests/form-throwing-subscriber.test.ts`.
+  `dist/index.js` +64 bytes raw, +19 brotli.
+- **The router's commit.** A `currentRoute` subscriber that threw made a
+  COMMITTED `push()` resolve `component_load_failed`, fire `onError` and skip
+  `afterEach`, with the URL moved and the snapshot already the new page. The
+  push now resolves `null`, `onCommit` and `afterEach` run, and the
+  subscriber's error is logged as a post-commit hook's is.
+- **The router's background lanes.** A subscriber throwing when `isLoading`
+  turned true on a query-only change, or when `isRevalidating` turned true,
+  left that flag true for the life of the router, and the refetch or the
+  refresh never ran. Both now run and lower their flag. The caller that
+  triggered the write still gets the subscriber's error.
+  `tests/router/engine-throwing-subscriber.test.ts`. `dist/router.js` +168
+  bytes raw, +29 brotli; the commit statements measure the same, 37.5 against
+  37.3 ns, inside a push of about 6,500 ns.
+- **`createWsBridge`.** A subscriber of `connected` that threw skipped what
+  followed the write: on open the queue was not flushed and `onConnect` did not
+  run; on close `onDisconnect` did not run and the bridge never reconnected; in
+  `disconnect()` in-flight requests were not failed and the socket was left
+  open. All three now do their bookkeeping whatever the subscriber does; its
+  error still leaves the handler. `tests/ws-bridge-throwing-subscriber.test.ts`.
+  The full IIFE is 20 bytes SMALLER than before these fixes (39,483 raw,
+  12,234 brotli): two unreachable guards and a one-caller function in the same
+  file paid for it.
+- **`useCommandHistory().undo()` and `redo()`, and the `history()` plugin.** A
+  subscriber of `past`, `future`, `canUndo` or `canRedo` that threw while the
+  stacks moved threw out of `undo()`: the undo handler never ran, the ledger
+  had already moved the command to the redo stack, and the four signals were
+  left half written. The history read "undone" over an application that was
+  not. The move is now inside the `try` that guards the call, so a throw there
+  is an undo that did not land: the stacks move back, all four signals agree,
+  and the error is logged as a throwing undo handler's is.
+  `tests/history-throwing-subscriber.test.ts`. `dist/settled.js` +2 bytes.
+
 ## v1.25.0 - 2026-09-29
 
 ### Changed (breaking): a failure's code is `owner:condition:subject`, and the owner comes from the wiring
@@ -221,8 +1340,8 @@ A custom `isRetryable` reads the same condition the default rule does
 (`failureCondition(error)`: a library failure's own condition, an HTTP
 response's status through the status table, a timeout, an abort, `lost`),
 instead of matching statuses inside `error.message`, which is what
-`examples/feature-retry.ts` taught; it now uses it, and `retrying()` for the
-wire.
+`examples/feature-retry.ts` taught; it now reads the condition (`conditionOf`)
+and leaves the re-sending to the async bus.
 
 ### Changed (breaking, reference controller): an `Idempotency-Key` that is not a String is ignored
 

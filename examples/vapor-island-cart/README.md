@@ -75,4 +75,4 @@ script, and this example's `predev`/`prebuild` hooks build it on demand if
 `vite.config.ts` has no `vue` alias: `vue.runtime.esm-bundler.js` re-exports `@vue/runtime-vapor`
 itself (the export list is pinned by `tests/vue-bundler-vapor-exports.test.ts`). `vaporChamberHMR()` keeps bus state across HMR.
 
-Aligned with Vue <!-- vc:vueAligned -->3.6.0-rc.9<!-- /vc:vueAligned --> and the working-tree vapor-chamber (`vapor-chamber: file:../..`).
+Aligned with Vue <!-- vc:vueAligned -->3.6.0-rc.10<!-- /vc:vueAligned --> and the working-tree vapor-chamber (`vapor-chamber: file:../..`).

@@ -19,7 +19,7 @@ import { ... } from 'vapor-chamber/standard-schema';
 
 ### validateSchemas
 
-**Function** - [src/plugins-schema.ts:146](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-schema.ts#L146)
+**Function** - [src/plugins-schema.ts:142](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-schema.ts#L142)
 
 ```ts
 validateSchemas(schemas: Record<string, StandardSchemaV1>, options?: SchemaValidatorOptions) => Plugin
@@ -32,7 +32,7 @@ use {@link validateSchemasAsync} on `createAsyncCommandBus()` instead.
 
 ### validateSchemasAsync
 
-**Function** - [src/plugins-schema.ts:186](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-schema.ts#L186)
+**Function** - [src/plugins-schema.ts:183](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/plugins-schema.ts#L183)
 
 ```ts
 validateSchemasAsync(schemas: Record<string, StandardSchemaV1>, options?: SchemaValidatorOptions) => AsyncPlugin

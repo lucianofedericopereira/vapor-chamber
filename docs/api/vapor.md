@@ -19,7 +19,7 @@ import { ... } from 'vapor-chamber/vapor';
 
 ### configureVue
 
-**Function** - [src/chamber.ts:234](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L234)
+**Function** - [src/chamber.ts:255](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L255)
 
 ```ts
 configureVue(vue: object) => void
@@ -58,7 +58,7 @@ createVaporChamberApp(App).mount('#app');
 
 ### createVaporChamberApp
 
-**Function** - [src/chamber-vapor.ts:66](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L66)
+**Function** - [src/chamber-vapor.ts:76](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L76)
 
 ```ts
 createVaporChamberApp<TApp = any>(rootComponent: object, rootProps?: Record<string, unknown>) => TApp
@@ -71,38 +71,48 @@ Pass-through over Vue's createVaporApp - scope-ID handling, HMR app-instance
 refresh, and setup() error recovery are Vue runtime behavior (per-beta detail:
 CHANGELOG / whitepaper alignment log).
 
+`rootProps` are Vue's raw props, passed through unchanged: a plain value is
+the value, and a FUNCTION is a getter that Vue calls for the value. So a
+callback is wrapped, `{ onSave: () => onSave }`; passed bare it is called
+and the component receives what it returned. (A function set on a
+`defineWidget` element property is the opposite: it arrives as itself.)
+Pinned by tests/vapor/vapor-subpath-wiring.test.ts.
+
 ```ts
 import { createVaporChamberApp } from 'vapor-chamber';
 import App from './App.vue';
 createVaporChamberApp(App).mount('#app');
 ```
 
+```ts
+Root props
+createVaporChamberApp(App, { title: 'Cart', onSave: () => onSave }).mount('#app');
+```
+
 ### defineVaporAsyncComponent
 
-**Function** - [src/chamber-vapor.ts:188](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L188)
+**Function** - [src/vapor.ts:177](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vapor.ts#L177)
 
 ```ts
-defineVaporAsyncComponent<T = any>(loader: (() => Promise<unknown>) | object) => T | null
+defineVaporAsyncComponent<T = any>(loader: (() => Promise<unknown>) | object) => T
 ```
 
 defineVaporAsyncComponent - define an async Vapor component for lazy loading.
 
-Wraps Vue's `defineVaporAsyncComponent()` (introduced in 3.6.0-alpha.3, #13059). Async Vapor
-components are cached by VaporKeepAlive and hydrate under VDOM Suspense.
-The loading placeholder receives the deferred component's props and slots
-(beta.14+) - render a skeleton matching the final shape. Per-beta detail:
-CHANGELOG / whitepaper alignment log.
-
-Returns null if the Vapor runtime (Vue 3.6+) is not detected.
+This entry's own wrapper, the one exception to the list above: it calls
+Vue's function directly, so it reads no registry and never returns null.
+Under `vaporChamberWire({ entry: 'vapor' })` the root exports this one too
+(decision 6); everywhere else the root's wrapper reads the registry this
+module seeds. Same contract as the root's: see `chamber-vapor.ts`.
 
 ```ts
-import { defineVaporAsyncComponent } from 'vapor-chamber';
+import { defineVaporAsyncComponent } from 'vapor-chamber/vapor';
 const AsyncPanel = defineVaporAsyncComponent(() => import('./Panel.vue'));
 ```
 
 ### defineVaporCommand
 
-**Function** - [src/chamber-vapor.ts:218](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L218)
+**Function** - [src/chamber-vapor.ts:228](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L228)
 
 ```ts
 defineVaporCommand(action: string, handler: Handler, options?: RegisterOptions) => { dispatch: (target: any, payload?: any) => CommandResult; dispose: () => void; }
@@ -125,7 +135,7 @@ dispatch({ name: 'page_view', params: { page: '/landing' } });
 
 ### defineVaporComponent
 
-**Function** - [src/chamber-vapor.ts:164](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L164)
+**Function** - [src/chamber-vapor.ts:174](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L174)
 
 ```ts
 defineVaporComponent<T = any>(options: object) => T | null
@@ -157,7 +167,7 @@ const Comp = defineVaporComponent({
 
 ### defineVaporCustomElement
 
-**Function** - [src/chamber-vapor.ts:131](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L131)
+**Function** - [src/chamber-vapor.ts:141](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L141)
 
 ```ts
 defineVaporCustomElement<T = any>(options: object, extraOptions?: object) => T | null
@@ -207,7 +217,7 @@ Idempotent.
 
 ### getVaporInteropPlugin
 
-**Function** - [src/chamber-vapor.ts:97](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L97)
+**Function** - [src/chamber-vapor.ts:107](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L107)
 
 ```ts
 getVaporInteropPlugin() => any | null
@@ -228,7 +238,7 @@ if (plugin) createApp(App).use(plugin).mount('#app');
 
 ### isVaporAvailable
 
-**Function** - [src/chamber.ts:522](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L522)
+**Function** - [src/chamber.ts:556](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L556)
 
 ```ts
 isVaporAvailable() => boolean
@@ -238,7 +248,7 @@ Returns true if Vue 3.6+ with Vapor mode support is detected.
 
 ### untracked
 
-**Function** - [src/chamber.ts:298](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L298)
+**Function** - [src/chamber.ts:319](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L319)
 
 ```ts
 untracked<T>(fn: () => T) => T
@@ -267,7 +277,7 @@ suspending tracking around callbacks - this is that idea at the bus edge.
 
 ### useCommand
 
-**Function** - [src/chamber.ts:818](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L818)
+**Function** - [src/chamber.ts:842](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L842)
 
 ```ts
 useCommand() => { dispatch: <A extends keyof SharedCommandMap & string>(action: A, target: TargetOf<SharedCommandMap, A>, payload?: PayloadOf<SharedCommandMap, A>) => CommandResult<ResultOf<SharedCommandMap, A>> | Promise<CommandResult<ResultOf<SharedCommandMap, A>>>; register: <A extends keyof SharedCommandMap & string>(action: A, handler: (cmd: Command<A, TargetOf<SharedCommandMap, A>, PayloadOf<SharedCommandMap, A>>) => ResultOf<SharedCommandMap, A> | Promise<ResultOf<SharedCommandMap, A>>, opts?: RegisterOptions) => () => void; on: (pattern: string, listener: (cmd: Command, result: CommandResult) => void) => () => void; emit: (event: string, data?: any) => void; loading: Signal<boolean>; lastError: Signal<Error | null>; dispose: () => void; }
@@ -292,7 +302,7 @@ dispatch('cartAdd', { id: product.id });
 
 ### useCommandError
 
-**Function** - [src/chamber.ts:1512](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1512)
+**Function** - [src/chamber.ts:1616](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1616)
 
 ```ts
 useCommandError(options?: { filter?: (cmd: Command) => boolean; errorCap?: number; }) => { errors: Signal<{ cmd: Command; error: Error; timestamp: number; }[]>; latestError: Signal<Error | null>; clearErrors: () => void; dispose: () => void; }
@@ -312,7 +322,7 @@ const { latestError } = useCommandError({ filter: cmd => cmd.action.startsWith('
 
 ### useCommandGroup
 
-**Function** - [src/chamber.ts:1418](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1418)
+**Function** - [src/chamber.ts:1522](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1522)
 
 ```ts
 useCommandGroup(namespace: string) => { dispatch: (action: string, target: any, payload?: any) => CommandResult; query: (action: string, target: any, payload?: any) => CommandResult; emit: (event: string, data?: any) => void; register: (action: string, handler: Handler, opts?: RegisterOptions) => () => void; use: (plugin: Plugin) => () => void; on: (pattern: string, listener: Listener) => () => void; namespace: string; dispose: () => void; }
@@ -338,7 +348,7 @@ orders.dispatch('cancel', { id }) // dispatches 'ordersCancel'
 
 ### useCommandHistory
 
-**Function** - [src/chamber.ts:1294](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1294)
+**Function** - [src/chamber.ts:1402](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1402)
 
 ```ts
 useCommandHistory(options?: { maxSize?: number; filter?: (cmd: Command) => boolean; }) => { past: Signal<Command[]>; future: Signal<Command[]>; canUndo: Signal<boolean>; canRedo: Signal<boolean>; undo: () => Command | undefined; redo: () => Command | undefined; clear: () => void; dispose: () => void; }
@@ -347,11 +357,11 @@ useCommandHistory(options?: { maxSize?: number; filter?: (cmd: Command) => boole
 useCommandHistory - undo/redo with reactive state
 
 Auto-cleanup on Vue component unmount or scope disposal.
-Undo executes inverse handlers when registered via register(action, handler, { undo }).
+Undo dispatches `<action>$undo`, which runs the inverse registered via register(action, handler, { undo }).
 
 ### useCommandQuery
 
-**Function** - [src/chamber.ts:1375](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1375)
+**Function** - [src/chamber.ts:1483](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1483)
 
 ```ts
 useCommandQuery() => { query: (action: string, target: any, payload?: any) => CommandResult | Promise<CommandResult>; data: Signal<any>; loading: Signal<boolean>; lastError: Signal<Error | null>; }
@@ -374,7 +384,7 @@ const result = query('getUser', { id: 42 });
 
 ### useCommandState
 
-**Function** - [src/chamber.ts:1218](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1218)
+**Function** - [src/chamber.ts:1326](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1326)
 
 ```ts
 useCommandState<T>(initial: T, handlers: { [action: string]: (state: T, cmd: Command) => T; }, options?: UseCommandStateOptions) => { state: Signal<T>; dispose: () => void; }
@@ -396,7 +406,7 @@ const { state } = useCommandState([], { cartAdd: (s, cmd) => [...s, cmd.target] 
 
 ### useSharedCommandState
 
-**Function** - [src/chamber.ts:998](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L998)
+**Function** - [src/chamber.ts:1084](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1084)
 
 ```ts
 useSharedCommandState(options?: UseSharedCommandStateOptions) => { dispatch: (action: string, target: any, payload?: any, opts?: { signal?: AbortSignal; }) => CommandResult | Promise<CommandResult>; isLoading: (action: string, target?: unknown) => Readonly<Signal<boolean>>; inFlight: Signal<number>; isAnyLoading: Signal<boolean>; lastError: Signal<Error | null>; errors: Signal<Error[]>; errorCount: Signal<number>; clear: () => void; dispose: () => void; }
@@ -429,7 +439,7 @@ Auto-cleanup on Vue scope/component disposal via tryAutoCleanup.
 
 ### useVaporAsyncCommand
 
-**Function** - [src/chamber-vapor.ts:276](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L276)
+**Function** - [src/chamber-vapor.ts:286](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L286)
 
 ```ts
 useVaporAsyncCommand(asyncBus?: { dispatch: (action: string, target: any, payload?: any) => Promise<CommandResult>; }) => { dispatch: (action: string, target: any, payload?: any) => Promise<CommandResult>; loading: import("./signal").Signal<boolean>; lastError: import("./signal").Signal<Error | null>; dispose: () => void; }
@@ -465,7 +475,7 @@ const result = await dispatch('orderCreate', { items: cart });
 
 ### waitForVueDetection
 
-**Function** - [src/chamber.ts:506](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L506)
+**Function** - [src/chamber.ts:541](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L541)
 
 ```ts
 waitForVueDetection() => Promise<void>

@@ -17,6 +17,7 @@ import { it } from '../src/vitest';
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.restoreAllMocks();
 });
 
 const code = (r: CommandResult | undefined): string | undefined => (r?.error as BusError | undefined)?.code;
@@ -53,6 +54,10 @@ describe('dispose() runs plugin dispose()', () => {
 
   it('ends a retry wait mid-sleep as core:aborted:dispatch and stops the attempts', async () => {
     vi.useFakeTimers();
+    // The wait is full jitter, Math.random() * 100 ms: a draw under 1 ms ran
+    // out inside the first advance below (1 run in about 100; Math.random 0
+    // reproduces it). Pinned mid-range.
+    vi.spyOn(Math, 'random').mockReturnValue(0.5);
     const bus = createAsyncCommandBus({ retry: { baseDelay: 100, actions: { t: 'idempotent' } } });
     const handler = vi.fn(async () => { throw new Error('flaky'); });
     bus.register('t', handler);

@@ -2,7 +2,7 @@
 /**
  * ACCEPTANCE CRITERIA for `vapor-chamber/store`, written against the
  * composition plan that has since been deleted into the docs it fed
- * (docs/store.md, docs/whitepaper.md 11.9, ROADMAP posture). git has it.
+ * (docs/store.md, docs/whitepaper.md 8.2, ROADMAP posture). git has it.
  *
  * Written BEFORE any implementation, the order that paid for itself on
  * `revalidateRoutes`: two of that section's three claims were falsified by
@@ -27,8 +27,8 @@
  *     `vapor-chamber/vue` and `vapor-chamber/vapor` exist to kill exactly that
  *     failure class.
  *
- * So the store imports `effectScope`, `inject`, `hasInjectionContext` and
- * `shallowRef` STATICALLY from `vue`, the way `src/router/**` already does. An
+ * So the store imports what it needs (`getCurrentScope`, `onScopeDispose`,
+ * `shallowRef`) STATICALLY from `vue`, the way `src/router/**` already does. An
  * upstream rename becomes a consumer build error rather than a runtime null.
  * That also settles placement: a module with static `vue` imports cannot live
  * in the root barrel, which is Vue-less by construction - so
@@ -39,14 +39,15 @@
  * WHAT THIS MUST NOT BECOME
  * ============================================================================
  *
- * Whitepaper section 6 says "The bus coordinates state transitions. It does not
+ * Whitepaper section 3.6 says "The bus coordinates state transitions. It does not
  * store state." That stands and is load-bearing here: the store owns state, and
  * the bus stays the ONLY way state changes. A store that mutates its own signal
  * directly - without a dispatch - is the design failure this file exists to
  * prevent, because it would put a second mutation channel next to the bus and
  * quietly cost every plugin below.
  *
- * The claim section 6 DOES contradict is its other one, about package scope:
+ * The claim the whitepaper's former section 6 (now appendix A.3) made, and
+ * this module DOES contradict, is its other one, about package scope:
  * "Adding a state layer to vapor-chamber would create a fourth source of truth
  * and a competition problem." Section 3 is the counter-argument (a bus-backed
  * store is structurally different from Pinia, which grew a ~70-line bus inside
@@ -113,12 +114,12 @@ describe('composition surface - what the store is built from', () => {
     setCommandBus(a);
     // A JS caller writing `useCart()` gets a named error, not the shared bus
     // and not a WeakMap TypeError.
-    expect(() => (useCart as unknown as () => unknown)()).toThrow(/needs a bus/);
+    expect(() => (useCart as unknown as () => unknown)()).toThrow(/was given no bus/);
     resetCommandBus();
     a.dispose();
   });
 
-  it('imports vue and nothing else - the boundary the probe argument rests on', () => {
+  it('imports vue and the probe-free bus module, nothing else - the boundary the probe argument rests on', () => {
     // The first draft of src/store.ts failed this. It read well and pulled
     // chamber.ts through a default argument, so importing the store executed
     // the very probe its own docblock says it exists to avoid. Nothing in the
@@ -132,7 +133,15 @@ describe('composition surface - what the store is built from', () => {
     if (!existsSync(built)) return; // 8 test files skip without dist/; this is one
     const src = readFileSync(built, 'utf8');
     const imports = [...src.matchAll(/^import[^;]*?from\s*["']([^"']+)["']/gm)].map((m) => m[1]);
-    expect(imports).toEqual(['vue']);
+    // `./failure.js` mints the store's coded refusals (`store:missing:bus`):
+    // the failure module alone, no bus, no probe, no Vue. chamber.js, the
+    // module with the probe, must never appear.
+    expect(imports.sort()).toEqual(['./store-base.js', 'vue']);
+    // The implementation both store entries share (log s35.130): the failure
+    // module and the library's names, no bus, no probe.
+    const base = readFileSync(resolve(process.cwd(), 'dist/store-base.js'), 'utf8');
+    const baseImports = [...base.matchAll(/^import[^;]*?from\s*["']([^"']+)["']/gm)].map((m) => m[1]);
+    expect(baseImports.sort()).toEqual(['./failure.js', './library-names.js']);
   });
 
   /**
@@ -201,7 +210,8 @@ describe('defineChamberStore - behaviour', () => {
   it('registers each action as a command on the bus', () => {
     const bus = createCommandBus();
     const cart = useCart(bus);
-    expect(inspectBus(bus).actions.sort()).toEqual(['cartAdd', 'cartClear']);
+    // `cart$reset` is `$reset()`'s own command (tests/store-reset-command.test.ts).
+    expect(inspectBus(bus).actions.sort()).toEqual(['cart$reset', 'cartAdd', 'cartClear']);
     // Dispatching the command directly is equivalent to calling the action -
     // there is one path, not two.
     bus.dispatch('cartAdd', 7);
@@ -353,7 +363,7 @@ describe('URL-backed fields - pattern 4B', () => {
   });
 
   it('refuses url fields with no router, loudly and by name', ({ bus }) => {
-    expect(() => useCatalog(bus)).toThrow(/declares url fields \(page\).*no router was passed/s);
+    expect(() => useCatalog(bus)).toThrow(/declares url fields \(page\) and was given no router/);
     bus.dispose();
   });
 

@@ -14,12 +14,12 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { createApp } from 'vue';
-import { usePagination } from '../../src/router/composables';
-import { createMemoryHistory } from '../../src/router/history';
-import { ROUTER_KEY } from '../../src/router/keys';
-import { createRouteTable } from '../../src/router/table';
-import { defaultAffects, runLoaders, type LoaderHandlers } from '../../src/router/loaders';
-import type { RouteRecord } from '../../src/router/types';
+import { usePagination } from '@router/composables';
+import { createMemoryHistory } from '@router/history';
+import { ROUTER_KEY } from '@router/keys';
+import { createRouteTable } from '@router/table';
+import { defaultAffects, runLoaders, type LoaderHandlers } from '@router/loaders';
+import type { RouteRecord } from '@router/types';
 import { makeRouter } from './fixture';
 
 describe('route meta is the table declaration, not the caller to keep', () => {
@@ -52,7 +52,7 @@ describe('route meta is the table declaration, not the caller to keep', () => {
   it('leaves production alone, like every other freeze site', async () => {
     vi.stubEnv('NODE_ENV', 'production');
     vi.resetModules();
-    const prod = await import('../../src/router/table');
+    const prod = await import('@router/table');
     const record = prod.createRouteTable(rows()).getRecord('p');
     expect(Object.isFrozen(record?.meta)).toBe(false);
   });

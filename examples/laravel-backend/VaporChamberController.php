@@ -53,12 +53,12 @@ class VaporChamberController extends Controller
             (string) $request->input('command', ''),
             $request->input('target'),
             $request->input('payload'),
-            $this->idempotencyKey($request->header('Idempotency-Key')),
+            $this->idempotencyKey($request->input('meta')),
             $request->user(),
         );
 
         if ($result['status'] < 400) {
-            return response()->json($result['body'], $result['status']);
+            return response()->json($result['body'], $result['status'], $result['headers'] ?? []);
         }
         $headers = ['Content-Type' => 'application/problem+json'];
         // A key still running: the client's re-send waits a second and comes
@@ -75,7 +75,7 @@ class VaporChamberController extends Controller
      * Batch endpoint for `createBatchingHttpBridge` - the JS side coalesces
      * every command dispatched in one microtask into a single POST here:
      *
-     *   { commands: [{ id, command, target, payload, idempotencyKey? }, ...] }
+     *   { commands: [{ id, command, target, payload?, meta? }, ...] }
      *
      * Each command runs through the exact same dispatch path as __invoke()
      * (same handler resolution, same idempotency replay, same exception
@@ -105,12 +105,12 @@ class VaporChamberController extends Controller
                 (string) ($entry['command'] ?? ''),
                 $entry['target'] ?? null,
                 $entry['payload'] ?? null,
-                $entry['idempotencyKey'] ?? null,
+                $this->idempotencyKey($entry['meta'] ?? null),
                 $request->user(),
             );
             $results[] = $result['status'] >= 400
                 ? ['id' => $id, 'problem' => $result['body']]
-                : ['id' => $id, ...$result['body']];
+                : ['id' => $id, ...(array) $result['body']];
         }
 
         return response()->json(['results' => $results]);
@@ -137,8 +137,8 @@ class VaporChamberController extends Controller
 
         // Wire half of exactly-once: an action declared idempotent on the JS bus
         // (`retry: { actions: { cartSet: 'idempotent' } }`, one key for all its
-        // attempts) or the `idempotent()` plugin stamps an Idempotency-Key; the
-        // single bridge sends it as a header, the batching bridge per command.
+        // attempts) or the `idempotent()` plugin stamps an Idempotency-Key;
+        // every bridge sends it in the envelope's `meta`.
         // Replay the cached response for a key we've already processed so a
         // network retry can't double-write (e.g. duplicate orders).
         $cacheKey = $idempotencyKey ? "vc:idem:{$command}:{$idempotencyKey}" : null;
@@ -158,7 +158,7 @@ class VaporChamberController extends Controller
 
         try {
             if ($cacheKey && ($cached = Cache::get($cacheKey)) !== null) {
-                return ['body' => $cached, 'status' => 200];
+                return $cached;
             }
 
             $state = app($handler)($target, $payload, $user);
@@ -168,13 +168,27 @@ class VaporChamberController extends Controller
             // batch - so it is lifted there; wrapped as `state` it would be a
             // success whose value is a URL. Only that exact shape is lifted: a
             // state that merely HAS a `redirect` key among others is data.
-            $body = is_array($state) && array_keys($state) === ['redirect']
-                ? ['redirect' => $state['redirect']]
-                : ['state' => $state];
-            if ($cacheKey) {
-                Cache::put($cacheKey, $body, self::IDEMPOTENCY_TTL_SECONDS);
+            //
+            // A queued job answers by returning exactly
+            // ['accepted' => ['location' => url, 'retryAfter' => seconds]]:
+            // 202 Accepted (RFC 9110 15.3.3), its status monitor in Location,
+            // the client's `pollWith` follows it. A batch result has no status
+            // of its own, so there it reads as a success with no state.
+            if (is_array($state) && array_keys($state) === ['accepted']) {
+                $result = ['body' => (object) [], 'status' => 202, 'headers' => array_filter([
+                    'Location' => $state['accepted']['location'] ?? null,
+                    'Retry-After' => isset($state['accepted']['retryAfter']) ? (string) $state['accepted']['retryAfter'] : null,
+                ])];
+            } else {
+                $body = is_array($state) && array_keys($state) === ['redirect']
+                    ? ['redirect' => $state['redirect']]
+                    : ['state' => $state];
+                $result = ['body' => $body, 'status' => 200];
             }
-            return ['body' => $body, 'status' => 200];
+            if ($cacheKey) {
+                Cache::put($cacheKey, $result, self::IDEMPOTENCY_TTL_SECONDS);
+            }
+            return $result;
         } catch (ValidationException $e) {
             return $this->problem($e->getMessage(), 422, 'validation_failed', $this->pointers($e->errors()));
         } catch (AuthorizationException $e) {
@@ -208,20 +222,15 @@ class VaporChamberController extends Controller
     }
 
     /**
-     * The key from an Idempotency-Key header. The draft makes the value a
-     * Structured Field String (RFC 9651); the bridge sends the key
-     * percent-encoded and quoted, which needs no escaping, so unquoting and
-     * `rawurldecode` give back the exact key - the same one the batching
-     * bridge sends in the JSON body. A value that is not a String fails to
-     * parse, and RFC 9651 ignores a field that fails to parse: no key.
+     * The key from the envelope's `meta`, the one place the contract carries
+     * it on every transport (docs/plan-failures-and-contract.md 4.4). The
+     * `Idempotency-Key` header the client also sends is for other tooling.
      */
-    private function idempotencyKey(?string $header): ?string
+    private function idempotencyKey(mixed $meta): ?string
     {
-        if ($header !== null && strlen($header) >= 2 && $header[0] === '"' && str_ends_with($header, '"')) {
-            return rawurldecode(substr($header, 1, -1));
-        }
+        $key = is_array($meta) ? ($meta['idempotencyKey'] ?? null) : null;
 
-        return null;
+        return is_string($key) && $key !== '' ? $key : null;
     }
 
     /**

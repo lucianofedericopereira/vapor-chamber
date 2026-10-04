@@ -73,15 +73,17 @@ window.addEventListener('beforeunload', () => sse.teardown())
  * import { useCommand } from 'vapor-chamber/vue'
  *
  * const props = defineProps<{ product: Product }>()
- * const { dispatch, loading, lastError } = useCommand()
+ * // Kept as an object: a template unwraps top-level refs, so `cmd.loading.value`
+ * // (nested) reads the same at runtime and for vue-tsc.
+ * const cmd = useCommand()
  * </script>
  *
  * <template>
  *   <!-- With composable -->
  *   <!-- aria-disabled, not :disabled - disabling the focused button would
  *        send a keyboard user's focus to <body>. -->
- *   <button @click="!loading.value && dispatch('productFavorite', { id: product.id })" :aria-disabled="loading.value">
- *     {{ loading.value ? '...' : '♥ Save' }}
+ *   <button @click="!cmd.loading.value && cmd.dispatch('productFavorite', { id: product.id })" :aria-disabled="cmd.loading.value">
+ *     {{ cmd.loading.value ? '...' : '♥ Save' }}
  *   </button>
  *
  *   <!-- Or declaratively with directive -->
@@ -90,7 +92,7 @@ window.addEventListener('beforeunload', () => sse.teardown())
  *     ♥ Save
  *   </button>
  *
- *   <p role="status" class="error">{{ lastError.value?.message }}</p>
+ *   <p role="status" class="error">{{ cmd.lastError.value?.message }}</p>
  * </template>
  */
 

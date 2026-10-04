@@ -6,6 +6,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { createAsyncCommandBus, commandKey } from '../src/index';
 import { createOutbox, localStorageOutbox, indexedDbOutbox } from '../src/outbox';
 import type { OutboxRecord, OutboxStorage } from '../src/outbox';
+import { authGuard, validator } from '../src/plugins-core';
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -55,6 +56,25 @@ describe('createOutbox - queueing', () => {
     // 'outboxQueued' fires with the record
     expect(queuedEvents).toHaveLength(1);
     expect(queuedEvents[0].action).toBe('cartAdd');
+  });
+
+  it('stamps queuedAt as an RFC 3339 UTC string that round-trips through Date.parse', async () => {
+    const storage = memoryStorage();
+    const outbox = createOutbox({ storage, isOnline: () => false, autoFlush: false });
+    const bus = createAsyncCommandBus({ onMissing: 'ignore' });
+    outbox.install(bus);
+
+    const before = Date.now();
+    await bus.dispatch('cartAdd', { id: 1 });
+    const after = Date.now();
+
+    const queuedAt = storage.data![0].queuedAt;
+    expect(typeof queuedAt).toBe('string');
+    expect(queuedAt).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    const ms = Date.parse(queuedAt);
+    expect(ms).toBeGreaterThanOrEqual(before);
+    expect(ms).toBeLessThanOrEqual(after);
+    expect(new Date(ms).toISOString()).toBe(queuedAt);
   });
 
   it('non-matching actions pass through untouched', async () => {
@@ -115,7 +135,7 @@ describe('createOutbox - queueing', () => {
     });
 
     const storage = memoryStorage([
-      { id: 'r1', action: 'a', target: { n: 1 }, key: 'a:1', queuedAt: 1 },
+      { id: 'r1', action: 'a', target: { n: 1 }, key: 'a:1', queuedAt: '1970-01-01T00:00:00.001Z' },
     ]);
     const outbox = createOutbox({ storage, isOnline: () => true }); // autoFlush on, NOT installed
     expect(listeners.online).toHaveLength(1);
@@ -246,7 +266,7 @@ describe('createOutbox - queueing', () => {
     // A previous session persisted more records than this session allows.
     const storage = memoryStorage(
       [1, 2, 3, 4].map((n) => ({
-        id: String(n), action: `a${n}`, target: { n }, key: `k${n}`, queuedAt: n,
+        id: String(n), action: `a${n}`, target: { n }, key: `k${n}`, queuedAt: new Date(n).toISOString(),
       })),
     );
 
@@ -260,7 +280,7 @@ describe('createOutbox - queueing', () => {
   });
 
   it('hydrate does not rewrite storage when nothing is dropped', async () => {
-    const storage = memoryStorage([{ id: '1', action: 'a1', target: { n: 1 }, key: 'k1', queuedAt: 1 }]);
+    const storage = memoryStorage([{ id: '1', action: 'a1', target: { n: 1 }, key: 'k1', queuedAt: '1970-01-01T00:00:00.001Z' }]);
 
     const outbox = createOutbox({ storage, isOnline: () => false, autoFlush: false, maxQueue: 10 });
     await outbox.hydrate();
@@ -507,6 +527,76 @@ describe('createOutbox - flush', () => {
 });
 
 // ---------------------------------------------------------------------------
+// createOutbox - the default isRetryable on the library's own failures
+// ---------------------------------------------------------------------------
+
+describe('createOutbox - default rule on library failures', () => {
+  /** Queue `a` then `b` offline; install `downstream` (below the outbox); flush. */
+  async function replayThrough(setup: (bus: ReturnType<typeof createAsyncCommandBus>) => void, busOptions = {}) {
+    const storage = memoryStorage();
+    let online = false;
+    const outbox = createOutbox({ storage, isOnline: () => online, autoFlush: false });
+    const bus = createAsyncCommandBus(busOptions);
+    outbox.install(bus);
+    await bus.dispatch('a', { n: 1 });
+    await bus.dispatch('b', { n: 2 });
+    setup(bus);
+    const rejectedEvents: any[] = [];
+    bus.on('outboxRejected', (cmd) => rejectedEvents.push(cmd.target));
+    online = true;
+    const summary = await outbox.flush();
+    return { summary, storage, outbox, rejectedEvents };
+  }
+
+  it('a record a validator rejects at replay is final: rejected, reported, and the queue drains', async () => {
+    const runs: string[] = [];
+    const { summary, storage, outbox, rejectedEvents } = await replayThrough((bus) => {
+      bus.use(validator({ a: () => 'qty must be positive' }), { priority: 100 });
+      bus.register('a', async () => { runs.push('a'); return 'ok-a'; });
+      bus.register('b', async () => { runs.push('b'); return 'ok-b'; });
+    });
+
+    expect(summary).toEqual({ replayed: 1, failed: 0, rejected: 1 });
+    expect(runs).toEqual(['b']); // 'b' is no longer held behind the rejected 'a'
+    expect(outbox.pending.value).toBe(0);
+    expect(storage.data).toEqual([]);
+    expect(rejectedEvents).toHaveLength(1);
+    expect(rejectedEvents[0].record.action).toBe('a');
+    expect(rejectedEvents[0].error.code).toBe('validator:invalid:payload');
+  });
+
+  it('a missing handler is kept (it may be registered later)', async () => {
+    const { summary, storage } = await replayThrough(() => {});
+    expect(summary).toEqual({ replayed: 0, failed: 1, rejected: 0 });
+    expect(storage.data!.map((r) => r.action)).toEqual(['a', 'b']);
+  });
+
+  it('a plugin that throws is kept (a bug, not a verdict on the command)', async () => {
+    const { summary, storage } = await replayThrough((bus) => {
+      bus.use(Object.assign(() => { throw new Error('plugin bug'); }, { id: 'buggy' }) as never, { priority: 100 });
+      bus.register('a', async () => 'ok-a');
+      bus.register('b', async () => 'ok-b');
+    });
+    expect(summary).toEqual({ replayed: 0, failed: 1, rejected: 0 });
+    expect(storage.data!.map((r) => r.action)).toEqual(['a', 'b']);
+  });
+
+  it('an authGuard refusal is kept (replayed after sign-in)', async () => {
+    let signedIn = false;
+    const { summary, storage, outbox } = await replayThrough((bus) => {
+      bus.use(authGuard({ isAuthenticated: () => signedIn, protected: ['a'] }), { priority: 100 });
+      bus.register('a', async () => 'ok-a');
+      bus.register('b', async () => 'ok-b');
+    });
+    expect(summary).toEqual({ replayed: 0, failed: 1, rejected: 0 });
+    expect(storage.data!.map((r) => r.action)).toEqual(['a', 'b']);
+
+    signedIn = true;
+    expect(await outbox.flush()).toEqual({ replayed: 2, failed: 0, rejected: 0 });
+  });
+});
+
+// ---------------------------------------------------------------------------
 // createOutbox - hydrate / dispose / autoFlush
 // ---------------------------------------------------------------------------
 
@@ -518,7 +608,7 @@ describe('createOutbox - hydrate and lifecycle', () => {
       target: { id: 7 },
       payload: { qty: 1 },
       key: 'cartAdd:{"id":7}',
-      queuedAt: 123,
+      queuedAt: '1970-01-01T00:00:00.123Z',
     };
     const storage = memoryStorage([record]);
     const outbox = createOutbox({ storage, isOnline: () => true, autoFlush: false });
@@ -535,6 +625,20 @@ describe('createOutbox - hydrate and lifecycle', () => {
     expect(summary).toEqual({ replayed: 1, failed: 0, rejected: 0 });
     expect(seenKeys).toEqual(['cartAdd:{"id":7}']);
     expect(outbox.pending.value).toBe(0);
+  });
+
+  it('a record persisted with a numeric queuedAt (before RFC 3339) still hydrates and replays', async () => {
+    // The outbox never reads queuedAt, so a queue saved by an older build
+    // replays as it is: no migration.
+    const legacy = { id: 'r1', action: 'a', target: { n: 1 }, key: 'a:1', queuedAt: 123 } as unknown as OutboxRecord;
+    const storage = memoryStorage([legacy]);
+    const outbox = createOutbox({ storage, isOnline: () => true, autoFlush: false });
+    const bus = createAsyncCommandBus();
+    outbox.install(bus);
+    bus.register('a', async () => 'ok');
+
+    await outbox.hydrate();
+    expect(await outbox.flush()).toEqual({ replayed: 1, failed: 0, rejected: 0 });
   });
 
   it('autoFlush registers the window "online" listener and flushes on reconnect', async () => {
@@ -599,7 +703,7 @@ describe('createOutbox - hydrate and lifecycle', () => {
 // ---------------------------------------------------------------------------
 
 describe('localStorageOutbox', () => {
-  const record: OutboxRecord = { id: 'r1', action: 'a', target: { n: 1 }, payload: { p: 2 }, key: 'a:{"n":1}', queuedAt: 1 };
+  const record: OutboxRecord = { id: 'r1', action: 'a', target: { n: 1 }, payload: { p: 2 }, key: 'a:{"n":1}', queuedAt: '1970-01-01T00:00:00.001Z' };
 
   it('round-trips records through localStorage', async () => {
     const store = new Map<string, string>();
@@ -683,7 +787,7 @@ function fakeIndexedDb() {
 }
 
 describe('indexedDbOutbox', () => {
-  const record: OutboxRecord = { id: 'r1', action: 'a', target: { n: 1 }, key: 'a:{"n":1}', queuedAt: 1 };
+  const record: OutboxRecord = { id: 'r1', action: 'a', target: { n: 1 }, key: 'a:{"n":1}', queuedAt: '1970-01-01T00:00:00.001Z' };
 
   it('round-trips records through a fake indexedDB', async () => {
     vi.stubGlobal('indexedDB', fakeIndexedDb());
@@ -816,7 +920,7 @@ function failingRequestIndexedDb() {
 }
 
 describe("indexedDbOutbox - failure paths", () => {
-  const record: OutboxRecord = { id: "r1", action: "a", target: { n: 1 }, key: "k", queuedAt: 1 };
+  const record: OutboxRecord = { id: "r1", action: "a", target: { n: 1 }, key: "k", queuedAt: "1970-01-01T00:00:00.001Z" };
 
   it("a failed open() surfaces as a warning, not a throw, and does not poison later attempts", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
@@ -851,7 +955,7 @@ describe("indexedDbOutbox - failure paths", () => {
 // ---------------------------------------------------------------------------
 
 describe("storage failure paths", () => {
-  const record: OutboxRecord = { id: "r1", action: "a", target: { n: 1 }, key: "k", queuedAt: 1 };
+  const record: OutboxRecord = { id: "r1", action: "a", target: { n: 1 }, key: "k", queuedAt: "1970-01-01T00:00:00.001Z" };
 
   it("localStorageOutbox warns instead of throwing when the store rejects writes", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});

@@ -62,11 +62,12 @@ import { join, resolve } from 'node:path';
 import zlib from 'node:zlib';
 import { build } from 'vite';
 import { describe, expect, it } from 'vitest';
+import { requireDist } from '../require-dist';
 
 const routerEntry = resolve(process.cwd(), 'dist', 'router', 'index.js');
 const vdomEntry = resolve(process.cwd(), 'dist', 'router', 'vdom.js');
 const vaporEntry = resolve(process.cwd(), 'dist', 'router', 'vapor.js');
-const haveDist = existsSync(routerEntry) && existsSync(vdomEntry) && existsSync(vaporEntry);
+requireDist(existsSync(routerEntry) && existsSync(vdomEntry) && existsSync(vaporEntry));
 
 const esm = (p: string) => p.replace(/\\/g, '\\\\');
 
@@ -122,6 +123,30 @@ function writeMetrics(key: string, value: Record<string, string>): void {
 }
 
 /**
+ * The entry chunk with each lazy chunk's content hash replaced by zeros, same
+ * length. The entry imports a lazy chunk by its hashed file name
+ * (`./blade-DYzLD6BH.js`), and that hash follows the ENTRY's file name, which
+ * here is the arm's label. Eight characters that say nothing about the outlet
+ * moved the own arm's brotli size by tens of bytes between namings; with them
+ * fixed the three namings of `.probes/outlet-naming-noise.mjs` read the same
+ * (log s35.24). Throws when a lazy chunk's name is not the hashed shape or is
+ * not in the entry: a normalization that quietly did nothing would put the
+ * noise back unseen.
+ */
+function withFixedLazyNames(arm: string, entryCode: string, lazyChunks: Array<{ fileName: string }>): string {
+  let code = entryCode;
+  for (const chunk of lazyChunks) {
+    const base = chunk.fileName.slice(chunk.fileName.lastIndexOf('/') + 1);
+    const fixed = base.replace(/-[\w-]{8}\.js$/, '-00000000.js');
+    if (fixed === base || !code.includes(base)) {
+      throw new Error(`[outlet size] ${arm}: cannot normalize the lazy chunk name "${base}" in the entry`);
+    }
+    code = code.split(base).join(fixed);
+  }
+  return code;
+}
+
+/**
  * One production build per arm, the way a consumer's `vite build` runs it.
  *
  * Each arm is a real entry FILE, not stdin, because Vite builds from files.
@@ -168,7 +193,7 @@ async function measure(dir: string, name: string, contents: string) {
     );
   }
   const lazy = chunks.filter((c) => !c.isEntry).reduce((n, c) => n + brotli(Buffer.from(c.code)), 0);
-  const buf = Buffer.from(entry[0].code);
+  const buf = Buffer.from(withFixedLazyNames(name, entry[0].code, chunks.filter((c) => !c.isEntry)));
   return { name, raw: kb(buf.length), br: kb(brotli(buf)), gz: kb(gzip(buf)), lazyBr: kb(lazy) };
 }
 
@@ -261,7 +286,7 @@ const INTEROP_ARM = `${APP_PRELUDE}
 const OWN_ARM_CEILING_KB = 5.0;
 const SAVING_FLOOR_KB = 15;
 
-describe.skipIf(!haveDist)('Vapor outlet - size', () => {
+describe('Vapor outlet - size', () => {
   it(`own machinery stays under ${OWN_ARM_CEILING_KB} KB and saves at least ${SAVING_FLOOR_KB} KB brotli against a re-derived interop baseline`, async () => {
     const cache = resolve(process.cwd(), 'node_modules', '.cache');
     mkdirSync(cache, { recursive: true });

@@ -24,7 +24,9 @@ import { ref } from 'vue'
 // actions instead ('analytics*').
 function mountAnalyticsIsland(el: HTMLElement, endpoint: string) {
   const bus = createAsyncCommandBus()
-  bus.use(createHttpBridge({ endpoint, actions: ['analyticsLoad*'] }))
+  // `csrf: true` sends Laravel's token: the raw bridge leaves it off, where
+  // the IIFE's connect() turns it on.
+  bus.use(createHttpBridge({ endpoint, actions: ['analyticsLoad*'], csrf: true }))
 
   // Persist the selected period across page navigations: persist() saves
   // after each successful `analyticsSetPeriod`, on either bus.
@@ -56,7 +58,8 @@ if (el?.dataset.endpoint) mountAnalyticsIsland(el, el.dataset.endpoint)
  * ----------------------------------------------
  * class AnalyticsWidget extends Widget
  * {
- *     protected static string $view = 'filament.widgets.analytics-island';
+ *     // Filament 4 and later: an instance property (a static one is Filament 3's).
+ *     protected string $view = 'filament.widgets.analytics-island';
  *
  *     public function getViewData(): array
  *     {
@@ -82,7 +85,7 @@ if (el?.dataset.endpoint) mountAnalyticsIsland(el, el.dataset.endpoint)
  *   if (el) {
  *     // If using IIFE/CDN approach inside Filament
  *     const { bus, dispatch } = VaporChamber.mount('#analytics-island', {
- *       transport: VaporChamber.http({ endpoint: el.dataset.endpoint }),
+ *       transport: VaporChamber.http({ endpoint: el.dataset.endpoint, csrf: true }),
  *       state: { period: 'week', metrics: [] }
  *     })
  *   }

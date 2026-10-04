@@ -72,6 +72,9 @@ beforeEach(async ({ task }) => {
   if (exclude.some((pattern) => pattern.test(task.file.filepath))) return;
   const vc = await import('vapor-chamber');
   const bus = tap(vc.createCommandBus());
+  // Reset first: a test may have left a getCommandBus() fallback, and
+  // replacing it is the DEV warning's case (src/shared-bus.ts), not a split.
+  vc.resetCommandBus();
   vc.setCommandBus(bus);
   _setInstalledBus(bus);
 });

@@ -15,9 +15,9 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createWebHistory } from '../../src/router/history';
-import { createRouter } from '../../src/router/index';
-import type { RouteRecord } from '../../src/router/types';
+import { createWebHistory } from '@router/history';
+import { createRouter } from '@router/index';
+import type { RouteRecord } from '@router/types';
 import { stubGlobal } from '../../src/vitest-pure';
 import { makeRouter, ROWS } from './fixture';
 
@@ -118,7 +118,7 @@ describe('inline routes payload', () => {
     router.destroy();
   });
 
-  it('surfaces inline_routes_missing at start(), not at construction', async () => {
+  it('surfaces router:missing:inline at start(), not at construction', async () => {
     // Two different readers touch the same selector, and only one throws.
     // The constructor calls `readInlinePayload`, which swallows and returns
     // null - it runs only to learn `base` before the history is built, and a

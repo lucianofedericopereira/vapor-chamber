@@ -40,13 +40,16 @@ afterEach(() => {
 // runDispatch
 // ---------------------------------------------------------------------------
 
+/** A bus whose dispatch answers `value` (runDispatch calls bus.dispatch directly). */
+const answering = (value: unknown) => ({ dispatch: () => value }) as unknown as Parameters<typeof runDispatch>[0];
+
 describe('runDispatch error arms', () => {
   it('records a rejected dispatch promise', async () => {
     const loading = signal(false);
     const lastError = signal<Error | null>(null);
     const boom = new Error('rejected');
 
-    const result = await runDispatch(() => Promise.reject(boom), loading, lastError);
+    const result = await runDispatch(answering(Promise.reject(boom)), false, 'x', undefined, undefined, loading, lastError);
 
     expect(result).toEqual({ ok: false, error: boom });
     expect(loading.value).toBe(false);
@@ -57,7 +60,7 @@ describe('runDispatch error arms', () => {
     const loading = signal(false);
     const lastError = signal<Error | null>(new Error('stale'));
 
-    await runDispatch(() => Promise.resolve({ ok: false }), loading, lastError);
+    await runDispatch(answering(Promise.resolve({ ok: false })), false, 'x', undefined, undefined, loading, lastError);
     expect(lastError.value).toBeNull();
   });
 
@@ -65,7 +68,7 @@ describe('runDispatch error arms', () => {
     const loading = signal(false);
     const lastError = signal<Error | null>(new Error('stale'));
 
-    const result = runDispatch(() => ({ ok: false }), loading, lastError);
+    const result = runDispatch(answering({ ok: false }), false, 'x', undefined, undefined, loading, lastError);
     expect((result as { ok: boolean }).ok).toBe(false);
     expect(lastError.value).toBeNull();
   });
@@ -83,6 +86,17 @@ describe('untracked IIFE guard', () => {
   it('returns fn() directly when __VC_IIFE__ is set', () => {
     vi.stubGlobal('__VC_IIFE__', true);
     expect(untracked(() => 11)).toBe(11);
+  });
+
+  it('runDispatch calls the bus directly when __VC_IIFE__ is set, dispatch and query', () => {
+    vi.stubGlobal('__VC_IIFE__', true);
+    const bus = { dispatch: () => ({ ok: true, value: 'd' }), query: () => ({ ok: true, value: 'q' }) } as unknown as Parameters<typeof runDispatch>[0];
+    const seen: unknown[] = [];
+    const loading = signal(false);
+    const lastError = signal<Error | null>(null);
+    runDispatch(bus, false, 'x', undefined, undefined, loading, lastError, (v) => seen.push(v));
+    runDispatch(bus, true, 'x', undefined, undefined, loading, lastError, (v) => seen.push(v));
+    expect(seen).toEqual(['d', 'q']);
   });
 });
 

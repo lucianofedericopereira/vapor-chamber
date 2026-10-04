@@ -147,13 +147,15 @@ describe('the waits', () => {
     expect(calls[1] - calls[0]).toBe(100);
   });
 
-  it('honours a declared retryIn, clamped to the cap', async () => {
+  it('honours a declared retryIn; one longer than the cap is returned, never sent early', async () => {
     const bus = createAsyncCommandBus({ retry: { maxDelay: 5_000 } });
     const answers = [limited(1_500), limited(60_000), { ok: true, value: 1 } as CommandResult];
     const at: number[] = [];
     bus.use(Object.assign((() => { at.push(Date.now()); return answers.shift()!; }) as AsyncPlugin, { transport: true as const }));
-    expect((await settle(bus.dispatch('save', {}))).ok).toBe(true);
-    expect([at[1] - at[0], at[2] - at[1]]).toEqual([1_500, 5_000]);
+    // 60 s declared against a 5 s cap: returned, not re-sent at 5 s
+    // (Retry-After is a minimum). tests/retry-after-long.test.ts.
+    expect((await settle(bus.dispatch('save', {}))).ok).toBe(false);
+    expect(at.map((t) => t - at[0])).toEqual([0, 1_500]);
   });
 });
 

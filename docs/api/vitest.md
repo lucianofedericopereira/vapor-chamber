@@ -180,7 +180,7 @@ the current test's after-hooks. Every Vitest mock is already disposable
 
 ### VaporChamberFixtures
 
-**Interface** - [src/vitest.ts:134](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest.ts#L134)
+**Interface** - [src/vitest.ts:137](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest.ts#L137)
 
 ```ts
 export interface VaporChamberFixtures {
@@ -356,7 +356,7 @@ expect(val: any, message?: string) => Chai.Assertion
 
 ### it
 
-**Variable** - [src/vitest.ts:152](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest.ts#L152)
+**Variable** - [src/vitest.ts:155](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest.ts#L155)
 
 ```ts
 it<ExtraContext extends TestScoped<VaporChamberFixtures>>(name: string | Function, fn?: import("vitest").TestFunction<ExtraContext> | undefined, options?: number) => void
@@ -380,7 +380,7 @@ matchers read a `CommandResult` and compare codes, never message text.
 
 ### test
 
-**Variable** - [src/vitest.ts:125](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest.ts#L125)
+**Variable** - [src/vitest.ts:128](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest.ts#L128)
 
 ```ts
 test<ExtraContext extends TestScoped<VaporChamberFixtures>>(name: string | Function, fn?: import("vitest").TestFunction<ExtraContext> | undefined, options?: number) => void

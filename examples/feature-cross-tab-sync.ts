@@ -33,6 +33,8 @@ type CartState = { items: Array<{ id: number; qty: number }>; count: number }
 
 // The single writer. A local emit and a fact from another tab both land here,
 // so there is exactly one code path that changes cart state.
+// Outside a component, for brevity: in an app this runs in setup(). Here nothing
+// disposes it automatically (the DEV heads-up says so); call dispose() when done.
 const cartState = useCommandState<CartState>(
   { items: [], count: 0 },
   {

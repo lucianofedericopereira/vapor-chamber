@@ -17,16 +17,11 @@
 
 import type { AsyncCommandBus, AsyncPlugin, BusError, Command, CommandResult } from './command-bus';
 import { countOption } from './bounds';
-import { commandKey, matchesPattern, failureCondition, _okResult, _errResult, ownerOf } from './command-bus';
-import type { HttpError } from './http';
+import { commandKey, failureCondition, _okResult, _errResult, ownerOf, _isLibraryAction } from './command-bus';
 import { createSleeper } from './scheduler';
 import { signal } from './signal';
 import type { Signal } from './signal';
 
-function makeActionFilter(patterns: string[] | undefined): (action: string) => boolean {
-  if (!patterns?.length) return () => true;
-  return (action: string) => patterns.some(p => matchesPattern(p, action));
-}
 
 /** Lightweight unique record ID - timestamp + random suffix (same style as the WS bridge). */
 function genId(): string {
@@ -57,8 +52,14 @@ export type OutboxRecord = {
    * `Idempotency-Key` header for every delivery attempt of this command.
    */
   key: string;
-  /** Date.now() at enqueue time. */
-  queuedAt: number;
+  /**
+   * When the command was queued: an RFC 3339 timestamp in UTC, millisecond
+   * precision (`new Date().toISOString()`, e.g. `2026-10-02T17:41:19.250Z`).
+   * Text, not epoch ms, because the record crosses a boundary (storage, or a
+   * backend a custom `OutboxStorage` syncs to) and the text names its unit and
+   * zone. The outbox never reads it; `Date.parse(record.queuedAt)` gives ms.
+   */
+  queuedAt: string;
 };
 
 /**
@@ -205,8 +206,12 @@ export type OutboxOptions = {
   isOnline?: () => boolean;
   /**
    * Listen for the window `'online'` event and `flush()` automatically once a
-   * bus ref exists (via `install()`). Default: true. No timers, no polling -
-   * the listener is removed by `dispose()`.
+   * bus ref exists (via `install()`). Default: true. No polling. One timer,
+   * and only when a replay's answer declared a `Retry-After`: the outbox
+   * flushes again then, no sooner than a second later. While the answer
+   * repeats, the wait doubles (1 s, 2 s, 4 s, ...) up to 30 s; a longer
+   * declared wait wins; a successful replay starts it over at 1 s.
+   * `dispose()` removes the listener and ends that wait.
    */
   autoFlush?: boolean;
   /**
@@ -225,17 +230,22 @@ export type OutboxOptions = {
    * Whether a failed replay is worth trying again later. `true` keeps the
    * record at the head and stops the flush, so order is preserved and the
    * next flush retries from the same spot. `false` means the answer is final
-   * (the server refused it): the record is dropped, `'outboxRejected'` fires
+   * (the server refused it, or a validator rejected it): the record is dropped, `'outboxRejected'` fires
    * with `{ record, error }`, and the flush moves on to the next record.
    *
-   * Default: final only when the SERVER gave a verdict on this command - a
-   * refusal inside a 2xx (`{ ok: false }`), or a 4xx other than 401 (session),
-   * 408 (timeout), 419 (CSRF) and 429 (rate limit). Everything else is kept:
-   * a 5xx, a network failure, and every error the library raised itself (a
-   * plugin that threw, a handler not registered yet, a redirect), because
-   * dropping a queued command over a client-side failure loses the user's
-   * data. Pass `() => true` to block on every failure, or your own rule in
-   * your backend's codes (`error.code`).
+   * Default: final only for a verdict on this command. From the SERVER, a 4xx
+   * other than 401 / 419 (a session to renew), 408 (timeout) and 429 (rate
+   * limit), as the response's status or as a problem's own `status` inside a
+   * 2xx: the conditions `invalid`, `refused`, `missing`, `already`, `conflict`,
+   * and only when the answer declared no `Retry-After`.
+   * From the library or a plugin, only `invalid` (a validator or schema
+   * rejection, `validator:invalid:payload`): it gives the same answer on every
+   * flush. Everything else is kept: a 5xx, a problem with no status, a network
+   * failure, and every other error the library raised (a plugin that threw, a
+   * handler not registered yet, an authGuard refusal), because dropping a
+   * queued command over a client-side failure loses the user's data. Pass
+   * `() => true` to block on every failure, or your own rule in your backend's
+   * codes (`error.code`).
    *
    * WHY IT EXISTS: if every failure blocked, one record the server refuses
    * would hold the whole queue for good - each flush re-sends it, gets the
@@ -245,20 +255,28 @@ export type OutboxOptions = {
 };
 
 /**
- * The default `isRetryable`: false only for the server's verdict on the
- * command. A `remote` failure is that verdict when RFC 9110 puts it on the
- * request (a 4xx: `invalid`, `refused`, `missing`, `already`), except an
- * expired session (401, 419), which replays after sign-in. A server's own
- * failure (5xx), a transient one and the library's own failures keep the
- * record.
+ * The default `isRetryable`: false only for a verdict on the command itself.
+ * A `remote` failure is the server's verdict when RFC 9110 puts it on the
+ * request (a 4xx: `invalid`, `refused`, `missing`, `already`, `conflict`). An
+ * expired session (401, 419) reads `unauthenticated`, which is not a verdict:
+ * the record replays after sign-in. A failure the library or a plugin raised
+ * (any other owner) is a verdict only when it is `invalid`: a validator or a
+ * schema rejects the same record the same way on every flush, and the outbox
+ * captures before any validator runs, so the rejection only ever arrives
+ * here. Every other such failure keeps the record (a handler not registered
+ * yet, a plugin that threw, an authGuard refusal until sign-in).
+ * A server's own failure (5xx) and a transient one keep it too. So does any
+ * answer that declares a `Retry-After`: it says when to come back, which is
+ * not a verdict (a 409 for a request still in progress).
  */
 function outboxIsRetryable(error: Error): boolean {
+  if (typeof (error as BusError).context?.retryIn === 'number') return true;
   const owner = ownerOf(error);
-  if (owner !== undefined && owner !== 'remote') return true;
-  const status = owner === 'remote' ? (error as BusError).context?.status : (error as HttpError).response?.status;
-  return status === 401 || status === 419 || !VERDICTS.has(failureCondition(error));
+  const condition = failureCondition(error);
+  if (owner !== undefined && owner !== 'remote') return condition !== 'invalid';
+  return !VERDICTS.has(condition);
 }
-const VERDICTS = new Set(['invalid', 'refused', 'missing', 'already']);
+const VERDICTS = new Set(['invalid', 'refused', 'missing', 'already', 'conflict']);
 
 /**
  * What one `flush()` did. `failed` is 0 or 1: a retryable failure stops the
@@ -313,7 +331,8 @@ export type Outbox = {
  * Failure-safe: the first RETRYABLE failed replay (an `ok: false` result or a
  * throw) stops the flush and keeps that record plus everything behind it
  * queued - order is never reshuffled, and the next flush retries from the same
- * spot. A FINAL failure (the server refused it; see `isRetryable`) is dropped
+ * spot. A FINAL failure (the server refused it, or a validator rejected it;
+ * see `isRetryable`) is dropped
  * and reported as `'outboxRejected'` with `{ record, error }`, and the flush
  * continues - otherwise one refusal would hold the queue forever.
  *
@@ -363,12 +382,14 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
   // costlier one.
   const maxQueue = countOption(rawMaxQueue, 200);
 
-  const matchesActions = makeActionFilter(actions);
   const pending = signal(0);
 
   let queue: OutboxRecord[] = [];
-  // The scheduler's waits, for a flush the answer asked to come back for.
+  // The scheduler's waits, for a flush the answer asked to come back for, and
+  // the last one scheduled (ms; 0 after a successful replay), which the next
+  // one doubles.
   const waits = createSleeper();
+  let backoff = 0;
   let busRef: AsyncCommandBus | null = null;
   let flushPromise: Promise<OutboxFlushSummary> | null = null;
   /**
@@ -403,7 +424,7 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
       target: cmd.target,
       payload: cmd.payload,
       key: keyFn ? keyFn(cmd) : commandKey(cmd.action, cmd.target),
-      queuedAt: Date.now(),
+      queuedAt: new Date().toISOString(),
     };
     queue.push(record);
     enforceBound();
@@ -427,7 +448,7 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
   }
 
   const plugin: AsyncPlugin = (cmd, next) => {
-    if (!matchesActions(cmd.action)) return next();
+    if (_isLibraryAction(cmd.action)) return next();
 
     // Replay path - let the flush's own re-dispatch through, stamped with the
     // record's ORIGINAL key so the backend sees the same Idempotency-Key.
@@ -439,9 +460,9 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
       // key here would send a replay with no Idempotency-Key, i.e. exactly the
       // duplicate-execution the outbox exists to prevent.
       cmd.meta!.idempotencyKey = replay.record.key;
-      // CommandMeta gains an optional `origin` field in a parallel workstream;
-      // cast until the type lands so replays are distinguishable in handlers.
-      (cmd.meta as any).origin = 'replay';
+      // `origin` is a slot of every meta (stampMeta): replays are told apart
+      // in handlers by it.
+      cmd.meta!.origin = 'replay';
       return next();
     }
 
@@ -451,6 +472,7 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
     if (isOnline() && queue.length === 0) return next();
     return enqueue(cmd);
   };
+  Object.assign(plugin, { id: 'outbox', actions });
 
   async function runFlush(bus: AsyncCommandBus): Promise<OutboxFlushSummary> {
     let replayed = 0;
@@ -474,6 +496,7 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
       if (result?.ok) {
         queue.shift();
         replayed++;
+        backoff = 0;
         pending.value = queue.length;
         await saveQueue();
         continue;
@@ -492,11 +515,22 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
       // Retryable: keep this record and everything behind it, in order. When
       // the answer declared when to come back (a Retry-After), the scheduler
       // flushes again then; otherwise the next 'online' or flush() does.
+      // Never sooner than a second later: a `Retry-After: 0` re-flushed at
+      // once, got the same answer and re-flushed again, with no time passing
+      // between requests. While the answer repeats the wait doubles, capped at
+      // 30 s: a backend busy for ten minutes is asked 24 times, not 601, and
+      // the record still drains within 30 s of it recovering. A declared wait
+      // longer than the schedule wins (Retry-After is a minimum, RFC 9110). A
+      // successful replay resets it. A new wait replaces a pending one, so a
+      // flush() or 'online' during the wait cannot start a second timer.
+      // (tests/wire-contract.test.ts)
       failed++;
       await saveQueue();
       const retryIn = (error as BusError).context?.retryIn;
       if (autoFlush && typeof retryIn === 'number') {
-        void waits.sleep(retryIn).then((due) => { if (due) void flush(bus); });
+        backoff = Math.max(retryIn, Math.min(30_000, Math.max(backoff * 2, 1000)));
+        waits.wakeAll();
+        void waits.sleep(backoff).then((due) => { if (due) void flush(bus); });
       }
       break;
     }
@@ -547,7 +581,8 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
   }
 
   // Window 'online' listener - attached once at creation (SSR-safe: only when a
-  // window exists), removed by dispose(). No timers, no polling.
+  // window exists), removed by dispose(). No polling; the one timer is the
+  // Retry-After wait in runFlush.
   let onlineHandler: (() => void) | null = null;
   if (autoFlush && typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
     onlineHandler = () => { if (busRef) void flush(); };

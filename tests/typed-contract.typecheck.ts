@@ -66,8 +66,8 @@ export function _typedSharedBus() {
   loose.dispatch('anythingGoes', { free: true });
 }
 
-// ── schema-driven contract (defineSchema -> CommandsOf -> typed schema bus) ────
-import { defineSchema, createSchemaCommandBus, type CommandsOf } from '../src/schema';
+// ── schema-driven contract (defineSchema -> InferMap -> typed schema bus) ────
+import { defineSchema, createSchemaCommandBus, type InferMap } from '../src/schema';
 
 const schema = defineSchema({
   orderCreate: {
@@ -90,8 +90,8 @@ export function _schemaTypedBus() {
   // @ts-expect-error - couponCode must be a string
   bus.dispatch('orderCreate', { items: [], couponCode: 42 });
 
-  // CommandsOf produces GlobalCommands-compatible entries
-  type Derived = CommandsOf<typeof schema>;
+  // InferMap produces GlobalCommands-compatible entries
+  type Derived = InferMap<typeof schema>;
   type _t = Assert<Eq<Derived['orderCreate']['target'],
     { items: any[]; couponCode: string }>>;
 }

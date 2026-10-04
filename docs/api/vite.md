@@ -17,7 +17,7 @@ import { ... } from 'vapor-chamber/vite';
 
 ### vaporChamberHMR
 
-**Function** - [src/vite-hmr.ts:112](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L112)
+**Function** - [src/vite-hmr.ts:116](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L116)
 
 ```ts
 vaporChamberHMR(options?: VaporChamberHMROptions) => any
@@ -32,7 +32,7 @@ Injects a small runtime shim that:
 
 ### vaporChamberTest
 
-**Function** - [src/vite-hmr.ts:538](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L538)
+**Function** - [src/vite-hmr.ts:580](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L580)
 
 ```ts
 vaporChamberTest(options?: VaporChamberTestOptions) => any
@@ -69,7 +69,7 @@ export default defineConfig({
 
 ### vaporChamberWire
 
-**Function** - [src/vite-hmr.ts:395](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L395)
+**Function** - [src/vite-hmr.ts:425](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L425)
 
 ```ts
 vaporChamberWire(options?: VaporChamberWireOptions) => any
@@ -111,7 +111,15 @@ not use. The documented pattern (bus from the root, composables from /vue)
 stays at one. tests/vite-wire-plugin.test.ts pins both counts on a real dev
 server.
 
-Under serve the plugin does one thing instead: it defines `__VC_WIRED__`.
+In a build it also defines `__VC_WIRED_BUILD__`: the redirect wires the
+app, so the root's runtime probe is dead code and folds out, and with it
+the dynamic `import('vue')` (tests/root-probe-builds.test.ts).
+
+In a build and under serve it defines `__VC_LEAN__` from `profile`, so the
+profile's guard folds in every plugin build, the default included; an app's
+own define of it is kept (tests/isloading-profile.test.ts).
+
+Under serve the plugin does not redirect; it defines `__VC_WIRED__` instead.
 chamber.ts's DEV probe-path hint reads it and stays quiet, because its
 advice - import from `vapor-chamber/vue` - is what this plugin already does
 to the build. The define arrives as a GLOBAL (Vite leaves dependency code
@@ -141,7 +149,7 @@ export default defineConfig({
 
 ### VaporChamberHMROptions
 
-**Type alias** - [src/vite-hmr.ts:71](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L71)
+**Type alias** - [src/vite-hmr.ts:75](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L75)
 
 ```ts
 export type VaporChamberHMROptions = {
@@ -166,9 +174,13 @@ Two plugins (the history is in CHANGELOG.md):
     specifier to a virtual module that imports 'vapor-chamber/vue' (or
     '/vapor') for its side effect and re-exports the real root, so an app
     importing from the root is wired in production with no import changed.
-    Under the dev server it only defines `__VC_WIRED__`, which chamber.ts's
-    DEV probe hint reads: a dev-time redirect over a pre-bundled install put
-    two chamber modules in the page (see the function's note).
+    It also defines `__VC_WIRED_BUILD__` there, which folds the root's
+    runtime Vue probe out of the build (chamber.ts).
+    Under the dev server it does not redirect and defines `__VC_WIRED__`,
+    which chamber.ts's DEV probe hint reads: a dev-time redirect over a
+    pre-bundled install put two chamber modules in the page (see the
+    function's note). In both it defines `__VC_LEAN__`, the build profile
+    (the `profile` option), unless the app defines it.
 
 The rules the HMR shim keeps:
   - SCRIPTS ONLY. `enforce: 'pre'` runs ahead of
@@ -194,7 +206,7 @@ bus.register('cartAdd', handler)
 
 ### VaporChamberTestOptions
 
-**Type alias** - [src/vite-hmr.ts:430](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L430)
+**Type alias** - [src/vite-hmr.ts:472](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L472)
 
 ```ts
 export type VaporChamberTestOptions = {
@@ -220,7 +232,7 @@ export type VaporChamberTestOptions = {
 
 ### VaporChamberWireOptions
 
-**Type alias** - [src/vite-hmr.ts:309](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L309)
+**Type alias** - [src/vite-hmr.ts:315](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L315)
 
 ```ts
 export type VaporChamberWireOptions = {
@@ -230,7 +242,10 @@ export type VaporChamberWireOptions = {
    * same as importing `vapor-chamber/vue`. `'vapor'` wires that plus
    * `createVaporApp`, `defineVaporComponent` and `defineVaporAsyncComponent`,
    * the same as importing `vapor-chamber/vapor` - pick it when the app
-   * compiles `<script setup vapor>` SFCs.
+   * compiles `<script setup vapor>` SFCs. Under it the root's
+   * `defineVaporAsyncComponent` is /vapor's, which calls Vue's directly, so
+   * Vue's async code is bundled only when the app defines an async component
+   * (`__VC_WIRED_VAPOR__`, vapor.ts).
    *
    * The choice is yours on purpose. The plugin does not inspect
    * @vitejs/plugin-vue to guess it: `'vapor'` puts the Vapor runtime in the
@@ -238,5 +253,18 @@ export type VaporChamberWireOptions = {
    * would decide that cost for you.
    */
   entry?: 'vue' | 'vapor';
+  /**
+   * The build profile, for the library's speed-against-memory trades.
+   * `'performance'` (the default) spends memory for speed; `'lean'` spends
+   * speed for memory. The plugin defines `__VC_LEAN__` (true for `'lean'`,
+   * false otherwise) in a build and under the dev server, so the choice folds
+   * at build time and costs nothing per call. An app that defines
+   * `__VC_LEAN__` itself keeps its own value.
+   *
+   * Trades behind it today: `isLoading()` keeps up to 256 unread keys' slots
+   * per action for reuse (performance) or drops each one when it settles
+   * (lean).
+   */
+  profile?: 'performance' | 'lean';
 };
 ```

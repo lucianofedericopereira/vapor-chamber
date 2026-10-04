@@ -10,23 +10,24 @@
  * (`vue` is an optional peer, so it stays external in this bundle - what we
  * assert on is WHICH named bindings the router still asks `vue` for.)
  *
- * Skips when dist/ hasn't been built or esbuild is unavailable. "Built" means
- * both halves of `npm run build`: the `.d.ts` below comes from `tsc`, not from
- * the Vite pass that writes the `.js` files, and a test run can end up with the
- * second and not the first - tests/dev-flag.test.ts imports scripts/build.mjs,
- * whose top-level builds run on import. Without the `.d.ts` in the check, the
- * last case threw ENOENT instead of skipping (batch 2 audit, test:run before
- * build).
+ * Fails when dist/ hasn't been built (tests/require-dist.ts); skips when
+ * esbuild is unavailable. "Built" means both halves of `npm run build`: the
+ * `.d.ts` below comes from `tsc`, not from the Vite pass that writes the `.js`
+ * files, and a test run can end up with the second and not the first -
+ * tests/dev-flag.test.ts imports scripts/build.mjs, whose top-level builds run
+ * on import. Without the `.d.ts` in the check, the last case threw ENOENT
+ * instead of naming the missing build (batch 2 audit, test:run before build).
  */
 import { describe, expect, it } from 'vitest';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { requireDist } from '../require-dist';
 
 const routerEntry = resolve(process.cwd(), 'dist', 'router', 'index.js');
 const vdomEntry = resolve(process.cwd(), 'dist', 'router', 'vdom.js');
 const routerTypes = resolve(process.cwd(), 'dist', 'router', 'index.d.ts');
-const haveDist = existsSync(routerEntry) && existsSync(vdomEntry) && existsSync(routerTypes);
+requireDist(existsSync(routerEntry) && existsSync(vdomEntry) && existsSync(routerTypes));
 
 let esbuild: typeof import('esbuild') | null = null;
 try {
@@ -76,7 +77,7 @@ async function vueImportsOf(source: string): Promise<string[]> {
 
 const VDOM_MARKERS = ['defineComponent', 'h', 'createVNode', 'onMounted', 'onBeforeUnmount'];
 
-describe.skipIf(!haveDist || !esbuild)('vDOM boundary', () => {
+describe.skipIf(!esbuild)('vDOM boundary', () => {
   it('createRouter() alone does not pull vDOM bindings from vue', async () => {
     const imports = await vueImportsOf(`
       import { createRouter } from '${routerEntry.replace(/\\/g, '\\\\')}';

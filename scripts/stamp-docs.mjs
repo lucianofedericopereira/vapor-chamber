@@ -75,8 +75,8 @@ const VALUES = {
  * `docs/metrics.json` is NOT committed (.gitignore), which is the one cost
  * worth knowing: a marker whose source is absent renders exactly like a
  * current one, and `--check` calls it current having had nothing to compare
- * it against. The twelve `vc:bench*`
- * markers are that set. Run `npm run bench` before trusting one.
+ * it against. The `vc:bench*`
+ * markers are that set. Run `npm run bench:bands` before trusting one.
  */
 function readJson(path) {
   try {
@@ -86,8 +86,10 @@ function readJson(path) {
   }
 }
 
-// Only a COMPLETE run is comparable to what the docs claim: 8 test files skip
-// without `dist/`, 2 more without coverage. The reporter records both facts, so
+// Only a COMPLETE run is comparable to what the docs claim: without `dist/` the
+// files that read it fail (they skipped before log s35.64), and the docs carry the coverage run's counts, beside its
+// percentages (the measure-only timing tests skip there and in every run
+// without VC_TIMING, tests/under-coverage.ts). The reporter records both facts, so
 // data from an ordinary `npm run test:run` is ignored here instead of marking
 // every doc stale - otherwise running the suite the normal way would break the
 // next `lint:check`, which is a gate nobody would keep.
@@ -124,16 +126,19 @@ if (metrics?.outlet) {
   VALUES.outletMachineryInterop = metrics.outlet.machineryInterop;
 }
 /**
- * Peer-comparison ratios from `npm run bench`, published by
- * `scripts/bench-ratios-reporter.mjs`.
+ * Bench ratios from `npm run bench:bands` (`scripts/bench-bands.mjs`, over N
+ * runs of `scripts/bench-ratios-reporter.mjs`): a ratio of this library's own
+ * rows is the median, a ratio against a peer library the band "min-max", and
+ * `benchProvenance` says on what Node, peer versions and how many runs.
  *
  * The migration guides quote these, and until this existed they were the one
  * class of number in the docs with no generator - which the guide itself said
  * out loud, and which had already drifted. Ratios only, never absolutes: a hz
  * figure is host state, a same-run ratio is not.
  *
- * Absent unless someone ran the bench locally, and absent means SKIP, so CI and
- * a fresh checkout leave whatever the doc says untouched.
+ * Absent unless someone ran the bands locally, and absent means SKIP, so CI and
+ * a fresh checkout leave whatever the doc says untouched. A single
+ * `npm run bench` writes `benchRun`, which nothing here reads.
  */
 if (metrics?.bench) {
   for (const [name, value] of Object.entries(metrics.bench)) VALUES[name] = String(value);

@@ -31,10 +31,10 @@ import {
   setInsertionState,
   template,
 } from 'vue';
-import { createMemoryHistory } from '../../src/router/history';
-import { createRouter } from '../../src/router/index';
-import { RouterOutlet } from '../../src/router/vapor';
-import type { RouteRecord } from '../../src/router/types';
+import { createMemoryHistory } from '@router/history';
+import { createRouter } from '@router/index';
+import { RouterOutlet } from '@router/vapor';
+import type { RouteRecord } from '@router/types';
 
 const ROWS: RouteRecord[] = [
   { name: 'home', path: '/', component: 'Home' },

@@ -20,9 +20,10 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { requireDist } from './require-dist';
 
 const distDir = join(process.cwd(), 'dist');
-const haveDist = existsSync(join(distDir, 'index.js'));
+requireDist(existsSync(join(distDir, 'index.js')));
 
 /** ESM entries that can reach the Vue registry. */
 const ENTRIES = ['index.js', 'vue.js', 'reactive.js', 'router/index.js'];
@@ -38,7 +39,7 @@ function distFiles(dir: string): string[] {
   });
 }
 
-describe.skipIf(!haveDist)('dist - one chamber instance across all entries', () => {
+describe('dist - one chamber instance across all entries', () => {
   it('chamber.ts is emitted exactly once in the ESM output', () => {
     const holders = distFiles(distDir)
       .filter((f) => readFileSync(f, 'utf8').includes(CHAMBER_FINGERPRINT))

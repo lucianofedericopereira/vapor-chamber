@@ -14,7 +14,7 @@
  *
  * WHERE THE FIX LIVES, AND WHY NOT THE CORE. It is applied in `chamber.ts`,
  * the Vue layer, not in `command-bus.ts`. Putting it in the core meant a
- * runtime branch in a module the whitepaper §19 guarantee calls
+ * runtime branch in a module the whitepaper §15 guarantee calls
  * "framework-agnostic - always", and `tests/esm-treeshake.test.ts` objected in
  * the only language it has: a Vue-free Blade consumer bundle grew 35 bytes for
  * a Vue-only concern. Whether Vue is present is settled when the bundle is

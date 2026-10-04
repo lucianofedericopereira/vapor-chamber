@@ -365,6 +365,53 @@ describe('listener fan-out with in-flight unsubscribe', () => {
     expect(seen).toEqual(['first', 'fourth']);
   });
 
+  // Removing an EARLIER peer and adding one in the same call left the length
+  // unchanged, so the cursor was not corrected and the next listener was
+  // skipped (log s35.67).
+  for (const [kind, pattern, action] of [['exact', 'act', 'act'], ['wildcard', 'act*', 'actX']] as const) {
+    it(`${kind}: a listener that removes an earlier peer and adds one does not skip the next`, ({ bus }) => {
+      bus.register(action, () => 1);
+      const seen: string[] = [];
+      const offFirst = bus.on(pattern, () => seen.push('first'));
+      let armed = true;
+      bus.on(pattern, () => {
+        seen.push('second');
+        if (armed) { armed = false; offFirst(); bus.on(pattern, () => seen.push('added')); }
+      });
+      bus.on(pattern, () => seen.push('third'));
+      bus.dispatch(action, {});
+      expect(seen.filter((x) => x !== 'added')).toEqual(['first', 'second', 'third']);
+    });
+
+    // Removing itself and a LATER peer shrank the length by two, and the
+    // cursor stepped back two: the listener before it ran again.
+    it(`${kind}: a listener that removes itself and a later peer does not re-run the one before`, ({ bus }) => {
+      bus.register(action, () => 1);
+      const seen: string[] = [];
+      bus.on(pattern, () => seen.push('first'));
+      let offThird = () => {};
+      const offSecond = bus.on(pattern, () => { seen.push('second'); offSecond(); offThird(); });
+      offThird = bus.on(pattern, () => seen.push('third'));
+      bus.on(pattern, () => seen.push('fourth'));
+      bus.dispatch(action, {});
+      expect(seen).toEqual(['first', 'second', 'fourth']);
+    });
+  }
+
+  it('offAll(pattern) mid-dispatch: the later listeners of that pattern do not run in it', ({ bus }) => {
+    bus.register('actX', () => 1);
+    const seen: string[] = [];
+    bus.on('actX', () => { seen.push('exact 1'); bus.offAll('actX'); bus.offAll('act*'); });
+    bus.on('actX', () => seen.push('exact 2'));
+    bus.on('act*', () => seen.push('wild'));
+    bus.on('*', () => seen.push('all'));
+    bus.dispatch('actX', {});
+    expect(seen).toEqual(['exact 1', 'all']);
+    bus.offAll('nobody');
+    bus.dispatch('actX', {});
+    expect(seen).toEqual(['exact 1', 'all', 'all']);
+  });
+
   // The exact-match catch (fanOutListeners' first loop) is covered by
   // tests/echo-bridge.test.ts; the wildcard loop has its own try/catch and
   // was never exercised with a throwing listener.

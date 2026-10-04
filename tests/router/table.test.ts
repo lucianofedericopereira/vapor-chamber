@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { isRouterError } from '../../src/router/errors';
-import { compilePath, createRouteTable } from '../../src/router/table';
-import type { RouteRecord } from '../../src/router/types';
+import { isRouterError } from '@router/errors';
+import { compilePath, createRouteTable } from '@router/table';
+import type { RouteRecord } from '@router/types';
 
 const ROWS: RouteRecord[] = [
   { name: 'catalog', path: '/catalog', parent: null, query: { view: { type: 'string', default: 'grid' } } },
@@ -102,14 +102,14 @@ describe('createRouteTable', () => {
     expect(report && table.buildPath(report)).toBe('/report');
   });
 
-  it('throws coded errors: missing_param, duplicate_route, unknown_parent', () => {
+  it('throws coded errors: router:missing:param, router:already:route, router:missing:parent', () => {
     const edit = table.getRecord('catalog.products.edit');
-    expect(() => edit && table.buildPath(edit)).toThrow(expect.objectContaining({ code: 'missing_param' }));
+    expect(() => edit && table.buildPath(edit)).toThrow(expect.objectContaining({ code: 'router:missing:param' }));
     expect(() => createRouteTable([ROWS[6] as RouteRecord, ROWS[6] as RouteRecord])).toThrow(
-      expect.objectContaining({ code: 'duplicate_route' }),
+      expect.objectContaining({ code: 'router:already:route' }),
     );
     expect(() => createRouteTable([{ name: 'x', path: '/x', parent: 'ghost' }])).toThrow(
-      expect.objectContaining({ code: 'unknown_parent' }),
+      expect.objectContaining({ code: 'router:missing:parent' }),
     );
   });
 });
@@ -118,7 +118,7 @@ describe('malformed param segments are a dev-time error, not a dead route', () =
   it('rejects vue-router style /:name* instead of compiling it to a literal', () => {
     // Regression: PARAM_RE does not match ":pathMatch*", so the segment fell
     // through to `static` and compiled to the LITERAL "/:pathMatch*". The row
-    // matched nothing, every unknown URL became `unmatched`, and - behind a
+    // matched nothing, every unknown URL became `router:missing:route`, and - behind a
     // catch-all server - the hard-navigation fallback reloaded forever.
     expect(() => compilePath('/:pathMatch*')).toThrow(/not a valid param/);
     expect(() => compilePath('/products/:id(\\d+')).toThrow(/not a valid param/);
@@ -244,7 +244,7 @@ describe('colliding static rows - first one wins, like the scan', () => {
 });
 
 describe('unknown parent in production (DEV=false)', () => {
-  // The FALSE arm of `if (DEV)` in pass 2. The dev arm throws unknown_parent
+  // The FALSE arm of `if (DEV)` in pass 2. The dev arm throws router:missing:parent
   // (asserted above); production instead `return`s and leaves the record
   // unlinked, so a bad table degrades to a flat one rather than taking the app
   // down at import time.
@@ -256,7 +256,7 @@ describe('unknown parent in production (DEV=false)', () => {
   it('skips the link and leaves the row parentless instead of throwing', async () => {
     vi.stubEnv('NODE_ENV', 'production');
     vi.resetModules();
-    const prod = await import('../../src/router/table');
+    const prod = await import('@router/table');
 
     const rows: RouteRecord[] = [
       { name: 'real', path: '/real', component: 'R' },
@@ -289,14 +289,14 @@ describe('cyclic parent chains', () => {
     try {
       createRouteTable(cyclic);
     } catch (error) {
-      expect(isRouterError(error, 'cyclic_parent')).toBe(true);
+      expect(isRouterError(error, 'router:invalid:parent')).toBe(true);
     }
   });
 
   it('survives in production with a truncated chain', async () => {
     vi.stubEnv('NODE_ENV', 'production');
     vi.resetModules();
-    const prod = await import('../../src/router/table');
+    const prod = await import('@router/table');
 
     const table = prod.createRouteTable(cyclic);
     // Stops at the repeat rather than looping: each row sees itself and its
@@ -306,6 +306,39 @@ describe('cyclic parent chains', () => {
     expect(chain).toContain('a');
     // A wrong page beats a frozen tab: the route still resolves.
     expect(table.resolve('/a')?.record.name).toBe('a');
+  });
+});
+
+describe('the rest of the dev-only table checks, in production (DEV=false)', () => {
+  // docs/router.md, "Dev-trusts-generator": table validation runs in dev only,
+  // and production trusts the generated rows. The two checks above have their
+  // production arm pinned (unknown parent, cyclic chain); these are the other
+  // two, so the statement holds for every check, not for some.
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it('a duplicate route name does not throw: the name resolves to the later row', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.resetModules();
+    const prod = await import('@router/table');
+    const table = prod.createRouteTable([
+      { name: 'page', path: '/first', component: 'A' },
+      { name: 'page', path: '/second', component: 'B' },
+    ]);
+    expect(table.getRecord('page')?.path).toBe('/second');
+    expect(table.resolve('/first')?.record.path).toBe('/first');
+    expect(table.resolve('/second')?.record.path).toBe('/second');
+  });
+
+  it('a ":" segment that is no param does not throw: it compiles to a literal', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.resetModules();
+    const prod = await import('@router/table');
+    const table = prod.createRouteTable([{ name: 'files', path: '/files/:path*', component: 'F' }]);
+    expect(table.resolve('/files/a/b')).toBeNull();
+    expect(table.resolve('/files/:path*')?.record.name).toBe('files');
   });
 });
 

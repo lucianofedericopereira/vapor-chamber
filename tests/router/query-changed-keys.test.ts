@@ -19,9 +19,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { createMemoryHistory } from '../../src/router/history';
-import type { RouteRecord } from '../../src/router/types';
-import type { LoaderHandlers } from '../../src/router/index';
+import { createMemoryHistory } from '@router/history';
+import type { RouteRecord } from '@router/types';
+import type { LoaderHandlers } from '@router/index';
 import { makeRouter as fixtureRouter } from './fixture';
 
 const ROWS: RouteRecord[] = [

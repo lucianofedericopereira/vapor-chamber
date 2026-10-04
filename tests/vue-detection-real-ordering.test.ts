@@ -97,7 +97,7 @@ describe('real ordering: app mounts first, library loads second', () => {
     // precisely why this suite could not see that half.
     await chamber.waitForVueDetection();
 
-    // The plain `vue` entry ships no Vapor runtime (whitepaper §11.6), so Vapor
+    // The plain `vue` entry ships no Vapor runtime (whitepaper §9.6), so Vapor
     // specifically stays false even here - but Vue itself was found.
     expect(chamber.getVueDeepRefFn()).not.toBeNull();
   });

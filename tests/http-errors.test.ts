@@ -4,13 +4,19 @@
 import { describe, expect, it } from 'vitest';
 import { classifyError, isRetryableStatus } from '../src/http-errors';
 import { conditionOfStatus } from '../src/command-bus';
+import { _failures } from '../src/failure';
+import { _answered } from '../src/http';
+
+// The client's own failures, as it throws them (log s35.131).
+const answered = (status: number) => _answered(status, null, {});
+const transport = _failures('transport');
 import * as root from '../src/index';
 
 describe('the status table (docs/plan-failures-and-contract.md 4.4)', () => {
   it('each status declares the condition RFC 9110 gives it', () => {
     const table: Array<[number, string]> = [
-      [404, 'missing'], [410, 'missing'], [409, 'already'],
-      [401, 'refused'], [403, 'refused'], [419, 'refused'],
+      [404, 'missing'], [410, 'missing'], [409, 'conflict'], [412, 'conflict'],
+      [401, 'unauthenticated'], [419, 'unauthenticated'], [403, 'refused'],
       [429, 'limited'], [503, 'limited'], [408, 'timeout'], [504, 'timeout'],
       [501, 'unexpected'], [502, 'unexpected'], [505, 'unexpected'],
       [500, 'failed'], [599, 'failed'], [400, 'invalid'], [422, 'invalid'], [413, 'invalid'],
@@ -36,7 +42,7 @@ describe('isRetryableStatus', () => {
     // Retried, but not transient: serveStaleOnError does not serve stale data for them.
     for (const s of [408, 429]) {
       expect(isRetryableStatus(s)).toBe(true);
-      expect(classifyError({ response: { status: s } }).transient).toBe(false);
+      expect(classifyError(answered(s)).transient).toBe(false);
     }
   });
 
@@ -47,31 +53,29 @@ describe('isRetryableStatus', () => {
 });
 
 describe('classifyError', () => {
-  it('timeout is transient', () => {
-    expect(classifyError({ name: 'TimeoutError' }).transient).toBe(true);
+  it('a timeout is transient', () => {
+    expect(classifyError(transport('timeout:reply', 't')).transient).toBe(true);
   });
 
   it('no response (network failure) is transient', () => {
-    expect(classifyError(new Error('network down')).transient).toBe(true);
+    expect(classifyError(transport('lost:reply', 'l')).transient).toBe(true);
   });
 
   it('5xx is transient', () => {
-    expect(classifyError({ response: { status: 500 } }).transient).toBe(true);
-    expect(classifyError({ response: { status: 503 } }).transient).toBe(true);
+    expect(classifyError(answered(500)).transient).toBe(true);
+    expect(classifyError(answered(503)).transient).toBe(true);
   });
 
-  it('4xx is never transient', () => {
-    expect(classifyError({ response: { status: 404 } }).transient).toBe(false);
-    expect(classifyError({ response: { status: 422 } }).transient).toBe(false);
-    expect(classifyError({ response: { status: 429 } }).transient).toBe(false);
+  it('4xx is never transient, nor an abort', () => {
+    expect(classifyError(answered(404)).transient).toBe(false);
+    expect(classifyError(answered(422)).transient).toBe(false);
+    expect(classifyError(answered(429)).transient).toBe(false);
+    expect(classifyError(transport('aborted:request', 'a')).transient).toBe(false);
   });
 
-  it('2xx/3xx status present is not transient', () => {
-    expect(classifyError({ response: { status: 200 } }).transient).toBe(false);
-  });
-
-  it('handles null/undefined input', () => {
-    expect(classifyError(null).transient).toBe(true); // "no response" - treated as network failure
+  it('anything that is not the client failure reads as no response', () => {
+    expect(classifyError(null).transient).toBe(true);
     expect(classifyError(undefined).transient).toBe(true);
+    expect(classifyError(new Error('network down')).transient).toBe(true);
   });
 });

@@ -1,6 +1,6 @@
 # Plan: failures, the shared contract, and what comes back from splice
 
-**Status:** draft, rev 22 (2026-09-28). Phase 1's code model is built (section 4.5, CHANGELOG Unreleased). For review; nothing here is built.
+**Status:** draft, rev 23 (2026-09-30). Built, in v1.25.0: Phase 0's fixes, Phase 1's code model (4.5), the wire contract (4.4) and the retry model (7.1 item 3). The rest is for review and not built.
 **Scope:** vapor-chamber alone. PHP is the first customer of what it defines,
 but no backend dictates its internals.
 
@@ -186,7 +186,7 @@ computes the same `commandKey` again for the same command.
 1. **One error factory.** Every failure is built by it; sites name what failed and pass parameters, never severity or emitter by hand. Why: the drift in 2.1 and 2.2 is hand-filled fields; splice built from its table and did not drift.
 2. **One object shape for every failure.** Why: correctness, one place builds it so it cannot drift. Speed is a minor reason, measured in 2.3: tens of nanoseconds, and only past 4 shapes. Limit: handler throws stay raw (item 10), so readers still see app error classes.
 2b. ~~Derived facts are computed once, when the failure is built, and stored (retryable, kind).~~ **Reversed in rev 19 (section 4.5):** the retry verdict is the CALLER's policy over the condition, and an owner may only veto (gRPC A6, Temporal). Nothing that can raise retries is stored on a failure. The 2.3 reason was a few nanoseconds on the failure path; the new reason is who may decide.
-3. **RFC 9457 at the boundary, not on the fields** (rev 19; was: RFC member names on `BusError`). `toJSON()` is the problem document (`type` derived from the code, `detail` the message, `code`, `context` as extensions, `status` only when crossing to HTTP); inside, the fields stay the library's. Why: an RFC governs a boundary (owner); and structured clone keeps only `name`, `message` and `stack` of an error (HTML Standard), so whatever crosses a worker or a channel must be serialized data anyway.
+3. **RFC 9457 at the boundary, not on the fields** (rev 19; was: RFC member names on `BusError`). `toJSON()` is the problem document (`type`, `detail` the message, `code`, `action`, `context` as extensions, `status` only when crossing to HTTP); inside, the fields stay the library's. `type` was left implicit until 2026-10-02 (7.2 item 16: 77 B brotli then); the owner reversed it (log s35.80): RFC 9457 3.1.1 makes `type` a client's primary identifier and 3.2 tells it to ignore unknown extensions, so with `about:blank` an RFC client dropped `code`. `type` now names the CONDITION (`.../docs/errors.md#<condition>`, a generated page), resolvable for library, app and backend failures alike; `code` stays the exact identity; a backend's own `type` is kept; no `title` (optional, and the summaries are not in the core). Why: an RFC governs a boundary (owner); and structured clone keeps only `name`, `message` and `stack` of an error (HTML Standard), so whatever crosses a worker or a channel must be serialized data anyway.
 4. **No stack for expected refusals; bugs keep theirs.** Why: 2.3.
 5. **Templates and fix text only in DEV builds; production carries a documentation link** (Vue's `error-reference`, React's error decoder).
 6. **Codes are `owner:condition:subject` strings** (section 4). Why: splice's model (classification inside the code, owner inside the code); a string needs no allocated ranges, so no list to maintain; it crosses realms with no cast; it reads without a table.
@@ -206,7 +206,7 @@ computes the same `commandKey` again for the same command.
 
 `owner:condition:subject`
 
-- **owner**: `core`, a plugin's name, `app`, `remote` (a backend), `test`.
+- **owner**: `core`, a plugin's name, `app`, `remote` (a backend), `test`, or a feature's name for a function that is not a plugin (`ssr` for `rehydrate()`, `schema` for `synthesize()`, `directive` for `v-vc-command`; shape rule 2, log s35.78).
 - **condition**: a small fixed vocabulary the library owns, the equivalent of splice's tens digit and HTTP's status classes. Retryability and kind derive from it.
 - **subject**: what the failure is about (`handler`, `action`, `payload`, `reply`, `queue`, ...).
 
@@ -214,22 +214,28 @@ A receiver that has never seen a code still knows its condition, so it still kno
 
 ### 4.2 Condition vocabulary (from the mapping; four extensions to splice's set)
 
-| condition | meaning | retry by default |
-|---|---|:-:|
-| `missing` | the thing is not there | no |
-| `already` | it is there already | no |
-| `invalid` | input broke a rule | no |
-| `refused` | a rule or a party said no | no |
-| `limited` | a rate, a window or a circuit holds it back | yes |
-| `timeout` | no reply in time | yes |
-| `lost` | the outcome is unknown or data was dropped | no; yes when the command is idempotent |
-| `aborted` (ext.) | the caller cancelled | no |
-| `exceeded` (ext.) | a bound hit by a bug (recursion depth) | no |
-| `failed` | code threw or a step failed | no |
-| `unexpected` (ext.) | the other side answered off-protocol | no |
-| `unknown` | fallback | no |
+| condition | meaning | retry by default | gRPC / Connect |
+|---|---|:-:|---|
+| `missing` | the thing is not there | no | NOT_FOUND (a missing handler: UNIMPLEMENTED) |
+| `already` | it is there already | no | ALREADY_EXISTS |
+| `conflict` (ext.) | the state is not the one the request assumed (409, 412) | no | ABORTED / FAILED_PRECONDITION |
+| `invalid` | input broke a rule | no | INVALID_ARGUMENT / OUT_OF_RANGE |
+| `refused` | a rule or a party said no (403) | no | PERMISSION_DENIED |
+| `unauthenticated` (ext.) | no valid session or token; sign in, then the same request (401, 419) | no | UNAUTHENTICATED |
+| `limited` | a rate, a window or a circuit holds it back | yes | RESOURCE_EXHAUSTED / UNAVAILABLE |
+| `timeout` | no reply in time | yes | DEADLINE_EXCEEDED |
+| `lost` | the outcome is unknown or data was dropped | no; yes when the command is idempotent | none (gRPC's UNAVAILABLE is retry-safe, which `lost` is not) |
+| `aborted` (ext.) | the caller cancelled | no | CANCELLED (not gRPC's ABORTED, which is `conflict`) |
+| `exceeded` (ext.) | a bound hit by a bug (recursion depth) | no | INTERNAL |
+| `failed` | code threw or a step failed | no | INTERNAL |
+| `unexpected` (ext.) | the other side answered off-protocol | no | INTERNAL / UNKNOWN |
+| `unknown` | fallback | no | UNKNOWN |
 
-(`lost` is also an extension.)
+(`lost` is also an extension.) `conflict` and `unauthenticated` were added
+on 2026-10-02 (owner; log s35.79): gRPC's canonical codes draw both
+distinctions, which `already` and `refused` hid. Our words are kept; the last
+column reads any condition in gRPC's terms (Connect spells them `not_found`,
+`invalid_argument`, ...).
 
 ### 4.3 Mapping of today's codes
 
@@ -245,7 +251,7 @@ A receiver that has never seen a code still knows its condition, so it still kno
 | `VC_CORE_REQUEST_TIMEOUT` | `core:timeout:request` |
 | `VC_CORE_THROTTLED` | `core:limited:handler` |
 | `VC_CORE_ABORTED` | `core:aborted:dispatch` |
-| `VC_PLUGIN_THREW` | `core:failed:plugin` |
+| `VC_PLUGIN_THREW` | `<plugin id>:failed:plugin` (`plugin:failed:plugin` when it declares none; 4.5) |
 | `VC_HOOK_ERROR` | `core:failed:hook` |
 | `VC_LISTENER_ERROR` | `core:failed:listener` |
 | `VC_VALIDATION_FAILED` | `validator:invalid:payload`, `validateSchemas:invalid:payload` (split by owner) |
@@ -266,6 +272,14 @@ A receiver that has never seen a code still knows its condition, so it still kno
 
 One shape per fact, the same on both sides; RFC 9457 at the boundary with only
 the members that carry something.
+
+**The request** (rev 22, log s35.138): one envelope on every wire,
+`{ id?, command, target, payload?, meta? }`. `id` where answers are
+multiplexed (a batch item, a WebSocket frame), as on the answer side; `meta`
+only with a fact a backend can use: `idempotencyKey`, `correlationId`,
+`causationId`. A batch is `{ commands: [envelope, ...] }`. A single request also
+sends the `Idempotency-Key` header for standard tooling; the backend reads
+`meta`.
 
 | Answer | Shape |
 |---|---|
@@ -291,8 +305,8 @@ message, everything else `context`. `Retry-After` (RFC 9110), where a response
 carries it, goes to `context.retryIn`, never from the body. The owner is the transport's fact.
 
 **The status table** says only what RFC 9110 says of a status, plus the
-reference backend's declared 419: 404/410 `missing`, 409 `already`, 401/403/419
-`refused`, 429/503 `limited`, 408/504 `timeout`, 501/502/505 `unexpected`, any
+reference backend's declared 419: 404/410 `missing`, 409/412 `conflict`,
+401/419 `unauthenticated`, 403 `refused`, 429/503 `limited`, 408/504 `timeout`, 501/502/505 `unexpected`, any
 other 5xx `failed`, any other 4xx `invalid` (RFC 9110's class meaning). A
 backend declares a code's meaning by the status it sends; the PHP side derives
 the status from the declared meaning, so the two cannot disagree.
@@ -304,27 +318,32 @@ command is `transport:lost:result` (it may have run: re-sent only with an idempo
 at all is the transport's own failure, not the HTTP client's class leaking
 through: `transport:lost:reply` (network), `transport:timeout:reply`,
 `core:aborted:dispatch`. `lost` means the outcome is unknown, so it is retried
-only for a command that carries an idempotency key (7.1 item 2); a blind
-re-send of a write that may have landed is not retried.
+only for an action declared idempotent or a command that carries an
+idempotency key (7.1 item 2); a blind re-send of a write that may have landed
+is not retried.
 
-**Retries: one rule, two places.** `failureCondition(error)` gives any
+**Retries: one rule, one place.** `failureCondition(error)` gives any
 failure its condition by contract (its code; an HTTP status through the table;
 a timeout or abort by name; the Fetch standard's `TypeError` for no response,
-`lost`; anything else, a handler's own throw included, `failed`). A failure is
-re-sent unless it is the other side's verdict (`invalid`, `refused`, `missing`,
-`already`), an abort, a depth bound or a library bug (`failed` owned by the
-library); `lost` only for a command carrying an idempotency key; a declared
-`context.retryIn` (a `Retry-After`, a throttle's wait) is the wait used. This
-is what 1.24 retried, stated by condition; the retry model itself is 7.1
-item 3. `retrying(transport)` applies it to
-the wire, invisibly to the plugins outside, per command on a batch;
-`retry()` applies it to the command, through the chain. A failure
-`retrying()` re-sent carries `context.attempts` and `retry()` does not send it
-again. The bridges have no retry option; `noRetry` is replaced by the
-idempotency key, the declaration of "safe to send again". The outbox reads the
-same condition: a 4xx verdict (`invalid`, `refused`, `missing`, `already`) drops
-a record, except an expired session (401, 419); anything else keeps it.
-`Retry-After` is honoured on any status; `X-RateLimit-Reset` is its fallback
+`lost`; anything else, a handler's own throw included, `failed`). The async
+bus applies the class rule (7.1 item 3, `docs/plan-shape.md` 4) at the call
+that produced the outcome, a handler or a plugin declaring `transport: true`,
+so the plugins outside see one dispatch, per command on a batch. Transient
+(`limited`, `timeout`, a declared `context.retryIn`: a `Retry-After`, a
+throttle's wait) is re-sent for any action, after the declared wait when there
+is one. Uncertain (`lost`, `unexpected`, `unknown`, and a `failed` that is not
+a party's own bug) only for an action declared idempotent or a command
+carrying an idempotency key. The other side's verdict (`invalid`, `refused`,
+`missing`, `already`), an abort, a depth bound and a bug (`failed` raised by
+the library or a plugin) never. A failure sent more than once carries
+`context.attempts`. The bridges have no retry option; `noRetry` is replaced by
+that declaration of "safe to send again". The outbox reads the same condition:
+the backend's 4xx verdict (`invalid`, `refused`, `missing`, `already`,
+`conflict`) drops a record, an expired session (`unauthenticated`, 401 and
+419) keeps it; of the failures the library or a plugin raised, only `invalid`
+(a validator or schema rejection, the same answer on every flush) drops it;
+anything else keeps it. `Retry-After` is
+honoured on any status; in the HTTP client `X-RateLimit-Reset` is its fallback
 for the wait.
 
 **Kept, and why.** `{ state }` rather than the bare value: one inner shape for
@@ -360,7 +379,7 @@ the proposal, for the owner.
 | `action`, `context`, `errors`, `cause` | as today; `errors` is `[{ detail, pointer }]` | RFC 9457 extension, JSON:API |
 | owner | `#owner`, written only by the wiring | object-capability brands |
 
-Not on the object: **severity** (the logger decides from owner and condition; no surveyed model stores it on the error, OpenTelemetry puts it on the log record), **emitter** (the owner), **retryable** (the caller's policy; an owner may only veto, which is safe even from a backend because it can only lower retries). **Stack:** decided by the constructor from the condition, only `failed` (a bug) captures one, as Java's `writableStackTrace` and Effect's `Fail` / `Die` split. **Subclasses:** not needed for identity (a clone drops them); `HttpError` and `RouterError` joining is 7.1 item 16.
+Not on the object: **severity** (the logger decides from owner and condition; no surveyed model stores it on the error, OpenTelemetry puts it on the log record), **emitter** (the owner), **retryable** (the caller's policy; an owner may only veto, which is safe even from a backend because it can only lower retries). **Stack:** decided by the constructor from the condition, only `failed` (a bug) captures one, as Java's `writableStackTrace` and Effect's `Fail` / `Die` split. **Subclasses:** not needed for identity (a clone drops them); `HttpError` and `RouterError` joined, 7.1 item 16.
 
 ---
 
@@ -428,12 +447,12 @@ Current position after each.
 **The code model**
 1. The mapping's four findings: `QUEUE_FULL` -> `lost`, `UNKNOWN` not retryable, `CACHE_MISS` to diagnostics, `VALIDATION_FAILED` split by owner. Position: take all four.
 2. Retry rule: the condition decides; an idempotent command also retries `lost`. Taken in rev 21 (4.4).
-3. **Retry: DECIDED (owner, 2026-09-28), to build after `docs/plan-shape.md`** (until then the code keeps what 1.24 retried).
+3. **Retry: DECIDED (owner, 2026-09-28) and BUILT in v1.25.0** (`docs/plan-shape.md` 4; `tests/retry-policy.test.ts`).
    - Retry is the runner's, at the invocation boundary where the outcome is produced, not a plugin the app installs and orders: every success model makes it the default of the layer that owns the call (AWS SDKs, .NET standard handler, Temporal activities). The plugins outside see one dispatch.
    - On by default and bounded: 3 attempts in total, full jitter, a server-declared wait honoured and clamped, a retry budget per bus (AWS SDK and gRPC A6 token buckets), so retries cannot prolong an outage.
-   - The class rule decides: final (a 4xx verdict, an abort, a depth bound, a library bug) never; transient (`limited`, `timeout`, a `Retry-After`) always; uncertain (`lost`, `failed`, `unexpected`, `unknown`) only when the action is declared safe to repeat.
+   - The class rule decides: final (a 4xx verdict, an abort, a depth bound, a library bug) never; transient (`limited`, `timeout`, a `Retry-After`) always; uncertain (`lost`, `failed`, `unexpected`, `unknown`) only when the action is declared safe to repeat or the command carries an idempotency key.
    - Declared per action in the schema (idempotent, a retry override, or off), as gRPC's service config; the idempotency key follows the declaration.
-   - `retry()` and `retrying()` go when it lands. Chained actions in general (workflow compensation, the ledger's revert, the outbox's flush) are a separate primitive; retry does not wait for it.
+   - `retry()` and `retrying()` are gone with it. Chained actions in general (workflow compensation, the ledger's revert, the outbox's flush) are a separate primitive; retry does not wait for it.
    Sources: Polly, the .NET standard resilience handler, Temporal retry policies, AWS SDK retry behavior, gRPC A6, Envoy, Effect `Schedule` (section 9).
 4. `status` on internal failures. Position: only at the foreign boundary, derived from the condition.
 
@@ -458,7 +477,7 @@ Current position after each.
 15. A debug mode: production code paths with observation on (the fuse's careful path, the diagnostics channel, the devtools timeline, an inspection endpoint through `createMcpHandler`), as a second build flag beside `__VC_DEV__` (`__VC_DEBUG__`, Vue's `__VUE_PROD_DEVTOOLS__` pattern), folded away when off. Position: take it. Condition: debug changes what is observed, never what happens, enforced by a contract test running the suite in production and debug and asserting identical results (7.2 item 15). Measurements and browser tests run on production and debug builds, not DEV.
 
 **Shape (rev 19)**
-16. `HttpError` and `RouterError`: the same class now, or take the code format first and join later. The two shapes of a backend's code CLOSED in rev 21 (4.4): both paths read `remote:<condition>:<code>`; `HttpError` remains only for no response at all.
+16. `HttpError` and `RouterError`: the same class now, or take the code format first and join later. The two shapes of a backend's code CLOSED in rev 21 (4.4): both paths read `remote:<condition>:<code>`; `HttpError` remains only for no response at all. CLOSED in s35.131: `HttpError` removed, the client's every failure the core's `BusError` (`transport:` for no answer), `RouterError` already one.
 17. Plugins that declare no name: owner `plugin`. DONE (the DEV warning naming the install site is not built).
 18. How `fail` reaches a plugin: DONE as the third argument, bound when the runner is built (the happy path measured unchanged); `wired(plugin)`, exported from `vapor-chamber` beside `createTestBus`, for a plugin called outside a bus (the `vapor-chamber/vitest` pure entry imports nothing from the library at runtime, so it cannot carry it). Qualification on the way out was not benched and stays an alternative.
 
@@ -508,7 +527,9 @@ Each phase lands with: a test that fails on 1.24 for every defect it fixes; size
   `@vitest/browser-playwright` 5.0.1 and Playwright 1.63, headless shell only,
   production mode by default (`VC_MODE=development` for dev paths). Tests live
   in `tests/browser/`, which the default config excludes. Opt-in: not part of
-  `npm test`.
+  `npm test`. Since 2026-09-30, when the headless shell of the installed
+  Playwright is not on the machine the run uses the system Chrome and says so
+  (`scripts/browser-channel.mjs`, `tests/browser-channel.test.ts`).
 - The Vitest MCP server (`vc-vitest-mcp`), registered in the owner's MCP client
   at local scope (nothing in the repo): `runTests` warm, `getTestResults`,
   `getCoverageGaps` for the failure branches of each prototype.
@@ -762,3 +783,4 @@ the app can do (the words, headings, a skip link, colour contrast, page titles).
 | 20 | 2026-09-27 | Phase 1's code model landed: owner by wiring, `#code`, `toJSON` with needed members, `remote:refused`, `wired` (root export), `VC_TEST_*` renamed, IIFE target 2022 (owner); 7.2 items 1 and 16 done; 7.1 item 16 gains the two-shapes question. |
 | 21 | 2026-09-27 | Rule 10 (the front reads by contract, never guesses; one shape and one author per fact). 4.4 rewritten as the wire contract: RFC 9457 with the needed members, the problem's own `status` read through a table that says only what RFC 9110 says, no `ok`/`error`/`message`/`type`/`title`, one FormBus error shape; the half-migrated old shapes removed in this release. 4.5 moved after 4.4. 7.1 item 16 closed; 7.2 items 9 and 11 done. |
 | 22 | 2026-09-28 | 4.4: a success is any answer without `problem`; retries are one rule (`failureCondition`) applied by `retrying(transport)` (the wire) and `retry()` (the command), `noRetry` replaced by the idempotency key, the bridges' retry option removed; the outbox reads the same condition; `emitter` and `X-RateLimit-Reset` gone. Tests reorganized into `tests/wire-contract.test.ts`; the history-organized fixtures removed. |
+| 23 | 2026-09-30 | Brought into line with v1.25.0 as shipped: the status line says what is built; settled item 3's `toJSON()` sends no `type`; 4.3's plugin-throw row carries the plugin's owner; 4.4's retry paragraph and 7.1 item 3 state the bus's class rule in place of `retrying()` / `retry()`, with both routes to an uncertain re-send (declared idempotent, or keyed). |

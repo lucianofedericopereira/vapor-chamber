@@ -278,6 +278,49 @@ describe("removal: 'live' (default) - bus-parity semantics", () => {
     lane.emit('tick', 2); // listener gone - bucket dropped, no-op
     expect(seen).toEqual([1]);
   });
+
+  // The rule fanOutListeners states, with the cases the length-based cursor
+  // correction got wrong (log s35.67).
+  it('removing an earlier peer and adding one mid-emit does not skip the next', () => {
+    const lane = createFastLane();
+    const seen: string[] = [];
+    const offFirst = lane.on('tick', () => seen.push('first'));
+    let armed = true;
+    lane.on('tick', () => {
+      seen.push('second');
+      if (armed) { armed = false; offFirst(); lane.on('tick', () => seen.push('added')); }
+    });
+    lane.on('tick', () => seen.push('third'));
+    lane.emit('tick', 1);
+    expect(seen).toEqual(['first', 'second', 'third']);
+    seen.length = 0;
+    lane.emit('tick', 2); // the added one runs from the next emit
+    expect(seen).toEqual(['second', 'third', 'added']);
+  });
+
+  it('removing itself and a later peer mid-emit does not re-run the one before', () => {
+    const lane = createFastLane();
+    const seen: string[] = [];
+    lane.on('tick', () => seen.push('first'));
+    let offThird = () => {};
+    const offSecond = lane.on('tick', () => { seen.push('second'); offSecond(); offThird(); });
+    offThird = lane.on('tick', () => seen.push('third'));
+    lane.on('tick', () => seen.push('fourth'));
+    lane.emit('tick', 1);
+    expect(seen).toEqual(['first', 'second', 'fourth']);
+  });
+
+  it('remove(action) and clear() mid-emit: the rest of that emit does not run', () => {
+    for (const drop of ['remove', 'clear'] as const) {
+      const lane = createFastLane();
+      const seen: string[] = [];
+      lane.on('tick', () => { seen.push('first'); if (drop === 'remove') lane.remove('tick'); else lane.clear(); });
+      const off = lane.on('tick', () => seen.push('second'));
+      lane.emit('tick', 1);
+      expect(seen).toEqual(['first']);
+      expect(() => off()).not.toThrow(); // already off: a no-op
+    }
+  });
 });
 
 describe("removal: 'snapshot' - copy-on-write semantics", () => {

@@ -158,17 +158,18 @@ export function installDomIntegration(options: DomIntegrationOptions): () => voi
   }
 
   let hoverTimer: ReturnType<typeof setTimeout> | null = null;
-  function onMouseover(event: MouseEvent): void {
-    /* v8 ignore next -- defensive: this listener is only attached inside
-       `if (preheat)` below, and `preheat` is a const */
-    if (!preheat) return;
-    const anchor = (event.target as Element | null)?.closest?.('a[href]') as HTMLAnchorElement | null;
-    if (!anchor || anchor.hasAttribute('data-native')) return;
-    const routable = routableTarget(anchor, base);
-    if (!routable || !canHandle(routable.path)) return;
-    if (hoverTimer) clearTimeout(hoverTimer);
-    hoverTimer = setTimeout(() => preheat(routable.path), hoverDelayMs);
-  }
+  // Made only when `preheat` was given, inside the branch that attaches it, so
+  // it needs no "no preheat" check (tests/router/dom.test.ts, hover preheat).
+  const onMouseover = preheat
+    ? (event: MouseEvent): void => {
+        const anchor = (event.target as Element | null)?.closest?.('a[href]') as HTMLAnchorElement | null;
+        if (!anchor || anchor.hasAttribute('data-native')) return;
+        const routable = routableTarget(anchor, base);
+        if (!routable || !canHandle(routable.path)) return;
+        if (hoverTimer) clearTimeout(hoverTimer);
+        hoverTimer = setTimeout(() => preheat(routable.path), hoverDelayMs);
+      }
+    : null;
   function onMouseout(): void {
     if (hoverTimer) {
       clearTimeout(hoverTimer);
@@ -181,15 +182,17 @@ export function installDomIntegration(options: DomIntegrationOptions): () => voi
   }
 
   document.addEventListener('click', onClick);
-  if (preheat) {
+  if (onMouseover) {
     document.addEventListener('mouseover', onMouseover);
     document.addEventListener('mouseout', onMouseout);
   }
   if (onRestore) window.addEventListener('pageshow', onPageshow);
   return () => {
     document.removeEventListener('click', onClick);
-    document.removeEventListener('mouseover', onMouseover);
-    document.removeEventListener('mouseout', onMouseout);
+    if (onMouseover) {
+      document.removeEventListener('mouseover', onMouseover);
+      document.removeEventListener('mouseout', onMouseout);
+    }
     if (onRestore) window.removeEventListener('pageshow', onPageshow);
     if (hoverTimer) clearTimeout(hoverTimer);
   };

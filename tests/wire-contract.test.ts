@@ -15,7 +15,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus, _failures, type BusError, type Command, type CommandResult } from '../src/command-bus';
 import { isRetryableStatus } from '../src/http-errors';
-import { conditionOfStatus, failureCondition } from '../src/command-bus';
+import { conditionOf, conditionOfStatus, failureCondition, RETRYABLE_CONDITIONS } from '../src/command-bus';
 import { createOutbox, type OutboxRecord } from '../src/outbox';
 import { idempotent } from '../src/plugins-extra';
 import { createBatchingHttpBridge, createHttpBridge, createWsBridge } from '../src/transports';
@@ -106,13 +106,26 @@ describe('an answer reads the same on every path', () => {
 describe('the status table: only what RFC 9110 says of a status', () => {
   it('each status declares its condition', () => {
     const table: Array<[number, string]> = [
-      [404, 'missing'], [410, 'missing'], [409, 'already'],
-      [401, 'refused'], [403, 'refused'], [419, 'refused'],
+      [404, 'missing'], [410, 'missing'], [409, 'conflict'], [412, 'conflict'],
+      [401, 'unauthenticated'], [419, 'unauthenticated'], [403, 'refused'],
       [429, 'limited'], [503, 'limited'], [408, 'timeout'], [504, 'timeout'],
       [501, 'unexpected'], [502, 'unexpected'], [505, 'unexpected'],
       [500, 'failed'], [599, 'failed'], [400, 'invalid'], [413, 'invalid'], [422, 'invalid'],
     ];
     for (const [status, condition] of table) expect(conditionOfStatus(status), String(status)).toBe(condition);
+  });
+
+  it('the two conditions from gRPC are in the vocabulary, final by default', () => {
+    // unauthenticated (sign in, then retry) split from refused; conflict (the
+    // state changed underneath) split from already (it exists).
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const fail = _failures('test');
+    const a = fail('unauthenticated:session', 'sign in');
+    const b = fail('conflict:version', 'changed underneath');
+    expect(warn).not.toHaveBeenCalled();
+    warn.mockRestore();
+    expect([conditionOf(a), conditionOf(b)]).toEqual(['unauthenticated', 'conflict']);
+    expect(RETRYABLE_CONDITIONS.has('unauthenticated') || RETRYABLE_CONDITIONS.has('conflict')).toBe(false);
   });
 
   it('the HTTP client re-sends 408, 429 and every 5xx, and no other 4xx', () => {
@@ -127,7 +140,7 @@ describe('off the contract', () => {
     const bus = createAsyncCommandBus();
     singleServer(() => [200, { problem: problem(409, 'in_progress') }]);
     bus.use(createHttpBridge({ endpoint: '/api/vc' }));
-    expect(await bus.dispatch('save', { id: 1 })).toFailWith('remote:already:in_progress');
+    expect(await bus.dispatch('save', { id: 1 })).toFailWith('remote:conflict:in_progress');
   });
 
   it('a non-2xx whose body is not a problem reads by its status alone', async () => {
@@ -411,7 +424,7 @@ describe('the outbox drops a record on the backend\'s verdict, and only then', (
   });
 
   it('a transient answer, a server failure and an expired session keep the record, in order', async () => {
-    for (const status of [503, 500, 401, 419]) {
+    for (const status of [503, 500, 401, 419, 408, 429]) {
       const { outbox, rejected } = await queued(() => ({ problem: problem(status, 'x') }), ['orderA', 'orderB']);
       expect(await outbox.flush(), String(status)).toEqual({ replayed: 0, failed: 1, rejected: 0 });
       expect(outbox.pending.value).toBe(2);
@@ -449,9 +462,155 @@ describe('the outbox drops a record on the backend\'s verdict, and only then', (
     }
   });
 
+  /** One record queued offline over the single endpoint, back online, `autoFlush` on. */
+  async function oneQueued(answer: (nth: number) => Response | [number, unknown]) {
+    let nth = 0;
+    const sent = singleServer(() => answer(++nth));
+    let online = false;
+    const storage = { load: () => null, save: () => {}, clear: () => {} };
+    const outbox = createOutbox({ storage, isOnline: () => online });
+    const bus = createAsyncCommandBus();
+    outbox.install(bus);
+    bus.use(createHttpBridge({ endpoint: '/api/vc' }));
+    await bus.dispatch('orderA', {});
+    online = true;
+    const rejected: string[] = [];
+    bus.on('outboxRejected', (cmd) => rejected.push((cmd.target as { error: BusError }).error.code));
+    return { outbox, sent, rejected };
+  }
+  const answering = (status: number, code: string, retryAfter?: string): Response =>
+    new Response(JSON.stringify(problem(status, code)), {
+      status,
+      headers: { 'content-type': 'application/problem+json', ...(retryAfter === undefined ? {} : { 'retry-after': retryAfter }) },
+    });
+
+  it('a Retry-After of 0 is flushed again a second later, not at once, and it still drains', async () => {
+    vi.useFakeTimers();
+    let busy = true;
+    // The valve ends the run if the re-flush loops: 500 answers inside one tick of the clock.
+    const { outbox, sent } = await oneQueued((nth) => (busy && nth <= 500 ? answering(503, 'unavailable', '0') : [200, { state: 1 }]));
+
+    expect(await outbox.flush()).toEqual({ replayed: 0, failed: 1, rejected: 0 });
+    await vi.advanceTimersByTimeAsync(999);
+    expect(sent.length).toBe(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sent.length).toBe(2);
+    // Then backing off: 2 s, 4 s (t = 3 s, 7 s).
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(sent.length).toBe(4);
+    expect(outbox.pending.value).toBe(1);
+
+    busy = false;
+    await vi.advanceTimersByTimeAsync(5000); // the 8 s wait from t = 7 s
+    expect(sent.length).toBe(5);
+    expect(outbox.pending.value).toBe(0);
+    outbox.dispose();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+  });
+
+  /** Fake-clock times (ms from the first flush) at which the backend was asked. */
+  function clocked(answer: (nth: number) => Response | [number, unknown]) {
+    const at: number[] = [];
+    const t0 = Date.now();
+    return { at, answer: (nth: number) => { at.push(Date.now() - t0); return answer(nth); } };
+  }
+  const gaps = (at: number[]) => at.slice(1).map((t, i) => t - at[i]!);
+
+  it('a repeated Retry-After backs off: the waits double from 1 s and stop at 30 s', async () => {
+    vi.useFakeTimers();
+    const clock = clocked(() => answering(503, 'unavailable', '1'));
+    const { outbox } = await oneQueued(clock.answer);
+    await outbox.flush();
+    await vi.advanceTimersByTimeAsync(200_000);
+    expect(gaps(clock.at)).toEqual([1000, 2000, 4000, 8000, 16_000, 30_000, 30_000, 30_000, 30_000, 30_000]);
+    outbox.dispose();
+  });
+
+  it('ten minutes of a busy backend cost 24 requests, and the record drains a second after it recovers', async () => {
+    vi.useFakeTimers();
+    let busy = true;
+    const { outbox, sent } = await oneQueued(() => (busy ? answering(503, 'unavailable', '1') : [200, { state: 1 }]));
+    await outbox.flush();
+    await vi.advanceTimersByTimeAsync(600_000);
+    expect(sent.length).toBe(24); // 601 before the backoff: one a second
+    busy = false;
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(sent.length).toBe(25);
+    expect(outbox.pending.value).toBe(0);
+    outbox.dispose();
+  });
+
+  it('a declared wait longer than the schedule wins: Retry-After 20 waits 20 s where the schedule says 8', async () => {
+    vi.useFakeTimers();
+    const clock = clocked((n) => answering(503, 'unavailable', n === 4 ? '20' : '1'));
+    const { outbox } = await oneQueued(clock.answer);
+    await outbox.flush();
+    await vi.advanceTimersByTimeAsync(60_000);
+    // 1, 2, 4; then the declared 20 over the schedule's 8; then the schedule again, doubled and capped.
+    expect(gaps(clock.at)).toEqual([1000, 2000, 4000, 20_000, 30_000]);
+    outbox.dispose();
+  });
+
+  it('a successful replay resets the backoff: the next record waits 1 s again, not 8 s', async () => {
+    vi.useFakeTimers();
+    let online = false;
+    const storage = { load: () => null, save: () => {}, clear: () => {} };
+    const outbox = createOutbox({ storage, isOnline: () => online });
+    const bus = createAsyncCommandBus();
+    outbox.install(bus);
+    bus.use(createHttpBridge({ endpoint: '/api/vc' }));
+    await bus.dispatch('orderA', {});
+    await bus.dispatch('orderB', {});
+    online = true;
+    // orderA is busy three times (t = 0, 1 s, 3 s), lands at t = 7 s; orderB is then busy once.
+    let nth = 0;
+    const clock = clocked((n) => (n <= 3 || n === 5 ? answering(503, 'unavailable', '1') : [200, { state: 1 }]));
+    const sent = singleServer(() => clock.answer(++nth));
+    await outbox.flush();
+    await vi.advanceTimersByTimeAsync(8000);
+    expect(sent).toEqual(['orderA', 'orderA', 'orderA', 'orderA', 'orderB', 'orderB']);
+    expect(gaps(clock.at)).toEqual([1000, 2000, 4000, 0, 1000]);
+    expect(outbox.pending.value).toBe(0);
+    outbox.dispose();
+  });
+
+  it('a flush during a scheduled wait replaces that wait: one timer, never two', async () => {
+    vi.useFakeTimers();
+    const clock = clocked(() => answering(503, 'unavailable', '1'));
+    const { outbox } = await oneQueued(clock.answer);
+    await outbox.flush(); // t = 0, next at 1 s
+    await vi.advanceTimersByTimeAsync(500);
+    await outbox.flush(); // t = 0.5 s, by hand: next at 0.5 + 2 = 2.5 s, the 1 s wait cancelled
+    await vi.advanceTimersByTimeAsync(6500);
+    expect(clock.at).toEqual([0, 500, 2500, 6500]);
+    outbox.dispose();
+  });
+
+  it('a 409 that declares a Retry-After is not a verdict: the record is kept and flushed again then', async () => {
+    vi.useFakeTimers();
+    const { outbox, sent, rejected } = await oneQueued((nth) => (nth === 1 ? answering(409, 'in_progress', '1') : [200, { state: 1 }]));
+
+    expect(await outbox.flush()).toEqual({ replayed: 0, failed: 1, rejected: 0 });
+    expect(rejected).toEqual([]);
+    expect(outbox.pending.value).toBe(1);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(sent.length).toBe(2);
+    expect(outbox.pending.value).toBe(0);
+    outbox.dispose();
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+
+    // Control: the same 409 with no Retry-After is still the verdict it was.
+    const bare = await oneQueued(() => answering(409, 'in_progress'));
+    expect(await bare.outbox.flush()).toEqual({ replayed: 0, failed: 0, rejected: 1 });
+    expect(bare.rejected).toEqual(['remote:conflict:in_progress']);
+    bare.outbox.dispose();
+  });
+
   it('the app decides per record, in its own codes', async () => {
     const isRetryable = vi.fn((error: Error, record: OutboxRecord) =>
-      (error as BusError).code === 'remote:already:in_progress' && record.action === 'orderLocked');
+      (error as BusError).code === 'remote:conflict:in_progress' && record.action === 'orderLocked');
     const { outbox } = await queued((c) => ({ problem: c === 'orderLocked' ? problem(409, 'in_progress') : problem(422, 'bad') }), ['orderBad', 'orderLocked', 'orderAfter'], { isRetryable });
     expect(await outbox.flush()).toEqual({ replayed: 0, failed: 1, rejected: 1 });
     expect(isRetryable.mock.calls.map(([, record]) => record.action)).toEqual(['orderBad', 'orderLocked']);

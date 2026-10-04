@@ -14,7 +14,7 @@
  * unreachable through installDomIntegration - defensive only.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { installDomIntegration, preheatIdle } from '../../src/router/dom';
+import { installDomIntegration, preheatIdle } from '@router/dom';
 
 const cleanups: Array<() => void> = [];
 

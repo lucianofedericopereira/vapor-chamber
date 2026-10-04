@@ -21,7 +21,11 @@ import { it } from '../src/vitest';
 import { ERROR_CODE_REGISTRY } from '../src/schema';
 
 const SRC = join(import.meta.dirname, '..', 'src');
-const CONDITIONS = 'missing|already|invalid|refused|limited|timeout|lost|aborted|exceeded|failed|unexpected|unknown';
+// The vocabulary, read from the `Condition` type itself: a copy here went stale
+// when `conflict` and `unauthenticated` joined it, and a site minting either
+// would have been skipped by the scan without a word.
+const VOCABULARY = [...(/export type Condition =([^;]*);/.exec(readFileSync(join(SRC, 'failure.ts'), 'utf8'))?.[1] ?? '').matchAll(/'([a-z]+)'/g)].map((m) => m[1]);
+const CONDITIONS = VOCABULARY.join('|');
 
 /**
  * Declared, catalogued and minted by no site - each for a stated reason, so
@@ -29,7 +33,6 @@ const CONDITIONS = 'missing|already|invalid|refused|limited|timeout|lost|aborted
  */
 const DECLARED_NOT_MINTED: Record<string, string> = {
   'failed:handler': "a handler's throw reaches result.error raw (plan settled item 10)",
-  'invalid:name': 'the naming check throws a plain Error at register()',
   'already:handler': 'the overwrite notice is a DEV console line',
   'failed:hook': 'an after-hook throw is logged, not returned',
   'failed:listener': 'a listener throw is logged, not returned',
@@ -48,9 +51,11 @@ function sourceFiles(dir: string): string[] {
 /** Every `'condition:subject'` literal passed as a code, comments stripped. */
 function minted(): Set<string> {
   const found = new Set<string>();
-  const literal = new RegExp(`(?:fail|refuse|Fail|transportError|\\))\\(\\s*'((?:${CONDITIONS}):[a-z]+)'`, 'g');
+  const literal = new RegExp(`(?:fail|refuse|Fail|transportError|routerError|\\))\\(\\s*'((?:${CONDITIONS}):[a-zA-Z]+)'`, 'g');
   for (const file of sourceFiles(SRC)) {
-    const text = readFileSync(file, 'utf8').replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/[^\n]*/g, '$1');
+    // Line comments first: a `/*` inside one (table.ts writes the splat as
+    // `/*`) would otherwise open a block that swallows the code after it.
+    const text = readFileSync(file, 'utf8').replace(/(^|[^:])\/\/[^\n]*/g, '$1').replace(/\/\*[\s\S]*?\*\//g, '');
     for (const m of text.matchAll(literal)) found.add(m[1]);
   }
   return found;
@@ -66,6 +71,9 @@ describe('error-code registry sweep', () => {
     // A guard on the scan itself: an empty set would pass every check below.
     expect(codes.size).toBeGreaterThan(10);
     expect(ERROR_CODE_REGISTRY.length).toBeGreaterThan(10);
+    // And on the vocabulary read: the type, all fourteen words.
+    expect(VOCABULARY).toHaveLength(14);
+    expect(VOCABULARY).toEqual(expect.arrayContaining(['conflict', 'unauthenticated', 'lost']));
   });
 
   it('every minted code has a registry row', () => {
@@ -81,6 +89,32 @@ describe('error-code registry sweep', () => {
   it('a declared-not-minted code is really not minted', () => {
     const nowMinted = Object.keys(DECLARED_NOT_MINTED).filter((c) => codes.has(c));
     expect(nowMinted, 'now minted: remove it from DECLARED_NOT_MINTED').toEqual([]);
+  });
+
+  it('the DEV vocabulary check in BusError lists exactly the Condition type', () => {
+    // The one runtime copy of the vocabulary (a type is gone at runtime).
+    const text = readFileSync(join(SRC, 'failure.ts'), 'utf8');
+    const words = /DEV && !\/\^\(([a-z|]+)\):/.exec(text)?.[1].split('|') ?? [];
+    expect([...words].sort()).toEqual([...VOCABULARY].sort());
+  });
+
+  // The router owns its codes under its own name (shape rule 3), so its
+  // sweep is owner-exact: every `routerError` literal has a `router:` row and
+  // every `router:` row is raised, and no plain Error is built in its sources
+  // (log s35.108).
+  it('the router: every code it mints is a router: row, every router: row is minted', () => {
+    const own = new Set<string>();
+    const literal = new RegExp(`routerError\\(\\s*'((?:${CONDITIONS}):[a-zA-Z]+)'`, 'g');
+    const files = [...sourceFiles(join(SRC, 'router')), ...sourceFiles(join(SRC, 'router-fetch'))];
+    for (const file of files) for (const m of readFileSync(file, 'utf8').matchAll(literal)) own.add(`router:${m[1]}`);
+    const routerRows = ERROR_CODE_REGISTRY.map((e) => e.code).filter((c) => c.startsWith('router:'));
+    expect([...own].sort()).toEqual(routerRows.sort());
+  });
+
+  it('the router builds no plain Error', () => {
+    const files = [...sourceFiles(join(SRC, 'router')), ...sourceFiles(join(SRC, 'router-fetch'))];
+    const plain = files.filter((file) => /new (?:Type|Range)?Error\(/.test(readFileSync(file, 'utf8').replace(/(^|[^:])\/\/[^\n]*/g, '$1').replace(/\/\*[\s\S]*?\*\//g, '')));
+    expect(plain, 'a router failure is routerError, coded').toEqual([]);
   });
 
   it('no code is registered twice', () => {

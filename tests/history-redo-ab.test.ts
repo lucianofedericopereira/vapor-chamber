@@ -29,7 +29,7 @@ import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createCommandBus, createAsyncCommandBus } from '../src/command-bus';
 import type * as ShippedMod from '../src/plugins-core';
-import { underCoverage } from './under-coverage';
+import { runTiming } from './under-coverage';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // Per-file subdir: the whole dir is removed in afterAll, so it must be ours alone.
@@ -51,12 +51,12 @@ const REF_DIR = resolve(HERE, '__ref', 'history-redo');
 // biome-ignore-start lint/suspicious/noTemplateCurlyInString: source text matched against src/ledger.ts byte for byte, not templates
 const REVERT_FIX: Array<[string, string]> = [
   [
-    "      if (origin === 'redo' || origin === 'undo' || !result.ok || skip?.(cmd) || (filter && !filter(cmd))) return;",
-    '      if (_replaying || !result.ok || skip?.(cmd) || (filter && !filter(cmd))) return;',
+    "      if (origin === 'redo' || origin === 'undo' || origin === 'sync' || !result.ok || skip?.(cmd) || (filter && !filter(cmd))) {",
+    '      if (_replaying || !result.ok || skip?.(cmd) || (filter && !filter(cmd))) {',
   ],
   ['  let inFlight = false;\n', '  let inFlight = false;\n  let _replaying = false;\n'],
   [
-    "        () => (handler ? _withOriginScope('undo', () => handler(cmd)) : undefined));",
+    "        () => (handler ? onSettledValue(_undo(bus as LedgerBus, cmd)) : undefined));",
     '        () => { _replaying = true; try { return handler ? handler(cmd) : undefined; } finally { _replaying = false; } });',
   ],
   [
@@ -142,7 +142,7 @@ const ROWS: Array<[string, (m: Mod) => number | Promise<number>]> = [
 const ROUNDS = 11;
 
 describe('history() async-redo fix - real path A/B', () => {
-  it.skipIf(underCoverage)('agrees on the sync bus, records an async redo once, and measures the cost', async () => {
+  it('agrees on the sync bus, records an async redo once, and measures the cost', async () => {
     mkdirSync(REF_DIR, { recursive: true });
     const arms: Record<string, Mod> = {};
     const load = async (name: string, revert: boolean) => {
@@ -163,7 +163,8 @@ describe('history() async-redo fix - real path A/B', () => {
       bus.use(h);
       bus.register('cartAdd', () => { cart.count += 1; }, { undo: () => { cart.count -= 1; } });
       const seen: unknown[] = [];
-      bus.on('cart*', (cmd) => { const s = h.getState(); seen.push([cmd.action, cart.count, s.canUndo, s.canRedo]); });
+      // `$undo` commands (s35.114) are not this A/B's subject; the arms differ there on purpose.
+      bus.on('cart*', (cmd) => { if (cmd.action.endsWith('$undo')) return; const s = h.getState(); seen.push([cmd.action, cart.count, s.canUndo, s.canRedo]); });
       for (const a of ['cartAdd', 'cartAdd', 'cartUndo', 'cartRedo', 'cartUndo', 'cartUndo', 'cartRedo']) bus.dispatch(a, {});
       return seen;
     };
@@ -181,6 +182,9 @@ describe('history() async-redo fix - real path A/B', () => {
       await new Promise((r) => setTimeout(r, 0));
       expect(h.getState().past).toHaveLength(expected);
     }
+
+    // Timing runs on `npm run test:timing` only, never instrumented (tests/under-coverage.ts).
+    if (!runTiming) return;
 
     // --- measurement --------------------------------------------------------
     const order = Object.keys(arms);

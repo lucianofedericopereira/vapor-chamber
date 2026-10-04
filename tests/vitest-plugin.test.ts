@@ -12,6 +12,7 @@ import ts from 'typescript';
 import { describe, expect, it, vi } from 'vitest';
 import { vaporChamberTest } from '../src/vite-hmr';
 import { stubEnv, VcTestError } from '../src/vitest-pure';
+import { requireDist } from './require-dist';
 
 const SETUP = 'vapor-chamber/vitest';
 
@@ -283,9 +284,9 @@ describe('the island project (R7)', () => {
   });
 });
 
-const haveDist = existsSync(resolve(process.cwd(), 'dist/vite-hmr.d.ts'));
+requireDist(existsSync(resolve(process.cwd(), 'dist/vite-hmr.d.ts')));
 
-describe.skipIf(!haveDist)('R14 the public type stays structural', () => {
+describe('R14 the public type stays structural', () => {
   it('dist/vite-hmr.d.ts references no vitest module', () => {
     const text = readFileSync(resolve(process.cwd(), 'dist/vite-hmr.d.ts'), 'utf8');
     const info = ts.preProcessFile(text, true, true);

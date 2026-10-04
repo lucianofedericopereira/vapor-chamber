@@ -38,6 +38,8 @@ bus.register('cartAdd', (cmd) => {
 })
 
 // State also survives - items in the cart stay after a component hot-reload
+// Outside a component, for brevity: in an app this runs in setup(). Here nothing
+// disposes it automatically (the DEV heads-up says so); call dispose() when done.
 const { state: cartState } = useCommandState(
   { items: [] as string[], count: 0 },
   {

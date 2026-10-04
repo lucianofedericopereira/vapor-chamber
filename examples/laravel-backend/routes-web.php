@@ -9,8 +9,8 @@
  * is in the JSON body, not the URL.
  */
 
-use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\VaporChamberController;
+// Fully-qualified, no `use` lines: the skeleton's web.php already imports
+// Route, so a second `use` of it is a PHP fatal.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Flow A - Web/Blade with cookie CSRF (sprinkled JS, server-rendered pages)
@@ -29,7 +29,7 @@ use App\Http\Controllers\VaporChamberController;
 // auto-refresh would otherwise re-read the (stale) meta tag and retry with
 // the same expired token.
 
-Route::post('/api/vc', VaporChamberController::class)
+\Illuminate\Support\Facades\Route::post('/api/vc', \App\Http\Controllers\VaporChamberController::class)
     ->middleware(['web'])
     ->name('api.vc');
 
@@ -54,7 +54,7 @@ Route::post('/api/vc', VaporChamberController::class)
 // as stateful.
 
 /*
-Route::post('/vc', VaporChamberController::class)   // -> /api/vc
+\Illuminate\Support\Facades\Route::post('/vc', \App\Http\Controllers\VaporChamberController::class)   // -> /api/vc
     ->middleware(['auth:sanctum'])
     ->name('api.vc');
 */

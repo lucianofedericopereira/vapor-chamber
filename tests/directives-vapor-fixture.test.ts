@@ -419,6 +419,47 @@ describe('v-vc-command on a real Vapor app (vcCommandVapor)', () => {
     ]);
   });
 
+  // Fails on rc.9, where `:onClick` on a native element was a property write
+  // that never ran. From rc.10 (`86d44991`) it is a listener, registered first.
+  it('a bound :onClick on the same element runs first too, and its veto stands', async () => {
+    const v = await vapor();
+    const arms: Array<[string, number, string[]]> = [];
+    for (const arm of ['plain', 'disable', 'stopImmediate'] as const) {
+      seen.length = 0;
+      let ran = 0;
+      const { render } = await compileVapor(
+        v,
+        `<div><button v-vc-command="'cartAdd'" :onClick="mine">go</button></div>`,
+      );
+      const host = document.createElement('div');
+      document.body.appendChild(host);
+      const app = v.createVaporApp(
+        v.defineVaporComponent({
+          setup: () =>
+            render({
+              mine: (e: Event) => {
+                ran++;
+                if (arm === 'disable') (e.currentTarget as HTMLButtonElement).disabled = true;
+                if (arm === 'stopImmediate') e.stopImmediatePropagation();
+              },
+            }),
+        }),
+      );
+      app.directive('vc-command', vcCommandVapor);
+      app.mount(host);
+      (host.querySelector('button') as HTMLButtonElement).click();
+      await settle();
+      arms.push([arm, ran, [...seen]]);
+      app.unmount();
+      host.remove();
+    }
+    expect(arms).toEqual([
+      ['plain', 1, ['cartAdd']],
+      ['disable', 1, []],
+      ['stopImmediate', 1, []],
+    ]);
+  });
+
   // COVERAGE: the plugin on a Vapor app names the FIX, and is silent in production.
   it('createDirectivePlugin() on a Vapor app warns with our text, not just any text', async () => {
     const v = await vapor();

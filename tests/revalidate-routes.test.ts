@@ -2,7 +2,7 @@
 /**
  * ACCEPTANCE CRITERIA for `revalidateRoutes`, written against pattern C of
  * the composition plan, which has since been deleted into docs/router.md and
- * docs/whitepaper.md 11.9. git has it.
+ * docs/whitepaper.md 8.2. git has it.
  *
  * Committed BEFORE the implementation, deliberately - and it earned that order
  * immediately: writing the criteria against today's exports falsified one plan
@@ -88,12 +88,12 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { createCommandBus, matchesPattern } from '../src/command-bus';
-import { isRouterError } from '../src/router/errors';
-import type { LoaderHandlers } from '../src/router/loaders';
-import { revalidateRoutes } from '../src/router/revalidate';
-import { createMemoryHistory } from '../src/router/history';
-import { createRouter, runLoaders } from '../src/router/index';
-import type { Router } from '../src/router/router-type';
+import { isRouterError } from '@router/errors';
+import type { LoaderHandlers } from '@router/loaders';
+import { revalidateRoutes } from '@router/revalidate';
+import { createMemoryHistory } from '@router/history';
+import { createRouter, runLoaders } from '@router/index';
+import type { Router } from '@router/router-type';
 
 const ROWS = [
   { name: 'shop', path: '/', component: 'Shell' },
@@ -244,7 +244,7 @@ describe('revalidateRoutes - behaviour', () => {
     const plugin = revalidateRoutes(router, LOADERS(() => ({ ok: 1 })), { 'cart*': ['nope'] }, { onError });
     const result = plugin({ action: 'cartAdd' }, () => ({ ok: true }));
     expect(result).toEqual({ ok: true });
-    expect(isRouterError(onError.mock.calls[0]?.[0], 'unknown_route_name')).toBe(true);
+    expect(isRouterError(onError.mock.calls[0]?.[0], 'router:missing:record')).toBe(true);
     plugin.dispose();
     router.destroy();
   });
@@ -414,7 +414,7 @@ describe('revalidateRoutes - edges', () => {
     const plugin = revalidateRoutes(router, LOADERS(() => ({ v: 1 })), { '*': ['shop.cart'] }, { onError });
     plugin({ action: 'cartAdd' }, () => ({ ok: true }));
     const caught = onError.mock.calls[0]?.[0];
-    expect(isRouterError(caught, 'unknown_route_name')).toBe(true);
+    expect(isRouterError(caught, 'router:missing:record')).toBe(true);
     expect(String((caught as Error).message)).toContain('none');
     plugin.dispose();
     router.destroy();
@@ -506,7 +506,7 @@ describe('revalidateRoutes - edges', () => {
 
   it('stays silent when an aborted refresh rejects rather than resolves', async () => {
     // The other half of the abort story: dispose() aborts, and runLoaders maps
-    // an aborted signal to a coded 'cancelled' rejection. That is a refusal we
+    // an aborted signal to a coded `router:aborted:navigation` rejection. That is a refusal we
     // caused, so it must not reach onError or the console.
     let release!: () => void;
     const gate = new Promise<void>((r) => { release = r; });

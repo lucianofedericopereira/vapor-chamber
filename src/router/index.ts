@@ -129,7 +129,7 @@ export type RouterOptions = {
   dehydrate?: (el: Element) => unknown;
   /** Fetch server HTML for blade rows. REQUIRED if the table has any;
    *  `bladeFetcher()` from `vapor-chamber/router/remote` is the in-box one. A
-   *  blade row with no fetcher is a coded `blade_unconfigured`. */
+   *  blade row with no fetcher is a coded `router:missing:fetchBlade`. */
   fetchBlade?: (href: string) => Promise<string>;
   /** Terminal error handler. Default: hard-navigate on HARD_NAV_CODES, log
    *  the rest. */
@@ -148,18 +148,14 @@ export type RouterOptions = {
 };
 
 /**
- * A routes payload, bare or as the wire contract answers it: `{ state }` on
- * success, `{ problem }` (RFC 9457) for a failure.
+ * A routes payload as a read answers it: plain JSON, the table itself. A
+ * failure is a non-2xx problem, which the http client throws; an envelope
+ * (`{ state }`, a 2xx `{ problem }`) is off-protocol (log s35.115).
  */
-export function unwrapRoutesPayload(raw: unknown): RoutesPayload {
-  const answer = raw as { state?: unknown; problem?: { code?: string; detail?: string } } | null;
-  if (answer && typeof answer === 'object' && answer.problem) {
-    const { code, detail } = answer.problem;
-    throw routerError('routes_load_failed', `routes endpoint failed: ${detail ?? code ?? 'no detail'}`);
-  }
-  const candidate = (answer && typeof answer === 'object' && 'state' in answer ? answer.state : raw) as RoutesPayload;
+export function readRoutesPayload(raw: unknown): RoutesPayload {
+  const candidate = raw as RoutesPayload | null;
   if (!candidate || !Array.isArray(candidate.routes)) {
-    throw routerError('invalid_routes_payload', 'routes payload has no routes array');
+    throw routerError('unexpected:routes', 'routes payload has no routes array');
   }
   return candidate;
 }
@@ -179,7 +175,7 @@ function readInlinePayload(selector: string): RoutesPayload | null {
   if (typeof document === 'undefined') return null;
   try {
     const text = document.querySelector(selector)?.textContent;
-    return text ? unwrapRoutesPayload(JSON.parse(text)) : null;
+    return text ? readRoutesPayload(JSON.parse(text)) : null;
   } catch {
     return null;
   }
@@ -262,7 +258,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
     // blank component instead of a coded error. See `../dict`.
     const entry = options.components && Object.hasOwn(options.components, key) ? options.components[key] : undefined;
     if (entry === undefined) {
-      throw routerError('component_missing', `no component registered for key "${key}"`, { to });
+      throw routerError('missing:component', `no component registered for key "${key}"`, { to });
     }
     if (typeof entry === 'function' && !isComponentLike(entry)) {
       let mod: unknown;
@@ -270,7 +266,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
         mod = await (entry as () => Promise<unknown>)();
       } catch (cause) {
         // Stale chunk after a deploy - default handler hard-navigates.
-        throw routerError('component_load_failed', `failed to load component "${key}"`, { to, cause });
+        throw routerError('failed:component', `failed to load component "${key}"`, { to, cause });
       }
       const component = unwrapModule(mod);
       componentCache.set(key, component);
@@ -287,7 +283,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
       records.map(async (record): Promise<RenderEntry> => {
         if (record.blade) {
           if (!fetchBlade) {
-            throw routerError('blade_unconfigured', `blade route "${record.name}" hit but no fetchBlade available`, {
+            throw routerError('missing:fetchBlade', `blade route "${record.name}" hit but no fetchBlade available`, {
               to,
             });
           }
@@ -295,7 +291,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
           try {
             html = await fetchBlade(history.createHref(to.fullPath));
           } catch (cause) {
-            throw routerError('blade_fetch_failed', `blade fetch failed for "${to.fullPath}"`, { to, cause });
+            throw routerError('failed:blade', `blade fetch failed for "${to.fullPath}"`, { to, cause });
           }
           // Imported here, not at module scope: blade.ts is a vDOM component
           // (defineComponent/h/onMounted). A static import would put the vDOM
@@ -329,7 +325,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
       const href = history.createHref(to.fullPath);
       // Handing the URL back to the server only helps if the server can answer
       // it differently. Under the catch-all this router is built for, it
-      // cannot: the shell comes back, the router says `unmatched` again, and
+      // cannot: the shell comes back, the router says `missing:route` again, and
       // location.assign() fires again - an endless reload storm that survives
       // refreshes, because the offending URL stays in the address bar.
       // Hard-navigate only when it actually moves us somewhere else.
@@ -381,35 +377,47 @@ export function createRouter<TName extends string = string>(options: RouterOptio
 
   let started: Promise<void> | null = null;
   const teardowns: Array<() => void> = [];
+  /** Set by destroy(). start() is async (the table load, the first
+   *  navigation), and anything it installed after destroy() ran its teardowns
+   *  would never be removed. tests/router/destroy-during-start.test.ts. */
+  let destroyed = false;
 
   async function loadRemoteTable(url: string): Promise<void> {
     try {
       if (!http) {
         throw routerError(
-          'http_unconfigured',
+          'missing:http',
           `routes: { url: "${url}" } needs an http client - pass \`http: routerHttp()\` from vapor-chamber/router/remote (or any HttpClient of your own)`,
         );
       }
       const response = await http.get<unknown>(url, { retry: 2 });
-      const payload = unwrapRoutesPayload(response.data);
+      const payload = readRoutesPayload(response.data);
       if (DEV) warnRemoteBase(payload);
       tableRef.value = createRouteTable(payload.routes);
     } catch (cause) {
       throw isRouterError(cause)
         ? cause
-        : routerError('routes_load_failed', `could not load routes from "${url}"`, { cause });
+        : routerError('failed:routes', `could not load routes from "${url}"`, { cause });
     }
   }
 
   function loadInlineTable(selector: string): void {
     if (typeof document === 'undefined') {
-      throw routerError('inline_routes_missing', 'inline routes need a DOM - pass rows or { url } instead');
+      throw routerError('missing:inline', 'inline routes need a DOM - pass rows or { url } instead');
     }
     const el = document.querySelector(selector);
     if (!el?.textContent) {
-      throw routerError('inline_routes_missing', `no inline routes element matches "${selector}"`);
+      throw routerError('missing:inline', `no inline routes element matches "${selector}"`);
     }
-    tableRef.value = createRouteTable(unwrapRoutesPayload(JSON.parse(el.textContent)).routes);
+    let raw: unknown;
+    try {
+      raw = JSON.parse(el.textContent);
+    } catch (cause) {
+      // The router reading its own input: coded like the element's other two
+      // failures. tests/router/inline-routes-json.test.ts.
+      throw routerError('unexpected:routes', `inline routes in "${selector}" are not JSON`, { cause });
+    }
+    tableRef.value = createRouteTable(readRoutesPayload(raw).routes);
   }
 
   /** Remote payloads cannot inform `base` - the history exists before the
@@ -440,6 +448,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
         if ('inline' in (source as { inline?: string })) loadInlineTable((source as { inline: string }).inline);
         else await loadRemoteTable((source as { url: string }).url);
       }
+      if (destroyed) return;
 
       teardowns.push(history.listen((fullPath, info) => engine.handlePop(fullPath, { delta: info.delta })));
 
@@ -507,7 +516,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
 
       await engine.navigate(history.location(), { replace: true });
 
-      armIdlePreheat();
+      if (!destroyed) armIdlePreheat();
     })();
     started.catch((error) => dispatchError(error, engine.snapshot.value.location));
     return started;
@@ -555,7 +564,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
     },
     reload: async () => {
       if (!('url' in (source as { url?: string }))) {
-        throw routerError('routes_load_failed', 'reload() needs a { url } routes source');
+        throw routerError('missing:url', 'reload() needs a { url } routes source');
       }
       await loadRemoteTable((source as { url: string }).url);
     },
@@ -582,6 +591,8 @@ export function createRouter<TName extends string = string>(options: RouterOptio
       void start();
     },
     destroy: () => {
+      destroyed = true;
+      engine.cancel();
       for (const teardown of teardowns.splice(0)) teardown();
       history.destroy();
     },

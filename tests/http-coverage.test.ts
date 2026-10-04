@@ -22,6 +22,7 @@ import {
   invalidateCsrfCache,
 } from '../src/http';
 import { createResponseCache } from '../src/http-cache';
+import { problemOf } from '../src/http-errors';
 
 // ---------------------------------------------------------------------------
 // Fetch mock helper (mirrors the existing test files)
@@ -121,9 +122,7 @@ describe('refreshCsrfOnce - failure path', () => {
       .mockResolvedValueOnce(mockResponse(419)) // original request -> 419
       .mockResolvedValueOnce(mockResponse(200, {})); // csrf-cookie GET succeeds
 
-    await expect(postCommand('/api/cmd', {}, { retry: 0 })).rejects.toThrow(
-      /CSRF refresh failed: no token found in DOM after refresh/,
-    );
+    await expect(postCommand('/api/cmd', {}, { retry: 0 })).rejects.toMatchObject({ code: 'transport:missing:csrf' });
   });
 });
 
@@ -192,11 +191,9 @@ describe('refreshCsrfOnce - coalescing', () => {
     // Both reject - one from the primary refresh, one from the coalesced wait.
     expect(results[0].status).toBe('rejected');
     expect(results[1].status).toBe('rejected');
-    const messages = results.map((r) => (r as PromiseRejectedResult).reason?.message ?? '');
+    const codes = results.map((r) => (r as PromiseRejectedResult).reason?.code ?? '');
     // At least one reflects the coalesced "token unavailable after refresh" path.
-    expect(
-      messages.some((m) => /CSRF refresh failed/.test(m)),
-    ).toBe(true);
+    expect(codes.some((c) => c === 'transport:missing:csrf')).toBe(true);
   });
 });
 
@@ -272,7 +269,7 @@ describe('combineSignals - fallback without AbortSignal.any', () => {
       const promise = postCommand('/api/cmd', {}, { signal: ctrl.signal });
       ctrl.abort();
 
-      await expect(promise).rejects.toMatchObject({ name: 'AbortError' });
+      await expect(promise).rejects.toMatchObject({ code: 'transport:aborted:request' });
     } finally {
       (AbortSignal as any).any = realAny;
     }
@@ -284,21 +281,36 @@ describe('combineSignals - fallback without AbortSignal.any', () => {
 // ---------------------------------------------------------------------------
 
 describe('sleepMs - abort during retry backoff', () => {
-  it('rejects the backoff sleep with AbortError when the user signal fires mid-wait', async () => {
+  it("rejects the backoff sleep with the caller's abort code when the user signal fires mid-wait", async () => {
     const ctrl = new AbortController();
-    // Network error so the catch path schedules sleepMs(backoff, userSignal),
-    // then we abort while that sleep is pending -> clearTimeout + reject path.
-    (globalThis.fetch as any).mockRejectedValue(new Error('boom'));
+    // A 503 is re-sent for any method, so the loop schedules sleepMs(backoff,
+    // userSignal); the abort lands while that sleep is pending.
+    (globalThis.fetch as any).mockResolvedValue(jsonResponse(503, { message: 'busy' }));
 
     vi.useFakeTimers();
     const promise = postCommand('/api/cmd', {}, { retry: 3, signal: ctrl.signal });
-    const assertion = expect(promise).rejects.toMatchObject({ name: 'AbortError' });
+    const assertion = expect(promise).rejects.toMatchObject({ code: 'transport:aborted:request' });
 
     // Let the first fetch reject and enter the backoff sleep.
     await vi.advanceTimersByTimeAsync(0);
     ctrl.abort(); // fires the sleepMs abort listener -> clearTimeout + reject
     await vi.runAllTimersAsync();
     await assertion;
+  });
+
+  it('the same after a thrown failure: a GET with no response, aborted in its backoff', async () => {
+    const ctrl = new AbortController();
+    (globalThis.fetch as any).mockRejectedValue(new TypeError('Failed to fetch'));
+
+    vi.useFakeTimers();
+    const promise = createHttpClient().get('/api/q', { retry: 3, signal: ctrl.signal });
+    const assertion = expect(promise).rejects.toMatchObject({ code: 'transport:aborted:request' });
+
+    await vi.advanceTimersByTimeAsync(0);
+    ctrl.abort();
+    await vi.runAllTimersAsync();
+    await assertion;
+    expect((globalThis.fetch as any).mock.calls.length).toBe(1);
   });
 });
 
@@ -350,10 +362,10 @@ describe('createHttpClient - 419 CSRF retry', () => {
     expect(retryInit.headers['X-CSRF-TOKEN']).toBe('client-csrf-token');
   });
 
-  it('a 419 that survives the refresh throws HttpError and does NOT fire onSessionExpired', async () => {
+  it('a 419 that survives the refresh throws the remote failure and does NOT fire onSessionExpired', async () => {
     const onSessionExpired = vi.fn();
     // 419 -> refresh -> 419 again. 419 is CSRF expiry, not session expiry
-    // (whitepaper 5.7): it is thrown as an HttpError, and only 401 fires
+    // (whitepaper 6.2): it is thrown as the remote failure, and only 401 fires
     // onSessionExpired - clientRequest and postCommand alike (runWithRetry,
     // one policy).
     (globalThis.fetch as any)
@@ -364,8 +376,8 @@ describe('createHttpClient - 419 CSRF retry', () => {
     const http = createHttpClient({ csrf: true });
 
     await expect(http.post('/api/cmd', {}, { onSessionExpired })).rejects.toMatchObject({
-      name: 'HttpError',
-      response: { status: 419 },
+      name: 'BusError',
+      context: { status: 419 },
     });
     expect(onSessionExpired).not.toHaveBeenCalled();
   });
@@ -473,7 +485,7 @@ describe('createHttpClient - safe.put/patch/delete', () => {
     const result = await http.safe.patch('/api/users/1', { name: '' });
 
     expect(result.data).toBeNull();
-    expect(result.error).toEqual({ status: 422, code: 'invalid', detail: 'Validation failed' });
+    expect(problemOf(result.error)).toEqual({ status: 422, code: 'invalid', detail: 'Validation failed' });
     expect(result.status).toBe(422);
     const [, init] = (globalThis.fetch as any).mock.calls[0];
     expect(init.method).toBe('PATCH');
@@ -548,6 +560,19 @@ describe('getAny - last-resort lookup for cache.serveStaleOnError', () => {
 
   it('returns null on a genuine miss', () => {
     expect(createResponseCache().getAny('json:/api/never-set')).toBeNull();
+  });
+});
+
+describe('cache.set at capacity (50 entries)', () => {
+  it('evicts the least recently used entry, and only that one', () => {
+    const cache = createResponseCache();
+    for (let i = 0; i < 50; i++) cache.set(`json:/k${i}`, { i });
+    cache.get('json:/k0'); // a hit moves k0 to the end; k1 is now the oldest
+    cache.set('json:/k50', { i: 50 });
+    expect(cache.getAny('json:/k1')).toBeNull();
+    expect(cache.getAny('json:/k0')).not.toBeNull();
+    expect(cache.getAny('json:/k2')).not.toBeNull();
+    expect(cache.getAny('json:/k50')).not.toBeNull();
   });
 });
 

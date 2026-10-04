@@ -53,7 +53,7 @@ describe('postCommand - silent on permanent failures', () => {
 
     await expect(
       postCommand('/api/vc', { command: 'save' }, { retry: 3, silent: true }),
-    ).rejects.toMatchObject({ silent: true, response: { status: 422 } });
+    ).rejects.toMatchObject({ context: { silent: true, status: 422 } });
 
     // A permanent 4xx must not consume the retry budget.
     expect((globalThis.fetch as any).mock.calls).toHaveLength(1);
@@ -63,8 +63,8 @@ describe('postCommand - silent on permanent failures', () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(422, { error: 'invalid' }));
 
     const err = await postCommand('/api/vc', { command: 'save' }, { retry: 1 }).catch(e => e);
-    expect(err.response.status).toBe(422);
-    expect(err.silent).toBeUndefined();
+    expect(err.context.status).toBe(422);
+    expect(err.context.silent).toBeUndefined();
   });
 });
 
@@ -78,7 +78,7 @@ describe('createHttpClient - abort and session expiry', () => {
     ac.abort();
     const http = createHttpClient();
 
-    await expect(http.get('/api/data', { signal: ac.signal })).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(http.get('/api/data', { signal: ac.signal })).rejects.toMatchObject({ code: 'transport:aborted:request' });
     expect((globalThis.fetch as any)).not.toHaveBeenCalled();
   });
 
@@ -93,7 +93,7 @@ describe('createHttpClient - abort and session expiry', () => {
     });
 
     const http = createHttpClient();
-    await expect(http.get('/api/data', { retry: 2, signal: ac.signal })).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(http.get('/api/data', { retry: 2, signal: ac.signal })).rejects.toMatchObject({ code: 'transport:aborted:request' });
     // Attempt 0 ran; the pre-attempt guard stopped attempt 1.
     expect((globalThis.fetch as any).mock.calls).toHaveLength(1);
   });
@@ -103,7 +103,7 @@ describe('createHttpClient - abort and session expiry', () => {
     const onSessionExpired = vi.fn();
     const http = createHttpClient();
 
-    await expect(http.get('/api/me', { onSessionExpired })).rejects.toMatchObject({ response: { status: 401 } });
+    await expect(http.get('/api/me', { onSessionExpired })).rejects.toMatchObject({ context: { status: 401 } });
     expect(onSessionExpired).toHaveBeenCalledTimes(1);
   });
 
@@ -115,7 +115,7 @@ describe('createHttpClient - abort and session expiry', () => {
     });
 
     const http = createHttpClient();
-    await expect(http.get('/api/data', { retry: 2, signal: ac.signal })).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(http.get('/api/data', { retry: 2, signal: ac.signal })).rejects.toMatchObject({ code: 'transport:aborted:request' });
     expect((globalThis.fetch as any).mock.calls).toHaveLength(1);
   });
 });
@@ -133,9 +133,9 @@ describe('createHttpClient - response interceptor onRejected', () => {
     const http = createHttpClient({ retry: 0 });
     http.interceptors.response.use(onFulfilled, onRejected);
 
-    await expect(http.get('/api/data')).rejects.toMatchObject({ response: { status: 500 } });
+    await expect(http.get('/api/data')).rejects.toMatchObject({ context: { status: 500 } });
     expect(onRejected).toHaveBeenCalledTimes(1);
-    expect((onRejected.mock.calls[0]![0] as any).response.status).toBe(500);
+    expect((onRejected.mock.calls[0]![0] as any).context.status).toBe(500);
     expect(onFulfilled).not.toHaveBeenCalled();
   });
 
@@ -143,6 +143,6 @@ describe('createHttpClient - response interceptor onRejected', () => {
     (globalThis.fetch as any).mockResolvedValue(jsonResponse(500, { error: 'boom' }));
     const http = createHttpClient();
 
-    await expect(http.get('/api/data', { silent: true, retry: 0 })).rejects.toMatchObject({ silent: true });
+    await expect(http.get('/api/data', { silent: true, retry: 0 })).rejects.toMatchObject({ context: { silent: true } });
   });
 });

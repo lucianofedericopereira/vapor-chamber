@@ -23,7 +23,9 @@ import {
   defineVaporComponent,
   h,
   nextTick,
+  renderEffect,
   setInsertionState,
+  shallowRef,
   template,
 } from 'vue';
 import { createMemoryHistory } from '../../src/router/history';
@@ -51,6 +53,22 @@ export type OutletObservations = {
   guard: {
     vdom: { name: string | null; code: unknown };
     blade: { name: string | null; code: unknown };
+  };
+  liveSlot: {
+    beforeChild: string;
+    flippedBeforeChild: string;
+    whileChild: string;
+    afterRoundTrip: string;
+    flippedAfterRoundTrip: string;
+    afterSecondRoundTrip: string;
+    slotElements: number;
+  };
+  lateSlot: {
+    offAtMount: { text: string; elements: number };
+    turnedOn: string;
+    whileChild: string;
+    backWithSlotOff: string;
+    turnedOnAgain: string;
   };
 };
 
@@ -293,6 +311,97 @@ export async function runOutletObservations(): Promise<OutletObservations> {
   };
   app5.done();
 
+  // (g) a REACTIVE default slot, through a child route and back. The slot holds
+  //     a render effect, which is what a compiled `{{ }}` or `v-if` emits. The
+  //     static slot of (c) cannot show this: DOM with no effect behind it
+  //     still reads right until something has to change.
+  const flag = shallowRef(true);
+  const app6 = await scenario({
+    Layout: withOutlet('layout', {
+      default: () => {
+        const el = (template('<em> </em>', 1) as () => Element)();
+        renderEffect(() => {
+          el.textContent = flag.value ? 'on' : 'off';
+        });
+        return el;
+      },
+    }),
+    About: leaf('<span>about</span>'),
+  });
+  const slotText = () => app6.layout().textContent ?? '';
+  const flip = async (value: boolean) => {
+    flag.value = value;
+    await nextTick();
+  };
+  await app6.push('/app');
+  const beforeChild = slotText();
+  await flip(false);
+  const flippedBeforeChild = slotText();
+  await flip(true);
+  await app6.push('/app/about');
+  const whileChild = slotText();
+  // Flipped while the slot is out of the DOM: it must come back current.
+  await flip(false);
+  await app6.push('/app');
+  const afterRoundTrip = slotText();
+  await flip(true);
+  const flippedAfterRoundTrip = slotText();
+  await app6.push('/app/about');
+  await app6.push('/app');
+  const afterSecondRoundTrip = slotText();
+  const liveSlot = {
+    beforeChild,
+    flippedBeforeChild,
+    whileChild,
+    afterRoundTrip,
+    flippedAfterRoundTrip,
+    afterSecondRoundTrip,
+    slotElements: app6.layout().children.length,
+  };
+  app6.done();
+
+  // (h) a default slot that is itself CONDITIONAL, and off when the outlet is
+  //     created: `<template v-if="on" #default>`. compiler-vapor emits that as
+  //     a dynamic slot SOURCE, which is the `$` array below (the shape is
+  //     checked against the installed compiler in vapor-outlet-helpers.test.ts,
+  //     since this file cannot compile: its production arm has no compiler).
+  //     While the condition is off there is no `slots.default` to read.
+  const slotOn = shallowRef(false);
+  const app7 = await scenario({
+    Layout: withOutlet('layout', {
+      $: [
+        () =>
+          slotOn.value
+            ? { name: 'default', fn: () => (template('<em>late fallback</em>', 1) as () => Element)() }
+            : undefined,
+      ],
+    }),
+    About: leaf('<span>about</span>'),
+  });
+  const lateText = () => app7.layout().textContent ?? '';
+  const turn = async (value: boolean) => {
+    slotOn.value = value;
+    await nextTick();
+  };
+  await app7.push('/app');
+  const offAtMount = { text: lateText(), elements: app7.layout().children.length };
+  await turn(true);
+  const turnedOn = lateText();
+  await app7.push('/app/about');
+  const lateWhileChild = lateText();
+  await turn(false);
+  await app7.push('/app');
+  const backWithSlotOff = lateText();
+  await turn(true);
+  const lateSlot = {
+    offAtMount,
+    turnedOn,
+    whileChild: lateWhileChild,
+    backWithSlotOff,
+    turnedOnAgain: lateText(),
+  };
+  app7.done();
+
   // (f) the mode guard, both causes.
   const guard = {
     vdom: await guardAtMount('/vdom', {
@@ -301,5 +410,5 @@ export async function runOutletObservations(): Promise<OutletObservations> {
     blade: await guardAtMount('/blade', {}),
   };
 
-  return { build, depth, nullBranch, fallback, reuse, attrs, guard };
+  return { build, depth, nullBranch, fallback, reuse, attrs, guard, liveSlot, lateSlot };
 }

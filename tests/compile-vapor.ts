@@ -22,6 +22,8 @@
  * turns that into a named error at the call site instead.
  */
 
+import { bindVapor } from './bind-vapor';
+
 /** The with-vapor browser build, untyped on purpose - these fixtures build trees by hand. */
 export type VaporApi = any;
 
@@ -33,31 +35,27 @@ export type Compiled = {
 };
 
 export async function compileVapor(v: VaporApi, source: string): Promise<Compiled> {
+  const code = await compileVaporSource(source);
+  return { render: bindVapor(v, code), code };
+}
+
+/**
+ * The generated module source alone, for a fixture that binds it somewhere
+ * this file cannot run (see tests/bind-vapor.ts). `isProd` is the compiler's
+ * own production switch, as a production SFC build sets it.
+ */
+export async function compileVaporSource(source: string, isProd = false): Promise<string> {
   const { code, errors } = (await import('vue/compiler-sfc')).compileTemplate({
     source,
     filename: 'T.vue',
     id: 'vc-fixture',
     vapor: true,
+    isProd,
   });
   if (errors.length > 0) {
     throw new Error(`compileVapor(): ${source}\n${errors.map(String).join('\n')}`);
   }
-
-  const importLine = code.match(/^import\s*\{([\s\S]*?)\}\s*from\s*'vue';?$/m);
-  if (!importLine) throw new Error(`compileVapor(): no vue import in generated code:\n${code}`);
-
-  const names: string[] = [];
-  const values: unknown[] = [];
-  for (const part of importLine[1].split(',')) {
-    const [orig, local] = part.trim().split(/\s+as\s+/);
-    if (!orig) continue;
-    if (!(orig in v)) throw new Error(`compileVapor(): the runtime has no "${orig}" (the template needed it)`);
-    names.push(local ?? orig);
-    values.push(v[orig]);
-  }
-
-  const body = code.replace(importLine[0], '').replace('export function render', 'return function render');
-  return { render: new Function(...names, body)(...values) as Compiled['render'], code };
+  return code;
 }
 
 /**

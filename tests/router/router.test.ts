@@ -1,9 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { isRouterError } from '../../src/router/errors';
-import { createMemoryHistory } from '../../src/router/history';
-import { createRouter, unwrapRoutesPayload } from '../../src/router/index';
-import type { LoaderHandlers } from '../../src/router/loaders';
-import type { RouteRecord } from '../../src/router/types';
+import { isRouterError } from '@router/errors';
+import { createMemoryHistory } from '@router/history';
+import { createRouter, readRoutesPayload } from '@router/index';
+import type { LoaderHandlers } from '@router/loaders';
+import type { RouteRecord } from '@router/types';
 
 const ROWS: RouteRecord[] = [
   { name: 'shell', path: '/', parent: null }, // group
@@ -99,11 +99,11 @@ describe('navigation basics', () => {
     expect(loc(router).name).toBe('home');
   });
 
-  it('unmatched -> coded error + onError, nothing committed', async () => {
+  it('router:missing:route -> coded error + onError, nothing committed', async () => {
     const onError = vi.fn();
     const { router } = makeRouter({ onError });
     await router.isReady();
-    expect(isRouterError(await router.push('/nope'), 'unmatched')).toBe(true);
+    expect(isRouterError(await router.push('/nope'), 'router:missing:route')).toBe(true);
     expect(onError).toHaveBeenCalledOnce();
     expect(loc(router).name).toBe('home');
   });
@@ -113,7 +113,7 @@ describe('navigation basics', () => {
     const { router } = makeRouter({ onError });
     await router.isReady();
     const offGuard = router.beforeEach((to) => to.meta.permission !== 'admin');
-    expect(isRouterError(await router.push('/secret'), 'aborted')).toBe(true);
+    expect(isRouterError(await router.push('/secret'), 'router:refused:guard')).toBe(true);
     expect(onError).not.toHaveBeenCalled();
     offGuard();
 
@@ -217,13 +217,13 @@ describe('loader mechanics (via test preset)', () => {
     const slow = router.push('/remote');
     const fast = router.push('/products/1');
     const [slowResult, fastResult] = await Promise.all([slow, fast]);
-    expect(isRouterError(slowResult, 'cancelled')).toBe(true);
+    expect(isRouterError(slowResult, 'router:aborted:navigation')).toBe(true);
     expect(fastResult).toBeNull();
     expect(sawAbortedSignal).toBe(true);
     expect(loc(router).name).toBe('product');
   });
 
-  it('loader failure -> "load_failed" with cause, navigation not committed', async () => {
+  it('loader failure -> "router:failed:loader" with cause, navigation not committed', async () => {
     const onError = vi.fn();
     const boom = new Error('500');
     const { router } = makeRouter({ onError }, async (template) => {
@@ -232,15 +232,15 @@ describe('loader mechanics (via test preset)', () => {
     });
     await router.isReady();
     const result = await router.push('/remote');
-    expect(isRouterError(result, 'load_failed')).toBe(true);
+    expect(isRouterError(result, 'router:failed:loader')).toBe(true);
     expect((result as Error & { cause?: unknown }).cause).toBe(boom);
     expect(loc(router).name).toBe('home');
   });
 
-  it('no preset configured + load route -> "load_failed"', async () => {
+  it('no preset configured + load route -> "router:missing:loader"', async () => {
     const { router } = makeRouter({ loaders: undefined });
     await router.isReady();
-    expect(isRouterError(await router.push('/products'), 'load_failed')).toBe(true);
+    expect(isRouterError(await router.push('/products'), 'router:missing:loader')).toBe(true);
   });
 });
 
@@ -313,17 +313,13 @@ describe('popstate', () => {
 });
 
 describe('errors & delivery', () => {
-  it('unwrap accepts a bare payload and { state }, and throws coded errors', () => {
+  it('reads a bare payload, and throws a coded error for anything else', () => {
     const payload = { routes: [{ name: 'a', path: '/a', component: 'A' }] };
-    expect(unwrapRoutesPayload(payload)).toEqual(payload);
-    expect(unwrapRoutesPayload({ state: payload })).toEqual(payload);
-    expect(() => unwrapRoutesPayload({ problem: { status: 500, code: 'x', detail: 'x' } })).toThrow(
-      expect.objectContaining({ code: 'routes_load_failed' }),
-    );
-    expect(() => unwrapRoutesPayload({})).toThrow(expect.objectContaining({ code: 'invalid_routes_payload' }));
+    expect(readRoutesPayload(payload)).toEqual(payload);
+    expect(() => readRoutesPayload({})).toThrow(expect.objectContaining({ code: 'router:unexpected:routes' }));
   });
 
-  it('component_missing / component_load_failed(cause) / blade_unconfigured', async () => {
+  it('router:missing:component / router:failed:component(cause) / router:missing:fetchBlade', async () => {
     const onError = vi.fn();
     const boom = new Error('chunk 404');
     const { router } = makeRouter({
@@ -338,11 +334,11 @@ describe('errors & delivery', () => {
       { name: 'broken', path: '/broken', component: 'Broken' },
       { name: 'legacy', path: '/legacy', blade: true },
     ]);
-    expect(isRouterError(await router.push('/missing'), 'component_missing')).toBe(true);
+    expect(isRouterError(await router.push('/missing'), 'router:missing:component')).toBe(true);
     const broken = await router.push('/broken');
-    expect(isRouterError(broken, 'component_load_failed')).toBe(true);
+    expect(isRouterError(broken, 'router:failed:component')).toBe(true);
     expect((broken as Error & { cause?: unknown }).cause).toBe(boom);
-    expect(isRouterError(await router.push('/legacy'), 'blade_unconfigured')).toBe(true);
+    expect(isRouterError(await router.push('/legacy'), 'router:missing:fetchBlade')).toBe(true);
     expect(loc(router).name).toBe('home'); // none committed
   });
 
@@ -353,7 +349,7 @@ describe('errors & delivery', () => {
     const off = router.onError(() => order.push('subscriber'));
     await router.push('/nope');
     expect(order).toEqual(['subscriber', 'terminal']);
-    expect(isRouterError(router.lastError.value, 'unmatched')).toBe(true);
+    expect(isRouterError(router.lastError.value, 'router:missing:route')).toBe(true);
     off();
     await router.push('/still-nope');
     expect(order).toEqual(['subscriber', 'terminal', 'terminal']);
@@ -364,6 +360,6 @@ describe('errors & delivery', () => {
     await router.isReady();
     router.setRoutes([{ name: 'only', path: '/only', component: 'Home' }]);
     expect(await router.push('/only')).toBeNull();
-    await expect(router.reload()).rejects.toMatchObject({ code: 'routes_load_failed' });
+    await expect(router.reload()).rejects.toMatchObject({ code: 'router:missing:url' });
   });
 });

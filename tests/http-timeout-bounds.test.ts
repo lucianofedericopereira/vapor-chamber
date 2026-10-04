@@ -60,13 +60,13 @@ describe('HTTP timeout option - bounds', () => {
 
     it('NaN waits the default instead of aborting at once', async () => {
       const { at, error } = await rejectionTime(post(Number.NaN), 10_001);
-      expect(error?.name).toBe('TimeoutError');
+      expect((error as { code?: string })?.code).toBe('transport:timeout:reply');
       expect(at).toBe(10_000);
     });
 
     it('Infinity waits: past the default, and clamped to the longest wait a timer holds', async () => {
       const { at, error } = await rejectionTime(post(Number.POSITIVE_INFINITY), MAX_TIMEOUT_MS + 1);
-      expect(error?.name).toBe('TimeoutError');
+      expect((error as { code?: string })?.code).toBe('transport:timeout:reply');
       expect(at).toBe(MAX_TIMEOUT_MS);
     });
 
@@ -77,7 +77,7 @@ describe('HTTP timeout option - bounds', () => {
 
     it('5_000 still aborts at 5_000 (unchanged)', async () => {
       const { at, error } = await rejectionTime(post(5_000), 10_001);
-      expect(error?.name).toBe('TimeoutError');
+      expect((error as { code?: string })?.code).toBe('transport:timeout:reply');
       expect(at).toBe(5_000);
     });
 
@@ -95,13 +95,13 @@ describe('HTTP timeout option - bounds', () => {
 
     it('NaN waits the default instead of aborting at once', async () => {
       const { at, error } = await rejectionTime(get(Number.NaN), 30_001);
-      expect(error?.name).toBe('TimeoutError');
+      expect((error as { code?: string })?.code).toBe('transport:timeout:reply');
       expect(at).toBe(30_000);
     });
 
     it('Infinity waits: past the default, and clamped to the longest wait a timer holds', async () => {
       const { at, error } = await rejectionTime(get(Number.POSITIVE_INFINITY), MAX_TIMEOUT_MS + 1);
-      expect(error?.name).toBe('TimeoutError');
+      expect((error as { code?: string })?.code).toBe('transport:timeout:reply');
       expect(at).toBe(MAX_TIMEOUT_MS);
     });
 
@@ -112,7 +112,7 @@ describe('HTTP timeout option - bounds', () => {
 
     it('5_000 still aborts at 5_000 (unchanged)', async () => {
       const { at, error } = await rejectionTime(get(5_000), 30_001);
-      expect(error?.name).toBe('TimeoutError');
+      expect((error as { code?: string })?.code).toBe('transport:timeout:reply');
       expect(at).toBe(5_000);
     });
   });

@@ -58,10 +58,20 @@ function devWarnNoVapor(api: string): void {
  * refresh, and setup() error recovery are Vue runtime behavior (per-beta detail:
  * CHANGELOG / whitepaper alignment log).
  *
+ * `rootProps` are Vue's raw props, passed through unchanged: a plain value is
+ * the value, and a FUNCTION is a getter that Vue calls for the value. So a
+ * callback is wrapped, `{ onSave: () => onSave }`; passed bare it is called
+ * and the component receives what it returned. (A function set on a
+ * `defineWidget` element property is the opposite: it arrives as itself.)
+ * Pinned by tests/vapor/vapor-subpath-wiring.test.ts.
+ *
  * @example
  * import { createVaporChamberApp } from 'vapor-chamber';
  * import App from './App.vue';
  * createVaporChamberApp(App).mount('#app');
+ *
+ * @example Root props
+ * createVaporChamberApp(App, { title: 'Cart', onSave: () => onSave }).mount('#app');
  */
 export function createVaporChamberApp<TApp = any>(
   rootComponent: object,
@@ -284,9 +294,12 @@ export function useVaporAsyncCommand(asyncBus?: { dispatch: (action: string, tar
   // this is the awaited HTTP/WS path, so keep it lean. Do not "consolidate" into
   // runDispatch - the consistency isn't worth the wrapper overhead here.
   async function dispatch(action: string, target: any, payload?: any): Promise<CommandResult> {
-    loading.value = true;
-    lastError.value = null;
     try {
+      // Both opening writes are inside the try: a sync subscriber that throws
+      // on either becomes a failed result and `loading` ends false (pinned by
+      // tests/vapor-async-throwing-subscriber.test.ts).
+      loading.value = true;
+      lastError.value = null;
       // Untracked around the SYNCHRONOUS entry only - once the dispatch
       // suspends, the caller's effect has finished and there is no subscriber
       // left to leak into (pinned by the "synchronous entry is the whole

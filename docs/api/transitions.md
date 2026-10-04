@@ -17,7 +17,7 @@ import { ... } from 'vapor-chamber/transitions';
 
 ### createTransitionBridge
 
-**Function** - [src/transitions.ts:315](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L315)
+**Function** - [src/transitions.ts:322](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L322)
 
 ```ts
 createTransitionBridge(options: TransitionBridgeOptions & { bus: BaseBus; }) => TransitionBridge
@@ -36,11 +36,18 @@ bus.register('modalEnter', (cmd) => {
 
 const t = createTransitionBridge({ bus, namespace: 'modal' });
 // Pass t.onEnter, t.onLeave, etc. to <Transition> or call them manually
+
+On a vDOM app, `<Transition mode="out-in">` with this bridge needs an ASYNC
+bus. On a sync bus the bridge calls `done()` at once, so the leave finishes
+synchronously, and Vue's vDOM `out-in` then throws and renders nothing
+(tests/transition-done-timing-fixture.test.ts). That is Vue's defect,
+reported as vuejs/core#15727, a fix proposed in vuejs/core#11824. Vapor's
+`<Transition>` and the default mode are not affected (same test).
 ```
 
 ### useTransitionCommand
 
-**Function** - [src/transitions.ts:360](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L360)
+**Function** - [src/transitions.ts:367](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L367)
 
 ```ts
 useTransitionCommand(options?: TransitionBridgeOptions) => TransitionBridge

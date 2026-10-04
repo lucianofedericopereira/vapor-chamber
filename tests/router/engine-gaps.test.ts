@@ -16,8 +16,11 @@
  *  - setRouteData's dev warning for an unknown record name.
  */
 import { describe, expect, it, vi } from 'vitest';
-import type { RouteRecord } from '../../src/router/types';
-import { routerError } from '../../src/router/errors';
+import type { RouteRecord } from '@router/types';
+import { routerError } from '@router/errors';
+import { createMemoryHistory } from '@router/history';
+import { createEngine } from '@router/engine';
+import { createRouteTable } from '@router/table';
 import { stubEnv } from '../../src/vitest-pure';
 import { makeRouter as fixtureRouter } from './fixture';
 
@@ -289,8 +292,8 @@ describe('setRouteData', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     using _NODE_ENV = stubEnv('NODE_ENV', 'production');
     vi.resetModules();
-    const { createRouter: prodCreateRouter } = await import('../../src/router/index');
-    const { createMemoryHistory: prodMemoryHistory } = await import('../../src/router/history');
+    const { createRouter: prodCreateRouter } = await import('@router/index');
+    const { createMemoryHistory: prodMemoryHistory } = await import('@router/history');
 
     const router = prodCreateRouter({
       history: prodMemoryHistory('/'),
@@ -364,7 +367,7 @@ describe('supersession', () => {
 
     const firstError = await first;
     await second;
-    expect(firstError?.code).toBe('cancelled');
+    expect(firstError?.code).toBe('router:aborted:navigation');
     expect(router.currentRoute.value.location.path).toBe('/other');
     router.destroy();
   });
@@ -386,7 +389,7 @@ describe('supersession', () => {
 
     const firstError = await first;
     await second;
-    expect(firstError?.code).toBe('cancelled');
+    expect(firstError?.code).toBe('router:aborted:navigation');
     expect(router.currentRoute.value.location.path).toBe('/other');
     // The superseded navigation's data never commits.
     expect(router.currentRoute.value.data.get('list')).toBeUndefined();
@@ -472,7 +475,7 @@ describe('refetchAffected - stale guards', () => {
     const router = makeRouter(() => {
       calls++;
       if (calls === 1) return 'data-1';
-      throw routerError('cancelled', 'superseded by a newer refetch');
+      throw routerError('aborted:navigation', 'superseded by a newer refetch');
     });
     const onError = vi.fn();
     router.onError(onError);
@@ -490,8 +493,8 @@ describe('refetchAffected - stale guards', () => {
 });
 
 describe('navigation error wrapping', () => {
-  it('wraps a NON-router error as component_load_failed', async () => {
-    // `isRouterError(error) ? error : routerError('component_load_failed', ...)`
+  it('wraps a NON-router error as router:failed:component', async () => {
+    // `isRouterError(error) ? error : routerError('failed:component', ...)`
     // - the wrap arm. Coded router errors pass through untouched (covered
     // elsewhere); a plain Error from a component chunk is the common real case
     // and had never reached this branch.
@@ -511,7 +514,7 @@ describe('navigation error wrapping', () => {
 
     expect(onError).toHaveBeenCalled();
     const err = onError.mock.calls[0]![0] as { code?: string; cause?: unknown };
-    expect(err.code).toBe('component_load_failed');
+    expect(err.code).toBe('router:failed:component');
     // The original failure is preserved as the cause, not swallowed.
     expect(String((err.cause as Error)?.message)).toMatch(/dynamically imported module/);
     router.destroy();
@@ -519,12 +522,11 @@ describe('navigation error wrapping', () => {
 });
 
 describe('navigation error wrapping - uncoded errors', () => {
-  it('wraps a plain Error thrown by a beforeEach guard', async () => {
-    // `isRouterError(error) ? error : routerError('component_load_failed', ...)`
-    // - the WRAP arm. Component load failures arrive already coded, so they
-    // take the pass-through arm; guards are awaited unwrapped inside the same
-    // try, so a guard that throws (a buggy auth check, a failed permission
-    // lookup) is the path that produces an uncoded error here.
+  it('codes a plain Error thrown by a beforeEach guard as router:failed:guard', async () => {
+    // A guard that throws (a buggy auth check, a failed permission lookup) is
+    // a bug in app code, coded at the guard call (log s35.108). It used to
+    // reach the wrap arm as `component_load_failed`, a hard-navigation code,
+    // so the default onError reloaded the page for a guard bug.
     const router = makeRouter(() => 'x');
     const onError = vi.fn();
     router.onError(onError);
@@ -538,12 +540,48 @@ describe('navigation error wrapping - uncoded errors', () => {
 
     expect(onError).toHaveBeenCalled();
     const err = onError.mock.calls[0]![0] as { code?: string; cause?: unknown };
-    expect(err.code).toBe('component_load_failed');
+    expect(err.code).toBe('router:failed:guard');
     // The original is preserved as the cause rather than swallowed...
     expect(String((err.cause as Error)?.message)).toBe('auth service unreachable');
     // ...and the navigation reverted rather than half-committing.
     expect(router.currentRoute.value.location.path).toBe('/');
 
+    router.destroy();
+  });
+  it('a context that breaks its contract (a plain throw from resolveRender) is still coded, as failed:component', async () => {
+    // EngineContext.resolveRender "throws coded RouterErrors"; createRouter's
+    // does. The catch-all keeps a context that does not from reaching onError
+    // uncoded.
+    const table = createRouteTable(ROWS);
+    const onError = vi.fn();
+    const engine = createEngine({
+      getTable: () => table,
+      history: createMemoryHistory('/'),
+      resolveRender: async () => { throw new Error('render bug'); },
+      runLoaders: async () => new Map(),
+      loadAffectedBy: () => [],
+      onError,
+    });
+    const result = await engine.navigate('/list');
+    expect(result?.code).toBe('router:failed:component');
+    expect(((result as Error).cause as Error).message).toBe('render bug');
+    expect(onError).toHaveBeenCalledWith(result, expect.anything());
+  });
+
+  it('a throw from a supplied history is router:failed:history, its throw the cause (log s35.118)', async () => {
+    // The browser history catches its own throws (Safari's pushState limit
+    // falls back to a full load), so only a history the app supplies throws.
+    const history = createMemoryHistory('/');
+    const router = makeRouter(() => 'x', { history: { ...history, push: () => { throw new Error('history full'); } } });
+    const onError = vi.fn();
+    router.onError(onError);
+    await router.isReady();
+
+    await router.push('/list');
+
+    const err = onError.mock.calls[0]![0] as { code?: string; cause?: unknown };
+    expect(err.code).toBe('router:failed:history');
+    expect((err.cause as Error).message).toBe('history full');
     router.destroy();
   });
 });

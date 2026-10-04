@@ -25,7 +25,7 @@ cd demo-app && php artisan serve
 own route block rather than skipping when one is already present, so a scaffold
 made before a page was added still picks it up.
 
-Needs PHP ≥ 8.2 and Composer. `setup.sh` also builds the vapor-chamber `dist/`
+Needs PHP ≥ 8.3 (Laravel 13) and Composer. `setup.sh` also builds the vapor-chamber `dist/`
 on demand for the IIFE copy.
 
 `composer create-project` always pulls the **current** Laravel skeleton - last

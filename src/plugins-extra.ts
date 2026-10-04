@@ -34,14 +34,10 @@ import { DEV } from './dev';
 import { onSettled } from './settled';
 import { MAX_TIMEOUT_MS, countOption } from './bounds';
 import type { Command, CommandResult, Plugin, AsyncPlugin } from './command-bus';
-import { matchesPattern, commandKey, _isBug, _errResult } from './command-bus';
+import { commandKey, _isBug, _errResult } from './command-bus';
 import { freezeCached } from './freeze';
 import { createLanes } from './scheduler';
 
-function makeActionFilter(patterns: string[] | undefined): (action: string) => boolean {
-  if (!patterns?.length) return () => true;
-  return (action: string) => patterns.some(p => matchesPattern(p, action));
-}
 
 // ---------------------------------------------------------------------------
 // cache - memoize query results with TTL
@@ -91,7 +87,6 @@ export function cache(options: CacheOptions = {}): Plugin & {
   // `| 0` was not enough: it mapped `Infinity` to 0, so asking for an unbounded
   // cache got you one that stored nothing.
   const maxSize = countOption(rawMaxSize, 100);
-  const matchesActions = makeActionFilter(actions);
 
   // LRU-style cache: Map preserves insertion order, we move accessed entries to end
   const store = new Map<string, { result: CommandResult; expiresAt: number; action: string }>();
@@ -142,7 +137,6 @@ export function cache(options: CacheOptions = {}): Plugin & {
   }
 
   const plugin: Plugin = (cmd, next) => {
-    if (!matchesActions(cmd.action)) return next();
 
     const k = getKey(cmd);
     const cached = store.get(k);
@@ -171,6 +165,8 @@ export function cache(options: CacheOptions = {}): Plugin & {
   };
 
   return Object.assign(plugin, {
+    id: 'cache',
+    actions,
     invalidate(action: string, target?: any): void {
       if (target !== undefined) {
         // Targeted invalidation needs the entry's exact key, and a custom
@@ -239,7 +235,6 @@ export function circuitBreaker(options: CircuitBreakerOptions = {}): Plugin & {
   // the first failure is not a breaker.
   const threshold = countOption(rawThreshold, 5, 1);
   const resetTimeout = countOption(rawResetTimeout, 30_000, 0, MAX_TIMEOUT_MS);
-  const matchesActions = makeActionFilter(actions);
 
   const circuits = new Map<string, {
     state: CircuitState;
@@ -254,7 +249,6 @@ export function circuitBreaker(options: CircuitBreakerOptions = {}): Plugin & {
   }
 
   const plugin: Plugin = (cmd, next, fail) => {
-    if (!matchesActions(cmd.action)) return next();
 
     const c = getCircuit(cmd.action);
 
@@ -297,6 +291,7 @@ export function circuitBreaker(options: CircuitBreakerOptions = {}): Plugin & {
 
   return Object.assign(plugin, {
     id: 'circuitBreaker',
+    actions,
     getState(action: string): CircuitState {
       return getCircuit(action).state;
     },
@@ -330,13 +325,11 @@ export type RateLimitOptions = {
  */
 export function rateLimit(options: RateLimitOptions = {}): Plugin {
   const { max = 10, window: windowMs = 1_000, actions } = options;
-  const matchesActions = makeActionFilter(actions);
 
   // Per-action sliding window: { timestamps[], head } - head index avoids O(n) shift()
   const windows = new Map<string, { ts: number[]; head: number }>();
 
   const plugin: Plugin = (cmd, next, fail) => {
-    if (!matchesActions(cmd.action)) return next();
 
     const now = Date.now();
     let win = windows.get(cmd.action);
@@ -362,7 +355,7 @@ export function rateLimit(options: RateLimitOptions = {}): Plugin {
     win.ts.push(now);
     return next();
   };
-  return Object.assign(plugin, { id: 'rateLimit' });
+  return Object.assign(plugin, { id: 'rateLimit', actions });
 }
 
 // ---------------------------------------------------------------------------
@@ -406,7 +399,6 @@ export function metrics(options: MetricsOptions = {}): Plugin & {
   const { maxEntries: rawMaxEntries = 1000, actions, onEntry } = options;
   // Measured at 1500 retained against a cap of 1000 with a NaN option.
   const maxEntries = countOption(rawMaxEntries, 1000);
-  const matchesActions = makeActionFilter(actions);
   let data: MetricsEntry[] = [];
   let head = 0; // O(1) eviction - head index tracks first live entry
 
@@ -419,7 +411,6 @@ export function metrics(options: MetricsOptions = {}): Plugin & {
   }
 
   const plugin: Plugin = (cmd, next) => {
-    if (!matchesActions(cmd.action)) return next();
 
     const start = performance.now();
     return onSettled(next(), (result) => {
@@ -443,6 +434,8 @@ export function metrics(options: MetricsOptions = {}): Plugin & {
   };
 
   return Object.assign(plugin, {
+    id: 'metrics',
+    actions,
     entries(): MetricsEntry[] { return data.slice(head); },
     summary(): Record<string, { count: number; avgMs: number; errorRate: number }> {
       const map = new Map<string, { total: number; errors: number; sumMs: number }>();
@@ -532,14 +525,12 @@ export type SerializeOptions = {
  */
 export function serialize(options: SerializeOptions = {}): AsyncPlugin {
   const { key, actions, scope = 'instance', lockPrefix = 'vapor-chamber:serialize' } = options;
-  const matchesActions = makeActionFilter(actions);
   const crossTab = scope === 'cross-tab';
   // The in-memory lanes (default mode AND the cross-tab fallback): the shared
   // scheduler's, so serialize, retry and the outbox order runs one way.
   const lanes = createLanes();
 
-  return (cmd, next) => {
-    if (!matchesActions(cmd.action)) return next();
+  const plugin: AsyncPlugin = (cmd, next) => {
     const raw = key ? key(cmd) : cmd.action;
     if (raw == null) return next();
     const k = String(raw);
@@ -555,6 +546,7 @@ export function serialize(options: SerializeOptions = {}): AsyncPlugin {
     }
     return lanes.run(k, next);
   };
+  return Object.assign(plugin, { id: 'serialize', actions });
 }
 
 // ---------------------------------------------------------------------------
@@ -626,13 +618,11 @@ export function idempotent(options: IdempotentOptions = {}): AsyncPlugin {
   // `cache()`'s rule, so `maxKeys: 0` remembers nothing.
   // Bounded through ../bounds, for the same reason as cache() above.
   const maxKeys = countOption(rawMaxKeys, 500);
-  const matchesActions = makeActionFilter(actions);
   // key -> completed result (with timestamp); in-flight promises are in `inflight`.
   const done = new Map<string, { at: number; result: CommandResult }>();
   const inflight = new Map<string, Promise<CommandResult>>();
 
-  return (cmd, next) => {
-    if (!matchesActions(cmd.action)) return next();
+  const plugin: AsyncPlugin = (cmd, next) => {
     const raw = key ? key(cmd) : commandKey(cmd.action, cmd.target);
     if (raw == null) return next();
     const k = String(raw);
@@ -681,6 +671,7 @@ export function idempotent(options: IdempotentOptions = {}): AsyncPlugin {
     inflight.set(k, run);
     return run;
   };
+  return Object.assign(plugin, { id: 'idempotent', actions });
 }
 
 // ---------------------------------------------------------------------------
@@ -718,7 +709,9 @@ export type SupersedeOptions = {
  * dispatch's AbortSignal fires the instant a second dispatch for the same key
  * starts - `createHttpBridge` / `createBatchingHttpBridge` already forward
  * `cmd.signal` to `fetch()`, so the stale request is genuinely cancelled, not
- * merely ignored once it resolves.
+ * merely ignored once it resolves. A handler that passes `cmd.signal` to
+ * `createHttpClient().get()` is cancelled the same way, even when its GET
+ * joined one already in flight (see the client's `dedupe`).
  *
  * **Async bus only** - mutates `cmd.signal` before the rest of the pipeline
  * runs, which is only meaningful for cancelable async dispatches.
@@ -732,11 +725,9 @@ export type SupersedeOptions = {
  */
 export function supersede(options: SupersedeOptions = {}): AsyncPlugin {
   const { key, actions } = options;
-  const matchesActions = makeActionFilter(actions);
   const controllers = new Map<string, AbortController>();
 
-  return (cmd, next) => {
-    if (!matchesActions(cmd.action)) return next();
+  const plugin: AsyncPlugin = (cmd, next) => {
     const raw = key ? key(cmd) : commandKey(cmd.action, cmd.target);
     if (raw == null) return next();
     const k = String(raw);
@@ -761,4 +752,5 @@ export function supersede(options: SupersedeOptions = {}): AsyncPlugin {
     });
     return result;
   };
+  return Object.assign(plugin, { id: 'supersede', actions });
 }

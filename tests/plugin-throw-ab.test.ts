@@ -58,7 +58,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it, vi } from 'vitest';
 import * as shippedMod from '../src/command-bus';
-import { underCoverage } from './under-coverage';
+import { runTiming } from './under-coverage';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // Per-file subdir: the whole dir is removed in afterAll, so it must be ours alone.
@@ -66,9 +66,9 @@ const REF_DIR = resolve(HERE, '__ref', 'plugin-throw');
 
 const SHIPPED_ASYNC_NEXT = `      let r: CommandResult | Promise<CommandResult>;
       try { r = plugin(cmd, next, fails[idx]); }
-      catch (e) { return pluginThrew(e, cmd, plugin, idx, fails[idx]); }
+      catch (e) { return pluginThrew(e, cmd, plugin, at ? at[idx] : idx, fails[idx]); }
       return (last = r !== last && r != null && typeof (r as PromiseLike<CommandResult>).then === 'function'
-        ? (r as Promise<CommandResult>).then(undefined, (e: unknown) => pluginThrew(e, cmd, plugin, idx, fails[idx]))
+        ? (r as Promise<CommandResult>).then(undefined, (e: unknown) => pluginThrew(e, cmd, plugin, at ? at[idx] : idx, fails[idx]))
         : r);`;
 
 /** [shipped text, replacement], grouped by the change it undoes (or, for the declined arm, rewrites). */
@@ -79,21 +79,33 @@ const TRANSFORMS: Record<string, Array<[string, string]>> = {
       // The boundary (see pluginThrew), inline so this runner keeps its OWN
       // plugin call site - tests/plugin-throw-ab.test.ts.
       try { return plugin(cmd, () => nextFrom(idx + 1), fails[idx]); }
-      catch (e) { return pluginThrew(e, cmd, plugin, idx, fails[idx]); }`,
+      catch (e) { return pluginThrew(e, cmd, plugin, at ? at[idx] : idx, fails[idx]); }`,
       '      return plugin ? plugin(cmd, () => nextFrom(idx + 1), fails[idx]) : execute();',
     ],
     [SHIPPED_ASYNC_NEXT, '      return plugin(cmd, next, fails[idx]);'],
   ],
   settle: [
     [
-      "  const result = s.opts.onMissing === 'throw' ? syncRunSettling(s, cmd, execute) : s.runner(cmd, execute);",
-      '  const result = s.runner(cmd, execute);',
+      "    result = s.opts.onMissing === 'throw' ? syncRunSettling(s, cmd, execute) : s.runner(cmd, execute);",
+      '    result = s.runner(cmd, execute);',
     ],
     [
       `  let result: CommandResult;
-  try { result = await s.runner(cmd, execute); }
-  catch (e) { const h = asyncRunHooks(s, cmd, errResult(e as Error)); if (h) await h; throw e; }`,
-      '  const result = await s.runner(cmd, execute);',
+  try {
+    const at = s.dispatchDepth;
+    s.dispatchDepth = depth;
+    let p: Promise<CommandResult>;
+    try { p = s.runner(cmd, execute); }
+    finally { s.dispatchDepth = at; }
+    result = await p;
+  }
+  catch (e) { const h = asyncRunHooks(s, cmd, errResult(e as Error), depth); if (h) await h; throw e; }`,
+      `  const at = s.dispatchDepth;
+  s.dispatchDepth = depth;
+  let p: Promise<CommandResult>;
+  try { p = s.runner(cmd, execute); }
+  finally { s.dispatchDepth = at; }
+  const result = await p;`,
     ],
   ],
   awaitPerLevel: [
@@ -202,7 +214,7 @@ const ROWS: Array<[string, (m: Mod) => number | Promise<number>]> = [
 const ROUNDS = 11;
 
 describe('plugin-throw work on the bus - real path A/B', () => {
-  it.skipIf(underCoverage)('agrees where it must, differs where intended, and measures the cost', async () => {
+  it('agrees where it must, differs where intended, and measures the cost', async () => {
     mkdirSync(REF_DIR, { recursive: true });
     // EVERY timed arm is a derived copy written and loaded the same way -
     // `shipped` too, with nothing transformed. The src module itself is used
@@ -259,6 +271,9 @@ describe('plugin-throw work on the bus - real path A/B', () => {
         expect(settled).toBe(expected);
       }
     }
+
+    // Timing runs on `npm run test:timing` only, never instrumented (tests/under-coverage.ts).
+    if (!runTiming) return;
 
     // --- measurement --------------------------------------------------------
     const order = Object.keys(arms);

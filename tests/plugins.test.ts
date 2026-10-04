@@ -1,3 +1,4 @@
+import { conditionOf } from '../src/command-bus';
 import { describe, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
 import { logger, validator, history, debounce, throttle, authGuard, optimistic } from '../src/plugins';
@@ -550,7 +551,9 @@ describe('authGuard plugin', () => {
     // A refusal owned by the plugin, as every library refusal is: retry() does
     // not re-send it and a circuit breaker does not count it.
     const blocked = bus.dispatch('shopCartAdd', {});
-    expect(blocked).toFailWith('authGuard:refused:action');
+    // No session is `unauthenticated` (plan 4.2: sign in, then the same request), not `refused`.
+    expect(blocked).toFailWith('authGuard:unauthenticated:action');
+    expect(conditionOf(blocked.error)).toBe('unauthenticated');
     expect(blocked.error?.message).toContain('Unauthorized');
 
     const allowed = bus.dispatch('uiToast', {});

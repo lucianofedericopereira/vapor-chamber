@@ -25,9 +25,10 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, 
 import { join, resolve } from 'node:path';
 import { build } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { requireDist } from './require-dist';
 
 const dist = (f: string) => resolve(process.cwd(), 'dist', f);
-const haveDist = existsSync(dist('index.js')) && existsSync(dist('vue.js'));
+requireDist(existsSync(dist('index.js')) && existsSync(dist('vue.js')));
 
 /** chamber.ts's DEV-only probe-path hint - the string s19.4 found shipped. */
 const HINT = 'Vue detected at runtime rather than at build time';
@@ -96,7 +97,7 @@ async function chunks(entry: string): Promise<string[]> {
   return outputs.filter((o) => o.type === 'chunk').map((c) => (c as { code: string }).code);
 }
 
-describe.skipIf(!haveDist)('DEV folds in every production chunk (Vite build API)', () => {
+describe('DEV folds in every production chunk (Vite build API)', () => {
   it('one chunk (the vapor-sfc shape)', async () => {
     const code = await chunks('one.js');
     expect(code).toHaveLength(1);
@@ -130,7 +131,7 @@ function esmChunks(root: string): string[] {
   return out;
 }
 
-describe.skipIf(!haveDist)('the ESM dist derives DEV per module', () => {
+describe('the ESM dist derives DEV per module', () => {
   it('no chunk imports DEV from another, and the build left no placeholder behind', () => {
     const files = esmChunks(dist(''));
     for (const file of files) {

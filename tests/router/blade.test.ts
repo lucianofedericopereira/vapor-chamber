@@ -6,7 +6,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { createApp } from 'vue';
-import { makeBladeComponent } from '../../src/router/blade';
+import { makeBladeComponent } from '@router/blade';
 
 describe('makeBladeComponent', () => {
   it('injects HTML + hydrates on mount, dehydrates + clears on unmount', () => {

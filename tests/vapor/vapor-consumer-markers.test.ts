@@ -38,9 +38,10 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:
 import { join, resolve } from 'node:path';
 import { build } from 'vite';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { requireDist } from '../require-dist';
 
 const dist = (f: string) => resolve(process.cwd(), 'dist', f);
-const haveDist = existsSync(dist('vapor.js')) && existsSync(dist('router/index.js')) && existsSync(dist('router/vapor.js'));
+requireDist(existsSync(dist('vapor.js')) && existsSync(dist('router/index.js')) && existsSync(dist('router/vapor.js')));
 
 /** Names whose presence would mean the vDOM renderer or interop is in the app. */
 const VDOM_MARKERS = ['vaporInteropPlugin', 'defineComponent', 'createApp', 'h', 'createVNode', 'createRenderer'];
@@ -121,7 +122,7 @@ function importsFrom(code: string, spec: string): string[] {
   return [...names].sort();
 }
 
-describe.skipIf(!haveDist)('Vapor consumer bundle (vapor-chamber/vapor + router/vapor, Vite)', () => {
+describe('Vapor consumer bundle (vapor-chamber/vapor + router/vapor, Vite)', () => {
   it('imports nothing vDOM from vue, and carries one chamber module', async () => {
     const { entry, lazy } = await bundle();
     const vueNames = importsFrom(entry, 'vue');

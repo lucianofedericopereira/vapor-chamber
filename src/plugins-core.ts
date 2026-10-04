@@ -9,7 +9,7 @@ import { onSettled, isThenable } from './settled';
 import { createLedger } from './ledger';
 import { GLYPH_COMMAND } from './glyphs';
 import type { Command, CommandResult, Plugin, CommandBus, AsyncCommandBus, BaseBus } from './command-bus';
-import { commandKey, disposeAll, _okResult, _errResult, _throttleGate } from './command-bus';
+import { commandKey, disposeAll, _okResult, _errResult, _throttleGate, _undo } from './command-bus';
 
 /**
  * Logger plugin - logs all commands and results
@@ -38,7 +38,7 @@ export function logger(options: {
   // Ok results log at 'info', failures at 'error' - only 'warn'/'error' can suppress.
   const skipOk = level === 'warn' || level === 'error';
 
-  return (cmd, next) => {
+  const plugin: Plugin = (cmd, next) => {
     if (filter && !filter(cmd)) return next();
 
     const log = collapsed ? console.groupCollapsed : console.group;
@@ -82,6 +82,7 @@ export function logger(options: {
     };
     return onSettled(next(), decide);
   };
+  return Object.assign(plugin, { id: 'logger' });
 }
 
 /**
@@ -117,7 +118,7 @@ export function validator(rules: {
 /**
  * History plugin - tracks command history for undo/redo
  *
- * undo() executes the inverse handler if the command was registered with
+ * undo() dispatches `<action>$undo`, which runs the inverse registered with
  * { undo: fn } via bus.register(), and falls back to a data-only pop if none
  * exists.
  */
@@ -160,10 +161,11 @@ export function history(options: {
   });
 
   const api = Object.assign(plugin, {
+    id: 'history',
     getState: (): HistoryState => ({
       past: [...past],
       future: [...future],
-      canUndo: past.length > 0,
+      canUndo: ledger.canUndo(),
       canRedo: future.length > 0,
     }),
     undo: () => ledger.undo(),
@@ -195,19 +197,17 @@ export function history(options: {
  * Debounce plugin - debounce specific actions
  *
  * Runs the latest dispatch per action and target once `wait` passes with no
- * newer one. Returns { pending: true } synchronously.
+ * newer one. Returns { pending: true, key } synchronously, `key` being the
+ * action and target the timer is kept under (`commandKey`).
  */
 export function debounce(
   actions: string[],
   wait: number
 ): Plugin & { /** Cancel all pending debounce timers. */ dispose(): void } {
-  const actionSet = new Set(actions);
   // One entry per key: its timer and the latest next(), replaced together.
   const pending = new Map<string, { timer: ReturnType<typeof setTimeout>; next: () => unknown }>();
 
   const plugin: Plugin = (cmd, next) => {
-    if (!actionSet.has(cmd.action)) return next();
-
     const key = commandKey(cmd.action, cmd.target);
     const existing = pending.get(key);
     if (existing) clearTimeout(existing.timer);
@@ -222,6 +222,8 @@ export function debounce(
   };
 
   return Object.assign(plugin, {
+    id: 'debounce',
+    actions,
     dispose(): void { for (const [, e] of pending) clearTimeout(e.timer); pending.clear(); },
   });
 }
@@ -233,19 +235,19 @@ export function throttle(
   actions: string[],
   wait: number
 ): Plugin & { /** Cancel all pending throttle timers. */ dispose(): void } {
-  const actionSet = new Set(actions);
   const timers = new Set<ReturnType<typeof setTimeout>>();
   // The gate register({ throttle }) uses; a plugin returns the refusal.
   const lastRun = new Map<string, number>();
   const gate = _throttleGate(wait, timers, lastRun);
   const plugin: Plugin = (cmd, next, fail) => {
     // The plugin's own `fail`: the refusal is the plugin's, not core's.
-    const refused = actionSet.has(cmd.action) ? gate(cmd, fail) : undefined;
+    const refused = gate(cmd, fail);
     return refused ? _errResult(refused) : next();
   };
 
   return Object.assign(plugin, {
     id: 'throttle',
+    actions,
     dispose(): void { for (const t of timers) clearTimeout(t); timers.clear(); lastRun.clear(); },
   });
 }
@@ -264,7 +266,7 @@ export function authGuard(options: {
     // A prefix match covers the exact name too.
     if (protectedPrefixes.some(p => cmd.action.startsWith(p)) && !isAuthenticated()) {
       if (onUnauthenticated) onUnauthenticated(cmd);
-      return _errResult(fail('refused:action', `Unauthorized: ${cmd.action} requires authentication`, { action: cmd.action }));
+      return _errResult(fail('unauthenticated:action', `Unauthorized: ${cmd.action} requires authentication`, { action: cmd.action }));
     }
     return next();
   };
@@ -293,7 +295,7 @@ export function optimistic(
   // plugin called it as the optimistic `apply` and treated the result as a
   // rollback closure.
   const compiled = new Map(Object.entries(handlers));
-  return (cmd, next) => {
+  const plugin: Plugin = (cmd, next) => {
     const config = compiled.get(cmd.action);
     if (!config) return next();
 
@@ -309,6 +311,7 @@ export function optimistic(
       return result;
     });
   };
+  return Object.assign(plugin, { id: 'optimistic' });
 }
 
 // ---------------------------------------------------------------------------
@@ -365,12 +368,9 @@ export function optimisticUndo(
   actions: string[],
   options: OptimisticUndoOptions = {},
 ): Plugin {
-  const actionSet = new Set(actions);
   const { predict, onRollback, onRollbackError } = options;
 
-  return (cmd, next) => {
-    if (!actionSet.has(cmd.action)) return next();
-
+  const plugin: Plugin = (cmd, next) => {
     const undoHandler = bus.getUndoHandler(cmd.action);
     if (!undoHandler) return next(); // no undo registered - passthrough
 
@@ -382,12 +382,15 @@ export function optimisticUndo(
     // nothing about that required the BODY to be duplicated as well.
     const rollbackIfFailed = (r: CommandResult): void => {
       if (r.ok) return;
-      try { undoHandler(cmd); }
-      catch (undoErr) {
-        if (onRollbackError) onRollbackError(cmd, undoErr as Error, r.error!);
-        else console.error(`[vapor-chamber] Undo rollback error for "${cmd.action}":`, undoErr);
-      }
-      if (onRollback) onRollback(cmd, r.error!);
+      // The rollback is the `$undo` command; a failed or refused one is reported.
+      onSettled(_undo(bus, cmd), (u: CommandResult) => {
+        if (!u.ok) {
+          if (onRollbackError) onRollbackError(cmd, u.error as Error, r.error!);
+          else console.error(`[vapor-chamber] Undo rollback error for "${cmd.action}":`, u.error);
+        }
+        if (onRollback) onRollback(cmd, r.error!);
+        return u;
+      });
     };
 
     // THE TWO PATHS RETURN DIFFERENT THINGS, and that is the feature rather
@@ -406,4 +409,5 @@ export function optimisticUndo(
     rollbackIfFailed(result as CommandResult);
     return result;
   };
+  return Object.assign(plugin, { id: 'optimisticUndo', actions });
 }

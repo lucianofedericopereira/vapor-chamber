@@ -62,6 +62,46 @@ describe('vapor-chamber/vapor under a real with-vapor Vue', () => {
     host.remove();
   });
 
+  // Vue's raw-props contract, passed through unchanged, and the opposite of a
+  // widget PROPERTY (tests/vapor/widget-shape.test.ts), which is why it is
+  // written down: a function root prop is a getter, so a callback is wrapped.
+  it('root props: a function is a getter, so a callback is passed as () => fn', async () => {
+    const { createVaporChamberApp, defineVaporComponent } = await import('../../src/vapor');
+    const v = (await import('vue')) as any;
+
+    let calls = 0;
+    const onSave = () => {
+      calls++;
+    };
+    const seen: Record<string, unknown> = {};
+    const App = defineVaporComponent({
+      props: { plain: String, label: String, onSave: Function },
+      setup(props: Record<string, unknown>) {
+        seen.plain = props.plain;
+        seen.label = props.label;
+        seen.onSave = props.onSave;
+        return v.template('<i>root</i>', true)();
+      },
+    });
+
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const app = createVaporChamberApp(App as object, {
+      plain: 'as given',
+      label: () => 'from the getter',
+      onSave: () => onSave,
+    });
+    (app as { mount: (el: Element) => void }).mount(host);
+
+    expect(seen.plain).toBe('as given');
+    expect(seen.label).toBe('from the getter');
+    expect(seen.onSave).toBe(onSave);
+    expect(calls).toBe(0);
+
+    (app as { unmount: () => void }).unmount();
+    host.remove();
+  });
+
   it('the KeepAlive guard works through this entry, with nothing hand-wired', async () => {
     // `hasInjectionContext` missing from the /vue wiring list silently
     // disables this guard in production bundles

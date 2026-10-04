@@ -29,7 +29,7 @@ async function production() {
 }
 
 describe('toJSON: the members a problem needs', () => {
-  it('detail, code, action and the context as extensions; no type', () => {
+  it('type (its condition), detail, and code, action and the context as extensions', () => {
     const bus = createCommandBus();
     bus.register('save', () => 'ok', { throttle: 10_000 });
     bus.dispatch('save', 1);
@@ -37,18 +37,22 @@ describe('toJSON: the members a problem needs', () => {
 
     const problem = JSON.parse(JSON.stringify(refused));
     expect(problem).toEqual({
+      type: 'https://github.com/lucianofedericopereira/vapor-chamber/blob/main/docs/errors.md#limited',
       detail: refused.message,
       code: 'core:limited:handler',
       action: 'save',
       retryIn: expect.any(Number),
       wait: 10_000,
     });
-    expect(problem).not.toHaveProperty('type');
   });
 
   it('a failure with no action or context serializes without them', () => {
     const e = new BusError('invalid:payload', 'bad');
-    expect(JSON.parse(JSON.stringify(e))).toEqual({ detail: 'bad', code: 'app:invalid:payload' });
+    expect(JSON.parse(JSON.stringify(e))).toEqual({
+      type: 'https://github.com/lucianofedericopereira/vapor-chamber/blob/main/docs/errors.md#invalid',
+      detail: 'bad',
+      code: 'app:invalid:payload',
+    });
   });
 });
 
@@ -119,7 +123,15 @@ describe('production messages carry the fact, not the fix', () => {
     using _env = stubEnv('NODE_ENV', 'production');
     const { bus } = await production();
     const b = bus.createCommandBus({ naming: { pattern: /^[a-z]+$/, onViolation: 'throw' } });
-    expect(() => b.register('Bad', () => 1)).toThrow(/^\[vapor-chamber\] Action "Bad" does not match naming pattern \/\^\[a-z\]\+\$\/\.$/);
+    // A BusError since s35.117: the code names the source, so no prefix.
+    expect(() => b.register('Bad', () => 1)).toThrow(/^Action "Bad" does not match naming pattern \/\^\[a-z\]\+\$\/\.$/);
+  });
+
+  it("an app's $ name", async () => {
+    using _env = stubEnv('NODE_ENV', 'production');
+    const { bus } = await production();
+    const b = bus.createCommandBus();
+    expect(() => b.register('save$draft', () => 1)).toThrow(/^Action "save\$draft": a name with "\$" is the library's\.$/);
   });
 
   it('createVaporChamberApp without Vapor keeps the diagnosis, drops the advice', async () => {

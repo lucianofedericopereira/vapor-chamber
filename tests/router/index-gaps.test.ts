@@ -10,15 +10,15 @@
  *  - preheatPath: hover-preheat resolving a path and loading its
  *    lazy component, plus the unresolvable-path bail.
  *  - the meta.preheat idle arming with nothing flagged.
- *  - unwrapRoutesPayload's envelope arms.
+ *  - readRoutesPayload's rejection (the read contract: tests/router/routes-plain-json.test.ts).
  *  - defaultFetchBlade's DOMParser extraction and its no-DOMParser fallback
  *.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createMemoryHistory } from '../../src/router/history';
-import { bladeFetcher } from '../../src/router/remote';
-import { createRouter, unwrapRoutesPayload } from '../../src/router/index';
-import type { RouteRecord } from '../../src/router/types';
+import { createMemoryHistory } from '@router/history';
+import { bladeFetcher } from '@router/remote';
+import { createRouter, readRoutesPayload } from '@router/index';
+import type { RouteRecord } from '@router/types';
 import { stubGlobal } from '../../src/vitest-pure';
 import { makeRouter, ROWS } from './fixture';
 
@@ -28,29 +28,13 @@ afterEach(() => {
 });
 
 // ---------------------------------------------------------------------------
-// unwrapRoutesPayload
+// readRoutesPayload
 // ---------------------------------------------------------------------------
 
-describe('unwrapRoutesPayload', () => {
-  it('unwraps the contract answer { state }', () => {
-    const payload = unwrapRoutesPayload({ state: { routes: ROWS, base: '/admin' } });
-    expect(payload.base).toBe('/admin');
-    expect(payload.routes).toHaveLength(3);
-  });
-
-  it('throws routes_load_failed with the problem detail, else its code', () => {
-    expect(() => unwrapRoutesPayload({ problem: { status: 403, code: 'forbidden', detail: 'Not yours' } })).toThrow(/Not yours/);
-    expect(() => unwrapRoutesPayload({ problem: { status: 403, code: 'forbidden' } })).toThrow(/forbidden/);
-    expect(() => unwrapRoutesPayload({ problem: {} })).toThrow(/no detail/);
-  });
-
-  it('a { state } without a routes array is not a payload', () => {
-    expect(() => unwrapRoutesPayload({ state: { nope: true } })).toThrow(/no routes array/);
-  });
-
-  it('rejects a bare payload with no routes array', () => {
-    expect(() => unwrapRoutesPayload({ nope: true })).toThrow(/no routes array/);
-    expect(() => unwrapRoutesPayload(null)).toThrow(/no routes array/);
+describe('readRoutesPayload', () => {
+  it('rejects a payload with no routes array', () => {
+    expect(() => readRoutesPayload({ nope: true })).toThrow(/no routes array/);
+    expect(() => readRoutesPayload(null)).toThrow(/no routes array/);
   });
 });
 
@@ -76,7 +60,7 @@ describe('inline routes source', () => {
     router.destroy();
   });
 
-  it('throws inline_routes_missing when the selector matches nothing', async () => {
+  it('throws router:missing:inline when the selector matches nothing', async () => {
     const router = makeRouter({
       routes: { inline: '#absent' } as never,
       components: {},
@@ -85,7 +69,7 @@ describe('inline routes source', () => {
     router.destroy();
   });
 
-  it('throws inline_routes_missing for an empty element', async () => {
+  it('throws router:missing:inline for an empty element', async () => {
     document.body.innerHTML = '<script id="routes" type="application/json"></script>';
     const router = makeRouter({
       routes: { inline: '#routes' } as never,
@@ -132,7 +116,7 @@ describe('remote routes source', () => {
     router.destroy();
   });
 
-  it('wraps a transport failure as routes_load_failed', async () => {
+  it('wraps a transport failure as router:failed:routes', async () => {
     const http = { get: vi.fn().mockRejectedValue(new Error('502 bad gateway')) } as any;
     const router = makeRouter({
       routes: { url: '/routes.json' } as never,
@@ -145,8 +129,8 @@ describe('remote routes source', () => {
   });
 
   it('passes a coded router error through unwrapped', async () => {
-    // A payload with no routes array makes unwrapRoutesPayload throw a coded
-    // error inside the try - it must not be re-wrapped as routes_load_failed.
+    // A payload with no routes array makes readRoutesPayload throw a coded
+    // error inside the try - it must not be re-wrapped as router:failed:routes.
     const http = { get: vi.fn().mockResolvedValue({ data: { nope: true } }) } as any;
     const router = makeRouter({
       routes: { url: '/routes.json' } as never,

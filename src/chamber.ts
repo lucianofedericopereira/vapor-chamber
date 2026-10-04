@@ -12,9 +12,10 @@
  */
 
 import { DEV } from './dev';
-import { createCommandBus, disposeAll, commandKey, _errResult, type CommandBus, type AsyncCommandBus, type Command, type CommandResult, type CommandMap, type TargetOf, type PayloadOf, type ResultOf, type Handler, type Plugin, type RegisterOptions, type Listener } from './command-bus';
+import { disposeAll, _targetKey, unsealBus, _isSyncBus, _errResult, type CommandBus, type Command, type CommandResult, type CommandMap, type TargetOf, type PayloadOf, type ResultOf, type Handler, type Plugin, type RegisterOptions, type Listener } from './command-bus';
 import { configureSignal, signal } from './signal';
 import { createLedger } from './ledger';
+import { getCommandBus, resetCommandBus, setCommandBus } from './shared-bus';
 
 /**
  * Build-time flag injected by `scripts/build.mjs` via Vite `define`: `true` in
@@ -40,6 +41,27 @@ declare const __VC_IIFE__: boolean | undefined;
  * `__VC_IIFE__`. Only {@link warnProbePath} reads it.
  */
 declare const __VC_WIRED__: boolean | undefined;
+
+/**
+ * `true` in an app BUILD that wires Vue statically: `vaporChamberWire()`
+ * defines it in a Vite build, and an esbuild or webpack app defines it with
+ * one line when it imports its composables from `vapor-chamber/vue` (or
+ * `/vapor`). Such a build needs no runtime probe, so the probe's body and
+ * {@link warnUnwired} sit inside a condition on it and fold away; the
+ * probe's `import('vue')` is what made esbuild and webpack ship all of Vue
+ * (tests/root-probe-builds.test.ts). Absent, nothing changes, which is what
+ * keeps a root-only Vue app working on those bundlers. `false` in the IIFE
+ * builds (scripts/build.mjs), so the guard costs them nothing.
+ *
+ * Written as a CONDITION around the code, never an early return: Vite's
+ * minifier kept a function's body after a folded `if (true) return`
+ * (measured in the 1.26 evaluation).
+ */
+declare const __VC_WIRED_BUILD__: boolean | undefined;
+// The build profile: true from `vaporChamberWire({ profile: 'lean' })`, false
+// from the plugin otherwise and from the IIFE builds; undefined (performance)
+// through a bundler without the plugin. Read in trackLoading.
+declare const __VC_LEAN__: boolean | undefined;
 
 import type { Signal } from './signal';
 
@@ -184,8 +206,7 @@ const VUE_GLOBAL_KEY = '__VAPOR_CHAMBER_VUE__';
 function readGlobal(key: string): any | null {
   try {
     const vue = (globalThis as any)[key];
-    // `__VUE__` is `true` on any page that has mounted - the `.ref` check is
-    // what separates a namespace from Vue's devtools marker.
+    // The `.ref` check separates a namespace from anything else parked there.
     return vue && typeof vue.ref === 'function' ? vue : null;
   } catch {
     return null;
@@ -240,9 +261,11 @@ export function configureVue(vue: object): void {
 /**
  * Reactive dependency collection, suspended for the duration of a callback.
  *
- * Null until Vue detection completes; a plain pass-through when Vue is absent.
+ * No-ops until `_wireUntrack` installs Vue's `pauseTracking` / `resetTracking`,
+ * so a caller brackets its call with them whether Vue is here or not.
  */
-let _untrack: (<T>(fn: () => T) => T) | null = null;
+let _pause = (): void => {};
+let _reset = (): void => {};
 
 /**
  * True once `vapor-chamber/vue` has been imported, i.e. the tracking primitives
@@ -268,10 +291,8 @@ let _untrackWarned = false;
  */
 export function _wireUntrack(pause: () => void, reset: () => void, viaSubpath = false): void {
   if (viaSubpath) _vueSubpathLoaded = true;
-  _untrack = <T>(fn: () => T): T => {
-    pause();
-    try { return fn(); } finally { reset(); }
-  };
+  _pause = pause;
+  _reset = reset;
 }
 
 /**
@@ -297,15 +318,16 @@ export function _wireUntrack(pause: () => void, reset: () => void, viaSubpath = 
  */
 export function untracked<T>(fn: () => T): T {
   // In an IIFE the wiring below never runs (no bundler can resolve
-  // `@vue/reactivity` from a <script> tag), so `_untrack` is provably null.
+  // `@vue/reactivity` from a <script> tag), so the slots are provably no-ops.
   // Folding that here lets the minifier reduce this to `fn()` and drop the
-  // slot entirely rather than shipping a branch that can only go one way.
+  // bracket entirely rather than shipping a branch that can only go one way.
   if (typeof __VC_IIFE__ !== 'undefined' && __VC_IIFE__) return fn();
 
   // Deliberately BEFORE the wired-path return - see warnProbePath().
   warnProbePath();
 
-  return _untrack === null ? fn() : _untrack(fn);
+  _pause();
+  try { return fn(); } finally { _reset(); }
 }
 
 /**
@@ -381,113 +403,126 @@ let _unwiredWarned = false;
  * `configureVue(Vue)`, the tail vueDetectionHint() already gives, is its remedy.
  */
 function warnUnwired(): void {
-  if (!_unwiredWarned && _vueDeepRefFn === null && (globalThis as any).__VUE__ === true) {
-    _unwiredWarned = true;
-    // Short on purpose: unlike the DEV text above, this ships in the IIFEs.
-    console.warn(
-      '[vapor-chamber] Composables run without reactivity, cleanup or KeepAlive guard. ' +
-      (typeof __VC_IIFE__ !== 'undefined' && __VC_IIFE__
-        ? ''
-        : "Import them from 'vapor-chamber/vue' (or /vapor), or: ") +
-      vueDetectionHint(),
-    );
+  // Every composable creation passes here, so the test that is false once Vue
+  // is wired comes first and alone: the build flag's `typeof` of a global that
+  // is not defined is a slow lookup, and it cost useCommand() creation 7-8%
+  // (perf-1.26 A/B, log s35.44). A wired build cannot be in this state; the
+  // flag stays first INSIDE, so the inner block still folds there (see
+  // __VC_WIRED_BUILD__) and the empty `if` goes with it.
+  if (_vueDeepRefFn === null) {
+    if (!(typeof __VC_WIRED_BUILD__ !== 'undefined' && __VC_WIRED_BUILD__) && !_unwiredWarned && (globalThis as any).__VUE__ === true) {
+      _unwiredWarned = true;
+      // Short on purpose: unlike the DEV text above, this ships in the IIFEs.
+      console.warn(
+        '[vapor-chamber] Composables run without reactivity, cleanup or KeepAlive guard. ' +
+        (typeof __VC_IIFE__ !== 'undefined' && __VC_IIFE__
+          ? ''
+          : "Import them from 'vapor-chamber/vue' (or /vapor), or: ") +
+        vueDetectionHint(),
+      );
+    }
   }
   warnProbePath();
-}
-
-/**
- * Wire {@link untracked} from `@vue/reactivity`, best-effort.
- *
- * That package and not `vue`: the primitives are simply not on the `vue` entry
- * - re-verified at 3.6.0-rc.6 by enumerating both modules, where
- * `pauseTracking`, `resetTracking`, `enableTracking` and `setActiveSub` are all
- * `undefined` on `vue` and all functions on `@vue/reactivity`, which resolves
- * to the *same module instance* Vue itself uses (a second copy would toggle
- * unrelated state and silently do nothing - checked). First verified at rc.3
- * and unchanged since; the RC is named because an unqualified "not on the vue
- * entry" is the kind of claim that quietly stops being true.
- *
- * SCOPE, measured: this works under a dev server and in vitest, and fails in
- * every production bundle - the specifier is bare, and a built bundle has no
- * import map to resolve it against. It is kept because it is the zero-config
- * path where it does work; production correctness comes from
- * `enableVueReactivity()` in the `vapor-chamber/vue` subpath, which resolves
- * the same primitives at BUILD time. `untracked()` warns once in DEV when this
- * probe has failed, rather than degrading in silence.
- *
- * The specifier is held in a variable so no bundler can fold it back into a
- * literal `import()` of that specifier: that would make the optional peer
- * statically resolvable from the package root and break consumers who lack it. Guarded by
- * `tests/dist-optional-peers.test.ts`, which is also why `src/vue.ts` is built
- * as its own pass in `scripts/build.mjs` - marking the peer external in the
- * main build is exactly what lets the fold happen.
- */
-async function wireUntracked(): Promise<void> {
-  // An IIFE is loaded by a <script> tag, where a bare `import()` can never
-  // resolve. `__VC_IIFE__` const-folds, so this whole function and its
-  // specifier string are dropped from those bundles.
-  if (typeof __VC_IIFE__ !== 'undefined' && __VC_IIFE__) return;
-  if (_vueDeepRefFn === null) return; // no Vue - nothing to suspend
-  try {
-    // Assembled, not written. A plain `const pkg = '@vue/reactivity'` is folded
-    // straight back into a literal `import()` of that specifier by Rollup now that the
-    // package is a declared (optional) peer - Vite's lib mode auto-externalises
-    // peers, and an external specifier is exactly what constant propagation is
-    // free to inline. That literal is the leak `tests/dist-optional-peers.test.ts`
-    // guards: statically resolvable from the package root, so every consumer
-    // without the optional peer breaks at dep-optimize. `@vite-ignore` does not
-    // prevent it - the pre-bundled dep is re-analysed.
-    const pkg = ['@vue', 'reactivity'].join('/');
-    const r: any = await import(/* @vite-ignore */ pkg);
-    if (typeof r?.pauseTracking === 'function' && typeof r?.resetTracking === 'function') {
-      _wireUntrack(r.pauseTracking, r.resetTracking);
-    }
-  } catch {
-    // Probe unavailable. Nothing to record: the diagnostic keys off
-    // `_vueSubpathLoaded`, which is already false here.
-  }
 }
 
 function probeVue(): void {
   if (_vueProbed) return;
   _vueProbed = true;
 
-  // 1. Synchronous probe. This is the only channel that can ever detect Vapor
-  //    without a bundler (no-build IIFE / sprinkled-JS pages,
-  //    docs/whitepaper.md section 11.6): the async probe below resolves a bare
-  //    `import('vue')`, which Vue 3.6 NEVER wires to the Vapor-enabled build
-  //    outside a bundler's alias magic (@vitejs/plugin-vue does this per-app
-  //    when it sees `<script setup vapor>`) - Vapor is a physically separate
-  //    dist file (vue.runtime-with-vapor.esm-*.js).
-  //
-  //    Two slots are read, ours first. `__VUE__` is kept for compatibility
-  //    with pages and docs that already use it, but it is Vue's key: Vue
-  //    assigns `true` to it on first app creation, so a namespace left there
-  //    is gone the moment anything mounts. Whichever slot still holds a real
-  //    namespace wins; `configureVue()` bypasses both.
-  //
-  //    Do NOT try to "fix" a miss here with a second dynamic import of the
-  //    with-vapor build as a fallback - verified directly that two
-  //    separately-imported Vue dist files are two disconnected
-  //    reactivity-engine instances (a ref() from one is invisible to a
-  //    watchEffect from the other, silently, no error), so an automatic
-  //    fallback would risk introducing exactly that bug rather than fixing
-  //    anything.
-  const fromGlobal = readGlobal(VUE_GLOBAL_KEY) ?? readGlobal('__VUE__');
-  if (fromGlobal) applyVueModule(fromGlobal);
+  // A wired build has no probe at all (see __VC_WIRED_BUILD__).
+  if (!(typeof __VC_WIRED_BUILD__ !== 'undefined' && __VC_WIRED_BUILD__)) {
+    // 1. Synchronous probe. This is the only channel that can ever detect Vapor
+    //    without a bundler (no-build IIFE / sprinkled-JS pages,
+    //    docs/whitepaper.md section 9.6): the async probe below resolves a bare
+    //    `import('vue')`, which Vue 3.6 NEVER wires to the Vapor-enabled build
+    //    outside a bundler's alias magic (@vitejs/plugin-vue does this per-app
+    //    when it sees `<script setup vapor>`) - Vapor is a physically separate
+    //    dist file (vue.runtime-with-vapor.esm-*.js).
+    //
+    //    Only our own slot is read (`__VUE__` is Vue's: it holds a boolean once
+    //    an app mounts); `configureVue()` bypasses it.
+    //
+    //    Do NOT try to "fix" a miss here with a second dynamic import of the
+    //    with-vapor build as a fallback - verified directly that two
+    //    separately-imported Vue dist files are two disconnected
+    //    reactivity-engine instances (a ref() from one is invisible to a
+    //    watchEffect from the other, silently, no error), so an automatic
+    //    fallback would risk introducing exactly that bug rather than fixing
+    //    anything.
+    const fromGlobal = readGlobal(VUE_GLOBAL_KEY);
+    if (fromGlobal) applyVueModule(fromGlobal);
 
-  // 2. Async probe: dynamic import for ESM / Vite / bundler environments.
-  //    Resolved by the time user code's first await/tick completes.
-  //    Variable indirection prevents TS from statically resolving the optional peer dep.
-  const vuePkg = 'vue';
-  _probePromise = import(/* @vite-ignore */ vuePkg)
-    .then((vue: any) => {
-      applyVueModule(vue);
-    })
-    .catch(() => {
-      // Vue not available - use plain signals, no auto-cleanup
-    })
-    .then(wireUntracked);
+    // 2. Async probe: dynamic import for ESM / Vite / bundler environments.
+    //    Resolved by the time user code's first await/tick completes.
+    //    Variable indirection prevents TS from statically resolving the optional peer dep.
+    const vuePkg = 'vue';
+    _probePromise = import(/* @vite-ignore */ vuePkg)
+      .then((vue: any) => {
+        applyVueModule(vue);
+      })
+      .catch(() => {
+        // Vue not available - use plain signals, no auto-cleanup
+      })
+      .then(wireUntracked);
+
+    /**
+     * Wire {@link untracked} from `@vue/reactivity`, best-effort.
+     *
+     * That package and not `vue`: the primitives are simply not on the `vue` entry
+     * - re-verified at 3.6.0-rc.6 by enumerating both modules, where
+     * `pauseTracking`, `resetTracking`, `enableTracking` and `setActiveSub` are all
+     * `undefined` on `vue` and all functions on `@vue/reactivity`, which resolves
+     * to the *same module instance* Vue itself uses (a second copy would toggle
+     * unrelated state and silently do nothing - checked). First verified at rc.3
+     * and unchanged since; the RC is named because an unqualified "not on the vue
+     * entry" is the kind of claim that quietly stops being true.
+     *
+     * SCOPE, measured: this works under a dev server and in vitest, and fails in
+     * every production bundle - the specifier is bare, and a built bundle has no
+     * import map to resolve it against. It is kept because it is the zero-config
+     * path where it does work; production correctness comes from
+     * `enableVueReactivity()` in the `vapor-chamber/vue` subpath, which resolves
+     * the same primitives at BUILD time. `untracked()` warns once in DEV when this
+     * probe has failed, rather than degrading in silence.
+     *
+     * The specifier is held in a variable so no bundler can fold it back into a
+     * literal `import()` of that specifier: that would make the optional peer
+     * statically resolvable from the package root and break consumers who lack it. Guarded by
+     * `tests/dist-optional-peers.test.ts`, which is also why `src/vue.ts` is built
+     * as its own pass in `scripts/build.mjs` - marking the peer external in the
+     * main build is exactly what lets the fold happen.
+     *
+     * Declared inside this block, not beside probeVue: webpack parses a
+     * function whether or not anything calls it, and warned "Critical
+     * dependency" on the assembled specifier even in a wired build. In the
+     * dead branch it is dropped (tests/root-probe-builds.test.ts).
+     */
+    async function wireUntracked(): Promise<void> {
+      // An IIFE is loaded by a <script> tag, where a bare `import()` can never
+      // resolve. `__VC_IIFE__` const-folds, so this whole function and its
+      // specifier string are dropped from those bundles.
+      if (typeof __VC_IIFE__ !== 'undefined' && __VC_IIFE__) return;
+      if (_vueDeepRefFn === null) return; // no Vue - nothing to suspend
+      try {
+        // Assembled, not written. A plain `const pkg = '@vue/reactivity'` is folded
+        // straight back into a literal `import()` of that specifier by Rollup now that the
+        // package is a declared (optional) peer - Vite's lib mode auto-externalises
+        // peers, and an external specifier is exactly what constant propagation is
+        // free to inline. That literal is the leak `tests/dist-optional-peers.test.ts`
+        // guards: statically resolvable from the package root, so every consumer
+        // without the optional peer breaks at dep-optimize. `@vite-ignore` does not
+        // prevent it - the pre-bundled dep is re-analysed.
+        const pkg = ['@vue', 'reactivity'].join('/');
+        const r: any = await import(/* @vite-ignore */ pkg);
+        if (typeof r?.pauseTracking === 'function' && typeof r?.resetTracking === 'function') {
+          _wireUntrack(r.pauseTracking, r.resetTracking);
+        }
+      } catch {
+        // Probe unavailable. Nothing to record: the diagnostic keys off
+        // `_vueSubpathLoaded`, which is already false here.
+      }
+    }
+  }
 }
 
 // Kick off Vue detection at module load time so it's resolved
@@ -505,8 +540,7 @@ probeVue();
  */
 export async function waitForVueDetection(): Promise<void> {
   probeVue();
-  /* v8 ignore next -- defensive: probeVue() runs at module load and its first
-     run always assigns _probePromise, so the null arm has no producer */
+  // Null in a wired build, which runs no probe (see __VC_WIRED_BUILD__).
   if (_probePromise) await _probePromise;
 }
 
@@ -535,7 +569,7 @@ export function isVaporAvailable(): boolean {
  */
 export function vueDetectionHint(): string {
   // Deliberately NOT dev-gated. The audience most likely to hit this is the
-  // no-bundler `<script>`-tag page (whitepaper section 11.6), which only ever runs a
+  // no-bundler `<script>`-tag page (whitepaper section 9.6), which only ever runs a
   // production IIFE - stripping the diagnosis in prod would remove it exactly
   // where it is needed. Kept as small as the three-way distinction allows:
   // one shared tail, three short causes, no helper function.
@@ -586,7 +620,7 @@ export function getVueDeepRefFn(): (<T>(v: T) => { value: T }) | null { return _
  * }
  *
  * Unaugmented, everything stays exactly as loose as before (string actions,
- * `any` targets). Schema users: derive the entries with `CommandsOf<S>` from
+ * `any` targets). Schema users: derive the entries with `InferMap<S>` from
  * './schema' instead of writing them by hand.
  */
 // biome-ignore lint/suspicious/noEmptyInterface: augmentation hook by design
@@ -602,46 +636,8 @@ export type SharedCommandMap = [keyof GlobalCommands] extends [never]
   ? CommandMap
   : { [K in keyof GlobalCommands]: GlobalCommands[K] };
 
-let sharedBus: CommandBus | null = null;
-
-/**
- * Get the shared bus. Typed with {@link SharedCommandMap} - augment
- * {@link GlobalCommands} to make every call site typed. Pass an explicit map
- * to override per call site (`getCommandBus<CommandMap>()` opts back out).
- */
-export function getCommandBus<M extends CommandMap = SharedCommandMap>(): CommandBus<M> {
-  if (!sharedBus) {
-    sharedBus = createCommandBus();
-  }
-  return sharedBus as CommandBus<M>;
-}
-
-/**
- * Replace the shared bus instance.
- *
- * SSR WARNING: the shared bus is a module global - one per Node process, not
- * per request. The set-render-reset pattern (see ssr.ts) is only safe when
- * requests render strictly one at a time. Under CONCURRENT SSR renders,
- * interleaved requests stomp each other's bus: handlers and state leak across
- * requests. For concurrent servers, don't use the shared bus on the server -
- * create a bus per request and pass it explicitly (every composable and plugin
- * accepts a `bus` option / argument).
- *
- * Accepts either bus flavor - the composables' dispatch path already handles
- * thenable results (`runDispatch` awaits them), so an AsyncCommandBus works at
- * runtime. `getCommandBus()`'s static type is `CommandBus`.
- */
-export function setCommandBus(bus: CommandBus | AsyncCommandBus): void {
-  sharedBus = bus as CommandBus;
-}
-
-/**
- * Reset the shared bus to null. Useful in test teardown to prevent
- * handler/hook leaks between test files.
- */
-export function resetCommandBus(): void {
-  sharedBus = null;
-}
+// The shared bus lives in a probe-free module (see its header).
+export { getCommandBus, setCommandBus, resetCommandBus };
 
 // ---------------------------------------------------------------------------
 // Vue lifecycle detection (optional - works without Vue too)
@@ -746,8 +742,17 @@ export function tryKeepAliveHooks(onPause: () => void, onResume: () => void): vo
 
 // ---------------------------------------------------------------------------
 // runDispatch - shared loading/error wrapper. Two callers, both in this file:
-// `useCommand` and `useCommandQuery`. Accepts a thunk so the bus call is made
-// inside the try block.
+// `useCommand` and `useCommandQuery`. It takes the bus and the call's
+// arguments, not a thunk, and calls `bus.dispatch` / `bus.query` directly.
+// Against the thunk shape (one closure per call through `untracked`) this
+// takes 0.915-0.934x the time on `useCommand().dispatch`, 2.7-3.9 ns less
+// (`npm run ab`, two call lengths, controls within 1%; log s35.53). With both
+// callers interleaved the
+// workload's own control spread up to 1.36x across processes, so no figure is
+// claimed for that shape. A function passed in and called with
+// `.call` gained nothing; why is not settled (V8 can inline through a
+// parameter when the site's call feedback is monomorphic, and that was not
+// checked with --trace-turbo-inlining).
 //
 // NOT used by chamber-vapor.ts: `useVaporAsyncCommand` hand-rolls its own
 // wrapper and says why at its own site (~1.2x leaner than this .then-chain,
@@ -756,21 +761,40 @@ export function tryKeepAliveHooks(onPause: () => void, onResume: () => void): vo
 
 /** @internal */
 export function runDispatch(
-  busCall: () => any,
+  bus: CommandBus,
+  query: boolean,
+  action: string,
+  target: unknown,
+  payload: unknown,
   loading: Signal<boolean>,
   lastError: Signal<Error | null>,
   onSuccess?: (value: any) => void,
 ): CommandResult | Promise<CommandResult> {
-  loading.value = true;
-  lastError.value = null;
   let result: any;
   try {
+    // Both opening writes are INSIDE the try. A synchronous subscriber can
+    // throw out of a signal write; outside the try that left `loading` true
+    // with the error escaping `dispatch`. Here it is a failed result like any
+    // other, and the handler does not run
+    // (tests/rundispatch-throwing-subscriber.test.ts).
+    loading.value = true;
+    lastError.value = null;
     // A dispatch is an action, not a read. Without this, every reactive value
     // the HANDLER touches becomes a dependency of whatever effect called the
     // composable, so the component re-runs on state it never mentions. Vue
     // fixed the same class twice in 3.6.0-rc.3 (#15203/#15204) the same way.
     // Pass-through when Vue is absent.
-    result = untracked(busCall);
+    if (typeof __VC_IIFE__ !== 'undefined' && __VC_IIFE__) {
+      result = query ? bus.query(action, target, payload) : bus.dispatch(action, target, payload);
+    } else {
+      warnProbePath();
+      _pause();
+      try {
+        result = query ? bus.query(action, target, payload) : bus.dispatch(action, target, payload);
+      } finally {
+        _reset();
+      }
+    }
   } catch (e) {
     loading.value = false;
     const error = e as Error;
@@ -829,7 +853,7 @@ export function useCommand() {
     target: TargetOf<SharedCommandMap, A>,
     payload?: PayloadOf<SharedCommandMap, A>,
   ): CommandResult<ResultOf<SharedCommandMap, A>> | Promise<CommandResult<ResultOf<SharedCommandMap, A>>> {
-    return runDispatch(() => bus.dispatch(action, target, payload), loading, lastError);
+    return runDispatch(bus, false, action, target, payload, loading, lastError);
   }
 
   function register<A extends keyof SharedCommandMap & string>(
@@ -909,50 +933,112 @@ type SharedCommandStateEntry = {
   errorCap: number;
   /** Bus-wide error observer - unhooked when refCount hits 0. */
   unsub: () => void;
-  /** Per-(action, target) loading, keyed by `commandKey`. Null until the first
-   *  `isLoading()` call, so a bus nobody asks per-key questions of pays nothing. */
-  slots: Map<string, LoadingSlot> | null;
+  /** Per-(action, target) loading: a map by action, then by the target's
+   *  `commandKey` part (`_targetKey`), so a dispatch builds no key string. Null
+   *  until the first `isLoading()` call, so a bus nobody asks per-key questions
+   *  of pays nothing. */
+  slots: Map<string, Map<string, LoadingSlot>> | null;
   /** The slot each started Command counted into, so a settle is matched to
-   *  ITS start and never decrements someone else's. */
-  started: WeakMap<Command, LoadingSlot> | null;
+   *  ITS start and never decrements someone else's. On an async bus, or one
+   *  this library did not make; a sync bus uses `stack`. */
+  started: Map<Command, LoadingSlot> | null;
+  /** A sync bus's starts, each Command followed by its slot, innermost last.
+   *  Its settles come in LIFO order on every nesting path
+   *  (tests/isloading-nesting.test.ts), so a settle is matched at the top. The
+   *  match is still by identity: a settle with no start (a query, an emit, a
+   *  command already running when tracking began) is not found and takes
+   *  nothing, and one below a start that never settled is found and removed
+   *  there. */
+  stack: Array<Command | LoadingSlot> | null;
   /** The loading before-hook - unhooked with `unsub`. */
   unBefore: (() => void) | null;
+  /** Commands started and not yet settled. While above 0 the entry outlives
+   *  its last holder, so the next one sees the key still in flight; the
+   *  settle that ends the last one releases it. */
+  pending: number;
+  /** An unread slot back at 0 is pruned only while its action's bucket holds
+   *  more than this: 256 in the performance profile (the slot is reused, no
+   *  allocation, set or delete per dispatch: 0.848-0.865x on a tracked
+   *  dispatch, 21-22 ns, log s35.61), 0 in lean (pruned at once). Set from
+   *  `__VC_LEAN__` when tracking starts (trackLoading), never per dispatch. */
+  pruneAbove: number;
 };
 
 /** One key's in-flight count and the flag its readers subscribe to. `flag` is
- *  written only on 0 <-> 1, so a reader re-runs on transitions of ITS key and
- *  on nothing else. `read` marks a slot handed out by `isLoading()`: only an
- *  unread slot is pruned when its count returns to 0, since a reader holds
- *  the signal and later dispatches must write that same one. */
-type LoadingSlot = { key: string; n: number; flag: Signal<boolean>; read: boolean };
+ *  null until `isLoading()` reads the key, created then from the count, so a key
+ *  nobody asks about costs no signal and no reactive write per dispatch
+ *  (0.969-0.982x on a tracked dispatch, 3.6-6.1 ns, log s35.53). Once
+ *  created it is written only on 0 <-> 1, so a reader re-runs on transitions of
+ *  ITS key and on nothing else, and the slot is kept when its count returns to
+ *  0, since the reader holds the signal and later dispatches must write that
+ *  same one. A slot without one is pruned then in the lean profile; the
+ *  performance profile keeps it for the next dispatch of its key while its
+ *  bucket holds 256 or fewer (see `pruneAbove`). */
+type LoadingSlot = { key: string; n: number; flag: Signal<boolean> | null; bucket: Map<string, LoadingSlot> };
 
 const _sharedStates = new WeakMap<CommandBus, SharedCommandStateEntry>();
 
-function loadingSlot(slots: Map<string, LoadingSlot>, key: string): LoadingSlot {
-  let slot = slots.get(key);
+function loadingSlot(slots: Map<string, Map<string, LoadingSlot>>, action: string, key: string): LoadingSlot {
+  let bucket = slots.get(action);
+  if (bucket === undefined) {
+    bucket = new Map();
+    slots.set(action, bucket);
+  }
+  let slot = bucket.get(key);
   if (slot === undefined) {
-    slot = { key, n: 0, flag: signal(false), read: false };
-    slots.set(key, slot);
+    slot = { key, n: 0, flag: null, bucket };
+    bucket.set(key, slot);
   }
   return slot;
 }
 
+/** Unhook the entry from its bus and forget it. */
+function releaseSharedState(entry: SharedCommandStateEntry, bus: CommandBus): void {
+  entry.unsub(); // the bus-wide error observer
+  entry.unBefore?.(); // and the loading before-hook, if one was installed
+  _sharedStates.delete(bus);
+}
+
 /**
  * Install per-key tracking on first use: a before-hook starts a Command, the
- * entry's `on('*')` observer settles it. Throws core:refused:bus on a sealed bus
- * (a before-hook cannot be added there) - call `isLoading()` before sealing.
+ * entry's `on('*')` observer settles it. On a sealed bus the hook is the
+ * library's own, installed past the seal: the bus is sealed again before
+ * this returns.
  */
-function trackLoading(entry: SharedCommandStateEntry, bus: CommandBus): Map<string, LoadingSlot> {
+function trackLoading(entry: SharedCommandStateEntry, bus: CommandBus): Map<string, Map<string, LoadingSlot>> {
   if (entry.slots === null) {
-    const slots = new Map<string, LoadingSlot>();
-    const started = new WeakMap<Command, LoadingSlot>();
-    entry.unBefore = bus.onBefore((cmd: Command) => {
-      const slot = loadingSlot(slots, commandKey(cmd.action, cmd.target));
-      if (slot.n++ === 0) slot.flag.value = true;
-      started.set(cmd, slot);
-    });
+    const slots = new Map<string, Map<string, LoadingSlot>>();
+    // The build profile, read once per entry: a `typeof` of a global nobody
+    // defined is a slow lookup (docs/V8-RULES.md rule 6), and a define folds
+    // this line to the write or to nothing.
+    if (typeof __VC_LEAN__ !== 'undefined' && __VC_LEAN__) entry.pruneAbove = 0;
+    const sealed = bus.isSealed();
+    if (sealed) unsealBus(bus);
+    if (_isSyncBus(bus)) {
+      const stack: Array<Command | LoadingSlot> = [];
+      entry.unBefore = bus.onBefore((cmd: Command) => {
+        const slot = loadingSlot(slots, cmd.action, _targetKey(cmd.target));
+        if (slot.n++ === 0 && slot.flag !== null) slot.flag.value = true;
+        entry.pending++;
+        stack.push(cmd, slot);
+      });
+      entry.stack = stack;
+    } else {
+      // A Map, not a WeakMap: every start is deleted at its settle, and a start
+      // that never settled would already hold `pending` above 0 (the entry and
+      // the key stay), so weakness would free only the Command. The WeakMap cost
+      // 24-26 ns of a tracked dispatch's ~188 (this Map: 0.858-0.871x, log s35.53).
+      const started = new Map<Command, LoadingSlot>();
+      entry.unBefore = bus.onBefore((cmd: Command) => {
+        const slot = loadingSlot(slots, cmd.action, _targetKey(cmd.target));
+        if (slot.n++ === 0 && slot.flag !== null) slot.flag.value = true;
+        entry.pending++;
+        started.set(cmd, slot);
+      });
+      entry.started = started;
+    }
+    if (sealed) bus.seal();
     entry.slots = slots;
-    entry.started = started;
   }
   return entry.slots;
 }
@@ -1001,22 +1087,6 @@ export function useSharedCommandState(options: UseSharedCommandStateOptions = {}
 
   let state = _sharedStates.get(bus);
   if (!state) {
-    const entry: SharedCommandStateEntry = {
-      inFlight: signal(0),
-      isAnyLoading: signal(false),
-      lastError: signal<Error | null>(null),
-      errors: signal<Error[]>([]),
-      errorCount: signal(0),
-      refCount: 0,
-      errorCap,
-      /* v8 ignore next -- type-satisfaction placeholder: overwritten by the
-         real unsubscribe 10 lines down, in straight-line sync code, before
-         `entry` is reachable by dispose() (its only caller) */
-      unsub: () => {},
-      slots: null,
-      started: null,
-      unBefore: null,
-    };
     // Observe errors BUS-WIDE, not only dispatches made through this
     // composable's own dispatch wrapper. Any failed command on the bus - from
     // useCommand, raw bus.dispatch, anywhere - lands in the
@@ -1037,14 +1107,31 @@ export function useSharedCommandState(options: UseSharedCommandStateOptions = {}
     // <plugin>:failed:plugin result (pluginThrew), and the one throw left by contract,
     // `onMissing: 'throw'`, is settled before it is re-thrown
     // (syncRunSettling), so every start has a settle.
-    entry.unsub = bus.on('*', (cmd, result) => {
-      const slot = entry.started?.get(cmd);
-      if (slot !== undefined) {
-        entry.started!.delete(cmd);
-        if (--slot.n === 0) {
-          slot.flag.value = false;
-          if (!slot.read) entry.slots!.delete(slot.key);
+    // Declared ahead of `entry`, which it reads only when a command settles,
+    // long after the literal below has run.
+    const observe: Listener = (cmd, result) => {
+      let slot: LoadingSlot | undefined;
+      const stack = entry.stack;
+      if (stack !== null) {
+        let i = stack.length - 2;
+        if (i >= 0 && stack[i] === cmd) {
+          slot = stack.pop() as LoadingSlot;
+          stack.pop();
+        } else {
+          i -= 2;
+          while (i >= 0 && stack[i] !== cmd) i -= 2;
+          if (i >= 0) slot = stack.splice(i, 2)[1] as LoadingSlot;
         }
+      } else if (entry.started !== null) {
+        slot = entry.started.get(cmd);
+        if (slot !== undefined) entry.started.delete(cmd);
+      }
+      if (slot !== undefined) {
+        if (--slot.n === 0) {
+          if (slot.flag !== null) slot.flag.value = false;
+          else if (slot.bucket.size > entry.pruneAbove) slot.bucket.delete(slot.key);
+        }
+        if (--entry.pending === 0 && entry.refCount <= 0) releaseSharedState(entry, bus);
       }
       if (!result.ok && result.error) {
         entry.lastError.value = result.error;
@@ -1054,7 +1141,23 @@ export function useSharedCommandState(options: UseSharedCommandStateOptions = {}
         entry.errors.value = next;
         entry.errorCount.value = next.length;
       }
-    });
+    };
+    const entry: SharedCommandStateEntry = {
+      inFlight: signal(0),
+      isAnyLoading: signal(false),
+      lastError: signal<Error | null>(null),
+      errors: signal<Error[]>([]),
+      errorCount: signal(0),
+      refCount: 0,
+      errorCap,
+      unsub: bus.on('*', observe),
+      slots: null,
+      started: null,
+      stack: null,
+      unBefore: null,
+      pending: 0,
+      pruneAbove: 256,
+    };
     state = entry;
     _sharedStates.set(bus, state);
   } else if (errorCap < state.errorCap) {
@@ -1130,28 +1233,33 @@ export function useSharedCommandState(options: UseSharedCommandStateOptions = {}
 
   /**
    * Reactive "is THIS (action, target) in flight?", bus-wide - any dispatch
-   * counts, not only this composable's. Keyed by `commandKey`, so object
+   * counts, not only this composable's. Keyed like `commandKey`, so object
    * targets match by value. `isLoading(action)` is the exact key
    * `(action, undefined)`, not "any target of this action".
    *
    * Atomic: each key has its own signal, written only when its count crosses
    * 0 <-> 1, so a reader re-runs on ITS key's transitions and no other's.
    * Tracking starts on the first call for this bus; a dispatch already in
-   * flight then is not counted. Not on a sealed bus (see trackLoading).
+   * flight then is not counted. It works on a sealed bus (see trackLoading),
+   * and a key still in flight when the last holder leaves reads lit for the
+   * next one (see `pending`).
    */
   function isLoading(action: string, target?: unknown): Readonly<Signal<boolean>> {
-    const slot = loadingSlot(trackLoading(state!, bus), commandKey(action, target));
-    slot.read = true;
+    const slot = loadingSlot(trackLoading(state!, bus), action, _targetKey(target));
+    // Created on the first read, lit if the key is already in flight.
+    if (slot.flag === null) slot.flag = signal(slot.n > 0);
     return slot.flag;
   }
 
+  // Once per holder: a manual dispose() followed by the scope's own would
+  // count this holder out twice and release an entry a later holder uses
+  // (tests/shared-state-dispose-twice.test.ts).
+  let held = true;
   function dispose(): void {
-    state!.refCount--;
-    if (state!.refCount <= 0) {
-      state!.unsub(); // unhook the bus-wide error observer
-      state!.unBefore?.(); // and the loading before-hook, if one was installed
-      _sharedStates.delete(bus);
-    }
+    if (!held) return;
+    held = false;
+    // With a command in flight the entry stays (see `pending`).
+    if (--state!.refCount <= 0 && state!.pending === 0) releaseSharedState(state!, bus);
   }
 
   tryAutoCleanup(dispose);
@@ -1289,7 +1397,7 @@ export function _createCommandState<T>(
  * useCommandHistory - undo/redo with reactive state
  *
  * Auto-cleanup on Vue component unmount or scope disposal.
- * Undo executes inverse handlers when registered via register(action, handler, { undo }).
+ * Undo dispatches `<action>$undo`, which runs the inverse registered via register(action, handler, { undo }).
  */
 export function useCommandHistory(options: {
   maxSize?: number;
@@ -1319,7 +1427,7 @@ export function useCommandHistory(options: {
       // Only renew the redo stack when it moved - a fresh [] every dispatch
       // is a new identity that re-triggers every future/canRedo watcher.
       if (futureMoved) future.value = ledger.future.slice();
-      canUndo.value = ledger.past.length > 0;
+      canUndo.value = ledger.canUndo();
       canRedo.value = ledger.future.length > 0;
     },
   });
@@ -1380,14 +1488,10 @@ export function useCommandQuery() {
   const data = signal<any>(null);
   const loading = signal(false);
   const lastError = signal<Error | null>(null);
+  const onData = (value: any): void => { data.value = value; };
 
   function query(action: string, target: any, payload?: any): CommandResult | Promise<CommandResult> {
-    return runDispatch(
-      () => bus.query(action, target, payload),
-      loading,
-      lastError,
-      (value) => { data.value = value; },
-    );
+    return runDispatch(bus, true, action, target, payload, loading, lastError, onData);
   }
 
   return { query, data, loading, lastError };

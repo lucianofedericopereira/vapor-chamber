@@ -159,6 +159,35 @@ describe('no-build widget shape', () => {
     expect(el.shadowRoot?.textContent).toContain('configured');
   });
 
+  // Fails on Vue 3.6.0-rc.9, which treated a function-valued property as a
+  // prop GETTER: it called it and delivered the return value. From rc.10
+  // (`506b333c`) the function arrives as the value it is.
+  it('a function set on a widget property arrives as that function, uncalled', () => {
+    let calls = 0;
+    const onSave = () => {
+      calls++;
+      return 'returned';
+    };
+    let arrived: unknown;
+    defineWidget('vc-fixture-fn-prop', {
+      props: { onSave: Function },
+      setup(props: { onSave: unknown }) {
+        arrived = props.onSave;
+        return document.createElement('span');
+      },
+    });
+
+    const container = document.createElement('div');
+    document.body.appendChild(container);
+    hosts.push(container);
+    const el = document.createElement('vc-fixture-fn-prop') as HTMLElement & { onSave: unknown };
+    el.onSave = onSave;
+    container.appendChild(el);
+
+    expect(arrived).toBe(onSave);
+    expect(calls).toBe(0);
+  });
+
   it('emitDOMEvent is inert without a real CustomEvent, and never throws', () => {
     // The IIFE guards this so a widget can call it on a server-rendered pass
     // or in a stripped environment without taking the page down.

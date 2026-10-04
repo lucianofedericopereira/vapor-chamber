@@ -5,7 +5,7 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { createMemoryHistory, createWebHistory } from '../../src/router/history';
+import { createMemoryHistory, createWebHistory } from '@router/history';
 
 describe('createWebHistory (happy-dom)', () => {
   beforeEach(() => {
@@ -168,7 +168,7 @@ describe('createWebHistory - fallback branches', () => {
 
 describe('resolveBase - window-pathname default (happy-dom)', () => {
   it('reads window.location.pathname when no pathname option is given', async () => {
-    const { resolveBase } = await import('../../src/router/history');
+    const { resolveBase } = await import('@router/history');
     window.history.replaceState(null, '', '/en/checkout');
     expect(resolveBase({ locales: ['en', 'it'] })).toBe('/en');
   });

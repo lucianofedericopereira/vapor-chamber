@@ -1,8 +1,9 @@
 # RC alignment log - the record of each Vue 3.6 RC cycle
 
 The working record of the rc.8 (2026-09-14) and rc.9 (2026-09-21) alignment
-cycles: what was read, measured, decided and retracted, in the order it
-happened. It is long on purpose and not the place to start.
+cycles, and of the rc.10 cycle from its reading pass (2026-09-30, s35): what
+was read, measured, decided and retracted, in the order it happened. It is long
+on purpose and not the place to start.
 
 - **What to do when a new RC lands:** [rc-alignment.md](./rc-alignment.md).
 - **What each cycle changed:** `CHANGELOG.md`, and the alignment table in
@@ -7283,3 +7284,6416 @@ the reason written at the list, because the list invites exactly this.
     breaks found      0 here (cycle total 2)
     enables found     0
     src lines changed +49 (two exports, a weak pending slot, two dispatch reads)
+
+## 35. Vue 3.6.0-rc.10 alignment cycle - the reading pass (2026-09-30)
+
+READING ONLY. This folder is a v1.25.0 copy with no `.git`, no `node_modules`
+and no `dist`, so nothing was bumped, built, run or measured in this pass.
+Every statement below about what a consumer observes comes from reading the
+upstream diff against our source, and is TO VERIFY by the check named with it.
+Nothing here is a decision; no row was added to `docs/decisions.md`.
+
+Read first, in full, in this order: `docs/rc-alignment.md`, s34 of this file,
+CHANGELOG v1.25.0 back to v1.21.0, ROADMAP, whitepaper section 9. Then, of
+`src`: `directives.ts`, `router/vapor.ts`, `vapor.ts`, `vue.ts`,
+`chamber-vapor.ts`, `iife-elements.ts`. NOT re-read in this pass, so any row
+leaning on them says TO VERIFY: `chamber.ts`, `transitions.ts`, `store.ts`,
+`ssr.ts`, `vite-hmr.ts`.
+
+### 35.1 What rc.10 is
+
+85 commits in `v3.6.0-rc.9..v3.6.0-rc.10`, and the range is linear (the
+first-parent count is also 85). Source outside tests, benchmarks and version
+stamps moves +5,109 / -3,170 lines. The release notes list fewer, as at rc.8
+and rc.9: the six refactors, the Vitest 5 chore and the release commit are not
+in them.
+
+Where the weight is, by source lines: vDOM interop (`vdomInterop.ts`, touched
+by 27 commits), how a Vapor component receives its inputs (`506b333c`, one
+commit, +475 / -315 in `componentProps.ts`), hydration of slot fallbacks
+(`28e0a087`, `baf8a48f`), and compiler-vapor codegen (seventeen commits that
+are codegen only). Two commits touch `packages/reactivity` source: `ef5ff106`
+(`system.ts`) and `506b333c` (`dep.ts`, `index.ts`).
+
+### 35.2 The 85 commits, V / TV
+
+    V    77   source diff read in full, 10 lines of context. Upstream's tests
+              were read for ONE row (ef5ff106); the rest are V on their source
+              diff, not on their tests.
+    TV    6   not read. Slot-fallback interop, SSR range markers, hydration of
+              static keys. Listed below with what each needs.
+    TV-N  2   closed on their touched files: the Vitest 5 chore (tests and
+              `reactivity/__benchmarks__` only) and the release commit (version
+              stamps). TV-N is TV; the owner's sign-off is owed.
+
+Counts from `scratchpad/rc10-tally.mjs`, which asserts the groups below sum to
+85, do not overlap, and name only shas in the range.
+
+    Reactivity and component inputs
+      V    ef5ff106  fix(reactivity): notify the rest of the batch when a subsc
+      V    506b333c  fix(runtime-vapor): deliver evaluated props and dynamic sl
+      V    1e449418  fix(runtime-core): keep local useModel value when prop did
+      V    caf4a59c  fix(runtime-core): skip vdom public properties on exposed 
+      V    5685aee1  fix(runtime-vapor): pass wrapper props and attrs to the as
+    Interop: directive and vnode hooks
+      V    437abc2a  fix(runtime-vapor): let vdom interop own directive and vno
+      V    8cf0c49c  fix(runtime-vapor): track interop directive bindings per r
+      V    8d272536  fix(runtime-vapor): queue vnode mounted after the mount a 
+      V    19c79908  fix(runtime-vapor): mount interop directives on a nested r
+      V    54a17425  fix(runtime-vapor): render vdom content with no current in
+      V    e77444ba  fix(runtime-vapor): expose emits options to vdom parents i
+    Listeners, class and style on elements
+      V    86d44991  fix(compiler-vapor): bind on* keys of native elements as l
+      V    51193cc7  fix(runtime-vapor): merge a root's own listeners with the 
+      V    19a7a43e  fix(compiler-vapor): register same-element listeners after
+      V    364fc0f0  fix(runtime-vapor): keep a root's own class when the fallt
+      V    e9eef846  fix(runtime-vapor): merge a root's own style with the fall
+      V    b5ce2cee  perf(runtime-vapor): resolve a root template's class and s
+      V    d2311bb3  fix(runtime-vapor): re-sync select v-model from the owner'
+      V    63d5263f  fix(runtime-vapor): also set checked and selected as attri
+      V    d9abcb82  fix(runtime-dom): keep injected css vars when style bindin
+    Dynamic component
+      V    489e8cd7  refactor(vapor): pass component keys through their creatio
+      V    0cdb312b  fix(runtime-vapor): patch same-type vnodes passed to a dyn
+      V    87b4c7c0  fix(runtime-vapor): key dynamic component vnode branches b
+      V    9dd8cdbb  fix(runtime-vapor): apply the outer key and transition hoo
+      V    6151faa3  fix(runtime-vapor): keep inherited root scope ids on patch
+      V    08cad764  refactor(runtime-vapor): simplify dynamic component vnode 
+      V    20f46c11  fix(runtime-vapor): merge dynamic component props into vno
+    KeepAlive
+      V    8faa3006  fix(runtime-vapor): restore KeepAlive components by explic
+      V    b6f25b06  fix(compiler-vapor): propagate component root through Keep
+      V    bba7ea6e  fix(runtime-vapor): skip the KeepAlive cache lookup for ma
+      V    d8364a56  fix(runtime-vapor): do not resume a v-else-if chain branch
+      V    daca5169  fix(compiler-vapor): recognize a kebab-case keep-alive tag
+    Transition, v-for, template refs, HMR
+      V    5592ea3e  fix(runtime-vapor): hand off each in-out leave to its own 
+      V    a4bb6fee  fix(runtime-vapor): preserve pending leave when transition
+      V    7372680b  fix(runtime-vapor): release settled in-out transition bran
+      V    7d94c491  fix(runtime-vapor): create the rows of a keyed insert in s
+      V    976638b4  fix(runtime-vapor): update refs when dynamic async compone
+      V    3a952ef5  fix(runtime-vapor): escalate hmr rerender of render-less c
+    Custom elements
+      V    a429b2a6  fix(vapor): hydrate custom element children
+      V    030f158d  fix(runtime-vapor): mount hydrated custom elements once
+      V    0f9d0758  fix(runtime-vapor): stamp the owner scope id on a native s
+    Interop: slots, fallbacks, SSR ranges
+      V    3cbe4c95  fix(runtime-vapor): mount a vapor slot in place when the s
+      TV   6385494a  fix(runtime-vapor): render vdom slot fallbacks under their
+      V    080589c3  fix(runtime-vapor): patch vdom slot fallbacks in place acr
+      TV   6816887b  refactor(runtime-vapor): resolve forwarded vapor slot fall
+      V    c3d11062  fix(runtime-vapor): render an inherited slot fallback unde
+      V    86ab796f  fix(runtime-vapor): render a vdom outlet fallback under it
+      V    a4bcb1d9  fix(runtime-dom): apply css vars to a vapor slot rendered 
+      TV   28e0a087  refactor(hydration): mark slot fallbacks in ssr output and
+      TV   baf8a48f  refactor(vapor): always emit fragment markers in ssr outpu
+      V    eebd3745  refactor(runtime-vapor): drop the inherited slot end ancho
+      V    24b4e99b  fix(server-renderer): keep the range of an empty vapor slo
+      TV   adbed283  fix(server-renderer): render a vapor slot an outlet holds 
+      V    6433cca5  fix(runtime-vapor): set template refs on vdom async compon
+      V    e542cf7d  fix(runtime-vapor): patch vdom components in a vapor telep
+      V    9b18c7f1  fix(runtime-vapor): pass the empty slots of vdom component
+      V    ca8170b6  fix(runtime-vapor): pass the suspense boundary when hydrat
+      V    f7651671  fix(runtime-vapor): resolve css vars of a vdom parent when
+    Hydration
+      V    56500421  fix(runtime-vapor): release the hydration locator cache wh
+      V    36c277f6  fix(runtime-vapor): write .prop and value bindings during 
+      TV   f90f4964  fix(runtime-vapor): write static key bindings during hydra
+      V    c1c0d304  fix(runtime-vapor): parse root templates from html after h
+      V    92ace1fa  fix(runtime-vapor): never clone a hydrated static template
+      V    8301eda2  fix(runtime-vapor): track reactive object style keys durin
+      V    c65c716b  fix(runtime-vapor): hydrate an empty trailing text in a dy
+      V    a59a1e7f  fix(runtime-vapor): hydrate an empty branch as the whole s
+    Compiler codegen only
+      V    1fdd8098  fix(compiler-vapor): do not decode static attribute values
+      V    f1c66a97  fix(compiler-vapor): keep the .prop and .attr modifier on 
+      V    b68a37aa  fix(compiler-vapor): do not fold a constant prop the templ
+      V    074501e2  fix(compiler-vapor): error when v-if branches share a key
+      V    24c9632c  fix(compiler-vapor): do not fold a constant prop with no c
+      V    d51f49a7  fix(compiler-vapor): preserve DOM prop initialization orde
+      V    79f749b7  fix(compiler-vapor): drop nullish dynamic v-bind arguments
+      V    0cfb662d  fix(compiler-vapor): handle same-name shorthand for v-for 
+      V    bd6b9caa  fix(compiler-vapor): do not hoist a member expression that
+      V    65919d9e  fix(compiler-vapor): keep end tags inside and around form 
+      V    13d0e4d1  fix(compiler-vapor): keep end tags at foreign scope bounda
+      V    374a4f2a  fix(compiler-vapor): detect svg elements by namespace in p
+      V    e5e75e97  fix(vapor): resolve `<style module>` bindings in templates
+      V    83049924  fix(compiler-vapor): keep end tags of lists nested in list
+      V    cb5789b8  fix(compiler-vapor): hydrate empty and lone nested v-if te
+      V    861e6309  fix(compiler-vapor): parenthesize loose conditions in the 
+      V    d73c2cbf  fix(compiler-vapor): let v-if and v-for slots override unc
+    Chore and release
+      TV-N 41e1d0fd  chore: migrate to Vitest 5 with Vite+
+      TV-N 444eef4b  release: v3.6.0-rc.10
+
+The six plain TV rows, and why they are not closed on their titles:
+
+    6385494a 6816887b   a vDOM outlet's fallback behind a forwarded Vapor slot.
+                        `router/vapor.ts` builds its no-match branch with
+                        `createSlot('default')`; "fallback" upstream means a
+                        slot outlet's default content, which is not that, but
+                        the two share `slotFragment.ts`. Read before closing.
+    28e0a087 baf8a48f   slot fallbacks are marked in SSR output and markerless
+                        hydration is dropped: the SERVER OUTPUT FORMAT changes.
+                        `tests/vapor-hydration-fixture.test.ts` renders and
+                        hydrates on one Vue, so it cannot see a mixed pair. An
+                        upgrade note is owed if the read confirms it: server
+                        and client on the same RC.
+    adbed283            server-renderer renders a held Vapor slot as a vnode.
+    f90f4964            static key bindings written during hydration; it also
+                        changes `compiler-vapor` prop codegen (+75 in
+                        `generators/prop.ts`), so compiled fixtures move.
+
+### 35.3 Rows with contact, against our call paths
+
+A fix commit says what upstream believed was broken. Each row below is answered
+against what THIS library calls, and says how it was reached.
+
+**`ef5ff106` - a throwing subscriber no longer starves the rest of the batch.**
+`flush()` wraps each `effect.notify()` in a try, drains the queue, resets it,
+then rethrows the FIRST error. Upstream's three tests: a later effect, a later
+watcher, and an unrelated later write all see what they should. Reaches us:
+every `signal()` write on Vue is a `shallowRef` write that ends in this
+`flush()`. The write still throws, so code after it is skipped exactly as on
+rc.9; what changes is that the other subscribers of `loading`, `lastError` or a
+command state are told. TO VERIFY by reading `chamber.ts`: no write site
+depends on the abort. `npm run ab:vue -- 3.6.0-rc.9` is REQUIRED this cycle,
+not skippable on "the reactivity dist is byte-identical": it is not.
+
+**`506b333c` - inputs are delivered, not re-resolved.** One input effect per
+component evaluates the parent's getters once per parent update and delivers
+values (`propsValues`, one standalone `Dep` per key, `trackDep` /
+`triggerDep`) inside one `startBatch` / `endBatch`. Deleted with it:
+`isolatePropSources`, `isolateSlotSources` and their `shallowReactive` copies
+under KeepAlive; a KeepAlive cache hit now REBINDS the cached instance to the
+new call site's getters. `VaporElement` hands host props over as
+`{ $: [() => this._props] }`, with the comment "a function property is not a
+prop getter". `@vue/reactivity` gains `@internal` exports: `Dep`, `trackDep`,
+`triggerDep`, `activeSub`, `startBatch`, `endBatch`. Reaches us four ways:
+
+- `router/vapor.ts`: the outlet passes no props. It reads `{ slots }` off the
+  instance in `setup`, and `initSlots` replaces `instance.slots` BEFORE setup
+  runs, so `slots.default` reads the final proxy. By reading; the six outlet
+  fixtures decide.
+- `defineWidget` / `defineVaporCustomElement`: a host page that sets a
+  FUNCTION on a widget property. On rc.9 it was treated as a getter and
+  called; on rc.10 it arrives as the function. No doc or test of ours states
+  either behaviour (`iife-elements.ts` and `chamber-vapor.ts` read in full).
+- KeepAlive: `keepalive-input-scope-fixture`, `usecommand-keepalive`,
+  `register-ownership` and `vapor-keepalive-fixture` all mount a real
+  `VaporKeepAlive`, whose input scope was just rebuilt.
+- Sizes: every Vue-bundled row in `docs/BUNDLE-SIZES.md`, the outlet guard and
+  the example bundles will move. Direction unknown until built.
+
+**`437abc2a` `8cf0c49c` `8d272536` `19c79908` - interop owns directive hooks
+and follows the Vapor child's root.** runtime-core stops invoking directive and
+vnode hooks for a Vapor child; interop does, per root-chain component: `created`
+/ `beforeMount` before the root is inserted, `beforeUnmount` while it is still
+connected, a REMOUNT when a branch switch replaces the root, `beforeUpdate` /
+`updated` (not a remount) when a KeepAlive branch is reactivated, and only once
+a pending async setup has settled. Hooks are handed the element that was
+mounted (`extend({}, vnode, { el })`), not the current one.
+
+Reaches us: `createDirectivePlugin()` on a vDOM app with `vaporInteropPlugin`,
+and `<VaporChild v-vc-command="...">` in a vDOM parent. Our `mounted` /
+`updated` / `beforeUnmount` now run against the element the child really
+renders. The removed rc.9 lines set `vnode.dirs = null` when the root did not
+resolve and never mounted on a replacement root, so a Vapor child whose root is
+a `v-if` / `v-else` kept its listener on the element that left. Upstream's
+"unmount with the bindings it was mounted with" is the rule at the top of
+`directives.ts` (teardown is keyed to what was mounted), implemented on their
+side of the call. NO FIXTURE OF OURS DRIVES THIS SHAPE: s34.23 ran the VAPOR
+directive under interop, never the vDOM plugin on a Vapor child.
+
+**`86d44991` `51193cc7` `19a7a43e` - listeners.** `:onXxx` on a native element
+binds a listener (it was a property write). A root's own listeners and the
+fallthrough ones share one invoker per key, own first. On an element with
+`v-model`, same-element listeners are emitted after it. Custom directives are
+still emitted LAST: `genCustomDirectives` follows the model block in
+`genBlockContent`. Reaches us: the ordering table at the end of
+`directives.ts` holds for `@click`. Two additions, both by reading:
+`:onClick="fn"` beside `v-vc-command` now registers before us and can veto
+like `@click`; and the merged invoker wraps `stopImmediatePropagation` but
+still calls the platform's, so that veto still reaches our direct listener.
+
+**`364fc0f0` `e9eef846` `b5ce2cee` - a root's class and style have two
+layers.** Own binding and fallthrough are tracked apart; a token leaves only
+when the layer that wrote it drops it and neither the other layer nor the
+template holds it. Reaches us: the "Still watching" limitation in whitepaper
+9.2. Scope unchanged, by reading: `vc-loading` on a component root is in no
+layer's previous value, so nothing removes it; on a non-root element
+`setClass` still assigns `className` wholesale. `$root` is now a meta object
+where it was `true`; nothing in `src` reads it.
+
+**`d2311bb3` - upstream re-asserts after a bound update, for its own
+directive.** `<select v-model>` now re-applies its selection from the OWNER's
+updated hooks, pushed onto `instance.u`, because the owner can re-render the
+options without touching the model. That is s34.11 option (c), which we
+recorded as unavailable on Vapor for want of a hook. It is still unavailable:
+`instance.u` is internal, and a lifecycle hook inside a userland Vapor
+directive still warns (rc.9 `4cffa134`). No unlock. It does settle what the
+fix looks like if a public hook appears.
+
+**`0cdb312b` `87b4c7c0` `9dd8cdbb` `08cad764` `20f46c11` `489e8cd7` - dynamic
+component.** Every new branch is gated on `isInteropEnabled && isVNode(...)` or
+on a `key` argument. Our outlet hands `createDynamicComponent` a `__vapor`
+component, a slot block or a literal null, and no key, so it takes the rc.9
+path line for line. Group A file, direct contact, no change - the same verdict
+and the same method as `0e4ff650` in s34.13.
+
+**`8faa3006` `b6f25b06` `bba7ea6e` `d8364a56` `daca5169` - KeepAlive.** A
+cached component is restored by its explicit key; a KeepAlive's child counts as
+the single root, so fallthrough attrs and a directive on `<KeepAlive>`'s parent
+reach through it; managed mounts skip the cache lookup; the rest of a
+`v-else-if` chain is stopped rather than paused. Reaches us through
+`tryKeepAliveHooks` and `useCommand`'s release-on-deactivate. TO VERIFY by the
+four fixtures named above; `chamber.ts` not re-read.
+
+**`7d94c491` - rows of a keyed insert are created in source order.** It was
+tail first. Creation order is registration order, and `register()` is
+last-wins with ownership, so N rows registering ONE action now leave the last
+row as owner where rc.9 left the first. Not a documented pattern; one line in
+the upgrade notes if a probe confirms it.
+
+**`5592ea3e` `a4bb6fee` `7372680b` - Transition, in-out mode.** Each leave is
+handed to its own entering branch, a pending leave survives a props update,
+and settled branches are released. Below the bridge, which supplies hook
+bodies only. TO VERIFY: `transitions.ts` was not re-read, and no fixture of
+ours runs `mode="in-out"`.
+
+**`3a952ef5` and the `hmr.ts` half of `87b4c7c0` - HMR.** Dirty components stay
+marked until the post-flush; a render-less component escalates past a vDOM
+parent. `tests/hmr-render-scope-fixture.test.ts` and
+`tests/vapor/vapor-outlet-hmr.test.ts` drive the real runtime.
+
+**Custom elements: `030f158d` `a429b2a6` `0f9d0758`.** A hydrated custom
+element mounts once; its children hydrate; a native slot outlet carries the
+owner's scope id. Inherited by `defineWidget` consumers that server-render.
+
+**Compiler only (17 rows).** They reach us through compiled output: the three
+examples, and every fixture that goes through `tests/compile-vapor.ts`. Worth
+naming: `1fdd8098` (static text and attribute values are no longer escaped
+twice), `e5e75e97` (`compileScript` emits `<style module>` bindings and changes
+what a non-inline Vapor `setup` returns; `tests/async-vapor-setup-fixture`
+calls `compileScript`), `074501e2` (two `v-if` branches sharing a key is a
+compile ERROR now).
+
+### 35.4 The standing question: what does rc.10 unlock, improve, or make cheaper
+
+**Unlocks - something in `src` we could delete or simplify: NONE FOUND in the
+77 rows read.** Three candidates were looked at. None is closed: each is OPEN
+until it is measured or the owner rules on it.
+
+WHAT "@internal" MEANS HERE, because the first draft of this list used the word
+as if it were a verdict, and the owner pulled it up: JavaScript has no public or
+private export. `@internal` is a JSDoc tag in Vue's TypeScript source, and
+Vue's type build sets `stripInternal: true` (`tsconfig.build.json` and
+`scripts/build-types.js`, read at the rc.10 tag). So a tagged name is a REAL
+export of the built module, importable and callable, and is only removed from
+the published `.d.ts`. Two facts follow and nothing else does: the type checker
+does not know the name, and upstream makes no promise to keep it. That is a
+cost to weigh against a measured gain, not a reason to skip the measurement.
+Precedent in this repo: `setActiveSub` has the same standing (whitepaper rc.4
+entry), and `untracked()` was built on the typed `pauseTracking` /
+`resetTracking` instead.
+
+- `startBatch` / `endBatch`, exported from `@vue/reactivity` since `506b333c`
+  (`packages/reactivity/src/index.ts`), which `src/vue.ts` already imports
+  from. Use: batch the several signals one dispatch writes (`loading`,
+  `lastError`, state). Expected gain, by reasoning only: render effects already
+  collapse through the scheduler, so a SYNCHRONOUS subscriber reading two of
+  our signals would run once instead of twice. UNMEASURED. Owes an interleaved
+  A/B on the real dispatch path before any verdict, and a fixture that fails if
+  a later RC drops the export (the `vue-bundler-vapor-exports` pattern).
+- A standalone `Dep` with `trackDep` / `triggerDep` as a lighter `signal()`.
+  Same standing: real exports, no types, no promise. `shallowRef` is what the
+  wiring hands over today. UNMEASURED.
+- An owner-updated hook for the Vapor directive (the `d2311bb3` shape). This
+  one is different in kind: `instance.u` is a field on an instance object, not
+  an export, and a Vapor directive is not handed the instance. Not reachable
+  without `getCurrentInstance()`-style access that Vapor withholds by design.
+
+**Improves - behaviour a consumer gets from the bump, each owing a fixture or a
+note before it is claimed:**
+
+1. The vDOM directive plugin on a Vapor child follows the child's root. The
+   largest item, and untested here. Owes a compiled mixed-tree fixture: vDOM
+   parent, Vapor child with a `v-if` / `v-else` root, `v-vc-command` on the
+   child, mounts and cleanups COUNTED across a root switch and a KeepAlive
+   round trip.
+2. A function-valued property on a widget is a value. Owes a probe on both
+   RCs, then one sentence in `defineWidget`'s docblock if it holds.
+3. A throwing subscriber no longer hides a dispatch's state from the others.
+4. In-out transitions, hydrated custom elements, KeepAlive restore by key.
+5. `56500421`: the hydration locator cache is released when the pass ends, so
+   a hydrated page stops retaining detached subtrees.
+
+**Cheaper - Vue's, inherited, and ours to MEASURE rather than quote:** inputs
+evaluated once per parent update with per-key deps; no `shallowReactive`
+copies under KeepAlive; a root template's class and style parsed on first use
+(`b5ce2cee`). What we own is the measurement: the outlet guard's two limits,
+the Vapor wiring rows in `docs/BUNDLE-SIZES.md`, the two Vapor example bundles
+against rc.9 on clean trees, and `ab:vue`.
+
+### 35.5 Owed, in the order the procedure gives
+
+1. The six TV rows read; the two TV-N rows signed off or read.
+2. `chamber.ts`, `transitions.ts`, `store.ts`, `ssr.ts`, `vite-hmr.ts` read in
+   full, and each TO VERIFY above turned into V or withdrawn.
+3. An install. Then step 2 of `rc-alignment.md`: `vue` and every direct
+   `@vue/*` devDependency, the peer range, the example pins; all three examples
+   rebuilt and `npm run check:example`.
+4. Build, both suites, the gates, `ab:vue -- 3.6.0-rc.9`.
+5. The fixture in 35.4 item 1 and the probe in item 2, each run on rc.9 first.
+6. Step 8's four places, under a NEW unreleased CHANGELOG heading: v1.25.0 is
+   dated.
+
+A git repository is needed before any of 3 to 6 can be gated: `npm run gate`
+ends on `git diff` and `git status`. Owner's call.
+
+### 35.6 Review of 35.1 to 35.5 against our source (second session, 2026-09-30)
+
+READING ONLY, again. Owner: a local repository; made, `main` = the baseline
+`e598271`, work on `rc10`. Read in full for this review: `chamber.ts`,
+`transitions.ts`, `store.ts`, `ssr.ts`, `vite-hmr.ts` (the five 35.2 had not
+re-read), and `directives.ts`, `chamber-vapor.ts`, `iife-elements.ts`,
+`vapor.ts`, `vue.ts`, `signal.ts`, `router/vapor.ts`, `outbox.ts`,
+`scheduler.ts`, `command-bus.ts`. NOT read: `form.ts`, `transports.ts` past its
+first third, `router/engine.ts`, `ledger.ts`, the plugin modules. Every
+statement about what an upstream commit does is still unchecked here: the
+vuejs/core clone has not been rebuilt.
+
+The listing in 35.2 sums to 85, 77 V / 6 TV / 2 TV-N, counted row by row.
+
+**Each TO VERIFY in 35.3 holds on our side. V by reading:**
+
+- `ef5ff106`: no write site in `chamber.ts` depends on the abort. A signal
+  write that throws either propagates or sits inside a bus `try` that turns it
+  into a result (a handler), a `core:refused:hook` (a before-hook) or a logged
+  hook / listener error. The row's scope was too narrow: signals are also
+  written in `outbox.ts`, `chamber-vapor.ts`, `transitions.ts` and `store.ts`
+  (read; same answer) and in `form.ts`, `transports.ts`, `router/engine.ts` and
+  `ledger.ts` (TO VERIFY, not read).
+- KeepAlive: `useCommand`'s release and re-register survives a double
+  deactivate, an activate with no deactivate, and a scope stopped first,
+  because `unregister` splices its entry out of `registered`.
+- The outlet passes no props and one argument to `createDynamicComponent`; its
+  getter returns a `__vapor` component, a `createSlot` block or a literal null.
+- Transitions: the nine hooks hold no shared state except `phase`; each
+  `dispatchWithDone` call has its own latch and timer.
+- `vite-hmr.ts` has no contact with Vue's `hmr.ts`; `ssr.ts` and `store.ts`
+  have no rc.10 contact beyond the rows above.
+- No test installs `createDirectivePlugin` together with `vaporInteropPlugin`
+  (grep over `tests/`, with the plugin found in ten other files as the control).
+
+**Corrections and gaps, each owing a probe unless it says otherwise:**
+
+- "Improves 3" is not purely an improvement. `runDispatch` writes
+  `loading = true` outside its `try`; a sync subscriber that throws there
+  aborts the dispatch and leaves `loading` true on both RCs, and rc.10 then
+  shows that value to the other subscribers. `trackLoading` has the same shape
+  (the flag write precedes `started.set`, so the key sticks). Both predate
+  rc.10 and are not this cycle's to fix.
+- `7d94c491` also flips `on()` LISTENER ORDER for the rows of one keyed
+  insert: fan-out runs in subscription order. More observable than the
+  handler-owner case, which already prints the DEV overwrite warning.
+- `1fdd8098` reaches us: a static `data-vc-payload='{"id":1}'` or
+  `data-vc-target` is a static attribute value. No compiled Vapor test parses
+  one; the only compiled case asserts that the binding wins.
+- The function-valued input of `506b333c` also reaches
+  `createVaporChamberApp(App, rootProps)`, not only `defineWidget` (s11.2 V1
+  recorded function root props as getters).
+- `:onClick` beside `v-vc-command` "now registers before us" has no rc.9
+  baseline: a property write of `onclick` already ran first, an `onClick`
+  expando never ran.
+- WRONG: `e5e75e97`'s change to a NON-INLINE setup does not reach
+  `tests/async-vapor-setup-fixture`, which passes `inlineTemplate: true`; a
+  second `compileScript` caller, `tests/directives-vapor-fixture`, does the
+  same and was not named.
+- About 40 V rows carry no recorded no-contact reason (they were in the lost
+  scratchpad). Owed: one line per row once the clone exists.
+
+Owed, unchanged in order: baseline on rc.9 with `npm ci` (the lock pins rc.9,
+the caret ranges admit rc.10), the clone and the six TV rows, the fixture and
+the probes run on rc.9 first, then the bump.
+
+### 35.7 The six TV rows, read (fourth session, 2026-09-30)
+
+Read in full from the bare clone at `.probes/vue-core.git`, one commit at a
+time, with
+
+    git -C .probes/vue-core.git show -U10 --format=%B <sha> -- 'packages/*/src/*'
+
+The pathspec in earlier notes, `'packages/*/src'`, matches no file and prints
+the commit message alone; the trailing `/*` is required. V (run: 1 to 19 lines
+without it, 391 to 3,546 with it).
+
+Control for every "no contact" below: a grep of `src/` for the helpers these
+six commits change (`setDynamicProps`, `setDynamicProp`, `setAttr`,
+`setDOMProp`, `setHtml`, `setElementText`, `renderSlot`, `ssrRenderSlot`)
+finds none, and the same grep finds `createSlot` in `src/router/vapor.ts`,
+where it must. The 35.2 listing is now 83 V / 0 TV / 2 TV-N.
+
+    6385494a  V  A vDOM slot outlet's fallback is invoked under the instance
+                 that owns the outlet (`invokeSlotFallback`), where interop
+                 invoked it late with no rendering instance. Touches
+                 `renderSlot.ts` (vDOM) and `createFallback` in
+                 `vdomInterop.ts`. No contact: our outlet is a Vapor component
+                 that calls `createSlot('default')` with no fallback argument.
+    6816887b  V  The two fixed fallback fields on a forwarded Vapor slot
+                 become a list of enclosing vDOM outlets, resolved innermost
+                 first. CONTACT, shared code: `slotBoundary.ts` (`parent`
+                 becomes `getParent()`) and `recheckSlotResolutionNow` in
+                 `slotFragment.ts`, which every `createSlot` outlet runs. The
+                 one behaviour change there is that parked content returns to
+                 the DOM once the chain loses its LAST fallback. Our outlet
+                 passes no fallback, so `activeFallback` is never set on its
+                 own boundary and the new arm is not taken. By reading; the
+                 conditional-default-slot probe decides (35.8).
+    28e0a087  V  THE SERVER OUTPUT FORMAT CHANGES. A slot outlet that renders
+                 its fallback is wrapped in `<!--(-->` ... `<!--)-->` where it
+                 was `<!--[-->` ... `<!--]-->`, from `ssrRenderSlot`
+                 (compiled SSR) and from `renderVNode` for a `renderSlot`
+                 fragment (`ShapeFlags.SLOT_FALLBACK`, a new flag). The Vapor
+                 client reads the marker instead of trying content and taking
+                 it back: the two-phase "pending slot content" ledger in
+                 `hydrateFragment.ts` is deleted (588 lines changed in that file).
+                 vDOM hydration accepts both pairs. No contact in `src`:
+                 `ssr.ts` holds no DOM and no marker. Upgrade note owed, and
+                 it is Vue's fact rather than ours: a server on rc.10 with a
+                 client on rc.9 emits a marker the client does not know; the
+                 reverse pair makes a Vapor client report a slot-fallback
+                 mismatch and recover. Server and client on the same RC.
+                 `tests/vapor-hydration-fixture.test.ts` renders and hydrates
+                 on one Vue, so it cannot see a mixed pair, and stays as it is.
+    baf8a48f  V  Vapor SSR always emits fragment markers, inside
+                 `<TransitionGroup>` too, and markerless hydration is deleted
+                 (`markerlessHydrationContainer`, `TransitionChild`). A
+                 `compiler-ssr` change gated on a new `vapor` compiler option
+                 that `compileTemplate` sets for `ssr && vapor`. Same upgrade
+                 note as 28e0a087. No contact: `transitions.ts` supplies hook
+                 bodies through `v-bind` and holds no hydration state.
+    adbed283  V  `@vue/server-renderer` renders a Vapor slot held by a vDOM
+                 outlet vnode the way the outlet would, fallback included.
+                 Server renderer only. No contact.
+    f90f4964  V  A compiled static-key binding (`:title="x"`) is WRITTEN
+                 during hydration, as vDOM writes every key in `dynamicProps`;
+                 it was cached only. An unchanged `src` / `href` / `srcset` /
+                 `poster` is adopted without a write. `setDynamicProps` gains
+                 a parameter in the MIDDLE: `(el, args, staticKeys?, isSVG?)`
+                 where it was `(el, args, isSVG?)`, with the key list hoisted
+                 beside the templates as `const k0 = [...]`. No contact in
+                 `src` (the grep above). Reaches us two ways, both inherited:
+                 a hydrated `:data-vc-payload="x"` whose server value differs
+                 now ends with the client's value in the attribute, which is
+                 what `.delegate` reads; and any hand-written
+                 `setDynamicProps(el, [..], true)` would now pass `true` as
+                 the key list. None exists in `tests/` (grep, with
+                 `tests/vapor-hydration-fixture.test.ts` found for
+                 `<!--[-->` as the control).
+
+### 35.8 The probes, run on rc.9 BEFORE the bump (fourth session)
+
+Eight probes in `.probes/` (gitignored), every template compiled on the
+installed Vue through `tests/compile-vapor.ts`. `.probes/run-all.sh <dir>` runs
+them, one output file each; the rc.9 outputs are kept in `.probes/out/rc9/`.
+All eight printed `3.6.0-rc.9` and exited 0. Every row below is V on rc.9 (it
+ran); what rc.10 does with it is 35.9.
+
+The interop probe's listener spy was fixed first: a spy on
+`EventTarget.prototype` counted nothing under happy-dom, one on
+`Element.prototype` plus `document` counts. Positive control: the direct arm
+counts one `click` add on the first root at mount, the `.delegate` arm counts
+one on `document`.
+
+    1. vDOM directive plugin on a Vapor child, under vaporInteropPlugin
+       root v-if/v-else, direct     mount: 1 add on root A. After the switch to
+                                    root B: the listener is re-added on A (the
+                                    detached element), never on B. Click B: no
+                                    dispatch. Click detached A: dispatches.
+       root v-if/v-else, .delegate  1 document add. After the switch: click B,
+                                    no dispatch. At unmount: 0 document removes.
+       payload + optimistic         {qty:3} and the optimistic fn reach root A
+                                    only; B is dead after the switch.
+       KeepAlive round trip         same element, dispatches before and after.
+       text root                    Vue warns, nothing mounted, nothing thrown.
+
+    2. a function-valued input (506b333c)
+       widget property, set before or after connect
+                                    Vue CALLS it (4 calls) and the prop arrives
+                                    as its return value, a string. The host
+                                    reads the function back from the property.
+       createVaporChamberApp(App, { fn })
+                                    same: called 4 times, arrives as the return
+                                    value, and Vue warns "Expected Function,
+                                    got String". `{ label: () => 'x' }` arrives
+                                    as 'x' (the getter form, s11.2 V1).
+
+    3. static data-vc-payload (1fdd8098)
+       '{"id":1}', the &quot; form, an &amp; inside a string, root and non-root:
+                                    all four dispatch the right object on Vapor
+                                    and on vDOM. The Vapor template string holds
+                                    `{&quot;id&quot;:1}` in both source forms.
+
+    4. :onClick="h" beside v-vc-command (86d44991)
+       Vapor, direct and .delegate  compiled to `setProp(n0, "onClick", h)`. The
+                                    handler NEVER RUNS; the dispatch always
+                                    does; no veto can exist.
+       vDOM :onClick                a listener, identical to @click.
+       @click, all three modes      the table at the end of `directives.ts`,
+       (control)                    row for row.
+
+    5. a hand-added class, then the bound class changes (s34.11)
+       Vapor non-root               vc-loading LOST
+       Vapor root, own binding      kept
+       Vapor root, own + fallthrough, either one changing
+                                    kept
+       vDOM non-root                LOST
+       vDOM root, fallthrough       LOST
+
+    6. rows of one keyed insert, each register('x') and on('x') (7d94c491)
+       initial mount [1,2,3]        created 1,2,3; owner 3; listeners 1,2,3
+       insert [1,2,3] into empty    created 1,2,3; owner 3; listeners 1,2,3
+       insert 2,3 between 1 and 4   created 3,2 (TAIL FIRST); owner 2;
+                                    listeners 1,4,3,2
+       append 3,4 after 1,2         created 4,3 (TAIL FIRST); owner 3;
+                                    listeners 1,2,4,3
+       So rc.9 is tail first only when rows join a list that already has rows.
+
+    7. <Transition mode=".." v-bind="t">, dispatches per toggle
+       in-out, Vapor and vDOM       one each of BeforeEnter, Enter, AfterEnter,
+                                    BeforeLeave, Leave, AfterLeave; a double
+                                    toggle gives two of each and ends on one
+                                    node.
+       out-in, Vapor                one of each, leave first.
+       out-in, vDOM                 THROWS on the first toggle: "Cannot read
+                                    properties of null (reading 'parentNode')",
+                                    from `resumeAfterLeave` -> `instance.update`.
+                                    The bridge calls `done()` synchronously on
+                                    a sync bus, so the leave ends inside the
+                                    patch that started it. Not an rc.10 row; a
+                                    LEAD, recorded because the probe found it.
+       default mode (control)       one of each, leave first, both renderers.
+
+    8. Vapor RouterOutlet with a conditional default slot (6816887b)
+       /app, toggle the v-if        the slot content leaves and returns.
+       child route matches          the child replaces the slot.
+       the condition flips WHILE the child shows, then back to /app
+                                    DEAD: the slot shows the content of the
+                                    branch that was live when it left the DOM
+                                    (`<em>` with the condition false; `ON`
+                                    where v-else should show `OFF`), and two
+                                    further flips change nothing.
+       unconditional slot (control) as `tests/vapor/vapor-outlet.test.ts` pins.
+       The dead case is a LEAD against OUR outlet: `createSlot('default')` is
+       built once in setup and the same block is handed back after the child
+       branch replaced it. Reading only, TO VERIFY: removing the branch stops
+       the slot fragment's scope, so what returns is its last DOM with no
+       effect behind it. Static slot content cannot show this, and the outlet
+       fixture's slot is static.
+
+### 35.9 The bump, and the same probes on rc.10 (fourth session)
+
+`vue`, `@vue/reactivity` and `@vue/runtime-vapor` devDependencies, the two peer
+ranges (`>=3.5.0 || >=3.6.0-rc.10`) and the two example pins moved. After
+`npm install` all twelve installed `@vue/*` packages read `3.6.0-rc.10`, with no
+second copy nested anywhere under `node_modules`. `npm run check:example`
+passed. All V (run).
+
+**What rc.10 did to each probe. V: every row was run on both RCs.**
+
+    1. vDOM directive plugin on a Vapor child
+       direct      rc.9: listener stays on the root that left.
+                   rc.10: removed from A, added on B; B dispatches, detached A
+                   does not; a binding update reaches B; adds equal removes at
+                   unmount.
+       .delegate   rc.9: new root dead, document listener never removed.
+                   rc.10: new root dispatches; 2 document adds, 2 removes.
+       payload and optimistic
+                   rc.10: both reach the new root.
+       KeepAlive, text root
+                   unchanged, and correct on both.
+    2. function-valued input
+       widget property
+                   rc.9: called 4 times, arrives as its return value.
+                   rc.10: arrives as the function, called 0 times.
+       createVaporChamberApp(App, { fn })
+                   rc.9: called 4 times. rc.10: called ONCE, and still arrives
+                   as its return value. Root props are raw props, and a function
+                   there is a getter on both RCs. 35.6 said the rc.10 change
+                   "also reaches" root props: WRONG, withdrawn.
+    3. static data-vc-payload
+                   same payloads on both. The one difference is inside the
+                   template string: rc.10 keeps `&amp;` where rc.9 had decoded
+                   it to `&`; the attribute the DOM ends with is identical.
+    4. :onClick beside v-vc-command, Vapor
+                   rc.9: `setProp(n0, "onClick", h)`, never runs.
+                   rc.10: `setListener(n0, "onClick", h)`; runs first; the four
+                   verdicts equal the `@click` rows in the direct and the
+                   `.delegate` column.
+    5. hand-added class
+                   no difference in any of the six arms.
+    6. keyed insert into a list that has rows
+                   rc.9: created tail first (3,2), owner 2, listeners 1,4,3,2.
+                   rc.10: created in source order (2,3), owner 3, listeners
+                   1,4,2,3. Initial mount and insert-into-empty were source
+                   order already and did not move.
+    7. Transition bridge
+                   no difference. in-out: one of each hook per toggle, on both
+                   renderers and both RCs.
+    8. Vapor RouterOutlet, conditional default slot
+                   no difference. The dead slot of 35.8 is on both RCs.
+
+**Committed from the probes, each failing on rc.9 in a clean worktree of `main`
+and passing on rc.10:**
+
+    tests/interop-vdom-directive-fixture.test.ts   rc.9: 3 failed, 2 passed
+                                                   rc.10: 5 passed
+    tests/directives-vapor-fixture.test.ts         `:onClick` veto test
+                                                   rc.9: 1 failed of 44
+    tests/vapor/widget-shape.test.ts               function property test
+                                                   rc.9: 1 failed of 6
+
+Two comments were written against those tests and nothing else in `src`
+changed: a paragraph in `defineWidget`'s docblock (`src/iife-elements.ts`) and
+one at the end of the ordering note in `src/directives.ts`.
+
+**Suites and gates on rc.10. V.** Build ok. `test:run` and `test:vapor` pass
+(counts are stamped in the README, not typed here). `typecheck` clean.
+`size:check` passes. Coverage 100 on all four: 5,656 statements, 3,465
+branches, 1,248 functions, 4,683 lines.
+
+**`npm run ab:vue -- 3.6.0-rc.9`, five runs. V.** Both workloads SAME:
+scope create and dispose 1.027x (40.33 -> 41.27 ns) under a 4.0% floor, ref
+write 0.997x (1.28 ns both) under a 1.5% floor. The reactivity source changed
+in `ef5ff106` and `506b333c`; neither moved what this library sits on by an
+amount this harness can resolve.
+
+**Sizes against rc.9, clean worktree of `main` against this tree, same
+harness. V.**
+
+                                              rc.9            rc.10
+    outlet own arm, KB brotli (ceiling 5.0)   4.13            4.58
+    outlet saving, KB brotli (floor 15)       21.18           22.22
+    hand-wired createVaporApp, raw/gz/br KB   44.5/16.5/15.1  46.9/17.4/16.0
+    + vaporInteropPlugin                      84.2/29.9/26.4  89.4/31.8/28.0
+    vapor-chamber/vapor over the floor        4.4/1.6/1.5     4.5/1.6/1.5
+    vapor-sfc bundle, bytes raw / brotli      89,467 / 29,147 92,520 / 30,220
+    vapor-island-cart index, raw / brotli     61,468 / 20,566 64,467 / 21,628
+
+Every other row of `docs/BUNDLE-SIZES.md` is identical between the two trees,
+and so is the example's `store` chunk, which is ours (18,340 / 5,987). The
+growth is Vue's: about 1 KB brotli per Vapor bundle.
+
+**The standing question.** Unlocks: none, as 35.4 said; nothing in `src` could
+be deleted. Improves: the four behaviours above that now have a committed test.
+Cheaper: not for a consumer, this RC. Every Vapor number grew.
+
+### 35.10 Findings to pick up (written so that someone else can)
+
+The probes are gitignored, so each entry carries its own reproduction. None of
+these was fixed in this cycle: the cycle's task was the alignment. Ordered by
+what a consumer would hit first.
+
+**F1. BUG, ours. The Vapor `RouterOutlet`'s default slot stops being reactive
+once a child route has shown.** Both RCs. V (run).
+
+    Reproduce  vitest.vapor.config.ts project (bare `vue` aliased to the
+               with-vapor build). Routes: `/app` -> Layout, `/app/about` ->
+               About with `parent: 'layout'`. Layout's template, compiled with
+               tests/compile-vapor.ts:
+                 <div class="layout"><RouterOutlet>
+                   <em v-if="s.on">no child route</em></RouterOutlet></div>
+               push /app; push /app/about; set s.on = false; push /app.
+    Measured   the `<em>` is shown with `s.on` false, and two further flips of
+               `s.on` change nothing. With `v-if`/`v-else` the branch that was
+               live when the slot left stays, whatever the condition says.
+               Before the first child route, the slot toggles correctly.
+    Control    the same routes with a static slot behave as
+               tests/vapor/vapor-outlet.test.ts pins.
+    Reading    `src/router/vapor.ts` builds the slot block ONCE in setup
+    (TO VERIFY) (`createSlot('default')`) and returns the same block from the
+               branch getter. When the child branch replaces it, Vue removes
+               the block and stops its scope; the block handed back later is
+               its last DOM with no effect behind it.
+    First step a failing arm in tests/vapor/vapor-outlet-fixture.ts (a
+               REACTIVE slot, round trip through a child route), on both the
+               dev and the production arm. The comment above the `createSlot`
+               call says why it is not built inside the getter (a fragment per
+               navigation); that reason has to be re-measured against the fix.
+
+**F2. BUG, Vue's, reached through our bridge. vDOM
+`<Transition mode="out-in">` throws when `done()` is called synchronously.**
+Both RCs. V (run), classified by a second probe.
+
+    Reproduce  vDOM app from the with-vapor dev build, under happy-dom:
+                 <Transition mode="out-in" v-bind="t">
+                   <div v-if="s.a" key="a">A</div><div v-else key="b">B</div>
+                 </Transition>
+               with `t = createTransitionBridge({ bus, namespace })` on a SYNC
+               bus; flip `s.a`.
+    Measured   "TypeError: Cannot read properties of null (reading
+               'parentNode')", from `resumeAfterLeave` -> `instance.update`,
+               on the first flip.
+    Classified `t = { onLeave: (el, done) => done() }`, no bridge: same throw.
+               `done` deferred to a microtask: no throw. No hooks: no throw.
+               So any synchronous `done()` does it; the bridge on a sync bus
+               is one way to call it synchronously.
+    Not hit by Vapor out-in, default mode and in-out on either renderer.
+    Unknown    whether a real browser and Vue 3.5 behave the same (TO VERIFY;
+               `npm run test:browser` exists for the first), and whether
+               upstream knows.
+    Options    report upstream with the four-line reproduction; and, ours to
+               decide, make the bridge never call `done` inside the hook's own
+               stack. That second one changes WHEN `phase` settles, which is
+               observable state: measure before choosing.
+
+**F3. WATCH. The outlet guard has 0.42 KB of ceiling left.** Own arm 4.13 ->
+4.58 KB brotli against `OWN_ARM_CEILING_KB = 5.0`, with `src/router/vapor.ts`
+unchanged: the growth is in the Vue helpers it imports. One more RC of the same
+size fails `tests/vapor/vapor-outlet-size.test.ts`. Before raising the ceiling,
+attribute the bytes per helper (the size-limit rule).
+
+**F4. DOC GAP, ours. A function passed as a ROOT PROP is a getter.**
+`createVaporChamberApp(App, { onSave: fn })` calls `fn` and hands the
+component its return value, on both RCs (4 calls on rc.9, 1 on rc.10), and Vue
+warns "Expected Function, got String". A widget property is the opposite from
+rc.10. `createVaporChamberApp`'s docblock says neither. Owed: one sentence and
+a test; the working form is `{ onSave: () => fn }`.
+
+**F5. LIMITATION, unchanged, now measured in six arms.** `vc-loading` added
+by hand is lost when the bound class changes on a non-root Vapor element and on
+any vDOM element; it survives on a Vapor component root. Whitepaper 9.2 "Still
+watching" describes it; the table in 35.8 item 5 is its measurement.
+
+**F6. UNEXPLAINED. One listener re-bind per arm in the interop probe.** Between
+the mount and the root switch, the direct arm counts a second `click` add and
+one remove on the same root (`adds a,a / removes a`), on both RCs. The fixture
+asserts the balance, which holds; the extra pair is not accounted for. If the
+vDOM directive re-binds on every `updated`, that is a cost per parent render.
+First step: count adds across N parent re-renders with no binding change.
+
+**F7. NOT COVERED. Hydration of a bound `:data-vc-payload`.** From `f90f4964`
+a compiled static-key binding is written during hydration, so a server value
+that differs from the client's is replaced where it was kept. `.delegate`
+reads that attribute. No fixture of ours hydrates a bound `data-vc-*`.
+
+**F8. UPGRADE NOTES owed to consumers, all in the CHANGELOG entry:** server and
+client on the same RC (`28e0a087`, `baf8a48f`); the keyed-insert owner and
+listener order (`7d94c491`); a function on a widget property (`506b333c`);
+`:onClick` can now veto (`86d44991`).
+
+**F9. STILL OPEN from 35.6, untouched here:** `runDispatch` writes
+`loading = true` outside its `try`; about 40 V rows have no recorded
+no-contact reason; the two TV-N rows wait for the owner's sign-off; the signal
+write sites in `form.ts`, `transports.ts`, `router/engine.ts` and `ledger.ts`
+were not read against `ef5ff106`.
+
+### 35.11 F1 and F4 taken (fifth step, branch `outlet-slot-fix` off `rc10`)
+
+Owner: fix our bugs and the doc gaps first, the rest is for discussion. So F1
+and F4 of 35.10 are done here, on their own branch, and F2 (Vue's), F3, F5, F6,
+F7 and F9 stand as written.
+
+**F1, FIXED. The cause, V by reading Vue's source and by the test.** In the
+installed runtime, `removeFragment(block)` ends with
+`if (block.scope) block.scope.stop()`, and `DynamicFragment.update` calls it on
+the previous branch. `createSlot('default')` with no fallback argument returns
+a `DynamicFragment` whose scope holds the slot content's effects. The outlet
+built that fragment once in setup and returned the same block from the
+`createDynamicComponent` getter, so after a child route had replaced it the
+block was re-inserted with its scope stopped.
+
+    fails-before   tests/vapor/vapor-outlet.test.ts, new arm (g): a slot holding
+                   a render effect, through a child route and back. Both arms
+                   failed, the dev build and the executed production build:
+                   "expected 'on' to be 'off'".
+    the fix        with a default slot, the outlet returns
+                     createIf(entryAt, matched, () => createSlot('default'), 261)
+                   so the slot is created in the branch's scope each time the
+                   branch is entered. That is, flags included, what
+                   compiler-vapor emits for
+                     <component :is="c" v-if="c" /><slot v-else />
+                   and tests/vapor/vapor-outlet-helpers.test.ts recompiles that
+                   template on the installed Vue and compares the flags with
+                   the constant in `src/router/vapor.ts`. With NO default slot
+                   there is no `createIf`: the empty branch must stay one node,
+                   and arm (b) still pins it.
+    after          3 passed; arms (a) to (f) unchanged. The compiled
+                   conditional-slot probe of 35.8 item 8 now reads right in all
+                   three arms, steps 6 to 8.
+    rejected       creating the slot inside the `createDynamicComponent` getter:
+                   the getter runs in the outlet's render effect, not in a
+                   branch scope, so each navigation would allocate a fragment
+                   nothing disposes (the reason the old comment gave, and it
+                   holds). Calling `slots.default()` directly from a wrapper
+                   component: it skips the slot fragment, its scope ids and its
+                   boundary, and adds a component instance per fallback.
+
+**F1, the cost. V (measured).**
+
+    module alone, esbuild minified      831 -> 880 B min, 441 -> 471 B brotli
+    its BUNDLE-SIZES row                unchanged: 0.8 / 0.5 / 0.4 KB
+    outlet own arm, KB brotli           4.58 -> 4.74 (ceiling 5.0)
+    outlet saving, KB brotli            22.22 -> 22.07 (floor 15)
+
+The own-arm fixture app has no `v-if`, so `createIf` enters its bundle with the
+fix; an app that already has one pays the module's 30 bytes. F3 moves with it:
+0.26 KB of ceiling left.
+
+A MEASUREMENT THAT WAS NOT ONE, recorded because it nearly went into this
+section: the first size read after the fix said "4.58, unchanged". The size
+guard bundles `dist/router/vapor.js`, and `dist` had not been rebuilt. The
+number moved only after `npm run build`. Build before reading a size.
+
+The dependency surface gains `createIf`. The helpers test now also READS the
+import block of `src/router/vapor.ts` and compares it with its list, where the
+comment used to say the list "can be checked by eye".
+
+**F4, DONE.** `createVaporChamberApp`'s docblock states the raw-props contract:
+a plain value is the value, a function is a getter, a callback is passed as
+`() => fn`. `tests/vapor/vapor-subpath-wiring.test.ts` pins all three forms.
+No behaviour change.
+
+### 35.12 Leftovers: two checks the cycle did not make (branch `rc10-leftovers` off `outlet-slot-fix`)
+
+**A. `npm run test:browser` on rc.10. V (run), with one finding.**
+
+    as written, first try
+                   FAILED before any test. Playwright 1.63.0 looks for
+                   `chromium_headless_shell-1243`; this machine's cache held
+                   revision 1228. Not an rc.10 fact: the binary had not been
+                   downloaded for the installed Playwright. Fixed with
+                   `npx playwright install chromium --only-shell` (the same
+                   command on macOS and Linux), on the owner's word.
+    as written, headless shell 153 (revision 1243)
+                   production: 5 files, 18 passed, 0 failed.
+                   `VC_MODE=development`: 5 files, 18 passed, 0 failed.
+    on system Chrome 154 (channel 'chrome', same config otherwise,
+    `.probes/vitest.browser-chrome.config.ts`)
+                   5 files, 18 passed, 0 failed.
+    improvement, not done
+                   the suite dies on a missing browser revision with no test
+                   run. A machine with any Chrome could still run it through
+                   `channel: 'chrome'`, as the probe config does; a fallback in
+                   `vitest.browser.config.ts` would make that automatic.
+    what it says   about rc.10: nothing either way. `grep -li vue
+                   tests/browser/*.ts` lists no file; the control, the same
+                   grep for `vapor-chamber`, lists all five. The browser suite
+                   mounts no Vue, so it cannot see an RC.
+
+**B. `src/router/vapor.ts` is NOT in the coverage set. V (read).** It is in
+`coverage.exclude` of `vitest.config.ts`, with the reason beside it: the default
+project cannot link the module, because bare `vue` there has no Vapor exports.
+That is why the statement count (5,656) did not move when the file changed in
+35.11. What covers it: `tests/vapor/vapor-outlet*.test.ts` under
+`vitest.vapor.config.ts`, against the dev build and an executed production
+bundle. No coverage number is produced for that project. Config unchanged.
+
+### 35.13 F6 closed: the extra listener pair is the in-flight guard, not a re-bind
+
+V (run). `tests/interop-vdom-directive-fixture.test.ts`, new arm: the vDOM
+directive on a Vapor child, the parent rendered 50 times with the binding
+unchanged.
+
+    after mount                    adds 1, removes 0 on the root
+    after 50 parent re-renders     adds 1, removes 0   (control: the parent's
+                                   `{{ n }}` reads 50)
+    after one click                adds 2, removes 1
+
+The directive's `updated` hook writes `state.action` and attaches nothing, so a
+parent render costs no listener. The pair the probe of 35.8 counted came from
+the probe's own click between the mount and the root switch: on a button,
+`markBusy` adds a capture `click` guard for the length of the dispatch and
+removes it. One-off per dispatch, by design. No src change.
+
+### 35.14 F7 covered: hydration of a bound `:data-vc-payload`
+
+V (run, rc.10). Three arms added to `tests/vapor-hydration-fixture.test.ts`.
+Template, compiled for the server and for Vapor on the installed Vue:
+`<button v-vc-command.delegate="act" :data-vc-payload="pay">{{ label }}</button>`.
+The server renders `pay = '{"id":1}'`; the client hydrates, clicks, writes
+`pay = '{"id":3}'`, clicks again.
+
+                          attribute after   first click   second click   hydration
+    client `pay`          hydration         dispatches    dispatches     warnings
+    '{"id":1}' (equal)    {"id":1}          {id:1}        {id:3}         0
+    '{"id":2}' (differs)  {"id":2}          {id:2}        {id:3}         0
+    control: equal `pay`, text 'go' on the server and 'GO' on the client
+                                                                         > 0
+
+The button is the server's node in every arm (identity asserted). Where server
+and client disagree, the CLIENT value is written during hydration and is what
+`.delegate` dispatches, and Vue prints no mismatch warning for it; the control
+arm shows the same spy does count a text mismatch on the same element. So a
+server payload that the client state does not reproduce is replaced silently.
+That is `f90f4964` as 35.10 F7 described it, now pinned. Not run on rc.9: no
+rc.9 install in this tree. No src change.
+
+### 35.15 F3: the outlet's own arm, attributed per helper (table only)
+
+V (run, rc.10, after `npm run build`). `.probes/outlet-helper-bytes.mjs`
+(gitignored) uses the guard's harness: Vite production build, the guard's
+defines and prelude, entry chunk, brotli quality 11. A helper is attributed by
+keeping it alive in the FLOOR app (`globalThis.__keep = [vue.createSlot]`), so
+the bundler cannot shake it. Control for that method: keeping
+`defineVaporComponent`, which the floor already holds, costs 27 B raw and 20 B
+brotli, the statement itself.
+
+    floor: router, no outlet                    64,863 B raw   22,006 B brotli
+    Vapor arm: RouterOutlet rendered            81,120         26,882
+    OWN ARM                                     16,257          4,876
+
+    LADDER, cumulative in this order (sums to the own arm exactly)
+                                                 raw B   brotli B   share of brotli
+      + inject                                     285       159       3%
+      + provide                                    120        56       1%
+      + createDynamicComponent                   4,789     1,547      32%
+      + createSlot                              10,256     2,811      58%
+      + createIf                                   355       130       3%
+      + the outlet module itself                   452       173       4%
+                                                16,257     4,876
+
+    ALONE, the floor plus one helper (brotli is not additive; these overlap)
+      inject 285 / 159, provide 148 / 99, createDynamicComponent 4,818 / 1,646,
+      createSlot 12,956 / 3,754, createIf 2,774 / 976
+
+So 96% of the arm is Vue's: `createSlot` and `createDynamicComponent` are 90%
+between them. Our module is 173 B of it. `createIf` alone is 976 B, but beside
+`createSlot` and `createDynamicComponent` it adds 130: they share the dynamic
+fragment.
+
+**FINDING: the guard's number carries about 0.1 KB of noise from a file name.**
+The entry chunk imports the router's lazy blade chunk by a content-hashed name
+(`./blade-DYzLD6BH.js`), and that hash follows the entry's own file name. The
+raw size is identical whatever the name; brotli is not:
+
+    entry files named as the guard names them       own arm 4,858 B = 4.74 KB
+                                                    (the guard's number, V)
+    named `arm-0.js` / `arm-1.js`                   4,916 B = 4.80 KB
+    named `a.js` / `b.js`                           4,802 B = 4.69 KB
+    hash replaced by `blade-00000000.js`            4,876 B = 4.76 KB (the
+                                                    tables above)
+
+A spread of 114 B from eight characters, against 0.26 KB of headroom under the
+5.0 ceiling. Reproduce: run the probe; it prints all four. Renaming an arm's
+label in `tests/vapor/vapor-outlet-size.test.ts` changes its entry file name
+and so moves the guard by this much. Not fixed here: what the guard measures
+is decision 3b.2, and this belongs with it (normalizing the hash before
+compressing would remove it).
+
+### 35.16 F2: the out-in throw is Vue's, on 3.5 too; deferring `done` is observable, so it STOPS here
+
+**(a) Where it throws. V (run).** The reproduction with no compiler and no
+bridge (`.probes/out-in-repro.ts`):
+
+    const s = reactive({ a: true })
+    createApp({ render: () =>
+      h(Transition, { mode: 'out-in', onLeave: (el, done) => done() },
+        () => s.a ? h('div', { key: 'a' }, 'A') : h('div', { key: 'b' }, 'B')) }).mount(host)
+    s.a = false
+
+Five builds (rc.10 runtime dev, runtime prod and with-vapor dev; 3.5.43 runtime
+dev and prod, packed from npm as `scripts/ab-vue.mjs` packs a baseline), three
+engines:
+
+                              happy-dom   Chrome 154   headless shell 153
+    no hooks (control)        ok, B       ok, B        ok, B
+    sync done                 THROWS      THROWS       THROWS
+    css: false, sync done     THROWS      THROWS       THROWS
+    done in a microtask       ok, B       ok, B        ok, B
+
+identical on all five builds: "TypeError: Cannot read properties of null
+(reading 'parentNode')", and the host is left EMPTY (neither A nor B). So it is
+not happy-dom, not rc.10, not the dev build and not Vapor's: it is
+runtime-core's out-in on stable 3.5. Owed and NOT done here (nothing is posted
+from this repo without the owner): the upstream report, with the five lines
+above. Whether upstream already has it was not looked up.
+
+**(b) When `phase` settles, today against `done` deferred to a microtask. V
+(run).** `tests/transition-done-timing-fixture.test.ts`, 9 tests, templates
+compiled on the installed Vue, one toggle on a sync bus. `deferred` is the
+proposed change emulated in the test (the two hooks wrapped); src is untouched.
+Markers: `[post]` a `flush: 'post'` watcher in the same flush, `[tick]` the
+line after `await nextTick()`, `[later]` a macrotask on.
+
+    default mode, Vapor and vDOM (identical)
+      today     BeforeLeave Leave AfterLeave BeforeEnter [post] Enter AfterEnter [tick]
+                at [post]: entering, 1 node, text B
+      deferred  BeforeLeave Leave BeforeEnter [post] Enter AfterLeave AfterEnter [tick]
+                at [post]: entering, 2 nodes, text AB
+
+    out-in, Vapor
+      today     BeforeLeave Leave BeforeEnter AfterLeave [post] Enter AfterEnter [tick]
+                at [post]: idle, 1 node, text B
+      deferred  BeforeLeave Leave [post] BeforeEnter AfterLeave [tick] Enter AfterEnter
+                at [post]: leaving, 1 node, text A
+
+    out-in, vDOM
+      today     BeforeLeave Leave [post] [tick]      THROWS; at every marker:
+                leaving, 0 nodes, empty. `phase` never returns to idle.
+      deferred  as Vapor deferred; no throw.
+
+    called by hand, `t.onLeave(el, done)`
+      today     `done` has run when the call returns
+                (tests/transitions.test.ts already pins this)
+      deferred  not yet; one microtask later
+
+At `[tick]` and `[later]` every arm that does not throw reads the same: idle,
+1 node, text B.
+
+**Deferring IS consumer-observable, in four places**, so by the rule of this
+task the item stops and goes to 3b.1 with both behaviours measured:
+
+1. a post-flush reader in default mode finds the leaving node still in the DOM
+   (2 nodes, "AB") where today it finds 1;
+2. `*AfterLeave` is dispatched after `*BeforeEnter` and `*Enter` where today it
+   precedes them;
+3. on Vapor out-in, which works today, the swap is no longer done at
+   post-flush, and `*Enter` / `*AfterEnter` land after `await nextTick()`;
+4. a hook called by hand no longer has `done` called on return.
+
+What deferring buys: vDOM out-in on a sync bus works instead of leaving an
+empty view with `phase` stuck on leaving.
+
+**Interleaved A/B, `.probes/transition-defer-ab.test.ts`. V (two runs).**
+200,000 `onLeave` calls by hand on a sync bus, median of 7 interleaved reps:
+
+    today      37.9 and 38.1 ns per call
+    deferred   115.6 and 107.4 ns per call   (2.8x to 3.1x, about +75 ns)
+
+No src change. No decisions row: nothing changed behaviour.
+
+### 35.17 F9: `runDispatch` wrote `loading = true` outside its `try`. Fixed
+
+**Fails before. V (run).** `tests/rundispatch-throwing-subscriber.test.ts`, two
+tests on real Vue `effect`s over `useCommand()`'s own signals (control:
+`isRef(loading)`, and the effect saw the write). One subscriber throws when
+`loading` becomes true, the other when `lastError` is cleared. Before the fix,
+both:
+
+    escaped   Error: subscriber threw     (out of `dispatch`)
+    loading   true                        (expected false)
+
+**The fix.** Both opening writes moved inside the `try` of `runDispatch`
+(`src/chamber.ts`). The subscriber's error is now a failed `CommandResult`,
+`lastError` holds it, `loading` ends false, the handler does not run (counted:
+0 calls). After: 2 passed.
+
+**Checkpoint. V (measured).**
+
+    bytes     dist/chamber.js               19,256 -> 19,260 raw, 4,679 -> 4,678 brotli
+              dist/vapor-chamber.iife.min   39,503 -> 39,503 raw, 12,242 -> 12,244 brotli
+              the other 52 dist .js files   identical
+              `npm run size:check`          passes
+    A/B       `.probes/rundispatch-try-ab.test.ts`, the two bodies side by
+              side on Vue shallowRefs, 1,000,000 calls, median of 9
+              interleaved reps, three runs, ns per call outside / inside:
+              39.87 / 38.83, 37.57 / 37.04, 39.13 / 37.95. Ratio 0.97 to
+              0.99: not slower.
+
+This is the first src change on the branch that is not a comment; decisions
+row added, CHANGELOG entry under Unreleased.
+
+**FOUND, NOT FIXED (not in the work list): `useVaporAsyncCommand` has the same
+shape.** `src/chamber-vapor.ts` writes `loading.value = true` and
+`lastError.value = null` before its `try`, in an `async` function. V (run),
+`.probes/vapor-async-throwing-subscriber.test.ts`:
+
+    Reproduce  const { dispatch, loading } = useVaporAsyncCommand(asyncBus)
+               effect(() => { if (loading.value) throw new Error('x') })
+               await dispatch('save', {})
+    Measured   the promise REJECTS with the subscriber's error, `loading` stays
+               true, the handler ran 0 times.
+    Control    the same subscriber on `useCommandQuery`, which goes through
+               `runDispatch`: returns `ok: false`, `loading` false.
+    Fix        the same move, with a failing test first. Its wrapper is
+               hand-rolled for speed (its own comment), so A/B it.
+
+### 35.18 F9: `form.ts`, `transports.ts`, `router/engine.ts`, `ledger.ts` read in full against `ef5ff106`
+
+All four read end to end (2,117 lines), then probed on rc.10:
+`.probes/throwing-subscriber-modules.test.ts`, output kept in
+`.probes/out/rc10/throwing-subscriber-modules.txt`. Every arm has a control
+with no throwing subscriber, and one arm shows `ef5ff106` is in the installed
+Vue: with two effects on one signal and the first throwing, the second saw the
+new value (rc.9: it would not have) and the write still threw.
+
+**Question 1: does any write site depend on a throwing subscriber ABORTING the
+batch? NO, in all four. V (read, and run on rc.10).** Nothing in them catches a
+write's throw and continues on the assumption that later subscribers were not
+told. What `ef5ff106` changes is who else hears; the write throws on both RCs
+and the statements after it are skipped on both. Not run on rc.9 (no rc.9
+install in this tree); the claim about rc.9 is by reading Vue's diff.
+
+**Question 2: does it reach anything 35.3 lists as contact? Only the
+`ef5ff106` row. V (grep, with a control).**
+
+    value imports          form.ts: ./signal, ./command-bus
+                           transports.ts: ./bounds, ./dev, ./command-bus,
+                             ./http, ./signal
+                           router/engine.ts: ../dev, ../dict, vue (shallowRef
+                             only), ./errors, ./url
+                           ledger.ts: ./bounds, ./command-bus, ./settled
+    lines with `.value =`  form.ts 27, transports.ts 3, engine.ts 6, ledger.ts 0
+    contact identifiers    one grep for the names behind the other 35.3 rows
+                           (KeepAlive and scope hooks, inject / provide, slot
+                           and dynamic-component helpers, directives,
+                           Transition, custom elements, HMR, batching, watch,
+                           computed): 0 lines of code in the four. Three hits,
+                           all in comments (transports.ts 177 and 182,
+                           ledger.ts 8).
+    control                the same grep: chamber.ts 75 lines, router/vapor.ts
+                           12, router/composables.ts 17, transitions.ts 49.
+
+`ledger.ts` writes no signal; it reaches the row through the `onChange` its
+caller passes (`useCommandHistory` writes four signals there).
+
+**What the reading did find: the `runDispatch` shape, in three of the four.**
+Not an rc.10 regression (same on rc.9 by reading), not in the work list, so
+written down and NOT fixed. V (run on rc.10), subscriber = a raw Vue `effect`
+that throws on the write named:
+
+    form.ts
+      set('email','x'), subscriber on `values`
+        control   values x, errors "Invalid email", isDirty true, isValid false
+        throwing  set() RETURNS (the bus turns the handler's throw into a
+                  failed result that set() drops); values x, errors none,
+                  isDirty false, isValid true. An invalid value reads valid.
+      submit(), subscriber on `isValidating` becoming true
+        throwing  rejects; isValidating STUCK true, isBusy false, onSubmit 0
+      submit(), subscriber on `isSubmitting` becoming true
+        throwing  rejects; isSubmitting STUCK true, isBusy false, onSubmit 0
+        Both writes sit before their `try` (runSubmit), as runDispatch's did.
+
+    router/engine.ts
+      push('/list'), subscriber on `currentRoute`
+        control   resolves null; snapshot /list; afterEach ran 1; no error
+        throwing  resolves `component_load_failed`; onError fired; lastError
+                  set; afterEach ran 0; and the snapshot IS /list. The write
+                  is one line above `committed = true`, so a committed
+                  navigation is reported as a failed one: the phantom failure
+                  the comment in that catch block describes.
+      by reading, not probed: `refetchAffected` and `trackRevalidation` set
+      their flag and call `syncLoading()` / `syncRevalidating()` BEFORE the
+      promise chain whose `finally` clears it; a throw there leaves
+      `isLoading` / `isRevalidating` true. TO VERIFY.
+
+    transports.ts, createWsBridge, subscriber on `connected`
+        control   on open: queued message sent 1, onConnect 1. On close:
+                  onDisconnect 1, a second socket made (reconnect).
+        throwing on open   the queued message is NOT sent (0), onConnect 0
+        throwing on close  onDisconnect 0, NO reconnect (sockets made 1)
+        The write is the first statement of `onopen`, `onclose` and
+        `disconnect()`; the bookkeeping follows it.
+
+    ledger.ts through useCommandHistory, subscriber on `past`
+        control   undo(): handler ran 1, value 0, past 0, future 1,
+                  canUndo false, canRedo true
+        throwing  undo() THROWS; handler ran 0, value 1 (not undone); signals
+                  past 0, future 0, canUndo TRUE, canRedo false: the four
+                  signals disagree with each other and with the app state.
+
+    Fix shape, the same each time: write the signal LAST, or inside the
+    existing try, with a failing test first. Each is a state change; bench the
+    hot ones (form set, router commit).
+
+**Also seen while reading `transports.ts`:** two `/* v8 ignore next */`
+markers (in `flush` and `scheduleReconnect`), against the owner's no-v8-ignore
+rule. Each guards a branch its own comment calls unreachable.
+
+### 35.19 D: `startBatch` / `endBatch` and a standalone `Dep` signal. Dropped, both
+
+No src edit was made or kept for either.
+
+**`startBatch` / `endBatch`. V (run, rc.10), `.probes/batch-effect-runs.test.ts`.**
+The batch is opened by the caller around the dispatch; the subscriber is one
+raw Vue `effect` reading the signals named. Control: two refs written inside
+one batch run one effect once, unbatched twice. Bare `vue` does NOT export
+`startBatch` (`typeof` is `undefined`); only `@vue/reactivity` does, marked
+`@internal`.
+
+    sync-effect runs per dispatch                        plain   batched
+    useCommand, handler succeeds (loading + lastError)     2        0
+    useCommand, handler throws                             4        1
+    useCommandHistory, a recorded dispatch (all four)      1        1
+    useCommandHistory, undo then dispatch                  8        1
+    useCommandState (one signal)                           1        1
+
+    ns per dispatch, median of 7 interleaved reps, three runs (batched / plain)
+    useCommand, NO sync subscriber        74.8 -> 77.8 ns; 1.04x, 1.02x, 1.06x
+    useCommand, one sync subscriber       146.5 -> 102.5 ns; 0.70x, 0.72x, 0.76x
+    useCommandHistory, one subscriber     322.2 -> 322.4 ns; 1.00x, 0.98x, 0.99x
+
+Read: a batch helps only where a SYNCHRONOUS subscriber reads more than one of
+the signals a dispatch writes. A component's render is not one: the scheduler
+already runs it once per tick. For everyone else it is 2% to 6% slower per
+dispatch. It also changes what is observable: with a sync handler, a sync
+subscriber of `loading` runs 0 times where it ran twice, so it never sees
+`true`. And it would rest on an internal export that `vue` itself does not
+re-export. No gain on the common path, a state change, an internal API:
+DROPPED.
+
+**A standalone `Dep` signal through `configureSignal(fn)`. V (run, twice).**
+Tried inside `tests/signal-shallow-ab.test.ts` as the task said, then the file
+was restored: `new Dep()` with `trackDep` on read and `triggerDep` on a changed
+write, against `shallowRef`, the file's own harness (real `useCommandState`
+dispatches, median of 7 interleaved reps). Control: an `effect` from `vue`
+tracked the Dep signal and saw the write (one reactivity instance).
+
+    ops per second                 shallowRef      Dep     ratio (two runs)
+    array append /100                  11,321    9,782     0.86, 0.85
+    array append /10                  310,147  202,880     0.65, 0.63
+    scalar increment /100             139,405   43,299     0.31, 0.34
+
+Slower on all three. DROPPED; `signal()` stays on `shallowRef`.
+
+### 35.20 E: the two outbox leads, on branch `outbox-leads` off `main` (not rc.10)
+
+Recorded here because the log lives on this branch; the code is commit
+`a4f84fe` on `outbox-leads`, which sits on `main` (`e598271`, Vue rc.9). It was
+worked in its own worktree with its own `npm ci` (Vue 3.6.0-rc.9 installed),
+and `npm run gate` is GREEN there, 11 steps: 2,628 passed and 1 skipped,
+`test:vapor` 24, coverage 100 on all four (branches 3,466, one more than
+`main`).
+
+**Lead A, the Retry-After re-flush had no floor. V (run).**
+
+    fails-before  `tests/wire-contract.test.ts`: one record queued offline, a
+                  backend answering 503 with `Retry-After: 0`, fake timers,
+                  10 s advanced. Expected 11 requests, got 501: all 500 busy
+                  answers the test's valve allows, with the clock not moving.
+    the fix       the scheduled re-flush waits `max(retryIn, 1000)` ms. One
+                  second is the smallest wait the header can declare.
+    after         11 requests in 10 s; when the backend recovers the record
+                  drains on the next re-flush (12 requests, pending 0).
+    measured and rejected
+                  no re-flush at all for a wait of zero (`retryIn > 0`): 1
+                  request in 10 s, and the record then stays queued after the
+                  backend recovers, until `'online'` or a manual `flush()`.
+
+**Lead B, a `409 in_progress` with a `Retry-After` was dropped as a verdict. V
+(run).**
+
+    fails-before  same file: a 409 problem `in_progress` sent with
+                  `Retry-After: 1`, then a 200. Expected
+                  `{ replayed 0, failed 1, rejected 0 }`, got `rejected 1`: the
+                  record was dropped and `outboxRejected` fired.
+    the fix       the default `isRetryable` returns true for any failure whose
+                  context carries a numeric `retryIn`. It is the class rule the
+                  async bus's retry states already: "transient, always: a
+                  declared `retryIn`".
+    after         kept, flushed again 1 s later, 2 requests, pending 0.
+    control       in the same test: the same 409 with NO `Retry-After` is still
+                  rejected, `remote:already:in_progress`.
+
+**The `autoFlush` text.** Its docblock and one comment said "No timers, no
+polling". The Retry-After wait is a timer; both now say so.
+
+**Bytes. V (measured, the 55 dist .js before and after).** Only
+`dist/outbox.js` moves: 9,162 -> 9,223 B raw, 2,333 -> 2,349 B brotli. Per
+lead: the floor about +15 raw, the `retryIn` rule about +46 raw. A named
+constant for the floor cost 41 B raw and 23 B brotli more than the literal, so
+it is a literal with its comment at the call site. `size:check` passes.
+
+**Seen while regenerating `docs/BUNDLE-SIZES.md` on `main`:** four gzip cells
+moved by 0.1 KB in rows whose dist files are byte-identical before and after
+(`./vapor`, `./transitions`, `./alien-signals`, `./router`). The committed
+table on `main` was generated on another machine; this is its first
+regeneration here. The gate requires the regenerated file, so they are in the
+commit.
+
+**Open, and the owner's: how MANY times.** Neither test asks for a bound on the
+number of re-flushes, and none was added. A backend that answers
+`Retry-After: 1` for ever is asked once a second for ever, as in v1.25.0; with
+lead B fixed, a 409 that keeps declaring a `Retry-After` now joins that case
+where it used to be dropped on the first answer.
+
+**At merge:** `outbox-leads` and the rc.10 branches each add a `## Unreleased`
+entry at the top of `CHANGELOG.md` and a row at the end of
+`docs/decisions.md`. Both will conflict, and both resolve by keeping both.
+
+### 35.21 Two decisions closed, the 41 undiscussed rows scanned, and F10 found (discussion window)
+
+Done in a second window while the leftovers ran, read-only against the tree,
+and written here once that work had landed.
+
+**Decision 3b.4, CLOSED: the two TV-N rows are signed off (owner).** Verified
+first, which the earlier sessions had only asserted: neither commit touches a
+non-test file under `packages/*/src`.
+
+    444eef4b  release        15 files: package versions and the changelog
+    41e1d0fd  Vitest 5 chore 30 files: CI config, test files, benchmarks,
+                             `scripts/bench.ts`, `scripts/setup-vitest.ts`,
+                             `vite.config.ts`, the lockfile
+
+The two scripts are the benchmark runner and the test setup, not the build, so
+nothing in the published rc.10 packages can differ because of either commit.
+The range closes at 83 read, 2 signed off.
+
+**Decision 3b.3, CLOSED: the rows with no recorded reason were not accepted on
+trust (owner: investigate, to find a hidden bug).** The log said "about 40";
+counted, it is 41. `.probes/rows-scan.mjs` lists every commit in the range that
+s35.3, s35.4 and s35.7 do not answer, with the non-test source files it touched
+(names only, so no blob is fetched). 85 in the range, 44 answered, 41 not.
+
+    group                                   rows  our path to it
+    runtime-vapor `vdomInterop.ts` only       12  the vDOM directive plugin on a
+                                                  Vapor child (fixture exists),
+                                                  and nothing else
+    compiler-vapor codegen                    15  compiled output only
+    `dom/prop.ts`, hydration, `template.ts`    9  attributes and classes we read
+    server renderer, css vars, `useModel`,
+    async error component, template refs       5  none found
+
+Control for "none found": a grep of `src` for `useModel`, `useCssVars`,
+`.exposed` / `.proxy`, `useTemplateRef`, `Teleport`, `.checked` / `.selected`
+finds nothing, and the same grep finds `shallowRef|onScopeDispose` in 12 files.
+`Suspense` appears in comments only. A FIRST VERSION of that grep had its
+arguments in the wrong order and BRE alternation under `-E`; its empty output
+was not evidence and was thrown away.
+
+A grep cannot close a row (`docs/rc-alignment.md`), and these are not closed by
+one: they were read in full in the first session. What the scan adds is the
+reason that session did not write down, at file level, and the two candidates
+below, which were run.
+
+Two of the rows (`c1c0d304`, `92ace1fa`) stop Vue cloning a HYDRATED node as the
+template prototype. On rc.9 whatever a directive had written onto a hydrated
+element could have been copied into later instances of that template. In our
+favour; by reading titles and files only, TO VERIFY if the rc.9 behaviour is
+ever wanted on record.
+
+**Candidate 1, the production build. No difference. V (run).** `e77444ba` is a
+production-only change, and the interop fixture runs Vue's dev build. Four
+probes (interop directive, `:onClick` order, function input, keyed insert) were
+run against `vue.runtime-with-vapor.esm-browser.prod.js`. The behaviour is
+identical. The only differing lines are fragment anchors (an empty text node
+where dev has a comment) and the absence of Vue's dev warnings.
+
+**Candidate 2, F10. BUG, ours. A default slot that is itself conditional, and
+off when the outlet is created, never appears. V (run) on rc.10.** Reached from
+`d73c2cbf` ("let v-if and v-for slots override unconditional ones"), which is
+about conditional slots; the defect is not that commit's.
+
+    Reproduce  vitest.vapor.config.ts project. Layout template, compiled with
+               tests/compile-vapor.ts:
+                 <div class="layout"><RouterOutlet>
+                   <template v-if="s.on" #default><em>fallback</em></template>
+                 </RouterOutlet></div>
+               Routes: /app -> Layout, /app/about -> About (parent layout).
+               Start with s.on = false; push /app; set s.on = true.
+    Measured   the layout holds only the outlet's anchor. The fallback never
+               shows: not after the flip, not after a round trip through the
+               child route.
+    Controls   the same template with s.on = true at mount works, through flips
+               and the round trip. An unconditional `<template #default>` works.
+    Cause      the outlet reads `slots.default` ONCE, in setup, to choose its
+               path. compiler-vapor emits a conditional slot as a DYNAMIC source,
+                 $: [() => (s.on ? { name: "default", fn } : void 0)]
+               so the read is undefined while the condition is off and the
+               outlet takes the no-slot path for its whole life.
+    Not F1     F1 (s35.11) was the slot's CONTENT going dead after a child
+               route. This is whether the slot EXISTS at setup. The same line,
+               a different defect.
+
+### 35.22 F10 fixed: a conditional default slot that starts off (branch `outlet-dynamic-slot` off `rc10-leftovers`)
+
+**It predates rc.10. V (run).** The probe of 35.21 was run in a clean worktree
+on Vue 3.6.0-rc.9 with the v1.25.0 outlet: the starts-off arm shows only the
+outlet's anchor at every step, exactly as on rc.10. `d73c2cbf` led the scan to
+it and did not cause it.
+
+    fails-before   tests/vapor/vapor-outlet.test.ts, new arm (h): the outlet is
+                   given a dynamic slot source whose condition is off at mount.
+                   Both arms failed, the dev build and the executed production
+                   build: "expected '' to be 'late fallback'".
+    the fix        the outlet takes the createIf + createSlot path when
+                   `slots.default` exists OR the raw slots carry dynamic
+                   sources (`rawSlots.$`). `createSlot` already follows a
+                   dynamic source; the outlet only had to reach it.
+    after          3 passed, arms (a) to (g) unchanged. The compiled probe of
+                   35.21 reads right in the starts-off arm at all six steps.
+    unchanged      no slot at all: no `$`, no `createIf`, one anchor node, arm
+                   (b). A conditional slot that is off leaves two anchors (the
+                   slot's and the if's) and no element.
+
+**The second property read, and why it is defensive.** `rawSlots` is not in the
+typed setup context: `tsc` rejected `{ slots, rawSlots }` in the parameter. It
+is there at runtime because Vapor passes the component INSTANCE as `setup`'s
+second argument. So the module casts and reads it with `?.`: handed a narrower
+object it falls back to the setup-time read (F10 returns) and does not throw.
+`tests/vapor/vapor-outlet-helpers.test.ts` compiles
+`<Late><template v-if="s.on" #default>` on the installed Vue and asserts what
+the outlet relies on: no `slots.default`, one entry in `rawSlots.$`; and for an
+unconditional slot, `slots.default` present and no `$`. The same test asserts
+the emitted source has the `$: [` / `name: "default"` / `fn:` shape that the
+fixture's arm (h) builds by hand, because the fixture's production arm has no
+compiler.
+
+**Rejected.** Always taking the `createIf` path, with
+`() => !!entryAt() || !slots.default` as its condition: it needs no second
+property read, but it adds a fragment, an effect and a second anchor node to
+EVERY outlet, the slot-less ones included, which are the common case. That is
+a state change and a setup cost for all consumers to avoid one internals read.
+
+**Cost. V (measured, after `npm run build`; `dist/router/vapor.js` checked to
+contain the change).**
+
+    module alone, esbuild minified      880 -> 898 B min, 471 -> 489 B brotli
+    its BUNDLE-SIZES row                unchanged: 0.8 / 0.5 / 0.4 KB
+    outlet own arm, KB brotli           4.74 -> 4.74 (ceiling 5.0)
+
+The own-arm reading is below that guard's own noise (up to 114 B with the entry
+file name, s35.15), so "unchanged" means "under 0.01 KB at this naming", not
+zero.
+
+### 35.23 M1: the `runDispatch` shape at five more sites (branch `rc10-mechanicals` off `outlet-dynamic-slot`)
+
+The second mechanical list, HANDOFF 3a-2. One site at a time: a test on real
+Vue `effect`s that fails first, the smallest move of the write, bytes from the
+55 dist .js before and after, an interleaved A/B where the path is hot. The
+control at every site is the path with NO throwing subscriber: the writes a
+subscriber sees, in order, must be what they were.
+
+**a. `useVaporAsyncCommand` (`src/chamber-vapor.ts`). FIXED. V (run).**
+
+    fails-before  tests/vapor-async-throwing-subscriber.test.ts, 3 tests. The
+                  two throwing arms (subscriber on `loading` becoming true; on
+                  `lastError` being cleared) both failed: the promise REJECTED
+                  with the subscriber's error and `loading` was true. The
+                  third, the no-throw control, passed before the fix.
+    the fix       both opening writes moved inside the `try`, as in s35.17.
+    after         3 passed. Resolves `ok: false` with the subscriber's error,
+                  `lastError` holds it, `loading` false, handler ran 0 times.
+    no-throw      the control lists the writes two effects see over a
+                  succeeding and a failing dispatch: loading true, loading
+                  false; loading true, error set, loading false. Same list
+                  before and after.
+    bytes         dist/chamber-vapor.js 3,094 -> 3,098 B raw, 879 -> 881 brotli;
+                  iife.js 149,956 -> 149,958 raw, 40,570 -> 40,553 brotli;
+                  iife.min 39,503 -> 39,503 raw, 12,244 -> 12,243 brotli.
+                  The other 52 files identical.
+    A/B           `.probes/vapor-async-try-ab.test.ts`, the two bodies on Vue
+                  shallowRefs, 200,000 awaited calls, median of 9 interleaved
+                  reps, three runs, ns per call outside / inside:
+                  120.39 / 120.39, 123.62 / 123.70, 120.26 / 119.16.
+                  Ratio 0.991 to 1.001: not slower.
+
+**b. `form.ts`, `set` and `submit`. FIXED for the reproduction in s35.18; one
+wider shape measured slower and NOT landed. V (run).**
+
+    fails-before  tests/form-throwing-subscriber.test.ts, 5 tests. Three
+                  failed: `set` with a subscriber throwing on `values` (errors
+                  none, isDirty false, isValid true: an invalid value read
+                  valid); `submit` with one on `isValidating` (stuck true);
+                  `submit` with one on `isSubmitting` (stuck true). Two passed
+                  before: the no-throw control and the "today" pin below.
+    the fix       `set`: the `values` write sits in a `try` whose `finally`
+                  holds the rest of the handler unchanged (the `outside`
+                  adjustment, the rules, the three other writes). `submit`:
+                  `isValidating = true` and `isSubmitting = true` each moved
+                  from the line above its `try` to the first line inside it.
+    after         5 passed. `set` still returns (the bus drops the handler's
+                  throw, as before) and the four signals agree. `submit` still
+                  REJECTS with the subscriber's error, as it does for a rule or
+                  an `onSubmit` that throws; both flags and `isBusy` end false,
+                  `onSubmit` ran 0 times, and the next `submit()` goes through.
+    no-throw      the control records every write eight effects see, and each
+                  call of the rule and of `onSubmit`, across an invalid set, a
+                  failed submit, a valid set and a good submit: 5, 7, 4 and 12
+                  events. Same four lists before and after. It is why the rules
+                  stay AFTER the `values` write: running them first would let
+                  one `try` cover everything, and would move `rule` ahead of
+                  `values:x` in that list.
+    bytes         dist/index.js 53,943 -> 54,007 B raw, 11,959 -> 11,978 brotli.
+                  The other 54 files identical (the form is not in the IIFEs).
+                  `size:check` passes; `tests/esm-treeshake.test.ts` passes.
+    A/B, `set`    `.probes/form-set-ab.test.ts`, the handler body in each
+                  shape on Vue shallowRefs with one sync rule, 500,000 calls
+                  per rep. `submit` is one awaited call per submit, not hot:
+                  not benched.
+
+                  Ratio against the plain body, one number per process.
+                  Sets: (1) two shapes, median of 16 alternating reps; (2) four
+                  shapes in one process, order rotated, median of 16; (3) five
+                  shapes, the same; (4) pairwise, minimum of 40 reps.
+
+                  single `finally` (LANDED)
+                    (2) 0.990 0.995 0.996 1.005 1.005
+                    (3) 0.976 0.989 0.998 1.012 1.038
+                    (4) 0.964 0.987 0.994 1.005 1.041 1.110
+                    16 runs, 9 below 1.00, median 0.998.
+                  one `finally` per write, 3 levels, covers all four writes
+                    (1) 1.010 1.010 1.014 1.016 1.018
+                    (2) 0.999 1.000 1.002 1.015 1.034
+                    (3) 0.981 0.982 1.025 1.032 1.036
+                    (4) 1.001 1.013 1.022 1.024 1.024 1.050
+                    21 runs, 3 below 1.00, median 1.015.
+                  try/catch per write, the catch calls the continuation
+                    (2) 1.035 1.044 1.046 1.048 1.055
+                    (3) 1.016 1.037 1.042 1.046 1.057
+                  one try/catch around the body and a step counter
+                    (3) 0.990 1.019 1.034 1.046 1.061
+
+                  The machine was loaded from set (3) on (load average 7 to 11,
+                  a Time Machine backup): those sets spread about 5%. The
+                  single `finally` reads 1.00 within that noise. The shape that
+                  covers every write reads about 1.5% slower, the other two
+                  more.
+
+**NOT FIXED, and the owner's (added to HANDOFF 3b): a subscriber that throws on
+`errors` or on `isDirty`.** V (run), pinned as today's behaviour by the second
+test in that file.
+
+    Reproduce  const f = createFormBus({ fields: { email: '' },
+                 rules: { email: v => v.includes('@') ? null : 'Invalid email' } })
+               effect(() => { if (f.errors.value.email) throw new Error('x') })
+               f.set('email', 'x')
+    Measured   values x, errors "Invalid email", isDirty FALSE, isValid TRUE.
+               With the subscriber on `isDirty`: isDirty true, isValid TRUE.
+    The two behaviours
+               landed: one `finally`. The writes after a throwing `errors` or
+               `isDirty` subscriber stay stale. `set` costs what it cost.
+               not landed: one `finally` per write. All four signals always
+               agree. 1.00x to 1.05x per `set`, a per-keystroke path, and
+               +156 B raw / +41 brotli on dist/index.js instead of +64 / +19.
+
+Seen while reading, not run: the same ordering exists in the `formReset`,
+`formValidate` and `formErrors` handlers (8, 3 and 3 writes in a row), and in
+the two `finally` blocks of `runSubmit` (`isValidating = false` then
+`updateBusy()`): a subscriber throwing on the FIRST write of any of them skips
+the rest. TO VERIFY; none is in this list.
+
+**c. `router/engine.ts`: the commit, `refetchAffected`, `trackRevalidation`.
+FIXED, all three. V (run).** The two background lanes were known by reading
+only (s35.18); they were run first, as the failing tests.
+
+    fails-before  tests/router/engine-throwing-subscriber.test.ts, 4 tests on
+                  a real router with a `rows:` loader. Three failed:
+                  commit    subscriber on `currentRoute`: push('/list')
+                            resolved `component_load_failed` (cause: the
+                            subscriber's error), afterEach 0, with the snapshot
+                            already /list.
+                  refetch   subscriber on `isLoading`, push('/list?page=2'):
+                            isLoading STUCK true, loader calls 1 (the refetch
+                            never ran), data still `data-1`.
+                  refresh   subscriber on `isRevalidating`, a reported
+                            refresh: isRevalidating STUCK true, data still
+                            `stale-value`.
+                  The fourth, the no-throw control, passed before.
+    the fix       commit: `committed = true` moved above the snapshot write,
+                  and the write put in a `try` whose `finally` runs `onCommit`
+                  and the after-hooks. The subscriber's error then reaches the
+                  engine's existing post-commit branch: logged, push resolves
+                  null. `committed` is still set after the history call, so a
+                  history that throws is still a pre-commit failure.
+                  refetch, refresh: the signal write put in a `try` whose
+                  `finally` builds the promise chain that lowers the flag.
+    after         4 passed; `tests/router` and `tests/revalidate-routes`, 461
+                  tests in 39 files, pass. Commit: resolves null, afterEach 1,
+                  onError 0, lastError null, the error logged once. Refetch:
+                  loader calls 2, data `data-2`, isLoading false. Refresh:
+                  data `fresh-value`, isRevalidating false.
+    unchanged, and pinned as such
+                  the CALLER of a query-only push, and of `ctx.revalidate`,
+                  still gets the subscriber's error thrown at it, before and
+                  after. Only the state behind it is repaired.
+    no-throw      the control records subscriber runs, loader calls and
+                  afterEach over a path navigation (5 events), a query-only
+                  change (5) and a reported refresh (3). Same lists before and
+                  after.
+    bytes         dist/router.js 57,896 -> 58,064 B raw, 13,638 -> 13,667
+                  brotli. The other 54 files identical.
+    A/B           `.probes/router-commit-ab.test.ts`, the commit statements in
+                  both orders on a Vue shallowRef with one subscriber, an
+                  onCommit and one after-hook; 300,000 calls, 40 alternating
+                  reps, four runs, ns before / after: 37.49 / 37.28,
+                  38.25 / 38.38, 37.59 / 37.40, 34.74 / 35.27. Median ratio
+                  0.994 to 1.015, minimum ratio 0.996 to 1.004: the same. For
+                  scale, `.probes/router-push-scale.test.ts`: one committed
+                  push on the fixture router costs about 6,500 ns (after,
+                  before, after, before: 6,520, 6,583, 6,779, 6,563).
+
+**FOUND, NOT FIXED (not in the list): a `currentRoute` subscriber that throws on
+a QUERY-ONLY commit.** V (run), `.probes/router-query-commit-throw.test.ts`.
+`commitQueryLocation` and the `refetchAffected` call after it sit above
+`navigate`'s `try`.
+
+    Reproduce  routes with `load: 'rows:list'` and a `page` query key;
+               await router.push('/list?page=1')
+               effect(() => { if (router.currentRoute.value.location.query.page
+                 === '2') throw new Error('x') })
+               await router.push('/list?page=2')
+    Control    resolves null; query 2; loader calls 2; data `data-2`.
+    Measured   the push REJECTS (navigate is documented to resolve
+               `RouterError | null`); query IS 2 and the URL moved; loader
+               calls 1, data `data-1`: the page shows the old query's data
+               under the new query, and no refetch is coming.
+    Also       the `.finally()` of both background chains writes the signal
+               again; a subscriber throwing on `false` there becomes an
+               unhandled rejection. By reading, TO VERIFY.
+
+**d. `createWsBridge` (`src/transports.ts`): `onopen`, `onclose`,
+`disconnect()`. FIXED, all three, and paid for. V (run).** Landed after M3
+(s35.25) for the budget reason given there.
+
+    fails-before  tests/ws-bridge-throwing-subscriber.test.ts, 4 tests on a
+                  stubbed WebSocket with a Vue effect on `connected`. Three
+                  failed:
+                  open        queued message sent 0, onConnect 0
+                  close       onDisconnect 0, sockets made 1 (no reconnect)
+                  disconnect  the in-flight request stayed pending, the socket
+                              stayed OPEN, isConnected() true. Not in s35.18's
+                              probe; the same write, the same shape.
+                  The fourth, the no-throw control, passed before.
+    the fix       each of the three writes put in a `try` whose `finally`
+                  holds the bookkeeping that followed it, unchanged.
+    after         4 passed; the transports suites, 70 tests in 4 files, pass.
+                  Open: sent 1, onConnect 1. Close: onDisconnect 1, a second
+                  socket. disconnect(): the request fails at once with
+                  `transport:lost:reply`, the socket is closed, no reconnect.
+    unchanged, and pinned as such
+                  the subscriber's error still leaves the socket's handler, or
+                  `disconnect()`.
+    no-throw      the control lists the subscriber's run against sends,
+                  callbacks, the reconnect socket, the close and the settled
+                  request over open, close, reopen and disconnect: 3, 3, 2 and
+                  3 events. Same lists before and after.
+    speed         connection events, not a hot path: not benched.
+
+    bytes, per piece, vapor-chamber.iife.min.js (budget 39,505 raw / 12,245
+    brotli)                                          raw      brotli
+      after M1 c                                  39,503     12,243
+      M3, two dead guards removed                    -22         -1
+      this fix, three try/finally                    +39         +2
+      `scheduleReconnect` inlined into `onclose`     -37        -10
+      now                                         39,483     12,234
+    dist/transports2.js over the same steps: 15,193 -> 15,074 -> 15,214 ->
+    15,084 B raw; 3,603 -> 3,579 -> 3,597 -> 3,577 brotli. The other 52 files
+    identical. The fix measured ALONE, before M3, was 39,542 / 12,260: over.
+
+    the inline    `scheduleReconnect` had one caller. Its body is now that
+                  caller's branch: `reconnectTimer = setTimeout(connect,
+                  reconnectDelay * ++reconnectCount)`. Same count, same delay,
+                  `connect` called with no argument as before; one function
+                  and one closure fewer. Pinned by the reconnect tests in
+                  `tests/transports-coverage.test.ts` and by the control above.
+
+**e. `useCommandHistory`: undo and redo. FIXED, one level down, in
+`moveUnlessRefused` (`src/settled.ts`). V (run).**
+
+    where         `useCommandHistory` mirrors the ledger's stacks into four
+                  signals from `onChange`. The ledger moves the stacks FIRST
+                  and reverts if the call does not land (`moveUnlessRefused`).
+                  There `move()` stood one line above the `try` that guards the
+                  call: `runDispatch`'s shape exactly. `src/settled.ts` was
+                  read for this (lines 89 to 132); it is where the write sits.
+    fails-before  tests/history-throwing-subscriber.test.ts, 3 tests. Two
+                  failed, each because the subscriber's error ESCAPED:
+                  undo, subscriber on `past`; redo, subscriber on `future`.
+                  The s35.18 probe has the state behind the undo arm: handler
+                  ran 0, value 1, signals past 0 / future 0 / canUndo true /
+                  canRedo false, while the ledger had already moved the command
+                  to the redo stack. The third test, the no-throw control,
+                  passed before.
+    the fix       `move()` moved inside the `try`. A throw during the move is a
+                  call that did not land: the existing catch reverts the stacks
+                  (which rewrites all four signals) and logs.
+    after         3 passed; `history-undo-lands` and `plugins-core-gaps`, 27
+                  more, pass. Undo: nothing escapes, `undo()` returns the
+                  command as it does for a refused undo, the undo handler ran
+                  0 times, value 1, past 1 / future 0 / canUndo true / canRedo
+                  false, logged once as `Undo handler error for "inc"`. With
+                  the subscriber stopped the next undo lands: value 0, past 0 /
+                  future 1. Redo: the mirror image, logged as `Redo dispatch
+                  error for "inc"`.
+    rejected      try/finally around the four writes in `onChange`
+                  (`src/chamber.ts`, where the item pointed). It makes the four
+                  signals agree with the LEDGER, but the throw still aborts the
+                  undo after the stacks moved: history reads "undone" over an
+                  application that was not, and a redo then applies the command
+                  a second time. Not built; the reading of `moveUnlessRefused`
+                  above is why.
+    also covers   the `history()` plugin, which shares the helper. Its ledger
+                  has no signals; the change is the same one for any `onChange`
+                  that throws. Its tests pass unchanged.
+    no-throw      the control lists the four subscribers' runs against the
+                  handler and the undo handler over a dispatch (3 events), an
+                  undo (5) and a redo (5). Same lists before and after.
+    bytes         dist/settled.js 860 -> 862 B raw, 344 -> 345 brotli.
+                  vapor-chamber.iife.min.js 39,483 -> 39,479 raw, 12,234 ->
+                  12,236 brotli (budget 39,505 / 12,245). iife.js 149,716 ->
+                  149,717 / 40,490 -> 40,493. The other 52 files identical.
+    speed         a user's undo or redo, not a hot path: not benched.
+
+### 35.24 M2: the outlet size guard no longer moves with the entry file's name
+
+**The noise, on this tree. V (run, after `npm run build`).**
+`.probes/outlet-naming-noise.mjs`, the guard's harness, the floor and the Vapor
+arm built under three namings of the entry file. Raw own arm 16,275 B under
+all three. The lazy blade chunk's hash differs in every one of the six builds.
+
+                              own arm, brotli, AS BUILT    hash set to zeros
+    the guard's own names     4,859 B = 4.75 KB            4,809 B = 4.70 KB
+    arm-0.js / arm-1.js       4,825 B = 4.71 KB            4,809 B = 4.70 KB
+    a.js / b.js               4,812 B = 4.70 KB            4,809 B = 4.70 KB
+    spread                    47 B                         0 B
+
+(s35.15 measured a spread of 114 B on the tree of that day; the hashes, and so
+the spread, move with every change to the router.) M1 c showed it live: the
+engine fix is on the shared side of the subtraction and the stamped own arm
+still went from 4.74 to 4.75.
+
+**The fix.** `tests/vapor/vapor-outlet-size.test.ts`, `withFixedLazyNames`:
+before compressing, each lazy chunk's file name in the entry code has its
+eight hash characters replaced by zeros. Same length, so raw sizes do not move.
+It applies to all four arms. It throws if a lazy chunk's name is not the hashed
+shape or is not found in the entry.
+
+    after          the guard prints own arm 4.70 KB (was 4.75), the probe's
+                   number for every naming. Saving against interop 22.06 KB,
+                   unchanged. `test:vapor` 29 passed.
+    positive       the hash pattern seeded to miss (`{8}` to `{9}`): the guard
+    control        fails with `cannot normalize the lazy chunk name
+                   "blade-jNlTBrN6.js" in the entry`. Restored: passes.
+    not touched    the ceiling (5.0) and the floor (15): decisions, 3b.2.
+    what it is     a convention, and it should be read as one: zeros compress
+                   a little better than a real hash, so the normalized number
+                   sits at the low end of the as-built range (4,809 against
+                   4,812 to 4,859). Headroom under 5.0 reads 0.30 KB.
+
+### 35.25 M3: the two `v8 ignore` markers in `src/transports.ts`, removed with the branches they hid
+
+Done before M1 d and M2, out of order, for a measured reason: the `createWsBridge`
+fix of M1 d alone put the full IIFE over its budget (39,542 B raw / 12,260
+brotli against 39,505 / 12,245; headroom before it was 2 and 2), and these two
+lines are dead code in the same file.
+
+**Both guarded a branch nothing can reach. V (read, then run).**
+
+    flush()              `if (batch.length === 0) return;` in
+                         createBatchingHttpBridge. `flush` is scheduled only by
+                         `scheduleFlush`, only after a `queue.push`, once per
+                         window (`scheduled`), and only `flush` empties the
+                         queue.
+    scheduleReconnect()  `if (!reconnect || intentionalClose || reconnectCount
+                         >= maxReconnects) return;`. Its one caller, `onclose`,
+                         tests the same three conditions on the line above the
+                         call.
+
+Neither can be covered by a test, so they are removed, not tested: the guard
+and its marker, 7 lines. What each guarded stays pinned by tests that were
+already there: `tests/transports.test.ts` (same-tick dispatches make ONE POST;
+separate ticks make two; a numeric window makes one) and
+`tests/transports-coverage.test.ts` (`reconnect: false` never schedules;
+reconnecting stops at `maxReconnects`).
+
+    after        `grep -c "v8 ignore" src/transports.ts` prints 0 (it printed 2).
+                 Coverage 100 x4: statements 5,660 / 5,660, branches 3,465 /
+                 3,465, functions 1,248 / 1,248, lines 4,687 / 4,687. The
+                 totals are the same as before the removal, as they must be:
+                 an ignored line is not counted. 2,659 passed, 1 skipped.
+    bytes        dist/transports2.js 15,193 -> 15,074 B raw, 3,603 -> 3,579
+                 brotli. vapor-chamber.iife.min.js 39,503 -> 39,481 raw,
+                 12,243 -> 12,242 brotli. iife.js 149,958 -> 149,731 /
+                 40,553 -> 40,473. The other 52 files identical.
+    speed        one comparison fewer per batch flush and per reconnect. Not
+                 benched: nothing was added.
+
+**FOUND, NOT FIXED (not in the list): nine more markers in `src`.** V (grep;
+the same grep found the two above before they were removed).
+
+    src/http-cache.ts       1   src/router/dom.ts     1
+    src/chamber.ts          2   src/router/blade.ts   2
+    src/command-bus.ts      3
+
+None is there for speed; each costs a comparison. By kind: type narrowing
+(`http-cache.ts` `firstKey !== undefined`, `chamber.ts` `if (_probePromise)`,
+`router/blade.ts` `if (!el.value)` twice), a placeholder function overwritten
+before it can be called (`chamber.ts` `unsub`), and a guard its caller or an
+invariant already makes dead (`command-bus.ts` `flushDeferred` and the two
+rollbacks, `router/dom.ts` `if (!preheat)`). The two in `router/blade.ts` have
+bare marker lines, but the comment above them records a measurement (false
+path 4 of 4) and a choice to ignore them and not fake a test: at least those
+were deliberate. All eleven were in the v1.25.0 baseline commit. Whether the
+nine go is the owner's (HANDOFF 3b.12). Reproduce: `grep -rn "v8 ignore" src`.
+
+**CORRECTION, the same day: the removal of the `flush()` guard above rested on
+a reading.** "Unreachable" was argued from the call sites, and the run evidence
+was a suite that stayed green: a negative with no positive control. The owner
+asked; the evidence is now a test.
+
+    the test      tests/batching-flush-never-empty.test.ts, 5 tests. A backend
+                  stub records the size of every batch it is sent, over each
+                  way a flush is scheduled: a same-tick burst then separate
+                  ticks (3, 1, 1); a 20 ms window, two bursts, a second of idle
+                  time (2, 1); a dispatch whose signal is already aborted (no
+                  POST); a dispatch aborted while queued (1); a dispatch made
+                  while a flush is in flight (2, 1). The lists are exact, so an
+                  extra empty POST fails them.
+    positive      `flush()` seeded to schedule one more flush after every real
+    control       one: 4 of the 5 fail, each on a recorded batch of 0. Restored:
+                  5 pass. V (run).
+    the other     `scheduleReconnect` no longer exists (M1 d inlined it), so its
+    guard         condition is written once, in `onclose`, and both arms were
+                  already covered: `reconnect: false`, `maxReconnects` reached,
+                  and the reconnect itself.
+
+**FOUND, NOT FIXED, by that test:** a command whose signal aborts WHILE it
+waits in the batching queue is still sent to the backend. The pre-flight check
+runs only at enqueue. Reproduce: the fourth test above, which pins today's
+batch of one.
+
+### 35.26 M4: `outbox-leads` on Vue rc.10, a TRIAL branch (nothing merged)
+
+`a4f84fe` was written and gated on `main`, which is Vue rc.9. Branch
+`outbox-on-rc10` is `rc10-mechanicals` plus a cherry-pick of it.
+
+    conflicts     FOUR, not the two expected. `CHANGELOG.md` (top) and
+                  `docs/decisions.md` (tail): both sides kept, ours first.
+                  `README.md` (two hunks) and `docs/whitepaper.md` (one): every
+                  hunk a `vc:tests` / `vc:testFiles` stamp, so ours was taken
+                  and `docs:stamp` rewrote them. `docs/BUNDLE-SIZES.md` merged
+                  by itself and was regenerated.
+    the gate      GREEN on the committed tree, 11 steps, all twelve `@vue/*` at
+                  3.6.0-rc.10. `test:run` 2,673 passed and 1 skipped (the 2,671
+                  of this branch plus the commit's two), `test:vapor` 29,
+                  coverage 100 x4 with branches 3,466 (one more than this
+                  branch: the `retryIn` rule). `size:check` passes.
+    bytes         against this branch's dist, one file moves:
+                  dist/outbox.js 9,162 -> 9,223 B raw, 2,333 -> 2,349 brotli.
+                  The same +61 / +16 it measured on rc.9 (s35.20).
+
+So the two outbox fixes behave on rc.10 as they did on rc.9. V (run). The
+branch is a trial: merging it, or `outbox-leads`, is decision 3b.6. This run
+was on `b65bf6c`, the head after M2; the branch's current head is in HANDOFF.
+
+### 35.27 M5: three re-flush policies, measured for decision 3b.7 (no src change)
+
+`.probes/outbox-reflush-policies.test.ts`, fake timers. One record queued
+offline, then online, against a backend that answers 503 with `Retry-After: 1`
+for the length of the outage and 200 after it. "Today" is the real outbox with
+`autoFlush`. The two alternatives are the real outbox with `autoFlush` off and
+its `flush()` scheduled by the probe the way that policy would: nothing in
+`src` was edited. Drain time is sampled every 250 ms for an hour after the
+backend recovers; "never" means still queued after that hour, waiting for
+`'online'` or a `flush()`.
+
+**V (run).** Control: today's row reads 601 requests in 10 minutes, the 11 per
+10 s of s35.20 (one at once, then one a second).
+
+                                     requests sent while busy   recovery -> drained
+    policy                           30 s    10 min    1 h      30 s     10 min   1 h
+    today: once per declared wait,     31      601    3,601     1.0 s    1.0 s    1.0 s
+      for ever
+    hard bound N = 5                    6        6        6     never    never    never
+    hard bound N = 10                  11       11       11     never    never    never
+    hard bound N = 60                  31       61       61     1.0 s    never    never
+    growing x2, cap 30 s                5       24      124     1.0 s    1.0 s    1.0 s
+    growing x2, cap 60 s                5       15       65     1.0 s    3.0 s    3.0 s
+    growing x2, cap 5 min               5       10       20     1.0 s    211 s    211 s
+    growing x1.5, cap 60 s              7       19       69     2.25 s   51 s     51 s
+
+    The three right-hand columns are one sample each: the outage ends at
+    exactly 30 s, 10 min or 1 h. For a growing wait the delay depends on where
+    in the current wait the recovery falls; its worst case is the cap. For
+    today's policy the worst case is the declared wait, 1 s.
+
+What the numbers say, without choosing:
+
+- **Today** is the fastest to drain and the only one that costs the backend a
+  request a second for as long as it says it is busy: 3,601 in an hour, per
+  client with a queued record.
+- **A hard bound** sends N + 1 requests and then stops. It drains by itself
+  only if the outage ends inside the first N declared waits (N = 60: a 30 s
+  outage drains, a 10 minute one does not). After that the record sits until
+  the browser fires `'online'`, which it does not for a backend that was busy
+  and not unreachable, or until the app calls `flush()`.
+- **A growing wait** always drains by itself, within one cap of recovery, and
+  sends 29 times fewer requests (cap 30 s) to 180 times fewer (cap 5 min) over
+  an hour. The backend's declared wait is honoured as the floor of each step; the
+  growth is on top of it.
+
+Run on this branch, which does not hold `a4f84fe`. With `Retry-After: 1` the
+one-second floor that commit adds does not change any wait, and the "today"
+row is the same on `outbox-on-rc10`: 31 / 601 / 3,601 requests, 1.0 s to
+drain. V (run there).
+
+### 35.28 M6: `npm run test:browser` runs on the system Chrome when the headless shell is missing
+
+The improvement s35.12 left undone. A Playwright upgrade pins a new browser
+revision; until it is downloaded the launch fails and no test runs.
+
+    fails-before  `PLAYWRIGHT_BROWSERS_PATH` pointed at an empty directory, so
+                  no downloaded revision exists: `npm run test:browser` exits
+                  1, "Executable doesn't exist at
+                  .../chromium_headless_shell-1243/...", no tests.
+                  Control: with the real directory, 18 passed in 5 files.
+    the rule      `scripts/browser-channel.mjs`, `browserChannel(path, exists,
+                  platform)`. Playwright exports no "is it installed", so it
+                  reads the one public thing, `chromium.executablePath()`,
+                  which ends in `<dir>/chromium-<revision>/...`, and looks for
+                  `<dir>/chromium_headless_shell-<revision>` beside it. Missing,
+                  and a system Chrome present: `channel: 'chrome'`. Anything
+                  else, a path of another shape included: the stock launch.
+                  `vitest.browser.config.ts` calls it and prints one line on
+                  stderr when it falls back.
+    after, both   shell present (revision 1243 installed): 18 passed, 5 files,
+    ways          no notice. Shell absent (the empty directory): 18 passed, 5
+                  files, on Chrome 154, with the notice. Absent and
+                  `VC_MODE=development`: 18 passed. V (run), macOS.
+    the test      `tests/browser-channel.test.ts`, 6 tests, no browser: shell
+                  installed; missing with Chrome; missing without Chrome;
+                  another revision installed does not count; a Windows-style
+                  path; a path of the wrong shape.
+    not run       Linux. The Chrome location used there is
+                  `/opt/google/chrome/chrome`; pinned by the unit test as a
+                  string, TO VERIFY on a Linux machine. Shell absent AND no
+                  Chrome: by the unit test only.
+
+`docs/plan-failures-and-contract.md` 8b said "headless shell only"; it now says
+what happens without it.
+
+### 35.29 The list closed: both branches gated, and a test that fails one run in a hundred
+
+`rc10-mechanicals` at `e256f02`: gate GREEN, 11 steps, 2,677 passed and 1
+skipped in 209 files, `test:vapor` 29, coverage 100 x4 (5,659 / 3,465 / 1,246 /
+4,686), full IIFE 39,479 B raw / 12,236 brotli against 39,505 / 12,245.
+
+`outbox-on-rc10` was rebuilt on that head (`2a56b39` = `e256f02` + `a4f84fe`,
+the same four conflicts resolved the same way): 2,679 passed and 1 skipped,
+coverage 100 x4 with branches 3,466. Its gate ran twice: RED at `test:run` the
+first time, GREEN the second, on the same tree.
+
+**FOUND, NOT FIXED (not in the list): `tests/dispose-plugins.test.ts` fails
+about one run in a hundred, by construction. V (run).** The red gate run was
+"ends a retry wait mid-sleep as core:aborted:dispatch and stops the attempts",
+at its first assertion: handler called 2 times, expected 1.
+
+    Reproduce  `.probes/dispose-retry-jitter-flake.test.ts`: the test's own
+               setup (`retry: { baseDelay: 100 }`, a handler that throws, fake
+               timers, advance 0 ms) with `Math.random` pinned.
+    Measured   Math.random 0, 0.001, 0.004, 0.005, 0.009: handler calls 2.
+               Math.random 0.01, 0.02, 0.5, 0.999: handler calls 1.
+    Cause      the retry's backoff is jittered, and below 0.01 the wait comes
+               out as 0 ms, so the second attempt runs inside the test's
+               "advance 0 ms" before it disposes the bus. One chance in a
+               hundred per run; nothing to do with the machine's load, or with
+               either branch. Alone, the file passed 30 of 30.
+    Two things it says
+               the test needs a pinned `Math.random`, or a wait it controls;
+               and a retry CAN re-send with no wait at all, one time in a
+               hundred, which is the behaviour s35.20 removed from the outbox
+               for `Retry-After: 0`. Whether the bus's retry should have a
+               floor is a question for the owner (HANDOFF 3b.13).
+
+### 35.30 3b.1 and 3b.10, DECIDED (owner): report the out-in bug to Vue, document the limit, change nothing in the bridge now
+
+Sections 35.30 to 35.36 are the record of the discussion window of 2026-09-30,
+moved here VERBATIM from `.probes/decisions-from-discussion-window.md`
+(gitignored; it was kept there because another window owned the working tree).
+Only the headings were renumbered. Branch `vc-components` off
+`rc10-mechanicals`, Step 0 of the Vc route (HANDOFF 3d). "V" in them means run
+on Vue 3.6.0-rc.10. Two things changed after they were written, and the text
+below is left as it was:
+
+- The shape of 35.34 (bus-native, `:show`, nothing of Vue's transition
+  imported) was APPROVED by the owner the same day. It supersedes the PROPOSED
+  SHAPE of 35.32, and with it the open point at the end of 35.35 (`css: false`
+  on Vapor): a component that imports no Vue transition has no CSS classes to
+  switch off.
+- Of the "To apply in the tracked tree" list at the end of 35.36: items 2 and 4
+  were applied with this commit; items 1 and 3 belong to Step 3 of the Vc route.
+
+Owner: "create a report file so i can report the bug, document, and if it
+remains in 3.6 we can have another solution; most consumers use Vapor, so 0
+consumers for now."
+
+- The bridge keeps calling `done()` synchronously. Deferring it was measured
+  (log s35.16): it changes four things on paths that work today and costs
+  about 3x per hook. Not taken.
+- REVISIT CONDITION: if the bug is still in Vue when 3.6 goes stable, look at
+  it again (the option then is an opt-in on the bridge, which is a feature and
+  waits for the freeze to lift anyway).
+- The upstream report is written: `.probes/vue-issue-out-in-sync-done.md`. The
+  owner posts it. Its single-file reproduction was run on rc.10 with three
+  control arms (`.probes/vue-issue-repro.test.ts`): the reported arm throws and
+  renders nothing; `done` in a microtask, the default mode and `in-out` all
+  show B. A search of vuejs/core found no existing report of this cause
+  (#10098, #10517 and #11061 are different bugs).
+
+- LATER FINDING (same day, owner asked "is it 100% Vue's bug, not my code?"):
+  it throws with NO hook at all. `<Transition mode="out-in" :css="false">`
+  with two keyed divs throws and renders nothing on Vue 3.5.43 (dev and prod)
+  and on 3.6.0-rc.10, under happy-dom (`.probes/vue-issue-repro-35.test.ts`).
+  A hook taking only `el` does the same. So no user code is needed: Vue ends
+  the leave synchronously itself and re-enters its own update. The report now
+  leads with that reproduction. Real browser for the no-hook arm: the owner
+  ran it in the Vue playground on Firefox and got `can't access property
+  "parentNode", node is null` (Firefox's wording of the same error).
+  The log's s35.16 says "any synchronous done() does it"; the accurate
+  statement is "any leave that FINISHES synchronously does it".
+
+### 35.31 `VcTransition`: prototypes measured, NOT decided (owner is weighing it)
+
+The owner asked what our own transition would cost, so as not to wait for Vue.
+All of this is in `.probes/`, nothing in the tracked tree. V = run on rc.10.
+
+- A candidate fix INSIDE Vue, tried on copies of the 3.5.43 and rc.10 runtime
+  builds: `queuePostFlushCb` around the out-in resume. All seven arms of the
+  reproduction show B. V. It is in the upstream report as a diff. Not run
+  against Vue's own tests.
+- WRAPPER over `Transition` (`.probes/vc-transition-proto.ts`): defers the
+  leave's `done` one microtask, in `mode="out-in"` only. Fixes the three
+  broken arms; default mode, in-out and CSS-driven out-in are identical to
+  `<Transition>`. V (`.probes/vc-transition-proto.test.ts`). 239 B brotli with
+  vue external.
+- The name `Transition` swapped to ours in compiled output: works at the
+  render level in five arms, `v-show` included (the compiler still adds what
+  it adds for the built-in tag). V (`.probes/vc-transition-swap.test.ts`). The
+  Vite half, making `import { Transition } from 'vue'` resolve to ours, is NOT
+  tested. Registering a component named `Transition` cannot work: the
+  compiler imports the built-in directly. Owner: "not sure on that".
+- LEAN form, a functional component straight over `BaseTransition`
+  (`.probes/vc-transition-lean.test.ts`): no CSS class machinery, no extra
+  component instance. Fixes out-in; default and in-out identical. V.
+  PITFALL FOUND: without `inheritAttrs = false`, fallthrough merges the
+  original `onLeave` back beside ours and the undeferred hook still runs
+  ("Leave" dispatched twice, then the throw). Any shipped form needs a test
+  for exactly that.
+- Bytes in a Vite production bundle, vue bundled, brotli q11
+  (`.probes/transition-fat-bytes.mjs`), over a floor of `createApp` + `h`:
+
+      + BaseTransition                          4,063 B raw   1,313 B brotli
+      + Transition (Vue, with CSS classes)      7,312         2,514
+      + VcTransition wrapper over Transition    7,626         2,639
+      + lean VcTransition over BaseTransition   4,262         1,452
+
+  So Vue's CSS class machinery is about 1.2 KB brotli, the wrapper costs 125 B
+  over `Transition`, and the lean form costs 139 B over `BaseTransition`. The
+  lean form saves about 1.19 KB brotli against the wrapper ONLY in an app
+  that uses Vue's `<Transition>` nowhere else, and it has no CSS classes:
+  `name="fade"` does nothing, the animation has to come from the command
+  handlers.
+- NOT KNOWN: whether any of this can stand in for `<Transition>` in a Vapor
+  template (the Vapor compiler recognizes the tag by name; Vapor's transition
+  does not have the bug).
+
+### 35.32 `VcTransition`: DECIDED (owner), to build when the tree is free
+
+Owner: "an honest rewrite [of] Transition for VcTransition as an opt in is
+acceptable, as you do not hijack the names; you are 'linting' to use the
+vapor-chamber way", and "we should use [it] on demos and overall on the repo,
+as we show the use of my version".
+
+So: an explicit, opt-in `VcTransition`; no name swap; the repo's own docs and
+demos use it. Facts gathered for the design, all V (run on rc.10):
+
+- WHERE THE REPO USES A TRANSITION TODAY: no example component has a
+  `<Transition>` tag. The bridge is shown in `examples/feature-transitions.ts`,
+  `README.md`, `docs/api/transitions.md` (generated from the docblocks in
+  `src/transitions.ts` and `src/index.ts`), `docs/whitepaper.md`,
+  `docs/router.md` and `CONTRIBUTING.md`. "Across the repo" is those, plus a
+  real demo gaining one.
+- IT WORKS IN VAPOR WITH NO INTEROP (`.probes/vc-transition-vapor.test.ts`).
+  compiler-vapor emits the same slot content for a custom tag as for
+  `<Transition>` (same `createIf` flags, same `setBlockKey`); only the
+  component created differs. A Vapor component that does
+  `createComponent(VaporTransition, { $: [() => attrs] }, slots, true)` is
+  identical to the built-in tag in default mode, out-in and in-out, over two
+  toggles: same twelve dispatches, same order, same DOM. It works with the
+  PUBLIC `slots` of the setup context; `rawSlots` is not needed.
+- Vapor's transition does not have the out-in bug, so the Vapor form has
+  nothing to fix: it exists so the same tag works in both renderers.
+
+PROPOSED SHAPE (the owner has not answered A or B; A is assumed until told
+otherwise, because the owner wants the docs to show it and A changes only the
+tag in the documented pattern):
+
+    vapor-chamber/transitions/vdom    VcTransition: functional, straight over
+                                      BaseTransition, the out-in fix, no CSS
+                                      classes, `inheritAttrs = false`
+    vapor-chamber/transitions/vapor   VcTransition: a Vapor component over
+                                      VaporTransition, pass-through
+
+    <VcTransition mode="out-in" v-bind="t">   t from createTransitionBridge
+
+The same export name on both subpaths, as `RouterOutlet` has. OPEN DESIGN
+POINTS, to settle with a measurement or to bring to the owner:
+- the vDOM form has no CSS classes and the Vapor form, over VaporTransition,
+  keeps them. Either document the difference or pass `css: false` on Vapor.
+- shape B (the component owns the bridge: `namespace`, `bus`) can be built on
+  A later.
+- bytes of the Vapor form are not measured yet.
+
+### 35.33 Vapor: where the weight is, and what we can and cannot trim (V, measured)
+
+Owner: "we should have full performance gains on vapor apps, that are most
+apps with this lib." Measured with `.probes/transition-fat-bytes-vapor.mjs`
+and its `-ladder` variant (Vite production build, vue bundled, brotli q11),
+over a floor of `createVaporApp` + `defineVaporComponent` + `template`:
+
+    + VaporTransition (Vue), whole               13,333 B raw   4,400 B brotli
+      of which resolveTransitionProps (CSS)       3,175          1,127
+      of which baseResolveTransitionHooks
+               + useTransitionState               1,474            583
+      the rest: Vapor's own block wiring         about 8,700    about 2,700
+    + VcTransition wrapper over VaporTransition  +94 raw, +41 to +53 brotli more
+
+So a transition costs a Vapor app 4.4 KB brotli, against 2.5 KB for vDOM's.
+
+WHAT WE CANNOT DO TODAY: a lean Vapor transition. `@vue/runtime-vapor` exports
+`VaporTransition` and `VaporTransitionGroup` and no primitive under them; the
+block wiring (about 2.7 KB) is internal, and fragments only honour transition
+hooks once `VaporTransition` has registered them. Dropping the CSS part (1.1
+KB) means not importing `VaporTransition`, which means rebuilding that
+internal wiring: a fork. Not buildable on exported pieces.
+
+WHAT WE CAN GUARANTEE: zero overhead. Registering `VaporTransition` ITSELF
+under the name `VcTransition` behaves identically to the built-in tag in all
+three modes (`.probes/vc-transition-vapor-alias.test.ts`). So the Vapor form
+can be a re-export: no bytes, no extra component instance.
+
+UPSTREAM REQUEST worth making (owner posts): let the CSS class machinery be
+left out of a Vapor bundle, or export the Vapor base transition, so a
+JS-driven transition does not pay for it.
+
+### 35.34 A bus-native transition that imports none of Vue's: PROTOTYPED (V), not decided
+
+Owner: "I focus on people that will be die-hard vapor-chamber users."
+
+For them the target is not Vue's transition under our name. A transition
+needs one thing from the framework: control over WHEN the leaving element is
+removed. Vue gets it by hooking its renderer (the 4.4 KB). A component of ours
+gets it by owning the condition:
+
+    <VcTransition :show="open" namespace="modal" :bus="bus"><Panel /></VcTransition>
+
+`.probes/vc-presence-proto.ts`, a Vapor component of about 40 lines:
+`createIf` over an internal `present` ref that lags behind `show` until the
+`<ns>Leave` command has answered. Same six action names as the bridge, the
+element as the target. Immune to Vue's out-in bug by construction.
+
+Run on a real Vapor app, compiled template (`.probes/vc-presence-proto.test.ts`):
+- sync bus: BeforeLeave, Leave, AfterLeave; the element is removed after.
+- async bus, Leave handler takes 30 ms: the element STAYS in the DOM while it
+  runs, removed after, then AfterLeave.
+- reopen: BeforeEnter, Enter, AfterEnter, each with the element.
+- reactive content inside the slot keeps updating.
+- closed then reopened before the leave answered: the leave is cancelled, no
+  AfterLeave, the element never leaves.
+
+Bytes (`.probes/transition-fat-bytes-presence.mjs`, Vite production build,
+brotli q11, over a bare Vapor floor):
+
+    + createIf                                  2,748 B raw     891 B brotli
+    + createIf, shallowRef, watch, nextTick     6,623         2,131
+    + VaporTransition (Vue), whole             13,333         4,400
+    + bus-native VcTransition                   7,353         2,388
+
+So ours is 257 B brotli on top of four Vue helpers. In an app that already has
+a `v-if` and a `watch`, which is nearly every app, the transition costs about
+0.26 KB where Vue's costs 4.4 KB.
+
+WHAT THE PROTOTYPE DOES NOT DO, each a piece of work before it could replace
+`<Transition>` for real:
+- one child, shown or hidden. No switching between two children (out-in,
+  in-out). That needs a keyed form.
+- no `appear` on first mount, no cancelled hooks, no move / group.
+- no CSS classes: the look comes from the command handlers.
+- it finds the element by reading the block's `nodes`: an internals-adjacent
+  read that would need pinning like the outlet's.
+- the template pattern changes: the condition is a prop, not a `v-if` inside.
+
+### 35.35 Naming rule: DECIDED (owner, "agree Vc as rule")
+
+A component of ours that stands in for a Vue one is named `Vc` + the Vue name:
+`VcTransition`, and by the same rule `VcTransitionGroup`, `VcKeepAlive` if they
+ever exist. Documented in PascalCase.
+
+Why not the alternatives (both facts, not taste):
+- a lowercase `v` prefix is a DIRECTIVE in `<script setup>`: Vue registers any
+  `vFoo` variable as `v-foo`. The repo's own docs rely on it
+  (`vcCommandVapor as vVcCommand`). So `vTransition` cannot be a component.
+- a bare capital `V` is Vuetify's convention for every component, transitions
+  included (`VFadeTransition`).
+- `vc` is already the brand wherever a consumer touches the library:
+  `v-vc-command` (12 files), `vVc...` aliases (6), `<vc-...>` widget tags (7),
+  `vc-loading` (7), `data-vc-...` (10). Counted by grep over src, README, docs
+  and examples.
+
+The principle that goes with it, in the owner's words: not a Vue library, but
+where Vue has a bug or carries weight we do not need, replace that piece with
+our own, independent, under our name. So each `Vc*` component needs its
+reason measured: the bug reproduced, or the bytes.
+
+Existing exception: `RouterOutlet` is unprefixed on both subpaths. Renaming it
+breaks consumers; leave it. A `VcRouterOutlet` alias later is the owner's call.
+
+To record when the tree is free: a `docs/decisions.md` row; a short naming
+section in CONTRIBUTING.md; the rule applied to the new subpaths.
+
+STILL OPEN, the owner's: on Vapor, should `VcTransition` pass `css: false` so
+both renderers behave the same (command-driven, no CSS classes), or keep the
+classes where Vue provides them.
+
+### 35.36 LATER, on the plan (owner): explore where else a `Vc*` piece is justified
+
+Owner: "we can explore other parts, we can do other changes as we did
+transition, later, on the plan." Not started. After `VcTransition` ships.
+
+The bar is the one `VcTransition` met, and nothing enters the list without it:
+a Vue BUG reproduced with no vapor-chamber code, or WEIGHT measured in a
+consumer's bundle that we do not need. Never for its own sake.
+
+Method, per candidate: (1) what we use of it today, by grep with a control;
+(2) the bug, reproduced on stable and on the current RC, or the bytes, with
+the Vite harness of `.probes/transition-fat-bytes.mjs`; (3) a prototype in
+`.probes/` compared arm by arm against Vue's; (4) only then a decision.
+
+Candidates, as LEADS only. None is measured; each line says what would have to
+be shown:
+- `TransitionGroup`: the natural sibling. Does the bridge's `onMove` path
+  have a bug or carry the same CSS weight? Unknown.
+- `KeepAlive`: the repo has four fixtures around it (pause, input scope,
+  register ownership, directive scope) because its behaviour moved across
+  RCs. A bug of Vue's still open there, or only history? Unknown.
+- the vDOM `RouterOutlet` under `vaporInteropPlugin`: interop costs about 28 KB
+  brotli (s35.9). Is there a lighter way to render a Vapor route in a vDOM
+  app? Unknown, and probably Vue's to solve.
+- `createSlot` is 58% of the Vapor outlet's own arm (s35.15, 2,811 B brotli).
+  The outlet needs very little of what a slot does. Could it render its
+  fallback without it? The two slot bugs fixed this cycle (F1, F10) both came
+  from how it is used. Worth a prototype.
+- ALREADY MEASURED AND CLOSED, do not reopen without new evidence: a
+  standalone `Dep` signal in place of `shallowRef` (0.31x to 0.86x, slower,
+  s35.19); `startBatch` / `endBatch` (slower with no sync subscriber, s35.19).
+
+To apply in the tracked tree:
+
+1. The transitions documentation and `createTransitionBridge`'s docblock gain
+   the limit, in these words or near them:
+   "On a vDOM app, `<Transition mode="out-in">` with this bridge needs an
+   ASYNC bus. On a sync bus the bridge calls `done()` at once, so the leave
+   finishes synchronously, and Vue's vDOM `out-in` throws and renders nothing
+   whenever a leave finishes synchronously (a Vue bug, on 3.5 as well, and
+   reproducible with no hook at all; reported upstream). Vapor's
+   `<Transition>`, the default mode and `in-out` are not affected."
+   The test that pins it exists: `tests/transition-done-timing-fixture.test.ts`
+   (the vDOM out-in arm). Add the upstream issue number once it is posted.
+2. A `docs/decisions.md` row: the decision, the measurement, the revisit
+   condition.
+3. CHANGELOG Unreleased: the "Found and not fixed" paragraph already names the
+   bug; add that the limit is now documented and reported.
+4. HANDOFF 3b items 1 and 10: closed, with the revisit condition.
+
+### 35.37 Vc route, Step 1: `VcTransition`, show and hide (`vapor-chamber/transitions/vapor`)
+
+Branch `vc-components`. The shape is the one approved in 35.34. Everything
+below was run on Vue 3.6.0-rc.10. V = run.
+
+**Test first. V.** `tests/vapor/vc-transition.test.ts` (3 tests) over
+`tests/vapor/vc-transition-fixture.ts`: a real `createVaporApp`, the real buses
+of `src/command-bus`, templates compiled on the installed Vue and handed to the
+fixture as generated source, asserted twice with one function, on the dev build
+and against an esbuild bundle built with production defines and executed. The
+fixture was first run against the prototype's logic (35.34) placed at
+`src/transitions/vapor.ts`. It failed in both arms; the full dump, dev arm:
+
+    AfterLeave while the element is still in the document   4 arms (sync,
+                                                            slow leave, close
+                                                            again, rejecting
+                                                            handler)
+    unmount mid-leave                                       AfterLeave
+                                                            dispatched after
+                                                            the unmount
+    a Leave that never settles                              element stranded
+    an Enter that never settles                             no AfterEnter
+    no `:bus`                                               nothing dispatched,
+                                                            element never left
+    already right in the prototype                          the six names, the
+                                                            five content
+                                                            shapes, reopen
+                                                            mid-leave, live
+                                                            content
+
+**What was built.** `src/transitions/vapor.ts`, one export. `createIf` over an
+internal `present` ref that lags behind `show`. Arms, all passing on both
+builds:
+
+    a  sync bus: mount dispatches nothing; close is BeforeLeave, Leave,
+       AfterLeave, the last with the element OUT of the document; reopen is
+       BeforeEnter, Enter, AfterEnter on a new element; same from mounted closed
+    b  async bus, Leave gated: element in the DOM while the handler runs,
+       removed after, then AfterLeave
+    c  content is live while open, while leaving, and after a reopen
+    d  reopened before the leave answered: the SAME element enters again; the
+       old answer removes nothing and dispatches nothing; a later close works
+    e  unmounted mid-leave: timers held 1 -> 0 (the 1 is the positive control
+       on the timer wrapper), nothing dispatched afterwards
+    f  a Leave / an Enter that never settles, `timeout` 25 ms: the transition
+       goes on; one DEV warning on the dev arm, none on the production arm
+    g  a Leave handler that rejects: the element still leaves
+    h  the action names equal `createTransitionBridge`'s for the same cycle,
+       with a namespace and without (run against the real bridge)
+    i  a bus with no handler at all: still hides and shows, no error
+    j  no `:bus`: the shared bus gets the commands
+    k  target per content shape: element, component root, several roots
+       (first element), `v-if` / `v-else` root (both branches), text only (no
+       target, still leaves)
+    l  a SYNC bus whose Leave handler returns a promise that never settles:
+       the element leaves at once
+
+**The element lookup. V.** No public way was found: a slot function returns a
+block, and a block's element is reached through `nodes` (fragment) and `block`
+(component instance). The alternative that uses only public API is two marker
+nodes of our own around the content; not taken, it adds two DOM nodes per
+transition. So the read is pinned, as the outlet's `rawSlots` read is:
+`tests/vapor/vc-transition-helpers.test.ts` (4 tests) compiles four slots on
+the installed Vue and records what each returns (`node:1`, `array:3`,
+`object:nodes`, `object:block`), compares the module's import block with a
+list, and checks that the list holds no name of Vue's transition (with a
+positive control on the scan). Fallback when a shape is not recognized: null,
+the commands carry no target, the transition still runs (arm k, `text`).
+
+**FOUND: on a sync bus a leave is not awaited, and the shared bus is sync. V.**
+`.probes/sync-bus-promise-result.test.ts`. A sync `dispatch` returns
+`{ ok, value, error }`; when the handler returned a promise it is in `value`.
+The bridge looks only at the dispatch result, so:
+
+    bus                       dispatch result       bridge `done()`
+    createCommandBus()        not thenable          called synchronously
+    getCommandBus() (shared)  not thenable          called synchronously
+    createAsyncCommandBus()   thenable              called after 21 ms (a
+                                                    handler that takes 20 ms)
+
+`VcTransition` matches the bridge (arm l), and its documentation says so: for
+a leave that must be waited for, pass an async bus as `:bus`. The alternative,
+also waiting on `result.value` when it is a promise, was measured and NOT
+built: +57 B raw, +22 to +83 B brotli. It is a behaviour the bridge does not
+have, so it is the owner's (HANDOFF 3d, decisions).
+
+**Bytes. V.** `.probes/vc-transition-bytes.mjs`, the BUILT `dist` module in a
+Vite production bundle, vue bundled, brotli q11. Positive control: the string
+`enterFromClass` is in a `VaporTransition` bundle and not in ours.
+
+    A. floor: createVaporApp, defineVaporComponent, template   35,881 B raw  12,670 B brotli
+       + VaporTransition (Vue), whole                          +13,333       +4,400
+       + createIf, shallowRef, watch, nextTick, onScopeDispose  +6,626       +2,132
+    B. floor A + createCommandBus (an app with its own bus)    48,104        16,188
+       + VaporTransition + createTransitionBridge (today)      +14,687       +4,717
+       + VcTransition, as built                                +10,398       +3,381
+       + VcTransition, `:bus` required (variant)                +7,717       +2,574
+       the app already uses the five helpers: as built          +3,781       +1,255
+       the app already uses the five helpers: `:bus` required   +1,099         +453
+    C. floor A + getCommandBus (an app on the shared bus)      50,779        17,028
+       + VaporTransition + createTransitionBridge (today)      +14,687       +4,737
+       + VcTransition, as built                                 +7,723       +2,534
+       the app already uses the five helpers: as built          +1,106         +428
+       the app already uses the five helpers: + await value     +1,163         +511
+
+    dist/transitions/vapor.js as built (unminified)              3,309 B raw   1,156 B brotli
+    BUNDLE-SIZES row `./transitions/vapor`                       15.6 KB min   5.1 KB brotli
+
+Reading it. Against the documented pattern of today (C), the transition goes
+from 4,737 to 2,534 B brotli in an app that has none of the five helpers, and
+to 428 B in an app that already has them. The BUNDLE-SIZES row reads 5.1 KB
+because a row bundles everything the entry reaches, and the shared-bus default
+reaches the bus; `./transitions` reads 5.4 KB for the same reason. The cost of
+that default is on floor B: an app that creates its own bus and never touches
+the shared one pays +2,681 B raw, about +0.8 KB brotli, for a default it does
+not use. An app on the shared bus pays +6 B raw. Brotli moves by about 50 B
+for a 1 B change in the minified module (428 here, 485 in the run before a
+lint fix that changed one statement), so the raw column is the stable one.
+
+**Speed. V.** `.probes/vc-transition-ab.test.ts`: one show and hide cycle on a
+real Vapor app, templates compiled with `isProd`, both arms in one esbuild
+bundle built with production defines and executed; sync bus, six no-op
+handlers, a cycle ends when AfterEnter has been dispatched. 2,000 cycles a
+round, 15 rounds, interleaved with the order rotating. Sanity per arm first:
+6 dispatches, hidden, shown again.
+
+    <Transition v-bind="t">               32.6 us per cycle   (as documented)
+    <Transition v-bind="t" :css="false">  19.1
+    <VcTransition>                         7.4
+
+    VcTransition / <Transition>              0.228
+    VcTransition / <Transition :css=false>   0.389  (per round: 0.288 to 0.595)
+
+Ours is faster in every round, so the design stands. It takes two scheduler
+ticks per flip where Vue's takes one (the enter commands are dispatched after
+the flush that inserts the content, AfterLeave after the flush that removes
+it). The CSS arm is understated for Vue: its class swaps are queued on
+animation frames that never run inside the measured loop.
+
+**Wiring. V.** `package.json` exports `./transitions/vapor`; `scripts/build.mjs`
+entry; the BUNDLE-SIZES row and `docs/api/transitions-vapor.md` are generated
+from `exports` (27 entry points, 477 public exports). `src/transitions/vapor.ts`
+is in `coverage.exclude` beside `src/router/vapor.ts`, for the same measured
+reason: the default project's bare `vue` has no `createIf` and no
+`defineVaporComponent` (node: ABSENT, ABSENT; control `watch` present), so the
+module does not link there. `tests/compile-vapor.ts` gained `compileVaporSource`
+and its binding half moved to `tests/bind-vapor.ts`, so a fixture can bind
+compiled source inside a production bundle that has no compiler.
+
+**Suites.** `test:run` 2,677 passed, 1 skipped; `test:vapor` 36 (was 29);
+coverage 100 x4 (5,659 / 3,465 / 1,246 / 4,686, unchanged: the module is
+excluded and no measured file changed).
+
+**Not done in this step, by the list:** `appear`, the cancelled commands, a
+keyed switch between two children (Step 2); the repo's docs and demos (Step 3).
+
+### 35.38 Vc route, Step 2: what the prototype did not do, one at a time
+
+#### a. `appear` on first mount. V.
+
+Arm (m) added to the fixture first; it failed on both builds (mounted open
+with `appear`: no command). After: mounted open, the three enter commands,
+once, with the element in the document; mounted closed, none until it opens,
+then once; the close after an appear is the three leave commands. As in Vue
+with the bridge, there are no separate appear actions: Vue falls back to the
+enter hooks when no appear hook is given, and the bridge gives none.
+
+    bytes, the app of floor C already using the five helpers   1,106 -> 1,157 B raw (+51)
+    cycle time                                                 7.4 us, unchanged (0.375 of <Transition :css=false>)
+
+#### b. The cancelled cases. V.
+
+What the bridge dispatches today, measured first
+(`.probes/bridge-cancelled.test.ts`: Vue's own `<Transition v-bind="t">` on a
+real Vapor app, compiled templates, async bus, Enter and Leave gated):
+
+    case                     v-if                              v-show
+    close during an enter    EnterCancelled(el1) BeforeLeave   the same
+                             Leave, then AfterLeave
+    reopen during a leave    AfterLeave(el1, out of the DOM)   LeaveCancelled(el1)
+                             BeforeEnter(el2) Enter(el2):      BeforeEnter(el1) Enter(el1):
+                             a NEW element, and NO             the same element
+                             LeaveCancelled
+
+So under Vue, `LeaveCancelled` exists only where the element survives the
+reopen, which is `v-show`. `VcTransition` keeps the element on a reopen (35.37
+arm d), so it matches the `v-show` column: `LeaveCancelled`, then the three
+enter commands on the same element. Close during an enter is the same in both
+columns and is matched as is: `EnterCancelled`, then the leave commands.
+
+Test first: arm (d) changed and arm (n) added; both builds failed (3 commands
+where 4 were expected). After: both pass, the older answer still dispatches
+nothing (no AfterEnter after an EnterCancelled, no AfterLeave after a
+LeaveCancelled), and the two names equal the bridge's with no namespace (run
+against the real bridge: `enterCancelled`, `leaveCancelled`). A cancelled
+command is dispatched only while an Enter or a Leave is waiting for its
+answer, so a sync bus never produces one; arm (a) lists a sync cycle in full.
+Unmounting mid-leave dispatches nothing (arm e, unchanged).
+
+    bytes, the app of floor C already using the five helpers   1,157 -> 1,221 B raw (+64)
+    cycle time, two runs of 15 rounds                          0.396 and 0.341 of <Transition :css=false>
+
+The second A/B was run because the first had one round at 1.29; the machine
+was slower for all three arms in both (Vue's arms 21.3 and 23.1 us against
+19.1 in 35.37). The sync path gained one `if` on a variable.
+
+### 35.39 Upstream: the out-in report is vuejs/core#15727, and the fix proposed in vuejs/core#11824 was run (2026-10-01)
+
+**The report. V (read on GitHub).** The owner posted it as
+https://github.com/vuejs/core/issues/15727, "[vDOM] `<Transition mode="out-in">`
+throws error on synchronous done() call in leave hook". Open, no comment. It
+leads with the hook reproduction (`@leave="(el, done) => done()"`), says
+Vapor is not affected and that `queueMicrotask(done)` avoids it. It does not
+carry the no-hook reproduction (35.30) or the root cause below. GitHub links it
+to a pull request that may close it.
+
+**The pull request. V (read on GitHub).**
+https://github.com/vuejs/core/pull/11824, "fix(transition): handle leave
+immediately done in out-in mode", by a core team member, open, labels `bug`,
+`scope: transition`, `p2-nice-to-have`; branch on `main` (the 3.5 line). Its
+ecosystem CI run: vue-i18n and vue-macros fail with the PR and pass on the
+latest scheduled run, language-tools fails on both. Its whole source change,
+`packages/runtime-core/src/components/BaseTransition.ts`:
+
+    -              instance.update()
+    +              queueJob(instance.update)
+
+in the out-in `afterLeave`, plus an e2e test. So the re-render after the leave
+is queued in the scheduler instead of run inside the patch that started the
+leave. That is the shape of the candidate fix in the report draft
+(`queuePostFlushCb` around the same call, 35.31), queued as a job rather than
+post-flush.
+
+**Run on its build. V.** pkg.pr.new, commit `c79d93d` = Vue 3.5.40 plus the
+change (the dev browser build contains `queueJob(instance.update)`). Controls:
+Vue 3.5.40 from npm (the same version without the change) and 3.5.43. Each on
+`vue.runtime.esm-browser.js` and `.prod.js`, happy-dom.
+`.probes/vue-issue-repro-35.test.ts` (the seven arms of the report, no
+compiler) and `.probes/pr11824-bridge.test.ts` (the bridge on a sync bus, the
+three markers of `tests/transition-done-timing-fixture.test.ts`, h() only).
+
+    seven-arm reproduction           3.5.40 / 3.5.43, dev and prod   PR build, dev and prod
+    out-in, css false, NO hook       throws, empty                   B
+    out-in, one-argument onLeave     throws, empty                   B
+    out-in, done() synchronously     throws, empty                   B
+    the four controls                B                               B
+
+    bridge, sync bus, vDOM           3.5.40 / 3.5.43                 PR build
+    default   BeforeLeave Leave AfterLeave BeforeEnter [post] Enter AfterEnter [tick] [later]   identical
+    in-out    BeforeEnter [post] Enter AfterEnter BeforeLeave Leave AfterLeave [tick] [later]   identical
+    out-in    BeforeLeave Leave [post] [tick] [later],         BeforeLeave Leave AfterLeave BeforeEnter [post]
+              'leaving, 0 node' at every marker, the TypeError   Enter AfterEnter [tick] [later]; post
+                                                                 'entering, 1 node, text B', then idle
+
+So the PR fixes the bridge's case and the no-hook case, on both builds, and
+changes nothing on the default mode and in-out. With it, vDOM out-in reads the
+same as the default mode. It is not Vapor's out-in order of today
+(`BeforeLeave Leave BeforeEnter AfterLeave [post]`, settled at post-flush,
+`tests/transition-done-timing-fixture.test.ts`).
+
+What follows for this repo: nothing in `src`. The bridge is unchanged (35.30)
+and `VcTransition` imports nothing of Vue's transition and runs on Vapor. The
+documented limit (vDOM out-in with the bridge needs an async bus) holds until a
+Vue release carries the change; the docs now cite the issue and the pull
+request. The tripwire is the last vDOM test of
+`tests/transition-done-timing-fixture.test.ts`, which asserts the throw: on the
+first release with the fix it fails, and the limit and that test are then
+rewritten together. The pull request targets 3.5; whether it reaches the 3.6
+line is not known.
+
+**The report draft is deleted** (`.probes/vue-issue-out-in-sync-done.md`,
+gitignored, owner's word: it is posted). What it held that this log did not,
+kept here:
+
+- Search before posting, 2026-09-30: no report of this cause. The nearest were
+  different bugs: #10098 (Suspense, fixed in 3.4 by #10184), #10517 (closed,
+  need more info), #11061 (undefined props, fixed by #11066). The pull request
+  above says the second issue described in #11061 is this one.
+- The root cause, by reading `BaseTransition` and the component update
+  function. (1) In `out-in` mode `applyTransitionModeSwitch` sets
+  `state.isLeaving = true`, installs `leavingHooks.afterLeave = () => {
+  state.isLeaving = false; resumeAfterLeave() }`, and the render returns an
+  empty placeholder; `resumeAfterLeave` is `instance.update()`. (2)
+  `componentUpdateFn` assigns `instance.subTree = nextTree` (the placeholder)
+  and THEN calls `patch(prevTree, nextTree, hostParentNode(prevTree.el), ...)`.
+  (3) That patch unmounts the old child, which runs the leave. (4) When the
+  leave completes synchronously, `afterLeave` runs inside that same patch and
+  calls `instance.update()` re-entrantly. (5) The re-entrant update reads
+  `prevTree = instance.subTree`, the placeholder, which is not mounted yet, so
+  `prevTree.el` is null and `hostParentNode(prevTree.el)` throws. The stack:
+  `parentNode` <- `SetupRenderEffect.fn` <- `resumeAfterLeave` <-
+  `leavingHooks.afterLeave`. A leave that completes one microtask later avoids
+  it because the outer patch has finished and the placeholder has an element.
+  The pull request's author describes it the same way: `afterLeave` runs while
+  the empty placeholder has not been mounted.
+- Where each row was run, as the draft recorded it: every row on 3.5.43 dev and
+  prod and 3.6.0-rc.10 dev under happy-dom; the synchronous-`done()` row also
+  in Chrome 154 and Chromium headless shell 153 (35.16); the no-hook row in the
+  Vue playground on Firefox by the owner, `can't access property "parentNode",
+  node is null`.
+
+### 35.40 Vc route, Step 2 b, the A/B re-run on a quiet machine; and where the 1.26 review lives (2026-10-01)
+
+**The 2b A/B, re-run quiet. V.** 35.38 b recorded two runs taken under load
+(0.396 and 0.341, one round at 1.29). Re-run with the 2b code on a quieter
+machine (1-minute load 11.0, down from 20.9), same probe
+(`.probes/vc-transition-ab.test.ts`, 2,000 cycles x 15 interleaved rounds,
+production build, sync bus, six no-op handlers):
+
+    <Transition v-bind="t">               31.1 us per cycle
+    <Transition v-bind="t" :css="false">  19.0
+    <VcTransition>                         7.6
+    VcTransition / <Transition :css=false> 0.401 (per round 0.301 to 0.597)
+
+The same as Step 1 (0.389, per round up to 0.595): the cancelled commands
+cost nothing measurable on the sync path.
+
+**The 1.26 review.** The owner paused the Vc route after 2b to settle the
+1.26 list first. What was measured for it (where a Vapor demo's bytes go, our
+own wiring, Vue/Vapor detection, the esbuild bug of HANDOFF 3a-4, the
+dispatch-cost breakdown, the V8 checklist) is in the gitignored
+`.probes/proposals-1.26.md`, with its probes beside it, until the window that
+evaluates it (HANDOFF 3e) logs what it confirms. One correction made in that
+review is recorded there: a 1.2x slowdown read from hand-patched `dist` files
+on a Node build of Vue's CommonJS runtime was the method, not the change;
+measured as a source guard plus a define on a consumer-shaped build, the
+change was speed-neutral. That lesson is now `docs/V8-RULES.md` rule 9 and its
+open item.
+
+### 35.41 The 1.26 list: two proposal sets evaluated, measured and ranked (2026-10-01)
+
+HANDOFF 3e. Evaluation only: no src change on any branch. Inputs: our review
+(`.probes/proposals-1.26.md`) and an external set (`.probes/proposals-1.26-
+external.md`), both gitignored. Output: `.probes/1.26-list.md` (one ranked
+table, 21 lines, and the owner's 13 decisions); the raw record with every
+control is `.probes/1.26-notes.md`. Tree free at the start: git clean, no
+vitest or npm process in this tree. Timing runs waited out a backup; each was
+judged by its own control band.
+
+Method. Every claim became a probe in `.probes/p126-*.test.ts` with a control
+arm, run here (red = fails on this tree today). Every fix was prototyped as a
+source change in a scratch worktree, built, and its `dist/*.js` diffed raw and
+brotli q11; the prototype proven by its acceptance turning green. A fresh
+baseline build equals the gated dist byte for byte, and `scripts/build.mjs`
+alone reproduces the baseline JS byte for byte (used where only typing
+failed). Demos were built with their own `vite.config.ts` against a prototype
+dist (`.probes/p126-demo-build.mjs`; the baseline reproduces the review's
+92,518 / 30,262 exactly). Speed: `.probes/p126-ab.mjs`, a built dist bundled by
+esbuild for the browser (Vue's esm-bundler build tree-shaken), production
+defines, 15 or 25 interleaved rounds, a same-bundle control, both load orders.
+
+External maintenance, all reproduced: ext 1 (a destroyed router commits a held
+navigation: result null, history /list), ext 2 (isLoading dark across a
+handover), ext 6 (one flush against a 503 sends 257 requests in 300 ms at
+`Retry-After: 0`, 255 at -5; the parser reads "-5" as -5,000 ms), ext 7 (a 409
+with Retry-After dropped), ext 10 (a read in flight undoes an invalidation),
+ext 11 (a PUT does not invalidate its URL), ext 12 (revalidateRoutes re-reads
+through the loader cache), ext 13 (inspectBus names no plugin; five of twenty
+factories declare an id), ext 15 (a bridge on `cart*` shadows the `cartAdd`
+handler: one request, the handler never runs), ext 18 (`$reset()` heard by no
+listener, storage keeps the old state); all 13 docs statements of ext 3. On
+`outbox-on-rc10` (a4f84fe) ext 7 passes and the storm is gone (1 request in
+300 ms, 601 per 10 min for 0, 1 and -5). ext 6's own bound (the bus's three
+attempts) makes 3 requests and then never drains by itself.
+
+Architectures picked where proposals compete, with the number that decided:
+- isLoading: keeping tracking armed for ever (A) costs an unheld bus 232 ns
+  per dispatch instead of 35 (6.5x); keeping the entry only while a key is in
+  flight (C) is neutral (0.992..1.003). C, plus installing the library's own
+  hook past the seal (D), because of the next finding.
+- HTTP cache: a per-client invalidation generation (G), because the external
+  set's Cache Groups study needs the same counter per group; ext 11 on top.
+- Composable cost: removing the per-dispatch closure (M-g) makes
+  `useCommand().dispatch` 0.911 / 0.919 (25 rounds, controls 0.998..1.009);
+  ext 5's outcome slot adds 4-5% to every tracked dispatch (1.051 / 1.037
+  against 0.976 / 1.003). M-g first.
+- Plugin ids (ext 13): no speed cost (1.012 / 0.990 against 1.011 / 0.979).
+
+FOUND, written down, not fixed:
+- On a sealed bus, once every `useSharedCommandState` holder has left, the
+  next `isLoading()` throws `core:refused:bus` (it works while one holder
+  remains). Reproduction: `.probes/p126-ext2-isloading.test.ts`, "SEALED".
+- The root probe's `import("vue")` makes esbuild and webpack ship all of Vue to
+  every Vue app that uses the composables, including one wired the documented
+  way (bus from the root, composables from `vapor-chamber/vue`): esbuild
+  278,380 raw / 91,039 brotli, the Vue chunk loaded at start; webpack 274,357 /
+  86,343. With the probe folded by a define: 34,878 / 11,648 and 25,734 /
+  8,241. Vite is spared (30,472 / 10,042). Reproduction:
+  `.probes/p126-mc-wired-vue-app.mjs`. Webpack (unknown in 3a-4) has the bug.
+- Correction to 3a-4: a consumer importing only `createCommandBus` does NOT
+  fetch Vue (chamber.js is tree-shaken; esbuild only emits a dead file). One
+  that also imports `getCommandBus` does, on esbuild and webpack.
+- Correction to the review: a root-only Vue app is not "broken once built"
+  everywhere. It works on the Vite dev server, esbuild production and webpack
+  production (signal() is a Vue ref: true in all three) and fails only in a
+  Vite production build. A narrow fix (assemble the specifier) turns all
+  three false. Moving the shared bus to a probe-free module keeps all three
+  true and stops the Vue-less fetch (esbuild entry 17,104 + 251,108 -> 14,689).
+- Every webpack build of the root warns "Critical dependency: the request of
+  a dependency is an expression".
+- Vite's minifier keeps a function body after a folded `if (true) return`; a
+  build-time guard has to be a condition around the code. Measured in M-d.
+- Per-key loading tracking costs about 200 ns per sync dispatch (241 vs 34).
+- `persist` without `getState` throws inside `save()` (caught and warned).
+- In an async-only app the sync bus ships unused (vapor-sfc 2,656 raw / 437
+  brotli), kept by `getCommandBus()`'s silent fallback.
+
+Ours, M-a to M-k: M-a reproduced (the same source change reads 1.211 / 0.958
+through a Node-resolution harness whose own control reads 1.099 / 0.827, and
+0.995 / 0.997 through the consumer-shaped one); M-c and M-d above (M-d as a
+source guard: vapor-sfc -1,928 / -713, island-cart -516 / -186, speed neutral
+to faster); M-e in a real demo build (D1 for the async wrapper -2,173 / -754,
+dropping both pieces of wiring -2,649 / -939); M-f above; M-g above; M-i
+verified (VcTransition's commands share their maps with any dispatch, both
+buses, %HaveSameMap with a positive control); M-k half (no IIFE page relies on
+`__VUE__`). Not done, kept as tasks: M-h in a browser, M-j's prototypes, M-k's
+HMR half, M-b (the owner's wording).
+
+Added by the owner during the window: dates as RFC 3339 at a boundary. The only
+library-defined date that leaves the process is the outbox record's
+`queuedAt` (an epoch-ms number in storage); a prototype is +32 / +14 B on
+`outbox.js`; Retry-After stays an HTTP-date (RFC 9110).
+
+The IIFE budgets gate most of the list: full has 26 / 9 B of headroom, core
+and elements 2 / 2, and a 4 B raw change moved the full IIFE by +14 brotli.
+That is 3b.14, the first of the owner's decisions in the list.
+
+### 35.42 The 1.26 bug list fixed, test first (2026-10-01)
+
+Branch `bugs-1.26` off `vc-components` (5173f16), Vue 3.6.0-rc.10. Owner rule
+for the window: rc.10 means the basic API will not change before 3.6 stable,
+so fixes land now; fixes first, no measurement until every bug is committed.
+Every fix: a test in `tests/` that failed before it (red shown), the smallest
+change, the suite green, coverage 100 x4 (`npx vitest run --coverage`).
+
+| Bug | Commit | Red before | Fix | Test |
+|---|---|---|---|---|
+| B5 `router.destroy()` left the held navigation alive | 3a69a8a | 2 of 3 (control green) | engine `cancel()`: bump the navigation id, abort both controllers, clear the loading flag no successor would clear; called by `destroy()` | `tests/router/destroy-cancels-navigation.test.ts` |
+| B6 cache: ext 10, 11, 12 | 398ca43 | 9 of 14 (4 controls, 2 must-stay green) | one invalidation generation per client (G); invalidate drops matching in-flight keys; `setInflight` cleanup deletes only its own entry; a resolved write drops exactly its URL; `LoaderContext.refresh` + `fetchLoaders` reads past its cache on a refresh (R) | `tests/http-cache-writes.test.ts`, `tests/router-fetch/revalidate-past-cache.test.ts` |
+| B3 + B4 `isLoading` handover, sealed throw | 615c5fc | 4 of 6 | C: entry counts `pending` starts, outlives its last holder while above 0; D: own hook past the seal (unseal, onBefore, seal). A declined (6.5x, s35.41) | `tests/shared-state-handover.test.ts` |
+| B8 Retry-After grammar | 7f61aa7 | `-5` read as -5000 | seconds branch takes `/^\d+$/` only; the HTTP-date branch already ignores a past date (`Date.parse` reads `-5`, `+3`, `1.5` as 2001) | `tests/retry-after-grammar.test.ts` |
+| B12 persist without getState | 8f51aea | 2 of 3 | owner's shape: `TypeError` at setup, text DEV-only, `'persist: getState'` in production | `tests/persist-requires-getstate.test.ts` |
+| B1 + B2 + B11 the root Vue probe | e60272e | 6 of 11 + the plugin line | M-d: probe body (with `wireUntracked` moved inside it) and `warnUnwired` behind a CONDITION on `__VC_WIRED_BUILD__`; `vaporChamberWire()` defines it in a build; IIFEs define it false. E: `src/shared-bus.ts`, re-exported from `chamber.ts` | `tests/root-probe-builds.test.ts`, `tests/vite-wire-plugin.test.ts` |
+
+B1 probes on the built dist (webpack 5.111.1 in the session scratchpad, not
+the repo): a root-only Vue app reads `vueRef: true` on the Vite dev server,
+esbuild prod and webpack prod (must stay true: it does). Wired app with the
+define: no full Vue from esbuild, webpack or Vite; webpack warnings 0. Without
+the define: unchanged (all of Vue, 1 warning), the documented trade. Vue-less
+`getCommandBus` consumer: the entry imports nothing at load on all three
+bundlers; esbuild still emits the unreferenced Vue file and webpack still warns
+(no define there), as s35.41 predicted for E.
+
+B11 needed one more step than the evaluation's prototype: the warning was
+`wireUntracked`'s assembled `@vue/reactivity` specifier, which webpack parses
+in any function, called or not. Moved inside the guarded block it is dropped
+with the define (0 warnings, was 1). A condition inside `wireUntracked` was
+tried first and rejected: its false arm has no runtime producer, an uncovered
+branch.
+
+Found on the way, reproduced (`.probes/p126-found-a-b.test.ts`), fixed with
+the owner's go-ahead ("anything you notice is wrong, fix it"):
+- F-a, a regression of B5: a POPSTATE navigation cancelled by `destroy()` went
+  through `revert()`, which called `history.go(1)` on the destroyed history.
+  Before B5 the destroyed router committed the snapshot without a history
+  write; after it, the page moved. Fixed in dcf0a39 (`cancel()` marks the
+  engine stopped; `revert()` walks nothing back).
+- F-b, pre-existing: `clearCache()` kept the in-flight keys on purpose and did
+  not bump the generation: ext 10's bug for `clear()` (1 fetch, later read
+  old). Fixed in c14f727.
+- Two `v8 ignore` comments in files this batch touched (2e72a89): the http
+  cache's `firstKey` guard (pinned first by a new LRU eviction test, which a
+  seeded wrong-key eviction turns red) and the shared-state `unsub`
+  placeholder (the observer is now a named closure subscribed in the literal,
+  same field order). `waitForVueDetection`'s ignore went with B1 (its null arm
+  now has a producer, covered). Six remain, all "defensive", in
+  `command-bus.ts` (3), `router/dom.ts` (1), `router/blade.ts` (2): each needs
+  a pinning test and a seeded failure; not touched here (command-bus is outside
+  this window's reading list).
+
+Bytes, each fix built at its own commit in a scratch worktree with
+`scripts/build.mjs` (control: HEAD's worktree build equals the main tree's
+`npm run build` on all 57 `dist/**/*.js`). IIFE `.min.js`, raw / brotli q11:
+
+| fix | full | core | elements |
+|---|---|---|---|
+| base 5173f16 | 39,479 / 12,236 | 26,416 / 8,176 | 28,047 / 8,658 |
+| B5, B6 | 0 | 0 | 0 |
+| B3 + B4 | +178 / +60 | 0 | 0 |
+| B8 | -9 / +21 | -9 / +14 | -9 / +15 |
+| B12 | +61 / +13 | 0 | 0 |
+| B1 + B2 + B11 | -4 / -3 | 0 | -3 / 0 |
+| the `unsub` refactor | -15 / -2 | 0 | 0 |
+| now | 39,690 / 12,325 | 26,407 / 8,190 | 28,035 / 8,673 |
+
+Over the old budgets (full +200 / +82 at the time, core and elements by 12 and
+13 brotli); the owner raised them to measured (32852f1), then full tightened to
+the refactor's measurement (402bef4). ESM, base to HEAD before the refactor:
+`http.js` +526 / +135, `router.js` +382 / +107, `chamber.js` +259 / +58,
+`plugins-io.js` +208 / +79, `router-fetch/index.js` +131 / +64, new
+`shared-bus.js` 377 / 163, `index.js` +34 / +10.
+
+Speed: not measured in this window's fix phase (owner rule); the fixed tree is
+the baseline for the speed phase.
+
+### 35.43 The Vue API this library imports, rc.1 to rc.10 (2026-10-01)
+
+The evidence for landing the rest of the 1.26 list before 3.6 stable: what
+changed, between `v3.6.0-rc.1` and `v3.6.0-rc.10`, in the declarations of the
+Vue API `src/` imports. Method: every name imported from `vue` /
+`@vue/reactivity` in `src/`, plus the names `applyVueModule` reads off a
+namespace, located at rc.10 in the bare clone (`.probes/vue-core.git`); its
+exported declaration, from the `export` line to the first line ending in `{`
+or `;`, compared at both tags; commits on the defining file counted. Scripts:
+the ninth session's scratchpad (`rc-surface.sh`, `rc-surface2.sh`).
+
+| API we use | Defining file (rc.10) | Declaration rc.1 -> rc.10 | Commits on file | Breaking for us? |
+|---|---|---|---|---|
+| `ref`, `shallowRef`, `customRef`, `Ref`, `ShallowRef` | reactivity/ref.ts | same | 0 | no |
+| `computed` | reactivity/computed.ts, runtime-core/apiComputed.ts | same | 0 | no |
+| `getCurrentScope`, `onScopeDispose` | reactivity/effectScope.ts | same | 0 | no |
+| `pauseTracking`, `resetTracking` | reactivity/effect.ts | same | 0 | no |
+| `watch` | runtime-core/apiWatch.ts | same | 1 | no |
+| `nextTick` | runtime-core/scheduler.ts | same | 4 | no |
+| `onMounted`, `onBeforeUnmount` | runtime-core/apiLifecycle.ts | same | 1 | no |
+| `onActivated`, `onDeactivated` | runtime-core/components/KeepAlive.ts | same | 2 | no |
+| `inject`, `provide`, `hasInjectionContext` | runtime-core/apiInject.ts | same | 0 | no |
+| `getCurrentInstance` | runtime-core/componentCurrentInstance.ts | same | 1 | no |
+| `h`, `defineComponent` | runtime-core/h.ts, apiDefineComponent.ts | same | 0 | no |
+| `createApp` | runtime-dom/index.ts | same | 2 | no |
+| `createVaporApp` | runtime-vapor/apiCreateApp.ts | same | 2 | no |
+| `defineVaporComponent` | runtime-vapor/apiDefineComponent.ts | same (two type-only commits: async setup #15377, an inference fix) | 3 | no |
+| `defineVaporCustomElement` | runtime-vapor/apiDefineCustomElement.ts | same | 3 | no |
+| `defineVaporAsyncComponent` | runtime-vapor/apiDefineAsyncComponent.ts | same | 16 | no |
+| `vaporInteropPlugin` | runtime-vapor/vdomInterop.ts | same (`const ...: Plugin`) | 81 | no |
+| `createIf` | runtime-vapor/apiCreateIf.ts | same | 10 | no |
+| `createSlot` | runtime-vapor/componentSlots.ts | same | 29 | no |
+| `createDynamicComponent` | runtime-vapor/apiCreateDynamicComponent.ts | CHANGED: optional trailing `key?: () => any`; return `VaporFragment` -> `Block` | 22 | no: `router/vapor.ts` passes no `key` and returns the result as a branch `Block` |
+| non-public: `VaporFragment.nodes`, `VaporComponentInstance.block` (`VcTransition`) | runtime-vapor/fragment.ts, component.ts | same (`nodes: T`, `block: TypeBlock`) | - | no; pinned on the installed Vue by `tests/vapor/vc-transition-helpers.test.ts` |
+
+One declaration changed in nine RCs, additively. The churn is behind the
+declarations, in the Vapor runtime (`vdomInterop.ts` 81 commits, `createSlot`
+29, `createDynamicComponent` 22, `defineVaporAsyncComponent` 16). This log
+reads rc.8 (section 3), rc.9 (section 34) and rc.10 (section 35) in full;
+rc.1 to rc.7 predate it (CHANGELOG entries only, to verify). Not covered by
+this table: behaviour changes behind an unchanged declaration; those are what
+the per-RC cycles read.
+
+### 35.44 The perf-1.26 audit: fixes audited, hot paths made faster, the method rebuilt (2026-10-01)
+
+Branch `perf-1.26` off `bugs-1.26` (d751200 = 4be7e3d + log s35.43), Vue
+3.6.0-rc.10, Node 24.21, macOS on Apple Silicon (4 P + 4 E cores). Owner's
+order: the speed baseline of the fixed tree, an audit of every landed fix for
+correctness and V8 alignment, then the existing code as fast as possible, one
+change at a time; no plugin-surface work.
+
+**Baseline.** `.probes/p126-ab.mjs` (built dists bundled as a consumer does,
+one process, 25 interleaved rounds, same-bundle control, both load orders),
+the fixed tree as both arms, re-run once the machine was quiet (controls
+0.979..1.011): raw dispatch 22-24 ns, bare with a listener 55, per-key
+tracking 237-243; `useCommand().dispatch` 41-43, creation 74-78; three plugins
+plus a listener 170-176, tracked mixed keys 203-208.
+
+**Audit of the fixes** (3a69a8a, 398ca43, 615c5fc, 7f61aa7, 8f51aea, e60272e,
+dcf0a39, c14f727, 2e72a89). B5, F-a, B8, B12, F-b: hold on every exit path,
+not on a hot path. Three findings:
+- `useSharedCommandState().dispose()` called twice by one holder (by hand,
+  then by its scope through `tryAutoCleanup`) released the entry under the
+  next holder mid-flight, whose `isLoading()` never lit again (from B3's
+  `pending`); with nothing in flight, older, it deleted a newer holder's entry
+  and split the state in two. Red 2 of 3, fixed by counting each holder out
+  once (164639c). The test itself depended on Vue detection having resolved
+  (the scope's call reaches `dispose` only then) and once passed without
+  reaching the guard; it now awaits detection, seeded failure checked
+  (72f4fdd).
+- B6's single invalidation generation per client kept every cacheable read in
+  flight from being stored on ANY invalidation and on every successful write,
+  whatever the URL. Documented as coarse on purpose in B6, so brought to the
+  owner, who chose the precise rule: a ticket per cacheable read, marked only
+  by an invalidation matching its URL (b8f0c18; red 2 of 5, controls green;
+  http.js +320 / +65 br, no IIFE).
+- B1 put its build-flag guard first in `warnUnwired`, which runs on every
+  composable creation; without the define that is a `typeof` of a missing
+  global per creation (found later by the comparison with v1.25.0, below).
+
+**Changes, each measured; the figures are the process-replicated ones (see
+"Method").**
+
+| change | commit | result | bytes |
+|---|---|---|---|
+| M-g: `useCommand().dispatch` / `query` without a thunk (`runDispatch(bus, query, ...)` calls the bus directly between no-op tracking slots) | d59d76b | 0.933x, -2.8 ns | chamber.js +36 br, full IIFE +27 / +5 |
+| C1: `makeActionFilter` as a loop, no closure per dispatch | 4001b81 | 0.965-0.977x on a four-plugin chain, -7 to -10 ns; no effect on one one-pattern plugin | index.js +13 br, outbox.js +11 br, no IIFE |
+| V-e: `warnUnwired`'s cheap test outside B1's folding condition | b8e973b | creation back to v1.25.0 (1.000); vs the previous HEAD 0.94-0.97x, gate not passed (creation controls 3-6%) | chamber.js +7 br, full IIFE +0 / +8 |
+| D1: a loading slot's signal only once `isLoading()` reads it | 6538509 | tracked 0.946-0.976x, -4.7 to -11.9 ns | full IIFE +35 / +4 |
+| D2: start -> settle pairing in a Map, not a WeakMap | 1512950 | tracked 0.866-0.870x, -25 to -28 ns | full IIFE -4 / +8 |
+
+Declined, measured: V1 (slots alone, thunk kept: no gain), V2 (method passed
+and called with `.call`: no gain, reason not settled), V3 (M-g1's copied body:
+equal to V5 head-to-head, larger in ESM), V-c (the build flag in a module
+const: broke the fold, vapor-sfc +609 br), B1 (an `idempotencyKey` slot on
+every meta: `%HaveSameMap` confirms the transition, no speed either way on
+the async path, an observable change). Where tracking's cost goes (no-op
+before-hook plus no-op `'*'` listener 47 ns over a 22 ns bare bus, real
+tracking 194): what D1 and D2 leave is mostly `commandKey` and slot churn for
+unread keys, a structural change not taken.
+
+**Against production (v1.25.0, `main`).** No path slower: raw dispatch,
+listener, tracking, three plugins 0.999-1.009 (MDE 0.3-0.8%). Faster:
+`useCommand().dispatch` 0.934 (-2.7 ns), the scoped-plugin chain 0.965 /
+0.977, tracked mixed keys 0.963 (-7.3 ns; not from this window, a candidate
+is 2e72a89, the observer subscribed in the literal: hypothesis). `npm run
+bench`, v1.25.0 and HEAD alternated: 68 rows, median 0.992, every row inside
+its own run-to-run spread. The comparison found the creation regression:
+7-9% (e60272e^ vs e60272e confirms the step), fixed by V-e.
+
+**Method rebuilt** (owner, after two outside reviews; `docs/V8-RULES.md`
+rewritten, rules 12-17):
+- An isolated win is a lead: C1 read 0.93-0.96x on one plugin, the mixed chain
+  decides.
+- One process is one draw. The single-process harness had M-g at 0.87-0.90x
+  on a workload interleaving both composables over Vue's graph; across
+  processes that workload's own A/A control spreads to 1.36x, so the figure is
+  withdrawn and the comments and docs carry only replicated numbers (37a0e21).
+  V-e's 1.05x on a dispatch path it does not run read 1.000 replicated.
+- `.probes/p126-abk.mjs`: 10 processes per comparison, random load order, a
+  timing loop per arm (`new Function`), `--max/min-semi-space-size=32`,
+  `gc()` per timed call, 40 rounds of ~15 ms, 20th percentile per arm, median
+  log-ratio across processes, bootstrap CI, exact sign-flip test, MDE from
+  1.4826 x MAD of the A/A control, a 3% gate per function, CPU time beside
+  wall, `--single-threaded` optional. `.probes/p126-session.sh`: demotes the
+  user's other busy processes to background QoS (36 per session), never the
+  measuring shell's ancestry, `caffeinate`, one load check before the session,
+  restores on exit. Two bugs of the first version fixed: an all-or-nothing gate
+  and a per-workload load check that counted the session's own processes.
+- The owner says "go"; a measurement does not start on this side's reading of
+  "quiet" (several runs were interrupted before this rule).
+- Claims corrected that nothing tested: "the direct call is the one TurboFan
+  inlines" (V8 can inline through a monomorphic parameter) and machine-code
+  placement as a mechanism (V8 lays code out in compilation order).
+
+**Found, written down, not fixed** (HANDOFF):
+- The stamped cross-library bench ratios do not hold on this host: fast lane
+  vs nanoevents 1.22 stamped, 0.92-0.97 measured on v1.25.0's own code today;
+  compile vs nanoevents 2.89 vs 2.05-2.08. CI never writes them (its
+  auto-commit updates test counts and coverage only). The migration guides'
+  "fast lane emit beats nanoevents" prose would be false at today's figures.
+- The CI job "bench smoke (no regression vs baseline)" compares against
+  nothing: it runs the bench on Node 22 and uploads `bench.txt` (an artifact
+  that needs a login to read); a regression passes it.
+- Creation: wall time 0.969x, CPU time 0.997x for V-e; unexplained.
+- The harness lives in `.probes/` (gitignored); rules 16-17 cite the log until
+  it is committed under `scripts/`.
+
+Commits: 164639c, d59d76b, 4001b81, ad28f0e, 4f253c2, 72f4fdd, b8f0c18,
+b8e973b, bc186bf, ba1d1c5, 37a0e21, 6538509, 1512950, then the docs commit.
+Suite 2,730 passed, 1 skipped; coverage 100 x4 after every change.
+
+### 35.45 Why wall time and CPU time disagree in the harness (2026-10-01)
+
+Branch `perf-1.26` at 691dcf8, HANDOFF 3h's first item: explain by experiment
+why the harness's wall and CPU ratios differ (s35.44: V-e creation 0.969 /
+0.997, D2 0.866 / 0.902, both directions), and write an outside prompt. No src
+change. Node 24.21, macOS, Apple Silicon (4 P + 4 E cores).
+
+**The clocks, with positive controls.** `process.cpuUsage()` counts every
+thread: main 200 ms busy plus a worker 200 ms busy read wall 203 ms, process
+CPU 335, main-thread CPU 166. `process.threadCpuUsage()` exists in 24.21 and
+counts the main thread only (same run). Blocked 200 ms in `Atomics.wait`: wall
+205, both CPU clocks about 0. Steps: hrtime 41 ns, both CPU clocks 1 us; one
+read costs 20 / 201 / 810 ns. Under `--single-threaded` the two CPU clocks
+differ by a constant 17 us per 15 ms call. `v8.GCProfiler` counts GCs in a
+synchronous region (2 scavenges on retained young allocations; costs 1.5 us
+per start and stop, kept outside the timing).
+
+**Experiment.** `.probes/p126-cw-abk.mjs` and `p126-cw-child.cjs` (gitignored),
+copies of rule 16's harness whose timed window is unchanged; outside it they
+record main-thread CPU, process CPU and GCProfiler counts per call, the CPU of
+the round that is wall's 20th percentile, and the raw rounds. Options: V8
+flags, `settle=N` (an `Atomics.wait` after each `gc()`, outside timing), `n=N`
+(iterations per call pinned). Dists built in a scratch worktree from b8f0c18,
+b8e973b (V-e) and 6538509, 1512950 (D2); each pair differs in `chamber.js`
+only. Workloads `p126-w-create.mjs` (V-e) and `p126-w-track-parts.mjs` (D2 runs
+in `p4_tracked`). Two sessions with `.probes/p126-cw-session.sh`, the owner's
+"go" for each; load 4.53 and 3.71 at start.
+
+Session 1 (n sized per variant; gap = median of log wall ratio minus log
+process-CPU ratio, 95% CI; ns per iteration):
+
+| job | row | wall | proc | thread | gap (CI) | off-CPU | other threads A / B |
+|---|---|---|---|---|---|---|---|
+| V-e default | create_useCommand | 0.947 | 0.918 | 0.929 | 1.029 (0.970..1.054) | 2.5 | 360 / 323 |
+| V-e default | create_component_mix | 0.921 | 0.983 | 0.970 | 0.922 (0.885..1.063) | 7-9 | 1,312 / 1,334 |
+| V-e single-threaded | both | 0.896 / 0.995 | same | same | 1.000 (1.000..1.000) | -0.3 | -0.2 |
+| V-e settle 20 ms | create_useCommand | 0.933 | 0.947 | 0.940 | 0.986 (0.982..1.000) | -0.1 | 176 / 182 |
+| D2 default | p4_tracked | 0.863 | 0.884 | 0.867 | 0.975 (0.960..0.981) | 0.1-0.3 | 46 / 51 |
+| D2 single-threaded | p4_tracked | 1.035 | 1.035 | 1.034 | 1.000 (1.000..1.000) | -0.2 | -0.1 |
+| D2 settle 20 ms | p4_tracked | 0.896 | 0.906 | 0.896 | 0.986 (0.964..0.995) | -0.3 | 28 / 28 |
+
+Controls: dispatch rows under default flags, gap 0.996-1.003; creation failed
+the 3% gate in every variant; under settle every dispatch control failed too
+(2.4-9.9%, bare dispatch 22 -> 32 ns).
+
+Session 2 (D2 only, n pinned to 41,728; every control within 1.3%):
+
+| flags | D2 wall | A -> B ns | other threads A / B | proc | (thrB + o) / (thrA + o) |
+|---|---|---|---|---|---|
+| default | 0.859 | 188.1 -> 161.5 | 32.6 / 32.4 | 0.878 | 0.879 |
+| compilers on the main thread (`--no-concurrent-recompilation --no-concurrent-osr --no-concurrent-sparkplug`) | 0.860 | 184.7 -> 158.7 | 17.2 / 17.2 | 0.873 | 0.871 |
+| `--single-threaded-gc` | 0.925 | 185.3 -> 171.0 | 12.1 / 12.0 | 0.929 | 0.927 |
+| `--single-threaded` | 0.927 | 184.7 -> 171.7 | -0.1 | 0.927 | 0.927 |
+
+**What it settles.**
+- H1, process-wide CPU: the mechanism. Main-thread CPU equals wall within
+  0.5% in every job; the gap is CPU on other threads, near-constant per call
+  and equal in both arms, which dilutes the CPU ratio toward 1. The dilution
+  model predicts the CPU ratio within 0.002 under all four flag sets. Under
+  `--single-threaded` the gap is 1.000. The CPU does not move between threads
+  with the change (other threads equal in both arms), as H1 first supposed.
+- The 20th-percentile statistic is not the cause: CPU on the round that is
+  wall's 20th percentile reads the same as CPU's own (D2 0.885 / 0.884).
+- H2, descheduling: no. Wall minus main-thread CPU is at most 0.4 ns per
+  iteration (under 0.3%) in every job, in a demoted session. Not run outside
+  one.
+- H3, core and frequency: cannot make the gap (both clocks of a round move
+  together). A 20 ms idle wait before each call made dispatch slower and the
+  controls 5-10x wider; an efficiency core or a low-frequency state after idle
+  is the likely reason, TO VERIFY.
+- H4, resolution: out by arithmetic, 1 us over 3-15 ms is at most 0.03%.
+- V-e's creation gap is noise: its CI includes 1, and on creation the other
+  threads burn 2.5x the main thread's CPU, so a process-CPU ratio there mostly
+  measures background work. Under `--single-threaded` creation goes 128 ->
+  442 ns per iteration, about main plus other threads under default flags.
+
+**Found on the way, not explained.**
+- Call length changes D2's ratio: 1.035 at 17k iterations per call (n sized
+  from a cold call under `--single-threaded`), 0.927 at 41.7k, same flags.
+- About half of D2's saving (13 of 27 ns) needs GC on background threads; the
+  compilers' threads do not matter. The WeakMap arm is about 185 ns under
+  every flag set; the Map arm is the one faster with background GC, with no GC
+  inside the timed call (GCProfiler 0). The D2 comment in `src/chamber.ts`
+  ("the ephemeron table cost most of tracking's time") is not explained by
+  these numbers; it is not changed here.
+- In a steady-state call with no GC in it, the GC threads use about 0.9 ms
+  and the compiler threads about 0.4 ms of CPU per call; what they do is not
+  traced.
+- n is sized from ONE cold call, so creation calls run 3-5 ms, not the ~15 ms
+  of rule 16's text (corrected there).
+- Absolute ns moved about 20% between the two sessions (D2 A 229 then 188
+  ns), the ratio did not (0.863 then 0.859).
+
+**Outside prompt.** `.probes/prompt-fable-cpu-wall.md` (gitignored,
+self-contained, for Fable 5.1): the setup, the s35.44 table, both sessions,
+the open questions, and what is wanted back (mechanism per question with its
+confirming experiment, whether CPU is reported at all, the forced `gc()`, the
+n sizing, and whether D2's claim holds in a browser).
+
+Recorded: `docs/V8-RULES.md` Open (CPU beside wall settled in part,
+`--single-threaded` measured, two new items) and rule 16's call length; HANDOFF
+3h. Raw rounds of all eleven jobs and both session outputs:
+`.probes/out/cpu-wall/` (gitignored).
+
+### 35.46 Fixed: a deduped GET obeyed another caller's signal (2026-10-01)
+
+Branch `fix-dedupe-signal` off `perf-1.26` (4fba175). Reported downstream
+(another window, on an app using an older release) as a possible gap in
+`supersede`'s docstring; treated as a lead and checked against the client.
+
+**Cause, by reading.** `createHttpClient().request()` keyed an in-flight GET
+by method, response type and URL; a second caller returned the first one's
+promise as it was (`src/http.ts`, the dedupe check), so its own
+`config.signal` was never read, and only the first caller's signal reached
+`clientRequest`. Two consequences: a joining caller was rejected by the first
+caller's abort, and could not cancel with its own. With `supersede` and a
+handler passing `cmd.signal` to `http.get()`, the second dispatch joined the
+request the plugin had just aborted. The `signal` option is documented per
+request; sharing the OUTCOME is the contract (the serveStaleOnError follower
+test, `tests/http-client.test.ts`), sharing the abort never was. The other
+window's real-fetch run against a local server showed both directions; here
+the reading confirms them and the tests below fail on them.
+
+**Red first.** `tests/http-dedupe-signal.test.ts`, 11 tests; first written on
+a fetch stub, then rewritten (owner: right and less hand-rolled) on Node's
+real `fetch` against a real `node:http` server whose own counters give the
+requests sent and the ones aborted mid-flight. On both versions, 8 failed
+before the fix (leader aborts,
+follower aborts, every holder aborts then a late caller, an unsignalled
+holder, an unsignalled leader, an already-aborted follower, an
+already-aborted leader, and the `supersede` shape); the 3 controls passed (no
+abort, an invalidation between two reads, `dedupe: false`).
+
+**Fix** (owner's choice of design: one shared fetch, cancelled only when every
+holder has aborted, over "a signalled GET skips dedupe", which would have
+turned dedupe off for every component passing its unmount signal). A
+signalled leader fetches under a controller of its own, kept per client in a
+WeakMap with a count of live holders; each signalled caller's promise is
+`hold()`: its own abort rejects it with `AbortError` and decrements the count;
+the last holder's abort aborts the fetch and drops the in-flight entry at
+once (`dropInflight`, new on the internal cache), so a later caller fetches
+anew. A caller without a signal holds the read to the end (its entry is
+removed from the WeakMap). An already-aborted caller is neither joined nor
+joins. A GET with no signal runs the code it ran.
+
+Found on the way: two tests in `tests/http-gaps.test.ts` failed on the first
+version: a signal aborted inside the synchronous start of the leader's own
+fetch, before `hold()` attached its listener, was missed (a 429 retried, then a
+TimeoutError). `hold()` now checks `signal.aborted` after attaching.
+
+Suite 2,741 passed, 1 skipped (220 files); coverage 100 x4 (5,752 / 3,549 /
+1,254 / 4,757). `dist/http.js` +1,407 B raw / +266 brotli (22,993 / 5,724);
+in no IIFE, `index.js` unchanged; consumer rows: the main barrel 25.7 -> 25.9
+KB brotli, `router/remote` 3.6 -> 3.8, `router-fetch` 4.0 -> 4.2. No speed A/B:
+the path is a network request, and a GET with no signal adds two reads and a
+null test. Docs: the `dedupe` option's docblock (`docs/api`), a line in
+`supersede`'s docstring, CHANGELOG Unreleased.
+
+NOT changed, found by reading, TO VERIFY: a joining caller's other options
+(`timeout`, `retry`, `silent`, `onSessionExpired`) are also ignored; the first
+caller's govern the shared request.
+
+### 35.47 The outside answer on wall and CPU time: leads, two corrections (2026-10-01)
+
+The prompt of s35.45 went to Fable 5.1; its answer is kept verbatim with our
+checks in `.probes/fable-cpu-wall-answer.md` (gitignored). Nothing in it is
+measured here yet; each item is a lead.
+
+Its main claims: the harness's forced full `gc()` before every timed call
+evicts the OSR code of the timing loop (a weak reference), so every creation
+call is recompiled on the compiler threads; the GC threads' share is either
+page release (system time) or sweeping (user time), told apart by splitting
+other-thread CPU into user and system; half of D2's saving comes from the Map's
+table living in old space (promoted by the first `gc()`), whose rehash
+allocations are cheap only while background GC work after `gc()` keeps old
+space ready; D2's dependence on call length is a fixed per-call cost of
+about 0.4-0.5 ms in the Map arm under `--single-threaded`; the 20 ms idle wait
+lets the core drop its frequency or move to an efficiency core. Its advice:
+decide on wall, report main-thread CPU only as a gate (wall minus thread CPU
+under 1%), keep other-thread CPU as a diagnostic; replace the full `gc()` per
+call by a minor one, one full `gc()` and a busy spin per process,
+`--no-memory-reducer`, `--no-flush-bytecode --no-flush-baseline-code`; fix n
+from a warm call and claim at two call lengths or by a fit over four.
+
+Checked against our record, two corrections:
+- On creation the other-thread CPU differed by arm (360 / 323 ns per
+  iteration, its A/A control 4%), so "equal in both arms" holds on dispatch
+  only; `docs/V8-RULES.md` Open said it without that limit, corrected.
+- Its design advice for D2 (a pair of module slots instead of any table)
+  rests on "one live entry at a time", a premise from OUR prompt that
+  describes the sync workload only: on the async bus many commands are in
+  flight and `started` holds several. Not applicable as written.
+
+The experiments it proposes (`sample <pid>` during a timed call;
+`--trace-osr --trace-opt --trace-deopt` between calls; the user/system split;
+`%InYoungGeneration` on D2's table and the Map built after warm-up; D2 at four
+n with a linear fit; a busy spin in place of the idle wait; the harness
+changes; a browser-facing D2 run in Chrome without forced GC) wait for the
+owner's "go".
+
+### 35.48 Fable's leads checked: the forced full gc() recompiles every timed call (2026-10-01)
+
+Branch `v8-harness` off `fix-dedupe-signal` (33f98e7), HANDOFF item 1c, step
+A: each lead of s35.47 checked by experiment, the owner's "go" for both runs.
+Dists built per commit in a scratch worktree (164639c, d59d76b, 4001b81,
+37a0e21, 6538509, 1512950, b8f0c18, b8e973b); each pair differs only in the
+ESM file its change touches. Probes in `.probes/lead-*` (gitignored): the
+s35.45 harness plus the tokens `gc=full|minor|none`, `spin=N`, `setup=before|after`
+and a user / system split. Raw data, scripts and session output:
+`.probes/out/step-a/` (gitignored). Node 24.21, macOS, Apple Silicon.
+
+**Single-process leads** (one process each, not demoted: leads, not ratios).
+- `gc({ type: 'minor' })` exists in Node 24.21. GCProfiler counts one
+  Scavenge and no MarkSweepCompact for it; `gc()` and `{ type: 'major' }`
+  count one MarkSweepCompact each (positive controls). An object is young
+  after one minor gc and old after two.
+- D2's `started` Map, found by a construct trap on `Map` during
+  `isLoading()`'s install and confirmed as the one Map holding the command
+  mid-dispatch: built at import, it is old at every timed call; built after a
+  `gc()`, young to the end of a 41.7k-iteration call; built before one, old.
+  Positive control: a fresh object young, the same object old after one full
+  gc. `%DebugPrint`: `table: <OrderedHashMap[17]>`.
+- `--trace-osr --trace-opt --trace-deopt`, markers around each gc and each
+  timed call, six calls after warm-up. Under the harness's full `gc()` EVERY
+  timed call recompiles the workload loop by OSR: a Maglev OSR (0.7 ms), then
+  a TurboFan OSR (1.5 ms) on the compiler threads, then an eager deopt to
+  enter it. D2 (both arms): 15 OSR and 5 compile lines per call; creation: up
+  to 15 OSR and 43 compile lines per call, deopts in the gc between calls.
+  Under `gc({ type: 'minor' })`: one `OSR - entry` into the cached code per
+  call, no compile, no deopt, on every row. Fable's "an OSR compile per call
+  on creation, none on dispatch" is half wrong: dispatch pays it too.
+- `sample <pid> 3` during timed calls (full gc): on creation the four
+  V8Worker threads are mostly TurboFan (490-600 of 1,460 samples each), then
+  marking 71-88 and the sweeper 20-43; the unmapper 1-3, the ArrayBufferSweeper
+  0-1. On D2 they are mostly idle; marking 132-151, sweeper 41-46, TurboFan
+  41-53. The main thread's marking samples are the `gc()` call itself.
+- User / system split: other-thread CPU is user time (system 1-30 ns per
+  iteration against user 20-1,171): compiling and sweeping, not page release.
+  Under minor gc other-thread CPU is about 0 on every row (-0.4 to 0.2 ns).
+  Creation at a longer call: other-thread CPU per iteration fell from 327 to
+  72 ns, the shape of a fixed per-call compile (the n multiplier was not a
+  clean 4x: n was resized from a fresh warm call).
+
+**Session** (20 jobs, K = 10 + 10, load 4.01 at start, 36 processes demoted).
+D2 is 6538509 -> 1512950 on `p126-w-track-parts`, row `p4_tracked`.
+
+| flags | gc | n = 10k | 20k | 40k | 80k | paired fit (B - A per call) |
+|---|---|---|---|---|---|---|
+| default | full | 0.861 | 0.864 | 0.858 | 0.875 | -24.1 ns/iter, intercept -128 us (residual 97) |
+| `--single-threaded` | full | 1.034 | 0.998 | 0.928 | 0.933 | -18.4 ns/iter, intercept +281 us (residual 79) |
+| default | minor | 0.878 | 0.876 | 0.864 | 0.877 | -25.9 ns/iter, intercept +16 us (residual 33) |
+
+- Call length: the ratio depends on n only under `--single-threaded` with the
+  full gc (s35.45's 1.035 / 0.927 reproduced: 1.034 / 0.928). There the Map
+  arm pays about 0.28 ms per call more and saves 18 ns per iteration, which is
+  Fable's fixed per-call cost, measured. Under default flags, with either gc,
+  the ratio is flat within 1.5% and the intercept is near 0.
+- A fit across jobs of absolute ns does not work: absolute ns drift 10-20%
+  between jobs (A: 197, 233, 221, 201 ns), so its intercepts are noise
+  (residuals 260-850 us). The paired B - A difference per process cancels the
+  drift (residuals 33-97 us): fit that.
+- Background GC: with minor gc per call, D2 reads 0.864 under default flags
+  and 0.876 under `--single-threaded-gc` (n = 40k), against 0.859 / 0.925 with
+  the full gc (s35.45). The "half of D2's gain needs background GC" of s35.45
+  is the forced full gc's doing, not V8's default behaviour. The
+  `--single-threaded-gc` job's own p4 control spread 2.2% (gate 3% at 2x):
+  no result by the gate, a lead.
+- D2's table young (Fable's prediction): NO RESULT. The `setup` workload
+  (`lead-w-d2young`, a fresh tracked bus per call) fails as an instrument: its
+  own A/A control reads 0.953 and 0.812, with one arm per process burning
+  about 260 ns per iteration of other-thread CPU. A harness defect found by
+  it: rule 16's gate checks the control's spread only, so the 0.953 control
+  (spread 1.3%) passed. The gate must also refuse an off-centre control.
+- Idle wait against busy spin: inconclusive. The positive control failed: a
+  20 ms `Atomics.wait` did NOT reproduce s35.45's slowdown today (bare
+  dispatch 20.2 ns, controls 0.4-0.5%; s35.45 read 32 ns and 2.4-9.9%).
+  Spin and wait read the same (D2 0.868 / 0.863). "Never idle inside a
+  session" stays a lead.
+- Creation with minor gc: controls 2.7% and 4.0% (6.3% and 10.0% with the
+  full gc in s35.45); still past the 3% gate. V-e reads 0.926 / 0.941.
+- Several dispatch controls of the full-gc jobs at 40k failed the gate (2.0%);
+  none of the minor-gc dispatch controls did (0.2-1.4%).
+
+**What it settles for the harness** (step B): a minor gc before each timed
+call, not a full one (no per-call recompile, no background CPU, no flag
+dependence, no call-length dependence, tighter controls); a call-length claim
+from the paired B - A difference over several n, not from absolute ns; the
+control gate checks the control's centre as well as its spread. Not settled:
+the young table, the idle wait, creation's controls.
+
+### 35.49 Measuring without a quiet machine (2026-10-01)
+
+The owner cannot stop a working day for a session; a first try of s35.48's
+session was refused by the load ceiling (1-minute load 11.9, a Playwright run
+of another project). Owner: "change to not expect a quieter machine is wise".
+The condition the ceiling stood for is checked per row instead: the A/A
+control's spread and centre, and wall against main-thread CPU (descheduling
+shows as off-CPU time in wall only, s35.45). That check is usable since the
+minor gc per call (s35.48) removed the background CPU that blurred it.
+
+Checked with the owner's "go", no load ceiling, the user's work running
+(load 3.31, Time Machine's `backupd` at 47%, root, not demotable; 37
+processes demoted): D2 on `p126-w-track-parts`, n = 40,000, minor gc. Controls
+0.3-0.7% on all five rows; D2 0.855 (CI 0.848..0.864), 186.1 -> 158.9 ns per
+dispatch; off-CPU and other-thread CPU about 0. Earlier the same day, quieter:
+0.864, controls 0.2-1.4%. One job took 27 s (70 s with the full gc).
+
+New with the minor gc: some timed calls contain an `IncrementalMarking` step,
+since old-space garbage now accumulates as it would in a browser; the 20th
+percentile excludes those rounds, and the tool reports them per arm. Not
+tested: a load that saturates every core (a test runner).
+
+Recorded: `docs/decisions.md`.
+
+### 35.50 The A/B harness committed as a tool: `npm run ab` (2026-10-01)
+
+Step B of item 1c: the harness rebuilt from rule 16 plus what s35.48 and
+s35.49 settled, committed under `scripts/ab/` (decisions, 2026-10-01).
+
+- `scripts/ab/ab.mjs` (`npm run ab -- <distA> <distB> <workload> [options]`):
+  bundles each arm as a consumer ships it, sizes n per function from a WARM
+  call of arm A under the base flags only (printed as `pinned: --n=fn:N,...`
+  for reuse), runs the A/A control then B against A in K processes each,
+  at n and 4n by default (`--lengths=1` for one). Wall decides. Per row: ratio,
+  CI, p, MDE, A and B ns and their difference, off-CPU share, other-thread CPU
+  share; per function a paired fit (ns per iteration, us per call) and one
+  verdict that needs every length to agree. `--raw=` keeps every round.
+- `scripts/ab/child.cjs`: a minor gc before every timed call (rule 18); one
+  full gc per function after warm-up, then two more warm-up calls per arm.
+- `scripts/ab/stats.mjs`: the statistics and gates, free of I/O.
+- `scripts/ab/session.sh` (`npm run ab:session -- <jobs> <out-dir>`): the
+  demotion and restore of rule 17, no load ceiling, skips demotion off macOS.
+- `scripts/ab/build-dists.sh` (`npm run ab:dists -- <out-dir> <commit...>`):
+  a build per commit in a scratch worktree, then the dist files that differ
+  between consecutive commits.
+- `scripts/ab/workloads/`: track-parts, create, composable, filter,
+  filter-mixed, plugins (from `.probes/p126-w-*`; composable-mixed left out,
+  it measures nothing), and smoke (no library, for the test).
+- `package.json` `files` gains `!scripts/ab`: the tool does not ship (npm pack:
+  12 files without the line, 0 with it).
+
+Not carried over: the one-arm-per-process mode (`P126_SPLIT`) of the old
+harness, used by no workload kept here; a spin or wait before a call (s35.48:
+not supported); `--no-memory-reducer` and `--no-flush-bytecode` (nothing showed
+they matter; an incremental marking step in a round is the browser's cost and
+the 20th percentile excludes it).
+
+Tests: `tests/ab-tool.test.ts`, 14. Synthetic replicates from a seeded PRNG:
+a 5% effect found (ratio and ns), a slowdown found, five A/A runs give no
+result; one refusal per gate (wide control, off-centre control, off-CPU time,
+load orders disagreeing, interval including 1, effect within the MDE), each
+seeded with an effect only that gate can stop. Each gate removed in turn
+turned exactly its test red (six seeds). Pieces: the paired fit, the length
+rule, the exact sign-flip test, option parsing. A smoke run of the real tool
+(bundle, sizing, children, report; K = 2, 4 rounds) asserts shape only.
+
+`docs/V8-RULES.md`: rule 16 rewritten to the tool and its gates, rule 17
+without the load check, rule 18 new (minor gc); Open items on CPU time, call
+length and background GC settled or withdrawn, two added (the young table,
+idling).
+
+### 35.51 A V8 test helper: `tests/v8.ts` (2026-10-01)
+
+Step C of item 1c. `tests/v8.ts` (test-only, not a public API) sets
+`--allow-natives-syntax` at runtime and compiles each `%` call after it, the
+way `tests/v8-shapes.test.ts` did: `sameMap(a, b)` (`%HaveSameMap`),
+`optimizationStatus(fn)` (the tier and the bits behind it),
+`optimize(fn, args, 'turbofan' | 'maglev' | 'baseline')` (feedback, the tier
+on the next call, the status after it) and `inYoungGeneration(o)`.
+
+The status bits are V8's internal enum, so `tests/v8-helper.test.ts` (8)
+drives each one to both values on the running Node: a never-called function
+is lazy (bits 0 and 18), a called one interpreted (bit 7), TurboFan sets bits
+4 and 6, Maglev 4 and 5, Sparkplug 15 and not 4, a deopt clears 4, a fresh
+object is young and old after a full gc (`gc` from a VM context made after
+`--expose-gc`). Found on the way: `%NeverOptimizeFunction` does not set bit 1
+on Node 24.21 (it is the global "no TurboFan" bit), and
+`%PrepareFunctionForOptimization` after it is a fatal CHECK that kills the
+worker (SIGTRAP), so the helper offers no "never optimize". Passes under
+coverage too.
+
+`tests/v8-shapes.test.ts` now uses `sameMap`; its seeded failure (a
+hand-built `{ ok: false, error }` in `validator`) still fails both the map
+test and the source scan.
+
+### 35.52 Test speed: the coverage run no longer times instrumented loops (2026-10-01)
+
+Step D of item 1c, measured first. Each gate step alone: typecheck 6.8 s,
+build 1.9, test:run 28.4, test:vapor 1.7, size:check 0.2, lint 1.8, coverage
+52.3, stamp 0.2, docs 1.5, size:doc 2.6; the gate 124 s. The suite twice
+(test:run and coverage) is 80 of it.
+
+Per file (vitest JSON reporter): in test:run the five slowest are A/B files
+whose single test runs an in-process timing loop (router-stamp-ab 21.1 s,
+before-cancel-ab 19.3, plugin-throw-ab 13.7, history-redo-ab 10.5,
+request-dispose-ab 8.5: 73 of 131.5 s of file time; the longest file sets
+the run's floor). Under coverage the same files took longer still
+(plugin-throw-ab 43.8 s; the ten A/B files about 170 of 223 s), although
+they are written to skip under coverage.
+
+**Bug found.** `tests/under-coverage.ts` decided "is this run instrumented"
+from the npm script name (`npm_lifecycle_event` of `test:coverage` or
+`coverage:doc`). The gate and the audit method run `npx vitest run
+--coverage`, which sets no script name, so every timing loop ran
+instrumented there, its numbers fiction by the file's own reasoning.
+
+**Fix.** `tests/coverage-flag.setup.ts`, a Vitest global setup, provides
+Vitest's own resolved `coverage.enabled`; `tests/under-coverage.ts` injects
+it. Positive control, a probe test in each mode: plain `npx vitest` false,
+`npx vitest run --coverage` true, `npm run test:coverage` true. The eight A/B
+tests that also check equivalence (async-execute, before-cancel,
+history-redo, origin-scope, plugin-throw, request-dispose, router-stamp,
+wildcard-prefix) are plain `it` now and return just before their timing loop
+under coverage, so their equivalence checks still run there and their count
+does not change; the three tests that only measure (clock-source,
+signal-shallow, static-map's cost) keep `it.skipIf(underCoverage)` and read
+"skipped" under coverage rather than passing with nothing run. Under coverage
+plugin-throw-ab 5,088 -> 180 ms and router-stamp-ab 7,644 -> 134 ms, both
+passing.
+
+**After.** Coverage 52.3 -> 22 s, 100 x4 with the same covered counts (5,752
+/ 3,549 / 1,254 / 4,757). The coverage run (whose counts the docs carry)
+reads 2,760 passed and 4 skipped; a plain run 2,763 and 1. test:run is
+unchanged (about 30 s): its floor is the timing loops, which run there by
+design. Comments that described the old behaviour corrected: the gate's
+coverage step, `test-counts-reporter.mjs` and `stamp-docs.mjs`.
+
+NOT done, for the owner: moving the in-process timing loops out of the
+default test:run (an opt-in script) would take test:run's floor from about
+21 s to the next file (7.5 s); they assert only that a number was produced,
+and rule 16 makes a one-process A/B a lead. The bench was not timed (a
+measurement: ask first).
+
+### 35.53 M-g, C1, D1, D2 re-measured with `npm run ab` (2026-10-01)
+
+Step E of item 1c, the owner's "go". `npm run ab:session`, 7 jobs, 47
+processes demoted, load 4.14 at start, 17:57-18:17. Each job at two call
+lengths (n and 4n), K = 10 + 10 per length. Raw rounds and session output:
+`.probes/out/step-e/` (gitignored). Ratios B/A (short / long call), ns per
+iteration saved (short / long), paired fit.
+
+| change | row | B/A | ns | verdict |
+|---|---|---|---|---|
+| M-g 164639c -> d59d76b | composable_dispatch | 0.934 / 0.915 | 2.7 / 3.9, fit -4.3 | faster |
+| C1 d59d76b -> 4001b81 | mixed4_listener | 0.979 / 0.986 | 6.6 / 4.6, fit -3.9 | faster |
+| C1 | mixed4 | 0.951 / 0.965 | 14.3 / 11.7, fit -10.9 | no result (short-call control 3.0%) |
+| C1 | filter5_miss | 0.892 / 0.907 | 11.7 / 11.7 | no result (short-call control 5.7%) |
+| D1 37a0e21 -> 6538509 | p4_tracked | 0.982 / 0.969 | 3.6 / 6.1, fit -6.9 | faster |
+| D1 | tracked_mixed_keys | 1.004 / 1.001 | ~0 | no result (within MDE) |
+| D2 6538509 -> 1512950 | p4_tracked | 0.858 / 0.863 | 26.4 / 26.2, fit -26.2 | faster |
+| D2 | tracked_mixed_keys | 0.864 / 0.871 | 25.7 / 24.4, fit -24.0 | faster |
+
+Every untouched row (raw dispatch, bare bus, no-op hook and listener,
+creation, filter1) read no result, as rule 12 expects.
+
+Against the claims (CHANGELOG Unreleased, src comments, V8-RULES 4/13/14,
+docs/performance.md), to correct:
+- M-g "0.933x, 2.8 ns": holds at the short call; 0.915x, 3.9 ns at the long.
+- C1 "0.965-0.977x, 7-10 ns on a chain of four": counted only with the
+  listener, 0.979-0.986x, 4.6-6.6 ns; without it the long call reads 0.965x,
+  11.7 ns but the short call's control failed. Smaller than claimed.
+- D1 "0.946-0.976x, 4.7-11.9 ns": 0.969-0.982x, 3.6-6.1 ns on p4_tracked; no
+  effect on tracked_mixed_keys. Smaller than claimed.
+- D2 "0.866-0.870x, 25-28 ns": holds (0.858-0.871x, 24-26 ns, flat over call
+  length). The src comment "the ephemeron table cost most of tracking's time"
+  is not what this measures: D2 saves 26 of about 188 ns (14%); reword.
+- CHANGELOG "tracking about 15% cheaper (194 -> 164 ns)": D1 + D2 compose to
+  about 0.84 on p4_tracked; to recompute from these rows.
+
+### 35.54 The claims that moved, corrected (2026-10-02)
+
+Step E's corrections, from s35.53. CHANGELOG Unreleased "Faster, and two
+more fixes": M-g 0.915-0.934x, 2.7-3.9 ns; C1 0.979-0.986x, 4.6-6.6 ns, on
+four scoped plugins and a listener; tracking about 16% cheaper (192 -> 162
+ns), D1 0.969-0.982x and 3.6-6.1 ns, D2 0.858-0.871x and 24-26 ns; method
+rules 12 to 18. `src/chamber.ts`: `runDispatch`'s figure; `LoadingSlot`
+loses "the signal and its two writes were most of tracking's cost" (D1 saves
+3.6-6.1 of about 190 ns); D2's "the ephemeron table cost most of tracking's
+time" becomes "the WeakMap cost 24-26 ns of a tracked dispatch's ~188".
+`src/outbox.ts` and `src/plugins-extra.ts`: C1's figure. `docs/V8-RULES.md`
+rules 4, 13, 14 and `docs/performance.md` "Reading an A/B" likewise.
+`npm run docs` regenerated `docs/api` (the `LoadingSlot` docblock); every
+`dist/*.js` byte-identical to the build before (comments only).
+
+### 35.55 The in-test timing loops are opt-in: `npm run test:timing` (2026-10-02)
+
+Owner: "do it" (the open item of s35.52). The A/B tests' timing loops ran in
+every `test:run` and set its floor (router-stamp-ab 21 s of 28), asserting
+only that a number came out; under rule 16 a one-process A/B is a lead, and
+`npm run ab` is the measurement.
+
+`tests/under-coverage.ts` exports `runTiming`: `VC_TIMING=1` and not under
+coverage. The eight A/B tests with equivalence checks return before their
+timing loop unless it is set (`if (!runTiming) return;`), so their checks
+still run in every suite and their count is unchanged; the three that only
+time (clock-source, signal-shallow, static-map's cost) are
+`it.skipIf(!runTiming)`. `npm run test:timing` runs the A/B files and
+`tests/router/static-map.test.ts` with `VC_TIMING=1` and the output shown
+(checked: the tables print, e.g. wildcard-prefix's four rows).
+
+test:run 28-32 s -> 16 s (2,760 passed, 4 skipped: the same counts as the
+coverage run, so the stamps do not move). Corrected with it: two passages of
+`docs/performance.md` ("run every suite", "runs this exact A/B in CI and
+prints the table on every run"; the second was already untrue, since
+`silent: 'passed-only'` hides a passing test's output), and the comments in
+`scripts/test-counts-reporter.mjs` and `scripts/stamp-docs.mjs` that said a
+plain run counts more.
+
+### 35.56 The peer bench ratios restamped: median of 5 runs from a clean tree (2026-10-02)
+
+Item 2 of HANDOFF. Inventory: 16 `vc:bench*` markers, 21 occurrences, in
+`docs/performance.md`, `docs/migrating/from-event-emitter.md`,
+`docs/migrating/from-mitt.md` and `ROADMAP.md`, plus prose that depends on
+them. The owner chose to run the bench and restamp ("we have a way to
+rewrite values ... can we run and fix the values?"): option a of the item's
+prompt, with the median of 5 runs instead of one run.
+
+Method: a clean worktree of 058c53d (node_modules shared, nothing
+downloaded), `npm run bench`'s command 5 times, each a fresh vitest process,
+28 processes demoted, load 4.04 at start, 87-88 s a run
+(`.probes/bench-session.sh`; raw runs `.probes/out/bench-2026-10-02/`).
+Node 24.21.0, vitest 5.0.1, tinybench 6.1.4, mitt 3.0.1, nanoevents 9.1.0.
+`.probes/bench-bands.mjs` wrote the medians to the worktree's
+`docs/metrics.json`; `docs:stamp` ran there; the commit was cherry-picked
+onto `v8-harness` (0fa1af4). Never stamped from the main tree.
+
+| ratio | stamped before | median | min..max |
+|---|---|---|---|
+| CompileVsDispatch | 15.62 | 10.93 | 10.68..11.54 |
+| CompileVsMitt | 6.28 | 5.47 | 5.32..5.69 |
+| CompileVsNano | 2.89 | 2.05 | 1.95..2.11 |
+| EmitNoListenersVsMitt | 1.41 | 1.74 | 1.71..1.76 |
+| EmitVsDispatchFanout | 1.63 | 1.31 | 1.29..1.32 |
+| FastLaneSnapshotVsNano | 1.32 | 1.07 | 1.06..1.17 |
+| FastLaneVsMitt | 2.33 | 1.83 | 1.79..1.92 |
+| FastLaneVsNano | 1.22 | 0.93 | 0.91..1.03 |
+| FloorVsCompile | 14.44 | 13.32 | 13.03..13.91 |
+| FloorVsDispatch | 225.65 | 152.04 | 141.82..152.84 |
+| FloorVsMitt | 90.69 | 72.32 | 71.34..75.81 |
+| FloorVsNano | 41.77 | 27.12 | 27.02..27.82 |
+| NanoVsEmitNoListeners | 2.99 | 6.84 | 6.71..9.42 |
+| NanoVsMittNoListeners | 4.22 | 11.75 | 11.68..16.58 |
+| PersistCoalesce | 14.68 | 17.50 | 16.37..17.93 |
+| UidCounterVsUuid | 2.56 | 3.13 | 3.11..3.19 |
+
+Prose checked against the new values. Corrected: the event-emitter guide
+said the default fast lane "sits at 1.22x" nanoevents (ahead); it is about
+level, its runs fall on both sides of 1, and the guide now says so and that
+each value is a 5-run median on one host (rule 15). `docs/performance.md`'s
+hand-typed snapshot figure "(~0.9-1.0x)" is now its marker. Still true at the
+new values: "beats every minimal event-emitter peer" (compile: 2.05x
+nanoevents, 5.47x mitt), "faster than mitt on fan-out" (1.83x), "roughly an
+order of magnitude faster than bus.dispatch" (10.93x), "nanoevents is far
+ahead" on no-listener emit (6.84x). Left as dated history: the June 2026
+peer tables' ops/sec and the v1.12.0 "~1.5x faster than mitt, ~36% behind
+nanoevents" row. `scripts/stamp-docs.mjs` no longer counts the bench markers
+("twelve", they are sixteen).
+
+These values will drift again (rule 15). Not done: publishing bands in place
+of single values (option b) and a CI check (item 3).
+
+### 35.57 No-listener emit: nanoevents' lead is one repeated name (2026-10-02)
+
+Owner's "yes" to checking s35.56's NanoVsEmitNoListeners (2.99 stamped, 6.84
+today). `npm run ab`, A = v1.25.0 (e598271), B = HEAD's src (68297fd), one
+call length, workload `.probes/w-emit-none.mjs` (pre-built emitters, a sink
+per iteration; raw `.probes/out/emit-none/`). Controls 0.2-0.6%, load 3.60.
+
+| row | ns per emit |
+|---|---|
+| empty loop with sink (positive control) | 0.4 |
+| nanoevents 9.1.0, one constant name | 1.5 |
+| nanoevents, four varying absent names | 7.4 |
+| mitt 3.0.1, one constant name | 6.7 |
+| `bus.emit`, one constant name | 3.2 |
+| `bus.emit`, four varying absent names | 3.8 |
+
+- Ours did not regress: v1.25.0 against HEAD 1.001 / 0.997, no result.
+- nanoevents is ahead only for one name emitted repeatedly, where V8
+  specialises its `this.events[event] || []` (not fully deleted: 1.5 against
+  the empty loop's 0.4). With four varying names it reads 7.4 ns, about twice
+  ours. Why (the keyed miss plus a fresh `[]` per emit) is read from its
+  source, not traced.
+- The bench row "NanoVsEmitNoListeners" is a constant-name micro-loop
+  (rule 13). `docs/performance.md`'s "nanoevents is far ahead on this path"
+  holds for that shape only, and it quotes nanoevents' code as
+  `if (!this.events[event]) return;`, which 9.1.0 does not ship. Not edited:
+  owner to decide.
+- Also checked: nanoevents 9.1.0 throws on `emit('constructor')` and
+  `emit('hasOwnProperty')` with no listeners, and on `on()` for any
+  `Object.prototype` name (`constructor`, `toString`, `__proto__`,
+  `hasOwnProperty`); the fast lane runs the listener once for each
+  (`src/dict.ts`'s rule).
+
+### 35.58 nanoevents removed: docs, bench, dev dependency (2026-10-02)
+
+Owner, after s35.57: "we should kill nanoevent narrative for real word scope
+project"; scope chosen: docs, bench and dependency.
+
+- `tests/perf.bench.ts`: the nanoevents import and its five rows (no
+  listeners, comparative fan-out, fast-lane single handler, fast-lane fan-out,
+  comparative dispatch); the header names mitt, eventemitter3 and
+  tiny-emitter as the peers.
+- `scripts/bench-ratios-reporter.mjs`: the six ratios that read a nanoevents
+  row (FastLaneVsNano, FastLaneSnapshotVsNano, CompileVsNano, FloorVsNano,
+  NanoVsEmitNoListeners, NanoVsMittNoListeners); ten remain. Its history
+  comment no longer names the peer.
+- `docs/performance.md`: nanoevents out of the fast-lane table, the fan-out
+  table, the no-listener and fan-out comparisons, the dispatch comparison and
+  the v1.12.0 copy-on-write note; the fast lane is stated against
+  `bus.dispatch` and mitt (stamped); the no-listener section states s35.57's
+  per-emit cost (3.2 ns one name, 3.8 ns four names, unchanged from v1.25.0);
+  a paragraph on why a one-name micro-loop flatters a plain-object emitter.
+  "beats every minimal event-emitter peer" removed. One frozen 2026 figure
+  (dispatch "7.10x to 5.30x slower than nanoevents") removed with its clause.
+- `docs/migrating/from-event-emitter.md` and `from-mitt.md`: no nanoevents;
+  the fast lane against mitt and `bus.dispatch` (stamped).
+- `docs/V8-RULES.md` rule 15: its evidence is now the mitt ratio (s35.56) and
+  the one-name micro-loop (s35.57).
+- `src/fast-lane.ts`: one credit kept in the `removal` docblock (the
+  copy-on-write design is nanoevents'); the inner comment's duplicate removed.
+- `package.json` / lock: `npm uninstall nanoevents --offline` (12 lines, no
+  download).
+
+Tried and withdrawn: a new own-library ratio, snapshot against live fast-lane
+fan-out. Its value derived from s35.56's runs was 1.15; one functional bench
+run in the main tree read 0.87, because the snapshot row there had outliers
+(max 7.8 ms against 0.40, +-2.77%) and the bench ratio is of means, while the
+two rows' minimum times were within 2% (0.1615 / 0.1587 ms). Not robust
+enough to publish; the docs describe the mode trade without a number and
+point to v1.12.0's dated "~10-15%". `docs/metrics.json` restored after that
+run; nothing stamped from the main tree.
+
+### 35.59 CI's speed check: `perf-ab`, base against head (2026-10-02)
+
+HANDOFF item 3. The CI job "bench smoke (no regression vs baseline)" ran the
+vitest bench and uploaded `bench.txt`; it compared against nothing. Three
+designs went to the owner (rename only; bands on the bench's own ratios;
+an A/B of the base against the head with `npm run ab`); the owner chose the
+A/B ("C").
+
+- `scripts/ab/ci.mjs` (`npm run ab:ci -- <distBase> <distHead> [workloads]`):
+  runs `ab.mjs` per workload (default track-parts, composable, create,
+  filter-mixed, plugins), one call length, K = 10. `decide()` fails the job on
+  a counted "slower", on a run in which no function's control passed (the
+  instrument failed; passing would be a silent pass), and on a workload that
+  measured nothing. "no result" does not fail. `ab.mjs`'s summary now carries
+  each length's control verdict.
+- `.github/workflows/ci.yml`: `bench` renamed "bench (report only)"; new job
+  `perf-ab` (Node 24, full history, base = the PR's base or the push's
+  `before`), building both with `scripts/ab/build-dists.sh` and uploading the
+  output and raw rounds. The YAML parses (seven jobs). Not run on GitHub from
+  here: the owner pushes.
+- `tests/ab-ci.test.ts`, 5: a clean pass; a seeded "slower" fails and names
+  the row and its ratio; no passing control fails; an empty workload fails;
+  the default workloads exist. Each of the three conditions removed in turn
+  turned exactly its test red.
+
+Verified locally on real builds, one demoted session, load 4.13:
+- A/A (15e592d against itself, five workloads): PASS, exit 0, 137 s; 14
+  functions "no result", 13 with a passing control.
+- Seeded regression (a detached scratch commit a8b0a1a, never on a branch:
+  the sync `dispatch` also writes `JSON.stringify(action)` to a global):
+  FAIL, exit 1, 61 s; every track-parts row "slower", +37.2 to +40.5 ns per
+  dispatch (B/A 2.726 bare, 1.256 tracked), controls within 1.7%.
+
+What it cannot catch: a path no workload runs; an effect below that run's
+MDE (0.3-0.6% here, wider on a CI VM); and a base built with the head's
+`node_modules`, so a dependency change in the same push is in both arms.
+
+### 35.60 isLoading item 4: option a, slots by action, then target (2026-10-02)
+
+HANDOFF item 4 (the isLoading design). The analysis went to the owner: what
+a tracked dispatch still pays over the no-op machinery (~110 ns: a fresh
+`action:target` string per dispatch, flattened and hashed for `slots.get`;
+a slot allocated and deleted for every unread key; the `started` Map; the
+counter) and options a (map by action, then target), b (keep unread slots,
+bounded), c (pair by stack on the sync bus), d (count only read keys: breaks
+the first-read-mid-flight contract, not recommended), e (none cheaper).
+Recommended a alone first; the owner: "do it", the `:` collision included.
+
+**Test first.** `tests/isloading-keys.test.ts`, 4: three pin the equalities
+that must not move (`1` and `'1'`, `null` and `'null'`, `true` and `'true'`
+share a flag; an object shares one with its canonical JSON string), one is
+the change: `('a:b', 'c')` and `('a', 'b:c')` were one `commandKey` and lit
+each other. Red before (1 of 4), green after.
+
+**Change.** `_targetKey(target)` in `src/command-bus.ts` (internal export):
+exactly `commandKey`'s target half, a primitive's `String()`, an object's
+`commandKey('', target).slice(1)`; `commandKey` itself is byte-identical.
+`src/chamber.ts`: `slots` is `Map<action, Map<targetKey, LoadingSlot>>`, a
+slot carries its bucket for the prune. A first version split `commandKey`'s
+object path into a function of its own and cost the Blade consumer bundle 1
+B over its ceiling (6,461 / 6,460); the version kept costs that bundle
+nothing. (Two later "failures" of that ceiling were a stale `dist` from the
+first version; with `dist` rebuilt, two full coverage runs passed.)
+
+**A/B** (`npm run ab`, two call lengths, base 187f2a8, the variant a detached
+scratch commit 6dc6e43 built with `ab:dists`; load 13.83 at start, 46
+processes demoted):
+
+| row | B/A short / long | ns |
+|---|---|---|
+| p4_tracked | 0.905 / 0.899, faster | -14.9 / -16.6, fit -17.2 |
+| tracked_mixed_keys | 0.900 / 0.892, faster | -16.0 / -18.3, fit -19.0 |
+| held_control (ext2) | 0.939 faster / long refused (off-CPU 5.6%) | -10.4 / -19.0 |
+| bare, no-op hook / listener, unheld, plugins3 | no result | ~0 |
+
+The off-CPU gate refused the one row the load descheduled, as designed.
+
+**Bytes.** `chamber.js` +160 raw / +27 br, `index.js` +0 / +7 br, full IIFE
++199 / +51 br (budget raised to the measured size, ledger in
+`scripts/check-size.mjs`; speed over size), core and elements IIFEs 0.
+The ledger's older lines also carried the pre-s35.53 figures for M-g (the
+withdrawn 0.87-0.90x), D1 and D2; corrected with it (E's grep had not
+covered `scripts/`).
+
+Suite 2,769 passed under coverage, 100 x4 (5,764 / 3,561 / 1,255 / 4,766).
+Not done: b and c (the owner's next call, each measured on top of a).
+
+### 35.61 isLoading option b measured; the build profile decided (2026-10-02)
+
+Napkin math to the owner first: on an admin panel, b and c together save an
+estimated 10-25 ns per tracked dispatch (about 1 us per second on a busy
+dashboard), against bytes and, for c, a pairing that relies on sync settles
+being LIFO. Owner: a speed-against-memory trade goes behind ONE build-time
+toggle, zero runtime cost, default performance ("0 cost on runtime / build
+have a toggle / default is performance"; "agree").
+
+**Option b measured** (performance form: an unread key's slot is kept at 0,
+pruned only when its action's bucket holds over 256; a detached scratch
+commit 4c1f67e on a443f81, built with `ab:dists`; `npm run ab`, two call
+lengths, load 5.91, 42 processes demoted; raw `.probes/out/item4b/`):
+
+| row | B/A short / long | ns |
+|---|---|---|
+| p4_tracked | 0.848 / 0.865, faster | -22.3 / -21.3 |
+| tracked_mixed_keys | 0.852 faster / long control 3.7%, refused | -22.3 / -26.2 |
+| held_control (ext2), bare, unheld, plugins3 | no result | ~0 |
+
+Larger than the 5-15 ns estimated. Not landed: it waits for the profile
+toggle, since it trades up to 256 idle slots per action for the speed.
+
+**Option c, debated.** A plain stack pairing is correct only by the sync
+bus's LIFO invariant (checked path by path: holds today); a stack WITH an
+identity check (pop if the top is this command, else search down and remove
+it, else ignore) is correct by construction, depth 1-3 on the sync bus. Not
+a memory trade, so not behind the toggle; to be measured in that form before
+any decision.
+
+**Decided (decisions row):** the build profile. Next window:
+`.probes/next-window-prompt-profile.md`.
+
+### 35.62 The build profile, and isLoading option b behind it (2026-10-02)
+
+Prompt `.probes/next-window-prompt-profile.md`, steps A to C.
+
+**Design (checkpoint A, approved).** `__VC_LEAN__`, declared in
+`src/chamber.ts` beside `__VC_WIRED_BUILD__`. It is read once per entry, in
+`trackLoading` (rule 3), into `entry.pruneAbove`, which the entry literal
+sets to 256 (rule 2): `if (typeof __VC_LEAN__ !== 'undefined' &&
+__VC_LEAN__) entry.pruneAbove = 0;`. The settle prunes an unread slot at 0
+only `if (slot.bucket.size > entry.pruneAbove)`. No `typeof` per call in any
+build (rule 6); lean pays a size read and a compare it did not before
+(accepted). The owner added: the plugin defines `__VC_LEAN__` for every
+profile ('false' for performance, as the IIFEs), in build and serve, so no
+plugin build ships the `typeof`; and it emits the key only when the app's
+config does not define it, since Vite merges a plugin's `config()` result
+over the user's.
+
+**Tests first.** `tests/isloading-profile.test.ts` (11): performance keeps
+one unread slot and reads it dark later; 300 distinct unread targets stop
+the bucket at 256 (257 in flight; the first 256 are the ones kept); lean
+leaves it empty; the profile is read when tracking starts, not per dispatch;
+a read key's slot and signal survive in both profiles, settled inside
+another key's dispatch where the bucket is fullest; and five real-build
+checks (a minified Vite app: no plugin ships the guard, `'lean'` folds it to
+the write, the default plugin folds it out, an app's own `'true'` plus the
+plugin builds lean; the ESM carries it and the IIFEs fold it). Buckets are
+found by spying `Map.prototype.set` for a value whose `bucket` is the Map,
+so no inspection API ships. `tests/vite-wire-plugin.test.ts`: the exact
+`config()` objects updated on purpose, plus the profile and the app-define
+cases; `tests/root-probe-builds.test.ts` likewise. 12 red before; 3 green
+before by nature (the two lean tests pin today's behaviour, the app-define
+test pins "emit nothing over it", which today's plugin met by emitting
+nothing). Ten seeds, each restored after: no bound (4 red), prune read
+slots (2), invert the profile (6), read the flag per dispatch (1), override
+the app's define (2), emit the key only for lean (3), no define (5), the
+IIFEs without `'false'` (1), no guard (6). Every test went red under one.
+A first "no false" seed (the value `undefined`) reddened only the exact
+`config()` checks: Vite writes an undefined define as the literal
+`undefined`, which folds the guard anyway; the honest seed is the
+lean-only one.
+
+**Found: a skipped test cannot go red.** CI's `test` job runs `npm ci`, then
+`npm run test:run`, with no build: every `describe.skipIf(!haveDist)` block
+skips there and reads green, in 8 files (this window's build checks among
+them). The local gate builds first, so they run there. Owner's call.
+
+**Bytes** (base 205f78e built with `ab:dists`, head this tree):
+
+| file | raw | br |
+|---|---|---|
+| chamber.js | +145 | +44 |
+| index.js | 0 | 0 |
+| vite-hmr.js | +137 | +38 |
+| full IIFE (min) | +43 | +14 |
+| core, elements IIFEs | 0 | 0 |
+
+The Blade consumer ceiling holds (`tests/esm-treeshake.test.ts`). The full
+IIFE budget raised to the measured size, ledger in `scripts/check-size.mjs`.
+
+**Fold** (a minified Vite build of `examples/vapor-sfc`, which reaches
+useSharedCommandState): without the plugin the `typeof __VC_LEAN__` ships
+(1) with its guarded write; the default plugin build has no `__VC_LEAN__`
+and no `.pruneAbove=0`; `profile: 'lean'` has the bare write and no flag.
+The compare and `pruneAbove:256` are in all three.
+
+`npm run docs` (line links, the `profile` option). Suite under coverage
+2,782 passed, 100 x4 (5,770 / 3,571 / 1,255 / 4,769).
+
+**Gate.** The first run failed in `tests/dispose-plugins.test.ts`, which
+nothing here touches: "ends a retry wait mid-sleep" read the handler called
+twice. Not load: the retry wait is full jitter, `Math.random() * 100` ms, and
+a draw under 1 ms ran out inside the test's `advanceTimersByTimeAsync(0)`,
+about 1 run in 100. `Math.random` pinned to 0 reproduces the exact failure;
+pinned to 0.5 the test is deterministic (c871826). Then `size:doc` and the
+README's IIFE size stamp (read from `BUNDLE-SIZES.md`, so stamped after it).
+Gate green 11/11 on the committed tree.
+
+**Step D, prepared.** Arms built with `ab:dists`: base 205f78e, variant
+c36903b; only `chamber.js`, the full IIFEs and `vite-hmr.js` differ (rule
+12). Lean copies of the three workloads set `globalThis.__VC_LEAN__ = true`
+after their imports (the flag is read when tracking starts, which is after).
+Positive control for them: 300 unread targets on the built variant keep 256
+slots by default and 0 with the global; the base keeps 0 either way.
+
+Next: step D, the A/B (default and lean rows), on the owner's "go".
+
+### 35.63 Step D: option b behind the profile, measured (2026-10-02)
+
+Arms rebuilt with `ab:dists` (the previous scratchpad was gone): base 205f78e,
+variant c36903b; only `chamber.js`, the full IIFEs and `vite-hmr.js` differ.
+Lean copies of the three workloads set `globalThis.__VC_LEAN__ = true` on
+their first line. Positive control, bundled as `ab.mjs` bundles: 300 unread
+targets keep 256 slots on the variant by default and 0 with the global; the
+base keeps 0 either way.
+
+`npm run ab:session`, six jobs, two call lengths, K 10, 11:40-12:00, load
+5.4-6.3, 45 processes demoted; report and raw rounds `.probes/out/step-d/`.
+
+| row | default B/A short / long | ns | lean |
+|---|---|---|---|
+| p4_tracked | 0.849 / 0.861, faster | -22.0 / -21.5 | no result |
+| tracked_mixed_keys | 0.848 / 0.862, faster | -22.4 / -21.9 | no result |
+| held_control (ext2) | 1.009 slower / long refused (off-CPU 5.5%) | +1.5 / -0.1 | no result |
+| bare, hook, star, both, unheld x2, plugins3 | no result | ~0 | no result |
+
+Reproduces s35.61 (0.848-0.865x, -21 to -22 ns). Lean gives the gain back, as
+it should. held_control has no verdict: it dispatches a new target every call,
+so on the variant the bucket stays at 256 and every settle compares its size
+before pruning; a +1.5 ns cost there would fit that, and one length cannot
+say.
+
+**The session was too heavy (owner).** Twenty minutes at full load with the
+owner's apps demoted left the machine unresponsive, and the load itself
+widened the controls it then refused (spreads of 4-5%). Most of it bought
+nothing: half the rows run code b does not touch, and one lean row would have
+answered the lean question. From here a measurement is the smallest run that
+answers it (the rows the change touches plus one control, low K, the A/B
+under `taskpolicy -b` instead of demoting the owner's apps), with its cost
+stated before the "go".
+
+### 35.64 A missing dist fails instead of skipping (2026-10-02)
+
+Owner, on the hole s35.62 found: build before the tests in CI, and make a
+missing `dist` a failure.
+
+**Scope.** Not 8 files but 17: every file with a `haveDist` (16) or
+`haveAll` (tests/iife-bundle.test.ts) guard, 15 under `test:run` and 2
+under `test:vapor`. Each now calls `requireDist(<its own existence check>)`
+at load (`tests/require-dist.ts`), which throws "dist/ is missing or
+incomplete: run `npm run build` before the tests"; every
+`describe.skipIf(!haveDist)` became `describe`, and `!haveDist || !esbuild`
+became `!esbuild` (esbuild stays optional, as before). The comments that
+said "skips when dist/ hasn't been built" and CONTRIBUTING's "Build before
+the test runs" say "fails" now.
+
+**CI.** `.github/workflows/ci.yml`'s `test` job runs `npm run build` before
+`test:run`. Its skip set had not even been fixed: `node
+scripts/check-size.mjs`, later in the same job, fails on a missing dist yet
+passed there, because tests/dev-flag.test.ts imports scripts/build.mjs, whose
+builds run on import and write dist mid-run. So which guarded files skipped in
+CI depended on file order. Not a hazard for the new check: build.mjs writes
+with `emptyOutDir: false` and prunes only unemitted `.js`, so a built dist
+stays present throughout a run.
+
+`prepublishOnly` already ran `build` before `test:run`; left as it was.
+
+**Seeded check** (the 17 files, 2 workers under `taskpolicy -b`): the old
+files without a dist read green, 5 files passed and 10 skipped, 98 of 141
+tests skipped (`test:vapor`: 2 skipped). The new files without a dist: 17 of
+17 failed, each with the missing-build message. With the dist: 17 passed, 145
+tests, none skipped. `lint:check` clean.
+
+### 35.65 A gate flake: an abort that lost to the answer (2026-10-02)
+
+The gate on 76d0b35, run under `taskpolicy -b` (efficiency cores, 237 s
+instead of 60), failed in `tests/http-dedupe-signal.test.ts`, which nothing
+here touches: "dedupe: false keeps every caller on its own request" read
+`[requests, abortedOnServer]` as `[2, 0]`, not `[2, 1]`. Owner: a gate
+failure is fixed before anything continues.
+
+Two races, either enough. The test server answers after `DELAY` (40 ms), and
+counts an abort only if it arrives before the answer; on a starved machine the
+time from a request's arrival to the test's `abort()` can pass 40 ms, and the
+answer wins. And `until` polled 100 x 5 ms, then returned as if its condition
+held, so a slow abort read as no abort.
+
+Fixed (test only): `DELAY` 250 ms, and `until` waits up to 2 s and then
+throws, naming the condition. Seeded with `DELAY = 1`: the old file fails the
+same four abort tests, "dedupe: false" after 564 ms with the gate's exact
+`[2, 0]`; the new file fails the same four, that one at 2,003 ms with the
+`until` message. Unseeded, 11 of 11 pass; the file takes 3.0 s instead of
+0.8 (each answer waits 250 ms), in parallel with the suite.
+
+The throttled gate was a mistake of method, not a gate result; it was rerun at
+normal priority (green, 60 s) before this fix, and again after it.
+
+### 35.66 Step E: option c, the identity-checked stack, measured (2026-10-02)
+
+Scratch commit 12faf6b on 913d2c1 (detached, in a session worktree; not on
+any branch). The sync bus pairs a start and its settle on a stack (each
+Command followed by its slot): the settle pops when the top is its Command,
+else searches down and removes it there, else takes nothing. The async bus,
+and any bus this library did not make, keep the Map; `_isSyncBus` in
+`src/command-bus.ts` reads the state `_INSPECT` already carries
+(`'pendingRequests' in s`).
+
+**Tests first** (`tests/isloading-nesting.test.ts`, 10, in the scratch
+commit): a handler three levels deep; before-hooks ahead of ours and behind
+it; an after-hook; listeners ahead of our settle and behind it; a before-hook
+behind ours throwing; the depth limit; tracking armed mid-flight; queries and
+emits over two levels in flight; a start whose settle never arrives; the
+async bus settling out of order. Each checks the flags and that the entry is
+released with its last holder (every start settled). Green on b (the Map)
+and on c; the six isLoading files 48 of 48 on c. Seeds on c: pop without
+the identity check, 3 red; top only, no search down, 1 red; removing the
+wrong pair when found below the top, NOT caught (it changes no count and no
+flag, only which stale Command the stack keeps; the Map keeps one for that
+open start too). A first draft of the query case looped (a handler querying
+itself: a query runs the handler, and query has no depth guard); fixed in
+the test.
+
+Only one path was found that reaches "found below the top" on a sync bus:
+`fanOutListeners` skips the next listener when one listener removes an
+EARLIER listener and adds one in the same call (the length is unchanged, so
+the index is not corrected). The test uses it, with a positive control that
+fails if the skip is ever fixed. The skip itself is a fan-out bug, not fixed
+here.
+
+**A/B** (owner's "go"; mild: plain `npm run ab`, normal priority, nobody
+demoted, K 6, one length, 20 s in all; arms 913d2c1 and 12faf6b built with
+`ab:dists`; raw `.probes/out/step-e/`):
+
+| row | B/A | ns |
+|---|---|---|
+| p4_tracked | 0.645, faster | 124.1 -> 79.9 (-43.9) |
+| tracked_mixed_keys | 0.650, refused (control centre 0.972) | 123.8 -> 80.4 (-43.4) |
+| p0_bare (control row) | no result | +0.1 |
+
+Positive control: both arms, bundled as `ab.mjs` bundles them, light the
+read key inside its handler and darken it after, nested and on the async
+bus, identically. Why so large is a lead, not measured: the Map hashed a
+new Command object on every set, get and delete.
+
+Two first attempts gave no verdict and are not results: K 4 cannot pass (the
+exact sign-flip test's smallest p is 2 / 2^K, 0.125 at K 4), and under
+`taskpolicy -b` the run lands on the efficiency cores and every control
+failed (spreads 6-27%, bare dispatch 130 ns instead of 22).
+
+**Bytes** (b -> c, from the arms): `vapor-chamber.iife.min.js` +427 raw /
++107 br; `vapor-chamber.iife.js` +1,178 / +265; `chamber.js` +836 / +164;
+`command-bus.js` +125 / +27; the core and elements IIFEs, `index.js`
+unchanged in raw (brotli moves of -11 to +1 from renamed chunk imports).
+The full IIFE budget would need a raise.
+
+Not landed: the owner decides.
+
+**Landed** (owner: speed over a size this small): cherry-picked onto
+`v8-harness`, the full IIFE budget raised to the measured 40,436 / 12,531.
+
+### 35.67 Three bugs: query depth, async depth, listener fan-out (2026-10-02)
+
+Found while landing option c (s35.66) and answering a consumer's questions;
+owner: "fix bugs", then the shape by "performance, correctness and overall
+coherence", and "all go".
+
+**Sync `query()` had no depth guard.** A handler that queried itself ran 969
+times and overflowed the stack; a dispatch -> query chain ran 32 levels (only
+the dispatches counted). `syncQuery` is now split like `dispatch`, the outer
+half owning the guard on the same counter. Red before: 969, 32; 16 after.
+
+**The async bus counted dispatches in flight, not nesting.** The counter was
+raised before an `await` and lowered after, so 20 concurrent, unnested
+dispatches had 4 refused with `core:exceeded:depth`. Fixed by depth by
+parent: `dispatchDepth` on the async bus is the depth of the dispatch whose
+code is running now; each stretch of a dispatch that calls user code
+(before-hooks, the runner, after-hooks, listeners) runs at its own depth and
+restores the one it found, so a dispatch started there is its child and one
+started anywhere else is depth 1. `asyncDispatch` is no longer `async` (no
+second frame); `asyncQuery` takes the guard inside. A loop through the user's
+own await is not followed (no async context exists to follow it). Tests, on
+the OLD code: 40 concurrent, red (refused); a listener re-dispatching its own
+action, the test worker crashed (an endless loop: the old counter did NOT stop
+it, the outer dispatch finishes before the child's listener runs); an
+after-hook re-dispatching, hung; an async query querying itself, stack
+overflow; depth back at 0 after a refused chain (control), green. All five
+green on the fix; the existing "stops infinite dispatch loops (async)" stays.
+
+**Listener fan-out corrected its cursor by length.** It skipped the next
+listener when one removed an EARLIER peer and added one (length unchanged),
+and re-ran the previous listener when one removed itself and a LATER peer. The
+same loop was in the fast lane's `'live'` emit and in `createTestBus()`.
+Owner chose one rule for all three (DOM's `EventTarget` rule): the listeners
+that existed when the dispatch started; one removed during it is marked `off`
+and skipped, one added during it runs from the next. Unsubscribe and `offAll`
+mark entries off and replace the array (copy-on-write), never splice one a
+loop is walking; exact listeners became entries of the wildcard entry's
+shape. The one behaviour change: an added listener no longer runs in the
+same dispatch. Red on the old code: bus 4 (exact, wildcard) + offAll
+mid-dispatch, fast lane 3, TestBus 3.
+
+**Option c's search-down.** With the fan-out fixed no public path leaves a
+start open on a sync bus, so "found below the top" lost its test. Owner: the
+shape stays (speed and correctness decide it); test it. The test finds the
+pairing stack by spying `Array.prototype.push` for a push of a Command and its
+slot, and puts a start that never settles on top of `outer`: `outer` still
+settles, only its own pair is removed, the entry is released. A public test
+pins the invariant (listeners removed and added mid-dispatch: every start
+settles). Seeds: top only, red; the wrong pair removed (uncaught in s35.66),
+red; the old wildcard fan-out, red (the invariant test).
+
+**A/B** (owner's "go"; plain `npm run ab`, normal priority, nobody demoted, K
+6, one length, 34 s; base = 575aef2's build, variant = the three fixes):
+
+| row | B/A | ns |
+|---|---|---|
+| bare dispatch (control) | 1.000, no result | 0.0 |
+| query, bare | 1.056, slower | +1.5 |
+| query, one listener | 1.054, slower | +2.4 |
+| dispatch, exact + wildcard listener | 0.974, faster | -1.4 |
+| emit, three listeners | 0.968, faster | -0.7 |
+| fast lane emit, three listeners | 0.964, faster | -0.6 |
+
+The async dispatch is not timed: the harness times synchronous functions
+only. Owner on the query cost: "swallow for correctness".
+
+**Bytes**, each fix built on its own (full / core / elements IIFE, raw / br),
+and the Blade consumer from 6,453:
+
+| fix | full | core | elements | Blade |
+|---|---|---|---|---|
+| query depth | +122 / +19 | +123 / +11 | +123 / +7 | +4 |
+| async depth | +451 / +161 | +452 / +140 | +451 / +146 | +126 |
+| fan-out rule | +129 / +40 | +128 / +59 | +128 / +69 | +64 |
+
+Owner: raised to the measured sizes. Two source-transform A/Bs
+(`tests/plugin-throw-ab.test.ts`, `tests/wildcard-prefix-ab.test.ts`) failed
+loudly on the moved lines, as designed, and were updated to them. Coverage
+100 x4 (5,847 / 3,593 / 1,265 / 4,826); one branch (`offAll` of an exact
+pattern nobody listens to) needed a test, added with offAll mid-dispatch.
+
+### 35.68 The whitepaper rewritten (2026-10-02)
+
+Prompt `.probes/next-window-prompt-whitepaper.md` (HANDOFF item 5), branch
+`whitepaper` off `v8-harness` at fcf8040. Owner approved the outline before
+any section was written. No src change beyond comments.
+
+**Inventory first** (`.probes/whitepaper-inventory.md`): an action per
+section (keep, rewrite, move, correct, verify) and the code or test backing
+each claim, checked by grep against `src/`. Seven claims had nothing behind
+them and five were wrong; each is settled below.
+
+**Structure.** The body describes the library as it is, in 17 sections plus
+a new one, Performance and V8 (14). The history moved verbatim to "Appendix:
+Notes and history": A, the origins (the v1.0 header and abstract, the store
+reversal, the nine comparison rounds); B, the Vue 3.6 alignment log beta.8 to
+rc.10 (was 9.2, the larger half of the file); C, every passage in which the
+body recorded its own correction, and every passage a rewrite replaced; D,
+the removed sections 18 and 20. Slices were cut by exact text anchors that
+had to match one line each. A line-by-line check against the pre-rewrite file
+confirms every old line is in the body or the appendix, except the rewritten
+ones, each reviewed: one fact had been lost (the meta fields in the dispatch
+flow) and was restored.
+
+**Corrected** (the old text is in appendix C):
+- `retry` was in the plugin catalogue; it is the async bus's option.
+- The comparison said naming is "enforced"; it is opt-in (default `'warn'`).
+- "Vapor Chamber enforces CDCC-compliant function sizes throughout the
+  codebase": no lint rule bounds complexity (biome's `complexity` group sets
+  none).
+- The composed-surface example passed `plugins` to `createCommandBus`, which
+  has no such option, so `revalidateRoutes` was never installed.
+- The directive section said `.vc-loading` disables the button; in flight it
+  sets `aria-disabled`, never `disabled`, and failures are announced in the
+  live region.
+- The layer diagram's "inertia bridge" (it is the HTTP bridge's
+  `csrf: 'inertia'`); the file map missed five modules, `transitions/vapor.ts`
+  and ten router modules; the dispatch flow said nothing of query depth, async
+  depth or the listener rule (log s35.67).
+
+**Unbacked, dropped or replaced:** "runs in under 30 seconds"; "~40KB
+smaller" / "~40KB baseline savings" (now the stamped interop row,
+`vc:sizeVaporInteropRaw`); the per-signal byte estimates (the direction
+stays); the Livewire / Alpine / HTMX bundle sizes; "in under ten seconds";
+the vuejs/vue-vapor and Vite 7.0 references. Backed after all: a sync bus's
+`request()` returns a Promise (`CommandBus.request`).
+
+**References repointed.** 29 comments and docs cited old section numbers;
+each was repointed by an exact substitution checked per site, and
+`docs/rc-alignment.md` and ROADMAP now send new alignment rows to appendix B.
+Comment-only in src: every `dist/*.js` byte-identical but the three
+unminified IIFEs, whose one changed comment is the cited number.
+
+Each section was its own commit (870aec2 to 51cebc8, then 5f7cd33), with
+`check-line-citations`, `check-doc-claims`, the stamp check and the ASCII
+guard after each.
+
+### 35.69 Peer bench ratios as bands, eventemitter3 compared (2026-10-02)
+
+HANDOFF item 2 (`.probes/next-window-prompt-bench-claims.md`), branch
+`bench-claims` off `whitepaper` (65ca3d7). The prompt predates s35.56 and
+s35.58: option a (restamp from a clean tree) was done there, and the six
+nanoevents ratios are gone.
+
+**Inventory.** Ten `vc:bench*` names in 15 places (`docs/performance.md`,
+both migration guides, ROADMAP), four against mitt, six between this
+library's own rows; every sentence on them held at s35.56's values. Three
+hand-typed peer claims in `docs/performance.md` had no ratio behind them;
+from s35.56's raw runs: `bus.emit` fan-out "~1.5x faster than mitt" read
+1.39-1.46, mitt emit against `bus.dispatch` "~3x" read 1.99-2.07, and "emit is
+faster than mitt" held. The bench also runs eventemitter3, which out-ran
+`bus.emit` on fan-out (about 6,300 against 4,750 hz) and which no doc
+mentioned, the EventEmitter guide included.
+
+**Owner's choice:** the mix by kind, and eventemitter3 in ("i dont want to
+leave out i want to keep honest mix"). b19a626:
+- `scripts/bench-ratios-reporter.mjs`: each ratio carries its describe group
+  and a kind, `own` or `peer`; the reporter records one run under
+  `benchRun` and no longer writes the stamped `bench` block.
+- `scripts/bench-bands.mjs` (`npm run bench:bands -- N`, not shipped): N
+  fresh vitest processes over only the groups that hold a ratio (26 of 64
+  rows); writes the median of an own ratio, the min-max of a peer one and
+  `benchProvenance`. Refuses fewer than 3 runs and stops at the first run
+  that fails or records fewer ratios than it should.
+- Four peer ratios added: `bus.emit` vs mitt and vs eventemitter3 on
+  fan-out, the fast lane vs eventemitter3 (one eventemitter3 row added to the
+  fast-lane fan-out group), mitt emit vs `bus.dispatch`.
+- `tests/bench-ratios.test.ts`, 9 tests: every row exists in its group;
+  peer exactly when a row names a peer library; bands by kind; too few runs
+  and a missing ratio refused; the `-t` pattern selects exactly the ratio
+  groups. Seeded red, one each: a kind flipped, bands ignoring kind, the
+  pattern unescaped, a row renamed.
+
+**Measured** (owner's "go"): a clean worktree of b19a626 (node_modules
+shared, nothing downloaded), `node scripts/bench-bands.mjs 5`, normal
+priority, nobody demoted, 15:02-15:05, 34 s a run, load 5.3 at start and 3.0
+at the end. Node 24.21.0, vitest 5.0.1, mitt 3.0.1, eventemitter3 5.0.4. Raw
+runs `.probes/out/bench-bands-2026-10-02/`.
+
+| ratio | kind | stamped before | now |
+|---|---|---|---|
+| FastLaneVsMitt | peer | 1.83 | 1.84-1.95 |
+| FastLaneVsEventEmitter3 | peer | new | 0.94-1.04 |
+| EmitVsMittFanout | peer | "~1.5x" | 1.44-1.54 |
+| EmitVsEventEmitter3Fanout | peer | new | 0.78-0.82 |
+| MittEmitVsDispatch | peer | "~3x" | 1.64-2.04 |
+| CompileVsMitt | peer | 5.47 | 5.34-5.76 |
+| FloorVsMitt | peer | 72.32 | 69.14-80.07 |
+| EmitNoListenersVsMitt | peer | 1.74 | 1.81-1.92 |
+| CompileVsDispatch | own | 10.93 | 10.57 |
+| FloorVsCompile | own | 13.32 | 13.96 |
+| FloorVsDispatch | own | 152.04 | 151.80 |
+| EmitVsDispatchFanout | own | 1.31 | 1.33 |
+| UidCounterVsUuid | own | 3.13 | 3.14 |
+| PersistCoalesce | own | 17.50 | 17.89 |
+
+`bus.emit` against mitt moved from s35.56's 1.39-1.46 to 1.44-1.54; s35.67's
+fan-out rule made the three-listener emit 0.968x its time, which fits, but
+the two figures come from different sessions and are not an A/B.
+
+**Docs** (stamped in the worktree, committed there and cherry-picked; never
+from the main tree): the EventEmitter guide states the fast lane level with
+eventemitter3 and the bus's `emit` behind it; the mitt guide adds `bus.emit`
+against mitt; `docs/performance.md` stamps the two hand-typed figures,
+drops "~18M dispatches per second" (an absolute from one host), names
+eventemitter3 in the fan-out sections and "What this means", and says which
+values are medians and which ranges, with the provenance marker; ROADMAP and
+V8-RULES rule 15 name `bench:bands`. Left as it was: "within reach of a
+hand-rolled `Map<string, Set<fn>>`" (not stamped; s35.56's runs read
+`bus.emit` at about 0.86x of it).
+
+The gate on 720560f failed at typecheck: TypeScript typed the parameters of
+`bands()` and `groupPattern()` from their default, `RATIOS`, so the tests' own
+ratio tables did not fit. JSDoc types on both; the tests had only been run,
+not typechecked, before b19a626.
+
+### 35.70 A store's `$reset` is a command (2026-10-02)
+
+The 1.26 list's decision 5 (item 18), owner: "now". Branch `reset-command`
+off `bench-claims` (3ee06df), so the log, CHANGELOG and decisions rows do not
+conflict at merge.
+
+**The bug.** `$reset()` wrote `state.value = options.state()`, so no plugin,
+hook or listener saw it: with `persist` the reset never reached storage and
+the next reload restored the state from before it. The probe
+`.probes/p126-ext13-15-18-d2.test.ts` arm 18 read heard `(none)` and storage
+`{n:5}` after the reset.
+
+**The name, checked against the code first.** README and the whitepaper show
+`naming: { pattern: /^[a-z][a-zA-Z0-9]+$/, onViolation: 'throw' }`, and
+`register()` validates. `<id>$reset` (the plan's name) fails that pattern, so
+every store on such a bus would have thrown at creation, where today it
+works. `<id>Reset`, `createFormBus`'s precedent (`src/form.ts`), passes it but
+is the name a store's own `reset` action already registers. Owner chose C:
+`<id>$reset`, and `validateNaming` returns for a name containing `$` once the
+pattern has failed (a passing name, or a bus without `naming`, runs what it
+ran). The cost of C: a naming rule can no longer reject a name with `$`.
+
+**The fix** (f4b06af): `<id>$reset` registered beside the actions, in `offs`
+so `$dispose` removes it; `$reset()` returns `bus.dispatch(<id>$reset, null)`,
+a promise on an async bus. `ChamberStore['$reset']`'s type widens from `void`.
+Observable: on an async bus the reset lands when that promise settles; a
+plugin can refuse it; history records it; `inspectBus().actions` lists it
+(`tests/chamber-store.test.ts` updated).
+
+**Tests** (`tests/store-reset-command.test.ts`, 8): persist hears it and a
+fresh `persist(...).load()` reads `{n:0}`; a listener and `history` see
+`counter$reset`; the result is ok with the fresh state; a refusing plugin
+leaves `{n:5}`; on the async bus the state is `{n:0}` after `await`;
+`$dispose` unregisters it; a store on a bus with README's rule creates and
+resets; control, a name without `$` failing the rule still throws. On the old
+code 7 of 8 red (the control green). Seeds, each red: no `$` exemption
+(option A) 1; the handler kept out of `offs` 1; the result dropped 4. The
+probe's arm 18 green: heard `counter$reset`, storage `{"n":0}`.
+
+**Bytes**, HEAD's build against the fix: `store.js` +147 / +36 (the plan
+estimated +128 / +27, before the result was returned); `command-bus.js` +24 /
++12; every IIFE +17 raw, brotli +15 full, +4 core, +3 elements, all from the
+naming check (the store is in no IIFE). Budgets raised to measured (owner:
+"rise it"). The Blade consumer stays under its ceiling. No A/B: the only new
+work is on a name that already failed its pattern.
+
+Coverage 100 x4 (5,851 / 3,595 / 1,266 / 4,830). Docs: `docs/store.md`
+(`$reset` is a command, its result, `$` reserved), README's naming section,
+the whitepaper's naming paragraph.
+
+### 35.71 `perf-ab` skips, with the reason, when there is no base (2026-10-02)
+
+HANDOFF item 3 (`.probes/next-window-prompt-ci-bench.md`) was already done
+by s35.59 (the bench job named "bench (report only)", `perf-ab` the check);
+the prompt predates it. Branch `ci-base-skip` off `reset-command` (7113442).
+Bench-claims (s35.69) does not touch CI: the CI bench job does not use the
+ratios reporter, and CI's `docs:stamp` has no `bench` block to publish.
+
+**Found reading the job.** `scripts/ab/build-dists.sh` ran `git worktree add`
+with its output sent to `/dev/null`; with an all-zero base it exited 128 and
+printed nothing (run locally). GitHub sets `github.event.before` to zeros on
+the push that creates the branch, and after a force-push it names a commit
+the checkout may not have (not tried on GitHub). Either way `perf-ab` would
+be red with no reason. Owner: skip with a message.
+
+- `scripts/ab/base-ok.sh <sha>`: exit 0 for a commit the checkout has;
+  otherwise exit 1 with one line saying why (none given, all zeros, not in
+  the checkout).
+- `.github/workflows/ci.yml`, `perf-ab`: before building, a base that fails
+  the check prints a `::notice` and writes the reason to `perf-ab.txt`
+  (the uploaded artifact), then exits 0.
+- `build-dists.sh` prints `cannot check out <sha>: <git's error>` and exits 1.
+- `tests/ab-ci.test.ts`, 4 added: HEAD accepted; zeros, an absent commit and
+  no argument refused, each with its reason; build-dists names the commit;
+  the workflow calls the check before any build and exits 0 there. Seeded, one
+  red each: the zeros case removed; the presence check removed; the old
+  silent build-dists; the workflow without the check.
+
+Checked locally: the YAML parses (js-yaml, seven jobs), and the step's own
+text, run with `BASE` all zeros, prints the notice and exits 0 before any
+build. Not run on GitHub: the owner pushes.
+
+### 35.72 `$reset` with a `state()` that reads storage; the naming comment (2026-10-02)
+
+Branch `ci-base-skip`. Two drifts s35.70 left, found answering the docs
+panel's questions (`.probes/1.26-remaining.md`, F1):
+
+- **F1, settled by a test.** `$reset()`'s handler sets `state.value =
+  options.state()` (`src/store.ts`), and `persist` saves after the handler.
+  So a store whose `state()` reads storage resets to the saved record and
+  saves it again: `set(5)` then `$reset()` leaves `{n:5}` in memory and in
+  storage. Pinned in `tests/store-reset-command.test.ts`, with the pattern the
+  docs now recommend (a pure `state()`, the saved record loaded through an
+  action), which resets to `{n:0}` and saves that. Seeded: a reset that
+  reuses the value computed at creation turns the first test red. Not
+  changed in the code: whether a reset should ignore storage is D6's
+  question (hydration as a command), the owner's.
+- **The naming comment.** `NamingConvention`'s docblock (`src/command-bus.ts`,
+  the source of `docs/api`) and README's options table now say a name with
+  `$` is not checked. Comment only: every `dist/*.js` byte-identical.
+
+`docs/store.md`: the how-to beside `$reset`, with the load-through-an-action
+example.
+
+### 35.73 Core 1: a DEV warning when the shared bus is replaced after use (2026-10-02)
+
+`main` fast-forwarded to `ci-base-skip` (1b0b7e4, owner: "merge into main").
+Owner's order from here: core, storage, router, examples. Branch `core-1.26`
+off `main`. Decision 7 of the 1.26 list (`.probes/1.26-remaining.md`).
+
+**The case.** `getCommandBus()` creates a sync bus when none is set
+(`src/shared-bus.ts`). An app that later calls `setCommandBus(asyncBus)`,
+after a composable or island already took the first one, is split: the early
+holders keep dispatching to the old bus, with no error. The fallback stays
+(every sync app relies on it).
+
+**The change.** `getCommandBus()` marks the bus it created, in DEV only;
+`setCommandBus()` with a DIFFERENT bus while the mark is set warns once and
+clears it; `resetCommandBus()` clears it. Quiet by construction: the HMR
+shim (`src/vite-hmr.ts`) restores the SAME bus object; the vitest setup file
+(`src/vitest.ts`) now calls `resetCommandBus()` before `setCommandBus()`.
+
+**Tests** (`tests/shared-bus-fallback-warning.test.ts`, 8): warns on the
+split, once; quiet when set before any get, when the same bus is set again,
+after a reset; and inside this repository's own setup file, a fallback left
+by one test does not warn when the setup installs the next test's bus, with
+a positive control that the package build does warn on that replacement.
+Red on the old code: 2 (the warning cases). Seeds, one red each: the same
+bus also warning; reset keeping the mark; the mark not cleared after the
+warning; the setup file without its reset.
+
+A first version of the setup-file pair could not fail: it captured with
+`vi.spyOn`, and `restoreMocks: true` (vitest.config.ts) restored the spy
+before the setup file's beforeEach ran for the next test, so the seed
+without the reset passed. Found by that seed; a probe showed the package
+warns (1 hit), and the pair now swaps `console.warn` for a plain function.
+
+**Bytes:** every IIFE byte-identical (`__VC_DEV__` folds the warning out);
+`shared-bus.js` +602 / +202 and `vitest.js` +25 / +9 in ESM, where the
+consumer's production build folds `DEV`. Not a hot path: `setCommandBus`
+runs at setup, and `getCommandBus` adds a DEV-folded store inside its
+first-call branch only.
+
+Docs: README's API row for `setCommandBus` (set before any
+`getCommandBus()`; the split warns in development).
+
+
+### 35.74 Core 2: `ok`, `err` and `countOption` from the root (2026-10-02)
+
+Branch `core-1.26` (off `main` c82ddcc). Decision 12 of the 1.26 list
+(`countOption` with the plugin-surface exports) and the plan's "Exporting the
+result factories safely".
+
+**The case.** An app plugin that answers without calling `next()` built its
+own result: `examples/custom-plugins.ts` returned `{ ok: false, error }`
+twice, a two-field literal with a different hidden class from the bus's
+three-field `{ ok, value, error }`, the polymorphism tests/v8-shapes.test.ts
+removed from the library's own ~30 sites. The factories existed only as
+`_okResult` / `_errResult`, outside the barrel. And an app plugin with a count
+option had no access to `countOption`, the rule bounds.ts records after
+cache() and createOutbox() failed open on NaN.
+
+**The change.** `src/index.ts` exports `_okResult as ok`, `_errResult as err`
+and `countOption`: the same functions, no wrappers. Safety stays where it
+was: `err` only wraps an error; the owner is minted by the plugin's bound
+`fail` (its third argument), so a refusal is `err(fail(code, message))`. The
+comment at command-bus.ts (the internal export) now says the barrel makes
+them public.
+
+**Tests** (`tests/plugin-result-factories.test.ts`, 5): identity with the
+internal factories; one map with a bus result for `ok` and `err` (V8's
+`%HaveSameMap`, tests/v8.ts); an app plugin with `id: 'qtyGuard'` refusing
+through `err(fail(...))` reads `qtyGuard:invalid:payload` on the bus's map;
+`countOption` is bounds.ts's own and keeps its rule (NaN and non-numbers to
+the fallback, negatives to `min`, truncation, `Infinity` through). Red before
+the change: 5 of 5. Seeds, each red: `ok` a same-shape copy (identity, 1
+red); `err` a two-field literal (identity, map, plugin: 3 red); `countOption`
+the `| 0` idiom (2 red).
+
+**Bytes:** the three IIFEs byte-identical (they import their names one by
+one); `dist/index.js` +47 raw / +18 brotli; the other 55 dist .js files
+byte-identical. Not a hot path (exports only).
+
+Docs: README's plugin section (a short paragraph and a `qtyGuard` example);
+`examples/custom-plugins.ts` refuses with `err(fail(...))`; the whitepaper's
+12.4 hydration example returns `ok(undefined)`; CHANGELOG.
+
+
+### 35.75 Core 3: the seal() shadow check pinned as expected-to-fail (2026-10-02)
+
+Branch `core-1.26`. Decision 9 of the 1.26 list: the check that a bridge
+shadows a local handler lands with P1, as one general rule at `seal()`, and
+its acceptance is committed now so P1 cannot land without it.
+
+**Tests** (`tests/seal-shadow-check.test.ts`, 3; no source change): CONTROL,
+without the bridge the local handler runs; TODAY, with an HTTP bridge whose
+`actions: ['cart*']` match `cartAdd` the bus answers from the bridge, one
+request, and the local handler runs 0 times; P1 ACCEPTANCE as `it.fails`,
+`seal()` throws `core:already:handler`. Positive control for the `it.fails`:
+a copy whose `seal()` throws that code turns it RED (1 failed, 2 passed),
+then the copy was deleted. The plan's probe was
+`.probes/p126-ext13-15-18-d2` arm 15 (fetch stubbed); this one injects the
+HTTP client.
+
+When P1 lands: flip `it.fails` to `it`, delete TODAY, and add the intended
+shadow from the panel round (a handler registered only to carry `undo`),
+which needs an exemption or a home for undo that is not a handler.
+
+Bytes: none (tests only).
+
+
+### 35.76 Core 4: three result literals the shape guard could not see (2026-10-02)
+
+Branch `core-1.26`. Found while listing the plugin factories for the id
+fixture (decision 8): `schemaValidator` (src/schema.ts) built its rejection
+as `({` newline `ok: false,` newline `error: ... })`.
+
+**The case.** tests/v8-shapes.test.ts guards "src/ builds no CommandResult
+literal of its own" with a regex over ONE line at a time, so a literal
+written over several lines passed. A multi-line scan of src (testing.ts
+excluded, as the guard does) found three:
+- src/schema.ts, `schemaValidator`'s rejection: `{ ok, error }`, two fields,
+  a plain Error.
+- src/ssr.ts, `rehydrate()` refusing an async bus: `{ ok, error }`, two
+  fields, a plain Error.
+- src/plugins-schema.ts, `validateSchemas`' `rejectResult`: three fields in
+  the factory's order.
+V8's `%HaveSameMap` (node --allow-natives-syntax, controls: errResult twice
+true, a two-field literal false): a three-field literal at another site IS
+the same map as errResult's, so the third was a discipline fix only; the
+first two were real splits.
+
+**The change.** All three use `_errResult(...)`, same error object and
+message; the two former two-field results gain `value: undefined`, like every
+other failure. The guard also scans each file's text for
+`{` + newline + `ok: true|false,`.
+
+**Tests** (tests/v8-shapes.test.ts): schemaValidator's and validateSchemas'
+rejections share the bus's map; rehydrate()'s async refusal shares it; the
+literal guard reads multi-line literals. Red before the change: 3 (the guard
+listing the three sites, and the two map tests). The guard's own red on the
+old tree is its seed.
+
+**Bytes:** IIFEs byte-identical; `ssr2.js` -39 / -21 brotli,
+`plugins-schema.js` -24 / -4, `index.js` -23 / -1. Speed: only the
+construction of a rejection result changed, not the dispatch path; one map
+at every `result.ok` site is the V8 direction (rule 1).
+
+Left as found, not changed: both former two-field sites carry a plain Error
+with no owner code, so `failureCondition` reads them as `failed`, a bug
+(its fallback, command-bus.ts), unlike validateSchemas'
+`validateSchemas:invalid:payload`. (Corrected: this entry first said
+`unknown`.) The owner decided to code them; that is a later step.
+
+
+### 35.77 Core 5: every plugin factory declares its id (2026-10-02)
+
+Branch `core-1.26`. Shape rule 3 (owner, 2026-10-02, recorded in
+`.probes/1.26-remaining.md`): one producer, one owner name, used for the
+plugin's id, the owner of every failure it mints, and (with P1) inspection.
+
+**The case.** 5 of the bus-plugin factories declared an id; the other 20 (the
+plan counted 20 in all; the real count is 25, adding `schemaValidator`,
+`schemaLogger`, `createSSRPlugin`, `validateSchemasAsync` and the outbox's
+plugin) reported a throw as `plugin:failed:plugin`, which names no plugin.
+
+**The change.** The id is the factory's name without `create`; where a
+module already minted its failures under a shared owner its plugins take
+it: the three bridges `transport` (one shared `TRANSPORT` marker, so a
+bridge has one owner name beside `transport:lost:reply`), both schema
+validators `validateSchemas`. 20 factories gained an id (`Object.assign` in
+the factory, the existing idiom; ssr and outbox on their `.plugin`). Codes
+that change: a built-in plugin's throw, `plugin:failed:plugin` ->
+`<id>:failed:plugin`. Refusal codes do not move (only the 5 already-named
+plugins mint them). Decision 8 had the ids land with P1 from one fixed list;
+they land now from that list, so each code changes once, and P1 reads these
+strings.
+
+Found and fixed with it: `getErrorEntry` / `isRetryableCode` looked a code up
+by exact string, so a throw from a named plugin (already
+`validator:failed:plugin` before this) had no registry entry. Any
+`<id>:failed:plugin` now answers with the one `plugin:failed:plugin` entry.
+
+**Tests** (`tests/plugin-ids.test.ts`, 6): the fixture (25 entries) against
+each factory's real id; the owner-word form; a throw in `logger` reads
+`logger:failed:plugin`; a bridge's (a lone-surrogate idempotency key)
+`transport:failed:plugin`; the registry answers for every id; the list
+covers every exported factory in src returning a Plugin (a source scan,
+reject-all-except-the-list). Red before: the fixture (20 ids missing) and
+the registry test. Seeds, each red: serialize without its id (1); the
+bridges named `httpBridge` (2); a new exported factory returning a Plugin
+(the coverage test).
+
+**Bytes:** the Blade consumer bundle (tests/esm-treeshake.test.ts) measured
+6_660 brotli over its 6_648 ceiling: logger's id and TRANSPORT's id. Alone
+(brotli is not additive): neither <= 6_647, TRANSPORT only 6_648, logger
+only 6_664, both 6_660. Owner: 12 B is acceptable; ceiling raised to the
+measured size (6_661). Dist and IIFE figures below.
+
+Speed: the dispatch code is unchanged; the plugin function objects carry one
+more property, and the async chain reads `plugin.transport` on them when
+retry is on (command-bus.ts nextFrom). See the A/B note below.
+
+**A/B (owner: "test speed").** `npm run ab -- 8d140f1 5142d8a
+scripts/ab/workloads/plugins.mjs --k=6` (arms from `npm run ab:dists`;
+`command-bus.js` byte-identical between them, the plugin modules not), node
+24.21.0, load 6.6, normal priority, 68 s. The touched row,
+`plugins3_listener1` (logger, cache and metrics each gained an id): B/A 0.997
+(CI 0.968..1.021, MDE 2.1%, control 1.010 +-4.0%) at n 27_776 and 0.992 (CI
+0.984..1.023, MDE 1.3%, control 0.991 +-2.5%) at 4n; 160.0 -> 159.0 ns and
+185.3 -> 184.1 ns. The untouched row, `tracked_mixed_keys`: 0.993 and 0.986,
+CIs including 1. Verdict on both: NO RESULT, no difference beyond the MDE;
+nothing counted slower (decision 11). The short call's controls were wide
+(4.0-4.2%) at that load; the 4n length is the cleaner read. The async chain's
+`plugin.transport` read is not timed: the tool times sync functions only (a
+recorded limit).
+
+
+### 35.78 Core 6: every library failure is coded (2026-10-02)
+
+Branch `core-1.26`. Shape rule 2 (owner, 2026-10-02): every failure the
+library builds is `owner:condition:subject`; a plain Error passes through
+only when it is someone else's (a handler's throw, Fetch's TypeError).
+
+**The case.** A scan for `errResult(new Error(` in src found four uncoded
+failures (against 11 coded through a `fail`). As plain Errors they read
+condition `failed` (failureCondition's fallback), the condition of a bug.
+
+**The change.**
+- `schemaValidator`'s rejection: through the plugin's own `fail` (its id,
+  core 5), `schemaValidator:invalid:payload`, with `action`.
+- `rehydrate()` given an async bus: `ssr:invalid:bus` (`_failures('ssr')`,
+  the plugin's id is `ssr` too).
+- `synthesize()` without an adapter: `schema:missing:adapter`.
+- `v-vc-command`'s timeout: `directive:timeout:dispatch`, context
+  `{ timeout }`, condition `timeout`; built by `_timedOut` (internal), a
+  function of its own because the element's state is private and a test
+  must read the code.
+Messages unchanged. Registry: the four codes, and `throttle:limited:handler`
+(throttle() raised it; the registry lacked it, and its test never checked
+the catalogue; it does now). Owners: a function that is not a plugin reports
+under its feature's name (docs/plan-failures-and-contract.md 4.1).
+
+**Correction to what I told the owner.** I said a coded schema rejection
+would make the outbox DROP the record instead of blocking. Wrong: the
+outbox's default `isRetryable` keeps every failure the library raised,
+whatever its condition (outbox.ts, by design: dropping over a client-side
+failure loses the user's data), exactly as it keeps
+`validator:invalid:payload` today. What coding changes: an app's rule keyed
+on the condition (`failureCondition(e) !== 'invalid'`) can now tell a schema
+rejection from a bug. Whether the default should treat a client-side
+`invalid` as final is open, for the storage step (owner).
+
+**Tests** (tests/errors-match-catalogue.test.ts, 6 new + throttle's catalogue
+check): each code, its registry entry and its owner; the message unchanged;
+an outbox with a condition rule drops the rejected record (replayed 0, failed
+0, rejected 1) and empties; a guard, no `errResult(new Error(` in src
+(testing.ts excluded). Red before: 6 (the guard listing the four sites).
+The outbox test re-checked red with src/schema.ts stashed.
+
+**Bytes:** IIFEs byte-identical; `index.js` +1_525 / +230 brotli (the five
+registry entries' text; the registry is `@__PURE__`, nothing to a consumer
+that does not import it), `directives2.js` +205 / +71, `ssr2.js` +69 / +29,
+`directives.js` +27 / +13. Not a hot path: rejection and refusal results
+only; the dispatch code is unchanged.
+
+
+### 35.79 Core 7: `unauthenticated` and `conflict` (2026-10-02)
+
+Branch `core-1.26`. The owner's pick after evaluating gRPC's canonical codes
+(recorded in `.probes/1.26-remaining.md`, "Shape decisions"): keep our
+words, take the two distinctions gRPC draws that ours hid, keep `lost`
+(gRPC has no peer: its UNAVAILABLE is retry-safe, which a lost reply is not),
+and publish a 1:1 table.
+
+**The case.** `conditionOfStatus` mapped 401, 403 and 419 to `refused`, so
+the outbox had to special-case 401 / 419 by status to keep those records for
+a replay after sign-in; and every 409 to `already` ("it exists"), where a 409
+is usually a conflict ("the state changed underneath"; the Idempotency-Key
+draft's "request still in progress" is one).
+
+**The change.** Condition gains `conflict` (409, 412 Precondition Failed:
+RFC 9110 says the target's state is not the one the request's conditions
+assumed) and `unauthenticated` (401, 419); 403 stays `refused`. The DEV
+vocabulary check knows both. Both are final for the async bus's retry (not in
+RETRYABLE_CONDITIONS, not uncertain). The outbox's default rule reads the
+condition: `conflict` joins its verdicts (a plain 409 was already dropped as
+`already`), `unauthenticated` is not one (kept, as before), and the status
+special case is gone. a4f84fe's rule (a 409 that declares a Retry-After is
+kept) lands with decision 4, in the storage step.
+plan-failures-and-contract.md 4.2 has both rows and a gRPC / Connect column;
+4.4's status table and the README follow.
+
+**Codes that change:** a backend failure's (`remote:<condition of its
+status>:<code>`) for 401, 409, 412 and 419; e.g. `remote:already:in_progress`
+-> `remote:conflict:in_progress`. tests/wire-contract.test.ts's app rule that
+matched the old string was updated with it; zero customers (owner).
+
+**Tests:** both status tables (tests/http-errors.test.ts,
+tests/wire-contract.test.ts) with 409/412 `conflict`, 401/419
+`unauthenticated`, 403 `refused`; the vocabulary test (no DEV warning for
+either, neither retryable). Red before: 3. Seed: `unauthenticated` added to
+the outbox's verdicts turns the existing "an expired session keeps the
+record" test red, so dropping the status special case lost no coverage.
+
+**Bytes:** `command-bus.js` +74 / +34 brotli, `outbox.js` -108 / -36; IIFE
+min +27 raw each, brotli full -2, core +11, elements -2; budgets raised to
+measured (owner: no sweat); the Blade bundle 6_670 (ceiling 6_661 -> 6_671).
+Not a hot path: the table runs per failed response.
+
+**Documented, and two stale copies found (owner: "document the change").**
+The whitepaper's 4.6 and 4.7 now state the shape as it is: every library
+failure coded, the producer's one owner name (plugin ids, `transport`,
+feature names), the fourteen conditions with the status map and the gRPC
+reading, and both new conditions in the retry's never-re-sent list.
+tests/error-registry-sweep.test.ts kept its own copy of the vocabulary
+(twelve words): a site minting `conflict:` or `unauthenticated:` would have
+been skipped by its scan without a word. It now reads the `Condition` type
+from source (and checks it read fourteen), and a new test holds BusError's
+DEV vocabulary regex, the one runtime copy, equal to the type; a seeded
+regex without the two words turned it red.
+
+
+### 35.80 Core 8: the problem's RFC 9457 `type` (2026-10-02)
+
+Branch `core-1.26`. The owner's wire decision, refined before building (owner
+"go"): RFC 9457 checked, 3.1.1 ("Consumers MUST use the 'type' URI ... as the
+problem type's primary identifier"), 4.2.1 (about:blank: "no additional
+semantics beyond that of the HTTP status code"), 3.2 (clients "MUST ignore"
+unknown extensions). With `type` implicit an RFC client dropped `code`.
+
+**Refined from the first proposal (a `type` per code, a `title` from the
+registry), for two facts read in the code.** The registry lives in schema.ts,
+not in the core, so a `title` would have carried every entry's text into every
+bundle; and a code-level `type` would resolve to nothing for an app plugin's
+codes, for each built-in plugin's `<id>:failed:plugin` (one registry row), and
+for a backend's codes. So `type` names the CONDITION: 14 anchors, resolvable
+for every failure, and the part an RFC client acts on. `code` stays the exact
+identity. A backend's own `type` (read into `context` by the transports) is
+kept for a `remote:` failure. No `title` (optional in the RFC).
+
+**The change.** `BusError.toJSON()` adds `type`: the backend's for a remote
+failure that sent one, else `PROBLEM_TYPE + condition`. `docs/errors.md` is
+generated by scripts/generate-errors-doc.mjs from the built registry (one
+section per condition: meaning, retry default, gRPC reading, its codes);
+`npm run docs` runs it and the gate's docs step diffs it. Plan settled item 3
+records the reversal (it had `type` implicit at 77 B brotli, 7.2 item 16).
+
+**Tests** (tests/problem-type.test.ts, 7): a library failure's JSON; an app
+code's `type`; a backend's own `type` kept; a backend's without one gets its
+status's condition; a JSON round trip; the page has every condition's anchor
+(the vocabulary read from the type) and lists every registry code under its
+condition. Red before: the page did not exist. Seed: `toJSON` ignoring a
+backend's `type` turned its test red. tests/failure-shape.test.ts pinned the
+old "no type" and was updated with it.
+
+**Bytes:** IIFE min +180 raw each, brotli +78 full, +75 core, +80 elements;
+the Blade bundle 6_764 (+93; ceiling 6_671 -> 6_765); budgets raised to
+measured (owner: no sweat). More than the "few dozen" estimated: the
+83-character prefix barely compresses, and no shorter resolvable address for
+the page was found. Not a hot path: `toJSON` runs when a failure is
+serialized.
+
+
+### 35.81 Core 9: `idempotencyKey` is a slot of every meta (2026-10-02)
+
+Branch `core-1.26`, f88666a. Shape rule 4 (owner): a command's meta is one
+fixed set of fields.
+
+**The case.** stampMeta built `{ ts, id, correlationId, causationId, origin }`;
+`idempotencyKey` was ADDED later at three sites (idempotent(), the outbox's
+enqueue and replay, the async retry's `??=`), so every keyed command's meta
+transitioned to a second hidden class. tests/v8-shapes.test.ts measured it:
+a keyed and a plain meta had different maps (%HaveSameMap false).
+
+**The change.** The literal holds `idempotencyKey: undefined`; the three sites
+fill the slot. The outbox's `(cmd.meta as any).origin` cast (its comment said
+the type had not landed; it has) is now a typed write. tests/origin-scope-ab
+reverts by source text and its line follows the literal (its own guard fired,
+as designed).
+
+**Tests:** the keyed and plain meta share one map (red before). Observable:
+`'idempotencyKey' in cmd.meta` is now true with `undefined` until stamped;
+JSON drops it; no repo test pinned the old key set.
+
+**Bytes:** IIFE min +22 raw each, brotli +9 full, +2 core, +7 elements;
+`command-bus.js` +13 brotli; the Blade bundle 6_769 (+4; ceiling 6_765 ->
+6_770). Budgets raised to measured.
+
+**A/B** (owner "go"): `npm run ab -- d1c79fd f88666a
+scripts/ab/workloads/meta-slot.mjs --k=6`, 66 s, node 24.21.0, load 20 (other
+windows working; controls 0.993-1.002, every row valid). `bare_dispatch` (the
+fast path, a meta per dispatch): B/A 1.008 (CI 0.995..1.021, MDE 1.0%) and
+1.000 (CI 0.995..1.008, MDE 0.6%), 22.8 -> 22.9 ns and 21.4 -> 21.4 ns: no
+result, neutral. `listener_reads_meta` (a listener reads the meta): 0.948
+(-6.0 ns, "faster") at n 43_759 and 1.045 (+5.4 ns, "slower") at 4n: the
+lengths disagree, no result; a sign that flips between lengths on one change is
+rule 12's signature of the harness, not of the code. Nothing counted slower.
+Not timeable: the benefit side (a keyed async command keeps one map), the tool
+times sync functions only. A clean re-measure of the listener row at K 10 is
+offered to the owner.
+
+
+### 35.82 Core 10: `HttpResponse.url` and `redirected` (A6, #17) (2026-10-02)
+
+Branch `core-1.26`. Decision 12: IN, the client plainly wrong and no plugin
+able to fix it. Owner on core 9's noisy A/B: at nanoseconds correctness wins;
+a noisy machine gives no baseline; green, commit, move on (memory).
+
+**The case.** Fetch's Response has `url` (final, after redirects) and
+`redirected`; both builders of HttpResponse (`doFetch` for postCommand,
+`doClientFetch` for createHttpClient) dropped them. The panel needs it before
+Cache Groups can replace its revalidate map (its round, 12).
+
+**The change.** Both builders set `url: raw.url, redirected: raw.redirected`;
+the type gains both, optional (an app's own `httpClient` handed to a bridge
+may not set them), always present on a response this library builds.
+
+**Tests** (tests/http-response-url.test.ts, 3, a real node:http server on
+127.0.0.1: a stubbed Response has no url): a client GET through a 302 reports
+the final url and `redirected` true; one with no redirect reports its own url
+and false; postCommand through a 307 keeps the POST and reports where it
+landed. Red before: 3.
+
+**Bytes:** `http.js` +100 / +26 brotli (the plan's prototype: +100 / +18);
+IIFE min +34 raw each, brotli +11 full, +8 core, +9 elements; the Blade
+bundle 6_778 (+9; ceiling 6_770 -> 6_779). Budgets raised to measured. Not a
+hot path: per response.
+
+
+### 35.83 Core 11: a 304 that resolves (A8, panel 21), and a dedupe bug (2026-10-02)
+
+Branch `core-1.26`. Panel item 21, owner: IN 1.26 as an OPT-IN.
+
+**The case.** The client sends no conditional requests itself; an app does
+(`If-None-Match`), and gets a 304. runWithRetry (http.ts, shared by
+postCommand and the client) threw every non-ok response, 304 included, and no
+plugin or interceptor could turn it into a resolve (onRejected returns void;
+the error is rethrown).
+
+**The change.** `HttpConfig.resolveNotModified` (default false): opted in,
+runWithRetry returns a 304 as it is (status 304, `ok` false as Fetch says, the
+empty body), first thing in its non-ok branch. Per request, per client
+(instance config), and on postCommand. Never cached (the cache stores `ok`
+responses only).
+
+**Found while reading the dedupe path, fixed on the owner's word ("fix
+it").** The GET dedupe key was `method:responseType:url`, headers not in it:
+a plain read that started while a conditional read of the same URL was in
+flight joined it and received its 304; any two reads with different
+`Authorization` or `Accept-Language` shared one answer. The key now carries
+the request's headers (`JSON.stringify(config.headers)`) and the opt-in: two
+reads share a request only when they would get the same answer. Equal
+headers in another key order do not join (conservative: a second request,
+never a wrong answer).
+
+**Tests** (tests/http-not-modified.test.ts, 7, a real node:http server):
+off, a 304 throws an HttpError as before; on per request, per client and on
+postCommand, it resolves; a plain read beside a conditional one gets its own
+200 (2 requests); two reads with the same headers still share one (control);
+an opted-in read and a plain one never share. The implementation was
+written before its test (out of order): its red was then shown against the
+old http.ts, stashed: 4 of 5 failed, "off" passing as it should. The dedupe
+test was red before its fix (the plain read got the 304), with its control
+green.
+
+**Bytes:** `http.js` +279 / +66 brotli; IIFE min +80 raw each, brotli +32
+full, +38 core, +35 elements; the Blade bundle 6_809 (+31; ceiling 6_779 ->
+6_810). Budgets raised to measured. Not a hot path: per request.
+
+
+### 35.84 Storage 1: `OutboxRecord.queuedAt` as RFC 3339 (A2) (2026-10-02)
+
+Branch `storage-1.26` (worktree `../vapor-storage`, off `core-1.26` at
+df3f36f; the router window works beside it on `router-1.26`). Decision 10 of
+the 1.26 list: swap now, zero customers.
+
+**The case.** `enqueue()` stamped `queuedAt: Date.now()`, an epoch number that
+names neither its unit nor its zone, on the one library-defined date that
+leaves the process (storage, or a backend a custom `OutboxStorage` syncs to).
+
+**The change.** `queuedAt: new Date().toISOString()` (RFC 3339, UTC `Z`,
+milliseconds); `OutboxRecord.queuedAt: string`, its comment names RFC 3339 and
+says the outbox never reads it (grep: the one write in `enqueue`, no read). No
+hydrate migration.
+
+**Tests** (tests/outbox.test.ts): the stored record's `queuedAt` is a string
+in the `toISOString` form, `Date.parse` lands it inside the enqueue window and
+formats back to the same text (red before: `typeof` was number); a record
+persisted with a number (an older build's queue) still hydrates and replays,
+which pins "never reads it" and the no-migration claim. The eight fixtures
+that used numbers are ISO strings now.
+
+**Bytes:** `outbox.js` +32 raw / +17 brotli (the plan's prototype: +32 / +14);
+the other 50 dist .js files byte-identical, IIFEs included. Not a hot path:
+enqueue only.
+
+
+### 35.85 Storage 2: a library `invalid` is final in the outbox (2026-10-02)
+
+Branch `storage-1.26`. The open outbox-default question of the storage step
+(`.probes/1.26-remaining.md`), DECIDED by correctness (owner: "correctness
+and not opinions dictate the decision").
+
+**The case.** `outboxIsRetryable` returned true (keep) for any failure with an
+owner other than `remote`, whatever its condition. The outbox is installed
+outermost and captures while offline, so a validator below it runs only at
+replay; the same target and payload get the same `invalid` on every flush.
+Kept, the record blocked every record behind it for ever and failed each
+flush: the data loss the keep rule meant to prevent. Since core 6 the four
+uncoded failures carry codes (`schemaValidator:invalid:payload` among them),
+so the condition is readable.
+
+**The change.** For an owner other than `remote`: final only when
+`failureCondition(error) === 'invalid'`. Kept as before: a missing handler
+(`core:missing:handler`, it may be registered later), a plugin's throw
+(`<id>:failed:plugin`), `authGuard` (`authGuard:refused:action`, replayed
+after sign-in), a redirect (`transport:refused:redirect`), a plain Error. The
+`remote` rule is unchanged. The `isRetryable` option's JSDoc stated the old
+status list and "every error the library raised itself" is kept; it now
+states both halves. docs/plan-failures-and-contract.md 4.4's outbox sentence
+was stale twice (no `conflict`, `unauthenticated` as a status exception) and
+now states the rule as coded.
+
+**Tests** (tests/outbox.test.ts, "default rule on library failures", 4): a
+`validator()` rejecting `a` at replay gives `{ replayed: 1, failed: 0,
+rejected: 1 }`, `b` runs, the queue and storage empty, `outboxRejected` with
+the record and `validator:invalid:payload`; a missing handler, a throwing
+plugin and an `authGuard` refusal each `{ failed: 1 }` with both records kept
+(the guard's drains after sign-in). tests/errors-match-catalogue.test.ts's
+schema-rejection test now uses the default rule (it passed an app rule to
+show a rule COULD drop it). tests/wire-contract.test.ts's kept-status loop
+gains 408 and 429, which the option's JSDoc names and no test pinned. Red
+before: 2 (the two `invalid` cases); the three kept cases green before and
+after, as controls. Seed: the library branch returning false (drop all)
+turned 5 red (the three kept cases and the two older throw / reject tests).
+
+**Bytes:** `outbox.js` +50 raw / +13 brotli against step 1; every other dist
+.js byte-identical. Not a hot path: once per failed replay.
+
+
+### 35.86 Storage 3a: a4f84fe brought in (the 1 s floor, a declared Retry-After keeps) (2026-10-02)
+
+Branch `storage-1.26`. Decision 4 builds the backoff on a4f84fe (branch
+`outbox-leads`, 2026-09-30, never merged). Checked first, as the build list
+asks: neither half was on this branch (`git merge-base --is-ancestor` false;
+outbox.ts slept `retryIn` as declared, and `outboxIsRetryable` never read
+`retryIn`).
+
+**Brought in, as a4f84fe wrote it, on today's outbox:** the scheduled re-flush
+sleeps `Math.max(retryIn, 1000)`; `outboxIsRetryable` returns true first for
+any failure whose context declares a numeric `retryIn`, before step 2's
+library rule and the remote verdicts; autoFlush's "No timers" JSDoc and the
+listener comment corrected. Adapted: since core 7 a 409 reads `conflict`
+(a verdict), so the control's code is `remote:conflict:in_progress` where
+a4f84fe had `remote:already:in_progress`. a4f84fe's decisions.md row comes
+with the backoff (3b), one row for decision 4.
+
+**Tests** (tests/wire-contract.test.ts, a4f84fe's two): `Retry-After: 0` on a
+503 gives 11 requests in 10 s of fake clock, and drains one second after the
+backend recovers; a 409 with `Retry-After: 1` is kept (`failed: 1`, nothing
+rejected) and replays a second later, and the same 409 without the header is
+rejected as `remote:conflict:in_progress`. Red before: 2 (501 requests in one
+tick, the valve; the 409 rejected).
+
+**Bytes:** `outbox.js` +78 raw / +22 brotli against step 2 (a4f84fe on
+v1.25.0: +61 / +16); every other dist .js byte-identical.
+
+
+### 35.87 Storage 3b: the outbox backoff (A4, decision 4) (2026-10-02)
+
+Branch `storage-1.26`, on 3a (a4f84fe brought in).
+
+**The case.** With the floor alone a backend answering `Retry-After: 1` for
+ten minutes was asked 601 times (the probe `.probes/outbox-reflush-policies`,
+decision 4's table). And two flushes could run two timer chains: a `flush()`
+or an `'online'` event during a scheduled wait that failed again scheduled a
+second wait beside the first, each re-scheduling itself.
+
+**The change** (runFlush, where it schedules the next try): one variable,
+`backoff`, the last scheduled wait. On a kept failure with a declared
+`retryIn`: `backoff = max(retryIn, min(30 s, max(2 * backoff, 1 s)))`; a
+successful replay sets it to 0; `waits.wakeAll()` before the new sleep ends a
+pending one (a woken sleep resolves false and does not flush). For a declared
+wait up to 30 s this is the probe's measured policy (`min(30 s, max(declared,
+1 s) * 2^n)`): the schedule doubles its own last wait, which already includes
+the declared one. Read while building, not changed: `_parseRetryAfter`
+(http.ts) ignores a header over 30 s (`MAX_RETRY_AFTER_MS`), so a declared
+wait never exceeds the cap and "declared wins" can only mean "longer than the
+current schedule"; a Retry-After of 120 reaches the outbox as no `retryIn` at
+all (the record is kept as `limited` and waits for `'online'` or `flush()`;
+a 409 with it is rejected as a bare `conflict`). Recorded, for the owner if
+the ceiling should move.
+
+**Tests** (tests/wire-contract.test.ts, fake clock, a real outbox and HTTP
+bridge over the stubbed fetch): the waits between requests for a repeated
+`Retry-After: 1` are 1, 2, 4, 8, 16, 30, 30, 30, 30, 30 s (the cap); ten
+minutes of it are 24 requests and the record drains at the next try, a
+second after recovery (the measured target); 1, 2, 4 s then a declared 20 s
+over the schedule's 8 s, then 30 s (precedence); a record that lands after
+1, 2, 4 s resets the next record's wait to 1 s (reset); a flush by hand at
+0.5 s replaces the 1 s wait: asked at 0, 0.5, 2.5, 6.5 s (one chain). 3a's
+`Retry-After: 0` test now reads the floor (1 s, not 0) and the backoff (4
+requests in 10 s, drain at the 8 s wait). Red before: 6 of 6. Seeds, each
+red: no cap (the cap, the 24, the precedence: 3), no reset (1), the declared
+wait not winning (1), no replacement of a pending wait (1).
+
+**Bytes:** `outbox.js` +152 raw / +36 brotli against 3a; every other dist
+.js byte-identical. Not a hot path: once per failed replay. docs/decisions.md
+gains decision 4's row (with step 2's rule); autoFlush's JSDoc states the
+schedule.
+
+
+### 35.88 Storage 4: the store re-review (2026-10-02)
+
+Branch `storage-1.26`. The owner's post-plan item for this area, brought into
+this window: re-review `src/store.ts` (`defineChamberStore`, with `persist`)
+for correctness, the accuracy of its docs against the code (docs/store.md,
+README, whitepaper 8.2), and V8 shape. Every suspect below was run on the
+tree first (a throwaway probe, deleted), not inferred.
+
+**Found and fixed** (tests/store-review.test.ts, 9; red before: 8, the
+control green):
+1. An action key equal to a store member replaced it (src/store.ts, the loop
+   that assigns `store[key]`): `actions: { state }` left `store.state` a
+   dispatching function (`store.state.value` undefined); `actions: { $reset }`
+   registered `s$reset`, which the library's reset handler then overwrote
+   (one DEV "is being overwritten" warning). `defineChamberStore` now throws at
+   definition for `$id`, `state`, `url`, `$reset`, `$dispose`, naming the key.
+   Five red, one per key; any other key is an action (control).
+2. `url` declared and no router: the error was thrown after the handlers were
+   registered and before the entry reached the registry, so they stayed on the
+   bus unreachable; the next call registered over them (a warning per
+   action). The check moved before any registration.
+3. `$dispose()` ran `registry.delete(id)` whatever the entry held. After a
+   dispose and a re-create, a second `$dispose()` of the old store (its owner
+   again), or a scope that still held the old store ending late (its holder
+   count reaching 0), removed the NEW store: the next `useStore` built a
+   third over its handlers (warnings), and the second store's state went dead
+   under its holders. It now deletes only its own entry. Two red.
+
+**Docs against code.** docs/store.md: every statement checked against
+store.ts and its tests (cached per bus, per-bus isolation, `$reset` as a
+command and its `state()` caveat, the getter-only state, url delegation, the
+named router error, last-holder-out disposal, the unscoped caller owning
+`$dispose()`, the import list `['vue']`); all hold. Added: the member-name
+rule. Stale and fixed: store.ts's header cited whitepaper "section 6" for why
+the package ships a state layer; that section is now Transports and the
+rationale is appendix A.3 ("was section 6"); tests/chamber-store.test.ts's
+header said the same and listed `effectScope`, `inject`,
+`hasInjectionContext` as the store's Vue imports (it imports
+`getCurrentScope`, `onScopeDispose`, `shallowRef`). README has no store
+section beyond the subpath rows (sizes stamped). Whitepaper 8.2 holds; its
+snippet calls `useCart(bus)` without defining it (a sketch, left).
+
+**V8 shape, read, not changed** (setup paths only, no hot path in the store
+besides the action call): the store is an object literal of five members to
+which each action is then added, one transition per action, once per store
+per bus; a call site `cart.add` sees one map per store. `StoreEntry` gains
+`pinned` late (an optional field set on an unscoped join): a second map for
+the few entries that pin; read only at dispose. Neither is on a dispatch path;
+no change without a measured reason.
+
+**Open, for the owner (not fixed: a design call):** two `defineChamberStore`
+calls with the SAME id on one bus share the first one's store. The second
+definition's `useStore` returns an object without its actions
+(`typeof store.bar === 'undefined'`) and with the first one's state, silently.
+The id is the store's identity by design (as in Pinia), so the choice is
+between a throw, a DEV warning, or documenting it.
+
+**Bytes:** `store.js` +313 raw / +90 brotli (most is the new error's text);
+every other dist .js byte-identical; no IIFE carries the store.
+
+
+### 35.88b Storage 4b: the store's refusals are coded (2026-10-02)
+
+Branch `storage-1.26`, after a4b1e4d. Asked by the owner what the plan and
+the shape rules dictate for the re-review's open points; the first answer
+was against my own step 4: shape rule 2 (every library failure coded) covers
+setup throws too, and core already throws coded at setup (`throw
+fail('refused:bus', ...)`, command-bus.ts). Step 4 had added one more plain
+`Error` beside the store's two.
+
+**The change.** `const storeFail = _failures('store')` (rule 3: a non-plugin
+API reports under its feature name, like `ssr` and `schema`); the three
+throws: `store:already:member`, `store:missing:bus`, `store:missing:router`,
+messages unchanged; three ERROR_CODE_REGISTRY entries (docs/errors.md
+regenerated). The store's import boundary moves from `['vue']` to `vue` and
+`./command-bus.js`: the boundary exists to keep `chamber.ts`'s probe out,
+and command-bus imports neither Vue nor the probe (dev, dict, bounds,
+scheduler); a store user always loads it for the bus. tests/chamber-store's
+boundary test and docs/store.md say so.
+
+**Tests** (tests/store-review.test.ts): each throw's `code` and its registry
+entry. Red before: 1 (code undefined).
+
+**Bytes:** `store.js` +138 raw / +51 brotli, `index.js` +745 / +146 (the
+entries' text; the registry is `@__PURE__`); the other 49 dist .js
+byte-identical, IIFEs included.
+
+**Still open, the owner's:** a second definition of one id on one bus.
+Rule 3 says it is `store:already:id`; but the HMR shim (src/vite-hmr.ts)
+keeps the same bus across a hot reload and the registry is per bus, so a
+re-evaluated store module defines its id again: today it silently gets the
+OLD store (edited reducers do not apply), and a plain throw would break
+every hot reload. The choice: replace the definition under HMR, or throw
+everywhere.
+
+
+### 35.89 Storage 5: Retry-After past 30 s, read as declared and never cut short (2026-10-02)
+
+Branch `storage-1.26`. Found in 3b (s35.87), answered by the plan's own rules
+when the owner asked what they dictate: decision 13 made the parser RFC
+9110's exact grammar, which has no ceiling, and RFC 9110 10.2.3 makes
+Retry-After a minimum; the 30 s ceiling (`MAX_RETRY_AFTER_MS`, http.ts) was
+the HTTP client's in-request policy sitting in the parser every caller
+shares.
+
+**The case, three red** (tests/retry-after-long.test.ts): the client read a
+503's `Retry-After: 120` as no header and retried at once on its backoff (3
+fetches with retry 2); the outbox got no `retryIn`, so a 409 with
+`Retry-After: 120` was rejected as a verdict (a4f84fe's rule defeated); the
+async bus slept `min(retryIn, maxDelay)`, so a declared 25 s was re-sent at
+20 s (3 calls in 60 s).
+
+**The change.** `_parseRetryAfter` returns what was declared, ignoring only a
+wait over `MAX_TIMEOUT_MS` (setTimeout fires at once past 2^31 - 1 ms). The
+client keeps 30 s as its own in-request bound: a declared wait over it is not
+slept, the request fails with the response (so the bridges read `retryIn`).
+The bus retry: a declared `retryIn` over `maxDelay` is not eligible (returned
+as is, no token spent); a computed wait is still capped at `maxDelay`. The
+`RetryOptions.maxDelay` and createRetryPolicy comments state both. The
+outbox needs no change: 3b's `max(retryIn, ...)` waits a long declared wait
+out. `X-RateLimit-Reset`, the client's fallback header, goes through the same
+rule: a delta over 30 s ends the request; an epoch-seconds value is past the
+timer bound and ignored, as the ceiling ignored it before (backoff).
+
+**Tests** (7): the parser past 30 s (seconds and an HTTP-date) and at the timer
+bound; the client, one fetch for 120 s and a control retried after 2 s; the
+bus, 25 s returned and a control re-sent after 1 s; the outbox, the 409 kept
+and re-flushed at exactly 120 s. Red before: 5; the two controls green.
+
+**Bytes:** `command-bus.js` +56 / +13 brotli, `http.js` +23 / +14; IIFE min
+brotli full -6, core +12, elements +23. Not a hot path: the retry runs only on
+a failure; the parser per failed response.
+
+**Closed (2026-10-03, on a second machine).** The two old tests the step
+pinned were already on the new rule (`cheap-arms`, `retry-policy`). Budgets
+raised to measured, owner ("no sweat"): IIFE raw +58 on all three, brotli
+core +12 and elements +23 (full -6, its budget kept); the Blade ceiling
+6_810 -> 6_812 (measured 6_811). Measured on Debian 13, Node 22.23.3: the
+three IIFEs reproduce this section's deltas exactly. Coverage 100 x4; docs,
+size:doc and stamps regenerated from that complete run.
+
+Found on the way: `tests/v8-helper.test.ts` "reaches Maglev" failed on this
+Node, which `package.json` engines (>=22.12) and CI's 22 leg admit. Not a
+Node 22 default: this build (NodeSource 22.23.3) has
+`process.config.variables.v8_enable_maglev` 0, and V8 answers "Maglev is not
+enabled." with `--maglev` at startup or at runtime alike. Owner: skip when
+not present. The test is skipped on that build fact only; a Node whose
+config omits the key still runs it.
+
+
+### 35.90 Router 1: a superseded navigation walks no history (2026-10-02)
+
+Branch `router-1.26` (worktree `../vapor-router`, off `core-1.26` df3f36f,
+gate green there). The owner's re-review of the router, brought forward: 1.26
+has no router build item. Findings first (all reproduced by a probe test before
+any change; the probe was deleted), then one fix per entry from here.
+
+**Findings.**
+1. A superseded popstate navigation walked the history back (this entry).
+2. A push or pop to the page on screen while another navigation was pending
+   answered null and let the pending one commit after it: `push('/list')`
+   held, `push('/')` -> null, then `/list` committed. Back then Forward during
+   a held navigation: the Forward's pop matched the committed page and was
+   ignored as "our own compensating go()", so the Back's navigation committed
+   `/` with the address bar on `/list`.
+3. `router.destroy()` during start()'s remote table load: start() carried on,
+   committed the first navigation, re-registered a history listener and
+   installed the document click listener after the teardowns had run. A link
+   click on the destroyed router navigated it.
+4. Malformed JSON in an inline routes element: start() rejected with a plain
+   `SyntaxError`, while readInlinePayload's comment says loadInlineTable
+   "throws a coded router error".
+5. RouterError has two hidden classes: `to` is added only when given
+   (`%HaveSameMap` false between `cancelled` with a `to` and
+   `unknown_route_name` without), and `cause` only when given. Locations and
+   snapshots on the navigation path are one map each (checked: navigation,
+   setQuery, a query push, setRouteData).
+6. Docs: the `vapor-chamber/router/vapor` row of the retained-bindings tables
+   (README, docs/router.md) omits `createIf`, which the Vapor outlet imports
+   and the boundary test's own log shows; `RouteLocation.path` and
+   `RouteTable.resolve` say "decoded path", while the path is as in the URL
+   (`/item/a%20b`; only params are decoded); docs/router.md's "~20us per
+   navigation on a 5k-row local source" has no test or harness behind it.
+For the owner (no test settles them): RouterError joining
+`owner:condition:subject` (recorded for 1.26 in docs/plan-shape.md, "After
+this plan", not on the build list); a throwing guard is wrapped as
+`component_load_failed`, a HARD_NAV_CODE, so the default handler reloads the
+page for a guard bug; a query-only change while a path navigation is pending
+is lost when that navigation commits.
+
+**The case (finding 1).** `revert()` walked the history back by a popstate
+navigation's delta when it was refused or failed, and also when it was
+CANCELLED. A cancelled navigation is one the user replaced: the browser is
+already where the newer one put it. Two Backs from `/other` during a held
+navigation: the first, cancelled, stepped forward; the router read the step
+as a navigation to `/list`, which cancelled the second Back's and stepped
+again. Result: page `/list`, address bar `/other`, `go` called
+`[-1],[-1],[1],[1]`.
+
+**The change.** The three cancelled returns in `navigate()` return the error
+without `revert()`; vue-router's popstate handler skips `go(-delta)` for
+NAVIGATION_CANCELLED the same way. The engine's `stopped` flag (set by
+`cancel()` so a destroyed router walked nothing) is removed: a navigation
+cancelled by `destroy()` takes the same path. Its pin is the existing
+`a popstate navigation cancelled by destroy walks no history back`.
+
+**Tests** (tests/router/superseded-navigation-history.test.ts, 4): two quick
+Backs land on the second (page and address bar `/`, `go` only the user's two
+calls); a push superseding a held Back adds no step; controls: a guard's
+`false` on a Back still walks back, and the superseded navigation still
+answers `cancelled`. Red before: 2 (the controls green). Seed: the walk put
+back on the guard-time cancelled return turns 3 red, the destroy pin among
+them.
+
+**Bytes:** `router.js` -112 raw / -12 brotli; the other 56 dist .js files,
+the three IIFEs among them, byte-identical. Not a hot path for the bus;
+navigation only.
+
+
+### 35.91 Router 2: the page on screen, asked for again, supersedes (2026-10-02)
+
+Branch `router-1.26`. Finding 2 of 35.90.
+
+**The case.** `navigate()`'s duplicate check answered null for the committed
+page and stopped there, so a navigation in flight committed after it: on `/`,
+`push('/list')` held by a guard, then `push('/')` -> null, then `/list`
+committed. vue-router supersedes there (it moves its pending location to the
+duplicate before the duplicate check, so the older navigation fails its
+cancellation check). The pop side was the same bug behind a special case:
+`handlePop` dropped any pop landing on the committed page as "our own
+compensating go()", so Forward back to the page during a held Back was
+ignored and the Back's navigation committed `/` with the address bar on
+`/list`.
+
+**The change.** The engine keeps `inFlight`, the id of the path navigation in
+flight (set with the id, cleared in the navigation's `finally` when it is
+still the newest). A duplicate with one in flight calls `supersede()`: the
+pending id moves, its controller aborts, its loading state clears (no
+successor will clear it). `cancel()` (destroy) is `supersede()` plus the
+refetch lane's abort. `handlePop` navigates on every pop; the router's own
+compensating step after a refusal lands on the committed page with nothing in
+flight, a duplicate answered null as before. With nothing in flight a
+duplicate changes nothing: the committed navigation's controller is not
+aborted, so a loader's background work tied to its signal is left alone.
+
+**Tests** (tests/router/navigation-to-current-page.test.ts, 4): push to the
+page supersedes (the held one answers `cancelled`, page and history `/`);
+Back then Forward during a held Back (page and history `/list`, `go` only the
+user's two calls); a superseded loading navigation: `isLoading` false at
+once, its loader's signal aborted; control, nothing in flight: null, the same
+snapshot object, no history change. Red before: 3 (the control green).
+
+**Real Chromium** (tests/browser/router-history.browser.test.ts, 3): the
+memory history calls its listeners synchronously inside `go()`, a browser
+fires popstate later, after the walking navigation settled. Two quick Backs
+(35.90's case) and Back then Forward (this one) on `createWebHistory`, each
+step waiting for the user's own popstate (two `history.back()` in one task
+are one traversal to Chromium), plus a refused-Back control. Run against the
+engine of df3f36f: 2 red, the control green; on this branch: 3 green.
+
+**Bytes:** `router.js` +103 raw / +12 brotli; the other 56 dist .js files
+byte-identical, so the IIFEs are unchanged. Navigation only.
+
+
+### 35.92 Router 3: `destroy()` during `start()` (2026-10-02)
+
+Branch `router-1.26`. Finding 3 of 35.90.
+
+**The case.** `destroy()` runs the teardowns start() has registered so far,
+cancels the navigation in flight and destroys the history. start() is async
+twice: a `{ url }` table is awaited, and so is the first navigation. A
+destroy() inside the first wait let start() carry on afterwards: it registered
+a history listener (the memory history's listener set had been cleared, then
+refilled), installed the document click / hover / pageshow listeners and the
+route announcer, and committed the first navigation; a link click then
+navigated the destroyed router (probe: page `/list`, history `/list`). A
+destroy() inside the second wait (destroy cancels that navigation, 1.26 #2)
+still armed the idle preheat, whose four window listeners no teardown would
+remove.
+
+**The change.** A `destroyed` flag set by destroy(); start() returns after the
+table load when it is set, and skips `armIdlePreheat()` after the first
+navigation. A start() called after destroy() (an `app.use()` late) stops at
+the first check too.
+
+**Tests** (tests/router/destroy-during-start.test.ts, 3): destroy while the
+table loads: no commit, a history step after it navigates nothing, a link
+click is not intercepted (`defaultPrevented` false); destroy during a guarded
+first navigation: no `pointerdown` listener added after it (preheatIdle's
+first act); control: the same start without destroy() adds it, so the
+probe's "none" is evidence. Red before: 2 (the control green).
+
+**Bytes:** `router.js` +94 raw / +27 brotli (the dist ESM is unminified; the
+comments are stripped); the other 56 dist .js files byte-identical. Not a
+navigation path: start() and destroy() only.
+
+
+### 35.93 Router 4: inline routes that are not JSON are coded (2026-10-02)
+
+Branch `router-1.26`. Finding 4 of 35.90.
+
+**The case.** `readInlinePayload` (the constructor's synchronous read, for
+`base`) is total and says why: malformed JSON returns null and leaves "the
+real diagnosis to `loadInlineTable()` during start(), which throws a coded
+router error". For malformed JSON it did not: `JSON.parse` threw a plain
+`SyntaxError` out of start() and into onError (probe: name `SyntaxError`,
+`isRouterError` false). The element's other two failures were coded
+(`inline_routes_missing`, `invalid_routes_payload`). The parse is the router
+reading its own input, not someone else's error passing through (shape rule
+2), so the comment was right about the intent and the code missed it.
+
+**The change.** loadInlineTable parses in a try; a failure throws
+`invalid_routes_payload` ("inline routes in <selector> are not JSON") with the
+SyntaxError as `cause`. The router's codes are still its own snake_case
+taxonomy; joining `owner:condition:subject` is the owner's (35.90).
+
+**Tests** (tests/router/inline-routes-json.test.ts, 2): truncated JSON:
+start() rejects with the code, the message names the selector, the cause is
+the SyntaxError, onError receives the same error; control: JSON without a
+routes array is the same code. Red before: 1 (the control green).
+
+**Bytes:** `router.js` +177 raw / +29 brotli; the other 56 dist .js files
+byte-identical; BUNDLE-SIZES `./router` 30.1 -> 30.2 KB raw, brotli rows
+unchanged. Not a navigation path: start() only.
+
+
+### 35.94 Router 5: one hidden class for every RouterError (2026-10-02)
+
+Branch `router-1.26`. Finding 5 of 35.90.
+
+**The case.** `routerError` built `new Error(message, cause ? { cause } :
+undefined)` and added `to` only when given: four hidden classes. The
+navigation path builds three of them: `cancelled` for a superseded navigation
+(with `to`), `unknown_route_name` from resolveLocation (neither), a loader's
+`load_failed` (both). `%HaveSameMap` false between the first two (probe).
+Locations and snapshots on the same path were already one map each.
+
+**The change.** `new Error(message, { cause: extra.cause })` and
+`error.to = extra.to`, unconditionally: own properties `stack`, `message`,
+`cause`, `name`, `code`, `to`, in that order, on every RouterError.
+Observable: `'cause' in error` and `'to' in error` are always true, with
+`undefined` when not given; reads are unchanged, `cause` is not enumerable,
+and JSON drops the undefined `to`. No repo test pinned their absence.
+
+**Tests** (tests/router/router-error-shape.test.ts, 4): four option
+combinations share one map; a real superseded push and a real unknown name
+share it; absent options still read undefined; control: a plain Error and a
+RouterError are told apart, so "same" is evidence. Red before: 2.
+
+**Bytes:** `keys.js` (the shared router chunk that holds `routerError`) -48 raw
+/ -16 brotli; the other 56 dist .js files byte-identical. Not timed: errors
+are built on refusal and failure, not on a committed navigation.
+
+
+### 35.95 Router 6: docs that stated what the code does not do (2026-10-02)
+
+Branch `router-1.26`. Finding 6 of 35.90. The code was right in all three; the
+docs move, and a test now stands behind each corrected statement.
+
+- **Retained bindings.** README and docs/router.md list what
+  `vapor-chamber/router/vapor` asks `vue` for as `createDynamicComponent
+  createSlot defineVaporComponent inject provide`. The outlet also imports
+  `createIf` (its default-slot branch, rc.10 cycle), and the boundary test's
+  own log printed it. Both rows now list it; tests/router/vapor-boundary.test.ts
+  gains an exact-list test of the outlet imported alone.
+- **"Decoded path".** `RouteLocation.path` (types.ts) and `RouteTable.resolve`
+  (table.ts) said decoded. The path is as in the URL: `push('/item/a%20b')`
+  gives path `/item/a%20b`, params `{ id: 'a b' }`; a named push encodes the
+  param into the path. vue-router's `path` is encoded too. Comments fixed;
+  tests/router/location-path-encoding.test.ts (2) pins both directions.
+- **"~20us per navigation on a 5k-row local source"** (docs/router.md, Hot
+  paths): no test or harness in the repo produces it (a computable number is
+  a stamp, an untested claim is not written). Removed; the advice stays.
+
+Red: the docs (the tests measure code that did not change, green before and
+after). **Bytes:** none; every dist .js byte-identical; docs/api/router.md
+regenerated from the comment.
+### 35.100 Storage 6: Retry-After's HTTP-date by RFC 9110 5.6.7 (2026-10-03)
+
+Branch `storage-1.26`, after storage 5 (152c15f). Found in the 1.26 review
+of storage 5 (the date branch of `_parseRetryAfter`, `src/http.ts`): its
+`Date.parse` read an asctime-date as local time and accepted any date form
+V8 knows. Storage 5 made it matter more: a date over 30 s used to be dropped
+at the parser, and is now a wait the outbox and the bus honour, so a
+misread date became a wait of hours. Decided by rule 5 (standards at the
+boundary) and decision 13 (RFC 9110's exact grammar, already taken for the
+seconds form); the bytes went to the owner (rule 11).
+
+**The case, probed at UTC-3, now 12:00:00 GMT, each value 10 s later.**
+IMF-fixdate and rfc850 read 10,000 ms; asctime `Wed Oct  1 12:00:10 2026`
+read 10,810,000 (3 h late); `2026-10-01T12:00:10Z`, `10/1/2026 12:00:10`
+(read as local, 3 h late), `Oct 1 2026 12:00:10` (local), `... +0000`,
+lowercase `gmt` were all accepted.
+
+**The change.** One regex for the three shapes (day and month names
+enumerated, two-digit day, asctime's space-padded day, `GMT` for the first
+two, the year last for asctime) and the time computed with `Date.UTC`. A
+two-digit year is its next occurrence (`00` late in 2099 is 2100): RFC
+9110's 50-year rule only moves a year into the past, which no wait reads,
+and `Date.parse`'s rule read it as 2000.
+
+**Tests** (tests/retry-after-grammar.test.ts, 3 new): the three forms in GMT
+under `TZ` UTC-3 (and a two-digit day); the century case; nine non-HTTP-date
+values ignored. Red before: 3 (asctime 3 h late, the century read as 2000,
+the ISO form accepted). The existing Retry-After, outbox and wire-contract
+tests unchanged and green.
+
+**Bytes**, against storage 5 (raw / brotli, full / core / elements):
++570 / +286, +571 / +264, +571 / +250; the Blade consumer 6,811 -> 7,083
+(+272). Attributed with two variants built on the same base, both failing
+tests above: asctime as GMT alone +62 / +43 (full) still accepts ISO, US,
+numeric-offset, lowercase and made-up names, and reads the century wrong; a
+shape gate over `Date.parse` +151 / +91 still accepts a made-up weekday and
+uses V8's two-digit years (`50`-`99` as the 1900s). Owner: "worth the
+rise"; budgets and the ceiling raised to measured. Not a hot path: the
+parser runs on a failed response only.
+
+
+### 35.101 Storage 7: a store id defined again takes over (2026-10-03)
+
+Branch `storage-1.26`, after storage 6 (0f8a754). The open point of s35.88
+and s35.88b: two definitions of one id on one bus.
+
+**Measured first, on a real hot update** (a probe, then
+tests/vapor/store-hmr.test.ts, `__VUE_HMR_RUNTIME__.reload` against a real
+`createVaporApp`, the call plugin-vue makes for a component whose import
+changed). A component holding the store: Vue disposes the old instance
+before the reloaded setup runs (order: old store disposed, then the setup),
+the registry is empty by then, and the new definition builds fresh - already
+right. A store created at module load (no scope, pinned): the re-run module's
+`useStore` got the first store - the edited reducer did not apply, a new
+action was missing. Two live modules with one id: the same, silently.
+
+**Decided by the core's pattern** (owner: "core change pattern on that"):
+`register()` is last wins with ownership (plan settled item 8). No new code
+(`store:already:id` was the other candidate, s35.88b; the core does not
+throw on a re-registration either). The entry records its definition (its
+`useStore`, in the literal); the same definition joins as before; another
+definition builds its store and registers over the old actions, where
+`register()` warns per action in DEV - the store adds no warning of its own,
+which would also need `./dev` in the store's import list that
+`tests/chamber-store.test.ts` pins. The old store's `$dispose` already
+removes only what it owns (s35.88): the actions no newer definition replaced,
+and the registry entry only while it is still its own.
+
+**Tests** (tests/store-redefine.test.ts, 4; tests/vapor/store-hmr.test.ts, 2):
+takeover with the new reducers, a new action and its own `state()`, and the
+two DEV warnings; the old store's `$dispose` removing its own leftover
+action (`cartClear`) and nothing of the new one; an old scope ending after
+the takeover; the real hot update, both holders. Red before: 4 (the three
+takeover cases and the pinned hot update); the same-definition control and
+the scoped hot update green before and after.
+
+**Bytes:** `store.js` +39 raw / +16 brotli; no IIFE carries the store.
+docs/store.md, Lifecycle, states the rule.
+
+
+### 35.102 Storage 7b: the store's refusals in the core's shape (2026-10-03)
+
+Branch `storage-1.26`. Storage 4b (s35.88b) coded the store's three setup
+throws but left their old text: a `[vapor-chamber]` prefix, the advice in
+production, no `context`. The core's shape (`assertNotSealed`,
+command-bus.ts) is the fact, every value in it also in `context` (plan
+4.5), the advice behind `DEV` (plan settled item 5). Dictated by those, not
+a decision.
+
+**The change.** `store:already:member`: "Store "<id>": the action "<key>"
+would replace the store's own "<key>"." + DEV advice, context `{ id, key }`;
+`store:missing:bus`: "Store "<id>" was given no bus." + DEV advice, context
+`{ id }`; `store:missing:router`: "Store "<id>" declares url fields (<fields>)
+and was given no router." + DEV advice, context `{ id, fields }`. The store
+imports `DEV` from `./dev`; `scripts/build.mjs` derives DEV inside each
+importing module, so `dist/store.js` still imports only `./command-bus.js`
+and `vue` (the boundary `tests/chamber-store.test.ts` pins, run).
+
+**Tests** (tests/store-review.test.ts, 2 new): the development messages
+with their context; production (`NODE_ENV`, a fresh import, the pattern of
+tests/command-bus.test.ts) carries the fact only. Six existing assertions
+followed the wording (five member keys, the router case) and two in
+tests/chamber-store.test.ts. Red before: 8.
+
+**Bytes:** `dist/store.js` +191 raw / +86 brotli (the DEV branches a
+consumer's build folds); a consumer's production build of `./store`
+(BUNDLE-SIZES) 2,728 -> 2,438 raw, 1,221 -> 1,113 brotli (-108): the advice no
+longer ships. No IIFE carries the store.
+
+
+### 35.103 Storage 9: D6, hydration as a command, on the event path (2026-10-03)
+
+Branch `storage-1.26`. D6 ("hydration as a command", F1's real fix: a
+`state()` that reads storage makes `$reset` return the saved record) was
+put in 1.26 by the owner. Decided on rule 2 and decision 12, after the
+owner's question whether not adding was a pyrrhic win:
+
+- A store's state has no setter (tests/chamber-store.test.ts, "mutates ONLY
+  through a dispatch"), so saved state can only enter through an action the
+  store declares; and that pattern was already documented and pinned
+  (docs/store.md, tests/store-reset-command.test.ts, the pure-state() case,
+  s35.72).
+- A library addition saves at most one line per store: `persist().restore(bus,
+  action)` saves none (the store still declares the action; a plugin cannot
+  write a store and has no install hook, whitepaper 5.2); a `$hydrate` member
+  saves the one reducer line for a member, a handler and a reserved name in
+  every store. No visible difference, so nothing is added (decision 12: what
+  an app builds in a line is not new surface).
+
+**What landed:** docs/store.md, "Loading saved state": one pattern for both
+sources; from the server, the state (a fact) rather than the commands;
+`__origin: 'replay'` in the payload. The open question "the SSR shape" keeps
+only the server-side warning class.
+
+**Tests** (tests/store-load-saved.test.ts, 3, pins of the docs' claims, no
+code to be red against): the server snapshot through the action, saved by
+`persist`; the snapshot converging where `createSSRPlugin`/`rehydrate`
+replay does not (seeded: with a deterministic reducer the replay matches and
+the test fails); `__origin: 'replay'` reaching `meta.origin` (fails without
+it). A claim dropped while writing the docs: plan 8e's "announcements stay
+quiet for 'replay'" is not built (neither `a11y.ts` nor `directives.ts`
+reads `meta.origin`), so the docs say only that a listener can tell a load
+apart.
+
+0 B.
+
+### 35.104 Storage 10: a store's fields as their own signals, measured (2026-10-03)
+
+Branch `storage-1.26`. Log 23.5's open item (atomic fields), measured in 1.26
+on the owner's go; nothing built. Every arm is a prototype on a scratch branch
+`s10-*` (never merged), built with `npm run ab:dists`; the workloads are
+committed (`scripts/ab/workloads/store-fields-200.mjs`, `-sweep.mjs`,
+`-arms.mjs`) and name the arm commits. Node 24.21, `npm run ab`, K 10, 40
+rounds, n and 4n unless said.
+
+**The arms.** Readers are effects over one store field, as a template is.
+A, today (base c9526a7): one `computed` per field, shared by its readers
+(what an app writes with no library code; a computed per READER was the
+first baseline and was dropped as a strawman). B (8612f35): `storeField`, a
+signal per field from one sync `watch` of the state. C (90b24c8): keyed bus
+events, a bridge listening on the store's actions emitting
+`$field.<id>.<field>`, readers as plain bus listeners (no Vue). D (7651460):
+C plus a Vue binding (a signal per field fed by its event). E (439dfbb) and
+E2 (8cf65a9): the store's OWN keyed field events (`$onField`, inside the
+action handler, only for subscribed fields) plus a Vue binding (`fieldRef`);
+no bus listener. Rows: readers of a field the action does not change
+(`other`), all readers on the changed field (`changed`), one reader per field
+(`fields`), an unrelated action on the same bus (`unrelated_50`), a store
+action with nothing subscribed (`no_binding`).
+
+**Sessions and the instrument.** On battery (cpu at 800 MHz, energy
+preference `power`) the A/A controls failed on every large-graph row; on AC
+(about 4 GHz, `performance`) every row ran about 3.5x faster and the large
+rows' controls STILL failed (spread 3-19% against the 3% gate), even at 20
+readers. Rows with few effects passed. So the failure is the workload (a Vue
+reactive graph of tens to hundreds of effects in one process), the failure
+mode V8-RULES rule 13 records, not the power - but power changes the
+absolute ns, so every session is on AC from the third on. The effect sizes
+repeated across every session within a few percent, which is why each row
+below says counted or not.
+
+**Results** (B/A at n / 4n; "c" = counted, its control passed):
+- A vs B, 200 readers (three sessions): other 0.09, fields(50) 0.46-0.47,
+  changed 1.08-1.14 (c at 4n: +9%); few (4 readers) 0.833 / 0.832 c.
+- A vs B, the sweep: other 0.55 / 0.38 / 0.23 at 20 / 50 / 100 readers;
+  fields 0.49 / 0.44 / 0.39; changed 1.13 / 1.13 / 1.11. Counted: fields_50
+  0.440 / 0.441 c (faster); changed_50 1.132 / 1.124 c (slower).
+- C vs A: other 0.35 c(4n), fields 0.19 c(4n), changed 0.40. C vs B: other
+  1.16 / 1.20 c(4n) (C slower, +54 to +70 ns), changed 0.39 c(n), fields
+  0.45 c(4n).
+- D vs B: other 1.16 / 1.18 c (slower, +53 to +60 ns), fields 0.50 / 0.51 c,
+  changed 0.87, unrelated_50 1.47 / 1.51 c(4n): +35 to +46 ns on EVERY
+  dispatch of an unrelated action - any bus listener (exact too) takes the
+  bus off its bare path. D vs A: other 0.34 / 0.33 c, fields 0.22 c(n),
+  unrelated_50 1.49 c(4n).
+- E vs B: other 0.69 c(4n), fields 0.33 c(4n), changed 0.78, unrelated_50
+  1.00 (neutral); E vs D: other 0.59 / 0.58 c, unrelated_50 0.69 c(4n);
+  E vs A: other 0.202 / 0.202 c, fields 0.14, changed 0.82. But no_binding
+  1.012-1.025 c against B, D and A: +4 to +8 ns on every store action, even
+  with nothing subscribed (a `write()` call and a `prev` read on every write).
+- E2 (the handler keeps today's path while no field has a subscriber): B vs
+  E2 no_binding 0.985 / 0.990 c, A vs E2 0.991 c(4n) - no longer slower
+  (about 1%, within what layout moves, rule 12; not claimed); unrelated_50
+  neutral against both; other_50 0.76 c(4n) vs B, 0.22 vs A.
+
+**What it shows.** Field-level notification is worth it where readers sit
+on fields an action does not touch, and the place it is built decides its
+cost: a sync watch (B) costs about 10% when every reader re-runs; a bus
+bridge (C, D) taxes every other dispatch on the bus; the store's own keyed
+events (E2) win every reader row against all four and cost nothing measured
+when no app opts in. `$onField` needs no Vue, which makes it the natural core
+for the Vue-less store (S11), with `fieldRef` as the Vue binding.
+
+**Design rules found on the way** (both prototype bugs, both measured):
+- A keyed-event bridge must not emit names its own wildcard matches: C's
+  first cut listened on `<id>*` and emitted `<id>.<field>`, re-entered itself
+  and ran 1,000x slower; events under a `$` name are the library's.
+- A per-write loop must not iterate a Map's entries (`for (const [k, v] of
+  map)` allocates an array per entry, V8 rule 4): E's first cut lost to B and
+  D with many fields (1.38x, 2.89x) until it walked the state's keys and
+  looked up only the changed ones (then 0.32x and 0.82x).
+
+**Not decided here:** whether E2 ships in 1.26, and as what (an opt-in
+binding beside the store); that is the owner's, with these numbers. The
+large-graph rows stay uncounted until the harness holds its control on a
+Vue graph (V8-RULES, Open).
+
+
+### 35.105 Dependencies: updated within their ranges (2026-10-03)
+
+Branch `deps-1.26` off `main` (d9581ac). Owner: no major version. `npm
+update` (the lockfile only; package.json ranges untouched): vite 8.2.2 ->
+8.3.2, vitest and @vitest/* 5.0.1 -> 5.0.3, @vitejs/plugin-vue 6.0.8 -> 6.0.9,
+vue-tsc 3.3.11 -> 3.3.12, astro 7.3.1 -> 7.3.5, @biomejs/biome 2.5.12 ->
+2.5.15, happy-dom 20.14.0 -> 20.14.5, @types/node 26.5.0 -> 26.6.4. Held:
+typescript 7.0.2 (a major; vue-tsc with it is untested). vue stays rc.10, the
+newest 3.6 RC (npm's "latest" is the 3.5 stable tag).
+
+**Audit.** `npm audit fix` (no --force) cleared devalue <= 5.9.2 (six
+advisories). Left: http-cache-semantics, 2 high, reached only through the
+exo-astro example's astro (7.3.5 still pins 4.2.0); the advisory covers every
+version, and npm's --force offer is astro 2.10.9, a downgrade - not taken.
+Composer, on the Laravel example scaffolded by its setup.sh (Laravel 13.34,
+PHP 8.5): no advisories; outdated only the skeleton's phpunit (a major). The
+scaffold's `"php": "^8.3"` confirms the examples' "php >= 8.2" is stale
+(examples review).
+
+**Effect.** Coverage 100 x4, all suites green, `check:example` green. Sizes
+from the minifier alone: full IIFE brotli +3 (raw, core and elements
+unchanged), budget raised to measured (owner: "3 B is nothing"); ESM rows
++0.1 to +0.2 KB raw on some subpaths; the Vapor outlet saving 22.05 -> 22.04,
+its own machinery 4.74 -> 4.76 (limits 15.0 / 5.0).
+
+### 35.106 Router 7: the router plan's items that needed no decision (2026-10-03)
+
+On `main` after the router merge (b1efedd), branch `router-tidy`. The owner:
+do what needs no decision, then discuss the rest on what has landed.
+
+- **The dead hover guard** (`todo-router` 4; `todo-finish-release` 6's
+  `router/dom.ts:162`). `onMouseover` began with `if (!preheat) return` under a
+  `v8 ignore`, unreachable: the listener is attached only inside `if
+  (preheat)`. The handler is now made only when `preheat` was given (a
+  conditional arrow, so `preheat` is known there), attached and removed under
+  the same condition. Pinned first (tests/router/dom.test.ts, 2): no
+  `mouseover` or `mouseout` listener at all without `preheat`; no preheat after
+  teardown. Both green before and after; seeded, the listener attached
+  unconditionally turns the first red. `dist/router.js` +32 raw / +11 brotli;
+  no IIFE carries the router. Two `v8 ignore` remain in src/router
+  (blade.ts:38, :44, type narrowing): the owner's.
+- **"Dev-trusts-generator"** (docs/router.md; handoff finding 12). Table
+  validation runs in dev only; the production arm was pinned for two of the
+  four checks (unknown parent, cyclic chain). The other two now are
+  (tests/router/table.test.ts, 2): a duplicate route name does not throw and
+  the name resolves to the later row; a `:` segment that is no param compiles
+  to a literal. Seeded, the two checks run in production: both red.
+- **Router tests on the fixture** (plan-shape 2.6, handoff finding 11). Nine
+  files build their own router. Six have a reason: `embedded` tests the
+  router choosing its own history (the fixture always passes one), the two
+  `*-production` files re-import after `vi.resetModules()`, the two boundary
+  files test built graphs, `ssr-node` runs with no DOM. `router` and
+  `abort-repro` override every fixture option (their own table and loaders, a
+  history started at `/products` under `/admin`), so the fixture adds nothing.
+  `inline-routes-json` (router 4, written after 2.6) was the fixture's exact
+  shape and now uses it.
+
+Left for the owner, to discuss on this shape: the 8d.1 A/B (a stack for every
+RouterError; a measurement, on the owner's go), the `router:*` code mapping
+(todo-router 1) with the cause reader of 8d.2 and the throwing guard (2), the
+query change during a pending navigation (3), ParamType against FieldType
+(8d.3), HttpError and RouterError joining (7.1 item 16), the two blade.ts
+ignores, and the browser history test outside the local gate.
+
+### 35.107 Router 8a: the failure module (2026-10-03)
+
+Branch `router-codes` off `main` (4bfc220). The router's failures join the
+core's model (plan 8d.2, shape rules 2 and 3) and, owner's choice over a
+router-only factory, the core's CLASS too: one failure shape for every
+failure (settled item 2), read by one `conditionOf` / `ownerOf` /
+`failureCondition`, with the stack rule (8d.1) and the RFC 9457 `toJSON` at
+the boundary (rule 5, settled item 3) for free. Plan 8d keeps the bus out of
+the router on purpose, so the failure moves out of the bus instead.
+
+**The move.** `BusError`, its vocabulary (`Condition`, `FailCode`,
+`BusErrorCode`, `FailOptions`, `Fail`), the one-shot owner slot,
+`PROBLEM_TYPE`, `_failures`, `ownerOf` and `conditionOf` moved verbatim from
+`src/command-bus.ts` to `src/failure.ts` (imports only `./dev`).
+`command-bus.ts` imports and re-exports them, so no public import changes;
+`failsFor`, the core's `fail`, `_isBug`, `conditionOfStatus` and
+`failureCondition` stay with the bus. The store imports `_failures` from
+`./failure`: `dist/store.js` now imports `vue` and `./failure.js` only (the
+boundary test and docs/store.md follow) - a smaller graph than before.
+
+**Order matters to brotli.** With the new import second in command-bus the
+bundler emitted the failure module first: the same code, renamed by the
+minifier (+4 raw) and +23 to +28 brotli in the IIFEs, the Blade consumer
++18 (over its ceiling). Placed after the scheduler import, where the code
+used to sit: raw bytes identical in all three IIFEs, brotli full -8, core
++5, elements +7, the Blade consumer back under its ceiling. Budgets raised
+to measured (owner: "size no issue").
+
+**Tests:** three read the vocabulary from source and now read
+`src/failure.ts` (tests/error-registry-sweep.test.ts, the DEV-vocabulary
+check with it; tests/problem-type.test.ts); a wrong path left the sweep's
+mint-site pattern empty (0 codes found), which its own scan guard caught.
+Everything else green unchanged: no behaviour moved.
+
+### 35.108 Router 8b: the router's codes (2026-10-03)
+
+Branch `router-codes-b` off `main` (d3fce89). Plan 8d.1 and 8d.2, shape
+rules 2 and 3, todo-router items 1 and 2, with the owner's mapping (the
+handoff's 23 rows, #13 as `unexpected`: a routes payload off-protocol always
+comes from the server, the other side breaking the contract, plan 4.2).
+
+**The change.** `routerError(code, message, { to, cause })` mints through
+`_failures('router')` (src/failure.ts, 35.107), so every router failure is a
+`BusError` coded `router:condition:subject`, with `context.to` for the
+target and the original as `cause`. Sites pass `condition:subject`; the
+owner is the module's. `isRouterError(e, code)` takes the full code and
+checks the class and the owner. The `[vapor-chamber-router]` prefix is gone:
+the code names the source, as for every other failure. The stack rule comes
+with the class: only `failed` keeps one, so a superseded navigation (one per
+keystroke under a search box, 8d.1) and a guard's refusal capture none.
+Pricing it with the A/B stays 8d.1's, on the owner's go.
+
+**Codes.** 23 renamed and three new, 26 rows in ERROR_CODE_REGISTRY, all
+`retryable: false` (no router condition is transient), `docs/errors.md`
+regenerated:
+
+- `router:failed:guard`: a guard's throw is coded at the guard call. It used
+  to reach the catch-all wrap as `component_load_failed`, a hard-navigation
+  code, so the default onError reloaded the page for a guard bug (todo-router
+  2).
+- `router:missing:loader`: a `load` no handler serves. Nothing was tried, so
+  it is not a failed load.
+- `router:missing:url`: `reload()` without a `{ url }` source, a usage
+  mistake rather than a failed load.
+
+**HARD_NAV_CODES** follows 8d.2's rule ("missing or failed route, component,
+server HTML"): `router:missing:route`, `router:missing:component`,
+`router:failed:component`, `router:failed:blade`. The rule over the registry
+is a test, so a new code that fits it fails until the set says so. Owner's
+choice over the handoff's explicit three: `router:missing:component` now
+hard-navigates (the server renders the page; the existing guard against
+hard-navigating to the URL already loaded still applies).
+
+**Guards widened.** The registry sweep's mint pattern now reads
+`routerError` and camelCase subjects (`missing:fetchBlade`, the option's
+name). Two router checks are owner-exact: every `routerError` literal in
+src/router and src/router-fetch is a `router:` row and every `router:` row is
+raised, and no plain `Error` is built there. The sweep stripped block
+comments before line comments, so a `/*` inside a line comment (table.ts
+writes the splat syntax as `/*`) opened a block that swallowed the
+`invalid:path` site after it; line comments go first now.
+
+**Measured, not chosen.** The hidden-class test (35.94) had one map for every
+RouterError. `BusError` sets `cause` only when given, so there are now two,
+no cause and cause, and they are the core failures' own two (the test now
+pins both against `new BusError`). The core defines the shape; recorded, not
+changed.
+
+**Found, not changed.** With guards coded, the engine's catch-all wrap
+(`router:failed:component`) is reached in the shipped router only by a
+`history` the app supplies whose `push` or `replace` throws (the browser
+history catches its own). It is labelled a component failure and hard
+navigates. Pinned as it is (tests/router/engine-gaps.test.ts) and reported:
+which code it should carry is the owner's.
+
+**Sizes** (docs/BUNDLE-SIZES.md): `router` 10.2 to 10.5 KB brotli,
+`router/vdom` and `router/vapor` 0.4 to 0.7 KB each (they now carry
+`BusError`), `router-fetch` 4.5 to 4.8 KB, the root entry 27.3 to 28.7 KB for
+the registry rows (tree-shaken out of an app that does not read the
+registry). IIFE budgets unchanged and met.
+
+**Tests:** tests/router/router-codes.test.ts (7, red first: the class and
+reader, the stack rule, the three new codes, the catalogue and the
+HARD_NAV rule); every router test migrated to the new codes (23 files),
+public-helpers' contract updated (name, no prefix, `context.to`), the guard
+test now expects `router:failed:guard`.
+
+### 35.109 A5: the `/vapor` async wrapper, scoped to the plugin (2026-10-03)
+
+Branch `vapor-async` off `main` (5d1b6af). Decision 6 (owner, 2026-10-02:
+D1 scoped to the plugin; .probes/1.26-remaining.md row 6), build list A5.
+
+**Checked first:** examples/vapor-sfc does not use `vaporChamberWire`
+(examples/vite.base.ts composes `vue()` and `vaporChamberHMR()` only), so
+the saving shows in fixture builds, not in that example.
+
+**The change.** Under `vaporChamberWire({ entry: 'vapor' })` the wired root
+adds `export { defineVaporAsyncComponent } from 'vapor-chamber/vapor'` (an
+explicit export beats the `export *`), and `config()` defines
+`__VC_WIRED_VAPOR__` in a build. src/vapor.ts has its own
+`defineVaporAsyncComponent`, which calls Vue's directly; its registry seed of
+that one name is a condition on the flag around the value, never an early
+return (chamber.ts, `__VC_WIRED_BUILD__`). Without the flag (esbuild,
+webpack, Vite without the plugin, `entry: 'vue'`, the dev server) the seed
+stays and the root's wrapper works as before. vapor.ts's comment on the
+re-exported wrappers keeps its claim for the six still shared; the async one
+is documented as the exception.
+
+**Tests**, each seeded red. tests/vapor-async-wire.test.ts builds three
+consumers for production: a root-only app under the plugin ships no
+`defineVaporAsyncComponent` import from `vue` (red on the previous tree); a
+root-import app that defines one gets a component when run (red with the
+wired root's explicit export removed: null); without the plugin, an app
+wiring through /vapor and calling the root's wrapper gets one (red with the
+seed dropped outright, plain D1). Plus the define, build-only and
+`entry: 'vapor'`-only. tests/vapor-async-seed.test.ts covers src/vapor.ts
+(the default project's `vue` has no Vapor, so Vue's function is mocked):
+the direct call, the seed, and no seed under the flag.
+tests/vite-wire-plugin.test.ts's `entry: 'vapor'` case now expects the async
+name only where it is used.
+
+**Bytes** (docs/BUNDLE-SIZES.md): `./vite` 2.2 to 2.3 KB brotli, `./vapor`
+25.3 to 25.4 KB raw, 8.2 KB brotli unchanged. The app saving was 754 B
+brotli on vapor-sfc, measured before item 1 of the 1.26 list landed (plan
+list row 9). Re-measured on the owner's go, one production build per arm of
+examples/vapor-sfc (deterministic, so one run each; a scratch config adding
+`vaporChamberWire({ entry: 'vapor' })`, removed after), app JS summed:
+
+    A  today, no plugin                 94,937 B raw / 30,985 B brotli
+    B  today, entry: 'vapor'            90,500 B raw / 29,437 B brotli
+    C  5d1b6af (before A5), 'vapor'     92,643 B raw / 30,201 B brotli
+
+A5 alone is C against B: -2,143 B raw / -764 B brotli. B against A also
+folds the root's probe (`__VC_WIRED_BUILD__`, 35.42), so it is not A5's
+figure. vapor-sfc defines no async component, which is the case A5 is for.
+
+### 35.110 Examples review: the fixes the findings dictate (2026-10-03)
+
+Branch `examples-review` off `main` (6fe0dcd). todo-finish-release section
+3, handoff findings 20, 21, 23 and 24 (proper-way-to-work.md); each is a
+fact checked there against today's library or framework, with the fix it
+names.
+
+- **20.** examples/pattern-5-filament.ts: the widget's `$view` is an
+  instance property (`protected string $view`), as Filament 4 and later
+  declare it; the static one is Filament 3's and a fatal error on a current
+  panel. Both bridges pass `csrf: true` (the raw bridge and
+  `VaporChamber.http` leave it off; the IIFE's `connect()` turns it on).
+- **21.** examples/pattern-4-nextjs.tsx: `setCommandBus(bus)` runs at module
+  scope, before any component renders, not in a `useEffect` (which runs after
+  the children's first render, where a `getCommandBus()` would already have
+  made a default bus).
+- **23.** examples/laravel-app README and setup.sh: PHP >= 8.3 (Laravel 13).
+- **24.** The two stale comments: useAction.ts (a missing handler is a
+  BusError coded `core:missing:handler`, a handler's throw its own error)
+  and realtime-search.ts (debounce answers `{ pending: true, key }`, the key
+  printed for the example's own dispatch), plus the debounce JSDoc in
+  src/plugins-core.ts, which said `{ pending: true }` too.
+
+Finding 22 (the status table and the 409 passages in
+docs/integrations/laravel.md) and finding 20's two `$view` snippets in the
+same page go with the docs step, last. Not done, each the owner's: 19 (the
+Vapor component example's template and its undo, "update to the new core"),
+25 (custom-plugins.ts's auth guard: no session is `unauthenticated` per
+4.2; the library's own `authGuard:refused:action` has the same reading and
+is a public code), 26 (observed in passing). Checked: `npm run typecheck`
+(the patterns included) and `npm run check:example` (vapor-sfc,
+vapor-island-cart, exo-astro) pass. laravel-app was run end to end in the
+earlier session (finding 23); none of its files changed here.
+
+### 35.111 Docs: decision 11's wording, the Laravel page's statuses (2026-10-03)
+
+Branch `docs-last` off `main` (c89279f). The docs items whose text or facts
+are already recorded:
+
+- **Decision 11** (owner, 2026-10-02): its wording replaces the first clause
+  of the speed-over-size row in docs/decisions.md (exact text,
+  .probes/1.26-remaining.md row 11). The budget clause after it is kept.
+- **Finding 22:** docs/integrations/laravel.md's status table read 409
+  `already` and 401/403/419 `refused`, from before the two conditions joined
+  (35.79). It now reads as `conditionOfStatus` does (command-bus.ts; pinned by
+  tests/http-errors.test.ts and tests/wire-contract.test.ts): 409/412
+  `conflict`, 401/419 `unauthenticated`, 403 `refused`. The two passages that
+  called a 409 `already` (the Idempotency-Key note and the reference
+  controller's lock comment) say `conflict`.
+- **Finding 20, the docs half:** the page's two Filament widget snippets
+  declare `$view` as an instance property (Filament 4 and later), as
+  examples/pattern-5-filament.ts does since 35.110.
+
+Not done here, waiting on the owner: the 13 statements of plan row 7 (the
+external report "ext 3" that details them is not in this tree; row 7 names
+each in a few words only, and each must be re-verified against the code
+line it states, with a test behind it), F3 (the timestamps page), and the
+corrections collected during the session.
+
+### 35.112 Store: undo, opt-in (2026-10-04)
+
+Branch `docs-pass` (after 26e6f38). Handoff finding 1, by the owner: "can
+store optional register with inverse?", and the docs that overstated undo
+are changed once, with the fix, not before it.
+
+**The defect.** `history` runs an inverse registered with
+`register(action, h, { undo })` (ledger.ts, `getUndoHandler`); the store
+registered its reducers with none, so on a store action `undo()` changed
+nothing and `redo()` ran it again. Pinned by the default-path test below.
+
+**The change.** `ChamberStoreOptions.undo?: boolean`, decided once when the
+store is built (V8 rule 3). Off: nothing is created and each action registers
+exactly as before; `$reset`'s handler takes the command and does one
+optional-chained call on an absent map. On: a `WeakMap` from command to the
+state it replaced, filled by each action handler and `$reset`, and one
+inverse shared by all of them that dispatches `<id>$restore` with that state.
+`$restore` is registered with the actions and goes with `$dispose`. A
+dispatch rather than a write, for the reason `$reset` became one (35.70): a
+write is heard by no plugin, so persist would keep the undone state. The
+ledger calls the inverse inside its 'undo' origin scope, so the restore is
+not recorded. The ledger undoes only its latest entry and redo dispatches a
+fresh command, so "the state before this command" is right in order; a
+change the history did not record (its `filter`) made after an undone action
+is undone with it, documented in docs/store.md.
+
+**Tests** (tests/store-undo.test.ts, 8): undo and redo step by step; persist
+stores the undone state and a reload reads it; the restore is not recorded;
+`$reset` undoes; two stores on one bus; the async bus; `$dispose` removes
+`$restore`; the default records and cannot undo. Six fail on the previous
+store (the two that pass there are guards). A first version built `history()`
+without `{ bus }` on the sync bus, which has no way to look up an inverse:
+the test's mistake, fixed in the test.
+
+**Speed.** The default path's per-dispatch code is unchanged (the same
+handler body), so decision 11 needs no run to land it. The cost of the
+opt-in (one WeakMap write per action) is not measured yet: an `npm run ab`
+on store actions with `undo: true`, on AC, is the owner's go.
+
+**Bytes:** `./store` 1.0 to 1.1 KB brotli (docs/BUNDLE-SIZES.md). Not in any
+IIFE.
+
+**Docs, once:** docs/store.md (the plugin table, the example's comment, an
+Undo section), src/store.ts's header, whitepaper 3.6 and A.3 (A.3 also lost
+"cross-tab sync" among what the store gets, the same overstatement the
+whitepaper 2.3 row has). The v1.18.0 CHANGELOG entry is history and is left;
+the new entry corrects it.
+
+### 35.113 Undo: `canUndo` beside `undo` (2026-10-04)
+
+Branch `undo-check` off `main` (7fa8aa0). Owner: "what we need is canBeUndone
+or similar to know if a state can be undo or not and only undo goes if can be
+undoable". 35.112's store undo restored the state before the action even when
+a change the history did not record had moved it since.
+
+- `RegisterOptions.canUndo(cmd)`, kept in the bus's undo entry with `undo`
+  (the entry is now the register options; `getUndoHandler` reads `.undo`, the
+  batch rollback too). `getUndoCheck` (internal) reads it.
+- The ledger: `canUndo()` is the stack and the top command's check; `undo()`
+  does nothing when it is false. A record it skips (filter, origin, failure)
+  notifies the view while the top step has a check, so `useCommandHistory`'s
+  signal follows.
+- The store (`undo: true`): canUndo while the state is the one the command
+  produced. A redo's write is credited to the last command undone, counted
+  only once `$restore` runs (a refused restore keeps the pairing).
+- tests/undo-check.test.ts (core, both buses, the composable signal),
+  tests/store-undo.test.ts (the skipped change, redo pairing, a refused
+  restore, a direct `$restore`, listeners hearing undo and redo with their
+  origin). Each seeded red. tests/history-redo-ab.test.ts's revert text
+  follows the ledger line it rewrites.
+- Bytes: IIFE budgets and the Blade ceiling raised to measured (owner, "size
+  no issue"); figures in docs/BUNDLE-SIZES.md and scripts/check-size.mjs. The
+  first version used a second map and was larger.
+- Speed: the ledger's skip path (a command the history does not record)
+  gains a stack check and one Map read, with undo history in use. That is
+  dispatch with a plugin, a hot path by decision 11. Owner: "merge now and we
+  test speed later": merged before the run, which stays owed (`npm run ab`,
+  history rows plus a control, both orders, on AC).
+
+### 35.114 Every undo is a command (2026-10-04)
+
+Branch `undo-command` off `main` (6fc5d5a). Owner: undo follows "the rules
+we are using over the entire system" - every state change is a command
+(`$reset`, 35.70), and "different treatment or you overlook proper shape?"
+for the rollbacks: the core has no dispatch plugins cannot see or refuse
+(`$reset` is refusable, tests/store-reset-command.test.ts), so the rollbacks
+take the same path.
+
+- `register` with `undo` also registers `<action>$undo` (target: the command
+  it reverses; the inverse is called with it). `_undo(bus, cmd)` dispatches
+  it with origin 'undo' and `causationId` = the command's id. Callers: the
+  ledger, `optimisticUndo`, both batch rollbacks.
+- The ledger reads the dispatch result as the inverse's answer: its value (a
+  refusal returned stays a refusal) or its error thrown (logged and kept, as
+  before).
+- The store's `$restore` (35.112) is gone: its inverse runs inside `$undo`.
+- Consequence: on the async bus an undo is async, so the ledger's one-at-a-
+  time rule drops a `redo()` in the same tick; tests that did `undo(); redo();`
+  there wait a tick. Listener sequences and `inspectBus().actions` include
+  the `$undo` commands.
+- tests/undo-command.test.ts (history, refusal, causation, unregister, both
+  buses, both rollbacks). Bytes: budgets and the Blade ceiling raised to
+  measured (owner); a variant passing a dispatch function measured smaller
+  raw but larger in brotli and was not kept.
+- Speed: register and undo paths only; the dispatch path is unchanged.
+
+Review of this branch (owner, from another window), each fixed with its test
+red first:
+- An undo went to the server: a bridge forwarding `cart*` matched
+  `cartAdd$undo`, posted it, and the local inverse never ran (the outbox
+  would queue it offline). `$reset` had the same exposure. One rule:
+  `_isLibraryAction` (a `$` name, the naming check's reading) - the HTTP,
+  batching and WebSocket bridges pass such commands on, the outbox never
+  queues them. tests/library-commands-local.test.ts.
+- `_undo` sat between `_withCausation`'s docblock and its body: moved.
+- `optimisticUndo` on the async bus called `onRollback` before the rollback
+  ran (visible with an async hook): it now runs once the `$undo` settles.
+- canUndo staleness: checked, not stale (the ledger notifies on writes it
+  skips); pinned for a store through `useCommandHistory`.
+
+### 35.115 Reads answer plain JSON (2026-10-04)
+
+Branch `reads-plain-json` off `main` (900acc9). Owner, settled with the
+reviewing window on an external consumer's report (sashimi): option A of
+two. The contract (4.4) defines command answers; a read's success is its body
+and its failure a non-2xx problem. Reasons recorded from that exchange: the
+client's stale-while-revalidate stores and serves the body as it came (an
+envelope needs an unwrap riding every background revalidation); a failure is
+already defined for a GET by its status, and a `{ problem }` inside a 2xx
+reads as a success to proxies, caches and the browser; the loader preset was
+already documented as plain JSON, so A changes one reader where B changes a
+documented contract. Rule 10 forbids the routes reader's guess between a bare
+payload and `{ state }` either way.
+
+`unwrapRoutesPayload` becomes `readRoutesPayload`: the bare payload or
+`router:unexpected:routes`. A failed `{ url }` fetch was already
+`router:failed:routes` with the client's error as cause. Tests:
+tests/router/routes-plain-json.test.ts (four red, the failure path a guard);
+the envelope cases in index-gaps and router.test removed with the decision.
+
+The consumer's side, for the record: its routes, query plan and OpenAPI
+document return bare bodies and problem+json failures; its envelope reader
+goes. Its direct reads become commands with `supersede`, `retry: 0` on the
+client call and the action declared idempotent on the bus, so one retry rule
+applies once.
+
+### 35.116 Tests import the router as `@router/...`; a missed gate (2026-10-04)
+
+Owner: "add to vite config a @router to avoid ../../ cryptic paths". Tests
+only: vitest.config.ts, vitest.vapor.config.ts and vitest.browser.config.ts
+alias `@router/` to `src/router/`, tsconfig.tests.json maps the same; 52
+files' imports rewritten. Two keep relative paths, as their bundler is not
+Vitest: tests/vapor/vapor-outlet-fixture.ts (esbuild) and
+tests/router/typed-names.test-d.ts (its own program). `src/` keeps relative
+imports: dist and its declarations are emitted from them.
+
+A missed gate, recorded: 900acc9 (35.114) was fast-forwarded into main with
+its gate failed at step 3 - the `$` command check in the bridges moved the
+Blade consumer bundle past its ceiling and the IIFEs past budget - because
+the background job's exit was read instead of the gate's own line. Both
+raised to measured here (owner, "size no issue"); the gate's result line is
+what gets read from now on.
+
+### 35.117 An app's `$` name is refused; the naming check coded (2026-10-04)
+
+Branch `decided-batch` off `main` (956080a). Owner: "can we fix and fill the
+gap?" - the rule "names with `$` are the library's" was read only by the
+naming check, so an app's `$` name was accepted, then kept local by the
+bridges (silently never sent) and able to collide with `<action>$undo`.
+
+- src/library-names.ts: `_isLibraryAction`, and `_asLibrary(fn)`, the core's
+  one-shot-slot pattern for the library registering its own `$` command.
+  Its own module: the store's boundary admits it without the bus
+  (tests/chamber-store.test.ts lists it).
+- `register()` refuses an app's `$` name, `core:invalid:name`, context
+  `{ action }`; not the dispatch path (a first version put it in the naming
+  check, which also runs per dispatch, and refused the library's own `$reset`
+  on a bus with a naming rule). `createTestBus` the same, and it now
+  registers `<action>$undo` like the real bus (with `passthroughHandlers`, an
+  undo there runs the inverse).
+- The naming violation in `throw` mode is `core:invalid:name` (was a plain
+  `Error`); the registry's declared-not-minted exception for it goes.
+- The store refuses a `$` in its id or an action key, `store:invalid:name`,
+  after the member check (`$id`, `$reset`, `$dispose` keep `already:member`).
+- tests/library-names.test.ts. Bytes: budgets and the Blade ceiling raised
+  to measured (owner).
+
+### 35.118 The owed speed runs, on AC (2026-10-04)
+
+Owner's go ("we are on ac"), Node 24.21, K 6, two lengths, A/A control per
+row (scripts/ab, workloads history-undo, store-undo, router-error).
+
+- history (7fa8aa0 -> main 956080a): a command the history SKIPS was counted
+  4.1% slower (+6 ns) at n, the 4n control failed (two `tsc` runs during the
+  job: interference of mine). Cause: the per-skip lookup of the top step's
+  `canUndo`. Fixed (V8 rule 3): the ledger caches whether the top step has a
+  check on every stack change. Re-run (-> b677a5e): skipped, recorded and
+  bare rows no result, no counted cost.
+- store `undo: true` (26e6f38 -> 956080a): 3.9-5x slower, +576 to +807 ns
+  per action, growing with the run: two WeakMap writes per command. Replaced
+  by a 256-entry ring of { cmd, before, after }; re-run: +58 / +60 ns (1.30x)
+  with the option, counted. The off path alone is neutral against both
+  26e6f38 and 956080a; in the same process as an `undo: true` store on the
+  same bus it measured +19 ns, the cost of mixing the option in.
+- router failure (d3fce89 -> b677a5e, 8d.1): a superseded navigation about
+  3,000-5,500 ns -> about 425 ns, but its control failed at both lengths (at
+  --ms=20 too): not counted. A `failed` router error is counted 16-17% slower
+  (+905 to +933 ns): the core BusError against the old plain Error, both
+  capturing a stack. Not a hot path by decision 11; recorded, not changed.
+- `router:failed:history`: a supplied history that throws writing the URL,
+  coded at the write (it fell into the catch-all as `failed:component`, a
+  hard navigation). tests/router/engine-gaps.test.ts.
+
+### 35.119 `authGuard`: no session is `unauthenticated` (2026-10-04)
+
+Branch `decided-2` off `main` (e1bbb81). Plan 4.2: `unauthenticated` is no
+valid session (sign in, then the same request), `refused` a rule that said
+no. `authGuard` refused a missing session as `refused:action`; it is now
+`authGuard:unauthenticated:action`, the registry row renamed, and
+examples/custom-plugins.ts follows (handoff finding 25). Test red first
+(tests/plugins.test.ts, the code and `conditionOf`).
+
+### 35.120 Router: a query change wins over a pending page navigation (2026-10-04)
+
+todo-router 3, settled by correctness (owner's question "1 2 correctness
+what dictate"): the query was lost and a stray history entry left. Carrying
+the query onto the new page would be wrong too: a query belongs to the route
+it was set on (`setQuery` merges into the committed location; query defs are
+per record). So the latest request wins, Router 2's rule:
+`commitQueryLocation` supersedes a page navigation in flight, which answers
+`aborted:navigation`. A query REFETCH still never touches the page lane (the
+two controllers stay). tests/router/query-during-navigation.test.ts (two red,
+a control); tests/router/abort-repro.test.ts, which pinned the old outcome
+after rc.2's accidental abort, now pins the deliberate one.
+
+### 35.121 `problemOf()`, the cause-chain reader (2026-10-04)
+
+Plan 8d.2 names it ("a backend's problem inside `load_failed` is read
+through the cause-chain reader instead of each consumer digging `cause` (the
+panel's `problemOf()`)"); an external consumer (sashimi) asked for it.
+src/http-errors.ts: `problemOfResponse(error)`, the reading `safeRequest`
+already did, now one function both use; `problemOf(error)` walks `cause`
+(bounded, a cycle ends) and returns a `remote:` failure's members or an
+answered HttpError's problem, else `undefined`. Duck-typed on `name`, so
+http-errors imports nothing new. Root export. tests/problem-of.test.ts (four
+red first: a router loader failure, a bridge failure, a non-problem body
+equal to `safe`'s, the undefined cases).
+
+### 35.122 The five `v8 ignore`s in src, removed (2026-10-04)
+
+House rule: no `v8 ignore`; a guard removed as unreachable gets a pinning test
+and a seeded failure.
+- command-bus `flushDeferred`: its `deferred === null` return (the only
+  caller checks first) is now a typed read. Pinned: a bus without buffering
+  registers, a buffered command replays.
+- Both batch rollbacks' `!results[j].ok` skip: a transactional batch stops at
+  its first failure, so every command before it succeeded; the guard and the
+  now-unused `results` parameter go. Pinned for sync (with `continueOnError`,
+  which transactional overrides) and async (an abort mid-batch). Seeded red:
+  a sync batch made to run past its failure fails the pin.
+- router/blade.ts: the two `!el.value` returns in `onMounted` /
+  `onBeforeUnmount` were type narrowing for a ref Vue sets before mount and
+  clears after unmount (measured 4/4); now an assertion, so a broken
+  invariant throws instead of skipping the hydrate silently. Covered by the
+  blade mount tests. tests/v8-ignores-removed.test.ts.
+
+### 35.123 The HMR shim's first load reads no bus (2026-10-04)
+
+Handoff finding 13: `vaporChamberHMR()`'s shim called `getCommandBus()` on
+first load, creating the shared bus, so an app whose setup then called
+`setCommandBus(...)` got decision 7's replacement warning on every dev
+server. The shim now stores a marker (`null`) and the mode on first load;
+`dispose()` stores the bus before a reload, and the reload restores only a
+stored bus. tests/hmr-shim-first-load.test.ts runs the generated shim
+against the source (red first once the suite's own shared bus was reset:
+the first version passed on the old code because the test plugin installs a
+bus before each test). Finding 14 (whether the restore branch ever runs) is
+unchanged: it needs a dev-server probe.
+
+### 35.124 `csrf: 'inertia'` removed (2026-10-04)
+
+Handoff finding 16, decided by the owner: remove `'inertia'`, no
+compatibility, docs on Laravel 13's CSRF behaviour. The option mapped to
+`false`, so it sent no token; the bridge's own fetch is reached by no Axios
+interceptor, and Inertia 3 ships no Axios; a tokenless POST passes on
+Laravel 13 only with `Sec-Fetch-Site: same-origin` (as verified in that
+finding). `csrf: true` reads the `XSRF-TOKEN` cookie when there is no meta
+tag (pinned by tests/transports.test.ts). The type is `boolean`; both
+bridges drop the mapping. tests/csrf-option.test-d.ts (in
+tsconfig.typecheck.json): the `@ts-expect-error` lines failed as unused
+before the removal. The two runtime tests that pinned `'inertia'` became one
+that pins `csrf` forwarding. Docs: docs/integrations/laravel.md, whitepaper
+6.1 and 9.3, examples/pattern-3-inertia.ts.
+
+Observed during the gate for 35.122-124 (recorded, not fixed): one gate run
+failed tests/hmr-render-scope-fixture.test.ts ("disposes each superseded
+generation of an element-nested child", expected 3, got 1). It passes alone
+3/3 and in the next full gate; it drives Vue's own HMR runtime, not the
+library's shim. A timing flake under full-suite load, for a later look.
+
+### 35.125 S10 shipped: a store's field events (2026-10-04)
+
+S10 (35.104) measured the store's own keyed field events (E2) winning every
+reader row; settled as "test it, ship it if it holds" under the speed rule.
+Ported onto today's store and re-measured on AC (Node 24.21, K 6, A/A
+controls, workloads store-fields-e2 and store-readers), against main b998adc:
+
+- E2 as prototyped (a `fieldSubs === null` check in each action handler, the
+  notify inline): a store with NO subscriber +11 ns per write (5%),
+  counted at both lengths. The prototype had measured neutral against its
+  own, older, baseline.
+- Experiments, each against b998adc, no-subscriber row: no check at all
+  (the rest of the port kept) neutral; check then an out-of-line write
+  +22 / +26 ns; a const holder object instead of the `let` +10 / +11 ns. So
+  any branch in the handler costs about 10 ns there.
+- Shipped: the handlers do not change at all. The first `$onField` starts
+  one synchronous Vue `effect` on the state, in a detached effect scope
+  (not the subscribing component's), stopped by `$dispose()`; it walks the
+  state's keys and calls the changed fields' subscribers. No subscriber:
+  neutral at both lengths. With a subscriber: +92 ns per write (a `watch`
+  measured +114; the inline version +40 but taxed every store).
+- Against what an app does without it, a `computed` per field read by a
+  render effect: 1 reader +11 / +17 ns (computed cheaper); 9 readers
+  -563 ns at 4n, 2.6x cheaper (the short length's control spread 3.1%, not
+  counted). Documented in docs/store.md as "a little faster with one reader,
+  fieldRef with several".
+- `$reset` and an undo notify through the same effect (one writer, the
+  ref). tests/store-field-events.test.ts (red first on the API, the undo
+  and reset cases, unsubscribe twice, `$dispose`, the member refusal,
+  fieldRef's re-run count).
+
+### 35.126 The speed costs left open, worked (2026-10-04)
+
+Owner: "why settle on slower times instead of find better ways to improve
+performance?" Each open cost, on AC, A/B against main aa3313b unless noted:
+
+- A `failed` router error, +905 ns (35.118). Skipping the
+  `Error.stackTraceLimit` read/write on the `failed` path: no change
+  (+54 / +78 ns, not counted), dropped. A probe of the construction alone:
+  a plain `Error` about 2,450 ns, any `class extends Error` about 3,370 ns,
+  `BusError` failed about 3,000 ns: the gap is V8's derived-Error
+  construction, the price of the one failure class (settled item 2), paid
+  only by a real failure. The superseded navigation it carries no stack for
+  is now counted faster at the long length (423 ns).
+- A store with `undo: true`, about +16 to +30 ns per action against the same
+  store without it. One flat ring with a power-of-two mask instead of three
+  arrays and a modulo: -1.9 ns counted at n, no result at 4n; kept (one
+  array). The bookkeeping built once as consts: no result at either length,
+  not kept. What is left is storing each step's states in a long-lived ring
+  (write barriers), the cost of keeping undo history at all.
+- The +19 ns on an undo-free store beside an `undo: true` one (35.118): not
+  reproduced; the undo-free row is neutral at both lengths here.
+- S10's no-subscriber cost, 35.125: removed by keeping the handlers
+  unchanged.
+
+### 35.127 Examples: findings 19 and 26 (2026-10-04)
+
+Branch `examples-2`. Each fix checked by running or mounting the example.
+- 19: examples/vue-vapor-component.vue did not render (the template read
+  `.value` on top-level refs, which templates unwrap: `.trim()` on
+  undefined; vue-tsc passed it, the static type being `{ value: T }`), and
+  its undo was a no-op. Rebuilt on today's core: the todos a store with
+  `undo: true` and `useCommandHistory`, the filter a view `ref` (a store
+  write history does not record would block undo), composable results kept
+  as objects so the template's nested `.value` is right at runtime and for
+  vue-tsc, stats a `computed`. tests/example-vue-vapor-component.test.ts
+  compiles and mounts the SFC against the source: red on the old file with
+  finding 19's TypeError, green now (add, undo, redo, the validator's
+  refusal shown). The same `.value` mistake in the comment snippets of
+  pattern-2, pattern-3 and feature-error-boundary: the same idiom.
+- 26: feature-persistence's `cartRemove` left `total` unchanged (it now
+  subtracts the line) and its IndexedDB adapter keyed the cache by array
+  index (now the store's keys, `getAllKeys`); shopping-cart's `cartUpdate`
+  and `cartClear` had no inverse and the example mutated its command's
+  payload, rebuilt on a store with `undo: true` (run: two undos restore
+  widget x2, gadget x1, as it prints); feature-command-group subscribed its
+  audit listener after every dispatch, moved before them; the feature
+  scripts that call composables at module level say so where they do and
+  how to dispose.
+
+### 35.128 Docs pass: stale passages, the cross-tab row, F3 (2026-10-04)
+
+Branch `docs-pass-2`. Each passage checked against the code first.
+- docs/plan-shape.md 4.2: "a declared `retryIn` honoured, clamped to the
+  cap" - storage 5 (35.89, owner) made a wait over `maxDelay` returned, not
+  clamped (command-bus.ts, `retrying`); the plan follows.
+- V8 rule 2 and performance.md "Hot-path shape consistency": the
+  `idempotencyKey` slot was added to every meta in 35.81; both said otherwise.
+  The field's doc comment in command-bus.ts ("not set by default") too.
+- Whitepaper 2.3 and A.4 comparison tables, "Cross-tab sync: built-in":
+  `createChannel` mirrors emitted facts; store state crosses tabs only if the
+  app emits it. The row now says so. Owner's review: this, with A.3's list
+  (7fa8aa0), is a real downgrade of a documented capability - the code fix
+  (a store sharing its resulting state across tabs, converging by version)
+  is proposed and waits for the owner's go.
+- F3: docs/timestamps.md, every timestamp the library produces and its form
+  (epoch ms inside the process, RFC 3339 text at a boundary); none breaks the
+  rule. Pinned: tests/timestamps.test.ts (meta.ts, metrics,
+  useCommandError), tests/devtools.test.ts (the timeline's ms, the
+  inspector's RFC 3339 text), tests/outbox.test.ts (`queuedAt`).
+- Owner's review of this session's doc changes (doc lowered vs code fixed):
+  one real downgrade (cross-tab, above). Not downgrades: the router codes,
+  the status table, `csrf: 'inertia'`, decision 11, the three passages above
+  (each follows a decided code change); store undo's opt-in (an enhancement:
+  stores without it pay nothing); the router's "~20us per navigation"
+  (hand-written speed figures were removed as policy).
+
+### 35.129 A store shared across tabs (2026-10-04)
+
+Owner, reviewing this session's doc changes: the whitepaper's "Cross-tab sync:
+built-in" (and A.3's list) had been lowered to match the code (35.128); "1 can
+be done as undo as optional?". Built as the `share` option.
+
+- Design: share the STATE a write reached, never the command - the reason
+  the old sync plugin was removed (createChannel's own comment: tabs
+  re-deriving a non-deterministic handler's outcome disagreed for ever). The
+  option takes an event lane (structural type; the store imports nothing
+  new) that the app bridges with `createChannel`. An effect on the state
+  sends `<id>$state` `{ state, version, tab }` after each local write; a
+  newer version (tie: the higher tab id) from another tab is applied through
+  `<id>$sync`, a library `$` command (local by the bridges' rule), with
+  `origin: 'sync'`. The ledger now skips that origin, as it skips undo and
+  redo: a change made in another tab is not a local undo step. No echo: a
+  received state is not sent again (identity, so it holds on the async bus).
+- Tests (two "tabs" over Node's BroadcastChannel), red first:
+  tests/store-share.test.ts - a write reaches the other tab both ways;
+  concurrent writes converge; the receiving tab hears `cart$sync` with origin
+  sync and its history records nothing; no echo; `$dispose` stops it and an
+  unshared store sends nothing.
+- A/B on AC against main 44f496b: a shared store's write +82 / +86 ns
+  (counted; the effect and the lane emit, before any BroadcastChannel clone);
+  an unshared store alone neutral at both lengths, and +15 / +18 ns
+  uncounted when a shared store runs in the same process; the history rows
+  (recorded, skipped, bare) no result at either length after the ledger's
+  extra origin check.
+- Docs restored: store.md (the table row and "Across tabs" with its limits),
+  whitepaper 2.3 / A.4 rows and A.3's list.
+
+### 35.130 S11: `vapor-chamber/store/core`, the store with no Vue (2026-10-04)
+
+Decided in 1.26 ("Design it in 1.26"); the design recorded then: one store,
+the Vue primitives injected, rather than a second implementation (two copies
+of the same rules, the duplication settled.ts and dict.ts removed) or
+`signal()` inside today's store (the runtime probe back in a Vue app, against
+the 2026-08-31 static-import decision). Named `store/core` as the router's
+variants are named (the bare name is the main entry, a variant one level
+below) and as the whitepaper uses "core" (framework-agnostic, zero deps).
+
+- src/store-base.ts: the whole store over a `StoreRuntime` - `cell` (the state
+  cell), `watch(cell, fn)` (after each changing write; it carries `$onField`
+  and `share`, added since the design) and an optional `scope` (the holder
+  lifetime). src/store.ts passes Vue's `shallowRef`, a sync `effect` in a
+  detached scope and Vue's scopes, and keeps `fieldRef`; its handlers are the
+  same code. src/store/core.ts passes a cell over `signal()` whose setter
+  calls its watchers, and no scope (every caller owns `$dispose()`).
+- Build entry `store/core`, export `./store/core`. Built graph: dist/store.js
+  imports `vue` and `./store-base.js`; dist/store-base.js `./failure.js` and
+  `./library-names.js`; dist/store/core.js `../signal.js` and
+  `../store-base.js` - no Vue, no probe. tests/chamber-store.test.ts and
+  tests/store-core.test.ts hold both.
+- tests/store-core.test.ts (red first, the module missing): commands, `$reset`,
+  undo, `$onField`, no-scope lifetime, `share` across tabs, an alien-signals
+  effect rerunning on a write, the built entry's imports.
+- A/B on AC against main 42a1d53, the Vue store after the split: undo on and
+  off, field events with and without a subscriber - no result in any row,
+  effects within 0.5%.
+- Docs: store.md "Without Vue" (the open question goes), README's subpath
+  list. Also corrected here, made wrong by 35.129: whitepaper 2.3 / A.4 store
+  rows ("cross-tab sync is no longer on that list") and store.ts's header
+  ("`createChannel` mirrors it").
+
+### 35.131 The HTTP client's failures are the core's `BusError` (7.1 #16) (2026-10-04)
+
+- `HttpError` removed. An answer is `remote:<condition>:<code>`, read once
+  (`_answered`, src/http.ts), shared by the bridges. No answer:
+  `transport:timeout:reply`, `lost:reply`, `aborted:request`, `missing:csrf`.
+- One retry rule, `retryClass` (src/failure.ts): transient for any method,
+  uncertain only for an idempotent method or an `Idempotency-Key`. A POST
+  with no response is no longer re-sent without a key.
+- `safe.*` returns the `BusError`; `problemOf` reads its problem.
+- Tests: tests/http-one-shape.test.ts.
+
+### 35.132 One JSON body reader: status first (2026-10-04)
+
+- A non-2xx keeps its status's condition whatever its body.
+- A 2xx: empty is no data; a body that is not the expected JSON (the
+  client: declared JSON; postCommand and the bridges: the envelope) is
+  `remote:unexpected:json`. Before, a bridge read a 2xx HTML page as success.
+- Tests: tests/http-one-shape.test.ts.
+
+### 35.133 The HTTP join measured (2026-10-04)
+
+- scripts/ab: `ASYNC = true` workloads awaited (scripts/ab/loop.cjs,
+  tests/ab-loop.test.ts); workload scripts/ab/workloads/http-failures.mjs.
+- main a8d029f against 18cfdc3, K 20, AC: success rows no result (within
+  MDE); answered failures B/A 0.51-0.60, no result (control spread);
+  client_get_lost 1.43 slower, the coded failure built where main rethrew
+  fetch's error.
+
+### 35.134 One action filter; P1's premise measured (2026-10-04)
+
+- `_actionFilter` (command-bus.ts) replaces the two identical copies in
+  plugins-extra.ts and outbox.ts.
+- Bridges keep their inline filter: the shared one measured no result
+  (bridge_miss B/A 1.003, within MDE) for +22 B brotli.
+- P1's premise, scripts/ab/workloads/plugins-miss.mjs, AC: bare dispatch
+  72 ns, four scoped plugins that miss 254 ns (about 45 ns a level).
+  bridge-miss.mjs: a bridge that misses adds about 190 ns to an async dispatch.
+
+### 35.135 Where a 202's marker lives: measured (2026-10-04)
+
+- Prototypes against main 1e4be22, scripts/ab/workloads/meta-slot.mjs, AC.
+- A slot on every result: bare dispatch slower at 4n (B/A 1.007, +0.5 ns).
+- A slot on `meta`: no result at either length (B/A 1.000 at 4n, MDE 0.3%).
+- Decided by it: the marker is a fixed `meta` slot.
+
+### 35.136 `meta.response` (2026-10-04)
+
+- A fixed meta slot (35.135), Fetch's members `{ status, headers, url,
+  redirected }`, filled by both HTTP bridges from the 2xx a reply arrived in;
+  `undefined` for a local handler; a non-2xx answer is the error's.
+- Tests: tests/meta-response.test.ts, tests/v8-shapes.test.ts (one meta map).
+- A/B against e9d0f3d, AC: bare dispatch, listener, client and bridge rows
+  all no result (bare dispatch 0.998 at 4n, MDE 0.5%).
+
+### 35.137 Compatibility removed: zero consumers (2026-10-04)
+
+Owner: zero consumers, so a refactor replaces; no aliases, no deprecation.
+
+- `window.__VUE__` no longer read (Vue's key); `__VAPOR_CHAMBER_VUE__` only.
+- `CommandsOf` removed; `InferMap` is the one name.
+- One CSRF attach (`attachCsrf`) for postCommand and the client.
+- Kept split, measured: one fetch for both paths cost the Blade bundle
+  +87 B brotli (the client's branches no longer tree-shake out).
+
+### 35.138 One command envelope (2026-10-04)
+
+Owner: speed, correctness, symmetry, shape, room to grow.
+
+- `{ id?, command, target, payload?, meta? }` on every wire; `id` only where
+  answers are multiplexed, as on the answer side (4.4); `meta` holds
+  `idempotencyKey`, `correlationId`, `causationId`, omitted when none is set.
+- Before: three shapes; the key in a header (single), the body (batch) or
+  not sent (WebSocket); the chain never sent.
+- Kept: the `Idempotency-Key` header on a single request (IETF draft tooling).
+  Not taken: JSON-RPC 2.0 (its error object is not RFC 9457).
+- The reference controller reads `meta`. tests/wire-envelope.test.ts.
+- A/B against 7434f50, K 20, AC: post_409, bridge_ok, bridge_409 no result;
+  at 4n B/A 1.006 / 1.002 / 1.008, CI includes 1 (n: 1.031 / 1.066, control
+  spread 8.5% / 5.0%).
+
+### 35.139 `meta.request` (2026-10-04)
+
+- The request side of `meta.response`: a fixed slot, `{ headers }`, set by a
+  bus plugin, merged by both HTTP bridges into the request (a batch: its
+  commands' headers in queue order, the later winning). Replaces P4's bridge
+  hook: a plugin installed with `bus.use()` reaches the request.
+- Per-command facts stay in the envelope's `meta` (35.138); this slot is for
+  request-level headers.
+- Tests: tests/meta-request.test.ts, tests/v8-shapes.test.ts (one meta map).
+- A/B against b922c18, AC: bare dispatch 0.999 / 0.998 (controls 0.7% /
+  0.4%), listener and bridge rows no result, every CI includes 1.
+
+### 35.140 `pollWith` (2026-10-04)
+
+- Owner: build it; the shape (b) by RFC 9110 15.3.3: a 202 is the answer, the
+  dispatch resolves at once; the job's end is a fact, `<action>$done`.
+- src/poll-with.ts: follows `meta.response` (35.136) `Location`, each
+  `Retry-After`; ends `{ state }`, the coded problem, or `pollWith:timeout:job`.
+- The reference controller answers 202 for an action returning
+  `['accepted' => [...]]`; its idempotency cache keeps status and headers.
+  Checked with `php -l` only: no PHP test runs in the suite.
+- Tests: tests/poll-with.test.ts. No size change (tree-shaken unless used).
+
+### 35.141 P1: plugins declare `actions` (2026-10-04)
+
+- A plugin's `actions` (PluginParts) is read by the runner: with any plugin
+  declaring, a runner per action over the plugins that match, built on its
+  first dispatch (cap 512); none declaring, the plain runner. `context.index`
+  stays the place in the whole chain. 16 scoped plugins declare; their own
+  checks removed (zero consumers, no alias).
+- A/B against a1ba5c9, AC: four_scoped_miss K 20 B/A 0.496 at 4n, faster
+  (control 2.5%), 0.497 at n, no result (control 3.6%); bare dispatch and
+  listener no result (0.998-1.004). Blade +96 B brotli.
+- Tests: tests/plugin-manifest.test.ts.
+
+### 35.142 P3's premise measured (2026-10-04)
+
+- scripts/ab/workloads/tracking-cost.mjs, main fbce0aa on both arms, AC: bare
+  dispatch ~82 ns, with `isLoading` armed ~219-229 ns: tracking ~140 ns a
+  dispatch. Worth a prototype.
+- Breakdown, scripts/ab/workloads/tracking-breakdown.mjs (ns at n / 4n): bare
+  60.6 / 82.0; a `'*'` listener +54 / +75 (off the bare fast path); an empty
+  before-hook +7 / +7; the error observer +12 / +14; armed tracking +69 / +66.
+- P3 dropped: a plugin cannot tell a query from a dispatch (queries show no
+  spinner, command-bus.ts:1472), settle timing would move, and the most it
+  could remove is under the ~60 ns the slot lookup shares. Next: the listener
+  path, the largest piece.
+
+### 35.143 Sync dispatch without plugins skips the runner (2026-10-04)
+
+- No plugin, no executeOverride, not `onMissing: 'throw'`: the handler is
+  called directly, then hooks and listeners as before; same result.
+- A/B against fbce0aa, AC: shared_armed faster at n and 4n (B/A 0.897 /
+  0.878, -25 / -28 ns); listener_only, listener_hook, shared_unarmed,
+  listener_reads_meta 0.81-0.93, no result (controls 3.3-7.9%); bare no
+  result. Blade +19 B brotli.
+
+### 35.144 Every example run end to end (2026-10-04)
+
+- Headless Chromium over the servers each README names: sprinkled-blade,
+  vapor-sfc, vapor-island-cart, exo-astro, feature-directives, router-demo
+  load and react with no error (feature-directives' "Out of stock" is its
+  failing-command demo).
+- examples/laravel-app's setup.sh on a fresh Laravel: /cart; an idempotency
+  key in the envelope's `meta` replayed (4, 4, 5); a 422 read as
+  `remote:invalid:validation_failed` with `/payload/qty`; the batch endpoint;
+  an action answering `accepted`, followed by `pollWith` to `$done`.
+  Fixtures (a batch route, a 202 action, a status monitor) in the scratch app
+  only.
+
+### 35.145 Build-time inventory: nothing to fold (2026-10-04)
+
+- Swept src for runtime checks a build could answer (typeof window, document,
+  navigator, process, AbortSignal.any, BroadcastChannel; process.env).
+- The dispatch path has none left: DEV, `__VC_LEAN__` and the wiring flags
+  already fold. The rest run once per HTTP request (http-query, the bridges,
+  supersede: one typeof against a network round trip), per log line
+  (logger), or once at setup (outbox, router, a11y, devtools, mcp, CSRF
+  readers). No candidate for a build flag.
+- examples/laravel-backend on a fresh Laravel, as its README installs it
+  (scratch models, policy, job): every action and failure as documented
+  (200, 404 not_found, 422 with pointers, 403 forbidden, 404
+  unknown_command; an envelope key replayed). Fixed: routes-web.php
+  appended to a stock web.php was a PHP fatal (a second `use Route`), now
+  fully-qualified; the config registers `checkoutProcess`; ProcessCheckout's
+  hand-made `pollWith` field removed (the plugin and `accepted` replace it).
+- exo-astro under `npm run dev` as well as built: loads and reacts, no error.
+- The 21 snippet files, bundled against dist/ and run in Chromium: 11 clean;
+  feature-retry, feature-transports, form-validation run as written (their
+  own failure demos, a placeholder WebSocket host); feature-persistence
+  saves on a real origin. The two Vite configs run as configs: vaporChamberWire
+  built and served, vaporChamberHMR under the dev server, both reacting.
+  pattern-2/-3/-6 are excerpts of a host app (their .vue pages and Inertia
+  exist only there; patterns-ambient.d.ts stubs them), type-checked only.
+- vue-vapor-component.vue mounted and used: add, toggle, undo, redo; an
+  empty submit refused with the validator's alert.

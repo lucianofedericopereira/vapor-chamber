@@ -17,7 +17,8 @@ import type { ParamType, RouteParams, RouteRecord, Segment, TableRecord } from '
 
 export type RouteTable = {
   records: readonly TableRecord[];
-  /** Resolve a decoded path (no query/hash) to the first matching record. */
+  /** Resolve a path as in the URL (no query/hash) to the first matching
+   *  record; captured params come back decoded. */
   resolve: (path: string) => { record: TableRecord; params: RouteParams } | null;
   getRecord: (name: string) => TableRecord | undefined;
   /** Interpolate params into a record's pattern. */
@@ -106,7 +107,7 @@ export function compilePath(path: string, paramTypes: Readonly<Record<string, Pa
       // splat syntax here is a bare `/*`, or `:name(.*)` to capture it.)
       if (DEV && raw.startsWith(':')) {
         throw routerError(
-          'invalid_path',
+          'invalid:path',
           `route path segment ":${raw.slice(1)}" in "${path}" is not a valid param - supported forms are :name, :name(regex), :name? and a trailing /* splat. As written it compiles to a literal segment and the route can never match.`,
         );
       }
@@ -145,7 +146,7 @@ export function createRouteTable(rows: readonly RouteRecord[]): RouteTable {
   // Pass 1 - compile rows.
   for (const row of rows) {
     if (DEV && byName.has(row.name)) {
-      throw routerError('duplicate_route', `duplicate route name "${row.name}"`);
+      throw routerError('already:route', `duplicate route name "${row.name}"`);
     }
     const record: TableRecord = {
       name: row.name,
@@ -180,7 +181,7 @@ export function createRouteTable(rows: readonly RouteRecord[]): RouteTable {
     const parent = byName.get(row.parent);
     if (!parent) {
       if (DEV) {
-        throw routerError('unknown_parent', `route "${row.name}" references unknown parent "${row.parent}"`);
+        throw routerError('missing:parent', `route "${row.name}" references unknown parent "${row.parent}"`);
       }
       return;
     }
@@ -208,7 +209,7 @@ export function createRouteTable(rows: readonly RouteRecord[]): RouteTable {
     }
     if (DEV && chain[0]?.parent) {
       throw routerError(
-        'cyclic_parent',
+        'invalid:parent',
         `route "${record.name}" has a cyclic parent chain (${chain.map((r) => r.name).join(' -> ')} -> ${chain[0].parent.name}) - a route cannot be its own ancestor`,
       );
     }
@@ -278,7 +279,7 @@ export function createRouteTable(rows: readonly RouteRecord[]): RouteTable {
   function buildPath(record: TableRecord, params: RouteParams = {}): string {
     const rendered = renderSegments(record.segments, params);
     if (rendered.missing !== undefined) {
-      throw routerError('missing_param', `missing param "${rendered.missing}" for route "${record.name}"`);
+      throw routerError('missing:param', `missing param "${rendered.missing}" for route "${record.name}"`);
     }
     return rendered.path;
   }

@@ -29,6 +29,8 @@ bus.register('userLogin', (cmd) => {
 
 // ─── Global error capture (catch all failures) ────────────────────────────────
 
+// Outside a component, for brevity: in an app this runs in setup(). Here nothing
+// disposes it automatically (the DEV heads-up says so); call dispose() when done.
 const { errors, latestError, clearErrors } = useCommandError()
 
 bus.dispatch('cartAdd', {})         // missing id -> error
@@ -64,8 +66,10 @@ console.log('Auth errors:', authErrors.errors.value.length)    // -> 1
  * import { useCommand, useCommandError } from 'vapor-chamber/vue'
  *
  * // Per-component error state - cleared on unmount automatically
- * const { dispatch, loading } = useCommand()
- * const { latestError, clearErrors } = useCommandError({
+ * // Kept as objects: a template unwraps top-level refs, so the nested `.value`
+ * // reads the same at runtime and for vue-tsc.
+ * const cmd = useCommand()
+ * const errs = useCommandError({
  *   filter: (cmd) => cmd.action === 'checkoutSubmit',
  * })
  * </script>
@@ -73,13 +77,13 @@ console.log('Auth errors:', authErrors.errors.value.length)    // -> 1
  * <template>
  *   <div>
  *     <!-- aria-disabled, not :disabled: keyboard focus stays on the button -->
- *     <button @click="!loading.value && dispatch('checkoutSubmit', formData)" :aria-disabled="loading.value">
- *       {{ loading.value ? 'Processing...' : 'Pay now' }}
+ *     <button @click="!cmd.loading.value && cmd.dispatch('checkoutSubmit', formData)" :aria-disabled="cmd.loading.value">
+ *       {{ cmd.loading.value ? 'Processing...' : 'Pay now' }}
  *     </button>
  *
- *     <div v-if="latestError.value" class="error-banner" role="alert">
- *       <p>{{ latestError.value.message }}</p>
- *       <button @click="clearErrors">Dismiss</button>
+ *     <div v-if="errs.latestError.value" class="error-banner" role="alert">
+ *       <p>{{ errs.latestError.value.message }}</p>
+ *       <button @click="errs.clearErrors()">Dismiss</button>
  *     </div>
  *   </div>
  * </template>

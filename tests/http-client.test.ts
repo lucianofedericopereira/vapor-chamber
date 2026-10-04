@@ -3,6 +3,7 @@
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { createHttpClient } from '../src/http';
+import { problemOf } from '../src/http-errors';
 
 // ---------------------------------------------------------------------------
 // Fetch mock helpers
@@ -240,7 +241,7 @@ describe('createHttpClient - retry', () => {
 
     const http = createHttpClient();
     await expect(http.post('/api/cmd', { qty: -1 }, { retry: 2 })).rejects.toMatchObject({
-      response: { status: 422 },
+      context: { status: 422 },
     });
     expect(attempts).toBe(1); // was 3 - the mutation was re-sent twice
   });
@@ -313,7 +314,7 @@ describe('createHttpClient - timeout retry', () => {
     vi.useFakeTimers();
     const http = createHttpClient();
     const promise = http.get('/api/slow', { timeout: 50, retry: 1 });
-    const assertion = expect(promise).rejects.toMatchObject({ name: 'TimeoutError' });
+    const assertion = expect(promise).rejects.toMatchObject({ code: 'transport:timeout:reply' });
     await vi.advanceTimersByTimeAsync(3000);
     await assertion;
   });
@@ -330,7 +331,7 @@ describe('createHttpClient - silent flag', () => {
     const http = createHttpClient();
     const err = await http.post('/api/x', {}, { silent: true }).catch((e: any) => e);
 
-    expect(err.silent).toBe(true);
+    expect(err.context.silent).toBe(true);
   });
 
   it('does not stamp without the flag', async () => {
@@ -339,7 +340,7 @@ describe('createHttpClient - silent flag', () => {
     const http = createHttpClient();
     const err = await http.post('/api/x', {}).catch((e: any) => e);
 
-    expect(err.silent).toBeUndefined();
+    expect(err.context.silent).toBeUndefined();
   });
 });
 
@@ -657,7 +658,10 @@ describe('createHttpClient - safe mode', () => {
     const http = createHttpClient();
 
     const result = await http.safe.post('/api/submit', {});
-    expect(result).toEqual({ data: null, error: { status: 422, code: 'invalid', detail: 'Validation failed', errors }, status: 422 });
+    expect(result.data).toBeNull();
+    expect(result.status).toBe(422);
+    expect(result.error?.code).toBe('remote:invalid:invalid');
+    expect(problemOf(result.error)).toEqual({ status: 422, code: 'invalid', detail: 'Validation failed', errors });
   });
 });
 

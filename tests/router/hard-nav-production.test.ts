@@ -2,7 +2,7 @@
 /**
  * The production half of the hard-navigation refusal (router/index.ts `if (DEV)`).
  *
- * When an `unmatched` (or other HARD_NAV_CODE) error names a URL that is ALREADY
+ * When an `router:missing:route` (or other HARD_NAV_CODE) error names a URL that is ALREADY
  * the current one, handing it back to the server would reload forever behind a
  * catch-all - so the router refuses. In dev it explains why and returns; in
  * production it falls through to the generic `console.error(error)`. Both arms
@@ -21,13 +21,13 @@ afterEach(() => {
 const ROWS = [{ name: 'home', path: '/', component: 'Home' }];
 
 async function bootRouter(): Promise<{ router: any; errors: unknown[][]; assign: any }> {
-  const { createRouter } = await import('../../src/router/index');
-  const { createWebHistory } = await import('../../src/router/history');
+  const { createRouter } = await import('@router/index');
+  const { createWebHistory } = await import('@router/history');
 
   const errors: unknown[][] = [];
   vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => { errors.push(args); });
 
-  // Sit on a URL the table cannot match, so navigating to it is `unmatched`
+  // Sit on a URL the table cannot match, so navigating to it is `router:missing:route`
   // AND `href === here` - the refusal case. Set the URL BEFORE spying, so the
   // router reads the live location rather than a snapshot taken too early.
   window.history.replaceState({ __vr: 0 }, '', '/nowhere');

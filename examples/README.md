@@ -3,7 +3,7 @@
 Runnable demos and copy-paste snippets for vapor-chamber. Each full-project app
 has its own README; each single-file snippet is self-contained. The apps
 consume the library via `file:../..` and auto-build `dist/` on demand. Aligned with
-**Vue <!-- vc:vueAligned -->3.6.0-rc.9<!-- /vc:vueAligned -->**.
+**Vue <!-- vc:vueAligned -->3.6.0-rc.10<!-- /vc:vueAligned -->**.
 
 Two shared helpers sit here rather than in each example:
 
@@ -31,10 +31,13 @@ Two shared helpers sit here rather than in each example:
 | [`feature-cross-tab-sync.ts`](./feature-cross-tab-sync.ts) | `createChannel` - a handler emits a fact, every other same-origin context applies it (BroadcastChannel) |
 | [`feature-error-boundary.ts`](./feature-error-boundary.ts) | `useCommandError` - component-scoped error boundary |
 | [`feature-persistence.ts`](./feature-persistence.ts) | `persist` plugin - localStorage / sessionStorage / custom storage (incl. IndexedDB) |
+| [`feature-outbox.ts`](./feature-outbox.ts) | `createOutbox` - commands queued offline, replayed in order with their idempotency key |
+| [`feature-store.ts`](./feature-store.ts) | `defineChamberStore` - actions as commands, undo, `$reset`, field events, `share` across tabs, `store/core` without Vue |
 | [`feature-retry.ts`](./feature-retry.ts) | The async bus's retry - the default by condition, per-action declarations (`'idempotent'`, `false`, a count), on a schema too |
 | [`feature-transitions.ts`](./feature-transitions.ts) | Transition-dispatched commands (the transitions bridge) |
 | [`feature-transports.ts`](./feature-transports.ts) | HTTP / WebSocket / SSE transport plugins |
 | [`feature-vite-hmr.ts`](./feature-vite-hmr.ts) | `vaporChamberHMR` - state-preserving Vite hot reload |
+| [`feature-vite-wire.ts`](./feature-vite-wire.ts) | `vaporChamberWire` - build-time Vue wiring, `entry` and `profile` |
 | [`feature-directives.html`](./feature-directives.html) | `v-vc-command` / `v-vc-payload` / `v-vc-optimistic` - **runnable**, no build step (ESM + import map): `node examples/static-server.mjs` |
 
 ## Framework patterns

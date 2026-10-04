@@ -17,7 +17,7 @@ import { ... } from 'vapor-chamber/router-fetch';
 
 ### fetchLoaders
 
-**Function** - [src/router-fetch/index.ts:56](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router-fetch/index.ts#L56)
+**Function** - [src/router-fetch/index.ts:57](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router-fetch/index.ts#L57)
 
 ```ts
 fetchLoaders(options?: FetchLoadersOptions) => LoaderHandlers
@@ -27,7 +27,7 @@ fetchLoaders(options?: FetchLoadersOptions) => LoaderHandlers
 
 ### FetchLoadersOptions
 
-**Type alias** - [src/router-fetch/index.ts:21](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router-fetch/index.ts#L21)
+**Type alias** - [src/router-fetch/index.ts:22](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router-fetch/index.ts#L22)
 
 ```ts
 export type FetchLoadersOptions = {
@@ -58,7 +58,7 @@ export type FetchLoadersOptions = {
 
 ### LoaderCache
 
-**Type alias** - [src/router-fetch/index.ts:19](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router-fetch/index.ts#L19)
+**Type alias** - [src/router-fetch/index.ts:20](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router-fetch/index.ts#L20)
 
 ```ts
 export type LoaderCache = { ttl?: number; staleTtl?: number; serveStaleOnError?: boolean };

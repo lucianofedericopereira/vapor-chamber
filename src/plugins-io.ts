@@ -86,6 +86,13 @@ export function persist<T>(options: PersistOptions<T>): Plugin & {
     filter,
     coalesce = false,
   } = options;
+  // A configuration mistake throws at setup: without it, every save() would
+  // fail and nothing would ever be stored.
+  if (typeof getState !== 'function') {
+    throw new TypeError(
+      DEV ? `[vapor-chamber] persist({ key: "${key}" }) needs getState: a function returning the state to save after each command.` : 'persist: getState',
+    );
+  }
 
   function getStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null {
     if (options.storage) return options.storage;
@@ -146,7 +153,7 @@ export function persist<T>(options: PersistOptions<T>): Plugin & {
         return result;
       });
 
-  return Object.assign(plugin, { load, save, clear });
+  return Object.assign(plugin, { id: 'persist', load, save, clear });
 }
 
 // ---------------------------------------------------------------------------

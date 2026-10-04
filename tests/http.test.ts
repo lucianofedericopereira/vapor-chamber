@@ -21,7 +21,7 @@ function mockResponse(status: number, body: unknown = null, headers: Record<stri
       get: (k: string) => headers[k.toLowerCase()] ?? null,
     },
     json: async () => body,
-    text: async () => String(body),
+    text: async () => (typeof body === 'string' ? body : JSON.stringify(body)),
   };
 }
 
@@ -61,10 +61,10 @@ describe('postCommand - basic', () => {
     expect(JSON.parse(init.body)).toEqual({ foo: 'bar' });
   });
 
-  it('throws HttpError on non-retryable error status', async () => {
+  it('throws the core failure on a non-retryable error status', async () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(400, 'bad request'));
 
-    await expect(postCommand('/api/cmd', {})).rejects.toMatchObject({ name: 'HttpError', response: { status: 400 } });
+    await expect(postCommand('/api/cmd', {})).rejects.toMatchObject({ name: 'BusError', context: { status: 400 } });
   });
 
   it('merges extra headers', async () => {
@@ -84,7 +84,7 @@ describe('postCommand - basic', () => {
 describe('postCommand - retry', () => {
   it("does not re-send a 422: the server's verdict", async () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(422));
-    await expect(postCommand('/api/cmd', {}, { retry: 2 })).rejects.toMatchObject({ response: { status: 422 } });
+    await expect(postCommand('/api/cmd', {}, { retry: 2 })).rejects.toMatchObject({ context: { status: 422 } });
     expect((globalThis.fetch as any).mock.calls).toHaveLength(1);
   });
 
@@ -121,7 +121,7 @@ describe('postCommand - retry', () => {
 
     vi.useFakeTimers();
     const promise = postCommand('/api/cmd', {}, { retry: 2 });
-    const assertion = expect(promise).rejects.toMatchObject({ name: 'HttpError', response: { status: 503 } });
+    const assertion = expect(promise).rejects.toMatchObject({ name: 'BusError', context: { status: 503 } });
     await vi.runAllTimersAsync();
     await assertion;
 
@@ -142,17 +142,27 @@ describe('postCommand - retry', () => {
     expect(res.ok).toBe(true);
   });
 
-  it('retries on network error', async () => {
+  // No reply is `lost`: the POST may have landed, so the one retry rule
+  // (retryClass, log s35.131) re-sends it only when it is safe to send twice -
+  // here, a request carrying an Idempotency-Key, as the bus reads a keyed command.
+  it('re-sends a POST with no reply only when it carries an Idempotency-Key', async () => {
     (globalThis.fetch as any)
       .mockRejectedValueOnce(new Error('network'))
       .mockResolvedValueOnce(mockResponse(200, { done: true }));
 
     vi.useFakeTimers();
-    const promise = postCommand('/api/cmd', {}, { retry: 1 });
+    const promise = postCommand('/api/cmd', {}, { retry: 1, headers: { 'Idempotency-Key': '"k1"' } });
     await vi.runAllTimersAsync();
     const res = await promise;
 
     expect(res.ok).toBe(true);
+    expect((globalThis.fetch as any).mock.calls).toHaveLength(2);
+  });
+
+  it('does not re-send a POST with no reply and no key', async () => {
+    (globalThis.fetch as any).mockRejectedValue(new Error('network'));
+    await expect(postCommand('/api/cmd', {}, { retry: 2 })).rejects.toMatchObject({ code: 'transport:lost:reply' });
+    expect((globalThis.fetch as any).mock.calls).toHaveLength(1);
   });
 
   it('throws on network error after exhausting retries', async () => {
@@ -160,7 +170,7 @@ describe('postCommand - retry', () => {
 
     vi.useFakeTimers();
     const promise = postCommand('/api/cmd', {}, { retry: 1 });
-    const assertion = expect(promise).rejects.toThrow('network down');
+    const assertion = expect(promise).rejects.toMatchObject({ code: 'transport:lost:reply', cause: { message: 'network down' } });
     await vi.runAllTimersAsync();
     await assertion;
   });
@@ -174,7 +184,7 @@ describe('postCommand - retry', () => {
 
     vi.useFakeTimers();
     const promise = postCommand('/api/cmd', {}, { retry: 2 });
-    const assertion = expect(promise).rejects.toMatchObject({ name: 'HttpError', response: { status: 422 } });
+    const assertion = expect(promise).rejects.toMatchObject({ name: 'BusError', context: { status: 422 } });
     await vi.runAllTimersAsync();
     await assertion;
 
@@ -186,7 +196,7 @@ describe('postCommand - retry', () => {
 
     vi.useFakeTimers();
     const promise = postCommand('/api/cmd', {}, { retry: 2 });
-    const assertion = expect(promise).rejects.toMatchObject({ name: 'HttpError', response: { status: 403 } });
+    const assertion = expect(promise).rejects.toMatchObject({ name: 'BusError', context: { status: 403 } });
     await vi.runAllTimersAsync();
     await assertion;
 
@@ -199,7 +209,7 @@ describe('postCommand - retry', () => {
 // ---------------------------------------------------------------------------
 
 describe('postCommand - timeout', () => {
-  it('throws TimeoutError when request exceeds timeout', async () => {
+  it('throws transport:timeout:reply when request exceeds timeout', async () => {
     (globalThis.fetch as any).mockImplementation((_url: string, init: RequestInit) =>
       new Promise((_, reject) => {
         init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')));
@@ -208,7 +218,7 @@ describe('postCommand - timeout', () => {
 
     vi.useFakeTimers();
     const promise = postCommand('/api/cmd', {}, { timeout: 100 });
-    const assertion = expect(promise).rejects.toMatchObject({ name: 'TimeoutError' });
+    const assertion = expect(promise).rejects.toMatchObject({ code: 'transport:timeout:reply' });
     await vi.advanceTimersByTimeAsync(200);
     await assertion;
   });
@@ -219,7 +229,7 @@ describe('postCommand - timeout', () => {
 // ---------------------------------------------------------------------------
 
 describe('postCommand - user abort', () => {
-  it('throws AbortError when user signal fires', async () => {
+  it('throws transport:aborted:request when user signal fires', async () => {
     const ctrl = new AbortController();
     (globalThis.fetch as any).mockImplementation((_url: string, init: RequestInit) =>
       new Promise((_, reject) => {
@@ -231,14 +241,14 @@ describe('postCommand - user abort', () => {
     const promise = postCommand('/api/cmd', {}, { signal: ctrl.signal });
     ctrl.abort();
 
-    await expect(promise).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(promise).rejects.toMatchObject({ code: 'transport:aborted:request' });
   });
 
   it('short-circuits immediately if signal is already aborted', async () => {
     const ctrl = new AbortController();
     ctrl.abort();
 
-    await expect(postCommand('/api/cmd', {}, { signal: ctrl.signal })).rejects.toMatchObject({ name: 'AbortError' });
+    await expect(postCommand('/api/cmd', {}, { signal: ctrl.signal })).rejects.toMatchObject({ code: 'transport:aborted:request' });
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 });
@@ -253,7 +263,7 @@ describe('postCommand - silent flag', () => {
 
     const err = await postCommand('/api/cmd', {}, { silent: true }).catch((e: any) => e);
 
-    expect(err.silent).toBe(true);
+    expect(err.context.silent).toBe(true);
   });
 
   it('stamps it on a request that got no response at all', async () => {
@@ -261,8 +271,8 @@ describe('postCommand - silent flag', () => {
 
     const err = await postCommand('/api/cmd', {}, { silent: true }).catch((e: any) => e);
 
-    expect(err).toBeInstanceOf(TypeError);
-    expect(err.silent).toBe(true);
+    expect(err.code).toBe('transport:lost:reply');
+    expect(err.context.silent).toBe(true);
   });
 
   it('does not stamp without the flag', async () => {
@@ -270,7 +280,7 @@ describe('postCommand - silent flag', () => {
 
     const err = await postCommand('/api/cmd', {}).catch((e: any) => e);
 
-    expect(err.silent).toBeUndefined();
+    expect(err.context.silent).toBeUndefined();
   });
 });
 
@@ -283,7 +293,7 @@ describe('postCommand - session expiry', () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(401));
     const onSessionExpired = vi.fn();
 
-    await expect(postCommand('/api/cmd', {}, { onSessionExpired })).rejects.toMatchObject({ response: { status: 401 } });
+    await expect(postCommand('/api/cmd', {}, { onSessionExpired })).rejects.toMatchObject({ context: { status: 401 } });
     expect(onSessionExpired).toHaveBeenCalledWith(401);
   });
 
@@ -339,7 +349,7 @@ describe('postCommand - CSRF 419 refresh', () => {
   it('does not retry 419 a second time (csrfRetried guard)', async () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(419));
 
-    await expect(postCommand('/api/cmd', {}, { retry: 0 })).rejects.toMatchObject({ response: { status: 419 } });
+    await expect(postCommand('/api/cmd', {}, { retry: 0 })).rejects.toMatchObject({ context: { status: 419 } });
     // call[0] = original POST, call[1] = csrf-cookie GET, call[2] = retry POST -> 419 again -> throw
     expect((globalThis.fetch as any).mock.calls).toHaveLength(3);
   });

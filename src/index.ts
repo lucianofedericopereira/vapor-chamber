@@ -70,6 +70,8 @@ export {
   type BaseBus,
   type Command,
   type CommandResult,
+  type MetaResponse,
+  type MetaRequest,
   type CommandMeta,
   type CommandBus,
   type AsyncCommandBus,
@@ -104,6 +106,13 @@ export {
 // Settling what `next()` gave a plugin, on either bus: what a `Plugin` uses to
 // read the result (see Plugin).
 export { onSettled, type MaybeAsyncResult } from './settled';
+
+// What an app plugin builds a result with: the bus's own two factories, so its
+// results share the bus's one hidden class (tests/plugin-result-factories).
+// A rejection is `err(fail(...))`: `fail`, the plugin's third argument, mints
+// the owner. And the library's rule for a numeric option.
+export { _okResult as ok, _errResult as err } from './command-bus';
+export { countOption } from './bounds';
 
 // Testing utilities (CORE - zero runtime deps, for test environments only)
 export { createTestBus, wired, type TestBus, type RecordedDispatch } from './testing';
@@ -143,6 +152,7 @@ export {
   type IdempotentOptions,
   type SupersedeOptions,
 } from './plugins-extra';
+export { pollWith, type PollWithOptions, type PollDone } from './poll-with';
 
 // -- OPTIONAL ------------------------------------------------------------------
 
@@ -219,7 +229,6 @@ export {
   createHttpClient,
   type HttpConfig,
   type HttpResponse,
-  type HttpError,
   type HttpRequestConfig,
   type HttpClient,
   type HttpMethod,
@@ -235,6 +244,7 @@ export {
 export {
   classifyError,
   isRetryableStatus,
+  problemOf,
   type ErrorClassification,
   type ProblemDetails,
 } from './http-errors';
@@ -320,7 +330,6 @@ export {
   type InferMap,
   // typed command contract
   defineSchema,
-  type CommandsOf,
   type SchemaCommandBus,
   type AsyncSchemaCommandBus,
   type SchemaCommandBusOptions,

@@ -20,6 +20,7 @@
   "include": [
     "src/**/*",
     "tests/typed-contract.typecheck.ts",
-    "tests/router/typed-names.test-d.ts"
+    "tests/router/typed-names.test-d.ts",
+    "tests/csrf-option.test-d.ts"
   ]
 }

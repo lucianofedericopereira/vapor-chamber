@@ -32,7 +32,7 @@ function mockResponse(status: number) {
     ok: status >= 200 && status < 300,
     status,
     headers: { entries: () => [], get: () => null },
-    json: async () => ({}),
+    json: async () => ({}), text: async () => JSON.stringify(({})),
   };
 }
 
@@ -124,8 +124,6 @@ describe('postCommand - 419 refresh with no document (a server)', () => {
       posts++;
       return Promise.resolve(mockResponse(posts === 1 ? 419 : 200));
     }));
-    await expect(postCommand('/api/cmd', {}, { retry: 0, csrf: true })).rejects.toThrow(
-      /CSRF refresh failed: no token found/,
-    );
+    await expect(postCommand('/api/cmd', {}, { retry: 0, csrf: true })).rejects.toMatchObject({ code: 'transport:missing:csrf' });
   });
 });

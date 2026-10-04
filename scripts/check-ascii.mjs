@@ -99,7 +99,7 @@ export function rootFiles() {
 // this array does not name. An alphabet cannot audit itself, so something that
 // reads the tree instead has to.
 export const EXTENSIONS = [
-  '.ts', '.tsx', '.js', '.mjs', '.md', '.json', '.vue', '.yml', '.yaml',
+  '.ts', '.tsx', '.js', '.mjs', '.cjs', '.md', '.json', '.vue', '.yml', '.yaml',
   '.html', '.css', '.php', '.astro', '.sh', '.svg', '.webmanifest',
 ];
 // `.astro` is Astro's generated cache under examples/exo-astro, gitignored and

@@ -14,7 +14,7 @@ import { decodeQueryParam, encodeQueryParam, resolveQueryHistory } from './url';
 export function useRouter(): Router {
   const router = inject<Router>(ROUTER_KEY);
   // Coded, like every other failure here, so a handler can switch on it.
-  if (!router) throw routerError('no_router', 'no router provided - did you app.use(router)?');
+  if (!router) throw routerError('missing:router', 'no router provided - did you app.use(router)?');
   return router;
 }
 

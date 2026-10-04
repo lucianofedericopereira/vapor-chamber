@@ -11,16 +11,18 @@
  * asserted the way the renderer boundaries are: build a consumer that calls
  * `createRouter()` and nothing else, and look at what came with it.
  *
- * Skips when dist/ hasn't been built or esbuild is unavailable.
+ * Fails when dist/ hasn't been built (tests/require-dist.ts); skips when
+ * esbuild is unavailable.
  */
 import { describe, expect, it } from 'vitest';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { requireDist } from '../require-dist';
 
 const routerEntry = resolve(process.cwd(), 'dist', 'router', 'index.js');
 const remoteEntry = resolve(process.cwd(), 'dist', 'router', 'remote.js');
-const haveDist = existsSync(routerEntry) && existsSync(remoteEntry);
+requireDist(existsSync(routerEntry) && existsSync(remoteEntry));
 
 let esbuild: typeof import('esbuild') | null = null;
 try {
@@ -61,7 +63,7 @@ async function modulesOf(source: string): Promise<string[]> {
   }
 }
 
-describe.skipIf(!haveDist || !esbuild)('http boundary', () => {
+describe.skipIf(!esbuild)('http boundary', () => {
   it('createRouter() alone does not pull in the http client', async () => {
     const modules = await modulesOf(
       `import { createRouter } from ${JSON.stringify(routerEntry)};\nglobalThis.__probe = createRouter;\n`,

@@ -112,6 +112,7 @@ describe('item 28 - redo() on an async bus records once', () => {
 
     history.undo();
     expect(history.past.value).toHaveLength(0);
+    await new Promise((r) => setTimeout(r, 0)); // an undo is a command: async on this bus (s35.114)
 
     history.redo();
     await new Promise((r) => setTimeout(r, 10)); // let the async dispatch settle
@@ -132,6 +133,7 @@ describe('item 28 - redo() on an async bus records once', () => {
     await vi.waitFor(() => expect(history.past.value).toHaveLength(1));
 
     history.undo();
+    await new Promise((r) => setTimeout(r, 0)); // an undo is a command: async on this bus (s35.114)
     history.redo();
     await vi.waitFor(() => expect(history.past.value).toHaveLength(1));
     await new Promise((r) => setTimeout(r, 20)); // grace: a double-record would land here
@@ -150,6 +152,7 @@ describe('item 28 - redo() on an async bus records once', () => {
     await bus.dispatch('setCount', target, 5);
     await vi.waitFor(() => expect(history.past.value).toHaveLength(1));
     history.undo();
+    await new Promise((r) => setTimeout(r, 0)); // an undo is a command: async on this bus (s35.114)
     history.redo();
     await vi.waitFor(() => expect(history.past.value).toHaveLength(1));
     await new Promise((r) => setTimeout(r, 20));

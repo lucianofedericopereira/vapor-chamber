@@ -10,7 +10,6 @@
 'use client'
 import { createAsyncCommandBus, setCommandBus } from 'vapor-chamber'
 import { createHttpBridge } from 'vapor-chamber/transports'
-import { useEffect } from 'react'
 
 // Singleton bus - shared across all 'use client' components. Its retry is on
 // by default: the bridge's transient failures are re-sent.
@@ -21,11 +20,13 @@ bus.onAfter((cmd, result) => {
   console.log(`⚡ ${cmd.action}`, result.ok ? result.value : result.error)
 })
 bus.use(createHttpBridge({ endpoint: '/api/vc' }))
+// Installed as the shared bus here, at module scope, before any component
+// renders: a child that calls getCommandBus() in its first render would
+// otherwise get a default bus, and setting one after it was used is the DEV
+// warning's case. (A useEffect runs after the children's first render.)
+setCommandBus(bus) // accepts either bus flavor
 
 export function VaporChamberProvider({ children }: { children: React.ReactNode }) {
-  useEffect(() => {
-    setCommandBus(bus) // accepts either bus flavor
-  }, [])
   return <>{children}</>
 }
 

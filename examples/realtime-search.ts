@@ -2,7 +2,7 @@
  * Real-time Search Example
  *
  * Demonstrates: the debounce plugin. It runs on either bus: a debounced
- * dispatch answers `{ pending: true }` at once, and the latest one runs after
+ * dispatch answers `{ pending: true, key }` at once, and the latest one runs after
  * the quiet period.
  */
 
@@ -68,14 +68,14 @@ function simulateTyping() {
   });
 
   // Wait for debounced execution. Note: a debounced action's dispatch ALWAYS
-  // returns { pending: true } - including this one - because the plugin defers
+  // returns { pending: true, key } - including this one - because the plugin defers
   // the real handler run. Results arrive via the deferred execution (observe
   // them with bus.on('searchQuery', ...)), never in the dispatch return value.
   console.log('\n--- Waiting 500ms for debounce to complete ---');
   setTimeout(() => {
     console.log('\n--- Dispatch after debounce period ---');
     const finalResult = bus.dispatch('searchQuery', 'wire');
-    console.log('Result:', finalResult); // -> { ok: true, value: { pending: true } }
+    console.log('Result:', finalResult); // -> { ok: true, value: { pending: true, key: 'searchQuery:wire' } }
   }, 500);
 }
 

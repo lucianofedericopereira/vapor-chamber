@@ -7,9 +7,13 @@
  *     specifier to a virtual module that imports 'vapor-chamber/vue' (or
  *     '/vapor') for its side effect and re-exports the real root, so an app
  *     importing from the root is wired in production with no import changed.
- *     Under the dev server it only defines `__VC_WIRED__`, which chamber.ts's
- *     DEV probe hint reads: a dev-time redirect over a pre-bundled install put
- *     two chamber modules in the page (see the function's note).
+ *     It also defines `__VC_WIRED_BUILD__` there, which folds the root's
+ *     runtime Vue probe out of the build (chamber.ts).
+ *     Under the dev server it does not redirect and defines `__VC_WIRED__`,
+ *     which chamber.ts's DEV probe hint reads: a dev-time redirect over a
+ *     pre-bundled install put two chamber modules in the page (see the
+ *     function's note). In both it defines `__VC_LEAN__`, the build profile
+ *     (the `profile` option), unless the app defines it.
  *
  * The rules the HMR shim keeps:
  *   - SCRIPTS ONLY. `enforce: 'pre'` runs ahead of @vitejs/plugin-vue, and
@@ -206,13 +210,15 @@ import { getCommandBus, setCommandBus, resetCommandBus, isVaporAvailable } from 
 const KEY = '${HMR_GLOBAL_KEY}';
 const MODE_KEY = '${HMR_MODE_KEY}';
 
-// On first load: store current bus and mode in globalThis
+// On first load: mark it and store the mode. The bus is not read here: that
+// would create the shared bus before the app's own setCommandBus() and trip
+// its replacement warning; dispose() stores the bus before any reload.
 if (typeof globalThis[KEY] === 'undefined') {
-  globalThis[KEY] = getCommandBus();
+  globalThis[KEY] = null;
   globalThis[MODE_KEY] = isVaporAvailable() ? 'vapor' : 'vdom';
 } else {
-  // On HMR reload: restore the preserved bus
-  setCommandBus(globalThis[KEY]);
+  // On HMR reload: restore the preserved bus, once dispose() has stored one
+  if (globalThis[KEY]) setCommandBus(globalThis[KEY]);
   // Detect vapor<->vdom mode switch (Vue 3.6.0-beta.10 tracks __vapor state)
   const prevMode = globalThis[MODE_KEY];
   const currMode = isVaporAvailable() ? 'vapor' : 'vdom';
@@ -313,7 +319,10 @@ export type VaporChamberWireOptions = {
    * same as importing `vapor-chamber/vue`. `'vapor'` wires that plus
    * `createVaporApp`, `defineVaporComponent` and `defineVaporAsyncComponent`,
    * the same as importing `vapor-chamber/vapor` - pick it when the app
-   * compiles `<script setup vapor>` SFCs.
+   * compiles `<script setup vapor>` SFCs. Under it the root's
+   * `defineVaporAsyncComponent` is /vapor's, which calls Vue's directly, so
+   * Vue's async code is bundled only when the app defines an async component
+   * (`__VC_WIRED_VAPOR__`, vapor.ts).
    *
    * The choice is yours on purpose. The plugin does not inspect
    * @vitejs/plugin-vue to guess it: `'vapor'` puts the Vapor runtime in the
@@ -321,6 +330,19 @@ export type VaporChamberWireOptions = {
    * would decide that cost for you.
    */
   entry?: 'vue' | 'vapor';
+  /**
+   * The build profile, for the library's speed-against-memory trades.
+   * `'performance'` (the default) spends memory for speed; `'lean'` spends
+   * speed for memory. The plugin defines `__VC_LEAN__` (true for `'lean'`,
+   * false otherwise) in a build and under the dev server, so the choice folds
+   * at build time and costs nothing per call. An app that defines
+   * `__VC_LEAN__` itself keeps its own value.
+   *
+   * Trades behind it today: `isLoading()` keeps up to 256 unread keys' slots
+   * per action for reuse (performance) or drops each one when it settles
+   * (lean).
+   */
+  profile?: 'performance' | 'lean';
 };
 
 /**
@@ -367,7 +389,15 @@ const WIRED_ROOT_PREFIX = '\0vapor-chamber:wired-root:';
  * stays at one. tests/vite-wire-plugin.test.ts pins both counts on a real dev
  * server.
  *
- * Under serve the plugin does one thing instead: it defines `__VC_WIRED__`.
+ * In a build it also defines `__VC_WIRED_BUILD__`: the redirect wires the
+ * app, so the root's runtime probe is dead code and folds out, and with it
+ * the dynamic `import('vue')` (tests/root-probe-builds.test.ts).
+ *
+ * In a build and under serve it defines `__VC_LEAN__` from `profile`, so the
+ * profile's guard folds in every plugin build, the default included; an app's
+ * own define of it is kept (tests/isloading-profile.test.ts).
+ *
+ * Under serve the plugin does not redirect; it defines `__VC_WIRED__` instead.
  * chamber.ts's DEV probe-path hint reads it and stays quiet, because its
  * advice - import from `vapor-chamber/vue` - is what this plugin already does
  * to the build. The define arrives as a GLOBAL (Vite leaves dependency code
@@ -401,9 +431,18 @@ export function vaporChamberWire(options: VaporChamberWireOptions = {}): any {
     name: 'vapor-chamber-wire',
     enforce: 'pre' as const,
 
-    config(_config: unknown, env: { command: 'build' | 'serve' }) {
+    config(config: { define?: Record<string, unknown> }, env: { command: 'build' | 'serve' }) {
       serve = env.command === 'serve';
-      return serve ? { define: { __VC_WIRED__: 'true' } } : undefined;
+      // A build is wired by the redirect below, so the root's runtime probe
+      // folds away (chamber.ts, __VC_WIRED_BUILD__).
+      const define: Record<string, string> = serve ? { __VC_WIRED__: 'true' } : { __VC_WIRED_BUILD__: 'true' };
+      // Wired for /vapor, the root's async wrapper is /vapor's (load below), so
+      // /vapor seeds no registry entry for it (vapor.ts, decision 6).
+      if (!serve && options.entry === 'vapor') define.__VC_WIRED_VAPOR__ = 'true';
+      // The profile, unless the app defines it: Vite merges this result into
+      // the user's config, so an emitted key would replace the app's own.
+      if (config.define?.__VC_LEAN__ === undefined) define.__VC_LEAN__ = options.profile === 'lean' ? 'true' : 'false';
+      return { define };
     },
 
     async resolveId(this: any, id: string, importer: string | undefined) {
@@ -418,7 +457,10 @@ export function vaporChamberWire(options: VaporChamberWireOptions = {}): any {
     load(id: string) {
       if (!id.startsWith(WIRED_ROOT_PREFIX)) return;
       const real = id.slice(WIRED_ROOT_PREFIX.length);
-      return `import '${wiring}';\nexport * from ${JSON.stringify(real)};\n`;
+      // Under 'vapor' the root's `defineVaporAsyncComponent` is /vapor's, which
+      // calls Vue's directly; an explicit export beats the `export *`.
+      const own = options.entry === 'vapor' ? `export { defineVaporAsyncComponent } from '${wiring}';\n` : '';
+      return `import '${wiring}';\n${own}export * from ${JSON.stringify(real)};\n`;
     },
   };
 }

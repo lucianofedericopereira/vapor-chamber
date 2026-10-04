@@ -4,8 +4,8 @@
  * environment, no window at all) unexercised. No docblock here on purpose.
  */
 import { describe, expect, it } from 'vitest';
-import { createRouter } from '../../src/router/index';
-import type { RouteRecord } from '../../src/router/types';
+import { createRouter } from '@router/index';
+import type { RouteRecord } from '@router/types';
 
 const ROWS: RouteRecord[] = [
   { name: 'home', path: '/', component: 'Home' },

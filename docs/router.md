@@ -42,7 +42,7 @@ A route row declares its data in the `load` column; HOW it resolves is a loader
 preset plugged into the SPI: prefix handlers (registered `rows:`-style
 prefixes), a url handler (plain URL templates), and an optional `affects` hook
 (which query-key changes trigger a refetch). A `load` with no matching handler
-is a coded `load_failed`.
+is a coded `router:missing:loader`.
 
 ```jsonc
 { "load": "rows:products" }               // a prefix handler: whatever the preset registers "rows:" to mean
@@ -82,8 +82,14 @@ serve two optional features. The outlet subpaths below follow the
 same reasoning, and `tests/router/remote-boundary.test.ts` enforces this split
 the same way.
 
-Forgetting one is a coded error, never a silent failure: `http_unconfigured`
-for a `{ url }` table, `blade_unconfigured` for a blade row.
+Forgetting one is a coded error, never a silent failure: `router:missing:http`
+for a `{ url }` table, `router:missing:fetchBlade` for a blade row.
+
+Reads answer plain JSON, like a loader: the `{ url }` endpoint (and an inline
+element) holds the table itself, `{ routes, base? }`, and a failure is a
+non-2xx `application/problem+json` (`router:failed:routes`, the client's
+error as its `cause`). The command envelope is not a read's shape: a
+`{ state }` or a 2xx `{ problem }` is `router:unexpected:routes`.
 
 ### Deriving state from the route
 
@@ -136,7 +142,7 @@ second HTTP client and a second cache, silently diverging from the router's.
 Only successful commands refresh (a failed mutation refreshing as though it had
 worked is the bug this avoids), a superseded navigation drops its refresh, a
 rejected refresh leaves the stale data on screen, and a record name that is not
-in the current load chain is a loud `unknown_route_name` rather than a silent
+in the current load chain is a loud `router:missing:record` rather than a silent
 no-op.
 
 **It flips its own `isRevalidating`, not the router's.** `router.isRevalidating`
@@ -189,10 +195,10 @@ immediately, and a query-only change aborts the previous refetch. Pass it to
 `fetch` (or check `signal.aborted` around a non-fetch source) or a superseded
 request keeps running and resolves into a snapshot nobody is looking at.
 
-**Throw, do not swallow.** Any error becomes a coded `load_failed` carrying
+**Throw, do not swallow.** Any error becomes a coded `router:failed:loader` carrying
 yours as `cause`; a `RouterError` you throw yourself passes through untouched,
 so you can raise a more specific code. If the signal aborted, it becomes
-`cancelled` instead, which the engine reads as supersession and deliberately
+`router:aborted:navigation` instead, which the engine reads as supersession and deliberately
 does NOT report to `onError` - a cancelled load is normal flow, not a failure.
 
 **Override `affects` only if the default is wrong for your dialect.** On a
@@ -205,11 +211,18 @@ so there is nothing to recompute per navigation.
 
 **Report a background refresh through `ctx.revalidate`.** A handler serving
 stale data now and refreshing behind it hands the refresh promise to
-`ctx.revalidate(promise)` - the fifth argument's one member. The engine flips
+`ctx.revalidate(promise)`, a member of the fifth argument. The engine flips
 `router.isRevalidating`, patches `snapshot.data` when it resolves, drops it if
 the location changed meanwhile, and keeps the stale value if it rejects.
 Without it, a stale-while-revalidate response refreshes your cache but never
 the page.
+
+**Read past your cache when `ctx.refresh` is true.** The fifth argument's other
+member says why the loader runs: `true` when `revalidateRoutes` refreshes the
+page after a command changed its data, `false` on a navigation or a query
+refetch. A handler that caches must not answer a refresh from the cache, or the
+page gets the copy from before the change; `fetchLoaders` drops its URL from
+the client's cache first (`tests/router-fetch/revalidate-past-cache.test.ts`).
 
 `vapor-chamber/router-fetch` is a worked implementation of the **`url` handler**
 specifically - read it for the signature, the abort behaviour and the
@@ -242,7 +255,7 @@ Measured on the built `dist/` (`tests/router/vdom-boundary.test.ts` and
 |---|---|
 | `vapor-chamber/router` | `computed customRef getCurrentScope inject onScopeDispose shallowRef` |
 | `vapor-chamber/router/vdom` | `defineComponent h inject provide` |
-| `vapor-chamber/router/vapor` | `createDynamicComponent createSlot defineVaporComponent inject provide` |
+| `vapor-chamber/router/vapor` | `createDynamicComponent createIf createSlot defineVaporComponent inject provide` |
 
 Blade rows need no import from you: the router pulls `makeBladeComponent` in
 on demand, as a separate chunk, the first time it renders one.
@@ -331,17 +344,23 @@ const crumbs = useBreadcrumbs(); // the matched parent chain, titled rows only,
   which stays false - the page has data), and the fresh value patches into
   `snapshot.data` when it lands. A custom preset gets the same channel through
   the loader SPI's `ctx.revalidate(promise)`.
-- Measured baseline: the SPI itself costs ~20µs per navigation on a
-  5k-row local source - specialize only past profiling, not before.
+- Specialize a preset only past profiling, not before.
 
 ## Everything else
 
 - **One atomic snapshot** - `{ location, render, data }`, frozen per commit;
   `<RouterOutlet/>` = `render[depth]`, keyless (resolved-component identity =>
   reuse, in both outlets).
-- **One error taxonomy** - `push()` resolves to `RouterError | null`;
-  machine-readable codes; `HARD_NAV_CODES` hard-navigate by default (server
-  gets the last word; stale chunks recover). `useRouteError()` for boundaries.
+- **The core's failure model, not a router taxonomy** - `push()` resolves to
+  `RouterError | null`. A `RouterError` is the core's `BusError` under the
+  core's rules, owner `router`: coded `router:condition:subject` (every code
+  in `ERROR_CODE_REGISTRY` and [errors.md](errors.md)), so `conditionOf`,
+  `ownerOf` and `toJSON` read it like any other failure; the
+  navigation target is `context.to`, the original error `cause`, and only a
+  `failed` code keeps a stack. `HARD_NAV_CODES` (a route, component or server
+  HTML that is missing or failed) hard-navigate by default (server gets the
+  last word; stale chunks recover); a guard that throws is
+  `router:failed:guard` and does not. `useRouteError()` for boundaries.
 - **Blade rows** are wrapped as ordinary components (hydrate/dehydrate in
   lifecycle) - incremental Blade->Vue migration, flip `blade: true` to
   `component` per row.
@@ -397,7 +416,7 @@ import { RouterOutlet } from 'vapor-chamber/router/vapor';  // Vapor, no interop
 
 What it costs, and what it requires:
 
-- **Measured saving: <!-- vc:outletSaving -->21.18<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->67.4<!-- /vc:outletSavingRaw --> KB raw** against the same app
+- **Measured saving: <!-- vc:outletSaving -->22.03<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->70.4<!-- /vc:outletSavingRaw --> KB raw** against the same app
   rendering through the vDOM outlet plus interop - re-derived every test run by
   `tests/vapor/vapor-outlet-size.test.ts` from a Vite production build rather
   than quoted, with the baseline built by the same harness so the two arms
@@ -405,19 +424,19 @@ What it costs, and what it requires:
   >= <!-- vc:outletFloor -->15.0<!-- /vc:outletFloor --> KB, and the Vapor
   outlet's own machinery over a router-without-outlet floor stays
   <= <!-- vc:outletOwnArmCeiling -->5.0<!-- /vc:outletOwnArmCeiling --> KB
-  (measured <!-- vc:outletOwnArm -->4.13<!-- /vc:outletOwnArm --> KB). The
-  subpath's own cost is <!-- vc:sizeRouterVapor -->0.4<!-- /vc:sizeRouterVapor --> KB brotli.
+  (measured <!-- vc:outletOwnArm -->4.72<!-- /vc:outletOwnArm --> KB). The
+  subpath's own cost is <!-- vc:sizeRouterVapor -->0.7<!-- /vc:sizeRouterVapor --> KB brotli.
 - **Route components must be `defineVaporComponent` output** (Vapor-compiled
   SFCs are). This is a real constraint, not a convention: with no interop
   installed, `createDynamicComponent` would otherwise create a vDOM component
   in Vapor mode with no error of its own. The outlet therefore checks the
-  `__vapor` marker itself and throws a coded `mode_mismatch` - a loud failure
+  `__vapor` marker itself and throws a coded `router:invalid:component` - a loud failure
   in place of wrong-mode rendering, and deliberately not a silent fallback to
   interop, which would restore the whole ~20 KB brotli the subpath exists to
   avoid.
 - **Blade rows still require the vDOM outlet.** `makeBladeComponent` is
   `defineComponent`/`h`, so a blade row reaching the Vapor outlet is the same
-  `mode_mismatch` throw, with its own message pointing here. An app that mixes
+  `router:invalid:component` throw, with its own message pointing here. An app that mixes
   blade rows and Vapor pages renders through `vapor-chamber/router/vdom` and
   pays for interop; that is unchanged and is the single most likely way to get
   a disappointing result from this subpath.
@@ -436,7 +455,7 @@ Two constraints worth knowing before writing your own Vapor test or app:
 - Vapor ships as a **physically separate dist file**
   (`vue/dist/vue.runtime-with-vapor.esm-*.js`). A bare `import 'vue'` never
   resolves to it outside a bundler's per-app alias - see `chamber.ts` §probeVue
-  and whitepaper §11.6.
+  and whitepaper §9.6.
 - Never mix that build with a plain `import 'vue'` in the same context. Two
   separately-imported Vue dists are two disconnected reactivity instances, and
   the failure is silent. Import `provide`, `inject`, `defineVaporComponent` and
@@ -518,7 +537,7 @@ Still not usable here, though the reasons differ:
   DOM-native way around it.
 - **SSR/Hydration** for blade rows - no server-side render path exists.
   `fetchBlade` is caller-supplied everywhere (a blade row without one throws
-  `blade_unconfigured`, browser or not), and `bladeFetcher()` off-DOM returns
+  `router:missing:fetchBlade`, browser or not), and `bladeFetcher()` off-DOM returns
   the document as fetched rather than extracting `bladeRoot` - fetching still
   works, hydrating does not.
 

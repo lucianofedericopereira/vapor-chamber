@@ -21,7 +21,7 @@ describe('createHttpBridge redirect & error-body paths', () => {
   it('calls onRedirect and resolves { ok:false } when body has a redirect', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ redirect: '/login' }),
+      json: async () => ({ redirect: '/login' }), text: async () => JSON.stringify(({ redirect: '/login' })),
     }));
 
     const onRedirect = vi.fn();
@@ -37,7 +37,7 @@ describe('createHttpBridge redirect & error-body paths', () => {
   it('surfaces a redirect error when no onRedirect handler is configured', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ redirect: '/checkout' }),
+      json: async () => ({ redirect: '/checkout' }), text: async () => JSON.stringify(({ redirect: '/checkout' })),
     }));
 
     const bus = createAsyncCommandBus({ retry: false });
@@ -758,7 +758,7 @@ describe('createEchoBridge broadcast error logging', () => {
 
 describe('bridge signal merging - AbortSignal.any fallbacks', () => {
   const okFetch = () =>
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ state: 1 }) }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ state: 1 }) , text: async () => JSON.stringify(({ state: 1 }))}));
 
   it('prefers the caller signal when AbortSignal.any is missing', async () => {
     const origAny = AbortSignal.any;
@@ -812,7 +812,7 @@ describe('bridge signal merging - AbortSignal.any fallbacks', () => {
           const sent = JSON.parse(String(init.body)) as { commands: Array<{ id: string }> };
           return {
             ok: true,
-            json: async () => ({ results: sent.commands.map((c) => ({ id: c.id, state: 1 })) }),
+            json: async () => ({ results: sent.commands.map((c) => ({ id: c.id, state: 1 })) }), text: async () => JSON.stringify(({ results: sent.commands.map((c) => ({ id: c.id, state: 1 })) })),
           };
         }),
       );
@@ -837,7 +837,7 @@ describe('bridge signal merging - AbortSignal.any fallbacks', () => {
   });
 
   it('forwards the Idempotency-Key the idempotent plugin stamps', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ state: 1 }) });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ state: 1 }) , text: async () => JSON.stringify(({ state: 1 }))});
     vi.stubGlobal('fetch', fetchMock);
 
     const bus = createAsyncCommandBus({ retry: false });

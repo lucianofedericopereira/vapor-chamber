@@ -180,9 +180,10 @@ step('lint', (name) => {
 });
 
 step('coverage', (name) => {
-  // npx, not `npm run test:coverage`: eight A/B files skip themselves on that
-  // lifecycle name, and their absence changes the counts a later stamp publishes
-  // (s20.0). The gate measures what the audit method measures.
+  // The audit method's command. It and `npm run test:coverage` are one run now:
+  // tests/under-coverage.ts reads Vitest's own coverage flag, so under either
+  // the A/B files run their equivalence checks and skip only their timing loops
+  // (log s35.52). It was the npm script name, which made the two differ (s20.0).
   const r = run('npx', ['vitest', 'run', '--coverage'], { capture: true });
   const out = (r.stdout || '') + (r.stderr || '');
   if (r.status !== 0) fail(name, out.slice(-4000));
@@ -222,11 +223,11 @@ step('docs', (name) => {
   // Scoped to what this step regenerates. An unscoped `git diff` here blamed the
   // docs for an unrelated edit sitting in the tree - a gate that names the wrong
   // step is worse than one that does not fire. Everything else is the last step's.
-  const d = run('git', ['diff', '--exit-code', '--stat', '--', 'docs/api'], { capture: true });
+  const d = run('git', ['diff', '--exit-code', '--stat', '--', 'docs/api', 'docs/errors.md'], { capture: true });
   if (d.status !== 0) {
-    fail(name, `docs/api regenerated with a diff - it was stale:\n${d.stdout || ''}`);
+    fail(name, `docs/api or docs/errors.md regenerated with a diff - it was stale:\n${d.stdout || ''}`);
   }
-  ok(name, 'docs/api regenerated, no diff');
+  ok(name, 'docs/api and docs/errors.md regenerated, no diff');
 });
 
 step('size:doc', (name) => {

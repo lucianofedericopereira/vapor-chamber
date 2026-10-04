@@ -2,7 +2,7 @@
  * vapor-chamber - Directive plugin (opt-in, 0KB when not imported)
  *
  * The rules this file keeps (the history is in CHANGELOG.md and the
- * whitepaper's Vue 3.6 alignment log, section 9.2):
+ * whitepaper's Vue 3.6 alignment log, appendix B):
  *   - THE NAME CARRIES THE SELECTOR: `vc-command`, `vc-payload`,
  *     `vc-optimistic`. Vue's directive argument is a parameter slot (a getter
  *     in compiled Vapor, #15490), so nothing here reads it - see
@@ -49,7 +49,19 @@ import { DEV } from './dev';
 import { announce } from './a11y';
 import { getCommandBus } from './chamber';
 import type { Command, CommandMap, CommandResult } from './command-bus';
-import { _errResult } from './command-bus';
+import { _errResult, _failures } from './command-bus';
+
+const directiveFail = _failures('directive');
+
+/**
+ * @internal The failure of a dispatch that did not settle within the
+ * directive's timeout: `directive:timeout:dispatch`, a transient condition.
+ * A function of its own so a test can read the code (the element's state is
+ * private); tests/errors-match-catalogue.test.ts.
+ */
+export function _timedOut(action: string, timeout: number): CommandResult {
+  return _errResult(directiveFail('timeout:dispatch', `Directive dispatch "${action}" timed out after ${timeout}ms`, { action, context: { timeout } }));
+}
 
 // ---------------------------------------------------------------------------
 // Internal state per element (stored via WeakMap)
@@ -403,7 +415,7 @@ function buildHandler(el: Element, state: DirectiveState): (event: Event) => voi
         let timeoutId: ReturnType<typeof setTimeout> | undefined;
         const timeoutPromise = new Promise<CommandResult>((resolve) => {
           timeoutId = setTimeout(
-            () => resolve(_errResult(new Error(`Directive dispatch "${state.action}" timed out after ${state.timeout}ms`))),
+            () => resolve(_timedOut(state.action, state.timeout)),
             state.timeout
           );
         });
@@ -967,4 +979,11 @@ export function createDirectivePlugin(): { install(app: any): void } {
  * fires during bubbling, after every element-level listener whatever order
  * they registered in, which is also why it is the one mode plain
  * `stopPropagation()` vetoes.
+ *
+ * ADDED AT rc.10. A bound `:onClick="fn"` on the same element now behaves as
+ * the `@click` of that table does in the `direct` column: it runs first, and
+ * `el.disabled = true` or `stopImmediatePropagation()` skips the dispatch. Vue
+ * 3.6.0-rc.10 (`86d44991`) compiles it on Vapor to a listener; rc.9 compiled
+ * it to a property write that never ran, so it could veto nothing. Pinned by
+ * tests/directives-vapor-fixture.test.ts.
  */

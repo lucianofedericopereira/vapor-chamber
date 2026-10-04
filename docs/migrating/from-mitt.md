@@ -100,7 +100,7 @@ bus.dispatchBatch([
 ## Bundle size
 
 mitt is <!-- vc:sizeMitt -->0.2<!-- /vc:sizeMitt --> KB brotli. vapor-chamber's `core` IIFE variant is
-**<!-- vc:sizeIifeCore -->8.0<!-- /vc:sizeIifeCore --> KB brotli**, a couple
+**<!-- vc:sizeIifeCore -->9.2<!-- /vc:sizeIifeCore --> KB brotli**, a couple
 of orders of magnitude more; that difference pays for the extras above. For
 always-current per-export numbers, see [BUNDLE-SIZES.md](../BUNDLE-SIZES.md)
 (generated, CI-verified fresh) and prefer it over any figure quoted in prose.
@@ -118,10 +118,15 @@ lane.emit('cartAdd', { id: 42 });
 ```
 
 On the three-listener fan-out both libraries are built for, the fast lane
-measures **<!-- vc:benchFastLaneVsMitt -->2.33<!-- /vc:benchFastLaneVsMitt -->x
-mitt**. `npm run bench` generates that ratio and `npm run docs:stamp` publishes
-it; nobody types it here. See [from-event-emitter.md](./from-event-emitter.md)
-for the nanoevents comparison and the removal-mode trade-off.
+measures **<!-- vc:benchFastLaneVsMitt -->1.84-1.95<!-- /vc:benchFastLaneVsMitt -->x
+mitt**, and the general bus's `emit`
+**<!-- vc:benchEmitVsMittFanout -->1.44-1.54<!-- /vc:benchEmitVsMittFanout -->x**.
+Each is the range over several runs on one host
+(<!-- vc:benchProvenance -->Node 24.21.0, vitest 5.0.1, mitt 3.0.1, eventemitter3 5.0.4, 5 runs<!-- /vc:benchProvenance -->): a ratio between two
+libraries moves with the host, Node and mitt's version (docs/V8-RULES.md rule
+15). `npm run bench:bands` generates them and `npm run docs:stamp` publishes
+them; nobody types them here. See [from-event-emitter.md](./from-event-emitter.md)
+for the removal-mode trade-off.
 
 ## When NOT to migrate
 

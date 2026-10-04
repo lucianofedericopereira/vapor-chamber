@@ -8,7 +8,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { computed, createApp, effectScope, isRef, unref } from 'vue';
-import { isRouterError } from '../../src/router/errors';
+import { isRouterError } from '@router/errors';
 import {
   onBeforeLeave,
   useBreadcrumbs,
@@ -19,9 +19,9 @@ import {
   useRouteError,
   useRouter,
   usePagination,
-} from '../../src/router/composables';
-import { ROUTER_KEY } from '../../src/router/keys';
-import type { RouteRecord } from '../../src/router/types';
+} from '@router/composables';
+import { ROUTER_KEY } from '@router/keys';
+import type { RouteRecord } from '@router/types';
 import { makeRouter as fixtureRouter } from './fixture';
 
 const ROWS: RouteRecord[] = [
@@ -67,7 +67,7 @@ describe('router composables', () => {
     }
     // Was a bare Error - the only failure in this router a handler could not
     // switch on. The message is unchanged; the code is new.
-    expect(isRouterError(caught, 'no_router')).toBe(true);
+    expect(isRouterError(caught, 'router:missing:router')).toBe(true);
   });
 
   it('useRouter returns the router; useRoute tracks the current location', async () => {

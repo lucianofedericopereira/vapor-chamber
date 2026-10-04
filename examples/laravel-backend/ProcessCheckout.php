@@ -4,8 +4,9 @@
  *
  * For commands that take more than a few hundred ms, dispatch a queued job
  * and return optimistic state. The client gets an immediate response with
- * `status: 'queued'` and can poll a separate command (e.g.
- * `orderStatusCheck`) or receive a Reverb push when the job completes.
+ * `status: 'queued'` and receives a Reverb push when the job completes. To
+ * follow the job instead, return `['accepted' => [...]]` (a 202 the client's
+ * `pollWith` follows): docs/integrations/laravel.md, "Queued commands".
  *
  * Register in config/vapor-chamber.php:
  *   'checkoutProcess' => \App\Actions\Order\ProcessCheckout::class,
@@ -45,11 +46,6 @@ class ProcessCheckout
         return [
             'orderId' => $order->id,
             'status'  => 'queued',
-            // Optional: hint at how the client should track progress.
-            'pollWith' => [
-                'command' => 'orderStatusCheck',
-                'target'  => ['id' => $order->id],
-            ],
         ];
     }
 }

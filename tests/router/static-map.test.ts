@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { createRouteTable } from '../../src/router/table';
-import type { RouteRecord } from '../../src/router/types';
-import { underCoverage } from '../under-coverage';
+import { createRouteTable } from '@router/table';
+import type { RouteRecord } from '@router/types';
+import { runTiming } from '../under-coverage';
 
 describe('static fast path - correctness', () => {
   it('does not let a static row jump ahead of an earlier parameterised row', () => {
@@ -57,7 +57,7 @@ describe('static fast path - cost', () => {
   // paths, not the fast path being measured). The timeout, not the
   // assertion, was the source of the flake. It asserts the resolves it
   // performs, so the reporter can fail.
-  it.skipIf(underCoverage)('measures build and resolve', () => {
+  it.skipIf(!runTiming)('measures build and resolve', () => {
     const rows: RouteRecord[] = [{ name: 'shell', path: '/', parent: null }];
     for (let i = 0; i < 300; i++) {
       rows.push({ name: `r${i}`, path: `/section${i}/page`, parent: 'shell', component: 'C' });

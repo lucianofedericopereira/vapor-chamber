@@ -9,7 +9,7 @@
  *     if (globalThis.__VUE__) { const vue = globalThis.__VUE__;
  *                               if (typeof vue.ref === 'function') applyVueModule(vue) }
  *
- * and whitepaper §11.6 + the README tell no-bundler users to put it there by
+ * and whitepaper §9.6 + the README tell no-bundler users to put it there by
  * hand, because that synchronous path is the ONLY way Vapor is ever detected
  * without a bundler (the async `import('vue')` fallback is a bare specifier
  * that cannot resolve in a browser).

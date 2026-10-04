@@ -13,6 +13,7 @@
  */
 
 import { type HttpClient, createHttpClient } from '../http';
+import { REGEX_METACHARS } from '../http-cache';
 import { type LoaderHandlers, interpolateLoad, routerError } from '../router/index';
 
 /** Fresh/stale windows for a cached loader read - the http client's own shape. */
@@ -59,6 +60,9 @@ export function fetchLoaders(options: FetchLoadersOptions = {}): LoaderHandlers 
     url: async (template, location, record, signal, ctx) => {
       const url = interpolateLoad(template, location, record.queryDefs);
       const cache = resolveCache(record.meta, options.cache);
+      // A refresh reads past the cache (LoaderContext.refresh). The client's
+      // key ends with this URL after its baseURL, hence the `$` anchor.
+      if (cache && ctx?.refresh) http.invalidateCache(new RegExp(`${url.replace(REGEX_METACHARS, '\\$&')}$`));
       try {
         // Only pass `cache` when it was asked for - an explicit `cache:
         // undefined` is indistinguishable from absent to the client, but
@@ -77,9 +81,9 @@ export function fetchLoaders(options: FetchLoadersOptions = {}): LoaderHandlers 
         return response.data;
       } catch (cause) {
         // runLoaders (vapor-chamber-router core) already reclassifies this as
-        // 'cancelled' when `signal` is the one that aborted - no need to
+        // `aborted:navigation` when `signal` is the one that aborted - no need to
         // special-case AbortError here, just attach the cause either way.
-        throw routerError('load_failed', `loader request failed for "${url}": ${(cause as Error).message}`, {
+        throw routerError('failed:loader', `loader request failed for "${url}": ${(cause as Error).message}`, {
           to: location,
           cause,
         });

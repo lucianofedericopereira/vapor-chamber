@@ -1,6 +1,9 @@
+import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { playwright } from '@vitest/browser-playwright';
+import { chromium } from 'playwright';
 import { defineConfig } from 'vitest/config';
+import { browserChannel } from './scripts/browser-channel.mjs';
 
 /**
  * Real-browser project, opt-in: `npm run test:browser`.
@@ -19,9 +22,21 @@ import { defineConfig } from 'vitest/config';
  * CHROMIUM ONLY, headless shell. A result here is evidence for Chromium, not
  * for Firefox or WebKit; add instances when a finding needs them.
  *
+ * WHEN THE HEADLESS SHELL IS NOT INSTALLED the run falls back to the system
+ * Chrome (`channel: 'chrome'`) and says so on stderr: `browserChannel` below.
+ *
  * The default config excludes `tests/browser/**`, so these never run in Node.
  */
 const mode = process.env.VC_MODE === 'development' ? 'development' : 'production';
+
+// The rule, and why it reads a path, is scripts/browser-channel.mjs.
+const fallback = browserChannel(chromium.executablePath(), existsSync, process.platform);
+if (fallback) {
+  console.warn(
+    `[test:browser] Playwright's headless shell r${fallback.revision} is not installed: running on the system Chrome (channel 'chrome'). ` +
+      'Install the shell with: npx playwright install chromium --only-shell',
+  );
+}
 
 export default defineConfig({
   define: {
@@ -33,13 +48,15 @@ export default defineConfig({
       // Same reason as vitest.config.ts: the suite measures src/, not the
       // workspace self-link to dist/.
       { find: /^vapor-chamber$/, replacement: fileURLToPath(new URL('./src/index.ts', import.meta.url)) },
+      // Tests import the router's source as `@router/...`; tsconfig.tests.json maps the same.
+      { find: /^@router\//, replacement: fileURLToPath(new URL('./src/router/', import.meta.url)) },
     ],
   },
   test: {
     include: ['tests/browser/**/*.browser.test.ts'],
     browser: {
       enabled: true,
-      provider: playwright(),
+      provider: fallback ? playwright({ launchOptions: { channel: fallback.channel } }) : playwright(),
       headless: true,
       instances: [{ browser: 'chromium' }],
     },

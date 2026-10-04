@@ -171,8 +171,9 @@ describe('isLoading - sync bus', () => {
     expect(p.seen['svcRestart:httpd']).toEqual([false, true, false]);
     expect(p.seen['svcRestart:nginx']).toEqual([false]);
 
-    // A key nobody reads is counted while in flight and pruned at 0; neither
-    // reader re-runs for it.
+    // A key nobody reads is counted while in flight, then kept at 0 or pruned
+    // by the build profile (tests/isloading-profile.test.ts); neither reader
+    // re-runs for it.
     bus.dispatch('svcRestart', 'apache');
     expect(p.seen['svcRestart:httpd']).toEqual([false, true, false]);
     expect(p.seen['svcRestart:nginx']).toEqual([false]);

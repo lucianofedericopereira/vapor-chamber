@@ -16,7 +16,7 @@ import { createFastLane } from '../src/fast-lane';
 import { resetCommandBus, setCommandBus, useCommandHistory } from '../src/chamber';
 import { createTransitionBridge } from '../src/transitions';
 import { createDirectivePlugin } from '../src/directives';
-import { stampActiveLinks } from '../src/router/dom';
+import { stampActiveLinks } from '@router/dom';
 import { useCommandState, signal, waitForVueDetection } from '../src/chamber';
 import { alienSignalAdapter } from '../src/alien-signals';
 import { signal as _alienSignal } from 'alien-signals';
@@ -268,21 +268,20 @@ describe('performance sanity', () => {
 // Comparative throughput vs other small event/dispatch libraries.
 //
 // vapor-chamber is a command bus (dispatch with plugins, hooks, listeners,
-// results). The closest "small lib" peers are pure event emitters - mitt and
-// nanoevents - plus a hand-rolled `Map<string, Set<fn>>` baseline. The point
+// results). The closest "small lib" peers are pure event emitters - mitt,
+// eventemitter3, tiny-emitter - plus a hand-rolled `Map<string, Set<fn>>` baseline. The point
 // of these benches is to show that the lib's emit-fan-out (the closest apple
 // to apple) is competitive with hand-rolled, with all the extra machinery
 // (results, plugins, hooks, before/after, batch, request) on top.
 //
 // Reading these numbers:
-//   - vapor-chamber `emit` should be in the same order as mitt / nanoevents.
+//   - vapor-chamber `emit` should be in the same order as mitt.
 //   - vapor-chamber `dispatch` does meaningfully more (plugin chain, meta
 //     stamping, results) - expect it to be slower than raw emit, but still
 //     competitive with hand-rolled middleware patterns.
 // ---------------------------------------------------------------------------
 
 import mitt from 'mitt';
-import { createNanoEvents } from 'nanoevents';
 import EventEmitter3 from 'eventemitter3';
 import TinyEmitter from 'tiny-emitter';
 import { Subject } from 'rxjs';
@@ -297,11 +296,6 @@ describe('emit fast path - no listeners', () => {
   bench('mitt with NO listeners (10k)', () => {
     const m = mitt<{ x: number }>();
     for (let i = 0; i < 10_000; i++) m.emit('x', i);
-  });
-
-  bench('nanoevents with NO listeners (10k)', () => {
-    const n = createNanoEvents<{ x: (i: number) => void }>();
-    for (let i = 0; i < 10_000; i++) n.emit('x', i);
   });
 });
 
@@ -321,14 +315,6 @@ describe('comparative emit fan-out (10k events x 3 listeners)', () => {
     m.on('evt', () => {});
     m.on('evt', () => {});
     for (let i = 0; i < 10_000; i++) m.emit('evt', i);
-  });
-
-  bench('nanoevents - 3 listeners', () => {
-    const n = createNanoEvents<{ evt: (i: number) => void }>();
-    n.on('evt', () => {});
-    n.on('evt', () => {});
-    n.on('evt', () => {});
-    for (let i = 0; i < 10_000; i++) n.emit('evt', i);
   });
 
   bench('eventemitter3 - 3 listeners', () => {
@@ -405,12 +391,6 @@ describe('fast lane - single-handler hot dispatch (10k)', () => {
     for (let i = 0; i < 10_000; i++) m.emit('tick', i);
   });
 
-  bench('nanoevents (closest peer - emit fires listeners, no return)', () => {
-    const n = createNanoEvents<{ tick: (n: number) => void }>();
-    n.on('tick', () => {});
-    for (let i = 0; i < 10_000; i++) n.emit('tick', i);
-  });
-
   bench('vapor-chamber bus.dispatch (general-purpose, for comparison)', () => {
     const bus = createCommandBus();
     bus.register('tick', (cmd) => cmd.target * 2);
@@ -452,12 +432,14 @@ describe('fast lane - multi-subscriber emit fan-out (10k events x 3 listeners)',
     for (let i = 0; i < 10_000; i++) m.emit('evt', i);
   });
 
-  bench('nanoevents - 3 listeners (peer)', () => {
-    const n = createNanoEvents<{ evt: (i: number) => void }>();
-    n.on('evt', () => {});
-    n.on('evt', () => {});
-    n.on('evt', () => {});
-    for (let i = 0; i < 10_000; i++) n.emit('evt', i);
+  // The EventEmitter migration guide's peer: the fast lane is what it
+  // recommends for EventEmitter's pub/sub, so it is compared here, same run.
+  bench('eventemitter3 - 3 listeners (peer)', () => {
+    const e = new EventEmitter3();
+    e.on('evt', () => {});
+    e.on('evt', () => {});
+    e.on('evt', () => {});
+    for (let i = 0; i < 10_000; i++) e.emit('evt', i);
   });
 });
 
@@ -478,12 +460,6 @@ describe('comparative dispatch (10k dispatches, single handler)', () => {
     const m = mitt<{ act: number }>();
     m.on('act', () => {});  // can't capture a return - emit is fire-only
     for (let i = 0; i < 10_000; i++) m.emit('act', i);
-  });
-
-  bench('nanoevents - emit', () => {
-    const n = createNanoEvents<{ act: (i: number) => void }>();
-    n.on('act', () => {});
-    for (let i = 0; i < 10_000; i++) n.emit('act', i);
   });
 });
 

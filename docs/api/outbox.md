@@ -17,7 +17,7 @@ import { ... } from 'vapor-chamber/outbox';
 
 ### createOutbox
 
-**Function** - [src/outbox.ts:337](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L337)
+**Function** - [src/outbox.ts:356](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L356)
 
 ```ts
 createOutbox(options?: OutboxOptions) => Outbox
@@ -40,7 +40,8 @@ summary.
 Failure-safe: the first RETRYABLE failed replay (an `ok: false` result or a
 throw) stops the flush and keeps that record plus everything behind it
 queued - order is never reshuffled, and the next flush retries from the same
-spot. A FINAL failure (the server refused it; see `isRetryable`) is dropped
+spot. A FINAL failure (the server refused it, or a validator rejected it;
+see `isRetryable`) is dropped
 and reported as `'outboxRejected'` with `{ record, error }`, and the flush
 continues - otherwise one refusal would hold the queue forever.
 
@@ -64,7 +65,7 @@ if (result.ok && result.value?.queued) {
 
 ### indexedDbOutbox
 
-**Function** - [src/outbox.ts:139](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L139)
+**Function** - [src/outbox.ts:140](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L140)
 
 ```ts
 indexedDbOutbox(dbName?: string, storeName?: string) => OutboxStorage
@@ -90,7 +91,7 @@ await outbox.hydrate();
 
 ### localStorageOutbox
 
-**Function** - [src/outbox.ts:86](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L86)
+**Function** - [src/outbox.ts:87](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L87)
 
 ```ts
 localStorageOutbox(storageKey?: string) => OutboxStorage
@@ -113,7 +114,7 @@ const outbox = createOutbox({ storage: localStorageOutbox('vc:cart-outbox') });
 
 ### Outbox
 
-**Type alias** - [src/outbox.ts:270](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L270)
+**Type alias** - [src/outbox.ts:288](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L288)
 
 ```ts
 export type Outbox = {
@@ -149,7 +150,7 @@ The object returned by {@link createOutbox}.
 
 ### OutboxFlushSummary
 
-**Type alias** - [src/outbox.ts:267](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L267)
+**Type alias** - [src/outbox.ts:285](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L285)
 
 ```ts
 export type OutboxFlushSummary = { replayed: number; failed: number; rejected: number };
@@ -160,7 +161,7 @@ flush. `rejected` counts records dropped as final (see `isRetryable`).
 
 ### OutboxOptions
 
-**Type alias** - [src/outbox.ts:196](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L196)
+**Type alias** - [src/outbox.ts:197](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L197)
 
 ```ts
 export type OutboxOptions = {
@@ -175,8 +176,12 @@ export type OutboxOptions = {
   isOnline?: () => boolean;
   /**
    * Listen for the window `'online'` event and `flush()` automatically once a
-   * bus ref exists (via `install()`). Default: true. No timers, no polling -
-   * the listener is removed by `dispose()`.
+   * bus ref exists (via `install()`). Default: true. No polling. One timer,
+   * and only when a replay's answer declared a `Retry-After`: the outbox
+   * flushes again then, no sooner than a second later. While the answer
+   * repeats, the wait doubles (1 s, 2 s, 4 s, ...) up to 30 s; a longer
+   * declared wait wins; a successful replay starts it over at 1 s.
+   * `dispose()` removes the listener and ends that wait.
    */
   autoFlush?: boolean;
   /**
@@ -195,17 +200,22 @@ export type OutboxOptions = {
    * Whether a failed replay is worth trying again later. `true` keeps the
    * record at the head and stops the flush, so order is preserved and the
    * next flush retries from the same spot. `false` means the answer is final
-   * (the server refused it): the record is dropped, `'outboxRejected'` fires
+   * (the server refused it, or a validator rejected it): the record is dropped, `'outboxRejected'` fires
    * with `{ record, error }`, and the flush moves on to the next record.
    *
-   * Default: final only when the SERVER gave a verdict on this command - a
-   * refusal inside a 2xx (`{ ok: false }`), or a 4xx other than 401 (session),
-   * 408 (timeout), 419 (CSRF) and 429 (rate limit). Everything else is kept:
-   * a 5xx, a network failure, and every error the library raised itself (a
-   * plugin that threw, a handler not registered yet, a redirect), because
-   * dropping a queued command over a client-side failure loses the user's
-   * data. Pass `() => true` to block on every failure, or your own rule in
-   * your backend's codes (`error.code`).
+   * Default: final only for a verdict on this command. From the SERVER, a 4xx
+   * other than 401 / 419 (a session to renew), 408 (timeout) and 429 (rate
+   * limit), as the response's status or as a problem's own `status` inside a
+   * 2xx: the conditions `invalid`, `refused`, `missing`, `already`, `conflict`,
+   * and only when the answer declared no `Retry-After`.
+   * From the library or a plugin, only `invalid` (a validator or schema
+   * rejection, `validator:invalid:payload`): it gives the same answer on every
+   * flush. Everything else is kept: a 5xx, a problem with no status, a network
+   * failure, and every other error the library raised (a plugin that threw, a
+   * handler not registered yet, an authGuard refusal), because dropping a
+   * queued command over a client-side failure loses the user's data. Pass
+   * `() => true` to block on every failure, or your own rule in your backend's
+   * codes (`error.code`).
    *
    * WHY IT EXISTS: if every failure blocked, one record the server refuses
    * would hold the whole queue for good - each flush re-sends it, gets the
@@ -217,7 +227,7 @@ export type OutboxOptions = {
 
 ### OutboxRecord
 
-**Type alias** - [src/outbox.ts:45](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L45)
+**Type alias** - [src/outbox.ts:40](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L40)
 
 ```ts
 export type OutboxRecord = {
@@ -235,8 +245,14 @@ export type OutboxRecord = {
    * `Idempotency-Key` header for every delivery attempt of this command.
    */
   key: string;
-  /** Date.now() at enqueue time. */
-  queuedAt: number;
+  /**
+   * When the command was queued: an RFC 3339 timestamp in UTC, millisecond
+   * precision (`new Date().toISOString()`, e.g. `2026-10-02T17:41:19.250Z`).
+   * Text, not epoch ms, because the record crosses a boundary (storage, or a
+   * backend a custom `OutboxStorage` syncs to) and the text names its unit and
+   * zone. The outbox never reads it; `Date.parse(record.queuedAt)` gives ms.
+   */
+  queuedAt: string;
 };
 ```
 
@@ -246,7 +262,7 @@ A queued command awaiting replay. JSON-serializable by design - `target` and
 
 ### OutboxStorage
 
-**Type alias** - [src/outbox.ts:69](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L69)
+**Type alias** - [src/outbox.ts:70](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L70)
 
 ```ts
 export type OutboxStorage = {

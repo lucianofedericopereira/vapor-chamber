@@ -15,12 +15,12 @@ import { createApp, h } from 'vue'
 import { createInertiaApp, router } from '@inertiajs/vue3'
 
 // ASYNC bus (createHttpBridge is an async plugin) - it lives outside the
-// Inertia page lifecycle. `csrf: 'inertia'` defers token management to
-// Inertia's Axios instance instead of reading the DOM.
+// Inertia page lifecycle. `csrf: true`: with no meta tag the bridge reads the
+// XSRF-TOKEN cookie Laravel sets; its own requests never pass through Axios.
 const bus = createAsyncCommandBus()
 bus.use(createHttpBridge({
   endpoint: '/api/vc',
-  csrf: 'inertia',
+  csrf: true,
   // A backend `{ redirect }` hands the navigation to Inertia; the dispatch
   // still fails as transport:refused:redirect (there is no state to return).
   onRedirect: (url) => router.visit(url),
@@ -58,11 +58,13 @@ createInertiaApp({
  * import { router } from '@inertiajs/vue3'
  *
  * const props = defineProps<{ orders: Order[] }>()
- * const { dispatch, loading, lastError } = useCommand()
+ * // Kept as an object: a template unwraps top-level refs, so the nested
+ * // `cmd.loading.value` reads the same at runtime and for vue-tsc.
+ * const cmd = useCommand()
  *
  * // Cancel with page transition after success
  * async function cancelOrder(id: number) {
- *   const result = await dispatch('orderCancel', { id })
+ *   const result = await cmd.dispatch('orderCancel', { id })
  *   if (result.ok) router.visit('/orders') // Inertia router
  * }
  * </script>
@@ -71,8 +73,8 @@ createInertiaApp({
  *   <div v-for="order in orders" :key="order.id">
  *     <span>{{ order.reference }}</span>
  *     <!-- aria-disabled, not :disabled: keyboard focus stays on the button -->
- *     <button @click="!loading.value && cancelOrder(order.id)" :aria-disabled="loading.value">
- *       {{ loading.value ? 'Cancelling...' : 'Cancel' }}
+ *     <button @click="!cmd.loading.value && cancelOrder(order.id)" :aria-disabled="cmd.loading.value">
+ *       {{ cmd.loading.value ? 'Cancelling...' : 'Cancel' }}
  *     </button>
  *   </div>
  * </template>

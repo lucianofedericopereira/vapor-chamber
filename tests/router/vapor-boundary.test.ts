@@ -18,17 +18,19 @@
  * (`vue` is an optional peer, so it stays external here - what we assert on is
  * WHICH named bindings each entry still asks `vue` for.)
  *
- * Skips when dist/ hasn't been built or esbuild is unavailable.
+ * Fails when dist/ hasn't been built (tests/require-dist.ts); skips when
+ * esbuild is unavailable.
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { requireDist } from '../require-dist';
 
 const routerEntry = resolve(process.cwd(), 'dist', 'router', 'index.js');
 const vdomEntry = resolve(process.cwd(), 'dist', 'router', 'vdom.js');
 const vaporEntry = resolve(process.cwd(), 'dist', 'router', 'vapor.js');
-const haveDist = existsSync(routerEntry) && existsSync(vdomEntry) && existsSync(vaporEntry);
+requireDist(existsSync(routerEntry) && existsSync(vdomEntry) && existsSync(vaporEntry));
 
 let esbuild: typeof import('esbuild') | null = null;
 try {
@@ -81,7 +83,7 @@ async function vueImportsOf(source: string): Promise<string[]> {
 
 const INTEROP_MARKERS = ['vaporInteropPlugin', 'defineComponent', 'h', 'createVNode'];
 
-describe.skipIf(!haveDist || !esbuild)('Vapor boundary', () => {
+describe.skipIf(!esbuild)('Vapor boundary', () => {
   it('the vapor subpath retains no interop binding from vue', async () => {
     const imports = await vueImportsOf(`
       import { createMemoryHistory, createRouter } from '${esm(routerEntry)}';
@@ -111,6 +113,16 @@ describe.skipIf(!haveDist || !esbuild)('Vapor boundary', () => {
     expect(imports).toContain('vaporInteropPlugin');
     expect(imports).toContain('defineComponent');
     expect(imports).toContain('h');
+  });
+
+  it('the outlet alone retains exactly the bindings docs/router.md and the README list', async () => {
+    // The `vapor-chamber/router/vapor` row of both retained-bindings tables.
+    // It once listed no `createIf`, which the outlet's slot branch imports.
+    const imports = await vueImportsOf(`
+      import { RouterOutlet } from '${esm(vaporEntry)}';
+      globalThis.__vc = [RouterOutlet];
+    `);
+    expect(imports).toEqual(['createDynamicComponent', 'createIf', 'createSlot', 'defineVaporComponent', 'inject', 'provide']);
   });
 
   it('the router entry does not re-export the Vapor outlet either', async () => {

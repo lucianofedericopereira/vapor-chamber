@@ -106,7 +106,8 @@ export type Segment =
 /** A resolved, normalized location - what guards and useRoute() see. */
 export type RouteLocation = {
   name: string | null;
-  /** Decoded path relative to base, no query/hash. */
+  /** Path relative to base, no query/hash, as in the URL: percent-encoded
+   *  (`/item/a%20b`); `params` hold the decoded values. */
   path: string;
   /** path + query + hash, relative to base. */
   fullPath: string;

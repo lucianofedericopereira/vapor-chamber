@@ -7,8 +7,8 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import { createApp, defineComponent, h } from 'vue';
-import { createRouter } from '../../src/router/index';
-import type { RouteRecord } from '../../src/router/types';
+import { createRouter } from '@router/index';
+import type { RouteRecord } from '@router/types';
 import { makeRouter as fixtureRouter } from './fixture';
 
 const ROWS: RouteRecord[] = [
@@ -310,9 +310,9 @@ describe('inline route payloads inform `base` synchronously', () => {
 
 describe('hard-navigation loop guard', () => {
   it('refuses to hard-navigate to the URL it is already on', async () => {
-    // Regression: `unmatched` is a HARD_NAV code, so the router handed the URL
+    // Regression: `router:missing:route` is a HARD_NAV code, so the router handed the URL
     // back to the server. Behind the catch-all this router targets, the server
-    // returns the same shell, the router says `unmatched` again, and
+    // returns the same shell, the router says `router:missing:route` again, and
     // location.assign() fires again - an endless reload storm that survives
     // refreshes, since the offending URL stays in the address bar.
     window.history.replaceState({}, '', '/admin/does-not-exist');
@@ -355,7 +355,7 @@ describe('hard-navigation loop guard', () => {
 describe('route table delivery - error paths', () => {
   it('inline: a missing element fails with a coded error from start(), not the constructor', async () => {
     const router = createRouter({ routes: { inline: '#vcr-absent' } });
-    await expect(router.isReady()).rejects.toMatchObject({ code: 'inline_routes_missing' });
+    await expect(router.isReady()).rejects.toMatchObject({ code: 'router:missing:inline' });
   });
 
   it('inline: an element with no text fails the same way', async () => {
@@ -364,7 +364,7 @@ describe('route table delivery - error paths', () => {
     empty.id = 'vcr-empty';
     document.head.appendChild(empty);
     const router = createRouter({ routes: { inline: '#vcr-empty' } });
-    await expect(router.isReady()).rejects.toMatchObject({ code: 'inline_routes_missing' });
+    await expect(router.isReady()).rejects.toMatchObject({ code: 'router:missing:inline' });
   });
 
   it('remote: warns when the payload declares a base the router cannot adopt', async () => {
@@ -392,11 +392,11 @@ describe('route table delivery - error paths', () => {
     router.destroy();
   });
 
-  it('remote: a failing fetch surfaces as routes_load_failed', async () => {
+  it('remote: a failing fetch surfaces as router:failed:routes', async () => {
     const router = createRouter({
       routes: { url: '/routes.json' },
       http: { get: async () => { throw new Error('network down'); } } as never,
     });
-    await expect(router.isReady()).rejects.toMatchObject({ code: 'routes_load_failed' });
+    await expect(router.isReady()).rejects.toMatchObject({ code: 'router:failed:routes' });
   });
 });

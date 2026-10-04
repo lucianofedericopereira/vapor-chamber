@@ -8,8 +8,8 @@
  * vaporInteropPlugin as main-entry exports at all in this environment (only a
  * bundler-resolved build does) - confirmed directly, `waitForVueDetection()`
  * changes nothing. tests/vue-global-detection.test.ts already established the
- * fix for exactly this: stub `globalThis.__VUE__` with a mock Vue object
- * before chamber.ts's module-load probe runs, so its SYNCHRONOUS `__VUE__`
+ * fix for exactly this: stub `globalThis.__VAPOR_CHAMBER_VUE__` with a mock Vue object
+ * before chamber.ts's module-load probe runs, so its SYNCHRONOUS global
  * branch (not the async ESM import) wires up the Vapor surface. This file
  * follows the same pattern to reach chamber-vapor.ts's success paths.
  */
@@ -44,7 +44,7 @@ afterEach(() => {
 });
 
 async function freshChamberVapor() {
-  vi.stubGlobal('__VUE__', mockVue);
+  vi.stubGlobal('__VAPOR_CHAMBER_VUE__', mockVue);
   vi.resetModules();
   return import('../src/chamber-vapor');
 }
@@ -125,7 +125,7 @@ describe('defineVaporComponent / defineVaporAsyncComponent - Vapor available', (
     vi.resetModules();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      // No __VUE__ stub here, so the Vapor surface is absent and all three take
+      // No global stub here, so the Vapor surface is absent and all three take
       // the null path - the same path that warns in dev.
       const m = await import('../src/chamber-vapor');
       expect(m.defineVaporCustomElement({})).toBeNull();

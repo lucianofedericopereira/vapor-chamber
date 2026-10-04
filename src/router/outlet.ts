@@ -19,7 +19,7 @@ export const RouterOutlet = defineComponent({
     const router = inject<Router>(ROUTER_KEY);
     // Coded, so an error boundary can switch on `code` here as it does
     // everywhere else.
-    if (!router) throw routerError('no_router', '<RouterOutlet> used without an installed router');
+    if (!router) throw routerError('missing:router', '<RouterOutlet> used without an installed router');
 
     const depth = inject<number>(OUTLET_DEPTH_KEY, 0);
     provide(OUTLET_DEPTH_KEY, depth + 1);

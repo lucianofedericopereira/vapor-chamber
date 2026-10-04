@@ -1,6 +1,6 @@
 {
   "name": "vapor-chamber",
-  "version": "1.25.0",
+  "version": "1.26.0",
   "description": "Lightweight command bus for Vue Vapor - plugins, hooks, undo/redo, Vue 3.6 Vapor aligned",
   "type": "module",
   "main": "./dist/index.js",
@@ -57,6 +57,11 @@
       "import": "./dist/transitions.js",
       "default": "./dist/transitions.js"
     },
+    "./transitions/vapor": {
+      "types": "./dist/transitions/vapor.d.ts",
+      "import": "./dist/transitions/vapor.js",
+      "default": "./dist/transitions/vapor.js"
+    },
     "./ssr": {
       "types": "./dist/ssr.d.ts",
       "import": "./dist/ssr.js",
@@ -112,6 +117,11 @@
       "import": "./dist/store.js",
       "default": "./dist/store.js"
     },
+    "./store/core": {
+      "types": "./dist/store/core.d.ts",
+      "import": "./dist/store/core.js",
+      "default": "./dist/store/core.js"
+    },
     "./router": {
       "types": "./dist/router/index.d.ts",
       "import": "./dist/router/index.js",
@@ -162,6 +172,8 @@
     "dist",
     "src",
     "scripts",
+    "!scripts/ab",
+    "!scripts/bench-bands.mjs",
     "ROADMAP.md",
     "CHANGELOG.md",
     "LICENSE"
@@ -194,7 +206,13 @@
     "test:run": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:timing": "VC_TIMING=1 vitest run --silent=false tests/*-ab.test.ts tests/router/static-map.test.ts",
     "bench": "vitest bench --run tests/perf.bench.ts --reporter=default --reporter=./scripts/bench-ratios-reporter.mjs",
+    "bench:bands": "node scripts/bench-bands.mjs",
+    "ab": "node scripts/ab/ab.mjs",
+    "ab:session": "bash scripts/ab/session.sh",
+    "ab:dists": "bash scripts/ab/build-dists.sh",
+    "ab:ci": "node scripts/ab/ci.mjs",
     "ab:vue": "node scripts/ab-vue.mjs",
     "size:check": "node scripts/check-size.mjs",
     "gate": "node scripts/gate.mjs",
@@ -204,7 +222,7 @@
     "coverage:doc": "vitest run --coverage && node scripts/measure-coverage.mjs --md > docs/COVERAGE.md",
     "check:example": "npm --prefix examples/vapor-sfc run build && node scripts/check-example-directive.mjs && npm --prefix examples/vapor-island-cart run build && npm --prefix examples/exo-astro run build",
     "loc": "node scripts/measure-loc.mjs src",
-    "docs": "node scripts/generate-api-docs.mjs",
+    "docs": "node scripts/generate-api-docs.mjs && node scripts/generate-errors-doc.mjs",
     "docs:serve": "node scripts/serve-docs.mjs",
     "prepublishOnly": "npm run typecheck && npm run build && npm run test:run && npm run test:vapor && npm run size:check && npm run lint:check && npm run test:coverage"
   },
@@ -241,11 +259,11 @@
   "peerDependencies": {
     "@vitejs/plugin-vue": ">=5.0.0",
     "@vue/devtools-api": ">=6.0.0",
-    "@vue/reactivity": ">=3.5.0 || >=3.6.0-rc.9",
+    "@vue/reactivity": ">=3.5.0 || >=3.6.0-rc.10",
     "alien-signals": ">=3.1.2",
     "vite": ">=5.0.0",
     "vitest": ">=5.0.0",
-    "vue": ">=3.5.0 || >=3.6.0-rc.9"
+    "vue": ">=3.5.0 || >=3.6.0-rc.10"
   },
   "peerDependenciesMeta": {
     "alien-signals": {
@@ -277,21 +295,20 @@
     "@vitest/browser-playwright": "^5.0.1",
     "@vitest/coverage-v8": "^5.0.1",
     "@vue/devtools-api": "^8.1.5",
-    "@vue/reactivity": "^3.6.0-rc.9",
-    "@vue/runtime-vapor": "^3.6.0-rc.9",
+    "@vue/reactivity": "^3.6.0-rc.10",
+    "@vue/runtime-vapor": "^3.6.0-rc.10",
     "alien-signals": "^3.1.2",
     "esbuild": "^0.28.2",
     "eventemitter3": "^5.0.4",
     "happy-dom": "^20.11.2",
     "mitt": "^3.0.1",
-    "nanoevents": "^9.1.0",
     "playwright": "^1.63.0",
     "rxjs": "^7.8.2",
     "tiny-emitter": "^2.1.0",
     "typescript": "^6.0.3",
     "vite": "^8.2.2",
     "vitest": "^5.0.1",
-    "vue": "^3.6.0-rc.9"
+    "vue": "^3.6.0-rc.10"
   },
   "engines": {
     "node": ">=22.12.0"

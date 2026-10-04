@@ -15,8 +15,8 @@
  *                   patch `snapshot.data` when done (isLoading tracks it).
  *
  * `navigate()` resolves to `RouterError | null` - null means committed.
- * Guard refusals ('aborted') and superseded navigations ('cancelled') are
- * returned but NOT dispatched to onError.
+ * Guard refusals (`refused:guard`) and superseded navigations
+ * (`aborted:navigation`) are returned but NOT dispatched to onError.
  */
 
 import { DEV } from '../dev';
@@ -116,12 +116,15 @@ export function createEngine(ctx: EngineContext) {
   const beforeGuards: NavigationGuard[] = [];
   const afterHooks: AfterEachHook[] = [];
   let pendingId = 0;
+  /** The id of the path navigation in flight; 0 when none. */
+  let inFlight = 0;
 
-  // Two lanes, two controllers. They MUST NOT share one: a query-only change
+  // Two lanes, two controllers. They MUST NOT share one: a query REFETCH
   // aborting the controller would kill an in-flight PATH navigation's loaders,
-  // and because runLoaders maps an aborted signal to a 'cancelled' RouterError,
+  // and because runLoaders maps an aborted signal to an `aborted:navigation` RouterError,
   // the engine reads that as supersession - the navigation is dropped without
-  // ever reaching onError. Silent, and the URL never moves.
+  // ever reaching onError. A query COMMIT does supersede it, on purpose and
+  // through `supersede()` (commitQueryLocation).
   let navController: AbortController | null = null;
   let refetchController: AbortController | null = null;
 
@@ -153,23 +156,29 @@ export function createEngine(ctx: EngineContext) {
    */
   function trackRevalidation(recordName: string, revalidation: Promise<unknown>, to: RouteLocation): void {
     revalidateCount++;
-    syncRevalidating();
-    void revalidation
-      .then((fresh) => {
-        const current = snapshot.value;
-        if (current.location.fullPath !== to.fullPath) return; // navigated away - drop it
-        setRouteData(recordName, fresh);
-      })
-      .catch(() => {
-        // A failed background refresh leaves the stale data in place. It is
-        // not a navigation failure and must not reach ctx.onError: the commit
-        // already succeeded, and `cache.serveStaleOnError` exists precisely so
-        // this degrades quietly.
-      })
-      .finally(() => {
-        revalidateCount--;
-        syncRevalidating();
-      });
+    // The chain that lowers the count is built in the `finally`: a sync
+    // subscriber throwing on the write cannot leave `isRevalidating` stuck
+    // (pinned by tests/router/engine-throwing-subscriber.test.ts).
+    try {
+      syncRevalidating();
+    } finally {
+      void revalidation
+        .then((fresh) => {
+          const current = snapshot.value;
+          if (current.location.fullPath !== to.fullPath) return; // navigated away - drop it
+          setRouteData(recordName, fresh);
+        })
+        .catch(() => {
+          // A failed background refresh leaves the stale data in place. It is
+          // not a navigation failure and must not reach ctx.onError: the commit
+          // already succeeded, and `cache.serveStaleOnError` exists precisely so
+          // this degrades quietly.
+        })
+        .finally(() => {
+          revalidateCount--;
+          syncRevalidating();
+        });
+    }
   }
 
   // ---- location resolution ---------------------------------------------------
@@ -195,7 +204,7 @@ export function createEngine(ctx: EngineContext) {
 
   function resolveLocation(raw: RouteLocationRaw): RouteLocation {
     const table = ctx.getTable();
-    if (!table) throw routerError('not_ready', 'routes not loaded yet - await router.isReady()');
+    if (!table) throw routerError('missing:routes', 'routes not loaded yet - await router.isReady()');
 
     if (typeof raw === 'string') {
       const hashIndex = raw.indexOf('#');
@@ -213,7 +222,7 @@ export function createEngine(ctx: EngineContext) {
     const query = cleanQueryPatch(raw.query);
     if (raw.name) {
       const record = table.getRecord(raw.name);
-      if (!record) throw routerError('unknown_route_name', `unknown route name "${raw.name}"`);
+      if (!record) throw routerError('missing:record', `unknown route name "${raw.name}"`);
       // Param inheritance: missing params default from the current location -
       // push({ name }) keeps e.g. the :locale segment of /admin/:locale/...
       // without every call site carrying it (vue-router semantics).
@@ -268,8 +277,16 @@ export function createEngine(ctx: EngineContext) {
     }
 
     // Duplicate - but never short-circuit before the first commit
-    // (START_LOCATION shares '/' with a common initial URL).
-    if (to.fullPath === from.fullPath && to.matched.length && from.matched.length) return null;
+    // (START_LOCATION shares '/' with a common initial URL). The page on
+    // screen, asked for again, supersedes a navigation still in flight like
+    // any newer one: answering null and letting that one commit afterwards
+    // left the user on the page they had navigated away from. With nothing in
+    // flight it changes nothing (the committed navigation's controller is not
+    // aborted). tests/router/navigation-to-current-page.test.ts.
+    if (to.fullPath === from.fullPath && to.matched.length && from.matched.length) {
+      if (inFlight) supersede();
+      return null;
+    }
 
     if (to.matched.length && isQueryOnlyChange(to)) {
       commitQueryLocation(to, opts.replace ? 'replace' : 'push', opts.popstate === true);
@@ -278,12 +295,13 @@ export function createEngine(ctx: EngineContext) {
     }
 
     if (!to.matched.length) {
-      const error = routerError('unmatched', `no route matches "${to.fullPath}"`, { to });
+      const error = routerError('missing:route', `no route matches "${to.fullPath}"`, { to });
       ctx.onError(error, to);
       return revert(error, opts);
     }
 
     const id = ++pendingId;
+    inFlight = id;
     const cancelled = () => pendingId !== id;
     // Abort the PREVIOUS navigation's in-flight loads the moment this one
     // starts (vue-router data-loaders timing - verified against source), and
@@ -309,25 +327,32 @@ export function createEngine(ctx: EngineContext) {
       for (let i = 0; i < beforeGuards.length; i++) {
         const lenBefore = beforeGuards.length;
         const guard = beforeGuards[i];
-        const verdict = await guard(to, from);
+        let verdict;
+        try {
+          verdict = await guard(to, from);
+        } catch (cause) {
+          // A guard's throw is a bug in app code: its own code, not a hard
+          // navigation (the server cannot fix it), the throw as its cause.
+          throw routerError('failed:guard', `guard threw navigating to "${to.fullPath}"`, { to, cause });
+        }
         if (beforeGuards.length < lenBefore && beforeGuards[i] !== guard) {
           i -= lenBefore - beforeGuards.length;
         }
-        if (cancelled()) return revert(routerError('cancelled', `navigation to "${to.fullPath}" superseded`, { to }), opts);
-        if (verdict === false) return revert(routerError('aborted', `navigation to "${to.fullPath}" refused by guard`, { to }), opts);
+        if (cancelled()) return routerError('aborted:navigation', `navigation to "${to.fullPath}" superseded`, { to });
+        if (verdict === false) return revert(routerError('refused:guard', `navigation to "${to.fullPath}" refused by guard`, { to }), opts);
         if (verdict && verdict !== true) {
           // Bounded: two guards that redirect at each other would otherwise
           // recurse forever - async, so no stack overflow to point at, just a
           // navigation that never resolves.
           if (redirects >= MAX_REDIRECTS) {
             // Code unconditional, explanatory tail DEV-only - the same shape
-            // the Vapor outlet uses for mode_mismatch. Handlers switch on
+            // the Vapor outlet uses for invalid:component. Handlers switch on
             // `code`, so the tail is for the person reading the console, and a
             // production bundle drops the string in one step. This module is
             // on the shared side of the outlet size guard, so prose that only
             // helps in dev is not worth shipping to every consumer.
             const error = routerError(
-              'redirect_loop',
+              'exceeded:redirects',
               `redirect loop navigating to "${to.fullPath}"${
                 DEV ? ` - exceeded ${MAX_REDIRECTS} hops; a guard is redirecting to a location another guard redirects back from` : ''
               }`,
@@ -344,7 +369,7 @@ export function createEngine(ctx: EngineContext) {
           // Unwound through every frame, so the ORIGINAL popstate frame - the
           // only one holding the delta - still compensates the history walk.
           // Inner frames carry no delta, so their revert() is a no-op.
-          return isRouterError(result, 'redirect_loop') ? revert(result, opts) : result;
+          return isRouterError(result, 'router:exceeded:redirects') ? revert(result, opts) : result;
         }
       }
 
@@ -355,14 +380,29 @@ export function createEngine(ctx: EngineContext) {
         ctx.resolveRender(leaf.renderChain, to),
         leaf.loadChain.length ? ctx.runLoaders(leaf.loadChain, to, own.signal) : Promise.resolve(EMPTY_DATA as Map<string, unknown>),
       ]);
-      if (cancelled()) return revert(routerError('cancelled', `navigation to "${to.fullPath}" superseded`, { to }), opts);
+      if (cancelled()) return routerError('aborted:navigation', `navigation to "${to.fullPath}" superseded`, { to });
 
       const next: RouteSnapshot = Object.freeze({ location: to, render: Object.freeze(render), data });
-      if (!opts.popstate) ctx.history[opts.replace ? 'replace' : 'push'](to.fullPath);
-      snapshot.value = next;
+      if (!opts.popstate) {
+        try {
+          ctx.history[opts.replace ? 'replace' : 'push'](to.fullPath);
+        } catch (cause) {
+          // A history the app supplied threw writing the URL: its own code,
+          // not a component failure, and not a hard navigation (log s35.118).
+          throw routerError('failed:history', `writing the URL "${to.fullPath}" failed`, { to, cause });
+        }
+      }
+      // `committed` is set BEFORE the write and the hooks run in its
+      // `finally`: a sync subscriber of the snapshot that throws is a
+      // post-commit observer like any other (pinned by
+      // tests/router/engine-throwing-subscriber.test.ts).
       committed = true;
-      ctx.onCommit?.(next, from, { popstate: opts.popstate === true });
-      runAfterHooks(to, from);
+      try {
+        snapshot.value = next;
+      } finally {
+        ctx.onCommit?.(next, from, { popstate: opts.popstate === true });
+        runAfterHooks(to, from);
+      }
       return null;
     } catch (error) {
       // A post-commit observer must never re-enter the pre-commit failure
@@ -371,25 +411,38 @@ export function createEngine(ctx: EngineContext) {
       // running `revert()` (which on a popstate walks the URL back while the
       // snapshot still shows the new page) would manufacture a phantom
       // failure. runAfterHooks contains its own throws, so in practice only
-      // ctx.onCommit can land here after the commit.
+      // ctx.onCommit and a throwing subscriber of the snapshot land here
+      // after the commit.
       if (committed) {
         console.error('[vapor-chamber-router] post-commit hook threw (logged, not fatal)', error);
         return null;
       }
-      if (cancelled() || isRouterError(error, 'cancelled')) {
-        return revert(routerError('cancelled', `navigation to "${to.fullPath}" superseded`, { to }), opts);
+      if (cancelled() || isRouterError(error, 'router:aborted:navigation')) {
+        return routerError('aborted:navigation', `navigation to "${to.fullPath}" superseded`, { to });
       }
       const wrapped = isRouterError(error)
         ? error
-        : routerError('component_load_failed', `navigation to "${to.fullPath}" failed`, { to, cause: error });
+        : routerError('failed:component', `navigation to "${to.fullPath}" failed`, { to, cause: error });
       ctx.onError(wrapped, to);
       return revert(wrapped, opts);
     } finally {
       if (pendingId === id) {
+        inFlight = 0;
         navLoading = false;
         syncLoading();
       }
     }
+  }
+
+  /** Supersede the path navigation in flight, as a newer one would: it
+   *  answers `cancelled` at its next check, its loaders are aborted, and its
+   *  loading state is cleared here because no successor will clear it. */
+  function supersede(): void {
+    pendingId++;
+    inFlight = 0;
+    navController?.abort();
+    navLoading = false;
+    syncLoading();
   }
 
   /**
@@ -398,7 +451,7 @@ export function createEngine(ctx: EngineContext) {
    * learned elsewhere in this codebase:
    *
    * - **Each hook is contained.** One throwing analytics hook must not wrap a
-   *   committed navigation as `component_load_failed`, fire `ctx.onError`, and
+   *   committed navigation as `failed:component`, fire `ctx.onError`, and
    *   `revert()` the URL out from under a live snapshot. The bus's
    *   `fanOutListeners` does it the same way (logs "Listener error", not fatal).
    * - **Self-removal doesn't skip a neighbour, and doesn't re-run one either.**
@@ -425,13 +478,26 @@ export function createEngine(ctx: EngineContext) {
     }
   }
 
+  /**
+   * A REFUSED or failed popstate navigation walks the history back, so the
+   * address bar returns to the page still on screen. A CANCELLED one never
+   * comes here: the user replaced it with a newer navigation, and the browser
+   * is already where that one put it. Walking back from there stepped into a
+   * third navigation (two quick Backs during a slow page ended a page off,
+   * with the address bar on another), and after `cancel()` it would move the
+   * page under whatever replaces the router.
+   * tests/router/superseded-navigation-history.test.ts.
+   */
   function revert<E>(error: E, opts: NavigateOptions): E {
     if (opts.popstate && opts.delta) ctx.history.go(-opts.delta);
     return error;
   }
 
+  /** Every pop navigates. One that lands on the page on screen is a
+   *  duplicate: our own compensating go() after a refusal (nothing in flight,
+   *  answered null), or a Forward back to the page during a pending Back,
+   *  which supersedes that Back. */
   function handlePop(fullPath: string, info: { delta: number }): void {
-    if (fullPath === snapshot.value.location.fullPath) return; // our own compensating go()
     void navigate(fullPath, { popstate: true, delta: info.delta });
   }
 
@@ -439,6 +505,10 @@ export function createEngine(ctx: EngineContext) {
 
   /** Location commits immediately; render/data carried over. */
   function commitQueryLocation(to: RouteLocation, mode: 'push' | 'replace', popstate: boolean): void {
+    // The latest request wins: a page navigation still in flight is superseded
+    // (it answers `aborted:navigation`), or it would commit over this query
+    // and lose it. The refetch lane is untouched. Log s35.120.
+    if (inFlight) supersede();
     if (!popstate) ctx.history[mode](to.fullPath);
     snapshot.value = Object.freeze({ location: to, render: snapshot.value.render, data: snapshot.value.data });
   }
@@ -468,27 +538,32 @@ export function createEngine(ctx: EngineContext) {
     refetchController?.abort();
     const own = (refetchController = new AbortController());
     refetchLoading = true;
-    syncLoading();
-    void ctx
-      .runLoaders(affected, to, own.signal)
-      .then((fresh) => {
-        if (own.signal.aborted) return;
-        const current = snapshot.value;
-        if (current.location.fullPath !== to.fullPath) return; // superseded meanwhile
-        const data = new Map(current.data);
-        for (const [key, value] of fresh) data.set(key, value);
-        snapshot.value = Object.freeze({ location: current.location, render: current.render, data });
-      })
-      .catch((error) => {
-        if (own.signal.aborted || isRouterError(error, 'cancelled')) return;
-        ctx.onError(error, to); // page keeps stale data; useRouteError surfaces it
-      })
-      .finally(() => {
-        if (refetchController === own) {
-          refetchLoading = false;
-          syncLoading();
-        }
-      });
+    // The loaders start in the `finally`, as in trackRevalidation: a sync
+    // subscriber throwing on the write cannot leave `isLoading` stuck.
+    try {
+      syncLoading();
+    } finally {
+      void ctx
+        .runLoaders(affected, to, own.signal)
+        .then((fresh) => {
+          if (own.signal.aborted) return;
+          const current = snapshot.value;
+          if (current.location.fullPath !== to.fullPath) return; // superseded meanwhile
+          const data = new Map(current.data);
+          for (const [key, value] of fresh) data.set(key, value);
+          snapshot.value = Object.freeze({ location: current.location, render: current.render, data });
+        })
+        .catch((error) => {
+          if (own.signal.aborted || isRouterError(error, 'router:aborted:navigation')) return;
+          ctx.onError(error, to); // page keeps stale data; useRouteError surfaces it
+        })
+        .finally(() => {
+          if (refetchController === own) {
+            refetchLoading = false;
+            syncLoading();
+          }
+        });
+    }
   }
 
   /** Merge a typed patch into the current query and commit via the fast path. */
@@ -559,6 +634,13 @@ export function createEngine(ctx: EngineContext) {
     handlePop,
     setQuery,
     setRouteData,
+    /** Cancel the navigation in flight, as a newer one would (router.destroy).
+     *  No successor will clear the loading flag, so this does; a cancelled
+     *  navigation walks no history back (see revert). */
+    cancel: () => {
+      supersede();
+      refetchController?.abort();
+    },
     beforeEach: (guard: NavigationGuard) => {
       beforeGuards.push(guard);
       return () => {

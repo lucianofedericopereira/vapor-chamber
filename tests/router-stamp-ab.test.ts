@@ -35,8 +35,8 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
-import { stampActiveLinks } from '../src/router/dom';
-import { underCoverage } from './under-coverage';
+import { stampActiveLinks } from '@router/dom';
+import { runTiming } from './under-coverage';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // Per-file subdir: the whole dir is removed in afterAll, so it must be ours alone.
@@ -70,7 +70,7 @@ function buildBaseline(): void {
     // allowlist in this repo that reported clean while missing what nobody
     // thought of. Rewrites any relative specifier to its real location instead.
     .replace(/from '\.\.\/([^']+)'/g, "from '../../../src/$1'")
-    .replace(/from '\.\/([^']+)'/g, "from '../../../src/router/$1'");
+    .replace(/from '\.\/([^']+)'/g, "from '@router/$1'");
   mkdirSync(REF_DIR, { recursive: true });
   writeFileSync(BASELINE, reverted);
 }
@@ -107,7 +107,7 @@ function secondsFor(fn: Stamp, host: HTMLElement, iters: number): number {
 }
 
 describe('stampActiveLinks - per-anchor memo, real function A/B', () => {
-  it.skipIf(underCoverage)('matches the baseline exactly, and measures the difference', async () => {
+  it('matches the baseline exactly, and measures the difference', async () => {
     buildBaseline();
     const base = (await import(/* @vite-ignore */ BASELINE)) as { stampActiveLinks: Stamp };
     const baseline = base.stampActiveLinks;
@@ -143,6 +143,9 @@ describe('stampActiveLinks - per-anchor memo, real function A/B', () => {
       snapshot(baseline, '/section-1/item-1'),
     );
     host.remove();
+
+    // Timing runs on `npm run test:timing` only, never instrumented (tests/under-coverage.ts).
+    if (!runTiming) return;
 
     // --- measurement --------------------------------------------------------
     const rows: Array<{ n: number; oldUs: number; newUs: number; ratio: number }> = [];

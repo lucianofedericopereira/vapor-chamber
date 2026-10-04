@@ -5,7 +5,7 @@
  * `<Transition v-bind="t" @enter="mine">` runs both hooks
  * (tests/transition-bind-merge-fixture.test.ts). The hooks are idempotent by
  * construction (see `buildHooks`); onMove's behaviour notes are on its JSDoc.
- * The history is in CHANGELOG.md and the whitepaper's section 9.2.
+ * The history is in CHANGELOG.md and the whitepaper's appendix B.
  *
  * Two entry points:
  *   createTransitionBridge - framework-agnostic factory (accepts BaseBus)
@@ -311,6 +311,13 @@ function assembleBridge(
  *
  * const t = createTransitionBridge({ bus, namespace: 'modal' });
  * // Pass t.onEnter, t.onLeave, etc. to <Transition> or call them manually
+ *
+ * On a vDOM app, `<Transition mode="out-in">` with this bridge needs an ASYNC
+ * bus. On a sync bus the bridge calls `done()` at once, so the leave finishes
+ * synchronously, and Vue's vDOM `out-in` then throws and renders nothing
+ * (tests/transition-done-timing-fixture.test.ts). That is Vue's defect,
+ * reported as vuejs/core#15727, a fix proposed in vuejs/core#11824. Vapor's
+ * `<Transition>` and the default mode are not affected (same test).
  */
 export function createTransitionBridge(
   options: TransitionBridgeOptions & { bus: BaseBus },

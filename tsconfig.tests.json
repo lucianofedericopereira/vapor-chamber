@@ -38,7 +38,9 @@
     // the source and there is one of each again.
     "paths": {
       "vapor-chamber": ["./src/index.ts"],
-      "vapor-chamber/*": ["./src/*"]
+      "vapor-chamber/*": ["./src/*"],
+      // Tests import the router's source as `@router/...` (vitest.config.ts aliases the same).
+      "@router/*": ["./src/router/*"]
     }
   },
   "include": ["src/**/*", "tests/**/*", "scripts/**/*.mjs"],

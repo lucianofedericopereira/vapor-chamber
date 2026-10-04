@@ -12,9 +12,9 @@
  * code at all - is remote-boundary.test.ts.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { isRouterError } from '../../src/router/errors';
-import { createMemoryHistory } from '../../src/router/history';
-import { bladeFetcher, routerHttp } from '../../src/router/remote';
+import { isRouterError } from '@router/errors';
+import { createMemoryHistory } from '@router/history';
+import { bladeFetcher, routerHttp } from '@router/remote';
 import { makeRouter } from './fixture';
 
 const PAYLOAD = { routes: [{ name: 'home', path: '/', component: 'Home' }] };
@@ -130,7 +130,7 @@ describe('bladeFetcher with no client of its own', () => {
 });
 
 describe('a { url } table with no client', () => {
-  it('is a coded http_unconfigured, not a crash', async () => {
+  it('is a coded router:missing:http, not a crash', async () => {
     const errors: unknown[] = [];
     const router = makeRouter({
       history: createMemoryHistory(''),
@@ -143,7 +143,7 @@ describe('a { url } table with no client', () => {
 
     // The router deliberately does not build a client for you; saying so with a
     // code beats a TypeError from a null dereference.
-    const coded = errors.find((error) => isRouterError(error, 'http_unconfigured'));
+    const coded = errors.find((error) => isRouterError(error, 'router:missing:http'));
     expect(coded).toBeDefined();
     expect(String((coded as Error).message)).toContain('router/remote');
     router.destroy();

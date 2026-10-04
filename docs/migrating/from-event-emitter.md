@@ -142,23 +142,34 @@ lane.on('userUpdate', (data) => updateUI(data));
 lane.emit('userUpdate', { userId, name });
 ```
 
-On multi-listener fan-out the fast lane's `on`/`emit` is
-**<!-- vc:benchFastLaneVsMitt -->2.33<!-- /vc:benchFastLaneVsMitt -->x mitt**.
-Against nanoevents it depends on the removal mode: the default (`'live'`, which
-matches the main bus - a listener removed mid-emit does not run) sits at
-**<!-- vc:benchFastLaneVsNano -->1.22<!-- /vc:benchFastLaneVsNano -->x**, while
-`createFastLane({ removal: 'snapshot' })` reaches
-**<!-- vc:benchFastLaneSnapshotVsNano -->1.32<!-- /vc:benchFastLaneSnapshotVsNano -->x**.
-The gap between those two modes is the price of the unsub-during-emit identity
-guard, and the guard bought correctness.
+On three-listener fan-out the fast lane's `on`/`emit` runs
+**<!-- vc:benchFastLaneVsEventEmitter3 -->0.94-1.04<!-- /vc:benchFastLaneVsEventEmitter3 -->x eventemitter3**
+and **<!-- vc:benchFastLaneVsMitt -->1.84-1.95<!-- /vc:benchFastLaneVsMitt -->x mitt**.
+Against eventemitter3 that is level: the band falls on both sides of 1. The
+general bus's `emit` is behind eventemitter3 on the same fan-out, at
+**<!-- vc:benchEmitVsEventEmitter3Fanout -->0.78-0.82<!-- /vc:benchEmitVsEventEmitter3Fanout -->x**.
+So moving EventEmitter pub/sub onto the bus costs some speed on this path;
+onto the fast lane, about none.
+The fast lane figure is the default removal mode (`'live'`, which matches the
+main bus - a listener removed mid-emit does not run, and one added mid-emit
+runs from the next emit).
+`createFastLane({ removal: 'snapshot' })` skips the per-listener `off` check
+and runs somewhat faster; the check is the price of that correctness
+(the measured gap is in [performance.md](../performance.md)).
 
-Single-handler `compile()` dispatch holds a different and much wider lead,
-**<!-- vc:benchCompileVsNano -->2.89<!-- /vc:benchCompileVsNano -->x nanoevents**,
+Single-handler `compile()` dispatch runs
+**<!-- vc:benchCompileVsDispatch -->10.57<!-- /vc:benchCompileVsDispatch -->x** the general bus's `dispatch`,
 and nothing above affects it. For the mode trade-off, see
 [performance.md](../performance.md).
 
-> These four ratios are **generated**, not typed: `npm run bench` writes them
-> through `scripts/bench-ratios-reporter.mjs`, and `npm run docs:stamp` publishes
-> them, so none is typed by hand. Ratios rather than hz on purpose: an absolute hz figure is
-> host state (rows here swing 20-30% run to run) and a same-run ratio is not.
-> Even a ratio moves a little, so read the second decimal as noise.
+> These ratios are **generated**, not typed: `npm run bench:bands` runs the
+> bench several times through `scripts/bench-ratios-reporter.mjs`, and
+> `npm run docs:stamp` publishes them, so none is typed by hand. Ratios rather
+> than hz on purpose: an absolute hz figure is host state (rows here swing
+> 20-30% run to run) and a same-run ratio is not. Even a ratio moves. A ratio
+> between two libraries is a fact about one host (docs/V8-RULES.md rule 15),
+> so it is printed as the range over the runs; a ratio between two of this
+> library's own paths is the median. These: <!-- vc:benchProvenance -->Node 24.21.0, vitest 5.0.1, mitt 3.0.1, eventemitter3 5.0.4, 5 runs<!-- /vc:benchProvenance -->,
+> one Apple Silicon Mac. A
+> micro-loop emitting one name over and over flatters emitters keyed by a
+> plain object; with varying names they fall behind (docs/performance.md).

@@ -23,11 +23,11 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { START_LOCATION } from '../../src/router/engine';
-import { createMemoryHistory } from '../../src/router/history';
-import { defaultAffects } from '../../src/router/loaders';
-import type { RouteRecord } from '../../src/router/types';
-import { parseQuery, stringifyQuery } from '../../src/router/url';
+import { START_LOCATION } from '@router/engine';
+import { createMemoryHistory } from '@router/history';
+import { defaultAffects } from '@router/loaders';
+import type { RouteRecord } from '@router/types';
+import { parseQuery, stringifyQuery } from '@router/url';
 import { makeRouter as fixtureRouter } from './fixture';
 
 const POLLUTING_KEYS = ['constructor', 'toString', 'valueOf', 'hasOwnProperty', 'isPrototypeOf'];

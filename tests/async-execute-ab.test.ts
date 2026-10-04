@@ -27,7 +27,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
-import { underCoverage } from './under-coverage';
+import { runTiming } from './under-coverage';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // Per-file subdir: the whole dir is removed in afterAll, so it must be ours alone.
@@ -94,7 +94,7 @@ async function opsPerSec(factory: Factory, mode: 'dispatch' | 'query', n: number
 }
 
 describe('async execute closure - real path A/B', () => {
-  it.skipIf(underCoverage)('matches the baseline exactly, and measures the difference', async () => {
+  it('matches the baseline exactly, and measures the difference', async () => {
     buildBaseline();
     const base = (await import(/* @vite-ignore */ BASELINE)) as { createAsyncCommandBus: Factory };
 
@@ -112,6 +112,9 @@ describe('async execute closure - real path A/B', () => {
         expect(await settle(a.query(action, 1))).toEqual(await settle(b.query(action, 1)));
       }
     }
+
+    // Timing runs on `npm run test:timing` only, never instrumented (tests/under-coverage.ts).
+    if (!runTiming) return;
 
     const N = 2_000;
     const rows: string[] = [];

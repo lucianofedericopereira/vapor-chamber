@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHttpClient } from '../../src/index';
-import { createMemoryHistory, createRouter, isRouterError } from '../../src/router/index';
+import { createMemoryHistory, createRouter, isRouterError } from '@router/index';
 import { fetchLoaders } from '../../src/router-fetch/index';
 
 const ROWS = [
@@ -51,7 +51,7 @@ describe('fetchLoaders', () => {
     expect(router.currentRoute.value.data.get('items')).toEqual({ items: [1, 2, 3] });
   });
 
-  it('non-2xx -> coded load_failed, navigation not committed', async () => {
+  it('non-2xx -> coded router:failed:loader, navigation not committed', async () => {
     (globalThis.fetch as any).mockImplementation(async () => jsonResponse({ error: 'nope' }, false, 500));
     const router = createRouter({
       history: createMemoryHistory(),
@@ -65,7 +65,7 @@ describe('fetchLoaders', () => {
     });
     await router.isReady();
     const result = await router.push('/items');
-    expect(isRouterError(result, 'load_failed')).toBe(true);
+    expect(isRouterError(result, 'router:failed:loader')).toBe(true);
     expect(router.currentRoute.value.location.name).toBe('home');
   });
 

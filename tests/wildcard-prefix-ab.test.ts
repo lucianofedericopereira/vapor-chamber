@@ -50,7 +50,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
-import { underCoverage } from './under-coverage';
+import { runTiming } from './under-coverage';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // Per-file subdir: the whole dir is removed in afterAll, so it must be ours alone.
@@ -58,8 +58,8 @@ const REF_DIR = resolve(HERE, '__ref', 'wildcard-prefix');
 const BASELINE = resolve(REF_DIR, 'command-bus-wildcard-baseline.ts');
 
 /** The line this change introduced, and the line it replaced. */
-const SHIPPED_LINE = 'if (action.startsWith(entry.prefix)) {';
-const BASELINE_LINE = 'if (matchesPattern(entry.pattern, action)) {';
+const SHIPPED_LINE = 'if (!entry.off && action.startsWith(entry.prefix)) {';
+const BASELINE_LINE = 'if (!entry.off && matchesPattern(entry.pattern, action)) {';
 
 function buildBaseline(): void {
   const src = readFileSync(resolve(HERE, '../src/command-bus.ts'), 'utf8');
@@ -107,7 +107,7 @@ function opsPerSec(factory: Factory, wilds: string[], n: number, iters: number):
 }
 
 describe('wildcard listener prefix - real dispatch path A/B', () => {
-  it.skipIf(underCoverage)('matches the baseline exactly, and measures the difference', async () => {
+  it('matches the baseline exactly, and measures the difference', async () => {
     buildBaseline();
     const base = (await import(/* @vite-ignore */ BASELINE)) as { createCommandBus: Factory };
     const baseline = base.createCommandBus;
@@ -133,6 +133,9 @@ describe('wildcard listener prefix - real dispatch path A/B', () => {
     // stop matching.
     expect(''.length).toBe(0);
     expect('anything'.startsWith('')).toBe(true);
+
+    // Timing runs on `npm run test:timing` only, never instrumented (tests/under-coverage.ts).
+    if (!runTiming) return;
 
     // --- measurement --------------------------------------------------------
     const N = 2_000;

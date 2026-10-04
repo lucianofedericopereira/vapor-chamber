@@ -137,7 +137,7 @@ export function revalidateRoutes(
         if (!record) {
           report(
             routerError(
-              'unknown_route_name',
+              'missing:record',
               `revalidateRoutes: "${name}" is not a loader-bearing record of the current route (chain: ${
                 leaf.loadChain.map((r) => r.name).join(', ') || 'none'
               })`,
@@ -172,7 +172,7 @@ export function revalidateRoutes(
     const at = snapshot.location;
     syncFlag();
 
-    void runLoaders(loaders, records, at, own.signal)
+    void runLoaders(loaders, records, at, own.signal, undefined, true)
       .then((fresh) => {
         if (own.signal.aborted) return;
         // Superseded by a navigation while we were fetching: the data belongs

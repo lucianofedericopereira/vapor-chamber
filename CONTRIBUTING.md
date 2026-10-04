@@ -74,6 +74,7 @@ scripts/
 docs/
   whitepaper.md        Design philosophy + integration patterns
   performance.md       Performance & tuning reference
+  V8-RULES.md          The settled V8 rules, short, each with its evidence
   rc-alignment.md      What to do when a new Vue RC lands
   rc-alignment-log.md  The record of each RC cycle (dev-only)
   decisions.md         Append-only decision log
@@ -118,15 +119,19 @@ npm run test:coverage  # 100% statements / branches / functions / lines
 
 All seven must pass, and the order is part of the gate. `npm run gate` runs them
 in exactly this order plus the drift and clean-tree steps. Deliberately NOT in
-that chain: `npm run bench` (its ratios are host state, and its markers are
-never stamped from a working tree), `npm run check:example` (it drives three
+that chain: `npm run bench` (one run, which only records its ratios) and
+`npm run bench:bands` (N runs; the one writer of the `vc:bench*` values: the
+median for this library's own ratios, the min-max band for a ratio against a
+peer library; run from a clean committed checkout, never a working tree),
+`npm run check:example` (it drives three
 example builds and belongs to the alignment cycle, not to every commit), and
 `ab:vue` (it needs a second Vue installed).
 
 - **Build before the test runs.** The size, boundary and Vite-plugin guards read
-  `dist/` and skip themselves (`describe.skipIf(!haveDist)`) when it is absent, so a
-  test run without a build is a partial run that can still print green. One suite
-  also reads a file that only `tsc` emits (`dist/router/index.d.ts`).
+  `dist/` and fail at load when it is absent (`tests/require-dist.ts`). They used
+  to skip, and a skipped test cannot go red: CI's `test` job ran without a build
+  and read green. CI builds first now, as `prepublishOnly` and the gate do. One suite also reads a
+  file that only `tsc` emits (`dist/router/index.d.ts`).
 - **After any change under `src/`, comments included, run `npm run docs`** and
   commit `docs/api/` with the change. The API reference carries source line
   anchors, so a comment that moves a line moves them. Run `npm run size:doc` too
@@ -162,7 +167,9 @@ the root does exercise that example's code.
 
 ### Performance work
 
-If your change is in a hot path (`command-bus.ts`, `transports.ts`, `chamber.ts`):
+If your change is in a hot path (`command-bus.ts`, `transports.ts`, `chamber.ts`),
+read [docs/V8-RULES.md](./docs/V8-RULES.md) first: the shape, allocation and
+measuring rules this project has already settled, each with its evidence.
 
 1. Add a bench to [tests/perf.bench.ts](./tests/perf.bench.ts) **before** changing
    the code, and capture the baseline numbers.

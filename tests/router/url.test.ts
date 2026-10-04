@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decodeQueryParam, encodeQueryParam, parseQuery, resolveQueryHistory, stringifyQuery } from '../../src/router/url';
+import { decodeQueryParam, encodeQueryParam, parseQuery, resolveQueryHistory, stringifyQuery } from '@router/url';
 
 describe('parseQuery / stringifyQuery', () => {
   it('round-trips simple values', () => {

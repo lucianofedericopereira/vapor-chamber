@@ -18,7 +18,7 @@ describe('createHttpBridge', () => {
   it('sends command envelope to endpoint', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ state: { count: 3 } }),
+      json: async () => ({ state: { count: 3 } }), text: async () => JSON.stringify(({ state: { count: 3 } })),
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -59,7 +59,7 @@ describe('createHttpBridge', () => {
 
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({}),
+      json: async () => ({}), text: async () => JSON.stringify(({})),
     }));
     vi.stubGlobal('document', {
       cookie: 'XSRF-TOKEN=abc123',
@@ -80,7 +80,7 @@ describe('createHttpBridge', () => {
   it('actions filter skips non-matching commands', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({}),
+      json: async () => ({}), text: async () => JSON.stringify(({})),
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -112,7 +112,13 @@ describe('createBatchingHttpBridge', () => {
             ok: true,
             state: c.command === 'cartAdd' ? { count: 1 } : { formOk: true },
           })),
-        }),
+        }), text: async () => JSON.stringify(({
+          results: body.commands.map((c: any) => ({
+            id: c.id,
+            ok: true,
+            state: c.command === 'cartAdd' ? { count: 1 } : { formOk: true },
+          })),
+        })),
       };
     });
     vi.stubGlobal('fetch', fetchMock);
@@ -141,7 +147,7 @@ describe('createBatchingHttpBridge', () => {
   it('does not batch dispatches from separate ticks - each flush is its own POST', async () => {
     const fetchMock = vi.fn(async (_url: string, init: any) => {
       const body = JSON.parse(init.body);
-      return { ok: true, json: async () => ({ results: body.commands.map((c: any) => ({ id: c.id, state: 1 })) }) };
+      return { ok: true, json: async () => ({ results: body.commands.map((c: any) => ({ id: c.id, state: 1 })) }) , text: async () => JSON.stringify(({ results: body.commands.map((c: any) => ({ id: c.id, state: 1 })) }))};
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -155,7 +161,7 @@ describe('createBatchingHttpBridge', () => {
   });
 
   it('fails a command with a clear error if the backend response omits its result', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ results: [] }) }));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ results: [] }) , text: async () => JSON.stringify(({ results: [] }))}));
 
     const bus = createAsyncCommandBus({ retry: false });
     bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch' }));
@@ -166,7 +172,7 @@ describe('createBatchingHttpBridge', () => {
   });
 
   it('actions filter skips non-matching commands (falls through to next)', async () => {
-    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ results: [] }) });
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, json: async () => ({ results: [] }) , text: async () => JSON.stringify(({ results: [] }))});
     vi.stubGlobal('fetch', fetchMock);
 
     const bus = createAsyncCommandBus({ onMissing: 'ignore' });
@@ -180,7 +186,7 @@ describe('createBatchingHttpBridge', () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn(async (_url: string, init: any) => {
       const body = JSON.parse(init.body);
-      return { ok: true, json: async () => ({ results: body.commands.map((c: any) => ({ id: c.id, state: 1 })) }) };
+      return { ok: true, json: async () => ({ results: body.commands.map((c: any) => ({ id: c.id, state: 1 })) }) , text: async () => JSON.stringify(({ results: body.commands.map((c: any) => ({ id: c.id, state: 1 })) }))};
     });
     vi.stubGlobal('fetch', fetchMock);
 

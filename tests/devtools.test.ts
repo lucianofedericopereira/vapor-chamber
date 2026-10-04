@@ -221,6 +221,12 @@ describe('setupDevtools - the @vue/devtools-api integration', () => {
       ]),
     );
 
+    // Timestamps (docs/timestamps.md): the panel shows RFC 3339 text, the
+    // timeline event takes epoch ms, as Vue's devtools API expects.
+    const time = state.state.meta.find((r: { key: string }) => r.key === 'time').value;
+    expect(time).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+    expect(typeof api.addTimelineEvent.mock.calls[0][0].event.time).toBe('number');
+
     const missing: any = { inspectorId: 'vapor-chamber', nodeId: 'does-not-exist' };
     api.handlers.state(missing);
     expect(missing.state).toBeUndefined();

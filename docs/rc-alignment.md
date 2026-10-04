@@ -15,7 +15,7 @@ Vue** and how that lets this library be aligned, improved or simplified.
 
 1. Branch: `git switch -c rc<N>`.
 2. Read, in full: this page, the previous cycle's section at the end of the log,
-   the top of `CHANGELOG.md`, `ROADMAP.md` and whitepaper section 9. The rc.9
+   the top of `CHANGELOG.md`, `ROADMAP.md` and the whitepaper's appendix B. The rc.9
    cycle made sixteen commits before reading any of it; log s34.4 lists the
    gates that were skipped as a result.
 
@@ -59,7 +59,7 @@ included; `npm run size:doc` when a size can move; `MCP_SERVER_VERSION` in
 `src/mcp.ts` follows the package version; `npm run docs:stamp` last.
 
 **8. Document the cycle in four places.** A `CHANGELOG.md` entry (under the
-current unreleased heading), a row in the whitepaper section 9 alignment table,
+current unreleased heading), a row in the alignment table of the whitepaper's appendix B,
 the header of each module the cycle changed, and `ROADMAP.md` (last reviewed
 version, RC dates, peer-range statements, the support matrix and the version
 targets table).

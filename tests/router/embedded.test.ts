@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { canUseWebHistory, createMemoryHistory } from '../../src/router/history';
-import { createRouter } from '../../src/router/index';
+import { canUseWebHistory, createMemoryHistory } from '@router/history';
+import { createRouter } from '@router/index';
 
 /**
  * Embedded/opaque-origin contexts (sandboxed or srcdoc iframes, data:

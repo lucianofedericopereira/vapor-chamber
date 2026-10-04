@@ -12,7 +12,7 @@
  *  - `Retry-After` honoured on any status (RFC 9110); `X-RateLimit-Reset` as its fallback for the wait
  *  - 419 CSRF refresh coalesces concurrent requests (no duplicate refreshes)
  *  - `session-expired` CustomEvent + configurable callback
- *  - `TimeoutError` distinct from `AbortError` (user abort vs timeout)
+ *  - The caller's abort (`transport:aborted:request`) distinct from no reply in time (`transport:timeout:reply`)
  */
 
 // ---------------------------------------------------------------------------
@@ -37,11 +37,10 @@ export type HttpConfig = {
    */
   timeout?: number;
   /**
-   * Max retry attempts on 5xx/429/408.
-   *
-   * Same split: **0 through `postCommand`**, and through a client **2 for
-   * idempotent methods (GET), 0 for mutations** - retrying a POST is not safe
-   * to do on the caller's behalf.
+   * Max re-sends of a failure the bus's rule allows (`retryClass`): a
+   * transient one for any method, an uncertain one only for an idempotent
+   * method or an `Idempotency-Key`. **0 through `postCommand`**, and through a
+   * client **2 for reads (GET), 0 for other methods**.
    */
   retry?: number;
   /** External abort signal (e.g. from component unmount) */
@@ -68,6 +67,16 @@ export type HttpConfig = {
    * Default: false.
    */
   silent?: boolean;
+  /**
+   * Resolve a 304 Not Modified instead of throwing it. A 304 answers a
+   * conditional request the app sent itself (`If-None-Match`,
+   * `If-Modified-Since`): "what you hold is current", not a failure. Opted
+   * in, the response resolves as it is (`status` 304, `ok` false as Fetch
+   * says, `data` the empty body); off, it throws its `remote:` failure like
+   * any non-2xx. Never cached. Default: false.
+   * tests/http-not-modified.test.ts.
+   */
+  resolveNotModified?: boolean;
 };
 
 export type HttpResponse<T = unknown> = {
@@ -75,6 +84,14 @@ export type HttpResponse<T = unknown> = {
   status: number;
   headers: Record<string, string>;
   ok: boolean;
+  /**
+   * The final URL, after any redirect Fetch followed (Fetch's `Response.url`).
+   * Always set by `createHttpClient` and `postCommand`; optional for an app's
+   * own client.
+   */
+  url?: string;
+  /** True when Fetch followed a redirect to reach `url` (`Response.redirected`). */
+  redirected?: boolean;
   /** True when this response was served from a stale (past-fresh) cache entry. */
   stale?: boolean;
   /** Present on a stale hit: resolves with the fresh response once the background revalidation lands. */
@@ -85,42 +102,13 @@ export type HttpResponse<T = unknown> = {
   error?: unknown;
 };
 
-export type HttpErrorName = 'HttpError' | 'TimeoutError' | 'AbortError';
-
-/**
- * The HTTP client's failure, for a request made with it directly: `name` says
- * which (`HttpError` for an answered non-2xx, `TimeoutError`, `AbortError`),
- * `response` is the answer (its `status` included), and `code` a problem
- * body's `code`. On the bus the bridges read it by the wire contract into a
- * `remote` or `transport` failure (docs/plan-failures-and-contract.md 4.4), and
- * `failureCondition` reads its `response.status` through the status table. `silent` is
- * stamped when the request asked to skip a global error handler.
- */
-export class HttpError extends Error {
-  declare name: HttpErrorName;
-  declare response?: HttpResponse;
-  /** Machine-readable error code from response body (e.g. `'CART_ITEM_LIMIT_EXCEEDED'`). */
-  declare code?: string;
-  /** Set when the request's `silent: true` config opts the caller out of a global error handler/toast. */
-  declare silent?: boolean;
-
-  constructor(
-    name: HttpErrorName,
-    message: string,
-    opts: { response?: HttpResponse; code?: string } = {},
-  ) {
-    super(message);
-    this.name = name;
-    this.response = opts.response;
-    this.code = opts.code;
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
 
 const SESSION_EXPIRED_STATUS = [401]; // 419 is CSRF expiry, not session expiry
+// The longest declared wait the client sleeps INSIDE one request; a longer one
+// ends the request (the header stays on the failure for the caller).
 const MAX_RETRY_AFTER_MS = 30_000;
 const CSRF_TTL_MS = 300_000; // 5 min
 const DEFAULT_CSRF_COOKIE_URL = '/sanctum/csrf-cookie';
@@ -152,6 +140,11 @@ export function readCsrfToken(): CsrfResult | null {
 const CSRF_HEADER_NAMES = ['X-CSRF-TOKEN', 'X-XSRF-TOKEN'] as const;
 
 /** Set `token` as the ONLY csrf header - clears the other name first. */
+function attachCsrf(headers: Record<string, string>): void {
+  const token = readCsrfToken();
+  if (token) headers[token.headerName] = token.token;
+}
+
 function setCsrfHeader(headers: Record<string, string>, result: CsrfResult): void {
   for (const name of CSRF_HEADER_NAMES) delete headers[name];
   headers[result.headerName] = result.token;
@@ -257,7 +250,7 @@ function refreshCsrfOnce(cookieUrl: string): Promise<CsrfResult> {
       // was rendered with. See readCsrfAfterRefresh.
       const freshToken = readCsrfAfterRefresh();
       if (!freshToken) {
-        throw new Error('[vapor-chamber] CSRF refresh failed: no token found in DOM after refresh');
+        throw transportFail('missing:csrf', `No CSRF token after refreshing it from "${cookieUrl}".`, { context: { url: cookieUrl } });
       }
       return freshToken;
     } finally {
@@ -271,20 +264,52 @@ function refreshCsrfOnce(cookieUrl: string): Promise<CsrfResult> {
 // Retry timing
 // ---------------------------------------------------------------------------
 
-/** @internal - also read by the bridges (transports.ts), for `context.retryIn`. */
+/**
+ * RFC 9110 5.6.7's three HTTP-date forms, all GMT: IMF-fixdate
+ * (`Sun, 06 Nov 1994 08:49:37 GMT`), and the obsolete rfc850-date
+ * (`Sunday, 06-Nov-94 08:49:37 GMT`) and asctime-date
+ * (`Sun Nov  6 08:49:37 1994`) a recipient MUST still accept. `Date.parse`
+ * read asctime as LOCAL time and took any form it knew (ISO, `10/1/2026`).
+ */
+const HTTP_DATE =
+  /^(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), (\d\d) (\w{3}) (\d{4})|(?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day, (\d\d)-(\w{3})-(\d\d)|(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (\w{3}) ([ \d]\d)) (\d\d):(\d\d):(\d\d) (?:GMT|(\d{4}))$/;
+const MONTHS = 'JanFebMarAprMayJunJulAugSepOctNovDec';
+
+/** An HTTP-date in ms since the epoch, or NaN for anything else. */
+function httpDate(value: string): number {
+  const m = HTTP_DATE.exec(value);
+  // asctime ends in its year; the other two end in GMT.
+  if (!m || (m[7] === undefined) !== (m[12] === undefined)) return NaN;
+  const month = MONTHS.indexOf(m[2] ?? m[5] ?? m[7]);
+  if (month % 3) return NaN;
+  let year = Number(m[3] ?? m[12] ?? m[6]);
+  if (m[6] !== undefined) {
+    // A two-digit year is its next occurrence: `00` sent late in 2099 is
+    // 2100. RFC 9110 5.6.7's 50-year rule only moves a year into the past,
+    // which no wait reads (a past date is ignored either way).
+    const now = new Date(Date.now()).getUTCFullYear();
+    year += now - (now % 100);
+    if (year < now) year += 100;
+  }
+  return Date.UTC(year, month / 3, Number(m[1] ?? m[4] ?? m[8]), Number(m[9]), Number(m[10]), Number(m[11]));
+}
+
+/**
+ * @internal - also read by the bridges (transports.ts), for `context.retryIn`.
+ * RFC 9110: `delay-seconds = 1*DIGIT`, else an HTTP-date; anything else is
+ * ignored. `Number()` alone would read `-5`, `1.5`, `1e1`, `0x10` as waits.
+ * No ceiling of its own (Retry-After is a minimum, RFC 9110): each caller
+ * applies its policy. Only a wait no timer can hold is ignored.
+ * tests/retry-after-long.test.ts, tests/retry-after-grammar.test.ts.
+ */
 export function _parseRetryAfter(header: string | null | undefined): number | undefined {
   if (!header) return undefined;
-  const seconds = Number(header);
-  if (!Number.isNaN(seconds)) {
-    const ms = seconds * 1000;
-    return ms <= MAX_RETRY_AFTER_MS ? ms : undefined;
+  if (/^\d+$/.test(header)) {
+    const ms = Number(header) * 1000;
+    return ms <= MAX_TIMEOUT_MS ? ms : undefined;
   }
-  const date = Date.parse(header);
-  if (!Number.isNaN(date)) {
-    const ms = date - Date.now();
-    return ms > 0 && ms <= MAX_RETRY_AFTER_MS ? ms : undefined;
-  }
-  return undefined;
+  const ms = httpDate(header) - Date.now();
+  return ms > 0 && ms <= MAX_TIMEOUT_MS ? ms : undefined;
 }
 
 /** Exponential backoff plus 0-200ms of jitter to avoid thundering herd. */
@@ -319,6 +344,11 @@ function combineSignals(a: AbortSignal, b: AbortSignal): CombinedSignal {
   };
 }
 
+// The caller's own abort, wherever it lands: a code, never a raw DOMException.
+function abortedRequest(url: string): BusError {
+  return transportFail('aborted:request', `"${url}" was aborted.`, { context: { url } });
+}
+
 function sleepMs(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const onAbort = () => {
@@ -339,21 +369,38 @@ function sleepMs(ms: number, signal?: AbortSignal): Promise<void> {
 // Error constructors
 // ---------------------------------------------------------------------------
 
+const remoteFail = _failures('remote');
+const transportFail = _failures('transport');
+
 /**
- * `HttpError` for a non-2xx, with the body's `code` lifted out.
- *
- * The `!= null` guard and the `String()` stay here rather than moving into the
- * the constructor: this is the one site reading an UNTRUSTED body, where `code`
- * may be a number or absent, and every other site already holds a string.
+ * @internal - the failure a backend declared: `remote:<condition>:<code>`, the
+ * condition from the problem's own `status` (else the response's), `detail` the
+ * message, the rest `context`. `retryIn` is the response's `Retry-After` (RFC
+ * 9110), never a body member: it is set after the spread, so a body cannot
+ * supply it. One reader for the client and every bridge (log s35.131).
  */
-function responseError(message: string, response: HttpResponse): HttpError {
-  const data = response.data as any;
-  const code = data?.code;
-  // An RFC 9457 problem's `detail` is the backend's own sentence for this
-  // occurrence, so it replaces `HTTP <status>` - here, once, for the client,
-  // router-fetch and both bridges alike: a bridge's catch path hands this
-  // error on as it is when the body has no `error`/`message` of its own.
-  return new HttpError('HttpError', data?.detail || message, { response, code: code == null ? undefined : String(code) });
+export function _remoteProblem(p: ProblemDetails, status?: number, retryIn?: number): BusError {
+  const s = typeof p.status === 'number' ? p.status : status;
+  const { status: _status, code, detail, ...params } = p;
+  return remoteFail(
+    `${s === undefined ? 'unknown' : conditionOfStatus(s)}:${code ?? 'problem'}` as FailCode,
+    detail ?? (s === undefined ? 'The backend answered with no status.' : `HTTP ${s}`),
+    { context: { ...params, status: s, code, retryIn } },
+  );
+}
+
+/** @internal - a non-2xx: its problem, or, for a body that is not one, the status alone. */
+export function _answered(status: number, data: unknown, headers?: Record<string, string>): BusError {
+  const retryIn = _parseRetryAfter(headers?.['retry-after']);
+  return data !== null && typeof data === 'object' && !Array.isArray(data)
+    ? _remoteProblem(data as ProblemDetails, status, retryIn)
+    : remoteFail(`${conditionOfStatus(status)}:http` as FailCode, `HTTP ${status}`, { context: { status, retryIn } });
+}
+
+/** A request marked `silent` (skip a global error handler) says so on its failure. */
+function asSilent(e: BusError, silent: boolean | undefined): BusError {
+  if (silent) (e as { context?: Record<string, unknown> }).context = { ...e.context, silent: true };
+  return e;
 }
 
 // ---------------------------------------------------------------------------
@@ -417,12 +464,28 @@ function headersToObject(headers: Headers | undefined): Record<string, string> {
   return out;
 }
 
+// The one reader of a JSON body, sync so a response pays no extra async frame.
+// Empty is no data. A body that does not parse is off-protocol on a 2xx; on
+// any other status the status already answers.
+function parseJson(text: string, ok: boolean): unknown {
+  if (!text) return null;
+  try { return JSON.parse(text); } catch (e) { if (ok) throw e; return null; }
+}
+
+// The bus's one rule (retryClass): a transient failure for any request, an
+// uncertain one only when safe to send twice - an idempotent method, or an
+// Idempotency-Key (any case, RFC 9110 5.1), the bus's keyed command.
+function resendable(failure: BusError, method: string, headers: Record<string, string>): boolean {
+  const cls = retryClass(failure);
+  return cls === 'transient' || (cls === 'uncertain'
+    && (IDEMPOTENT_METHODS.has(method) || Object.keys(headers).some((k) => k.toLowerCase() === 'idempotency-key')));
+}
+
 async function doFetch<T>(url: string, serialized: string, headers: Record<string, string>, signal: AbortSignal): Promise<HttpResponse<T>> {
   const raw = await fetch(url, { method: 'POST', headers, body: serialized, credentials: 'same-origin', signal });
   const resHeaders = headersToObject(raw.headers);
-  let data: T = null as T;
-  try { data = await raw.json() as T; } catch { /* non-JSON */ }
-  return { data, status: raw.status, headers: resHeaders, ok: raw.ok };
+  const data = parseJson(await raw.text(), raw.ok) as T;
+  return { data, status: raw.status, headers: resHeaders, ok: raw.ok, url: raw.url, redirected: raw.redirected };
 }
 
 /**
@@ -431,7 +494,7 @@ async function doFetch<T>(url: string, serialized: string, headers: Record<strin
  * fetch itself (passed as `doRequest`) and whether thrown errors are stamped
  * `silent`.
  *
- * ONE policy, correct for both (whitepaper 5.7): 401 = session expiry, fires
+ * ONE policy, correct for both (whitepaper 6.2): 401 = session expiry, fires
  * `onSessionExpired`; 419 = CSRF expiry, refreshed and retried ONCE and NEVER
  * escalated to session expiry.
  *
@@ -449,14 +512,16 @@ async function runWithRetry<T>(
     csrfCookieUrl: string;
     onSessionExpired?: (status: number) => void;
     url: string;
+    method: string;
     silent?: boolean;
+    notModified?: boolean;
   },
 ): Promise<HttpResponse<T>> {
-  const { retry, timeout, userSignal, csrfCookieUrl, onSessionExpired, url, silent = false } = opts;
+  const { retry, timeout, userSignal, csrfCookieUrl, onSessionExpired, url, silent = false, notModified = false } = opts;
   let csrfRetried = false;
 
   for (let attempt = 0; attempt <= retry; attempt++) {
-    if (userSignal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    if (userSignal?.aborted) throw asSilent(abortedRequest(url), silent);
 
     const timeoutCtrl = new AbortController();
     const timeoutId = setTimeout(() => timeoutCtrl.abort(), timeout);
@@ -469,10 +534,12 @@ async function runWithRetry<T>(
       combined?.detach();
 
       if (!res.ok) {
+        // Opted in: a 304 is the answer to the app's conditional request.
+        if (notModified && res.status === 304) return res;
         if (SESSION_EXPIRED_STATUS.includes(res.status)) handleSessionExpiry(res.status, url, onSessionExpired);
 
         // 419 = CSRF expiry: refresh once (off the retry budget), then retry.
-        // It NEVER fires onSessionExpired - that is 401's job (whitepaper 5.7).
+        // It NEVER fires onSessionExpired - that is 401's job (whitepaper 6.2).
         if (res.status === 419 && !csrfRetried) {
           csrfRetried = true;
           setCsrfHeader(headers, await refreshCsrfOnce(csrfCookieUrl));
@@ -480,41 +547,39 @@ async function runWithRetry<T>(
           continue;
         }
 
-        // Retry what the response declares temporary (http-errors.ts): a
-        // transient status, or any status sent with Retry-After (RFC 9110),
-        // waiting what it says.
-        const retryAfter = res.headers['retry-after'] ?? res.headers['x-ratelimit-reset'];
-        if ((isRetryableStatus(res.status) || res.headers['retry-after'] !== undefined) && attempt < retry) {
-          const wait = _parseRetryAfter(retryAfter) ?? backoffMs(attempt);
-          await sleepMs(wait, userSignal);
+        // A declared wait (Retry-After, RFC 9110) re-sends any request, else
+        // the rule. Waiting what it says, never less; a declared wait over
+        // 30 s is not slept inside the request, it ends it.
+        const failure = _answered(res.status, res.data, res.headers);
+        const declared = _parseRetryAfter(res.headers['retry-after'] ?? res.headers['x-ratelimit-reset']);
+        if (attempt < retry && (declared !== undefined || resendable(failure, opts.method, headers)) && !((declared ?? 0) > MAX_RETRY_AFTER_MS)) {
+          await sleepMs(declared ?? backoffMs(attempt), userSignal);
           continue;
         }
-
-        const failed = responseError(`HTTP ${res.status}`, res);
-        if (silent) failed.silent = true;
-        throw failed;
+        throw asSilent(failure, silent);
       }
 
       return res;
     } catch (e) {
       clearTimeout(timeoutId);
       combined?.detach();
-      const err = e as HttpError;
-      if (err.name === 'AbortError' && userSignal?.aborted) throw err;
-      // A timeout-triggered abort is transient: it competes for the retry
-      // budget like a transient status instead of throwing on the first attempt.
-      const failure = err.name === 'AbortError'
-        ? new HttpError('TimeoutError', `"${url}" timed out after ${timeout}ms`)
-        : err;
-      // A response thrown above was already judged by the status rule there;
-      // it re-enters here only to leave. Only no response at all (a network
-      // failure, a timeout) is retried from this path.
-      if (failure.response) throw failure; // stamped `silent` where it was thrown
-      if (attempt >= retry) {
-        if (silent) failure.silent = true;
-        throw failure;
+      // An answer thrown above was already judged by the rule there; it
+      // re-enters here only to leave.
+      if (e instanceof BusError) throw e;
+      if (userSignal?.aborted) throw asSilent(abortedRequest(url), silent);
+      // A timeout-triggered abort is transient; a body that is not the JSON it
+      // declared is an off-protocol answer; anything else is no response.
+      const failure = (e as Error)?.name === 'AbortError'
+        ? transportFail('timeout:reply', `"${url}" timed out after ${timeout}ms.`, { context: { url, timeout } })
+        : e instanceof SyntaxError
+          ? remoteFail('unexpected:json', `"${url}" answered a body that is not valid JSON.`, { context: { url }, cause: e })
+          : transportFail('lost:reply', `No response from "${url}".`, { context: { url }, cause: e });
+      if (attempt >= retry || !resendable(failure, opts.method, headers)) throw asSilent(failure, silent);
+      try {
+        await sleepMs(backoffMs(attempt), userSignal);
+      } catch {
+        throw asSilent(abortedRequest(url), silent);
       }
-      await sleepMs(backoffMs(attempt), userSignal);
     }
   }
 
@@ -545,24 +610,20 @@ export async function postCommand<T = unknown>(
     ...extra,
   };
 
-  if (csrf) {
-    const token = readCsrfToken();
-    if (token) headers[token.headerName] = token.token;
-  }
+  if (csrf) attachCsrf(headers);
 
   const serialized = JSON.stringify(body);
   return runWithRetry<T>(
     (signal) => doFetch<T>(url, serialized, headers, signal),
     headers,
-    { retry, timeout, userSignal, csrfCookieUrl, onSessionExpired, url, silent },
+    { retry, timeout, userSignal, csrfCookieUrl, onSessionExpired, url, method: 'POST', silent, notModified: config.resolveNotModified },
   );
 }
 
 // ---------------------------------------------------------------------------
 // Multi-method HTTP client - createHttpClient
 //
-// For new code, prefer createHttpClient(). postCommand is retained for
-// backward compatibility and is used by createHttpBridge.
+// postCommand is the wire contract's POST, used by the bridges.
 // ---------------------------------------------------------------------------
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
@@ -590,22 +651,28 @@ export type HttpRequestConfig = HttpConfig & {
    * `{ stale: true, servedOnError: true, error }` instead of rejecting.
    */
   cache?: boolean | { ttl?: number; staleTtl?: number; serveStaleOnError?: boolean };
-  /** Enable request deduplication for GET. Default: true */
+  /**
+   * Enable request deduplication for GET. Default: true. A concurrent GET
+   * of the same URL joins the one in flight and shares its outcome, but
+   * keeps its own `signal`: aborting it rejects that caller's promise only.
+   * The fetch is cancelled once every caller holding it has aborted; a
+   * caller without a signal holds it until it lands.
+   * (`tests/http-dedupe-signal.test.ts`)
+   */
   dedupe?: boolean;
   /** @internal marks a CSRF-retried request */
   _csrfRetried?: boolean;
 };
 
 /**
- * A `safe` helper's outcome: it never throws. `error` is the RFC 9457 problem
- * the backend answered (its body, `status` added when the body has none), or,
- * for a body that is not one, `{ status, detail: 'HTTP <status>' }`; with no
- * response at all (a timeout, an abort, the network) `{ detail }` only.
- * `status` is 0 when there was no response.
+ * A `safe` helper's outcome: it never throws. `error` is the failure the call
+ * would have thrown, the core's `BusError` (`conditionOf(error)`, and
+ * `problemOf(error)` for the backend's RFC 9457 problem). `status` is 0 when
+ * there was no response.
  */
 export type SafeResult<T = unknown> = {
   data: T | null;
-  error: ProblemDetails | null;
+  error: BusError | null;
   status: number;
 };
 
@@ -677,15 +744,19 @@ function createInterceptorManager<T>(): InterceptorManager<T> & { forEach(fn: (h
 
 import { MAX_TIMEOUT_MS } from './bounds';
 import { createResponseCache, CACHE_DEFAULT_TTL } from './http-cache';
-import { classifyError, isRetryableStatus, type ProblemDetails } from './http-errors';
+import { classifyError, type ProblemDetails } from './http-errors';
+import { BusError, _failures, conditionOfStatus, retryClass, type FailCode } from './failure';
 import { buildFullUrl } from './http-query';
 
 // ---------------------------------------------------------------------------
 // Constants for multi-method client
 // ---------------------------------------------------------------------------
 
-const IDEMPOTENT_METHODS: HttpMethod[] = ['GET'];
+/** A read: retried by default and cached; any other method invalidates its URL. */
+const READ_METHODS: HttpMethod[] = ['GET'];
 const MUTATION_METHODS: HttpMethod[] = ['POST', 'PUT', 'PATCH', 'DELETE'];
+/** RFC 9110 9.2.2: safe to send twice, so the retry rule may re-send an uncertain failure. */
+const IDEMPOTENT_METHODS: ReadonlySet<string> = new Set(['GET', 'HEAD', 'OPTIONS', 'PUT', 'DELETE']);
 const DEFAULT_GET_RETRY = 2;
 const DEFAULT_MUTATION_RETRY = 0;
 const DEFAULT_CLIENT_TIMEOUT = 30_000;
@@ -726,14 +797,13 @@ async function doClientFetch<T>(
     // (`application/json-seq`) is not JSON and stays text.
     const contentType = raw.headers?.get('content-type') || '';
     if (/[/+]json\s*(;|$)/i.test(contentType)) {
-      const text = await raw.text();
-      data = text ? JSON.parse(text) : null;
+      data = parseJson(await raw.text(), raw.ok);
     } else {
       data = await raw.text();
     }
   }
 
-  return { data: data as T, status: raw.status, headers: resHeaders, ok: raw.ok };
+  return { data: data as T, status: raw.status, headers: resHeaders, ok: raw.ok, url: raw.url, redirected: raw.redirected };
 }
 
 async function clientRequest<T>(
@@ -748,17 +818,15 @@ async function clientRequest<T>(
   csrf: boolean,
   csrfCookieUrl: string,
   onSessionExpired?: (status: number) => void,
+  notModified?: boolean,
 ): Promise<HttpResponse<T>> {
   // Attach CSRF for mutation methods
-  if (csrf && MUTATION_METHODS.includes(method)) {
-    const token = readCsrfToken();
-    if (token) headersObj[token.headerName] = token.token;
-  }
+  if (csrf && MUTATION_METHODS.includes(method)) attachCsrf(headersObj);
 
   return runWithRetry<T>(
     (signal) => doClientFetch<T>(fullUrl, method, headersObj, body, responseType, signal),
     headersObj,
-    { retry: maxRetries, timeout, userSignal, csrfCookieUrl, onSessionExpired, url: fullUrl },
+    { retry: maxRetries, timeout, userSignal, csrfCookieUrl, onSessionExpired, url: fullUrl, method, notModified },
   );
 }
 
@@ -801,6 +869,34 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
   // one for the derived client, so one instance's clearCache() can never empty
   // another's, and a per-request client under SSR is genuinely isolated.
   const cache = createResponseCache();
+  // A deduped GET that callers may cancel: it fetches under `ctrl`, aborted
+  // once every caller holding it has aborted (`live` reaches 0). A read with
+  // no entry here is one some caller holds without a signal: nothing cancels it.
+  const shares = new WeakMap<Promise<unknown>, { ctrl: AbortController; live: number }>();
+
+  // One caller's promise on a shared read: its own signal rejects it, and only
+  // it. The last holder to abort cancels the fetch and removes the in-flight
+  // entry at once, so a caller arriving after that starts a fresh request
+  // instead of joining one that is already aborted.
+  function hold<T>(key: string, url: string, shared: Promise<T>, signal: AbortSignal): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+      const onAbort = () => {
+        reject(abortedRequest(url));
+        const share = shares.get(shared);
+        if (share && --share.live === 0) {
+          shares.delete(shared);
+          cache.dropInflight(key, shared);
+          share.ctrl.abort();
+        }
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+      // The leader's signal can abort inside the synchronous start of its own
+      // fetch, before this listener exists (tests/http-gaps.test.ts).
+      if (signal.aborted) onAbort();
+      // After an abort, resolve and reject are no-ops; the listener goes either way.
+      shared.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+    });
+  }
 
   async function request<T = unknown>(url: string, options: HttpRequestConfig = {}): Promise<HttpResponse<T>> {
     // Merge instance defaults with per-call options
@@ -825,8 +921,8 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
     // Same bounds as postCommand's, normalized once before clientRequest's loop.
     const rawTimeout = config.timeout as number;
     const timeout = rawTimeout < MAX_TIMEOUT_MS ? rawTimeout : rawTimeout > 0 ? MAX_TIMEOUT_MS : DEFAULT_CLIENT_TIMEOUT;
-    const isIdempotent = IDEMPOTENT_METHODS.includes(method);
-    const maxRetries = config.retry ?? (isIdempotent ? DEFAULT_GET_RETRY : DEFAULT_MUTATION_RETRY);
+    const isRead = READ_METHODS.includes(method);
+    const maxRetries = config.retry ?? (isRead ? DEFAULT_GET_RETRY : DEFAULT_MUTATION_RETRY);
     const responseType: ResponseType = config.responseType ?? 'json';
     const csrf = config.csrf ?? false;
     const csrfCookieUrl = config.csrfCookieUrl ?? DEFAULT_CSRF_COOKIE_URL;
@@ -836,19 +932,39 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
     // responseType is part of both keys - a concurrent get(url) (json) and
     // get(url, { responseType: 'blob' }) must not collapse to one request or
     // one cache slot, or the loser receives the wrong data type.
-    const dedupeKey = `${method}:${responseType}:${fullUrl}`;
+    // Two reads share one request only when they would get the same answer.
+    // The request's headers change the answer (If-None-Match turns a 200 into
+    // a 304; Authorization, Accept-Language), so they are in the key: a plain
+    // read joining a conditional one received its 304. A read opted in to
+    // resolve a 304 never shares with one that is not, either: the same
+    // answer resolves for one and throws for the other.
+    // tests/http-not-modified.test.ts. (`config.headers` is always the merged
+    // object, the instance's defaults included.)
+    const dedupeKey = `${method}:${responseType}:${config.resolveNotModified ? '304:' : ''}${JSON.stringify(config.headers)}:${fullUrl}`;
     const cacheKey = `${responseType}:${fullUrl}`;
 
-    // Request deduplication for GET
-    if (isIdempotent && dedupe) {
-      const inflight = cache.getInflight(dedupeKey);
-      if (inflight) return inflight as Promise<HttpResponse<T>>;
+    // Request deduplication for GET. A caller joins the read in flight, but its
+    // signal stays its own: it cancels its promise, never another caller's.
+    // A caller with no signal holds the read until it lands.
+    const userSignal = config.signal;
+    if (isRead && dedupe) {
+      const inflight = cache.getInflight(dedupeKey) as Promise<HttpResponse<T>> | undefined;
+      if (inflight) {
+        if (!userSignal) {
+          shares.delete(inflight);
+          return inflight;
+        }
+        if (userSignal.aborted) throw abortedRequest(fullUrl);
+        const share = shares.get(inflight);
+        if (share) share.live++;
+        return hold(dedupeKey, fullUrl, inflight, userSignal);
+      }
     }
 
     // LRU cache for GET. A fresh hit short-circuits; a stale hit (within
     // cache.staleTtl) is captured and served below with a background
     // revalidation attached - the stale-while-revalidate path.
-    const cacheEnabled = config.cache && isIdempotent;
+    const cacheEnabled = config.cache && isRead;
     const cacheCfg = typeof config.cache === 'object' ? config.cache : {};
     let staleResponse: HttpResponse | null = null;
     if (cacheEnabled) {
@@ -874,10 +990,16 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
       }
     }
 
-    // Execute request
+    // Execute request. `ticket`: see ResponseCache.read.
+    const ticket = cacheEnabled ? cache.read(fullUrl) : null;
+    // A read others may join, started by a signalled caller, fetches under a
+    // controller of its own: this caller's abort is then one holder leaving.
+    // An already aborted caller is not joinable; it fails on its own below.
+    const joinable = isRead && dedupe && !userSignal?.aborted;
+    const share = joinable && userSignal ? { ctrl: new AbortController(), live: 1 } : null;
     const fetchPromise = clientRequest<T>(
       fullUrl, method, headersObj, body, responseType, maxRetries, timeout,
-      config.signal, csrf, csrfCookieUrl, config.onSessionExpired,
+      share ? share.ctrl.signal : userSignal, csrf, csrfCookieUrl, config.onSessionExpired, config.resolveNotModified,
     ).then((res) => {
       // Run response interceptors
       let response = res as HttpResponse;
@@ -885,17 +1007,21 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
         if (onFulfilled) response = onFulfilled(response) || response;
       });
 
-      // Cache successful GET responses
-      if (cacheEnabled && response.ok) {
+      // Cache successful GET responses, unless an invalidation of this URL
+      // happened while it was on the wire: it is returned, not stored.
+      if (ticket && cache.done(ticket) && response.ok) {
         cache.set(cacheKey, response, cacheCfg.ttl ?? CACHE_DEFAULT_TTL, cacheCfg.staleTtl ?? 0);
       }
+      // A write that resolved invalidates exactly its URL (RFC 9111 section
+      // 4.4). Only a 2xx gets here: the retry loop throws a non-ok response.
+      if (!isRead) cache.invalidate((u) => u === fullUrl);
 
       return response as HttpResponse<T>;
     }).catch((err) => {
+      if (ticket) cache.done(ticket);
       // Run response error interceptors
       responseInterceptors.forEach(({ onRejected }) => { if (onRejected) onRejected(err); });
-      if (config.silent) (err as HttpError).silent = true;
-      throw err;
+      throw err instanceof BusError ? asSilent(err, config.silent) : err;
     });
 
     // cache.serveStaleOnError (opt-in): a transient failure (timeout/network/
@@ -915,8 +1041,7 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
     const sharedPromise: Promise<HttpResponse<T>> =
       cacheEnabled && cacheCfg.serveStaleOnError
         ? fetchPromise.catch((error) => {
-            const aborted = (error as HttpError)?.name === 'AbortError';
-            if (!aborted && classifyError(error).transient) {
+            if (classifyError(error).transient) {
               const retained = cache.getAny(cacheKey);
               if (retained) {
                 return { ...(retained.data as HttpResponse<T>), stale: true, servedOnError: true, error };
@@ -927,19 +1052,22 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
         : fetchPromise;
 
     // Track in-flight GET for deduplication
-    if (isIdempotent && dedupe) {
+    if (joinable) {
       cache.setInflight(dedupeKey, sharedPromise);
+      if (share) shares.set(sharedPromise, share);
     }
+    // This caller holds its own read like any joiner (see hold).
+    const own = share ? hold(dedupeKey, fullUrl, sharedPromise, userSignal!) : sharedPromise;
 
     // Stale-while-revalidate: serve the stale response now; the fetch above
     // finishes in the background and is cached (cache.set) on success. `revalidation`
     // lets a caller push the fresh data into its own state when it lands.
     if (staleResponse) {
-      sharedPromise.catch(() => {}); // background failure must not surface as an unhandled rejection
+      own.catch(() => {}); // background failure must not surface as an unhandled rejection
       return { ...staleResponse, stale: true, revalidation: fetchPromise } as HttpResponse<T>;
     }
 
-    return sharedPromise;
+    return own;
   }
 
   // Safe mode wrapper
@@ -950,14 +1078,9 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
       const response = await request<T>(url, reqConfig);
       return { data: response.data, error: null, status: response.status };
     } catch (err) {
-      const e = err as HttpError;
-      const res = e.response;
-      if (!res) return { data: null, error: { detail: e.message }, status: 0 };
-      const body = res.data;
-      // `e.message` is already the body's `detail`, else `HTTP <status>`; a
-      // null body spreads as nothing.
-      const problem = typeof body === 'object' && !Array.isArray(body) ? body as ProblemDetails | null : null;
-      return { data: null, error: { status: res.status, ...problem, detail: e.message }, status: res.status };
+      // The failure the call would have thrown; `status` 0 when no response.
+      const e = err as BusError;
+      return { data: null, error: e, status: typeof e.context?.status === 'number' ? e.context.status : 0 };
     }
   }
 

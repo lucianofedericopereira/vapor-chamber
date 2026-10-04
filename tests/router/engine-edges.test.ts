@@ -13,9 +13,9 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
-import { createMemoryHistory } from '../../src/router/history';
-import { isRouterError } from '../../src/router/errors';
-import type { RouteRecord } from '../../src/router/types';
+import { createMemoryHistory } from '@router/history';
+import { isRouterError } from '@router/errors';
+import type { RouteRecord } from '@router/types';
 import { makeRouter as fixtureRouter } from './fixture';
 
 const ROWS: RouteRecord[] = [
@@ -35,7 +35,7 @@ const makeRouter = (opts: Record<string, unknown> = {}) => fixtureRouter({ route
 
 
 describe('resolve() shapes', () => {
-  it('throws not_ready before the table is loaded', () => {
+  it('throws router:missing:routes before the table is loaded', () => {
     const router = fixtureRouter({
       // A remote source, so no table exists until start() resolves.
       routes: { url: '/routes.json' } as never,
@@ -156,7 +156,7 @@ describe('guards', () => {
     router.beforeEach(() => false);
 
     const result = await router.push('/list');
-    expect(isRouterError(result, 'aborted')).toBe(true);
+    expect(isRouterError(result, 'router:refused:guard')).toBe(true);
     expect(router.currentRoute.value.location.path).toBe('/');
     router.destroy();
   });
@@ -172,7 +172,7 @@ describe('guards', () => {
     router.destroy();
   });
 
-  it('reports redirect_loop instead of hanging when two guards redirect at each other', async () => {
+  it('reports router:exceeded:redirects instead of hanging when two guards redirect at each other', async () => {
     // Two targets that are BOTH away from the start: a redirect landing on the
     // location already committed is a duplicate and short-circuits, which
     // would end the chain before it could loop.
@@ -196,7 +196,7 @@ describe('guards', () => {
 
     // Pre-fix this recursed forever: async, so no stack overflow to point at -
     // push() simply never settled and the page never moved.
-    expect(isRouterError(result, 'redirect_loop')).toBe(true);
+    expect(isRouterError(result, 'router:exceeded:redirects')).toBe(true);
     offA();
     offB();
     router.destroy();
@@ -244,7 +244,7 @@ describe('guards', () => {
 });
 
 describe('navigating without a table', () => {
-  it('reports not_ready instead of throwing out of push()', async () => {
+  it('reports router:missing:routes instead of throwing out of push()', async () => {
     const router = fixtureRouter({
       routes: { url: '/routes.json' } as never,
       components: {},

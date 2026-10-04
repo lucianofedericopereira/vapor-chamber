@@ -39,6 +39,9 @@
 export type FastDispatcher<T = any, R = any> = (data: T) => R;
 export type FastListener<T = any> = (data: T) => void;
 
+/** A live-mode subscription: `off` is set when it is unsubscribed. */
+type LiveEntry = { fn: FastListener<any>; off: boolean };
+
 export type FastLane = {
   /**
    * Bind a handler to an action and return a pre-compiled dispatcher.
@@ -79,9 +82,10 @@ export type FastLaneOptions = {
    * factory time - the emit/unsub closures are built per mode, so the hot
    * path carries zero mode-branching.
    *
-   * - `'live'` (default) - matches the main bus: a listener removed during
-   *   an emit (by itself or a peer) does NOT run in that emit. Costs an
-   *   identity guard per listener call.
+   * - `'live'` (default) - matches the main bus: an emit calls the listeners
+   *   that existed when it started; one removed during it (by itself or a
+   *   peer) does NOT run in that emit, and one added during it runs from the
+   *   next. Costs one `off` read per listener call.
    * - `'snapshot'` - the emit fans out to the subscriber list as it was
    *   when the emit started; a listener removed mid-emit still runs once.
    *   Unsubscribe replaces the bucket array instead of splicing it (the
@@ -102,7 +106,9 @@ export function createFastLane(options: FastLaneOptions = {}): FastLane {
   // returned closure can reference a single function via Map lookup, not
   // an array iteration.
   const handlers = new Map<string, (data: any) => any>();
-  const listeners = new Map<string, FastListener<any>[]>();
+  // Snapshot mode keeps the listeners themselves; live mode keeps LiveEntry
+  // records, whose `off` an emit already walking them reads.
+  const listeners = new Map<string, Array<FastListener<any> | LiveEntry>>();
 
   function compile<T, R>(action: string, handler: (data: T) => R): FastDispatcher<T, R> {
     handlers.set(action, handler as any);
@@ -116,34 +122,45 @@ export function createFastLane(options: FastLaneOptions = {}): FastLane {
     });
   }
 
+  /** Live mode: mark a bucket's entries off, so an emit walking it stops calling them. */
+  function markOff(bucket: Array<FastListener<any> | LiveEntry> | undefined): void {
+    if (!snapshot && bucket !== undefined) for (const e of bucket) (e as LiveEntry).off = true;
+  }
+
   function remove(action: string): void {
     handlers.delete(action);
+    markOff(listeners.get(action));
     listeners.delete(action);
   }
 
   function on<T>(action: string, listener: FastListener<T>): () => void {
     let bucket = listeners.get(action);
     if (bucket === undefined) { bucket = []; listeners.set(action, bucket); }
-    bucket.push(listener);
-    return snapshot
-      ? () => {
-          // Copy-on-write (nanoevents-style): replace the array, never splice
-          // it. An emit that started earlier keeps iterating the array it
-          // captured - that is what makes snapshot-emit guard-free. Allocation
-          // here is fine: unsubscribe is the cold path.
-          const b = listeners.get(action);
-          if (b === undefined) return;
-          const next = b.filter((l) => l !== listener);
-          if (next.length === 0) listeners.delete(action);
-          else if (next.length !== b.length) listeners.set(action, next);
-        }
-      : () => {
-          const b = listeners.get(action);
-          if (b === undefined) return;
-          const i = b.indexOf(listener);
-          if (i !== -1) b.splice(i, 1);
-          if (b.length === 0) listeners.delete(action);
-        };
+    // Both modes unsubscribe copy-on-write: replace the array, never splice
+    // it, so an emit that started earlier keeps walking the array it
+    // captured, to the length it started with. Allocation here is fine:
+    // unsubscribe is the cold path. Live mode also marks the entry off, so
+    // that emit does not call it.
+    if (snapshot) {
+      bucket.push(listener);
+      return () => {
+        const b = listeners.get(action);
+        if (b === undefined) return;
+        const next = b.filter((l) => l !== listener);
+        if (next.length === 0) listeners.delete(action);
+        else if (next.length !== b.length) listeners.set(action, next);
+      };
+    }
+    const entry: LiveEntry = { fn: listener, off: false };
+    bucket.push(entry);
+    return () => {
+      if (entry.off) return;
+      entry.off = true;
+      // Present: remove() and clear() mark their entries off before dropping a bucket.
+      const next = listeners.get(action)!.filter((e) => e !== entry);
+      if (next.length === 0) listeners.delete(action);
+      else listeners.set(action, next);
+    };
   }
 
   // Two emit implementations, selected once at factory time - the hot path
@@ -156,35 +173,26 @@ export function createFastLane(options: FastLaneOptions = {}): FastLane {
         // captured here is never mutated mid-flight - one call per slot, no
         // guards. Contract: a listener removed during this emit still runs
         // once; a listener added during it does not run until the next.
-        const bucket = listeners.get(action);
+        const bucket = listeners.get(action) as FastListener<any>[] | undefined;
         if (bucket === undefined) return;
         if (bucket.length === 1) { bucket[0](data); return; }
         for (let i = 0, len = bucket.length; i < len; i++) bucket[i](data);
       }
     : (action, data) => {
-        const bucket = listeners.get(action);
+        const bucket = listeners.get(action) as LiveEntry[] | undefined;
         if (bucket === undefined) return;
-        if (bucket.length === 1) { bucket[0](data); return; }
-        // LIVE mode (default, bus parity): a listener may unsubscribe itself
-        // (the once-pattern) or a peer during its own call, and `on()`'s
-        // unsub closure splices this live array - so the next listener shifts
-        // into the index just consumed and is silently skipped for this emit.
-        // Same identity guard the main bus uses in fanOutListeners. This
-        // module drops envelope, results, plugins, wildcards and tracing on
-        // purpose; it does not drop correctness, and the guard is
-        // allocation-free, which is this file's only currency. (The guard's
-        // per-call cost is why `removal: 'snapshot'` exists - see
-        // FastLaneOptions.)
-        for (let i = 0; i < bucket.length; i++) {
-          const lenBefore = bucket.length;
-          const listener = bucket[i];
-          listener(data);
-          // Only removals at or BEFORE the cursor shift it. Testing the length
-          // alone over-corrects: a listener that removes a LATER peer shrinks
-          // the array without moving anything at `i`, and decrementing would
-          // re-invoke the listener that just ran. `bucket[i] !== listener` is
-          // the exact signal, and holds for multi-removal too.
-          if (bucket.length < lenBefore && bucket[i] !== listener) i -= lenBefore - bucket.length;
+        // One listener: nothing it does can affect another in this emit.
+        if (bucket.length === 1) { bucket[0].fn(data); return; }
+        // LIVE mode (default, bus parity, the rule fanOutListeners states):
+        // the listeners that existed when the emit started; one removed
+        // during it is marked off and skipped, one added during it is past
+        // `len`. Nothing a listener does moves the cursor. The length-based
+        // cursor correction this replaced skipped or re-ran a listener when
+        // one removed several peers on both sides of itself (log s35.67).
+        // Allocation-free, which is this file's only currency.
+        for (let i = 0, len = bucket.length; i < len; i++) {
+          const e = bucket[i];
+          if (!e.off) e.fn(data);
         }
       };
 
@@ -194,6 +202,7 @@ export function createFastLane(options: FastLaneOptions = {}): FastLane {
 
   function clear(): void {
     handlers.clear();
+    for (const b of listeners.values()) markOff(b);
     listeners.clear();
   }
 

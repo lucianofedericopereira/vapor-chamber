@@ -65,7 +65,7 @@
        delimiters. Here the delimiters really are comments, textContent skips
        them, and the URL is assembled at runtime. (Described, not shown: a
        marker written into prose is still a marker to the stamper.) --}}
-  <span id="vc-vue-version" hidden><!-- vc:vueAligned -->3.6.0-rc.9<!-- /vc:vueAligned --></span>
+  <span id="vc-vue-version" hidden><!-- vc:vueAligned -->3.6.0-rc.10<!-- /vc:vueAligned --></span>
 
   {{-- 3. Vue, as a MODULE. Vapor ships only as `esm-browser` - there is no
           `vue.runtime-with-vapor.global.js` - so a classic <script src> tag

@@ -2,7 +2,7 @@
 # vapor-chamber - scaffold a runnable Laravel demo around the example files.
 #
 # Usage:  ./setup.sh [target-dir]      (default: ./demo-app)
-# Needs:  php >= 8.2, composer. The vapor-chamber IIFE is taken from the
+# Needs:  php >= 8.3 (Laravel 13), composer. The vapor-chamber IIFE is taken from the
 #         repo's dist/ (built automatically if missing).
 set -euo pipefail
 

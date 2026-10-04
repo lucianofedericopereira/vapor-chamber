@@ -17,7 +17,7 @@ import { ... } from 'vapor-chamber/fast-lane';
 
 ### createFastLane
 
-**Function** - [src/fast-lane.ts:98](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/fast-lane.ts#L98)
+**Function** - [src/fast-lane.ts:102](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/fast-lane.ts#L102)
 
 ```ts
 createFastLane(options?: FastLaneOptions) => FastLane
@@ -75,7 +75,7 @@ lane.emit('frame', dt);
 
 ### FastLane
 
-**Type alias** - [src/fast-lane.ts:42](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/fast-lane.ts#L42)
+**Type alias** - [src/fast-lane.ts:45](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/fast-lane.ts#L45)
 
 ```ts
 export type FastLane = {
@@ -115,7 +115,7 @@ export type FastLane = {
 
 ### FastLaneOptions
 
-**Type alias** - [src/fast-lane.ts:76](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/fast-lane.ts#L76)
+**Type alias** - [src/fast-lane.ts:79](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/fast-lane.ts#L79)
 
 ```ts
 export type FastLaneOptions = {
@@ -124,9 +124,10 @@ export type FastLaneOptions = {
    * factory time - the emit/unsub closures are built per mode, so the hot
    * path carries zero mode-branching.
    *
-   * - `'live'` (default) - matches the main bus: a listener removed during
-   *   an emit (by itself or a peer) does NOT run in that emit. Costs an
-   *   identity guard per listener call.
+   * - `'live'` (default) - matches the main bus: an emit calls the listeners
+   *   that existed when it started; one removed during it (by itself or a
+   *   peer) does NOT run in that emit, and one added during it runs from the
+   *   next. Costs one `off` read per listener call.
    * - `'snapshot'` - the emit fans out to the subscriber list as it was
    *   when the emit started; a listener removed mid-emit still runs once.
    *   Unsubscribe replaces the bucket array instead of splicing it (the

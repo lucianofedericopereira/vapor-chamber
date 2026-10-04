@@ -35,6 +35,8 @@ export default defineConfig({
       { find: /^vapor-chamber$/, replacement: fileURLToPath(new URL('./src/index.ts', import.meta.url)) },
       // src/vitest-mcp.ts imports serveMcpStdio by package name too, for the same reason.
       { find: /^vapor-chamber\/mcp$/, replacement: fileURLToPath(new URL('./src/mcp.ts', import.meta.url)) },
+      // Tests import the router's source as `@router/...`; tsconfig.tests.json maps the same.
+      { find: /^@router\//, replacement: fileURLToPath(new URL('./src/router/', import.meta.url)) },
     ],
   },
   test: {
@@ -111,6 +113,8 @@ export default defineConfig({
       },
     },
     include: ['tests/**/*.test.ts'],
+    // Provides `vcCoverage` (is this run instrumented?) to tests/under-coverage.ts.
+    globalSetup: ['./tests/coverage-flag.setup.ts'],
     // `tests/vapor/**` needs `vue` aliased to the with-vapor build to run at
     // all - see vitest.vapor.config.ts. Running them here would fail on the
     // harness (two disconnected Vue instances), not on the code.
@@ -186,6 +190,9 @@ export default defineConfig({
       //    binding-boundary fixture in this project. Excluded so the one
       //    number this gate reports stays honest; if coverage ever merges the
       //    two projects, delete this line first.
+      //  - transitions/vapor.ts: the same, for `createIf` and
+      //    `defineVaporComponent`. tests/vapor/vc-transition*.test.ts cover it
+      //    under that config, dev build and an executed production bundle.
       //  (devtools.ts is NO LONGER excluded: v1.9 promotes it to its own
       //   public subpath, and a published entry point should be measured.)
       exclude: [
@@ -199,6 +206,7 @@ export default defineConfig({
         'src/testing.ts',
         'src/directives.ts',
         'src/router/vapor.ts',
+        'src/transitions/vapor.ts',
       ],
       thresholds: {
         // Floors sit ~2 points below current measured coverage - tight enough

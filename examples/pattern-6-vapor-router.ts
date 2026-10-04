@@ -64,7 +64,7 @@ const router = createRouter({
 //
 // Two constraints come with it. Route components must be
 // `defineVaporComponent` output (a Vapor-compiled SFC is); anything else is a
-// loud `mode_mismatch`, never a silent wrong-mode render. And blade rows are
+// loud `router:invalid:component`, never a silent wrong-mode render. And blade rows are
 // vDOM by construction, so a table with `blade: true` rows needs the outlet
 // below for those.
 

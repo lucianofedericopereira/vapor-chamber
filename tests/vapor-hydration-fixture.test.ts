@@ -34,7 +34,7 @@
  * separately imported Vue dists are two disconnected instances, so
  * `currentRenderingInstance` was set in one and read in the other. That is
  * this repository's most-documented failure mode (chamber.ts probeVue,
- * whitepaper 11.6), and it is reachable from here.
+ * whitepaper 9.6), and it is reachable from here.
  *
  * WHY THE TEMPLATE IS NOT JUST A BUTTON. A plain `<button>go</button>`
  * supports one claim: a directive on a plain hydrated element mounts once. The
@@ -83,6 +83,9 @@ const SOURCE =
 
 const CTX = { act: 'cartAdd', empty: '', nothing: null };
 
+/** A BOUND `data-vc-payload`: the attribute `buildHandler` parses when no `v-vc-payload` binding is present. */
+const PAYLOAD_SOURCE = '<button v-vc-command.delegate="act" :data-vc-payload="pay">{{ label }}</button>';
+
 /**
  * Render SOURCE to a string the way a server bundle would.
  *
@@ -91,12 +94,12 @@ const CTX = { act: 'cartAdd', empty: '', nothing: null };
  * `_ssrInterpolate`, and a hard-coded parameter list died on it. Same lesson,
  * same fix, as tests/compile-vapor.ts.
  */
-async function renderOnTheServer(): Promise<string> {
+async function renderOnTheServer(source: string = SOURCE, ctx: Record<string, unknown> = CTX): Promise<string> {
   const vnode: Record<string, unknown> = await import('vue');
   const sr: Record<string, unknown> = await import('@vue/server-renderer');
   const { compileTemplate } = await import('vue/compiler-sfc');
 
-  const { code, errors } = compileTemplate({ source: SOURCE, filename: 'T.vue', id: 'h', ssr: true });
+  const { code, errors } = compileTemplate({ source, filename: 'T.vue', id: 'h', ssr: true });
   expect(errors).toEqual([]);
 
   let body = code.replace('export function ssrRender', 'return function ssrRender');
@@ -118,7 +121,7 @@ async function renderOnTheServer(): Promise<string> {
 
   const app = (vnode.createSSRApp as (o: unknown) => { use: (p: unknown) => void })({
     ssrRender,
-    data: () => ({ ...CTX }),
+    data: () => ({ ...ctx }),
   });
   app.use(createDirectivePlugin());
   return (sr.renderToString as (a: unknown) => Promise<string>)(app);
@@ -205,5 +208,87 @@ describe('v-vc-command on hydrated markup', () => {
     add.mockRestore();
     remove.mockRestore();
     host.remove();
+  });
+
+  /**
+   * Hydrate PAYLOAD_SOURCE over markup rendered with `server`, on a client
+   * whose binding holds `client`. Returns what the attribute reads and what a
+   * click dispatches, after hydration and again after the client writes `next`.
+   * `clientLabel` is the button's text on the client; the server renders 'go'.
+   */
+  async function hydratePayload(server: string, client: string, next: string, clientLabel = 'go') {
+    const html = await renderOnTheServer(PAYLOAD_SOURCE, { act: 'cartAdd', pay: server, label: 'go' });
+    // Control: the server's value is in the markup that gets hydrated.
+    expect(html).toContain(`data-vc-payload="${server.replace(/"/g, '&quot;')}"`);
+
+    const v = (await import(/* @vite-ignore */ WITH_VAPOR)) as unknown as VaporApi;
+    const payloads: unknown[] = [];
+    getCommandBus().onAfter((cmd) => {
+      payloads.push(cmd.payload);
+    });
+    const warned: string[] = [];
+    vi.spyOn(console, 'warn').mockImplementation((...a) => {
+      warned.push(String(a[0]));
+    });
+    vi.spyOn(console, 'error').mockImplementation((...a) => {
+      warned.push(String(a[0]));
+    });
+
+    const { render, code } = await compileVapor(v, PAYLOAD_SOURCE);
+    // The binding is a compiled static-key one, asserted in the generated code.
+    expect(code).toContain('"data-vc-payload"');
+    const host = document.createElement('div');
+    host.innerHTML = html;
+    document.body.appendChild(host);
+    const serverButton = host.querySelector('button');
+
+    const ctx = v.reactive({ act: 'cartAdd', pay: client, label: clientLabel });
+    const app = v.createVaporSSRApp(v.defineVaporComponent({ setup: () => render(ctx) }));
+    app.directive('vc-command', vcCommandVapor);
+    app.mount(host);
+
+    const button = host.querySelector('button') as HTMLButtonElement;
+    expect(button).toBe(serverButton);
+    const attrAfterHydration = button.getAttribute('data-vc-payload');
+    button.click();
+    await settle();
+
+    ctx.pay = next;
+    await v.nextTick();
+    const attrAfterUpdate = button.getAttribute('data-vc-payload');
+    button.click();
+    await settle();
+
+    app.unmount();
+    host.remove();
+    return {
+      attrAfterHydration,
+      attrAfterUpdate,
+      payloads,
+      mismatches: warned.filter((w) => /hydrat|mismatch/i.test(w)).length,
+    };
+  }
+
+  it('a bound :data-vc-payload equal on server and client: kept, dispatched, and a later write reaches the next click', async () => {
+    expect(await hydratePayload('{"id":1}', '{"id":1}', '{"id":3}')).toEqual({
+      attrAfterHydration: '{"id":1}',
+      attrAfterUpdate: '{"id":3}',
+      payloads: [{ id: 1 }, { id: 3 }],
+      mismatches: 0,
+    });
+  });
+
+  it('a bound :data-vc-payload that differs: the client value is written during hydration and is what dispatches', async () => {
+    expect(await hydratePayload('{"id":1}', '{"id":2}', '{"id":3}')).toEqual({
+      attrAfterHydration: '{"id":2}',
+      attrAfterUpdate: '{"id":3}',
+      payloads: [{ id: 2 }, { id: 3 }],
+      mismatches: 0,
+    });
+  });
+
+  it('control for the zero above: the same spy counts a text mismatch on the same element', async () => {
+    const measured = await hydratePayload('{"id":1}', '{"id":1}', '{"id":3}', 'GO');
+    expect(measured.mismatches).toBeGreaterThan(0);
   });
 });

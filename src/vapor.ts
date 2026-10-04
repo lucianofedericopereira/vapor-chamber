@@ -75,6 +75,18 @@ import {
 } from 'vue';
 import { configureVue } from './chamber';
 
+/**
+ * `true` in a Vite build wired by `vaporChamberWire({ entry: 'vapor' })`
+ * (decision 6). That plugin's wired root exports this module's
+ * {@link defineVaporAsyncComponent} by name, so the root's wrapper never runs
+ * there and the registry needs no seed of Vue's: the seed below sits in a
+ * condition on this flag, and Vue's async code stays out of an app that never
+ * defines an async component. Undefined in every other build, which keeps the
+ * seed. A condition around the value, never an early return (chamber.ts,
+ * `__VC_WIRED_BUILD__`).
+ */
+declare const __VC_WIRED_VAPOR__: boolean | undefined;
+
 // Evaluated on import - this IS the wiring, and it is why `./dist/vapor.js` is
 // listed in package.json#sideEffects: without that a bundler could hoist the
 // re-exports below and skip this body entirely.
@@ -123,7 +135,10 @@ import { configureVue } from './chamber';
 configureVue({
   createVaporApp: vueCreateVaporApp,
   defineVaporComponent: vueDefineVaporComponent,
-  defineVaporAsyncComponent: vueDefineVaporAsyncComponent,
+  // Not seeded in a build wired for /vapor (see __VC_WIRED_VAPOR__): there the
+  // root's name is this module's wrapper below. `configureVue` skips an
+  // undefined entry.
+  defineVaporAsyncComponent: typeof __VC_WIRED_VAPOR__ !== 'undefined' && __VC_WIRED_VAPOR__ ? undefined : vueDefineVaporAsyncComponent,
 });
 
 // Re-exporting `./vue` is also what EVALUATES it, which is the point: one
@@ -143,6 +158,22 @@ export {
   defineVaporCommand,
   defineVaporCustomElement,
   defineVaporComponent,
-  defineVaporAsyncComponent,
   useVaporAsyncCommand,
 } from './chamber-vapor';
+
+/**
+ * defineVaporAsyncComponent - define an async Vapor component for lazy loading.
+ *
+ * This entry's own wrapper, the one exception to the list above: it calls
+ * Vue's function directly, so it reads no registry and never returns null.
+ * Under `vaporChamberWire({ entry: 'vapor' })` the root exports this one too
+ * (decision 6); everywhere else the root's wrapper reads the registry this
+ * module seeds. Same contract as the root's: see `chamber-vapor.ts`.
+ *
+ * @example
+ * import { defineVaporAsyncComponent } from 'vapor-chamber/vapor';
+ * const AsyncPanel = defineVaporAsyncComponent(() => import('./Panel.vue'));
+ */
+export function defineVaporAsyncComponent<T = any>(loader: (() => Promise<unknown>) | object): T {
+  return vueDefineVaporAsyncComponent(loader as never) as T;
+}

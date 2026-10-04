@@ -207,6 +207,42 @@ describe('createTestBus', () => {
     expect(calls).toEqual(['A', 'B']);
   });
 
+  // The fan-out rule of the real buses (log s35.67): the listeners that
+  // existed when the dispatch started; the two cases the length-based
+  // correction got wrong, and offAll() mid-dispatch.
+  it('removing an earlier peer and adding one does not skip the next', () => {
+    const bus = createTestBus();
+    const calls: string[] = [];
+    const offA = bus.on('*', () => { calls.push('A'); });
+    let armed = true;
+    bus.on('*', () => { calls.push('B'); if (armed) { armed = false; offA(); bus.on('*', () => { calls.push('added'); }); } });
+    bus.on('*', () => { calls.push('C'); });
+    bus.dispatch('thing', {});
+    expect(calls).toEqual(['A', 'B', 'C']);
+  });
+
+  it('removing itself and a later peer does not re-run the one before', () => {
+    const bus = createTestBus();
+    const calls: string[] = [];
+    let offC = () => {};
+    bus.on('*', () => { calls.push('A'); });
+    const offB = bus.on('*', () => { calls.push('B'); offB(); offC(); });
+    offC = bus.on('*', () => { calls.push('C'); });
+    bus.on('*', () => { calls.push('D'); });
+    bus.dispatch('thing', {});
+    expect(calls).toEqual(['A', 'B', 'D']);
+    expect(() => offB()).not.toThrow(); // already off: a no-op
+  });
+
+  it('offAll() mid-dispatch: the rest of that dispatch hears nothing', () => {
+    const bus = createTestBus();
+    const calls: string[] = [];
+    bus.on('*', () => { calls.push('A'); bus.offAll(); });
+    bus.on('*', () => { calls.push('B'); });
+    bus.dispatch('thing', {});
+    expect(calls).toEqual(['A']);
+  });
+
   it('emit() uses the same cursor rule as dispatch', () => {
     const bus = createTestBus();
     const calls: string[] = [];
@@ -1967,6 +2003,55 @@ describe('recursion depth guard', () => {
     expect(count).toBe(16);
   });
 
+  // Depth is nesting, not a count of dispatches in flight: 4 of 20 were
+  // refused before (log s35.67).
+  it('async: 40 concurrent dispatches, none nested, are all answered', async ({ asyncBus: bus }) => {
+    bus.register('slow', () => new Promise((r) => setTimeout(() => r(1), 5)));
+    const results = await Promise.all(Array.from({ length: 40 }, () => bus.dispatch('slow', undefined)));
+    expect(results.every((r) => r.ok)).toBe(true);
+  });
+
+  it('async: a listener that re-dispatches its own action stops at the same depth', async ({ asyncBus: bus }) => {
+    let count = 0;
+    let deep: any;
+    bus.register('ping', async () => { count++; await Promise.resolve(); return 1; });
+    bus.on('ping', () => { const p = bus.dispatch('ping', undefined); void p.then((r) => { if (!r.ok && deep === undefined) deep = r; }); });
+    await bus.dispatch('ping', undefined);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(count).toBe(16);
+    expect(deep).toFailWith('core:exceeded:depth');
+  });
+
+  it('async: an after-hook that re-dispatches stops at the same depth', async ({ asyncBus: bus }) => {
+    let count = 0;
+    bus.register('pong', async () => { count++; await Promise.resolve(); return 1; });
+    bus.onAfter((cmd) => { if (cmd.action === 'pong') void bus.dispatch('pong', undefined); });
+    await bus.dispatch('pong', undefined);
+    await new Promise((r) => setTimeout(r, 20));
+    expect(count).toBe(16);
+  });
+
+  it('async: a query that queries itself stops at the same depth', async ({ asyncBus: bus }) => {
+    let count = 0;
+    let deep: any;
+    bus.register('q', async (cmd) => {
+      count++;
+      const r = await bus.query('q', cmd.target);
+      if (!r.ok && deep === undefined) deep = r;
+      return r;
+    });
+    await bus.query('q', {});
+    expect(count).toBe(16);
+    expect(deep).toFailWith('core:exceeded:depth');
+  });
+
+  it('async: depth is back at 0 after a refused chain; a plain dispatch runs', async ({ asyncBus: bus }) => {
+    bus.register('loop', async (cmd) => bus.dispatch('loop', cmd.target));
+    await bus.dispatch('loop', {});
+    bus.register('plain', async () => 1);
+    expect(await bus.dispatch('plain', undefined)).toMatchObject({ ok: true, value: 1 });
+  });
+
   it('depth resets after normal dispatch completes', ({ bus }) => {
     let depth1Count = 0;
     let depth2Count = 0;
@@ -1998,6 +2083,33 @@ describe('recursion depth guard', () => {
     bus.dispatch('loop', {});
     expect(deepResult).toBeDefined();
     expect(deepResult).toFailWith('core:exceeded:depth');
+  });
+
+  it('a query that queries itself stops at the same depth (it overflowed the stack)', ({ bus }) => {
+    let count = 0;
+    let deepResult: any;
+    bus.register('q', (cmd) => {
+      count++;
+      const r = bus.query('q', cmd.target);
+      if (!r.ok && deepResult === undefined) deepResult = r;
+      return r;
+    });
+    bus.query('q', {});
+    expect(count).toBe(16);
+    expect(deepResult).toFailWith('core:exceeded:depth');
+  });
+
+  it('dispatch and query nest on one counter', ({ bus }) => {
+    let count = 0;
+    let deepResult: any;
+    bus.register('d', (cmd) => { count++; const r = bus.query('q', cmd.target); if (!r.ok && deepResult === undefined) deepResult = r; return r; });
+    bus.register('q', (cmd) => { count++; const r = bus.dispatch('d', cmd.target); if (!r.ok && deepResult === undefined) deepResult = r; return r; });
+    bus.dispatch('d', {});
+    expect(count).toBe(16);
+    expect(deepResult).toFailWith('core:exceeded:depth');
+    // And the counter is back at 0: a plain query still runs.
+    bus.register('plain', () => 1);
+    expect(bus.query('plain', {})).toMatchObject({ ok: true, value: 1 });
   });
 });
 
@@ -2343,7 +2455,7 @@ describe('inspectBus (sync)', () => {
 
     const info = inspectBus(bus);
 
-    expect(info.actions).toEqual(['cartAdd', 'cartRemove']);
+    expect(info.actions).toEqual(['cartAdd', 'cartAdd$undo', 'cartRemove']);
     expect(info.undoActions).toEqual(['cartAdd']);
     expect(info.responderActions).toEqual(['cartCheck']);
     expect(info.pluginCount).toBe(2);
@@ -2384,7 +2496,7 @@ describe('inspectBus (async)', () => {
 
     const info = inspectBus(bus);
 
-    expect(info.actions).toEqual(['fetch']);
+    expect(info.actions).toEqual(['fetch', 'fetch$undo']);
     expect(info.undoActions).toEqual(['fetch']);
     expect(info.responderActions).toEqual(['query']);
     expect(info.sealed).toBe(false);
@@ -2401,7 +2513,7 @@ describe('TestBus.inspect()', () => {
 
     const info = (bus as any).inspect();
 
-    expect(info.actions).toEqual(['a', 'b']);
+    expect(info.actions).toEqual(['a', 'a$undo', 'b']); // the undo is a command (s35.114)
     expect(info.undoActions).toEqual(['a']);
     expect(info.pluginCount).toBe(0);
     expect(info.beforeHookCount).toBe(1);
@@ -2512,7 +2624,7 @@ describe('core dispatch - error & edge branches', () => {
     // so inspectBus() takes the fallback branch - undoActions is always [] there.
     const info = inspectBus(bus);
 
-    expect(info.actions).toEqual(['a', 'b']);
+    expect(info.actions).toEqual(['a', 'a$undo', 'b']); // the undo is a command (s35.114)
     expect(info.undoActions).toEqual([]);
     expect(info.responderActions).toEqual([]);
     expect(info.pluginCount).toBe(0);

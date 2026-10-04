@@ -34,6 +34,7 @@ import type {
 const testFail = _failures('core');
 import { buildRunner, matchesPattern, abortedResult, _failures, _beforeCancel, _errResult, _okResult, _stampMeta, _UNSEAL, _tryCatchHandler } from './command-bus';
 import { isThenable } from './settled';
+import { _isLibraryAction, _isLibraryRegister } from './library-names';
 
 export interface RecordedDispatch {
   cmd: Command;
@@ -84,11 +85,13 @@ export interface TestBus extends CommandBus<any> {
 export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): TestBus {
   const handlers = new Map<string, Handler>();
   const undoHandlers = new Map<string, Handler>();
+  const undoChecks = new Map<string, (cmd: Command) => boolean>();
   const responders = new Map<string, (cmd: Command) => any>();
   const plugins: Array<{ plugin: Plugin; priority: number }> = [];
   const beforeHooks: BeforeHook[] = [];
   const afterHooks: Hook[] = [];
-  const patternListeners: Array<{ pattern: string; listener: Listener }> = [];
+  // Replaced, never spliced, so a fan-out walking it keeps its array (see fanOut).
+  let patternListeners: Array<{ pattern: string; listener: Listener; off: boolean }> = [];
   const recorded: RecordedDispatch[] = [];
   let sealed = false;
   let dispatchDepth = 0;
@@ -113,31 +116,23 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
   }
 
   /**
-   * Listener fan-out with the cursor corrected by IDENTITY, matching
-   * `fanOutListeners` in command-bus.ts - see the reasoning there.
+   * Listener fan-out by the rule `fanOutListeners` in command-bus.ts states:
+   * the listeners that existed when it started; one removed during it is
+   * marked off and skipped, one added during it is past `n`.
    *
-   * This used the older `if (len < lenBefore) i--` shape, which handles a
-   * listener removing ITSELF but over-corrects the other way: removing a LATER
-   * peer shrinks the array without moving anything at or before `i`, so the
-   * decrement re-invoked the listener that had just run. Measured on a
-   * TestBus with three `'*'` listeners where the first removes the third:
-   * ['A', 'A', 'B'] instead of ['A', 'B'].
-   *
-   * That the real buses were already fixed and this one was not is the whole
-   * problem with it living here: a test asserting "called once" fails against
-   * behaviour the production bus does not have, and one merely counting calls
-   * records a phantom and passes.
+   * It must match the real buses exactly. It once kept an older cursor
+   * correction after they were fixed: a test asserting "called once" failed
+   * against behaviour the production bus does not have, and one merely
+   * counting calls recorded a phantom and passed.
    */
   function fanOut(cmd: Command, result: CommandResult, matchAgainst: string): void {
     const pl = patternListeners;
-    for (let i = 0; i < pl.length; i++) {
+    for (let i = 0, n = pl.length; i < n; i++) {
       const entry = pl[i];
-      if (matchesPattern(entry.pattern, matchAgainst)) {
-        const lenBefore = pl.length;
+      if (!entry.off && matchesPattern(entry.pattern, matchAgainst)) {
         try { entry.listener(cmd, result); } catch (e) {
           console.error('[vapor-chamber/test] Listener error:', e);
         }
-        if (pl.length < lenBefore && pl[i] !== entry) i -= lenBefore - pl.length;
       }
     }
   }
@@ -222,16 +217,24 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
 
   function register(action: string, handler: Handler, regOpts: RegisterOptions = {}): () => void {
     if (sealed) throw testFail('refused:bus', `Cannot call register() on a sealed bus.`);
+    // As the real bus: a `$` name is the library's, and an undo is `<action>$undo`.
+    if (_isLibraryAction(action) && !_isLibraryRegister()) throw testFail('invalid:name', `Action "${action}": a name with "$" is the library's.`, { context: { action } });
     handlers.set(action, handler);
-    if (regOpts.undo) {
-      undoHandlers.set(action, regOpts.undo);
+    const undoKey = action + '$undo';
+    const undoH = regOpts.undo && ((c: Command) => (regOpts.undo as Handler)(c.target));
+    if (undoH) {
+      undoHandlers.set(action, regOpts.undo as Handler);
+      handlers.set(undoKey, undoH);
     }
+    if (regOpts.canUndo) undoChecks.set(action, regOpts.canUndo);
     // Only what THIS call registered, as the real bus does
     // (tests/register-ownership.test.ts): a test double must not diverge.
-    const undo = regOpts.undo;
+    const { undo, canUndo } = regOpts;
     return () => {
       if (handlers.get(action) === handler) handlers.delete(action);
       if (undo && undoHandlers.get(action) === undo) undoHandlers.delete(action);
+      if (undoH && handlers.get(undoKey) === undoH) handlers.delete(undoKey);
+      if (canUndo && undoChecks.get(action) === canUndo) undoChecks.delete(action);
     };
   }
 
@@ -262,9 +265,13 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
   }
 
   function on(pattern: string, listener: Listener): () => void {
-    const entry = { pattern, listener };
+    const entry = { pattern, listener, off: false };
     patternListeners.push(entry);
-    return () => { const i = patternListeners.indexOf(entry); if (i !== -1) patternListeners.splice(i, 1); };
+    return () => {
+      if (entry.off) return;
+      entry.off = true;
+      patternListeners = patternListeners.filter((e) => e !== entry);
+    };
   }
 
   function once(pattern: string, listener: Listener): () => void {
@@ -273,10 +280,8 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
   }
 
   function offAll(pattern?: string): void {
-    if (pattern === undefined) { patternListeners.length = 0; return; }
-    for (let i = patternListeners.length - 1; i >= 0; i--) {
-      if (patternListeners[i].pattern === pattern) patternListeners.splice(i, 1);
-    }
+    for (const e of patternListeners) if (pattern === undefined || e.pattern === pattern) e.off = true;
+    patternListeners = patternListeners.filter((e) => !e.off);
   }
 
   /**
@@ -351,6 +356,7 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
     hasHandler: (action: string) => handlers.has(action),
     registeredActions: () => Array.from(handlers.keys()),
     getUndoHandler,
+    getUndoCheck: (action: string) => undoChecks.get(action),
     recorded,
     wasDispatched: (action: string) => recorded.some(r => r.cmd.action === action),
     getDispatched: (action: string) => recorded.filter(r => r.cmd.action === action),
@@ -359,12 +365,12 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
     // that reset `sealed` would pass a test the real bus fails.
     clear: () => {
       if (sealed) throw testFail('refused:bus', `Cannot call clear() on a sealed bus.`);
-      recorded.splice(0); patternListeners.length = 0; beforeHooks.length = 0;
+      recorded.splice(0); offAll(); beforeHooks.length = 0;
     },
     dispose: () => {
       // Plugin dispose() first, as a real bus's dispose() does.
       for (let i = plugins.length - 1; i >= 0; i--) plugins[i].plugin.dispose?.();
-      recorded.splice(0); patternListeners.length = 0; beforeHooks.length = 0; afterHooks.length = 0; handlers.clear(); undoHandlers.clear(); responders.clear(); plugins.length = 0;
+      recorded.splice(0); offAll(); beforeHooks.length = 0; afterHooks.length = 0; handlers.clear(); undoHandlers.clear(); undoChecks.clear(); responders.clear(); plugins.length = 0;
     },
     seal: () => { sealed = true; },
     isSealed: () => sealed,

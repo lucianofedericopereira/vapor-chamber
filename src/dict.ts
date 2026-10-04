@@ -24,7 +24,7 @@
  *      record's loader for a key it never declared.
  *    - `router/index.ts` `loadComponent`: `options.components?.[key]` with `key`
  *      taken from the ROUTES PAYLOAD (fetched or server-inlined). A row naming
- *      `constructor` resolved to `Object`, passed the `component_missing`
+ *      `constructor` resolved to `Object`, passed the `router:missing:component`
  *      check, was called as a lazy import and rendered as a BLANK component -
  *      a coded error degraded into a silently empty outlet.
  *

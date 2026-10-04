@@ -5,9 +5,9 @@
  * with its own table passes `routes`, one under a base passes `base` and gets
  * the history there.
  */
-import { createMemoryHistory } from '../../src/router/history';
-import { createRouter, type RouterOptions } from '../../src/router/index';
-import type { RouteRecord } from '../../src/router/types';
+import { createMemoryHistory } from '@router/history';
+import { createRouter, type RouterOptions } from '@router/index';
+import type { RouteRecord } from '@router/types';
 
 export const ROWS: RouteRecord[] = [
   { name: 'shell', path: '/', parent: null },

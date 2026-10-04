@@ -16,9 +16,10 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { requireDist } from './require-dist';
 
 const distDir = join(process.cwd(), 'dist');
-const haveDist = existsSync(join(distDir, 'index.js'));
+requireDist(existsSync(join(distDir, 'index.js')));
 
 /**
  * `vue` is deliberately exempt. Its literal is load-bearing, not an accident:
@@ -44,7 +45,7 @@ function distFiles(dir: string): string[] {
   });
 }
 
-describe.skipIf(!haveDist)('dist - optional peers are never statically resolvable', () => {
+describe('dist - optional peers are never statically resolvable', () => {
   it('declares at least one optional peer to guard', () => {
     expect(optionalPeers).toContain('@vue/devtools-api');
   });

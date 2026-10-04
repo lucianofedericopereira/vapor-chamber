@@ -15,6 +15,8 @@ setCommandBus(bus)
 
 // ─── Cart feature ─────────────────────────────────────────────────────────────
 
+// Outside a component, for brevity: in an app this runs in setup(). Here nothing
+// disposes it automatically (the DEV heads-up says so); call dispose() when done.
 const cart = useCommandGroup('cart')
 
 // Register namespaced handlers
@@ -53,6 +55,14 @@ telemetry.register('event', (cmd) => {
   console.log('[telemetry]', cmd.target.name, cmd.target.params)
 })
 
+// ─── Subscribe to a namespace with on() ───────────────────────────────────────
+
+cart.on('*', (cmd, result) => {
+  console.log('[audit] cart command:', cmd.action, result.ok ? '✓' : '✗')
+})
+// Listens to 'cart*' - only cart commands. Subscribed before the dispatches
+// below: a listener hears what is dispatched after it subscribes.
+
 // ─── Dispatch - no prefix needed inside the group ─────────────────────────────
 
 cart.dispatch('add', { id: 1, name: 'T-Shirt' }, { qty: 2 })
@@ -67,13 +77,6 @@ telemetry.dispatch('event', { name: 'page_view', params: { page: '/shop' } })
 // Cross-namespace dispatch does NOT trigger handlers (isolated):
 orders.dispatch('add', { id: 99 })
 // -> dispatches 'ordersAdd' - no handler, so it fails as core:missing:handler
-
-// ─── Subscribe to a namespace with on() ───────────────────────────────────────
-
-cart.on('*', (cmd, result) => {
-  console.log('[audit] cart command:', cmd.action, result.ok ? '✓' : '✗')
-})
-// Listens to 'cart*' - only cart commands
 
 // ─── Cleanup on component unmount ─────────────────────────────────────────────
 // useCommandGroup registers cleanup via onScopeDispose automatically.

@@ -34,6 +34,7 @@ return [
         // Orders
         'orderCreate' => \App\Actions\Order\CreateOrder::class,
         'orderCancel' => \App\Actions\Order\CancelOrder::class,
+        'checkoutProcess' => \App\Actions\Order\ProcessCheckout::class,
 
         // Profile
         'profileUpdate' => \App\Actions\Profile\UpdateProfile::class,

@@ -9,7 +9,7 @@
  * therefore answered for keys nobody registered.
  *
  * The failure is quiet, which is what makes it worth pinning. A row naming
- * `constructor` resolved to `Object`, survived the `component_missing` check,
+ * `constructor` resolved to `Object`, survived the `router:missing:component` check,
  * failed `isComponentLike` (no render/setup/__vccOpts), was called as if it
  * were a lazy import - `await Object()` returns `{}` - and that `{}` was cached
  * and RENDERED. A coded error the default handler hard-navigates on degraded
@@ -20,9 +20,9 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { isRouterError } from '../../src/router/errors';
-import { createMemoryHistory } from '../../src/router/history';
-import type { RouteRecord } from '../../src/router/types';
+import { isRouterError } from '@router/errors';
+import { createMemoryHistory } from '@router/history';
+import type { RouteRecord } from '@router/types';
 import { makeRouter as fixtureRouter } from './fixture';
 
 const POLLUTING_KEYS = ['constructor', 'toString', 'valueOf', 'hasOwnProperty', 'isPrototypeOf'];
@@ -45,12 +45,12 @@ function makeRouter(rows: readonly RouteRecord[]) {
 }
 
 describe('loadComponent - a payload component key is not looked up on Object.prototype', () => {
-  it.each(POLLUTING_KEYS)('reports component_missing for a row naming %s', async (key) => {
+  it.each(POLLUTING_KEYS)('reports router:missing:component for a row naming %s', async (key) => {
     const { router, errors } = makeRouter([{ name: 'row', path: '/row', component: key }]);
     await router.isReady();
     await router.push('/row');
 
-    const missing = errors.find((error) => isRouterError(error, 'component_missing'));
+    const missing = errors.find((error) => isRouterError(error, 'router:missing:component'));
     expect(missing).toBeDefined();
     // The whole point: the navigation was REFUSED, not committed with a blank
     // component. Pre-fix it committed, rendering the `{}` that calling the
@@ -68,11 +68,11 @@ describe('loadComponent - a payload component key is not looked up on Object.pro
     expect(router.currentRoute.value.render).toHaveLength(1);
   });
 
-  it('still reports component_missing for an ordinary unregistered key', async () => {
+  it('still reports router:missing:component for an ordinary unregistered key', async () => {
     const { router, errors } = makeRouter([{ name: 'row', path: '/row', component: 'Nope' }]);
     await router.isReady();
     await router.push('/row');
 
-    expect(errors.some((error) => isRouterError(error, 'component_missing'))).toBe(true);
+    expect(errors.some((error) => isRouterError(error, 'router:missing:component'))).toBe(true);
   });
 });

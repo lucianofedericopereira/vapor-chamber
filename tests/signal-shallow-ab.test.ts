@@ -10,7 +10,7 @@
  * timing with the setup amortised, interleaves A/B reps to cancel thermal drift,
  * and takes medians. The numbers it prints are the source of truth for the
  * ref-vs-shallowRef ratios quoted in docs/performance.md §"reactive runtime
- * notes" finding #5 and docs/whitepaper.md §9.1.
+ * notes" finding #5 and docs/whitepaper.md §7.1.
  *
  * The assertions are RATIO-based (shallowRef ÷ ref), so they hold even under
  * --coverage instrumentation (both paths are slowed proportionally). They fail
@@ -21,7 +21,7 @@ import { ref, shallowRef, effectScope } from 'vue';
 import { configureSignal } from '../src/signal';
 import { useCommandState, getCommandBus, setCommandBus, waitForVueDetection } from '../src/chamber';
 import { createCommandBus } from '../src/command-bus';
-import { underCoverage } from './under-coverage';
+import { runTiming } from './under-coverage';
 
 type Factory = (init: any) => any;
 type Kind = 'array' | 'counter';
@@ -73,7 +73,7 @@ describe('signal() shallowRef vs ref - empirical proof (real useCommandState pat
   // headroom under that timeout - the assertions only smoke-check that the
   // ratios are finite/positive, so precision beyond this buys nothing. That
   // timeout, not the assertions, was the source of the flake.
-  it.skipIf(underCoverage)('measures the ref-vs-shallowRef diff and proves shallowRef is faster', async () => {
+  it.skipIf(!runTiming)('measures the ref-vs-shallowRef diff and proves shallowRef is faster', async () => {
     await waitForVueDetection();
     // sanity: the factory must produce a real Vue ref, not the plain fallback
     expect(typeof (ref(0) as any).value).toBe('number');

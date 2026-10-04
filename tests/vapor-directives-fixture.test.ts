@@ -5,7 +5,7 @@
  * WHY THIS FILE EXISTS. Four places in this repo asserted that custom
  * directives are a VDOM-only feature and will never work in Vapor:
  * ROADMAP's "what is not on the roadmap" list ("the Vue team has consistently
- * signaled directives remain a VDOM-only feature"), whitepaper §10.3, the
+ * signaled directives remain a VDOM-only feature"), whitepaper §7.7, the
  * README composables note, and a runtime `console.warn` in
  * `src/directives.ts` fired at plugin install whenever Vapor is detected.
  *
@@ -45,7 +45,7 @@
  *
  * Everything is imported from the single with-vapor browser build on purpose -
  * two separately-imported Vue dists are two disconnected reactivity instances
- * (chamber.ts §probeVue, whitepaper §11.6), so mixing builds here would
+ * (chamber.ts §probeVue, whitepaper §9.6), so mixing builds here would
  * silently measure nothing.
  */
 

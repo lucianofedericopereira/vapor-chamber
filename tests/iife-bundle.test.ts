@@ -6,12 +6,13 @@
  *
  * Variant contents are not under semver before v2.0 - see ROADMAP.md.
  *
- * Skips automatically when dist/ hasn't been built.
+ * Fails when dist/ hasn't been built (tests/require-dist.ts).
  */
 import { describe, it, expect } from 'vitest';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import vm from 'node:vm';
+import { requireDist } from './require-dist';
 
 const dist = (f: string) => resolve(process.cwd(), 'dist', f);
 
@@ -21,7 +22,7 @@ const variants = {
   elements: 'vapor-chamber-elements.iife.js',
 };
 
-const haveAll = Object.values(variants).every(f => existsSync(dist(f)));
+requireDist(Object.values(variants).every(f => existsSync(dist(f))));
 
 /**
  * Load a variant exactly the way a <script> tag does: whatever ends up on the
@@ -53,7 +54,7 @@ function assertAbsent(ns: Record<string, unknown>, names: string[]) {
   }
 }
 
-describe.skipIf(!haveAll)('IIFE variants - audience-based contracts', () => {
+describe('IIFE variants - audience-based contracts', () => {
   // ---------------------------------------------------------------------
   // The global shape itself, before any per-variant contract: a <script>
   // user calls VaporChamber.connect(), not VaporChamber.VaporChamber.connect

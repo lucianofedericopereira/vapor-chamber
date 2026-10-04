@@ -2,15 +2,15 @@
 /**
  * Tests for router/index.ts - blade-row rendering (a custom fetchBlade and the
  * in-box `bladeFetcher`) and the table loaders (remote { url } / inline
- * { inline }), lazy component import, and the component_missing path.
+ * { inline }), lazy component import, and the router:missing:component path.
  */
 
 import { describe, expect, it, vi } from 'vitest';
 import { defineComponent, h } from 'vue';
-import { bladeFetcher } from '../../src/router/remote';
-import { isRouterError } from '../../src/router/errors';
+import { bladeFetcher } from '@router/remote';
+import { isRouterError } from '@router/errors';
 import type { HttpClient } from '../../src/http';
-import type { RouteRecord } from '../../src/router/types';
+import type { RouteRecord } from '@router/types';
 import { makeRouter } from './fixture';
 
 const ROWS: RouteRecord[] = [
@@ -44,7 +44,7 @@ describe('blade rows', () => {
     expect(render[render.length - 1].component).toBeTypeOf('object'); // makeBladeComponent result
   });
 
-  it('surfaces blade_fetch_failed when the fetch rejects', async () => {
+  it('surfaces router:failed:blade when the fetch rejects', async () => {
     const onError = vi.fn();
     const router = makeRouter({
       base: '/admin',
@@ -57,7 +57,7 @@ describe('blade rows', () => {
     });
     await router.isReady();
 
-    expect(isRouterError(await router.push('/report'), 'blade_fetch_failed')).toBe(true);
+    expect(isRouterError(await router.push('/report'), 'router:failed:blade')).toBe(true);
     expect(onError).toHaveBeenCalled();
   });
 
@@ -98,7 +98,7 @@ describe('table loaders', () => {
     expect(get).toHaveBeenCalledTimes(2);
   });
 
-  it('remote table load failure dispatches routes_load_failed', async () => {
+  it('remote table load failure dispatches router:failed:routes', async () => {
     const onError = vi.fn();
     const router = makeRouter({
       base: '/admin',
@@ -112,7 +112,7 @@ describe('table loaders', () => {
     await router.isReady().catch(() => {}); // start() rejects; error is dispatched
 
     expect(onError).toHaveBeenCalled();
-    expect(isRouterError(onError.mock.calls[0][0], 'routes_load_failed')).toBe(true);
+    expect(isRouterError(onError.mock.calls[0][0], 'router:failed:routes')).toBe(true);
   });
 
   it('loads a remote table with no global `process` (no-bundler delivery)', async () => {
@@ -188,7 +188,7 @@ describe('component resolution', () => {
     expect(loader).toHaveBeenCalledTimes(1);
   });
 
-  it('surfaces component_missing for an unregistered component key', async () => {
+  it('surfaces router:missing:component for an unregistered component key', async () => {
     const router = makeRouter({
       base: '/admin',
       routes: LAZY_ROWS,
@@ -196,6 +196,6 @@ describe('component resolution', () => {
     });
     await router.isReady();
 
-    expect(isRouterError(await router.push('/ghost'), 'component_missing')).toBe(true);
+    expect(isRouterError(await router.push('/ghost'), 'router:missing:component')).toBe(true);
   });
 });

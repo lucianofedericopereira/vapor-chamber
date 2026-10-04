@@ -112,9 +112,12 @@ export function moveUnlessRefused(
   const onError = (e: unknown): void => console.error(`[vapor-chamber] ${label} error for "${action}":`, e);
   const refused = (v: unknown): boolean =>
     v != null && typeof v === 'object' && (v as { ok?: unknown }).ok === false;
-  move();
   let outcome: unknown;
   try {
+    // The move is inside the try: an observer of the move that throws (a sync
+    // subscriber of useCommandHistory's signals) is a call that did not land
+    // (pinned by tests/history-throwing-subscriber.test.ts).
+    move();
     outcome = call();
   } catch (e) {
     revert();

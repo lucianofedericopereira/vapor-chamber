@@ -27,7 +27,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import type * as ShippedMod from '../src/command-bus';
-import { underCoverage } from './under-coverage';
+import { runTiming } from './under-coverage';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 // Per-file subdir: the whole dir is removed in afterAll, so it must be ours alone.
@@ -35,8 +35,8 @@ const REF_DIR = resolve(HERE, '__ref', 'origin-scope');
 
 const REVERTS: Array<[string, string, number]> = [
   [
-    '  return { ts: _clockFn(), id: uid(), correlationId, causationId, origin: slot ?? _originScope ?? payload?.__origin };\n',
-    '  return { ts: _clockFn(), id: uid(), correlationId, causationId, origin: slot ?? payload?.__origin };\n',
+    '  return { ts: _clockFn(), id: uid(), correlationId, causationId, origin: slot ?? _originScope ?? payload?.__origin, idempotencyKey: undefined, response: undefined, request: undefined };\n',
+    '  return { ts: _clockFn(), id: uid(), correlationId, causationId, origin: slot ?? payload?.__origin, idempotencyKey: undefined, response: undefined, request: undefined };\n',
     1,
   ],
 ];
@@ -89,7 +89,7 @@ const ROWS: Array<[string, (m: Mod) => number | Promise<number>]> = [
 const ROUNDS = 11;
 
 describe('scoped origin in stampMeta - real path A/B', () => {
-  it.skipIf(underCoverage)('agrees outside a scope, differs inside one, and measures the read', async () => {
+  it('agrees outside a scope, differs inside one, and measures the read', async () => {
     mkdirSync(REF_DIR, { recursive: true });
     const arms: Record<string, Mod> = {};
     const load = async (name: string, revert: boolean) => {
@@ -124,6 +124,9 @@ describe('scoped origin in stampMeta - real path A/B', () => {
       bus.dispatch('t', 3);
       expect(seen[2]).toBeUndefined(); // the scope ended with its callback
     }
+
+    // Timing runs on `npm run test:timing` only, never instrumented (tests/under-coverage.ts).
+    if (!runTiming) return;
 
     // --- measurement --------------------------------------------------------
     const order = Object.keys(arms);

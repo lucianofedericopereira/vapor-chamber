@@ -12,6 +12,7 @@
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHttpClient } from '../src/http';
+import { problemOf } from '../src/http-errors';
 import { fetchLoaders } from '../src/router-fetch/index';
 import { problemReply, reply } from './backend-stubs';
 
@@ -27,9 +28,8 @@ describe('createHttpClient reads a problem document', () => {
 
     const error = await createHttpClient().get('/api/logs/x').catch((e) => e);
 
-    expect(error.response.status).toBe(404);
-    expect(error.code).toBe('not_found');
-    expect(error.response.data).toEqual(NOT_FOUND);
+    expect(error.code).toBe('remote:missing:not_found');
+    expect(problemOf(error)).toEqual(NOT_FOUND);
   });
 
   it('takes the error message from detail, so every reader of the client gets it', async () => {
@@ -47,7 +47,7 @@ describe('createHttpClient reads a problem document', () => {
     const error = await createHttpClient().get('/api/logs/x').catch((e) => e);
 
     expect(error.message).toBe('HTTP 404');
-    expect(error.code).toBe('not_found');
+    expect(error.code).toBe('remote:missing:not_found');
   });
 
   it('parses any +json structured suffix, with parameters', async () => {
@@ -80,18 +80,19 @@ describe('createHttpClient reads a problem document', () => {
 });
 
 describe('router-fetch reads a problem document', () => {
-  it('load_failed carries the detail, and the problem rides on cause', async () => {
+  it('router:failed:loader carries the detail, and the problem rides on cause', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => problemReply(404, NOT_FOUND)));
     const { url } = fetchLoaders();
     const location = { path: '/logs/x', fullPath: '/logs/x', query: {}, params: {}, hash: '', matched: [] } as never;
 
     const error = (await Promise.resolve(url!('/api/logs/x', location, { queryDefs: {} } as never, new AbortController().signal, undefined as never))
-      .catch((e: unknown) => e)) as Error & { code?: string; cause?: { code?: string; response?: { status?: number } } };
+      .catch((e: unknown) => e)) as Error & { code?: string; cause?: { code?: string; context?: { status?: number } } };
 
-    expect(error.code).toBe('load_failed');
+    expect(error.code).toBe('router:failed:loader');
     expect(error.message).toContain('not a managed log: x.log');
-    expect(error.cause?.code).toBe('not_found');
-    expect(error.cause?.response?.status).toBe(404);
+    expect(error.cause?.code).toBe('remote:missing:not_found');
+    expect(error.cause?.context?.status).toBe(404);
+    expect(problemOf(error)).toEqual(NOT_FOUND);
   });
 });
 

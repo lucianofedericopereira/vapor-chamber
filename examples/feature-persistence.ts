@@ -14,7 +14,7 @@ setCommandBus(bus)
 
 // ─── Basic: persist cart state to localStorage ────────────────────────────────
 
-type CartState = { items: Array<{ id: number; name: string; qty: number }>; total: number }
+type CartState = { items: Array<{ id: number; name: string; price?: number; qty: number }>; total: number }
 
 const defaultCart: CartState = { items: [], total: 0 }
 
@@ -31,6 +31,8 @@ bus.use(cartPersist)
 const savedCart = cartPersist.load()
 
 // Initialize state with saved or default
+// Outside a component, for brevity: in an app this runs in setup(). Here nothing
+// disposes it automatically (the DEV heads-up says so); call dispose() when done.
 const cartState = useCommandState<CartState>(
   savedCart ?? defaultCart,
   {
@@ -39,10 +41,14 @@ const cartState = useCommandState<CartState>(
       items: [...state.items, { ...cmd.target, qty: cmd.payload?.qty ?? 1 }],
       total: state.total + (cmd.target.price ?? 0) * (cmd.payload?.qty ?? 1),
     }),
-    'cartRemove': (state, cmd) => ({
-      ...state,
-      items: state.items.filter(i => i.id !== cmd.target.id),
-    }),
+    'cartRemove': (state, cmd) => {
+      const gone = state.items.find(i => i.id === cmd.target.id)
+      return {
+        items: state.items.filter(i => i.id !== cmd.target.id),
+        // The removed line's amount comes off the total.
+        total: state.total - (gone ? (gone.price ?? 0) * gone.qty : 0),
+      }
+    },
     'cartClear': () => defaultCart,
   }
 )
@@ -115,8 +121,10 @@ function createIdbAdapter(dbName: string, storeName: string) {
     const db = await openDB(dbName, 1, {
       upgrade(db) { db.createObjectStore(storeName) }
     })
-    const all = await db.getAll(storeName)
-    cache = Object.fromEntries(all.map((v, i) => [i, v]))
+    // Keyed by the store's own keys: getAll() returns values only, and an
+    // index-keyed cache would miss every getItem(key).
+    const [keys, values] = await Promise.all([db.getAllKeys(storeName), db.getAll(storeName)])
+    cache = Object.fromEntries(keys.map((k, i) => [String(k), values[i]]))
   }
 
   return {
