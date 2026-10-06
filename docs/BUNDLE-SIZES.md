@@ -27,7 +27,7 @@ A `-` means nothing is deferred, which is every export except `./vitest` and `./
 
 | export | min KB | gzip KB | brotli KB | first load KB | on demand KB |
 |---|--:|--:|--:|--:|--:|
-| `.` | 108.7 | 35.7 | 31.6 | 31.6 | - |
+| `.` | 108.7 | 35.6 | 31.6 | 31.6 | - |
 | `./vue` | 26.4 | 9.4 | 8.5 | 8.5 | - |
 | `./vapor` | 27.6 | 9.7 | 8.8 | 8.8 | - |
 | `./transports` | 16.3 | 6.3 | 5.7 | 5.7 | - |
@@ -38,11 +38,11 @@ A `-` means nothing is deferred, which is every export except `./vitest` and `./
 | `./vitest/mcp` | 32.7 | 12.0 | 10.8 | 10.8 | - |
 | `./transitions` | 19.7 | 7.0 | 6.4 | 6.4 | - |
 | `./transitions/vapor` | 15.9 | 5.7 | 5.2 | 5.2 | - |
-| `./ssr` | 2.1 | 1.1 | 0.9 | 0.9 | - |
+| `./ssr` | 2.1 | 1.0 | 0.9 | 0.9 | - |
 | `./fast-lane` | 1.0 | 0.5 | 0.4 | 0.4 | - |
 | `./observable` | 0.5 | 0.3 | 0.3 | 0.3 | - |
 | `./standard-schema` | 2.2 | 1.0 | 0.9 | 0.9 | - |
-| `./alien-signals` | 0.2 | 0.2 | 0.1 | 0.1 | - |
+| `./alien-signals` | 0.2 | 0.1 | 0.1 | 0.1 | - |
 | `./reactive` | 18.7 | 6.7 | 6.1 | 6.1 | - |
 | `./outbox` | 7.1 | 2.9 | 2.6 | 2.6 | - |
 | `./mcp` | 4.3 | 2.0 | 1.8 | 1.8 | - |
@@ -50,7 +50,7 @@ A `-` means nothing is deferred, which is every export except `./vitest` and `./
 | `./stream-parser` | 6.7 | 2.0 | 1.9 | 1.9 | - |
 | `./store` | 5.1 | 2.4 | 2.2 | 2.2 | - |
 | `./store/core` | 5.1 | 2.4 | 2.2 | 2.2 | - |
-| `./router` | 31.1 | 11.6 | 10.5 | 10.3 | 0.3 |
+| `./router` | 31.1 | 11.5 | 10.5 | 10.3 | 0.3 |
 | `./router/vdom` | 1.5 | 0.8 | 0.7 | 0.7 | - |
 | `./router/vapor` | 1.4 | 0.8 | 0.7 | 0.7 | - |
 | `./router/remote` | 13.6 | 5.7 | 5.3 | 5.3 | - |
@@ -73,10 +73,10 @@ The split was decided on the same measurement taken on the vapor-sfc example at 
 
 | step (rows after the first are deltas) | min KB | gzip KB | brotli KB |
 |---|--:|--:|--:|
-| `Vapor wiring: hand-wired createVaporApp` | 47.1 | 17.5 | 16.0 |
+| `Vapor wiring: hand-wired createVaporApp` | 47.1 | 17.6 | 16.0 |
 | `vapor-chamber/vapor over that` | 4.5 | 1.6 | 1.5 |
 | `+ defineVaporCustomElement` | 6.8 | 2.1 | 1.9 |
-| `+ vaporInteropPlugin` | 89.4 | 31.9 | 27.9 |
+| `+ vaporInteropPlugin` | 89.4 | 31.8 | 27.9 |
 
 ## For comparison
 
