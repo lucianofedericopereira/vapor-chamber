@@ -1704,8 +1704,10 @@ CI runs the same tool on every push to main and every pull request against it,
 base against head (`perf-ab`, `npm run ab:ci`). A counted "slower" fails the
 build. So does a run in which no control passed, or a workload that measured
 nothing. With no base to build, the job skips and says why
-(`scripts/ab/base-ok.sh`). That is the push that creates the branch, or a base
-a force-push dropped. A missing base is not a regression.
+(`scripts/ab/base-ok.sh`). That is the push that creates the branch, a base
+a force-push dropped, or a base on another release: across a release the pair
+measures the work the fixes do, and the new release is the baseline (log
+s35.203). A missing base is not a regression.
 
 ### 14.3 Findings, in ns and ratios
 

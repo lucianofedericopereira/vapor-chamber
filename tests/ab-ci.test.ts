@@ -67,6 +67,33 @@ describe('ab:ci base check (scripts/ab/base-ok.sh)', () => {
     expect([none.status, none.out]).toEqual([1, expect.stringMatching(/no base commit/)]);
   });
 
+  it('refuses a base on another release, and accepts one on the same release', async () => {
+    const { execFileSync, spawnSync } = await import('node:child_process');
+    const { mkdtempSync, writeFileSync } = await import('node:fs');
+    const { tmpdir } = await import('node:os');
+    const { join, resolve } = await import('node:path');
+    const script = resolve('scripts/ab/base-ok.sh');
+    const dir = mkdtempSync(join(tmpdir(), 'vc-base-'));
+    const git = (...a: string[]) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...a], { cwd: dir, encoding: 'utf8' }).trim();
+    const commit = (version: string, note: string) => {
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ version, note }));
+      git('add', 'package.json');
+      git('commit', '-qm', note);
+      return git('rev-parse', 'HEAD');
+    };
+    git('init', '-q');
+    const old = commit('1.0.0', 'a');
+    const same = commit('1.1.0', 'b');
+    commit('1.1.0', 'c');
+    const check = (sha: string) => {
+      const r = spawnSync('bash', [script, sha], { cwd: dir, encoding: 'utf8' });
+      return { status: r.status, out: r.stdout.trim() };
+    };
+    const across = check(old);
+    expect([across.status, across.out]).toEqual([1, expect.stringMatching(/1\.0\.0 release, head is 1\.1\.0/)]);
+    expect(check(same)).toEqual({ status: 0, out: '' });
+  });
+
   it('build-dists names the commit it cannot check out instead of exiting silently', async () => {
     const { spawnSync } = await import('node:child_process');
     const { mkdtempSync } = await import('node:fs');
