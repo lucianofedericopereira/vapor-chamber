@@ -15,6 +15,7 @@ import { DEV } from './dev';
 import { disposeAll, _targetKey, unsealBus, _isSyncBus, _errResult, type CommandBus, type Command, type CommandResult, type CommandMap, type TargetOf, type PayloadOf, type ResultOf, type Handler, type Plugin, type RegisterOptions, type Listener } from './command-bus';
 import { configureSignal, signal } from './signal';
 import { createLedger } from './ledger';
+import { countOption } from './bounds';
 import { getCommandBus, resetCommandBus, setCommandBus } from './shared-bus';
 
 /**
@@ -930,7 +931,7 @@ type SharedCommandStateEntry = {
   errors: Signal<Error[]>;
   errorCount: Signal<number>;
   refCount: number;
-  errorCap: number;
+  maxSize: number;
   /** Bus-wide error observer - unhooked when refCount hits 0. */
   unsub: () => void;
   /** Per-(action, target) loading: a map by action, then by the target's
@@ -1000,6 +1001,19 @@ function releaseSharedState(entry: SharedCommandStateEntry, bus: CommandBus): vo
 }
 
 /**
+ * Install a composable's observer past the seal. `seal()` protects the
+ * handler/plugin topology, not the observation layer (command-bus.ts), so the
+ * library's own hooks go in, and the bus is sealed again before this returns.
+ * tests/composables-sealed-bus.test.ts.
+ */
+function pastSeal<T>(bus: CommandBus, install: () => T): T {
+  const sealed = bus.isSealed();
+  if (sealed) unsealBus(bus);
+  try { return install(); }
+  finally { if (sealed) bus.seal(); }
+}
+
+/**
  * Install per-key tracking on first use: a before-hook starts a Command, the
  * entry's `on('*')` observer settles it. On a sealed bus the hook is the
  * library's own, installed past the seal: the bus is sealed again before
@@ -1012,32 +1026,31 @@ function trackLoading(entry: SharedCommandStateEntry, bus: CommandBus): Map<stri
     // defined is a slow lookup (docs/V8-RULES.md rule 6), and a define folds
     // this line to the write or to nothing.
     if (typeof __VC_LEAN__ !== 'undefined' && __VC_LEAN__) entry.pruneAbove = 0;
-    const sealed = bus.isSealed();
-    if (sealed) unsealBus(bus);
-    if (_isSyncBus(bus)) {
-      const stack: Array<Command | LoadingSlot> = [];
-      entry.unBefore = bus.onBefore((cmd: Command) => {
-        const slot = loadingSlot(slots, cmd.action, _targetKey(cmd.target));
-        if (slot.n++ === 0 && slot.flag !== null) slot.flag.value = true;
-        entry.pending++;
-        stack.push(cmd, slot);
-      });
-      entry.stack = stack;
-    } else {
-      // A Map, not a WeakMap: every start is deleted at its settle, and a start
-      // that never settled would already hold `pending` above 0 (the entry and
-      // the key stay), so weakness would free only the Command. The WeakMap cost
-      // 24-26 ns of a tracked dispatch's ~188 (this Map: 0.858-0.871x, log s35.53).
-      const started = new Map<Command, LoadingSlot>();
-      entry.unBefore = bus.onBefore((cmd: Command) => {
-        const slot = loadingSlot(slots, cmd.action, _targetKey(cmd.target));
-        if (slot.n++ === 0 && slot.flag !== null) slot.flag.value = true;
-        entry.pending++;
-        started.set(cmd, slot);
-      });
-      entry.started = started;
-    }
-    if (sealed) bus.seal();
+    pastSeal(bus, () => {
+      if (_isSyncBus(bus)) {
+        const stack: Array<Command | LoadingSlot> = [];
+        entry.unBefore = bus.onBefore((cmd: Command) => {
+          const slot = loadingSlot(slots, cmd.action, _targetKey(cmd.target));
+          if (slot.n++ === 0 && slot.flag !== null) slot.flag.value = true;
+          entry.pending++;
+          stack.push(cmd, slot);
+        });
+        entry.stack = stack;
+      } else {
+        // A Map, not a WeakMap: every start is deleted at its settle, and a start
+        // that never settled would already hold `pending` above 0 (the entry and
+        // the key stay), so weakness would free only the Command. The WeakMap cost
+        // 24-26 ns of a tracked dispatch's ~188 (this Map: 0.858-0.871x, log s35.53).
+        const started = new Map<Command, LoadingSlot>();
+        entry.unBefore = bus.onBefore((cmd: Command) => {
+          const slot = loadingSlot(slots, cmd.action, _targetKey(cmd.target));
+          if (slot.n++ === 0 && slot.flag !== null) slot.flag.value = true;
+          entry.pending++;
+          started.set(cmd, slot);
+        });
+        entry.started = started;
+      }
+    });
     entry.slots = slots;
   }
   return entry.slots;
@@ -1048,7 +1061,7 @@ export type UseSharedCommandStateOptions = {
    * How many recent errors to retain in `errors`. The list is kept
    * newest-last; older entries drop off. Default: 10.
    */
-  errorCap?: number;
+  maxSize?: number;
   /**
    * Bus to attach to. Defaults to the shared instance from `getCommandBus()`,
    * which matches the single-bus pattern most apps use. Pass an explicit bus
@@ -1083,7 +1096,7 @@ export type UseSharedCommandStateOptions = {
  */
 export function useSharedCommandState(options: UseSharedCommandStateOptions = {}) {
   const bus = options.bus ?? getCommandBus<CommandMap>();
-  const errorCap = options.errorCap ?? 10;
+  const maxSize = countOption(options.maxSize, 10); // a NaN is the default (bounds.ts)
 
   let state = _sharedStates.get(bus);
   if (!state) {
@@ -1137,7 +1150,7 @@ export function useSharedCommandState(options: UseSharedCommandStateOptions = {}
         entry.lastError.value = result.error;
         const next = entry.errors.value.slice();
         next.push(result.error);
-        while (next.length > entry.errorCap) next.shift();
+        while (next.length > entry.maxSize) next.shift();
         entry.errors.value = next;
         entry.errorCount.value = next.length;
       }
@@ -1149,7 +1162,7 @@ export function useSharedCommandState(options: UseSharedCommandStateOptions = {}
       errors: signal<Error[]>([]),
       errorCount: signal(0),
       refCount: 0,
-      errorCap,
+      maxSize,
       unsub: bus.on('*', observe),
       slots: null,
       started: null,
@@ -1160,10 +1173,10 @@ export function useSharedCommandState(options: UseSharedCommandStateOptions = {}
     };
     state = entry;
     _sharedStates.set(bus, state);
-  } else if (errorCap < state.errorCap) {
+  } else if (maxSize < state.maxSize) {
     // Tighten the cap if the new caller wants a smaller buffer; never grow
     // it above another caller's request (avoid surprise memory growth).
-    state.errorCap = errorCap;
+    state.maxSize = maxSize;
   }
   state.refCount++;
 
@@ -1175,7 +1188,7 @@ export function useSharedCommandState(options: UseSharedCommandStateOptions = {}
     state!.lastError.value = err;
     const next = state!.errors.value.slice();
     next.push(err);
-    while (next.length > state!.errorCap) next.shift();
+    while (next.length > state!.maxSize) next.shift();
     state!.errors.value = next;
     state!.errorCount.value = next.length;
   }
@@ -1274,7 +1287,7 @@ export function useSharedCommandState(options: UseSharedCommandStateOptions = {}
     isAnyLoading: state.isAnyLoading,
     /** Most recent error (across all subscribers). */
     lastError: state.lastError,
-    /** Ring buffer of recent errors, newest last, capped at `errorCap`. */
+    /** Ring buffer of recent errors, newest last, capped at `maxSize`. */
     errors: state.errors,
     /** Current size of the `errors` buffer. */
     errorCount: state.errorCount,
@@ -1432,7 +1445,7 @@ export function useCommandHistory(options: {
     },
   });
 
-  const unsubscribe = bus.onAfter((cmd, result) => ledger.record(cmd, result));
+  const unsubscribe = pastSeal(bus, () => bus.onAfter((cmd, result) => ledger.record(cmd, result)));
 
   tryKeepAliveHooks(
     () => { paused = true; },
@@ -1616,9 +1629,10 @@ export function useCommandGroup(namespace: string) {
 export function useCommandError(options: {
   filter?: (cmd: Command) => boolean;
   /** Max errors retained - oldest are dropped first (ring buffer). Default: 50. */
-  errorCap?: number;
+  maxSize?: number;
 } = {}) {
-  const { filter, errorCap = 50 } = options;
+  const { filter } = options;
+  const maxSize = countOption(options.maxSize, 50); // a NaN is the default (bounds.ts)
   const bus = getCommandBus<CommandMap>();
 
   type ErrorEntry = { cmd: Command; error: Error; timestamp: number };
@@ -1626,18 +1640,18 @@ export function useCommandError(options: {
   const latestError = signal<Error | null>(null);
   let paused = false;
 
-  const unsubscribe = bus.onAfter((cmd, result) => {
+  const unsubscribe = pastSeal(bus, () => bus.onAfter((cmd, result) => {
     if (paused) return;
     if (!result.ok && result.error) {
       if (!filter || filter(cmd)) {
         latestError.value = result.error;
         const next = errors.value.slice();
         next.push({ cmd, error: result.error, timestamp: Date.now() });
-        while (next.length > errorCap) next.shift();
+        while (next.length > maxSize) next.shift();
         errors.value = next;
       }
     }
-  });
+  }));
 
   // KeepAlive: pause error capture when deactivated, resume when activated
   tryKeepAliveHooks(

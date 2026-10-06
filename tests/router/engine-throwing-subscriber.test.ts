@@ -65,7 +65,7 @@ describe('router engine: a throwing sync subscriber', () => {
     // The subscriber's error is not swallowed: it is logged once.
     expect(logged.mock.calls.map((c) => c[1])).toEqual([boom]);
     runner.effect.stop();
-    router.destroy();
+    router.dispose();
   });
 
   it('on `isLoading`, query-only refetch: the loaders still run and the flag ends false', async () => {
@@ -96,7 +96,7 @@ describe('router engine: a throwing sync subscriber', () => {
       data: 'data-2',
     });
     runner.effect.stop();
-    router.destroy();
+    router.dispose();
   });
 
   it('on `isRevalidating`: the refresh still lands and the flag ends false', async () => {
@@ -126,7 +126,7 @@ describe('router engine: a throwing sync subscriber', () => {
       data: 'fresh-value',
     });
     runner.effect.stop();
-    router.destroy();
+    router.dispose();
   });
 
   it('control, no throwing subscriber: what subscribers, hooks and loaders see, in order, is unchanged', async () => {
@@ -164,7 +164,7 @@ describe('router engine: a throwing sync subscriber', () => {
     await flush();
     expect(events).toEqual(['isRevalidating:true', 'route:/list?page=2:fresh', 'isRevalidating:false']);
     for (const r of runners) r.effect.stop();
-    router.destroy();
+    router.dispose();
   });
 });
 

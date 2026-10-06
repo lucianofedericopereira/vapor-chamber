@@ -49,7 +49,7 @@ describe('a superseded navigation walks no history', () => {
     expect(history.location()).toBe('/');
     // Only the user's two steps: the router walked nothing of its own.
     expect(go.mock.calls).toEqual([[-1], [-1]]);
-    router.destroy();
+    router.dispose();
   });
 
   it('a push that supersedes a held Back leaves no step of its own', async () => {
@@ -65,7 +65,7 @@ describe('a superseded navigation walks no history', () => {
     expect(go.mock.calls).toEqual([[-1]]);
     expect(router.currentRoute.value.location.fullPath).toBe('/other');
     expect(history.location()).toBe('/other');
-    router.destroy();
+    router.dispose();
   });
 
   it('control: a guard that refuses a Back still walks the history back', async () => {
@@ -78,7 +78,7 @@ describe('a superseded navigation walks no history', () => {
     expect(go.mock.calls).toEqual([[-1], [1]]);
     expect(history.location()).toBe('/list');
     expect(router.currentRoute.value.location.fullPath).toBe('/list');
-    router.destroy();
+    router.dispose();
   });
 
   it('control: the superseded navigation still answers cancelled', async () => {
@@ -89,7 +89,7 @@ describe('a superseded navigation walks no history', () => {
     release();
     expect(isRouterError(await first, 'router:aborted:navigation')).toBe(true);
     expect(await second).toBeNull();
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -111,8 +111,8 @@ describe('a superseded navigation walks no history', () => {
  * is the push case: a push from the entry the Back reached, so the entries
  * after it are dropped, as after any Back and click.
  *
- * `router.destroy()` cancelling a held Back walks no history either
- * (tests/router/destroy-cancels-navigation.test.ts), which before this needed a
+ * `router.dispose()` cancelling a held Back walks no history either
+ * (tests/router/dispose-cancels-navigation.test.ts), which before this needed a
  * `stopped` flag of its own; the cancelled path is now the reason, and the flag
  * is gone. That test is its pin.
  */

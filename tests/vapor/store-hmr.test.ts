@@ -29,7 +29,7 @@ type Hmr = { createRecord: (id: string, comp: unknown) => void; reload: (id: str
 const edit = (factor: number) =>
   defineChamberStore('cart', {
     state: () => ({ items: [] as number[] }),
-    actions: { add: (s, n: number) => ({ items: [...s.items, n * factor] }), ...(factor > 1 ? { bump: (s: { items: number[] }) => s } : {}) },
+    reducers: { add: (s, n: number) => ({ items: [...s.items, n * factor] }), ...(factor > 1 ? { bump: (s: { items: number[] }) => s } : {}) },
   });
 
 describe('a store module hot update', () => {

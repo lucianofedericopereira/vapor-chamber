@@ -29,6 +29,6 @@ describe('createRouter without a window (SSR)', () => {
     // ...and it is a working router, not a stub.
     await router.push('/list');
     expect(router.currentRoute.value.location.name).toBe('list');
-    router.destroy();
+    router.dispose();
   });
 });

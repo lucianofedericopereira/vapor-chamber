@@ -18,6 +18,7 @@
 import { countOption } from './bounds';
 import type { Command, CommandResult, Handler } from './command-bus';
 import { _undo, _withOriginScope } from './command-bus';
+import { _appliedRemotely } from './applied-remotely';
 import { isThenable, moveUnlessRefused } from './settled';
 
 // The `$undo` dispatch's result, read as the inverse's own answer: its value
@@ -99,6 +100,13 @@ export function createLedger(options: {
     return cmd;
   };
 
+  // The top step can be undone: there is one, a bridge did not carry it out
+  // (undo is local: plan item 1, R8, R9), and its `canUndo` allows it.
+  const can = (): boolean => {
+    const cmd = past[past.length - 1];
+    return cmd !== undefined && !_appliedRemotely.has(cmd) && checked()?.(cmd) !== false;
+  };
+
   return {
     past,
     future,
@@ -114,10 +122,10 @@ export function createLedger(options: {
       future.length = 0;
       changed(hadFuture);
     },
-    canUndo: () => past.length !== 0 && (checked()?.(past[past.length - 1]) ?? true),
+    canUndo: can,
     undo() {
+      if (inFlight || !can()) return undefined;
       const cmd = past[past.length - 1];
-      if (inFlight || !cmd || checked()?.(cmd) === false) return undefined;
       const handler = bus?.getUndoHandler(cmd.action);
       // Its own dispatches are rollback steps: origin 'undo', not recorded.
       return run('Undo handler', cmd, () => shift(past, future, cmd), () => shift(future, past, cmd),

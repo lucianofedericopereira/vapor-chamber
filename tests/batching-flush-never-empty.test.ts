@@ -66,15 +66,15 @@ describe('createBatchingHttpBridge: a flush always carries at least one command'
     expect(sizes).toEqual([]);
   });
 
-  it('a dispatch aborted while it waits in the queue is still sent, in a batch of one', async () => {
+  it('a dispatch aborted while it waits in the queue leaves it, and the empty flush sends nothing', async () => {
     const sizes = backend();
     const bus = busWith();
     const controller = new AbortController();
     const pending = bus.dispatch('a', {}, undefined, { signal: controller.signal });
     controller.abort();
-    await pending;
+    expect((await pending).error).toMatchObject({ code: 'core:aborted:dispatch' });
     await new Promise((r) => setTimeout(r, 0));
-    expect(sizes).toEqual([1]);
+    expect(sizes).toEqual([]); // tests/batching-abort.test.ts, log s35.168
   });
 
   it('a dispatch made while a flush is in flight gets a flush of its own', async () => {

@@ -46,7 +46,7 @@ panels, Reverb realtime, queued commands).
 ## Idempotency (double-submit protection)
 
 An action declared idempotent on the JS bus
-(`createAsyncCommandBus({ retry: { actions: { cartSet: 'idempotent' } } })`, or
+(`createAsyncCommandBus({ retry: { actionPolicies: { cartSet: 'idempotent' } } })`, or
 `retry: 'idempotent'` on the schema action) carries one `Idempotency-Key` on
 every attempt the bus re-sends; the `idempotent()` plugin stamps one too, and
 the outbox replays with its record's key. The controller honors it with a

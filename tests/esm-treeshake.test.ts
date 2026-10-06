@@ -396,7 +396,17 @@ describe.skipIf(!esbuild)('ESM tree-shake regression', () => {
       // Raised to measured for canUndo (s35.113), undo as a command and $ commands kept local (s35.114), an app's $ name refused (s35.117).
       // Raised to measured for the client's failures as the core's BusError, one answer reader, one retry rule (s35.131).
       // Raised to measured for one JSON body reader and a 2xx that is not the envelope failing (s35.132).
-      expect(viteBr.length, `vite production brotli grew unexpectedly (${viteBr.length} bytes)`).toBeLessThan(7_756);
+      // Raised to measured for actionFilter (s35.152): the bus reads it per action +17, the bridges pass it on +5 (the compiler stays out: +304 inside the bus).
+      // Raised to measured for one abort shape (s35.154): AbortError name +9, the reason as cause +3, a rethrown reason read as the abort +41.
+      // Raised to measured for a batch rolling back the Command that ran (s35.155): sync +33, async +7.
+      // Raised to measured for history never undoing a bridged command locally (s35.159): the mark +27, the ledger 0.
+      // Raised to measured for no reply on an unidentified command not re-sent (s35.162): the rule +61, the RateLimit read +70, the held-back report +46 (each left out alone; brotli is not additive, total +177).
+      // Raised to measured for one spelling per request header name (s35.163): the check and its rebuild +95, deleting every spelling +28.
+      // Raised to measured for async request() (s35.167): +13, the async execute line the sync bus shares a module with.
+      // Raised to measured for a landed undo making every plugin forget the command (s35.181): the `{ ok: false }` check +8, onSettled +7 (logger already brings it in), each left out alone; total +41. Then the plugin walk as the index loop the hook runners use (s35.183): +6.
+      // Raised to measured for a transport's answer handed to a handler's `answer` (s35.184): the `answers` map in register and the bus state +28, the async runner's settle +6 (shaken out, brotli context), each left out alone; total +32.
+      // Raised to measured for sync dispatch building its Command before the depth's try (s35.204): one piece, +5.
+      expect(viteBr.length, `vite production brotli grew unexpectedly (${viteBr.length} bytes)`).toBeLessThan(8_296);
 
       // Symbol budget. These are all chamber.ts-only - should NOT appear in a
       // consumer bundle that doesn't import Vue composables.

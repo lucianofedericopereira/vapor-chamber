@@ -24,7 +24,7 @@ describe('a query change during a pending page navigation', () => {
     expect(isRouterError(await going, 'router:aborted:navigation')).toBe(true);
     expect(router.currentRoute.value.location.fullPath).toBe('/?q=x');
     expect(history.location()).toBe('/?q=x');
-    router.destroy();
+    router.dispose();
   });
 
   it('a query-only push takes the same path', async () => {
@@ -37,7 +37,7 @@ describe('a query change during a pending page navigation', () => {
     expect(isRouterError(await going, 'router:aborted:navigation')).toBe(true);
     expect(router.currentRoute.value.location.fullPath).toBe('/?q=y');
     expect(history.location()).toBe('/?q=y');
-    router.destroy();
+    router.dispose();
   });
 
   it('control: with nothing pending, a query change does not touch the next navigation', async () => {
@@ -47,6 +47,6 @@ describe('a query change during a pending page navigation', () => {
     release();
     expect(await router.push('/list')).toBeNull();
     expect(router.currentRoute.value.location.path).toBe('/list');
-    router.destroy();
+    router.dispose();
   });
 });

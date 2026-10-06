@@ -22,7 +22,16 @@ becomes a rule when it is measured. The full record, with the numbers, is
    two maps differ (`%HaveSameMap` false). The cost was first inside the
    control band (log s35.44); log s35.81 then put the slot in every meta
    literal (`idempotencyKey: undefined`), one map for every command
-   (`tests/v8-shapes.test.ts`).
+   (`tests/v8-shapes.test.ts`). A call inside the literal is a late write
+   too: the object is allocated before the call runs. Inside a try region,
+   the call's exception edge then sees the object half built, and escape
+   analysis keeps an object nothing reads. Measured 2026-10-06, v1.27, Node
+   24.21.0 (log s35.204). Sync dispatch built
+   `{ ..., meta: stampMeta(payload) }` inside the depth's try/finally, and
+   every bare dispatch kept a dead meta.
+   Built before the try, the meta went: bare dispatch 0.62-0.71x (7-12 ns).
+   Move the build out of the try. A one-use `const` does not do it: the
+   bundler folds it back into the literal.
 3. **Decide a mode once, not on every call.** Choose behaviour at factory or
    build time and keep the branch off the hot path. The fast lane picks its
    `removal` mode at factory time; unifying the sync and async commands was
@@ -213,7 +222,36 @@ rule when it is measured and recorded.
   `.call` variant gained nothing.
 - **Bytecode size and inlining.** Inlining is budgeted in bytecode bytes; a
   hot function past the budget stops being inlined. To measure on
-  `runDispatch` and the runners before it becomes a rule.
+  `runDispatch` and the runners before it becomes a rule. One measured case,
+  2026-10-06, v1.27, Node 24.21.0 (log s35.204). Item 2 shrank
+  `_syncDispatchInner` from 699 to 225 bytecode bytes, under the 460 budget.
+  It then inlined into its caller inside the depth's try/finally, and bare
+  dispatch read 5 ns slower. The cause was rule 2's half-built literal, not
+  the inlining. Inlining also helped: inside the caller the bus state `s` is
+  a constant (the closure's `const` slot). Its arrays, maps and lengths
+  fold, where the standalone function loads each. The handler's shape
+  decides a row. Where the handler inlines too, a dead Command and meta can
+  go. Where it is called, they stay either way. So one action through a site
+  read 2-3 ns slower after item 2, and two actions 3 ns faster (one process
+  each, leads). A bare workload is the first shape, an app with listeners
+  the second.
+- **Flags as the control for a mechanism.** A flag that turns one optimizer
+  decision off shows whether it is the cause, with no code change. On the case above (2026-10-06, v1.27):
+  `--max-inlined-bytecode-size=224` put b15293e back at 845a610's time, so
+  the inlining decision was the mechanism. `--no-turbo-escape` cost the
+  out-of-line arm more than the inlined one, so escape analysis was what the
+  out-of-line arm kept. Read the direction only, in one process.
+- **Seeing what V8 kept.** `--trace-turbo` writes Turbolizer JSON per
+  optimized function. It holds the allocations left after escape analysis,
+  and the merge (Phi) that makes one escape. `--print-opt-code
+  --code-comments` shows what a kept object costs: the bump allocation, the
+  field stores, the write barriers. That is how rule 2's dead meta was found
+  (log s35.204).
+- **A double field is a box.** `meta.ts` holds `Date.now()`, above the small
+  integer range. So every live meta carries a 16-byte HeapNumber beside its
+  own 88 bytes (2026-10-06, v1.27, read off the printed code). Its cost per
+  dispatch is not measured. Another representation would change a public
+  field.
 - **try/catch placement.** `tryCatchHandler` keeps a `try` in a small
   function of its own ("so callers stay optimizable", `src/command-bus.ts`);
   the cost of the other shape is not measured here.

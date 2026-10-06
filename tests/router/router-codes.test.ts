@@ -20,7 +20,7 @@ describe('a router failure is the core failure', () => {
     expect((error as BusError).context?.to).toMatchObject({ fullPath: '/nowhere' });
     expect(isRouterError(error, 'router:missing:route')).toBe(true);
     expect(String((error as BusError).toJSON().type)).toMatch(/errors\.md#missing$/);
-    router.destroy();
+    router.dispose();
   });
 
   it('a superseded navigation carries no stack; a failure keeps its own', async () => {
@@ -35,7 +35,7 @@ describe('a router failure is the core failure', () => {
     const superseded = await held;
     expect(superseded?.code).toBe('router:aborted:navigation');
     expect(stackLines(superseded)).toBe(false);
-    router.destroy();
+    router.dispose();
 
     const failing = makeRouter({ links: false, announce: false, onError: () => {} });
     failing.beforeEach(() => { throw new Error('guard bug'); });
@@ -43,7 +43,7 @@ describe('a router failure is the core failure', () => {
     const failed = await failing.push('/list');
     expect(failed?.code).toBe('router:failed:guard');
     expect(stackLines(failed)).toBe(true);
-    failing.destroy();
+    failing.dispose();
   });
 });
 
@@ -57,7 +57,7 @@ describe('codes the old taxonomy merged', () => {
     expect(error?.code).toBe('router:failed:guard');
     expect((error as Error).cause).toBe(thrown);
     expect(HARD_NAV_CODES.has(error!.code)).toBe(false);
-    router.destroy();
+    router.dispose();
   });
 
   it('reload() with no { url } source is router:missing:url, not a failed load', async () => {
@@ -65,14 +65,14 @@ describe('codes the old taxonomy merged', () => {
     await router.start();
     const error = await router.reload().then(() => null, (e: unknown) => e);
     expect(isRouterError(error, 'router:missing:url')).toBe(true);
-    router.destroy();
+    router.dispose();
   });
 
   it('a load no handler serves is router:missing:loader; a loader that throws is router:failed:loader', async () => {
     const none = makeRouter({ links: false, announce: false, routes: withLoad('rows:x'), loaders: {}, onError: () => {} });
     await none.start();
     expect((await none.push('/data'))?.code).toBe('router:missing:loader');
-    none.destroy();
+    none.dispose();
 
     const throwing = makeRouter({
       links: false, announce: false, routes: withLoad('rows:x'), onError: () => {},
@@ -80,7 +80,7 @@ describe('codes the old taxonomy merged', () => {
     });
     await throwing.start();
     expect((await throwing.push('/data'))?.code).toBe('router:failed:loader');
-    throwing.destroy();
+    throwing.dispose();
   });
 });
 

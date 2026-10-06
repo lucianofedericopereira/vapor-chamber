@@ -91,7 +91,7 @@ sseBridge.install(mainBus)
 console.log('SSE connected?', sseBridge.isConnected())
 
 // On app teardown:
-// sseBridge.teardown()
+// sseBridge.dispose()
 
 // ─── Combined: HTTP + SSE (most common real-world setup) ─────────────────────
 

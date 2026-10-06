@@ -5,10 +5,10 @@ import { createCommandBus } from '__DIST__/index.js';
 import { createFastLane } from '__DIST__/fast-lane.js';
 import { defineChamberStore } from '__DIST__/store.js';
 
-const actions = { set: (s, n) => ({ n }) };
+const reducers = { set: (s, n) => ({ n }) };
 const lane = createFastLane();
-const useShared = defineChamberStore('shared', { state: () => ({ n: 0 }), actions, share: lane });
-const usePlain = defineChamberStore('plain', { state: () => ({ n: 0 }), actions });
+const useShared = defineChamberStore('shared', { state: () => ({ n: 0 }), reducers, share: lane });
+const usePlain = defineChamberStore('plain', { state: () => ({ n: 0 }), reducers });
 const shared = useShared(createCommandBus());
 const plain = usePlain(createCommandBus());
 

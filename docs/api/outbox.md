@@ -17,7 +17,7 @@ import { ... } from 'vapor-chamber/outbox';
 
 ### createOutbox
 
-**Function** - [src/outbox.ts:356](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L356)
+**Function** - [src/outbox.ts:360](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L360)
 
 ```ts
 createOutbox(options?: OutboxOptions) => Outbox
@@ -65,7 +65,7 @@ if (result.ok && result.value?.queued) {
 
 ### indexedDbOutbox
 
-**Function** - [src/outbox.ts:140](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L140)
+**Function** - [src/outbox.ts:141](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L141)
 
 ```ts
 indexedDbOutbox(dbName?: string, storeName?: string) => OutboxStorage
@@ -91,7 +91,7 @@ await outbox.hydrate();
 
 ### localStorageOutbox
 
-**Function** - [src/outbox.ts:87](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L87)
+**Function** - [src/outbox.ts:88](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L88)
 
 ```ts
 localStorageOutbox(storageKey?: string) => OutboxStorage
@@ -114,7 +114,7 @@ const outbox = createOutbox({ storage: localStorageOutbox('vc:cart-outbox') });
 
 ### Outbox
 
-**Type alias** - [src/outbox.ts:288](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L288)
+**Type alias** - [src/outbox.ts:292](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L292)
 
 ```ts
 export type Outbox = {
@@ -150,7 +150,7 @@ The object returned by {@link createOutbox}.
 
 ### OutboxFlushSummary
 
-**Type alias** - [src/outbox.ts:285](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L285)
+**Type alias** - [src/outbox.ts:289](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L289)
 
 ```ts
 export type OutboxFlushSummary = { replayed: number; failed: number; rejected: number };
@@ -161,12 +161,14 @@ flush. `rejected` counts records dropped as final (see `isRetryable`).
 
 ### OutboxOptions
 
-**Type alias** - [src/outbox.ts:197](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L197)
+**Type alias** - [src/outbox.ts:198](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L198)
 
 ```ts
 export type OutboxOptions = {
-  /** Which actions to capture. Glob patterns supported: '*', 'cart*'. Default: all. */
-  actions?: string[];
+  /** Which actions to capture. Glob patterns supported: '*', 'cart*'. An {@link ActionScope}. */
+  actions?: ActionScope;
+  /** Selects actions by name, ANDed with `actions`: an {@link ActionFilter} (`createActionFilter`). Log s35.152. */
+  actionFilter?: ActionFilter;
   /** Durable queue storage. Default: `localStorageOutbox()`. */
   storage?: OutboxStorage;
   /**
@@ -186,16 +188,17 @@ export type OutboxOptions = {
   autoFlush?: boolean;
   /**
    * Derive the idempotency key stored on each record and replayed to the
-   * backend. Default: `commandKey(action, target)` - the same convention the
-   * `idempotent()` plugin uses, so both layers agree on what "the same
-   * logical command" means.
+   * backend. Default: `commandKey(action, target)` followed by `:` and the
+   * record's id, so each queued write is its own request: a key names one
+   * request payload (Idempotency-Key draft-07). A record stored earlier keeps
+   * its stored key. tests/idempotency-key-payload.test.ts.
    */
   key?: (cmd: Command) => string;
   /**
    * Max queued records - bounded memory. When exceeded, the OLDEST record is
    * dropped with a console warning. Default: 200.
    */
-  maxQueue?: number;
+  maxSize?: number;
   /**
    * Whether a failed replay is worth trying again later. `true` keeps the
    * record at the head and stops the flush, so order is preserved and the
@@ -227,7 +230,7 @@ export type OutboxOptions = {
 
 ### OutboxRecord
 
-**Type alias** - [src/outbox.ts:40](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L40)
+**Type alias** - [src/outbox.ts:41](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L41)
 
 ```ts
 export type OutboxRecord = {
@@ -262,7 +265,7 @@ A queued command awaiting replay. JSON-serializable by design - `target` and
 
 ### OutboxStorage
 
-**Type alias** - [src/outbox.ts:70](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L70)
+**Type alias** - [src/outbox.ts:71](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L71)
 
 ```ts
 export type OutboxStorage = {

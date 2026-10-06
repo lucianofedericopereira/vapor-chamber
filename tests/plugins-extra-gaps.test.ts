@@ -57,8 +57,8 @@ describe('rateLimit window compaction', () => {
 // ---------------------------------------------------------------------------
 
 describe('metrics eviction', () => {
-  it('drops oldest entries past maxEntries and compacts', ({ bus }) => {
-    const m = metrics({ maxEntries: 2 });
+  it('drops oldest entries past maxSize and compacts', ({ bus }) => {
+    const m = metrics({ maxSize: 2 });
     bus.use(m);
     bus.register('go', () => 1);
 
@@ -123,12 +123,12 @@ describe('idempotent', () => {
     expect(runs).toBe(2);
   });
 
-  it('maxKeys: 0 remembers nothing, matching cache({ maxSize: 0 })', async () => {
+  it('maxSize: 0 remembers nothing, matching cache({ maxSize: 0 })', async () => {
     // Eviction runs down to the bound AFTER the insert, as cache() does:
     // evicting one key before inserting would, on an empty map, evict nothing
-    // and make `maxKeys: 0` a one-entry cache while `cache({ maxSize: 0 })`
+    // and make `maxSize: 0` a one-entry cache while `cache({ maxSize: 0 })`
     // stores nothing - one word, opposite meanings, in one module.
-    const plugin = wired(idempotent({ maxKeys: 0 }));
+    const plugin = wired(idempotent({ maxSize: 0 }));
     const first = await plugin(cmd('orderCreate'), () => ({ ok: true, value: 1 }) as any);
     expect(first.value).toBe(1);
     const repeat = await plugin(cmd('orderCreate'), () => ({ ok: true, value: 2 }) as any);
@@ -139,8 +139,8 @@ describe('idempotent', () => {
   // and loses every comparison, so the bound is not merely wrong, it is
   // absent. In cache() the same value produced the opposite failure - the
   // eviction walk never broke, so it dropped everything and reported size 0.
-  it('a NaN maxKeys remembers nothing instead of growing unbounded', async () => {
-    const plugin = wired(idempotent({ maxKeys: Number('nope'), ttl: 60_000 }));
+  it('a NaN maxSize remembers nothing instead of growing unbounded', async () => {
+    const plugin = wired(idempotent({ maxSize: Number('nope'), ttl: 60_000 }));
     const run = (target: number, value: number) =>
       plugin({ action: 'orderCreate', target, meta: {} } as any, () => ({ ok: true, value }) as any);
 
@@ -155,20 +155,20 @@ describe('idempotent', () => {
     expect((await run(19, -1)).value).toBe(19);
   });
 
-  it('a negative maxKeys is clamped, not treated as a one-entry cache', async () => {
+  it('a negative maxSize is clamped, not treated as a one-entry cache', async () => {
     // Unclamped, `done.size >= -1` was always true, so every insert evicted the
     // previous key and the plugin quietly behaved as a 1-entry cache. cache()
     // clamps `maxSize` for the same class of reason (there, a negative bound
     // hung the eviction loop outright).
-    const plugin = wired(idempotent({ maxKeys: -5 }));
+    const plugin = wired(idempotent({ maxSize: -5 }));
     const first = await plugin(cmd('orderCreate'), () => ({ ok: true, value: 1 }) as any);
     expect(first.value).toBe(1);
     const repeat = await plugin(cmd('orderCreate'), () => ({ ok: true, value: 2 }) as any);
     expect(repeat.value).toBe(2);
   });
 
-  it('evicts oldest first down to maxKeys', async () => {
-    const plugin = wired(idempotent({ maxKeys: 2 }));
+  it('evicts oldest first down to maxSize', async () => {
+    const plugin = wired(idempotent({ maxSize: 2 }));
     const run = (target: string, value: number) =>
       plugin({ action: 'orderCreate', target, meta: {} } as any, () => ({ ok: true, value }) as any);
 

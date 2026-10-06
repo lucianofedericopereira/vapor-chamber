@@ -191,20 +191,26 @@ describe("the client's retry is the bus's rule", () => {
     expect(calls()).toBe(2);
   });
 
-  it('a transient one (408, 429, 503, 504, a timeout) is re-sent for any method; a verdict (400, 404, 409) never', async () => {
+  it('a transient one (408, 429, 503) is re-sent for any method; no reply (504, a timeout) only when identified; a verdict (400, 404, 409) never', async () => {
     const http = createHttpClient({ retry: 1 });
-    for (const status of [408, 429, 503, 504]) {
+    for (const status of [408, 429, 503]) {
       fetchMock().mockReset();
       fetchMock().mockResolvedValue(mockResponse(status, null, { 'retry-after': '0' }));
       await caught(http.post('/x', {}));
       expect(calls()).toBe(2);
     }
-    fetchMock().mockReset();
-    fetchMock().mockImplementation((_u: string, init: { signal: AbortSignal }) => new Promise((_r, reject) => {
-      init.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
-    }));
-    expect((await caught(http.post('/x', {}, { timeout: 5 }))).code).toBe('transport:timeout:reply');
-    expect(calls()).toBe(2);
+    for (const [headers, sent] of [[{}, 1], [{ 'Idempotency-Key': 'k1' }, 2]] as const) {
+      fetchMock().mockReset();
+      fetchMock().mockResolvedValue(mockResponse(504, null, { 'retry-after': '0' }));
+      await caught(http.post('/x', {}, { headers }));
+      expect(calls()).toBe(sent);
+      fetchMock().mockReset();
+      fetchMock().mockImplementation((_u: string, init: { signal: AbortSignal }) => new Promise((_r, reject) => {
+        init.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })));
+      }));
+      expect((await caught(http.post('/x', {}, { timeout: 5, headers }))).code).toBe('transport:timeout:reply');
+      expect(calls()).toBe(sent);
+    }
     for (const status of [400, 404, 409]) {
       fetchMock().mockReset();
       fetchMock().mockResolvedValue(mockResponse(status, null));

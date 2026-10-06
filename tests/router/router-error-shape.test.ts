@@ -40,7 +40,7 @@ describe('RouterError shape', () => {
     expect(cancelled?.code).toBe('router:aborted:navigation');
     expect(unknown?.code).toBe('router:missing:record');
     expect(sameMap(cancelled as object, unknown as object)).toBe(true);
-    router.destroy();
+    router.dispose();
   });
 
   it('absent options read as undefined, as before', () => {

@@ -26,7 +26,7 @@ describe('location.path encoding', () => {
     expect(location.path).toBe('/item/a%20b');
     expect(location.fullPath).toBe('/item/a%20b?q=1');
     expect(location.params.id).toBe('a b');
-    router.destroy();
+    router.dispose();
   });
 
   it('a named push encodes the param into the path', async () => {
@@ -35,7 +35,7 @@ describe('location.path encoding', () => {
     const location = router.currentRoute.value.location;
     expect(location.path).toBe('/item/a%20b');
     expect(location.params.id).toBe('a b');
-    router.destroy();
+    router.dispose();
   });
 });
 

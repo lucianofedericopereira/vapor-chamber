@@ -19,7 +19,7 @@ import { ... } from 'vapor-chamber/mcp';
 
 ### busToMcpTools
 
-**Function** - [src/mcp.ts:110](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L110)
+**Function** - [src/mcp.ts:115](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L115)
 
 ```ts
 busToMcpTools(schema: BusSchema) => McpTool[]
@@ -48,7 +48,7 @@ const tools = busToMcpTools({
 
 ### createMcpHandler
 
-**Function** - [src/mcp.ts:205](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L205)
+**Function** - [src/mcp.ts:218](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L218)
 
 ```ts
 createMcpHandler(bus: McpBus, options?: McpHandlerOptions) => (message: unknown) => Promise<object | null>
@@ -62,30 +62,34 @@ Wire it to any transport: stdio (see {@link serveMcpStdio}), an HTTP POST
 body, a WebSocket frame, or a test harness.
 
 Protocol methods handled:
-  - `initialize` - echoes the client's `protocolVersion` (or advertises
-    `'2025-06-18'`), declares `capabilities: { tools: {} }`
+  - `initialize` - echoes the client's `protocolVersion` when it is one the
+    handler speaks (`2024-11-05`, `2025-03-26`, `2025-06-18`), else answers
+    `'2025-06-18'`; declares `capabilities: { tools: {} }`
   - `notifications/initialized` - notification, no reply
   - `ping` - replies `{}`
-  - `tools/list` - whitelisted schema actions as {@link McpTool}s
+  - `tools/list` - the schema actions `actionFilter` allows, as {@link McpTool}s
   - `tools/call` - dispatches `{ target, payload }` from `params.arguments`
     through the bus; the CommandResult is serialized as a text content
     block (`result.value` as JSON on success; `error.message` with
-    `isError: true` on failure - tool errors are results, not JSON-RPC errors)
+    `isError: true` on failure - tool errors are results, not JSON-RPC errors).
+    A tool not listed (unknown or not allowed) is JSON-RPC error `-32602`.
   - anything else with an `id` - JSON-RPC error `-32601` (method not found)
+  - a request with `id: null` - JSON-RPC error `-32600`, id null (MCP forbids a null id)
 
 Origin stamping: MCP-driven dispatches carry `meta.origin='agent'` on their
 own, stamped onto the dispatch itself, so no local dispatch interleaved with
 an awaiting tool call can be misattributed. Nothing to install.
 
 ```ts
-const handle = createMcpHandler(bus, { actions: ['cartGet', 'cartAdd'] });
+const reads = createActionFilter([{ any: [{ exact: { action: 'cartGet' } }, { exact: { action: 'userGet' } }] }]);
+const handle = createMcpHandler(bus, { actionFilter: reads });
 const reply = await handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
 // -> { jsonrpc: '2.0', id: 1, result: { tools: [...] } }
 ```
 
 ### serveMcpStdio
 
-**Function** - [src/mcp.ts:386](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L386)
+**Function** - [src/mcp.ts:406](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L406)
 
 ```ts
 serveMcpStdio(bus: McpBus, options?: McpStdioOptions) => () => void
@@ -96,7 +100,7 @@ JSON-RPC 2.0 on `process.stdin` in, `process.stdout` out. This is the
 transport MCP clients like Claude Desktop spawn subprocess servers with.
 
 Unparseable lines get a JSON-RPC `-32700` parse error; everything else is
-routed through {@link createMcpHandler}. Returns a `stop()` function that
+routed through {@link createMcpHandler}. Returns its dispose function, which
 detaches from stdin.
 
 Two input-driven limits keep a hostile or broken client from growing memory
@@ -116,15 +120,15 @@ the protocol stream. Log to stderr instead.
 // mcp-server.ts - spawned by an MCP client
 const bus = createSchemaCommandBus(schema);
 registerHandlers(bus);
-const stop = serveMcpStdio(bus, { actions: ['cart*', 'productGet'] });
-process.on('SIGTERM', stop);
+const dispose = serveMcpStdio(bus, { actionFilter: createActionFilter([{ prefix: { action: 'cart' } }]) });
+process.on('SIGTERM', dispose);
 ```
 
 ## Type aliases
 
 ### McpBus
 
-**Type alias** - [src/mcp.ts:119](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L119)
+**Type alias** - [src/mcp.ts:124](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L124)
 
 ```ts
 export type McpBus = {
@@ -137,23 +141,25 @@ Minimal bus surface the MCP layer needs - any schema bus (sync or async) satisfi
 
 ### McpHandlerOptions
 
-**Type alias** - [src/mcp.ts:124](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L124)
+**Type alias** - [src/mcp.ts:129](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L129)
 
 ```ts
 export type McpHandlerOptions = {
   /**
-   * Action whitelist - glob patterns matched with {@link matchesPattern}
-   * (`'cart*'`, exact names, or `'*'`). Only matching schema actions are
-   * listed by `tools/list` and callable via `tools/call`.
+   * The allowlist: an {@link ActionFilter} (`createActionFilter`). Only the
+   * schema actions it selects are listed by `tools/list` and callable through
+   * `tools/call`.
    *
    * **Pass this.** Omitting it exposes EVERY schema action - writes included -
    * to an LLM-driven caller, and dev-warns to say so. An MCP client is the one
    * caller class this library treats as untrusted by construction, and least
-   * privilege applies: expose reads broadly, writes narrowly. `['*']` opts
-   * into everything explicitly and silences the warning, which is the point:
-   * demo convenience should be a deliberate keystroke, not a default.
+   * privilege applies: expose reads broadly, writes narrowly.
+   * `createActionFilter([])` selects every action explicitly and silences the
+   * warning, which is the point: demo convenience should be a deliberate
+   * keystroke, not a default. To expose nothing, do not mount the handler:
+   * CloudEvents rejects an empty `any`. Log s35.180.
    */
-  actions?: string[];
+  actionFilter?: ActionFilter;
   /** Server name reported by `initialize`. Default: `'vapor-chamber'`. */
   serverName?: string;
   /** Server version reported by `initialize`. Default: the package version. */
@@ -163,7 +169,7 @@ export type McpHandlerOptions = {
 
 ### McpStdioOptions
 
-**Type alias** - [src/mcp.ts:335](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L335)
+**Type alias** - [src/mcp.ts:355](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L355)
 
 ```ts
 export type McpStdioOptions = McpHandlerOptions & {
@@ -191,12 +197,14 @@ export type McpStdioOptions = McpHandlerOptions & {
 
 ### McpTool
 
-**Type alias** - [src/mcp.ts:41](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L41)
+**Type alias** - [src/mcp.ts:43](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L43)
 
 ```ts
 export type McpTool = {
   name: string;
   description?: string;
+  /** The action's `ActionSchema.annotations`, when it declares any. */
+  annotations?: ActionAnnotations;
   inputSchema: {
     type: 'object';
     properties: Record<string, any>;
@@ -211,10 +219,10 @@ An MCP tool definition, as returned by the `tools/list` method.
 
 ### MCP_SERVER_VERSION
 
-**Variable** - [src/mcp.ts:152](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L152)
+**Variable** - [src/mcp.ts:159](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L159)
 
 ```ts
-MCP_SERVER_VERSION: "1.26.0"
+MCP_SERVER_VERSION: "1.27.0"
 ```
 
 Version reported by the MCP `initialize` handshake.

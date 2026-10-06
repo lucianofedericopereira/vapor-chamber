@@ -51,6 +51,7 @@ import { DEV } from './dev';
 import type { Command, CommandResult, Plugin, BaseBus } from './command-bus';
 import { _errResult, _failures } from './command-bus';
 import { onSettled } from './settled';
+import { countOption } from './bounds';
 
 /** rehydrate()'s own refusals; the plugin's are `ssr` too (its id). */
 const ssrFail = _failures('ssr');
@@ -79,7 +80,7 @@ export type SSRPluginOptions = {
    * Maximum number of commands to record. Prevents unbounded growth in
    * long SSR renders. Default: 500.
    */
-  maxCommands?: number;
+  maxSize?: number;
 };
 
 export type SSRPlugin = {
@@ -95,7 +96,7 @@ export type SSRPlugin = {
   /** Number of recorded commands. */
   size(): number;
   /**
-   * How many commands were dropped at the `maxCommands` cap. Non-zero means
+   * How many commands were dropped at the `maxSize` cap. Non-zero means
    * the client will rehydrate PARTIAL state - server/client divergence. Check
    * it after `dehydrate()` rather than trusting the render silently: a cap
    * that reads as "recorded everything" when it didn't is the failure mode
@@ -129,7 +130,8 @@ export type RehydrateOptions = {
  * to get a serializable command list for embedding in the HTML payload.
  */
 export function createSSRPlugin(options: SSRPluginOptions = {}): SSRPlugin {
-  const { filter, maxCommands = 500 } = options;
+  const { filter } = options;
+  const maxSize = countOption(options.maxSize, 500); // a NaN is the default (bounds.ts)
   const recorded: DehydratedCommand[] = [];
   let droppedCount = 0;
   let capWarned = false;
@@ -139,7 +141,7 @@ export function createSSRPlugin(options: SSRPluginOptions = {}): SSRPlugin {
   // comes back empty with no error (tests/ssr.test.ts, both buses).
   const plugin: Plugin = (cmd, next) => onSettled(next(), (result) => {
     if (result.ok && (!filter || filter(cmd))) {
-      if (recorded.length < maxCommands) {
+      if (recorded.length < maxSize) {
         recorded.push({
           action: cmd.action,
           target: cmd.target,
@@ -152,9 +154,9 @@ export function createSSRPlugin(options: SSRPluginOptions = {}): SSRPlugin {
         if (!capWarned && DEV) {
           capWarned = true;
           console.warn(
-            `[vapor-chamber] SSR command recording hit maxCommands (${maxCommands}) at "${cmd.action}". ` +
+            `[vapor-chamber] SSR command recording hit maxSize (${maxSize}) at "${cmd.action}". ` +
               'Further commands are dropped and the client will rehydrate PARTIAL state. ' +
-              'Raise maxCommands, or narrow what is recorded with the `filter` option.',
+              'Raise maxSize, or narrow what is recorded with the `filter` option.',
           );
         }
       }
@@ -247,6 +249,8 @@ export function rehydrate(
   return results;
 }
 
+// Its own copy, as command-bus.ts keeps one: importing settled.ts's measured -8 raw
+// and +1 brotli on an ssr consumer (log s35.177), no win, so the copy stays.
 function isThenable(value: unknown): boolean {
   return value != null && typeof (value as { then?: unknown }).then === 'function';
 }

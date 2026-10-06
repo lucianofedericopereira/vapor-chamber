@@ -135,7 +135,7 @@ describe('router composables', () => {
     // Once a route is matched the same composable starts resolving a name.
     await router.isReady();
     expect(router.currentRoute.value.location.matched.length).toBeGreaterThan(0);
-    router.destroy();
+    router.dispose();
   });
 
   it('useRouteError exposes latestError and clears it', async () => {
@@ -196,7 +196,7 @@ describe('useQueryParam is a real ref', () => {
       expect(typeof page.replace).toBe('function');
       expect(typeof page.clear).toBe('function');
     });
-    router.destroy();
+    router.dispose();
   });
 
   it('reads the URL and writes back through it', async () => {
@@ -210,7 +210,7 @@ describe('useQueryParam is a real ref', () => {
     });
     await new Promise((r) => setTimeout(r, 20));
     expect(router.currentRoute.value.location.query.page).toBe('5');
-    router.destroy();
+    router.dispose();
   });
 
   it('tracks navigation: a computed over it re-evaluates when the URL changes', async () => {
@@ -224,7 +224,7 @@ describe('useQueryParam is a real ref', () => {
     await router.push('/list?page=4');
     await new Promise((r) => setTimeout(r, 20));
     expect(doubled.value).toBe(8);
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -264,7 +264,7 @@ describe('usePagination', () => {
       expect(p.hasPrev.value).toBe(true);
       expect(p.hasNext.value).toBe(true);
     });
-    router.destroy();
+    router.dispose();
   });
 
   it('reads a Laravel-style { data, meta } envelope with no configuration', async () => {
@@ -278,7 +278,7 @@ describe('usePagination', () => {
       expect(p.total.value).toBe(3);
       expect(p.lastPage.value).toBe(3);
     });
-    router.destroy();
+    router.dispose();
   });
 
   it('derives lastPage when the backend omits it', async () => {
@@ -288,7 +288,7 @@ describe('usePagination', () => {
     withRouter(router, () => {
       expect(usePagination().lastPage.value).toBe(3); // ceil(25/10)
     });
-    router.destroy();
+    router.dispose();
   });
 
   it('next/prev/go write the URL and clamp to the valid range', async () => {
@@ -316,7 +316,7 @@ describe('usePagination', () => {
     p.prev(); // already first - clamped, stays 1
     await new Promise((r) => setTimeout(r, 20));
     expect(Number(router.currentRoute.value.location.query.page ?? 1)).toBe(1);
-    router.destroy();
+    router.dispose();
   });
 
   // Item 26: the push convention lives in `resolveQueryHistory`, keyed on the
@@ -353,7 +353,7 @@ describe('usePagination', () => {
     await new Promise((r) => setTimeout(r, 20));
     // Was '1' - both writes had been replaceState, so Back skipped the trail.
     expect(router.currentRoute.value.location.query.p).toBe('2');
-    router.destroy();
+    router.dispose();
   });
 
   it("a route's own history declaration still beats the composable convention", async () => {
@@ -387,7 +387,7 @@ describe('usePagination', () => {
     await new Promise((r) => setTimeout(r, 20));
     // The route asked for replace; the composable does not override it.
     expect(router.currentRoute.value.location.query.p ?? '1').toBe('1');
-    router.destroy();
+    router.dispose();
   });
 
   it('hasNext/hasPrev bound the ends', async () => {
@@ -399,7 +399,7 @@ describe('usePagination', () => {
       expect(p.hasPrev.value).toBe(false);
       expect(p.hasNext.value).toBe(false);
     });
-    router.destroy();
+    router.dispose();
   });
 
   it('pageRange windows long ranges with 0 marking an elision', async () => {
@@ -414,7 +414,7 @@ describe('usePagination', () => {
       expect(range).toContain(0); // elision marker
       expect(range.length).toBeLessThanOrEqual(9);
     });
-    router.destroy();
+    router.dispose();
   });
 
   it('lists every page when the range fits inside the window', async () => {
@@ -424,7 +424,7 @@ describe('usePagination', () => {
     withRouter(router, () => {
       expect(usePagination({ window: 7 }).pageRange.value).toEqual([1, 2, 3]);
     });
-    router.destroy();
+    router.dispose();
   });
 
   it('custom extractors override the defaults', async () => {
@@ -441,7 +441,7 @@ describe('usePagination', () => {
       expect(p.total.value).toBe(99);
       expect(p.lastPage.value).toBe(4); // ceil(99/25)
     });
-    router.destroy();
+    router.dispose();
   });
 
   it('survives a route with no loader data at all', async () => {
@@ -455,7 +455,7 @@ describe('usePagination', () => {
       expect(p.lastPage.value).toBe(1);
       expect(p.hasNext.value).toBe(false);
     });
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -493,7 +493,7 @@ describe('usePagination - extractor fallbacks and pageRange elisions', () => {
       expect(p.lastPage.value).toBe(1);  // ceil(3/3)
       expect(p.hasNext.value).toBe(false);
     });
-    router.destroy();
+    router.dispose();
   });
 
   it('with an EMPTY payload every extractor bottoms out safely', async () => {
@@ -508,7 +508,7 @@ describe('usePagination - extractor fallbacks and pageRange elisions', () => {
       expect(p.lastPage.value).toBe(1);  // Math.max(1, ...)
       expect(p.pageRange.value).toEqual([1]);
     });
-    router.destroy();
+    router.dispose();
   });
 
   it('pageRange elides on both sides mid-range and honours a custom window', async () => {
@@ -523,7 +523,7 @@ describe('usePagination - extractor fallbacks and pageRange elisions', () => {
       expect(range.filter((n) => n === 0)).toHaveLength(2); // '...' both sides
       expect(range).toContain(25);
     });
-    router.destroy();
+    router.dispose();
   });
 
   it('pageRange elides only the far side when current sits near the start', async () => {
@@ -535,7 +535,7 @@ describe('usePagination - extractor fallbacks and pageRange elisions', () => {
       expect(range[0]).toBe(1);
       expect(range.filter((n) => n === 0)).toHaveLength(1); // elision on the right only
     });
-    router.destroy();
+    router.dispose();
   });
 
   it('pageRange elides only the near side when current sits near the END', async () => {
@@ -555,7 +555,7 @@ describe('usePagination - extractor fallbacks and pageRange elisions', () => {
       // Nothing elided between the window and the last page.
       expect(range.at(-2)).toBe(49);
     });
-    router.destroy();
+    router.dispose();
   });
 
   it('treats page=0 as page 1 rather than falling off the bottom', async () => {
@@ -580,7 +580,7 @@ describe('usePagination - extractor fallbacks and pageRange elisions', () => {
     await new Promise((r) => setTimeout(r, 20));
     // next() from a 0 page advances to 2 (current 1 + 1), not to 1.
     expect(router.currentRoute.value.location.query.page).toBe('2');
-    router.destroy();
+    router.dispose();
   });
 
   it('treats an uncastable page value as page 1 rather than NaN', async () => {
@@ -597,7 +597,7 @@ describe('usePagination - extractor fallbacks and pageRange elisions', () => {
       expect(p.hasPrev.value).toBe(false);
       expect(p.pageRange.value).toEqual([1, 2, 3]);
     });
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -629,7 +629,7 @@ describe('onBeforeLeave - allowing arms', () => {
     expect(router.currentRoute.value.location.name).toBe('list'); // allowed through
 
     scope.stop();
-    router.destroy();
+    router.dispose();
   });
 
   it('returns a working off() when called outside any effect scope', async () => {
@@ -652,7 +652,7 @@ describe('onBeforeLeave - allowing arms', () => {
     await router.push('/list');
     expect(router.currentRoute.value.location.name).toBe('list');
 
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -668,6 +668,6 @@ describe('usePagination - page is a number whatever the route declares', () => {
     await router.push('/items?page=2');
     const pager = withRouter(router, () => usePagination());
     expect(pager.page.value).toBe(2);
-    router.destroy();
+    router.dispose();
   });
 });

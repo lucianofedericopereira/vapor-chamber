@@ -7,7 +7,7 @@ started building a command bus on top of it, this guide is the path.
 
 If your mitt usage is purely pub/sub event broadcast (no return values, no
 plugins, no async dispatching), **stay on mitt** or use vapor-chamber's
-[fast lane](../performance.md) - both are smaller and faster than the
+[fast lane](../performance.md). Both are smaller and faster than the
 general-purpose bus.
 
 ---
@@ -18,7 +18,7 @@ general-purpose bus.
 |-------------------------------------|--------------------------------------------------------------------------|
 | `mitt()`                            | `createCommandBus()` (with results) or `createFastLane()` (no results)   |
 | `emitter.on('foo', fn)`             | `bus.on('foo', fn)`                                                      |
-| `emitter.off('foo', fn)`            | unsubscribe via the closure returned from `bus.on('foo', fn)`            |
+| `emitter.off('foo', fn)`            | the unsubscribe function `bus.on('foo', fn)` returns                     |
 | `emitter.off('foo')`                | `bus.offAll('foo')`                                                      |
 | `emitter.emit('foo', payload)`      | `bus.emit('foo', payload)` *(see envelope note below)*                   |
 | `emitter.all` (Map of all listeners)| `inspectBus(bus).listenerPatterns`                                       |
@@ -100,8 +100,8 @@ bus.dispatchBatch([
 ## Bundle size
 
 mitt is <!-- vc:sizeMitt -->0.2<!-- /vc:sizeMitt --> KB brotli. vapor-chamber's `core` IIFE variant is
-**<!-- vc:sizeIifeCore -->9.2<!-- /vc:sizeIifeCore --> KB brotli**, a couple
-of orders of magnitude more; that difference pays for the extras above. For
+**<!-- vc:sizeIifeCore -->10.1<!-- /vc:sizeIifeCore --> KB brotli**, a couple
+of orders of magnitude more. That difference pays for the extras above. For
 always-current per-export numbers, see [BUNDLE-SIZES.md](../BUNDLE-SIZES.md)
 (generated, CI-verified fresh) and prefer it over any figure quoted in prose.
 
@@ -122,10 +122,10 @@ measures **<!-- vc:benchFastLaneVsMitt -->1.84-1.95<!-- /vc:benchFastLaneVsMitt 
 mitt**, and the general bus's `emit`
 **<!-- vc:benchEmitVsMittFanout -->1.44-1.54<!-- /vc:benchEmitVsMittFanout -->x**.
 Each is the range over several runs on one host
-(<!-- vc:benchProvenance -->Node 24.21.0, vitest 5.0.1, mitt 3.0.1, eventemitter3 5.0.4, 5 runs<!-- /vc:benchProvenance -->): a ratio between two
+(<!-- vc:benchProvenance -->Node 24.21.0, vitest 5.0.1, mitt 3.0.1, eventemitter3 5.0.4, 5 runs<!-- /vc:benchProvenance -->). A ratio between two
 libraries moves with the host, Node and mitt's version (docs/V8-RULES.md rule
 15). `npm run bench:bands` generates them and `npm run docs:stamp` publishes
-them; nobody types them here. See [from-event-emitter.md](./from-event-emitter.md)
+them. Nobody types them here. See [from-event-emitter.md](./from-event-emitter.md)
 for the removal-mode trade-off.
 
 ## When NOT to migrate

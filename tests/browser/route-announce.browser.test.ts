@@ -38,6 +38,6 @@ describe('route announcer (real Chromium)', () => {
     expect(getComputedStyle(region).visibility).not.toBe('hidden');
 
     expect(document.activeElement).toBe(heading);
-    router.destroy();
+    router.dispose();
   });
 });

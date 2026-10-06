@@ -11,7 +11,8 @@
 import { createCommandBus, createAsyncCommandBus, _errResult, _failures } from './command-bus';
 import { GLYPH_COMMAND, GLYPH_OK, GLYPH_WARN } from './glyphs';
 import { onSettled } from './settled';
-import type { CommandBus, AsyncCommandBus, Plugin, CommandResult, CommandBusOptions, AsyncCommandBusOptions, RetryDeclaration, CommandMap, BusSeverity, Fail } from './command-bus';
+import { DEV } from './dev';
+import type { CommandBus, AsyncCommandBus, Plugin, CommandResult, CommandBusOptions, AsyncCommandBusOptions, RetryPolicy, CommandMap, BusSeverity, Fail } from './command-bus';
 
 /** Failures of this module's functions that are not a plugin (synthesize). */
 const schemaFail = _failures('schema');
@@ -53,7 +54,28 @@ export type ActionSchema = {
    * cartAdd:      { retry: 'idempotent', target: { id: 'number' } },
    * cartCheckout: { retry: false,        target: { cartId: 'number' } },
    */
-  retry?: RetryDeclaration;
+  retry?: RetryPolicy;
+  /**
+   * Facts about the action, MCP's `ToolAnnotations` (schema 2025-06-18):
+   * `tools/list` emits them on the tool. `readOnlyHint` or `idempotentHint`
+   * true, with `retry` unset, reads as `retry: 'idempotent'` (RFC 9110 9.2.2:
+   * idempotency is the operation's). tests/schema-annotations.test.ts.
+   */
+  annotations?: ActionAnnotations;
+};
+
+/**
+ * MCP's `ToolAnnotations`, verbatim: hints about what an action does.
+ * `readOnlyHint` (default false), `destructiveHint` (default true, meaningful
+ * when not read-only), `idempotentHint` (default false, meaningful when not
+ * read-only), `openWorldHint` (default true), and a display `title`.
+ */
+export type ActionAnnotations = {
+  title?: string;
+  readOnlyHint?: boolean;
+  destructiveHint?: boolean;
+  idempotentHint?: boolean;
+  openWorldHint?: boolean;
 };
 
 export type BusSchema = Record<string, ActionSchema>;
@@ -72,8 +94,21 @@ type InferField<F extends FieldType> =
 type InferFields<M extends FieldMap | undefined> =
   M extends FieldMap ? { [K in keyof M]: InferField<M[K]> } : any;
 
+// `toCamel` at the type level, so the name the bus validates is a typed name:
+// a run of separators drops and upper-cases the next character, then a
+// leading capital is lowered. A trailing run stays, as the regex leaves it.
+type Separator = '_' | '.' | '-' | ' ' | '\t' | '\n' | '\r';
+type CamelRest<S extends string> = S extends `${infer H}${infer T}` ? (H extends Separator ? CamelRun<T, H> : `${H}${CamelRest<T>}`) : S;
+type CamelRun<S extends string, Run extends string> = S extends `${infer H}${infer T}` ? (H extends Separator ? CamelRun<T, `${Run}${H}`> : `${Uppercase<H>}${CamelRest<T>}`) : Run;
+type ToCamel<S extends string> = CamelRest<S> extends `${infer F}${infer R}` ? `${F extends Uppercase<F> ? Lowercase<F> : F}${R}` : CamelRest<S>;
+
+/**
+ * The CommandMap a schema types: each key under its camelCase name, the one
+ * the bus validates and lists, and under the key as written, so 1.26 code that
+ * uses it still compiles. tests/schema-camel-keys.test.ts.
+ */
 export type InferMap<S extends BusSchema> = {
-  [K in keyof S]: {
+  [K in keyof S as K | (K extends string ? ToCamel<K> : never)]: {
     target:  InferFields<S[K]['target']>;
     payload: InferFields<S[K]['payload']>;
     result:  InferFields<S[K]['result']>;
@@ -166,8 +201,9 @@ function normalizeSchema(schema: BusSchema): BusSchema {
   const out: BusSchema = {};
   for (const [key, def] of Object.entries(schema)) {
     const normalized = toCamel(key);
-    if (normalized !== key) {
-      console.warn(`[vapor-chamber] Schema key "${key}" normalized to "${normalized}"`);
+    // The one place the rename happens, so the one place it is reported.
+    if (DEV && normalized !== key) {
+      console.warn(`[vapor-chamber] Schema key "${key}" is "${normalized}" on the bus: register and dispatch it as "${normalized}", the name it validates and lists. "${key}" still compiles and runs unvalidated.`);
     }
     out[normalized] = def;
   }
@@ -476,7 +512,7 @@ export type SchemaCommandBusOptions = CommandBusOptions & {
 
 /**
  * The async schema bus's options. Each action's `retry` joins
- * `retry.actions`; a declaration given here for the same name wins.
+ * `retry.actionPolicies`; a policy given here for the same name wins.
  */
 export type AsyncSchemaCommandBusOptions = AsyncCommandBusOptions & { validate?: boolean };
 
@@ -513,11 +549,17 @@ export function createAsyncSchemaCommandBus<S extends BusSchema>(
 ): AsyncSchemaCommandBus<InferMap<S>> {
   const normalized = normalizeSchema(schema);
   const retry = options?.retry;
-  const declared: Record<string, RetryDeclaration> = {};
-  for (const action in normalized) if (normalized[action].retry !== undefined) declared[action] = normalized[action].retry!;
+  const declared: Record<string, RetryPolicy> = {};
+  for (const action in normalized) {
+    const { retry: own, annotations: hints } = normalized[action];
+    // An explicit retry is policy and wins; a read-only or idempotent hint is
+    // the fact that makes a re-send safe.
+    const declaration = own ?? (hints?.readOnlyHint || hints?.idempotentHint ? 'idempotent' : undefined);
+    if (declaration !== undefined) declared[action] = declaration;
+  }
   const bus = createAsyncCommandBus<InferMap<S>>({
     ...options,
-    retry: retry === false ? false : { ...retry, actions: { ...declared, ...retry?.actions } },
+    retry: retry === false ? false : { ...retry, actionPolicies: { ...declared, ...retry?.actionPolicies } },
   });
   if (options?.validate !== false) bus.use(schemaValidator(normalized) as any);
   return Object.assign(bus, {
@@ -582,11 +624,16 @@ export type ErrorCodeEntry = {
   /** The level a logger defaults to for this code; the logger decides. */
   severity: BusSeverity;
   /**
-   * Whether the async bus re-sends it for any action: a transient condition
-   * (`limited`, `timeout`). An uncertain one is re-sent only for an idempotent
-   * action or a keyed command, and reads false here. An outcome of the code's
-   * condition under RETRYABLE_CONDITIONS, not a judgement per row (asserted in
-   * tests/schema.test.ts).
+   * Whether the code's condition is transient by the retry rule
+   * (`retryClass`): `limited`, `timeout`, except a transport's own timeout,
+   * which got no reply and may have landed. The async bus re-sends such a
+   * failure only when the call it retries (a handler, a transport) produced
+   * it: a plugin's refusal (`rateLimit:limited:action`) and a
+   * `register({ throttle })` refusal sit outside that call and are never
+   * re-sent (tests/retryable-column.test.ts). An uncertain condition reads
+   * false here and is re-sent only for an idempotent action or a keyed
+   * command. An outcome of the rule, not a judgement per row
+   * (tests/schema.test.ts).
    */
   retryable: boolean;
   /** Broad failure category for filtering, telemetry, and LLM error handling. */
@@ -625,6 +672,7 @@ export const ERROR_CODE_REGISTRY: readonly ErrorCodeEntry[] = /* @__PURE__ */ Ob
   { code: 'core:failed:handler',     severity: 'error', retryable: false, category: 'general',    message: 'Declared for a handler throw; the bus rethrows those unwrapped instead', fix: 'The bus does not emit this. A handler throw arrives as the handler\'s own error in result.error - read that. Only a BusError you construct yourself carries this code; the async bus does not re-send it (a bug would fail again).' },
   { code: 'core:refused:hook',     severity: 'error', retryable: false, category: 'logic',      message: 'A beforeHook threw to cancel the dispatch',         fix: 'This is intentional cancellation. Check the beforeHook logic or remove the hook.' },
   { code: 'core:invalid:name',  severity: 'warn',  retryable: false, category: 'validation', message: 'Action name does not match the naming pattern, or carries a "$" (the library\'s names)',     fix: 'Rename the action: match the pattern, or adjust naming config in createCommandBus(); names with $ are the library\'s.' },
+  { code: 'core:invalid:filter', severity: 'error', retryable: false, category: 'validation', message: 'An action filter is not a valid CloudEvents filter expression', fix: 'Use one dialect per expression (exact, prefix, suffix, all, any, not), the action attribute only, a non-empty string, and at least one expression in all or any.' },
   { code: 'core:already:handler', severity: 'info',  retryable: false, category: 'internal',   message: 'A handler was overwritten without unregistering',   fix: 'Call the unregister function returned by register() before re-registering.' },
   { code: 'core:timeout:request',   severity: 'error', retryable: true,  category: 'network',    message: 'request() timed out waiting for a response',        fix: 'Increase the timeout option or check that respond() is registered for this action.' },
   { code: 'core:limited:handler',         severity: 'warn',  retryable: true,  category: 'general',    message: 'Handler throttled, too many calls in window',       fix: 'Wait for the throttle window to pass. Check context.retryIn for the remaining wait time.' },
@@ -647,7 +695,7 @@ export const ERROR_CODE_REGISTRY: readonly ErrorCodeEntry[] = /* @__PURE__ */ Ob
   { code: 'transport:missing:csrf', severity: 'error', retryable: false, category: 'logic', message: 'No CSRF token was found after refreshing it', fix: 'The csrfCookieUrl endpoint must set the XSRF-TOKEN cookie (Laravel Sanctum: /sanctum/csrf-cookie), or the page must carry the csrf-token meta tag.' },
   { code: 'transport:aborted:request', severity: 'warn', retryable: false, category: 'general', message: 'The caller aborted the request (its AbortSignal)', fix: 'Intentional cancellation. Send the request again if the abort was premature.' },
   { code: 'remote:unexpected:json', severity: 'error', retryable: false, category: 'network', message: 'The response declared JSON and its body is not valid JSON', fix: 'The backend answered off-protocol: fix the body or its Content-Type. Re-sent only for an idempotent request.' },
-  { code: 'transport:timeout:reply',     severity: 'error', retryable: true,  category: 'network',  message: 'No reply arrived within the transport\'s own timeout',          fix: 'Raise the bridge timeout option, or check the backend is answering. Transient, so the async bus re-sends it.' },
+  { code: 'transport:timeout:reply',     severity: 'error', retryable: false, category: 'network',  message: 'No reply arrived within the transport\'s own timeout',          fix: 'Raise the bridge timeout option, or check the backend is answering. It may have landed, so the async bus re-sends it only for an idempotent action or a keyed command. Otherwise context.outcome is unknown: check its status on the server.' },
   // Functions that are not a plugin (owner: their feature)
   { code: 'ssr:invalid:bus',          severity: 'error', retryable: false, category: 'logic',    message: 'rehydrate() was given an async bus',         fix: 'Use await rehydrateAsync(bus, commands) on an AsyncCommandBus.' },
   { code: 'schema:missing:adapter',   severity: 'error', retryable: false, category: 'logic',    message: 'synthesize() was called without an adapter',  fix: 'Pass options.adapter, an LlmAdapter function that calls your LLM provider.' },
@@ -659,7 +707,7 @@ export const ERROR_CODE_REGISTRY: readonly ErrorCodeEntry[] = /* @__PURE__ */ Ob
   // Router (owner: its feature, shape rule 3)
   { code: 'router:missing:route', severity: 'info', retryable: false, category: 'logic', message: 'The URL matches no route', fix: 'Expected for a server-side page: the default onError hard-navigates and the server renders it. Add a row if the client should own this URL.' },
   { code: 'router:refused:guard', severity: 'info', retryable: false, category: 'logic', message: 'A beforeEach guard returned false', fix: 'Intentional: the navigation is refused and the URL stays. Returned to the caller, not dispatched to onError.' },
-  { code: 'router:aborted:navigation', severity: 'info', retryable: false, category: 'general', message: 'A newer navigation (or destroy) superseded this one', fix: 'Normal flow: the latest navigation wins. Returned to the caller, not dispatched to onError.' },
+  { code: 'router:aborted:navigation', severity: 'info', retryable: false, category: 'general', message: 'A newer navigation (or dispose) superseded this one', fix: 'Normal flow: the latest navigation wins. Returned to the caller, not dispatched to onError.' },
   { code: 'router:missing:routes', severity: 'error', retryable: false, category: 'logic', message: 'The route table is not loaded yet', fix: 'Await router.isReady() before resolving or navigating.' },
   { code: 'router:missing:record', severity: 'error', retryable: false, category: 'logic', message: 'No route record has this name', fix: 'Check the route name against the table (or the loader-bearing records named to revalidateRoutes).' },
   { code: 'router:exceeded:redirects', severity: 'error', retryable: false, category: 'logic', message: 'Guard redirects did not settle within the hop limit', fix: 'Two guards redirect at each other. Break the cycle; a page reload cannot fix it, so this does not hard-navigate.' },

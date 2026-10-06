@@ -7,12 +7,12 @@ import { persist } from '../src/plugins-io';
 import { defineChamberStore } from '../src/store';
 
 type List = { items: number[] };
-const actions = {
+const reducers = {
   add: (s: List, n: number) => ({ items: [...s.items, n] }),
   clear: () => ({ items: [] as number[] }),
 };
-const useUndoable = defineChamberStore('undoable', { state: (): List => ({ items: [] }), actions, undo: true });
-const usePlain = defineChamberStore('plain', { state: (): List => ({ items: [] }), actions });
+const useUndoable = defineChamberStore('undoable', { state: (): List => ({ items: [] }), reducers, undo: true });
+const usePlain = defineChamberStore('plain', { state: (): List => ({ items: [] }), reducers });
 
 function memoryStorage() {
   let stored: string | null = null;
@@ -95,7 +95,7 @@ describe('a store with undo: true', () => {
   });
 
   it('two stores on one bus undo their own state only', () => {
-    const useOther = defineChamberStore('other', { state: (): List => ({ items: [] }), actions, undo: true });
+    const useOther = defineChamberStore('other', { state: (): List => ({ items: [] }), reducers, undo: true });
     const bus = createCommandBus();
     const h = history({ bus });
     bus.use(h);

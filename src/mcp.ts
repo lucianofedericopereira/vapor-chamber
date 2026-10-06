@@ -12,26 +12,28 @@
  *   - `serveMcpStdio(bus)`    - Node-only newline-delimited stdio transport
  *
  * @example
- * import { createSchemaCommandBus } from 'vapor-chamber';
+ * import { createActionFilter, createSchemaCommandBus } from 'vapor-chamber';
  * import { createMcpHandler, serveMcpStdio } from 'vapor-chamber/mcp';
  *
  * const bus = createSchemaCommandBus(schema);
  * bus.register('cartAdd', (cmd) => addToCart(cmd.target.id, cmd.payload.qty));
  * // meta.origin='agent' is stamped by the core; nothing to install.
+ * const cart = createActionFilter([{ prefix: { action: 'cart' } }]);
  *
  * // Wire to any transport (HTTP body, WebSocket message, test harness, ...):
- * const handle = createMcpHandler(bus, { actions: ['cartAdd', 'cart*'] });
+ * const handle = createMcpHandler(bus, { actionFilter: cart });
  * const reply = await handle(jsonRpcMessage); // null for notifications
  *
  * // Or run as a stdio MCP server (e.g. for Claude Desktop / claude_desktop_config.json):
- * const stop = serveMcpStdio(bus, { actions: ['cart*'] });
+ * const dispose = serveMcpStdio(bus, { actionFilter: cart });
  */
 
 import { DEV } from './dev';
 import { countOption } from './bounds';
-import { BusError, matchesPattern, _withOrigin, _errResult } from './command-bus';
+import { BusError, _withOrigin, _errResult } from './command-bus';
 import type { CommandResult } from './command-bus';
-import type { ActionSchema, BusSchema, FieldMap } from './schema';
+import type { ActionFilter } from './action-filter';
+import type { ActionAnnotations, ActionSchema, BusSchema, FieldMap } from './schema';
 
 // ---------------------------------------------------------------------------
 // MCP tool mapping
@@ -41,6 +43,8 @@ import type { ActionSchema, BusSchema, FieldMap } from './schema';
 export type McpTool = {
   name: string;
   description?: string;
+  /** The action's `ActionSchema.annotations`, when it declares any. */
+  annotations?: ActionAnnotations;
   inputSchema: {
     type: 'object';
     properties: Record<string, any>;
@@ -83,6 +87,7 @@ function actionToMcpTool(name: string, def: ActionSchema): McpTool {
   const tool: McpTool = { name, inputSchema: { type: 'object', properties } };
   if (def.description !== undefined) tool.description = def.description;
   if (required.length) tool.inputSchema.required = required;
+  if (def.annotations) tool.annotations = { ...def.annotations };
   return tool;
 }
 
@@ -123,18 +128,20 @@ export type McpBus = {
 
 export type McpHandlerOptions = {
   /**
-   * Action whitelist - glob patterns matched with {@link matchesPattern}
-   * (`'cart*'`, exact names, or `'*'`). Only matching schema actions are
-   * listed by `tools/list` and callable via `tools/call`.
+   * The allowlist: an {@link ActionFilter} (`createActionFilter`). Only the
+   * schema actions it selects are listed by `tools/list` and callable through
+   * `tools/call`.
    *
    * **Pass this.** Omitting it exposes EVERY schema action - writes included -
    * to an LLM-driven caller, and dev-warns to say so. An MCP client is the one
    * caller class this library treats as untrusted by construction, and least
-   * privilege applies: expose reads broadly, writes narrowly. `['*']` opts
-   * into everything explicitly and silences the warning, which is the point:
-   * demo convenience should be a deliberate keystroke, not a default.
+   * privilege applies: expose reads broadly, writes narrowly.
+   * `createActionFilter([])` selects every action explicitly and silences the
+   * warning, which is the point: demo convenience should be a deliberate
+   * keystroke, not a default. To expose nothing, do not mount the handler:
+   * CloudEvents rejects an empty `any`. Log s35.180.
    */
-  actions?: string[];
+  actionFilter?: ActionFilter;
   /** Server name reported by `initialize`. Default: `'vapor-chamber'`. */
   serverName?: string;
   /** Server version reported by `initialize`. Default: the package version. */
@@ -149,10 +156,12 @@ export type McpHandlerOptions = {
  * advertised a version that had not existed for months. A failing test at
  * release time is the cheapest possible checklist.
  */
-export const MCP_SERVER_VERSION = '1.26.0';
+export const MCP_SERVER_VERSION = '1.27.0';
 
 /** Latest MCP protocol revision this handler speaks. */
 const MCP_PROTOCOL_VERSION = '2025-06-18';
+/** Every revision it speaks: `initialize` echoes one of these, else answers the latest (MCP lifecycle). */
+const MCP_PROTOCOL_VERSIONS = ['2024-11-05', '2025-03-26', MCP_PROTOCOL_VERSION];
 
 type JsonRpcId = string | number | null;
 
@@ -182,23 +191,27 @@ function toolResult(text: string, isError?: boolean): object {
  * body, a WebSocket frame, or a test harness.
  *
  * Protocol methods handled:
- *   - `initialize` - echoes the client's `protocolVersion` (or advertises
- *     `'2025-06-18'`), declares `capabilities: { tools: {} }`
+ *   - `initialize` - echoes the client's `protocolVersion` when it is one the
+ *     handler speaks (`2024-11-05`, `2025-03-26`, `2025-06-18`), else answers
+ *     `'2025-06-18'`; declares `capabilities: { tools: {} }`
  *   - `notifications/initialized` - notification, no reply
  *   - `ping` - replies `{}`
- *   - `tools/list` - whitelisted schema actions as {@link McpTool}s
+ *   - `tools/list` - the schema actions `actionFilter` allows, as {@link McpTool}s
  *   - `tools/call` - dispatches `{ target, payload }` from `params.arguments`
  *     through the bus; the CommandResult is serialized as a text content
  *     block (`result.value` as JSON on success; `error.message` with
- *     `isError: true` on failure - tool errors are results, not JSON-RPC errors)
+ *     `isError: true` on failure - tool errors are results, not JSON-RPC errors).
+ *     A tool not listed (unknown or not allowed) is JSON-RPC error `-32602`.
  *   - anything else with an `id` - JSON-RPC error `-32601` (method not found)
+ *   - a request with `id: null` - JSON-RPC error `-32600`, id null (MCP forbids a null id)
  *
  * Origin stamping: MCP-driven dispatches carry `meta.origin='agent'` on their
  * own, stamped onto the dispatch itself, so no local dispatch interleaved with
  * an awaiting tool call can be misattributed. Nothing to install.
  *
  * @example
- * const handle = createMcpHandler(bus, { actions: ['cartGet', 'cartAdd'] });
+ * const reads = createActionFilter([{ any: [{ exact: { action: 'cartGet' } }, { exact: { action: 'userGet' } }] }]);
+ * const handle = createMcpHandler(bus, { actionFilter: reads });
  * const reply = await handle({ jsonrpc: '2.0', id: 1, method: 'tools/list' });
  * // -> { jsonrpc: '2.0', id: 1, result: { tools: [...] } }
  */
@@ -208,24 +221,27 @@ export function createMcpHandler(
 ): (message: unknown) => Promise<object | null> {
   const serverName = options.serverName ?? 'vapor-chamber';
   const serverVersion = options.serverVersion ?? MCP_SERVER_VERSION;
-  const whitelist = options.actions;
-  if (whitelist === undefined && DEV) {
+  const allowed = options.actionFilter;
+  if (allowed === undefined && DEV) {
     const exposed = Object.keys(bus.getSchema());
     console.warn(
-      `[vapor-chamber] createMcpHandler({ actions }) was omitted - all ${exposed.length} schema ` +
+      `[vapor-chamber] createMcpHandler({ actionFilter }) was omitted - all ${exposed.length} schema ` +
         `action(s) are exposed to the MCP client, writes included: ${exposed.join(', ')}. ` +
-        'An MCP client is an LLM-driven caller; pass an explicit whitelist ' +
-        "(e.g. actions: ['cartRead*']), or actions: ['*'] to accept full exposure deliberately.",
+        'An MCP client is an LLM-driven caller; pass an allowlist ' +
+        "(e.g. actionFilter: createActionFilter([{ prefix: { action: 'cartRead' } }])), " +
+        'or actionFilter: createActionFilter([]) to accept full exposure deliberately.',
     );
   }
-  const isAllowed = (name: string): boolean =>
-    whitelist === undefined || whitelist.some((pattern) => matchesPattern(pattern, name));
+  const isAllowed = (name: string): boolean => allowed === undefined || allowed(name);
 
-  async function callTool(params: any): Promise<object> {
+  // A tool that is not listed, unknown or not allowed, is a protocol error
+  // (MCP tools: "Standard JSON-RPC errors for issues like: Unknown tools",
+  // -32602); a listed tool's failure is a result. Returns the whole reply.
+  async function callTool(id: JsonRpcId, params: any): Promise<object> {
     const name = params?.name;
     const args = params?.arguments;
     if (typeof name !== 'string' || name.length === 0) {
-      return toolResult('tools/call: missing tool name', true);
+      return rpcError(id, -32602, 'Invalid params: missing tool name');
     }
     // Object.hasOwn, not `schema[name] === undefined`: a plain-object schema
     // inherits Object.prototype, so `constructor` / `toString` / `__proto__` /
@@ -234,7 +250,7 @@ export function createMcpHandler(
     // reached bus.dispatch. An MCP client is untrusted by construction; a tool
     // that is not listed must not be callable.
     if (!isAllowed(name) || !Object.hasOwn(bus.getSchema(), name)) {
-      return toolResult(`Tool "${name}" is unknown or not permitted`, true);
+      return rpcError(id, -32602, `Unknown tool: ${name}`);
     }
     const target = args?.target ?? {};
     // `__origin` rides the payload into stampMeta, which is the only
@@ -267,10 +283,10 @@ export function createMcpHandler(
       rawPayload !== undefined &&
       (typeof rawPayload !== 'object' || Array.isArray(rawPayload))
     ) {
-      return toolResult(
+      return rpcResult(id, toolResult(
         `Tool "${name}": payload must be an object (got ${Array.isArray(rawPayload) ? 'array' : typeof rawPayload})`,
         true,
-      );
+      ));
     }
     let result: CommandResult;
     try {
@@ -284,9 +300,9 @@ export function createMcpHandler(
     } catch (e) {
       result = _errResult(e as Error);
     }
-    if (result.ok) return toolResult(JSON.stringify(result.value ?? null));
+    if (result.ok) return rpcResult(id, toolResult(JSON.stringify(result.value ?? null)));
     const code = result.error instanceof BusError ? ` (${result.error.code})` : '';
-    return toolResult(`${result.error.message}${code}`, true);
+    return rpcResult(id, toolResult(`${result.error.message}${code}`, true));
   }
 
   return async (message: unknown): Promise<object | null> => {
@@ -295,7 +311,11 @@ export function createMcpHandler(
       return rpcError(null, -32600, 'Invalid Request');
     }
     const msg = message as Record<string, any>;
-    const hasId = msg.id !== undefined && msg.id !== null;
+    // MCP: "Unlike base JSON-RPC, the ID MUST NOT be null": a request with
+    // one is invalid, answered with id null (JSON-RPC 2.0), never ignored as
+    // a notification.
+    if (msg.id === null) return rpcError(null, -32600, 'Invalid Request');
+    const hasId = msg.id !== undefined;
     const id: JsonRpcId = hasId ? msg.id : null;
     if (msg.jsonrpc !== '2.0' || typeof msg.method !== 'string') {
       // Never reply to notifications, even malformed ones.
@@ -310,7 +330,7 @@ export function createMcpHandler(
       case 'initialize':
         return rpcResult(id, {
           protocolVersion:
-            typeof msg.params?.protocolVersion === 'string' ? msg.params.protocolVersion : MCP_PROTOCOL_VERSION,
+            MCP_PROTOCOL_VERSIONS.includes(msg.params?.protocolVersion) ? msg.params.protocolVersion : MCP_PROTOCOL_VERSION,
           capabilities: { tools: {} },
           serverInfo: { name: serverName, version: serverVersion },
         });
@@ -321,7 +341,7 @@ export function createMcpHandler(
           tools: busToMcpTools(bus.getSchema()).filter((tool) => isAllowed(tool.name)),
         });
       case 'tools/call':
-        return rpcResult(id, await callTool(msg.params));
+        return callTool(id, msg.params);
       default:
         return rpcError(id, -32601, `Method not found: ${method}`);
     }
@@ -360,7 +380,7 @@ export type McpStdioOptions = McpHandlerOptions & {
  * transport MCP clients like Claude Desktop spawn subprocess servers with.
  *
  * Unparseable lines get a JSON-RPC `-32700` parse error; everything else is
- * routed through {@link createMcpHandler}. Returns a `stop()` function that
+ * routed through {@link createMcpHandler}. Returns its dispose function, which
  * detaches from stdin.
  *
  * Two input-driven limits keep a hostile or broken client from growing memory
@@ -380,8 +400,8 @@ export type McpStdioOptions = McpHandlerOptions & {
  * // mcp-server.ts - spawned by an MCP client
  * const bus = createSchemaCommandBus(schema);
  * registerHandlers(bus);
- * const stop = serveMcpStdio(bus, { actions: ['cart*', 'productGet'] });
- * process.on('SIGTERM', stop);
+ * const dispose = serveMcpStdio(bus, { actionFilter: createActionFilter([{ prefix: { action: 'cart' } }]) });
+ * process.on('SIGTERM', dispose);
  */
 export function serveMcpStdio(bus: McpBus, options?: McpStdioOptions): () => void {
   if (typeof process === 'undefined' || !process.stdin || !process.stdout) {

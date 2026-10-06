@@ -47,8 +47,8 @@ export type ResponseCache = {
   set(key: string, data: any, ttl?: number, staleTtl?: number): void;
   clear(): void;
   /** Drop the entries and in-flight reads whose URL matches, and mark the
-   *  matching `read` tickets stale. A function is the client's own exact-URL
-   *  match (a write). */
+   *  matching `read` tickets stale. A function is the client's own match for
+   *  a write: its URL and the URIs its answer names. */
   invalidate(pattern: string | RegExp | ((url: string) => boolean)): void;
   /** A cacheable read going on the wire. A read across an invalidation of ITS
    *  URL may carry the value from before it, so `invalidate` marks its ticket;
@@ -57,7 +57,8 @@ export type ResponseCache = {
   /** The read landed or failed: forget the ticket. True when it may be stored. */
   done(ticket: ReadTicket): boolean;
   getInflight(key: string): Promise<any> | undefined;
-  setInflight(key: string, promise: Promise<any>): void;
+  /** A read others may join; `url` is what an invalidation matches. */
+  setInflight(key: string, promise: Promise<any>, url: string): void;
   /** Stop new callers joining `promise` (its last holder aborted). Only its
    *  own entry: after an invalidation the key may hold a newer read. */
   dropInflight(key: string, promise: Promise<any>): void;
@@ -66,7 +67,8 @@ export type ResponseCache = {
 /** One cache + one dedupe map, owned by exactly one HTTP client. */
 export function createResponseCache(): ResponseCache {
   const entries = new Map<string, CacheEntry>();
-  const inflight = new Map<string, Promise<any>>();
+  // The URL beside each read: an invalidation matches it, never a parse of the key.
+  const inflight = new Map<string, { promise: Promise<any>; url: string }>();
   const reads = new Set<ReadTicket>();
 
   return {
@@ -151,12 +153,11 @@ export function createResponseCache(): ResponseCache {
         if (matches(url)) keysToDelete.push(key);
       }
       for (const key of keysToDelete) entries.delete(key);
-      // Dedupe keys are `method:responseType:fullUrl`. A read made after this
-      // must not join one already on the wire, which may answer from before.
-      // Its callers keep their promise; only the joining stops.
-      for (const key of [...inflight.keys()]) {
-        if (matches(key.slice(key.indexOf(':', key.indexOf(':') + 1) + 1))) inflight.delete(key);
-      }
+      // A read made after this must not join one already on the wire, which
+      // may answer from before. Its callers keep their promise; only the
+      // joining stops. Matched on the read's URL: the dedupe key also holds
+      // the request's headers (tests/http-write-stops-join.test.ts).
+      for (const [key, read] of inflight) if (matches(read.url)) inflight.delete(key);
     },
 
     read(url) {
@@ -171,18 +172,18 @@ export function createResponseCache(): ResponseCache {
     },
 
     getInflight(key) {
-      return inflight.get(key);
+      return inflight.get(key)?.promise;
     },
 
-    setInflight(key, promise) {
-      inflight.set(key, promise);
+    setInflight(key, promise, url) {
+      inflight.set(key, { promise, url });
       // Auto-cleanup on resolve or reject. Only its own entry: after an
       // invalidation the key may hold a newer read.
-      promise.finally(() => inflight.get(key) === promise && inflight.delete(key)).catch(() => {});
+      promise.finally(() => inflight.get(key)?.promise === promise && inflight.delete(key)).catch(() => {});
     },
 
     dropInflight(key, promise) {
-      if (inflight.get(key) === promise) inflight.delete(key);
+      if (inflight.get(key)?.promise === promise) inflight.delete(key);
     },
   };
 }

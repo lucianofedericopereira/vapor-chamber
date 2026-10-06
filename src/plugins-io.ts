@@ -247,10 +247,11 @@ type ChannelMessage = { __vc: true; event: string; data: any };
  * })
  *
  * const tabSync = createChannel({ channel: 'vapor-chamber:app', lane, events: ['cartAdded'] })
- * tabSync.close() // on teardown
+ * tabSync.dispose() // on unmount
  */
 export function createChannel(options: ChannelOptions): {
-  close(): void;
+  /** Stops mirroring and closes the BroadcastChannel; `isOpen()` is then false. */
+  dispose(): void;
   isOpen(): boolean;
 } {
   const { channel, lane, events, onReceive } = options;
@@ -303,7 +304,7 @@ export function createChannel(options: ChannelOptions): {
   }
 
   return {
-    close(): void {
+    dispose(): void {
       for (const off of offs) off();
       offs.length = 0;
       bc?.close();

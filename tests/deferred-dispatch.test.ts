@@ -63,9 +63,9 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
     expect(order).toEqual(['plugin:x', 'handler:x', 'listener:x']);
   });
 
-  it('bufferLimit drops the oldest and warns', () => {
+  it('maxBufferSize drops the oldest and warns', () => {
     using _warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const bus = createCommandBus({ onMissing: 'buffer', bufferLimit: 2 });
+    const bus = createCommandBus({ onMissing: 'buffer', maxBufferSize: 2 });
     bus.dispatch('q', 1);
     bus.dispatch('q', 2);
     bus.dispatch('q', 3); // overflow -> drops oldest (1)
@@ -96,12 +96,12 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
     expect(seen).toEqual([1, 2]);
   });
 
-  it('onBufferOverflow fires when bufferLimit drops the oldest', () => {
+  it('onBufferOverflow fires when maxBufferSize drops the oldest', () => {
     using _warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const dropped: Array<{ action: string; target: any }> = [];
     const bus = createCommandBus({
       onMissing: 'buffer',
-      bufferLimit: 2,
+      maxBufferSize: 2,
       onBufferOverflow: (action, d) => dropped.push({ action, target: d.target }),
     });
     bus.dispatch('q', 1);
@@ -114,12 +114,12 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
   // satisfy `q.length >= limit`: `shift()` returns undefined and the overflow
   // callback dereferences it, throwing out of `bus.dispatch()` - and only when
   // `onBufferOverflow` is set (optional-chaining a call skips its arguments).
-  it('bufferLimit: 0 buffers nothing instead of throwing', () => {
+  it('maxBufferSize: 0 buffers nothing instead of throwing', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const dropped: Array<{ action: string; target: any }> = [];
     const bus = createCommandBus({
       onMissing: 'buffer',
-      bufferLimit: 0,
+      maxBufferSize: 0,
       onBufferOverflow: (action, d) => dropped.push({ action, target: d.target }),
     });
 
@@ -138,10 +138,10 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
 
   // Math.trunc and Math.max both propagate NaN, and every comparison against
   // NaN is false - so `q.length > limit` never fired and the bound silently
-  // vanished. A `bufferLimit: Number(badConfigValue)` is all it takes.
-  it('a NaN bufferLimit buffers nothing instead of unbounding the queue', () => {
+  // vanished. A `maxBufferSize: Number(badConfigValue)` is all it takes.
+  it('a NaN maxBufferSize buffers nothing instead of unbounding the queue', () => {
     using _warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const bus = createCommandBus({ onMissing: 'buffer', bufferLimit: Number('not-a-number') });
+    const bus = createCommandBus({ onMissing: 'buffer', maxBufferSize: Number('not-a-number') });
 
     for (let i = 0; i < 300; i++) bus.dispatch('q', i);
 
@@ -155,12 +155,12 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
     expect(replayed).toBe(0);
   });
 
-  it('a negative bufferLimit is clamped rather than draining into a crash', () => {
+  it('a negative maxBufferSize is clamped rather than draining into a crash', () => {
     using _warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const dropped: unknown[] = [];
     const bus = createCommandBus({
       onMissing: 'buffer',
-      bufferLimit: -3,
+      maxBufferSize: -3,
       onBufferOverflow: (_a, d) => dropped.push(d.target),
     });
 

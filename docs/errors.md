@@ -70,6 +70,7 @@ Re-sent by the async bus by default: no. gRPC: INVALID_ARGUMENT / OUT_OF_RANGE.
 | code | severity | retryable | what | fix |
 |---|---|---|---|---|
 | `core:invalid:name` | warn | no | Action name does not match the naming pattern, or carries a "$" (the library's names) | Rename the action: match the pattern, or adjust naming config in createCommandBus(); names with $ are the library's. |
+| `core:invalid:filter` | error | no | An action filter is not a valid CloudEvents filter expression | Use one dialect per expression (exact, prefix, suffix, all, any, not), the action attribute only, a non-empty string, and at least one expression in all or any. |
 | `validator:invalid:payload` | error | no | Schema or per-action validation rejected the dispatch | Fix the target/payload fields listed in the error message to match the declared schema. |
 | `validateSchemas:invalid:payload` | error | no | Schema or per-action validation rejected the dispatch | Fix the target/payload fields listed in the error message to match the declared schema. |
 | `schemaValidator:invalid:payload` | error | no | The bus schema rejected the dispatch | Fix the target/payload fields listed in the error message to match the schema the bus was created with. |
@@ -134,7 +135,7 @@ Re-sent by the async bus by default: yes. gRPC: DEADLINE_EXCEEDED.
 |---|---|---|---|---|
 | `core:timeout:request` | error | yes | request() timed out waiting for a response | Increase the timeout option or check that respond() is registered for this action. |
 | `pollWith:timeout:job` | error | yes | An accepted job was not done within maxWait | The backend answered 202 and its status monitor kept answering 202: raise maxWait in pollWith() or check the job. |
-| `transport:timeout:reply` | error | yes | No reply arrived within the transport's own timeout | Raise the bridge timeout option, or check the backend is answering. Transient, so the async bus re-sends it. |
+| `transport:timeout:reply` | error | no | No reply arrived within the transport's own timeout | Raise the bridge timeout option, or check the backend is answering. It may have landed, so the async bus re-sends it only for an idempotent action or a keyed command. Otherwise context.outcome is unknown: check its status on the server. |
 | `directive:timeout:dispatch` | error | yes | A v-vc-command dispatch did not settle within its timeout | Raise the timeout modifier (v-vc-command.60000; default 30000 ms), or check that the handler or backend answers. context.timeout is the limit that passed. |
 
 <a id="lost"></a>
@@ -163,7 +164,7 @@ Re-sent by the async bus by default: no. gRPC: CANCELLED.
 |---|---|---|---|---|
 | `core:aborted:dispatch` | warn | no | Dispatch aborted via its AbortSignal before completion | Intentional cancellation (ac.abort()). Re-dispatch explicitly if the abort was premature. |
 | `transport:aborted:request` | warn | no | The caller aborted the request (its AbortSignal) | Intentional cancellation. Send the request again if the abort was premature. |
-| `router:aborted:navigation` | info | no | A newer navigation (or destroy) superseded this one | Normal flow: the latest navigation wins. Returned to the caller, not dispatched to onError. |
+| `router:aborted:navigation` | info | no | A newer navigation (or dispose) superseded this one | Normal flow: the latest navigation wins. Returned to the caller, not dispatched to onError. |
 
 <a id="exceeded"></a>
 

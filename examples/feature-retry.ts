@@ -29,7 +29,7 @@ bus.use(createHttpBridge({ endpoint: '/api/vc', csrf: true }))
 
 const shop = createAsyncCommandBus({
   retry: {
-    actions: {
+    actionPolicies: {               // the most specific match wins
       'cart*': 'idempotent',   // setting a quantity twice is setting it once
       orderPay: false,         // never re-sent, whatever the failure
       searchRun: 2,            // at most 2 attempts

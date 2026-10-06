@@ -12,7 +12,7 @@ function cartStore() {
   let line = 0;
   return defineChamberStore('cart', {
     state: (): Cart => ({ items: [] }),
-    actions: {
+    reducers: {
       add: (s: Cart, name: string) => ({ items: [...s.items, { name, line: ++line }] }),
       load: (s: Cart, saved: Cart | null) => saved ?? s,
     },

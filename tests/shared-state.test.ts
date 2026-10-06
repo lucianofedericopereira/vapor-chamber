@@ -4,7 +4,7 @@
  * Locks v1.2.x behavior:
  *   - Multiple callers receive the SAME signal instances (not copies).
  *   - inFlight counter aggregates concurrent dispatches.
- *   - errors is a ring buffer capped at errorCap (default 10).
+ *   - errors is a ring buffer capped at maxSize (default 10).
  *   - Ref-counted disposal: state is GC-eligible once all subscribers dispose.
  *   - Async + sync bus paths both update state correctly.
  *   - Per-bus isolation: separate buses get separate shared states.
@@ -99,7 +99,7 @@ describe('useSharedCommandState - error capture', () => {
     s.dispose();
   });
 
-  it('respects the errorCap (default 10) - older errors drop off', ({ bus }) => {
+  it('respects the maxSize (default 10) - older errors drop off', ({ bus }) => {
     let i = 0;
     bus.register('boom', () => { throw new Error('e' + (++i)); });
     setCommandBus(bus);
@@ -114,10 +114,10 @@ describe('useSharedCommandState - error capture', () => {
     s.dispose();
   });
 
-  it('honors a custom errorCap', ({ bus }) => {
+  it('honors a custom maxSize', ({ bus }) => {
     bus.register('boom', () => { throw new Error('x'); });
     setCommandBus(bus);
-    const s = useSharedCommandState({ errorCap: 3 });
+    const s = useSharedCommandState({ maxSize: 3 });
 
     for (let n = 0; n < 7; n++) s.dispatch('boom', null);
 

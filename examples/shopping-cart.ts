@@ -45,7 +45,7 @@ bus.use(historyPlugin);
 // hand-written undo, and none to forget (cartUpdate and cartClear included).
 const useCart = defineChamberStore('cart', {
   state: (): Cart => ({ items: [], total: 0 }),
-  actions: {
+  reducers: {
     add: (s, product: Product, p?: { quantity?: number }) => {
       const quantity = p?.quantity ?? 1;
       const found = s.items.some((i) => i.id === product.id);

@@ -1,18 +1,18 @@
 # Vitest integration
 
 `vapor-chamber/vitest` tests a vapor-chamber app on Vitest 5 with Vitest's own
-tools: matchers registered with `expect.extend`, a setup file, fixtures built
-with `test.extend`, and a plugin for what needs configuration. Every command
-bus in a test is the real one; the entry records what it dispatched and asserts
-on that.
+tools. It gives matchers registered with `expect.extend`, a setup file,
+fixtures built with `test.extend`, and a plugin for what needs configuration.
+Every command bus in a test is the real one. The entry records what it
+dispatched and asserts on that.
 
 Every code block on this page is checked, and the tag after its language says
 how. `tests/vitest-consumer.test.ts` installs the built package in a temporary
-project, uses this page's two config blocks as its `vitest.config.ts`, and runs
-every test block there with a real Vitest. The rest are compared rather than
-run: the failure block against what a real failing run prints, the branding
-block against real stderr, and the two JSON blocks against what the package
-ships.
+project and uses this page's two config blocks as its `vitest.config.ts`. It
+runs every test block there with a real Vitest. The rest are compared rather
+than run. The failure block is compared against what a real failing run
+prints. The branding block is compared against real stderr, and the two JSON
+blocks against what the package ships.
 
 ---
 
@@ -56,8 +56,8 @@ export default defineConfig({
   shared bus. A file that asserts the library's one-shot Vue detection from a
   clean start needs nothing to have imported the library first.
 - `islands`: files named `*.island.test.*` or `*.island.spec.*`, and files
-  under `test/islands/` or `tests/islands/`, run in a project of their own with
-  a DOM (`happy-dom` unless `islands.environment` says otherwise). That project
+  under `test/islands/` or `tests/islands/`, run in a project of their own.
+  It has a DOM (`happy-dom` unless `islands.environment` says otherwise). That project
   inherits the rest of your config - aliases, setup files, plugins - which is
   Vitest 5's default for projects. `false` turns it off.
 - The setup file is placed first in `setupFiles`, once, and yours are kept.
@@ -71,7 +71,7 @@ terminal has colors:
  \\//  powered by vc-vitest-plugin
 ```
 
-It goes to stderr, once per run, and only beside Vitest's own banner: a run
+It goes to stderr, once per run, and only beside Vitest's own banner. A run
 with only the `json`, `junit` or `tap` reporter shows nothing, and
 `vitest list --json` output stays parseable. `NO_COLOR` turns the colors off.
 
@@ -154,7 +154,7 @@ payload and a wrong result value are type errors.
 
 Import `it` (or `test`) from `vapor-chamber/vitest` and a test can ask for a
 recorded bus instead of creating one. It is Vitest's own `test`, extended with
-`test.extend`; Vitest's `it` is not changed.
+`test.extend`. Vitest's `it` is not changed.
 
 ```ts test
 import { expect, it } from 'vapor-chamber/vitest';
@@ -269,11 +269,11 @@ as `toHaveBeenCalledWith` does.
 ## Testing an MCP surface
 
 `vc.mcp()` drives an MCP server handler as an agent does, without writing
-JSON-RPC by hand. `toBeToolResult` reads a tool's value; `toBeToolError` reads
-a refusal or a failure.
+JSON-RPC by hand. `toBeToolResult` reads a tool's value, and `toBeToolError`
+reads a refusal or a failure.
 
 ```ts test
-import { createSchemaCommandBus } from 'vapor-chamber';
+import { createActionFilter, createSchemaCommandBus } from 'vapor-chamber';
 import { createMcpHandler } from 'vapor-chamber/mcp';
 import { expect, it, vc } from 'vapor-chamber/vitest';
 
@@ -285,10 +285,10 @@ it('an agent can add to the cart and cannot clear it', async () => {
   bus.register('cartAdd', (cmd) => ({ count: cmd.payload.qty }));
   bus.register('cartClear', () => null);
 
-  const mcp = vc.mcp(createMcpHandler(bus, { actions: ['cartAdd'] }));
+  const mcp = vc.mcp(createMcpHandler(bus, { actionFilter: createActionFilter([{ exact: { action: 'cartAdd' } }]) }));
   expect(await mcp.toolNames()).toEqual(['cartAdd']);
   expect(await mcp.call('cartAdd', { target: { id: 1 }, payload: { qty: 2 } })).toBeToolResult({ count: 2 });
-  expect(await mcp.call('cartClear')).toBeToolError(/not permitted/);
+  await expect(mcp.call('cartClear')).rejects.toMatchObject({ code: -32602 }); // not listed: a protocol error
   expect(bus).toHaveBeenDispatchedWith('cartAdd', { qty: 2 });
 });
 ```
@@ -314,29 +314,30 @@ config.
 
 | tool | what it does |
 | --- | --- |
-| `runTests` | runs every test file, or those `target.files` selects, in a Vitest that stays warm between calls; returns counts and each failure with its message |
+| `runTests` | runs every test file, or those `target.files` selects, in a Vitest that stays warm between calls, and returns counts and each failure with its message |
 | `getTestResults` | the last run again, with `stale` and the files changed since it ran |
 | `getCoverageGaps` | runs the tests once with coverage and lists, per source file, the uncovered lines, functions and branch arms |
 
 - **What an agent can choose.** The root and the config are fixed by whoever
   starts the server. An agent passes only `files`, Vitest filters that select
-  among the test files your config already includes; a filter that starts with
+  among the test files your config already includes. A filter that starts with
   `-` is refused (`test:invalid:files`).
 - **Edits are seen.** The server watches the project and invalidates changed
   files before each run, so a run after an edit is not stale, and a new test
   file is found.
 - **Failures carry the dispatches.** With `vapor-chamber/vitest` as a setup
   file, a failure's message includes what the test dispatched.
-- **One run at a time.** Calls sent together wait their turn;
+- **One run at a time.** Calls sent together wait their turn, and
   `getTestResults` waits for a run in progress.
 - **Limits, for now.** `getCoverageGaps` starts a separate `vitest run`, so it
   pays a cold start. v8 coverage lists only the source files the selected tests
-  loaded; set `coverage.include` in your config to list the others. The server
+  loaded. Set `coverage.include` in your config to list the others. The server
   speaks stdio only.
 - **Programmatic use.** `await createVitestMcp({ root, config })` from
-  `vapor-chamber/vitest/mcp` returns `{ bus, close }`. Serve `bus` with
-  `createMcpHandler` or `serveMcpStdio`, passing `VITEST_MCP_ACTIONS` (or
-  fewer) as `actions`, and call `close()` on teardown.
+  `vapor-chamber/vitest/mcp` returns `{ bus, disposeAsync }`. Serve `bus` with
+  `createMcpHandler` or `serveMcpStdio`, passing an `actionFilter` that
+  allows the tools (`VITEST_MCP_ACTIONS`, or fewer). Await `disposeAsync()`
+  to stop the server.
 
 Tool names are camelCase, as a vapor-chamber schema bus names its actions.
 
@@ -399,9 +400,9 @@ it('a spy restores itself at the end of its block', () => {
 
 `vapor-chamber/vitest/pure` exports the same helpers and registers nothing: no
 matcher, no hook, no shared bus. It imports nothing from the library at
-runtime. What it does not carry is `it`, `test` and `expect`: the fixtures are
-the registration, so they stay in the full entry and a pure test takes those
-three from Vitest, as below.
+runtime. It does not carry `it`, `test` and `expect`. The fixtures are the
+registration, so they stay in the full entry, and a pure test takes those three
+from Vitest, as below.
 
 ```ts test
 import { createCommandBus } from 'vapor-chamber';
@@ -417,7 +418,7 @@ it('registers only what you ask for', () => {
 });
 ```
 
-Requires Vitest 5 (`vitest >=5.0.0`, an optional peer dependency). The API
+Needs Vitest 5 (`vitest >=5.0.0`, an optional peer dependency). The API
 reference is [docs/api/vitest.md](../api/vitest.md),
 [docs/api/vitest-pure.md](../api/vitest-pure.md) and
 [docs/api/vite.md](../api/vite.md).

@@ -29,7 +29,7 @@ describe('the { url } table', () => {
     const router = makeRouter({ routes: { url: '/routes.json' } as never, components: {}, http, links: false, announce: false, onError: () => {} });
     const error = await router.isReady().then(() => null, (e: unknown) => e);
     expect(isRouterError(error, 'router:unexpected:routes')).toBe(true);
-    router.destroy();
+    router.dispose();
   });
 
   it('a non-2xx problem is router:failed:routes, the client error (with the problem) its cause', async () => {
@@ -40,7 +40,7 @@ describe('the { url } table', () => {
     const error = await router.isReady().then(() => null, (e: unknown) => e);
     expect(isRouterError(error, 'router:failed:routes')).toBe(true);
     expect((error as Error).cause).toBe(clientError);
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -54,6 +54,6 @@ describe('the inline table', () => {
     const router = makeRouter({ routes: { inline: '#vcr-routes' } as never, links: false, announce: false, onError: () => {} });
     const error = await router.start().then(() => null, (e: unknown) => e);
     expect(isRouterError(error, 'router:unexpected:routes')).toBe(true);
-    router.destroy();
+    router.dispose();
   });
 });

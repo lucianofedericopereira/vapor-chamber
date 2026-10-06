@@ -3,9 +3,9 @@
 import { createCommandBus } from '__DIST__/index.js';
 import { defineChamberStore } from '__DIST__/store.js';
 
-const actions = { set: (_s, n) => ({ n }) };
-const useOn = defineChamberStore('on', { state: () => ({ n: 0 }), actions, undo: true });
-const useOff = defineChamberStore('off', { state: () => ({ n: 0 }), actions });
+const reducers = { set: (_s, n) => ({ n }) };
+const useOn = defineChamberStore('on', { state: () => ({ n: 0 }), reducers, undo: true });
+const useOff = defineChamberStore('off', { state: () => ({ n: 0 }), reducers });
 const bus = createCommandBus();
 const on = useOn(bus);
 const off = useOff(bus);

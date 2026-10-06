@@ -30,7 +30,7 @@ bus.onAfter((cmd, result) => {
 //    The bus re-sends through it what re-sending can change (a 429, 503 or
 //    408; any Retry-After, after its wait) and never a verdict (422, 404, 403,
 //    409) or a redirect; a lost request or a 500 only for an action declared
-//    idempotent (createAsyncCommandBus({ retry: { actions } })). The plugins
+//    idempotent (createAsyncCommandBus({ retry: { actionPolicies } })). The plugins
 //    outside see one dispatch.
 bus.use(createHttpBridge({
   endpoint: '/api/vc',
@@ -62,7 +62,7 @@ app.use(createDirectivePlugin())
 app.mount('#app')
 
 // Cleanup on page unload
-window.addEventListener('beforeunload', () => sse.teardown())
+window.addEventListener('beforeunload', () => sse.dispose())
 
 /*
  * resources/js/components/ProductCard.vue

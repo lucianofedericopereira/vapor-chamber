@@ -652,13 +652,15 @@ describe('throttle plugin dispose()', () => {
 });
 
 describe('debounce plugin dispose()', () => {
-  it('cancels all pending debounce timers', ({ bus }) => {
-    const d = debounce(['a'], 10000);
+  it('cancels all pending debounce timers', async ({ bus }) => {
+    const d = debounce(['a'], 10);
     bus.use(d);
-    bus.register('a', () => 1);
+    let runs = 0;
+    bus.register('a', () => { runs++; });
 
     bus.dispatch('a', {}); // starts debounce timer
     d.dispose(); // cancel the timer
-    // No timer leak - test just verifies dispose exists and doesn't throw
+    await new Promise((r) => setTimeout(r, 30));
+    expect(runs).toBe(0); // the debounced call never ran
   });
 });

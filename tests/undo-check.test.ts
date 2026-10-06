@@ -2,7 +2,7 @@
 import { afterEach, describe, expect } from 'vitest';
 import { resetCommandBus, setCommandBus, useCommandHistory } from '../src/chamber';
 import { type Command, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
-import { history } from '../src/plugins-core';
+import { history, optimisticUndo } from '../src/plugins-core';
 import { it } from '../src/vitest';
 
 afterEach(() => resetCommandBus());
@@ -96,6 +96,44 @@ describe('canUndo on register', () => {
   });
 });
 
+describe('a rollback does not read canUndo', () => {
+  /** An action whose canUndo is always false, and one that always fails. */
+  function wired(bus: ReturnType<typeof createCommandBus>) {
+    const undone: string[] = [];
+    bus.register('inc', () => 1, { undo: () => { undone.push('inc'); }, canUndo: () => false });
+    bus.register('fail', () => { throw new Error('boom'); });
+    return undone;
+  }
+
+  it('a transactional batch reverses the step that ran; history refuses the same step', () => {
+    const bus = createCommandBus();
+    const h = history({ bus });
+    bus.use(h);
+    const undone = wired(bus);
+    bus.dispatch('inc', null);
+    expect(h.undo()).toBeUndefined();
+    expect(undone).toEqual([]);
+    const r = bus.dispatchBatch([{ action: 'inc', target: null }, { action: 'fail', target: null }], { transactional: true });
+    expect(r.ok).toBe(false);
+    expect(undone).toEqual(['inc']);
+  });
+
+  it('optimisticUndo reverses the action that failed', () => {
+    const bus = createCommandBus();
+    const undone: string[] = [];
+    bus.register('save', () => { throw new Error('boom'); }, { undo: () => { undone.push('save'); }, canUndo: () => false });
+    bus.use(optimisticUndo(bus, ['save']));
+    expect(bus.dispatch('save', null).ok).toBe(false);
+    expect(undone).toEqual(['save']);
+  });
+});
+
 /*
  * Owner, 2026-10-04: undo runs only when it can be undone. Log s35.113.
+ *
+ * canUndo is history's check: history undoes by turn, newest first, and asks
+ * it before each undo. A rollback (optimisticUndo, a transactional batch) is
+ * wired once to reverse the step that failed and never reads it. A store's
+ * rebase depends on that: its canUndo is false for an older step. Owner,
+ * 2026-10-05, plan item 1 R7 (not built). Log s35.161.
  */

@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * Tests for router/index.ts - createRouter install/start/destroy lifecycle
+ * Tests for router/index.ts - createRouter install/start/dispose lifecycle
  * (DOM integration runs because happy-dom provides `window`) and the public
  * router methods node-env navigation tests don't reach.
  */
@@ -30,7 +30,7 @@ function makeRouter(overrides: Record<string, unknown> = {}) {
 }
 
 describe('createRouter - install + lifecycle (happy-dom)', () => {
-  it('app.use installs, starts, wires DOM integration, and destroy tears down', async () => {
+  it('app.use installs, starts, wires DOM integration, and dispose tears down', async () => {
     const router = makeRouter();
     const app = createApp({ render: () => h('div') });
 
@@ -38,7 +38,7 @@ describe('createRouter - install + lifecycle (happy-dom)', () => {
     await router.isReady();
     expect(router.currentRoute.value.location.name).toBe('home');
 
-    expect(() => router.destroy()).not.toThrow(); // teardowns + history.destroy
+    expect(() => router.dispose()).not.toThrow(); // teardowns + history.dispose
   });
 
   it('DOM integration: intercepts in-base clicks, preheats on hover, restores on bfcache', async () => {
@@ -75,7 +75,7 @@ describe('createRouter - install + lifecycle (happy-dom)', () => {
     expect(() => window.dispatchEvent(pageshow)).not.toThrow();
 
     a.remove();
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -219,7 +219,7 @@ describe('createRouter - public methods', () => {
       expect(list.hasAttribute('data-active')).toBe(false);
     }
 
-    router.destroy();
+    router.dispose();
     document.body.innerHTML = '';
   });
 
@@ -327,7 +327,7 @@ describe('hard-navigation loop guard', () => {
 
       expect(assign).not.toHaveBeenCalled();
       expect(errors).toHaveBeenCalled(); // diagnosed loudly instead
-      router.destroy();
+      router.dispose();
     } finally {
       errors.mockRestore();
       Object.defineProperty(window.location, 'assign', { value: original, configurable: true });
@@ -345,7 +345,7 @@ describe('hard-navigation loop guard', () => {
       await router.isReady();
       await router.push('/somewhere-else'); // unmatched, and not where we are
       expect(assign).toHaveBeenCalledWith('/admin/somewhere-else');
-      router.destroy();
+      router.dispose();
     } finally {
       Object.defineProperty(window.location, 'assign', { value: original, configurable: true });
     }
@@ -377,7 +377,7 @@ describe('route table delivery - error paths', () => {
     });
     await router.isReady();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('declares base "/admin"'));
-    router.destroy();
+    router.dispose();
   });
 
   it('remote: stays quiet when an explicit base was given', async () => {
@@ -389,7 +389,7 @@ describe('route table delivery - error paths', () => {
     });
     await router.isReady();
     expect(warn).not.toHaveBeenCalled();
-    router.destroy();
+    router.dispose();
   });
 
   it('remote: a failing fetch surfaces as router:failed:routes', async () => {

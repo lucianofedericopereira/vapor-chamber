@@ -13,7 +13,7 @@
 import { signal } from '../signal';
 import { type DefineChamberStore, type StoreRuntime, createStoreDefiner } from '../store-base';
 
-export type { ChamberStore, ChamberStoreOptions, StoreAction, StoreRouter } from '../store-base';
+export type { ChamberStore, ChamberStoreOptions, StoreReducer, StoreRouter } from '../store-base';
 
 const watchers = new WeakMap<object, Set<(next: any, prev: any) => void>>();
 

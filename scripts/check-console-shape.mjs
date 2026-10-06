@@ -281,7 +281,7 @@ const GUIDANCE =
 // GUIDANCE gives: this script has to quote source that contains real
 // placeholders, and in a plain string biome reads each one as a mistake.
 const BUFFER_WARNING =
-  `        console.warn(\`[vapor-chamber] onMissing:'buffer' queue for "\${cmd.action}" hit bufferLimit (\${limit}); dropped the oldest pending command. Register a handler, or raise bufferLimit.\`);`;
+  `        console.warn(\`[vapor-chamber] onMissing:'buffer' queue for "\${cmd.action}" hit maxBufferSize (\${limit}); dropped the oldest pending command. Register a handler, or raise maxBufferSize.\`);`;
 const ACTION_SLOT = `\${cmd.action}`;
 const mutate = (from, to) => ({ from, to });
 

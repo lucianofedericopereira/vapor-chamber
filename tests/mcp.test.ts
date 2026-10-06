@@ -5,6 +5,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, it, expect, vi } from 'vitest';
+import { createActionFilter } from '../src/action-filter';
 import { busToMcpTools, createMcpHandler, serveMcpStdio, MCP_SERVER_VERSION } from '../src/mcp';
 import type { McpTool } from '../src/mcp';
 import { createSchemaCommandBus, createAsyncSchemaCommandBus } from '../src/schema';
@@ -115,8 +116,8 @@ describe('createMcpHandler - protocol', () => {
     expect(await mcp.toolNames()).toEqual(['cartAdd', 'cartClear', 'ping']);
   });
 
-  it('tools/list respects the actions whitelist (glob patterns)', async () => {
-    const mcp = mcpClient(createMcpHandler(makeBus(), { actions: ['cart*'] }));
+  it('tools/list lists what actionFilter allows', async () => {
+    const mcp = mcpClient(createMcpHandler(makeBus(), { actionFilter: createActionFilter([{ prefix: { action: 'cart' } }]) }));
 
     expect(await mcp.toolNames()).toEqual(['cartAdd', 'cartClear']);
   });
@@ -240,27 +241,27 @@ describe('createMcpHandler - tools/call', () => {
     expect(await mcp.call('cartAdd', { target: { id: 1 }, payload: { qty: 1 } })).toBeToolError('core:missing:handler');
   });
 
-  it('non-whitelisted action -> isError, and the handler is never invoked', async () => {
+  it('an action actionFilter does not allow -> JSON-RPC -32602, and the handler is never invoked', async () => {
     const bus = makeBus();
     const spy = vi.fn();
     bus.on('*', spy);
-    const mcp = mcpClient(createMcpHandler(bus, { actions: ['cartClear'] }));
+    const mcp = mcpClient(createMcpHandler(bus, { actionFilter: createActionFilter([{ exact: { action: 'cartClear' } }]) }));
 
-    expect(await mcp.call('cartAdd', { target: { id: 1 }, payload: { qty: 1 } })).toBeToolError('unknown or not permitted');
+    await expect(mcp.call('cartAdd', { target: { id: 1 }, payload: { qty: 1 } })).rejects.toMatchObject({ code: -32602 });
     expect(spy).not.toHaveBeenCalled();
   });
 
-  it('unknown tool name -> isError', async () => {
+  it('unknown tool name -> JSON-RPC -32602', async () => {
     const mcp = mcpClient(createMcpHandler(makeBus()));
 
-    expect(await mcp.call('notATool')).toBeToolError('unknown or not permitted');
+    await expect(mcp.call('notATool')).rejects.toMatchObject({ code: -32602 });
   });
 
-  it('missing tool name -> isError', async () => {
+  it('missing tool name -> JSON-RPC -32602', async () => {
     const mcp = mcpClient(createMcpHandler(makeBus()));
 
     // No `name` at all, which call() cannot send: the raw request.
-    expect((await mcp.request('tools/call', {})).result).toBeToolError();
+    expect((await mcp.request('tools/call', {})).error).toMatchObject({ code: -32602 });
   });
 });
 
@@ -314,7 +315,7 @@ describe('serveMcpStdio', () => {
         writes.push(String(chunk));
         return true;
       }) as typeof process.stdout.write);
-    const stop = serveMcpStdio(makeBus());
+    const dispose = serveMcpStdio(makeBus());
 
     try {
       process.stdin.emit('data', Buffer.from('{"jsonrpc":"2.0","id":1,"method":"ping"}\n'));
@@ -325,7 +326,7 @@ describe('serveMcpStdio', () => {
       process.stdin.emit('data', Buffer.from('"method":"tools/list"}\n'));
       await new Promise((resolve) => setTimeout(resolve, 0));
     } finally {
-      stop();
+      dispose();
       writeSpy.mockRestore();
     }
 
@@ -357,7 +358,7 @@ describe('createMcpHandler defaults', () => {
     expect(MCP_SERVER_VERSION).toBe(pkg.version);
   });
 
-  it('warns when `actions` is omitted, naming what it exposed', () => {
+  it('warns when `actionFilter` is omitted, naming what it exposed', () => {
     using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     createMcpHandler(makeBus());
 
@@ -365,10 +366,10 @@ describe('createMcpHandler defaults', () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('writes included'));
   });
 
-  it("does not warn when exposure is declared - including the explicit ['*']", () => {
+  it('does not warn when exposure is declared, every action included: createActionFilter([])', () => {
     using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    createMcpHandler(makeBus(), { actions: ['cartAdd'] });
-    createMcpHandler(makeBus(), { actions: ['*'] });
+    createMcpHandler(makeBus(), { actionFilter: createActionFilter([{ exact: { action: 'cartAdd' } }]) });
+    createMcpHandler(makeBus(), { actionFilter: createActionFilter([]) });
 
     expect(warn).not.toHaveBeenCalled();
   });

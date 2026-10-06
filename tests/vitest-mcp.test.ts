@@ -4,6 +4,7 @@
  * real `createMcpHandler`, without writing JSON-RPC envelopes by hand.
  */
 import { describe, expect, it } from 'vitest';
+import { createActionFilter } from '../src/action-filter';
 import { createMcpHandler } from '../src/mcp';
 import { createAsyncSchemaCommandBus, createSchemaCommandBus } from '../src/schema';
 import type { BusSchema } from '../src/schema';
@@ -39,27 +40,27 @@ const withoutColors = (text: string) => text.replace(new RegExp(`${String.fromCh
 describe('mcpClient', () => {
   it('calls a tool through the real handler: the value comes back parsed, and the bus saw an agent dispatch', async () => {
     const bus = shop();
-    const mcp = mcpClient(createMcpHandler(bus, { actions: ['cart*'] }));
+    const mcp = mcpClient(createMcpHandler(bus, { actionFilter: createActionFilter([{ prefix: { action: 'cart' } }]) }));
 
     expect(await mcp.call('cartAdd', { target: { id: 1 }, payload: { qty: 2 } })).toBeToolResult({ count: 2 });
     expect(bus).toHaveBeenDispatchedWith('cartAdd', { qty: 2 });
   });
 
   it('lists what an agent can see', async () => {
-    const mcp = mcpClient(createMcpHandler(shop(), { actions: ['cartAdd'] }));
+    const mcp = mcpClient(createMcpHandler(shop(), { actionFilter: createActionFilter([{ exact: { action: 'cartAdd' } }]) }));
     expect(await mcp.toolNames()).toEqual(['cartAdd']);
     expect((await mcp.tools())[0]).toMatchObject({ name: 'cartAdd', description: 'Add item' });
   });
 
-  it('a refused or failing tool is a tool error, not a thrown one', async () => {
-    const mcp = mcpClient(createMcpHandler(shop(), { actions: ['cartAdd', 'cartClear'] }));
+  it('a failing tool is a tool error; a tool not listed is a protocol error', async () => {
+    const mcp = mcpClient(createMcpHandler(shop(), { actionFilter: createActionFilter([{ prefix: { action: 'cart' } }]) }));
     expect(await mcp.call('cartClear', { target: { force: true } })).toBeToolError('cart is locked');
-    expect(await mcp.call('orderCreate')).toBeToolError(/unknown or not permitted/);
+    await expect(mcp.call('orderCreate')).rejects.toMatchObject({ code: -32602 }); // not listed: a protocol error
     expect(await mcp.call('cartAdd', { target: { id: 1 }, payload: 'bare' })).toBeToolError();
   });
 
   it('initialize and raw requests number their ids; a protocol error throws with its JSON-RPC code', async () => {
-    const mcp = mcpClient(createMcpHandler(shop(), { actions: ['*'] }));
+    const mcp = mcpClient(createMcpHandler(shop(), { actionFilter: createActionFilter([]) }));
     expect(await mcp.initialize({ protocolVersion: '2024-11-05' })).toMatchObject({ protocolVersion: '2024-11-05' });
     expect(await mcp.request('ping')).toEqual({ jsonrpc: '2.0', id: 2, result: {} });
     // request() hands back the raw reply, errors included: it is for testing the envelope.
@@ -72,7 +73,7 @@ describe('mcpClient', () => {
   });
 
   it('a notification gets no reply', async () => {
-    const mcp = mcpClient(createMcpHandler(shop(), { actions: ['*'] }));
+    const mcp = mcpClient(createMcpHandler(shop(), { actionFilter: createActionFilter([]) }));
     expect(await mcp.notify('notifications/initialized')).toBeNull();
     expect(await mcp.notify('notifications/cancelled', { requestId: 1 })).toBeNull();
   });
@@ -80,7 +81,7 @@ describe('mcpClient', () => {
   it('works on an async bus', async () => {
     const bus = createAsyncSchemaCommandBus(schema);
     bus.register('cartAdd', async (cmd) => cmd.payload.qty * 2);
-    expect(await mcpClient(createMcpHandler(bus, { actions: ['*'] })).call('cartAdd', { target: { id: 1 }, payload: { qty: 4 } })).toBeToolResult(8);
+    expect(await mcpClient(createMcpHandler(bus, { actionFilter: createActionFilter([]) })).call('cartAdd', { target: { id: 1 }, payload: { qty: 4 } })).toBeToolResult(8);
   });
 });
 

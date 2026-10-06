@@ -64,7 +64,7 @@ export const VITEST_MCP_SCHEMA: BusSchema = {
   },
 };
 
-/** Every tool name, the default allow-list. */
+/** Every tool name. */
 export const VITEST_MCP_ACTIONS = Object.keys(VITEST_MCP_SCHEMA);
 
 export interface VitestMcpOptions {
@@ -101,10 +101,10 @@ export interface VitestMcpGap {
   uncoveredBranches: { line: number; type: string; uncoveredArms: number[]; arms: number }[];
 }
 
-/** A running server: the bus to serve, and `close()`. */
+/** A running server: the bus to serve, and `disposeAsync()`, which stops the watcher and closes Vitest. */
 export interface VitestMcpServer {
   bus: ReturnType<typeof createAsyncSchemaCommandBus<BusSchema>>;
-  close(): Promise<void>;
+  disposeAsync(): Promise<void>;
 }
 
 const MAX_FILTERS = 100;
@@ -192,7 +192,8 @@ function summarize(modules: readonly TestModule[], selected: Set<string>, errors
 /**
  * Start the server: a warm Vitest on `root`, a file watcher, and a schema bus
  * whose handlers are the three tools. Serve `bus` with `createMcpHandler` or
- * `serveMcpStdio`, passing {@link VITEST_MCP_ACTIONS} (or fewer) as `actions`.
+ * `serveMcpStdio`, passing an `actionFilter` that allows the tools
+ * ({@link VITEST_MCP_ACTIONS}, or fewer).
  */
 export async function createVitestMcp(options: VitestMcpOptions = {}): Promise<VitestMcpServer> {
   const root = resolve(options.root ?? process.cwd());
@@ -281,7 +282,7 @@ export async function createVitestMcp(options: VitestMcpOptions = {}): Promise<V
 
   return {
     bus,
-    async close() {
+    async disposeAsync() {
       watcher.close();
       await vitest.close();
     },
@@ -290,13 +291,13 @@ export async function createVitestMcp(options: VitestMcpOptions = {}): Promise<V
 
 /**
  * {@link createVitestMcp}, served over stdio with every tool allowed. Resolves
- * to a `stop()` that detaches from stdin and closes Vitest.
+ * to its async dispose: it detaches from stdin and closes Vitest.
  */
 export async function serveVitestMcp(options: VitestMcpOptions = {}): Promise<() => Promise<void>> {
   const server = await createVitestMcp(options);
-  const stop = serveMcpStdio(server.bus, { actions: VITEST_MCP_ACTIONS, serverName: 'vc-vitest-mcp' });
+  const dispose = serveMcpStdio(server.bus, { actionFilter: () => true, serverName: 'vc-vitest-mcp' });
   return async () => {
-    stop();
-    await server.close();
+    dispose();
+    await server.disposeAsync();
   };
 }

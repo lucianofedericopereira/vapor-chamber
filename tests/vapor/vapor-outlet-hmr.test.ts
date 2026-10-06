@@ -63,7 +63,7 @@ describe('Vapor outlet - dev HMR', () => {
       history: createMemoryHistory(''),
       routes: ROWS,
       components: { Home: leaf('<span>home</span>'), User, About: leaf('<span>about</span>') },
-    }) as unknown as { isReady: () => Promise<void>; push: (to: string) => Promise<unknown>; destroy: () => void };
+    }) as unknown as { isReady: () => Promise<void>; push: (to: string) => Promise<unknown>; dispose: () => void };
 
     const Root = defineVaporComponent({
       setup() {
@@ -104,6 +104,6 @@ describe('Vapor outlet - dev HMR', () => {
 
     app.unmount();
     host.remove();
-    router.destroy();
+    router.dispose();
   });
 });

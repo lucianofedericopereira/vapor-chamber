@@ -12,7 +12,7 @@ import { configureSignal } from '../src/signal';
 import { defineChamberStore } from '../src/store/core';
 
 type Cart = { items: string[]; count: number };
-const actions = {
+const reducers = {
   add: (s: Cart, item: string) => ({ items: [...s.items, item], count: s.count + 1 }),
 };
 const state = (): Cart => ({ items: [], count: 0 });
@@ -27,7 +27,7 @@ describe('the Vue-less store', () => {
     bus.use(h);
     const heard: string[] = [];
     bus.on('*', (cmd) => heard.push(cmd.action));
-    const useCart = defineChamberStore('cart', { state, actions, undo: true });
+    const useCart = defineChamberStore('cart', { state, reducers, undo: true });
     const cart = useCart(bus);
     const counts: number[] = [];
     cart.$onField('count', (n) => counts.push(n));
@@ -44,7 +44,7 @@ describe('the Vue-less store', () => {
 
   it('no scope: the store lives until its caller disposes it', () => {
     const bus = createCommandBus();
-    const useCart = defineChamberStore('cart', { state, actions });
+    const useCart = defineChamberStore('cart', { state, reducers });
     const a = useCart(bus);
     const b = useCart(bus);
     expect(b).toBe(a);
@@ -56,8 +56,8 @@ describe('the Vue-less store', () => {
     const tab = () => {
       const lane = createFastLane();
       const ch = createChannel({ channel: 'core-share', lane, events: ['cart$state'] });
-      const cart = defineChamberStore('cart', { state, actions, share: lane })(createCommandBus());
-      return { cart, close: () => { cart.$dispose(); ch.close(); } };
+      const cart = defineChamberStore('cart', { state, reducers, share: lane })(createCommandBus());
+      return { cart, close: () => { cart.$dispose(); ch.dispose(); } };
     };
     const a = tab();
     const b = tab();
@@ -71,8 +71,8 @@ describe('the Vue-less store', () => {
   it('field events and sharing watch the same state together', async () => {
     const lane = createFastLane();
     const sent: unknown[] = [];
-    lane.on('cart$state', (m) => sent.push(m));
-    const cart = defineChamberStore('cart', { state, actions, share: lane })(createCommandBus());
+    lane.on('cart$state', (m: { ask?: true }) => { if (!m.ask) sent.push(m); }); // the writes, not the open's ask
+    const cart = defineChamberStore('cart', { state, reducers, share: lane })(createCommandBus());
     const counts: number[] = [];
     cart.$onField('count', (n) => counts.push(n));
     cart.add('milk');
@@ -84,7 +84,7 @@ describe('the Vue-less store', () => {
 
   it('with alien-signals configured, an effect reading the state reruns on a write', () => {
     configureAlienSignals(alienSignal as never);
-    const cart = defineChamberStore('cart', { state, actions })(createCommandBus());
+    const cart = defineChamberStore('cart', { state, reducers })(createCommandBus());
     const seen: number[] = [];
     const stop = alienEffect(() => { seen.push(cart.state.value.count); });
     cart.add('milk');

@@ -56,7 +56,7 @@ describe('routerHttp', () => {
 
     expect(router.currentRoute.value.location.path).toBe('/');
     expect(router.routes.value.map((r) => r.name)).toEqual(['home']);
-    router.destroy();
+    router.dispose();
   });
 
   it('serves a reload from the same client', async () => {
@@ -74,7 +74,7 @@ describe('routerHttp', () => {
     await router.reload();
 
     expect((globalThis.fetch as unknown as { mock: { calls: unknown[] } }).mock.calls).toHaveLength(2);
-    router.destroy();
+    router.dispose();
   });
 
   it('lets a caller override the marker header', async () => {
@@ -98,7 +98,7 @@ describe('routerHttp', () => {
     const headers = JSON.stringify(seen[0]);
     expect(headers).toContain('X-Tenant');
     expect(headers).toContain('"X-Vapor-Router":"0"');
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -146,6 +146,6 @@ describe('a { url } table with no client', () => {
     const coded = errors.find((error) => isRouterError(error, 'router:missing:http'));
     expect(coded).toBeDefined();
     expect(String((coded as Error).message)).toContain('router/remote');
-    router.destroy();
+    router.dispose();
   });
 });

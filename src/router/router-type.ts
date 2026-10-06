@@ -65,5 +65,7 @@ export type Router<TName extends string = string> = {
    *  consumer's bundle), so `component` is deliberately not required here:
    *  requiring it would have this type contradict the implementation. */
   install: (app: { provide: (key: symbol, value: unknown) => unknown }) => void;
-  destroy: () => void;
+  /** Cancels the navigation in flight, removes what `start()` installed (a
+   *  start still running installs nothing more) and disposes the history. */
+  dispose: () => void;
 };

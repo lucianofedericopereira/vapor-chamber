@@ -20,13 +20,13 @@ describe("an app's $ name is refused", () => {
 
   it('a store id or action key with $: store:invalid:name, at definition', () => {
     const state = () => ({ n: 0 });
-    expect((thrown(() => defineChamberStore('ca$rt', { state, actions: {} })) as BusError).code).toBe('store:invalid:name');
-    expect((thrown(() => defineChamberStore('cart', { state, actions: { add$undo: (s: { n: number }) => s } })) as BusError).code).toBe('store:invalid:name');
+    expect((thrown(() => defineChamberStore('ca$rt', { state, reducers: {} })) as BusError).code).toBe('store:invalid:name');
+    expect((thrown(() => defineChamberStore('cart', { state, reducers: { add$undo: (s: { n: number }) => s } })) as BusError).code).toBe('store:invalid:name');
   });
 
   it("the library's own still register: a store's $reset, an action's $undo, on a bus with a strict naming rule", () => {
     const bus = createCommandBus({ naming: { pattern: /^[a-z]+[A-Z][a-zA-Z]*$/, onViolation: 'throw' } });
-    const useCart = defineChamberStore('cart', { state: () => ({ n: 0 }), actions: { set: (_s: { n: number }, n: number) => ({ n }) }, undo: true });
+    const useCart = defineChamberStore('cart', { state: () => ({ n: 0 }), reducers: { set: (_s: { n: number }, n: number) => ({ n }) }, undo: true });
     const cart = useCart(bus);
     expect(bus.hasHandler('cart$reset')).toBe(true);
     expect(bus.hasHandler('cartSet$undo')).toBe(true);

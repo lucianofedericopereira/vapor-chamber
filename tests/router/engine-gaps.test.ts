@@ -75,7 +75,7 @@ describe('stale-while-revalidate background refresh', () => {
 
     expect(router.currentRoute.value.data.get('list')).toBe('fresh-value');
     expect(router.isRevalidating.value).toBe(false);
-    router.destroy();
+    router.dispose();
   });
 
   it('drops a refresh that lands after the user navigated away', async () => {
@@ -96,7 +96,7 @@ describe('stale-while-revalidate background refresh', () => {
     expect(router.currentRoute.value.location.path).toBe('/');
     expect(router.currentRoute.value.data.get('list')).toBeUndefined();
     expect(router.isRevalidating.value).toBe(false);
-    router.destroy();
+    router.dispose();
   });
 
   it('keeps stale data and never reports an error when the refresh rejects', async () => {
@@ -119,7 +119,7 @@ describe('stale-while-revalidate background refresh', () => {
     expect(onError).not.toHaveBeenCalled();
     expect(router.lastError.value).toBeNull();
     expect(router.isRevalidating.value).toBe(false);
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -142,7 +142,7 @@ describe('query-only refetch', () => {
     // read-time concern (decodeQueryParam / useRouteQuery), not stored here.
     expect(router.currentRoute.value.location.query.page).toBe('2');
     expect(router.currentRoute.value.data.get('list')).toBe('data-2');
-    router.destroy();
+    router.dispose();
   });
 
   it('reports a rejecting refetch through onError while keeping stale data', async () => {
@@ -164,7 +164,7 @@ describe('query-only refetch', () => {
     expect(String((onError.mock.calls[0]![0] as Error).message)).toMatch(/loader failed/i);
     // The page keeps what it had rather than blanking.
     expect(router.currentRoute.value.data.get('list')).toBe('data-1');
-    router.destroy();
+    router.dispose();
   });
 
   it('drops a refetch superseded by a later navigation', async () => {
@@ -187,7 +187,7 @@ describe('query-only refetch', () => {
 
     expect(router.currentRoute.value.location.path).toBe('/');
     expect(onError).not.toHaveBeenCalled();
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -205,7 +205,7 @@ describe('location resolution', () => {
     expect(loc.path).toBe('/list');
     expect(loc.query.tag).toBe('blue');
     expect(loc.hash).toBe('#section-2');
-    router.destroy();
+    router.dispose();
   });
 
   it('treats a query-only string target as the ROOT path, not an empty one', async () => {
@@ -221,7 +221,7 @@ describe('location resolution', () => {
     expect(loc.path).toBe('/');
     expect(loc.name).toBe('home');
     expect(loc.query.tag).toBe('blue');
-    router.destroy();
+    router.dispose();
   });
 
   it('stringifies each element of an ARRAY query value', async () => {
@@ -234,7 +234,7 @@ describe('location resolution', () => {
     await router.push({ path: '/list', query: { tag: ['red', 'blue', 7] } as any });
     const { query } = router.currentRoute.value.location;
     expect(query.tag).toEqual(['red', 'blue', '7']); // every element a string
-    router.destroy();
+    router.dispose();
   });
 
   it('drops null and undefined values from a query patch', async () => {
@@ -249,7 +249,7 @@ describe('location resolution', () => {
     // applied when the value is READ, so nothing is stored for `page`.
     expect(query.page).toBeUndefined();
     expect(Object.keys(query)).toEqual(['tag']);
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -269,7 +269,7 @@ describe('setRouteData', () => {
     expect(warn.mock.calls[0]![0]).toContain('no route record by that name');
     // The value still lands - lenient, just loud.
     expect(router.currentRoute.value.data.get('lsit')).toEqual({ typo: true });
-    router.destroy();
+    router.dispose();
   });
 
   it('does not warn for a real record name', async () => {
@@ -281,7 +281,7 @@ describe('setRouteData', () => {
     router.setRouteData('list', 'pushed');
     expect(warn).not.toHaveBeenCalled();
     expect(router.currentRoute.value.data.get('list')).toBe('pushed');
-    router.destroy();
+    router.dispose();
   });
 
   it('skips the table lookup entirely in production (DEV=false)', async () => {
@@ -308,7 +308,7 @@ describe('setRouteData', () => {
     expect(warn).not.toHaveBeenCalled();
     expect(router.currentRoute.value.data.get('lsit')).toEqual({ typo: true });
 
-    router.destroy();
+    router.dispose();
     vi.resetModules();
   });
 });
@@ -339,7 +339,7 @@ describe('query-only navigation', () => {
     await flush();
     expect(router.currentRoute.value.location.query.tag).toBeUndefined();
 
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -369,7 +369,7 @@ describe('supersession', () => {
     await second;
     expect(firstError?.code).toBe('router:aborted:navigation');
     expect(router.currentRoute.value.location.path).toBe('/other');
-    router.destroy();
+    router.dispose();
   });
 
   it('abandons a navigation superseded while its loaders ran', async () => {
@@ -393,7 +393,7 @@ describe('supersession', () => {
     expect(router.currentRoute.value.location.path).toBe('/other');
     // The superseded navigation's data never commits.
     expect(router.currentRoute.value.data.get('list')).toBeUndefined();
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -415,7 +415,7 @@ describe('hook unsubscribe', () => {
     await router.push('/list');
     expect(guard).not.toHaveBeenCalled();
     expect(hook).not.toHaveBeenCalled();
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -464,7 +464,7 @@ describe('refetchAffected - stale guards', () => {
     expect(router.currentRoute.value.location.fullPath).toBe('/list?page=2&tag=x');
     expect(router.currentRoute.value.data.get('list')).toBe('data-1');
     expect(onError).not.toHaveBeenCalled();
-    router.destroy();
+    router.dispose();
   });
 
   it('stays silent when a refetch rejects as cancelled', async () => {
@@ -488,7 +488,7 @@ describe('refetchAffected - stale guards', () => {
     expect(calls).toBeGreaterThan(1);
     expect(onError).not.toHaveBeenCalled(); // swallowed, not reported
     expect(router.currentRoute.value.data.get('list')).toBe('data-1'); // stale data kept
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -517,7 +517,7 @@ describe('navigation error wrapping', () => {
     expect(err.code).toBe('router:failed:component');
     // The original failure is preserved as the cause, not swallowed.
     expect(String((err.cause as Error)?.message)).toMatch(/dynamically imported module/);
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -546,7 +546,7 @@ describe('navigation error wrapping - uncoded errors', () => {
     // ...and the navigation reverted rather than half-committing.
     expect(router.currentRoute.value.location.path).toBe('/');
 
-    router.destroy();
+    router.dispose();
   });
   it('a context that breaks its contract (a plain throw from resolveRender) is still coded, as failed:component', async () => {
     // EngineContext.resolveRender "throws coded RouterErrors"; createRouter's
@@ -582,6 +582,6 @@ describe('navigation error wrapping - uncoded errors', () => {
     const err = onError.mock.calls[0]![0] as { code?: string; cause?: unknown };
     expect(err.code).toBe('router:failed:history');
     expect((err.cause as Error).message).toBe('history full');
-    router.destroy();
+    router.dispose();
   });
 });

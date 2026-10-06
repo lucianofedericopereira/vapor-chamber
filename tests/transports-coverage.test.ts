@@ -697,7 +697,7 @@ describe('createSseBridge routing & reconnect noop', () => {
     // EventSource native reconnect handler is a no-op - just must not throw.
     expect(() => lastEs.onerror?.()).not.toThrow();
 
-    sse.teardown();
+    sse.dispose();
     expect(sse.isConnected()).toBe(false);
   });
 });

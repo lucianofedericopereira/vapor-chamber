@@ -58,7 +58,7 @@ describe('router:exceeded:redirects diagnostic', () => {
     expect(result?.code).toBe('router:exceeded:redirects');
     expect(result?.message).toContain('redirect loop navigating to');
     expect(result?.message).toContain('hops');
-    router.destroy();
+    router.dispose();
   });
 
   it('drops the explanation in production, and still reports the code', async () => {
@@ -73,6 +73,6 @@ describe('router:exceeded:redirects diagnostic', () => {
     expect(result?.code).toBe('router:exceeded:redirects');
     expect(result?.message).toContain('redirect loop navigating to');
     expect(result?.message).not.toContain('hops');
-    router.destroy();
+    router.dispose();
   });
 });

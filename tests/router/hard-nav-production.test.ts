@@ -50,7 +50,7 @@ describe('hard-navigation refusal', () => {
     expect(assign).not.toHaveBeenCalled(); // refused - no reload storm
     const messages = errors.map((e) => String(e[0]));
     expect(messages.some((m) => m.includes('refusing to hard-navigate'))).toBe(true);
-    router.destroy();
+    router.dispose();
   });
 
   it('stays quiet about the reason in production, and still refuses', async () => {
@@ -65,6 +65,6 @@ describe('hard-navigation refusal', () => {
     const messages = errors.map((e) => String(e[0]));
     expect(messages.some((m) => m.includes('refusing to hard-navigate'))).toBe(false);
     expect(errors.length).toBeGreaterThan(0); // but the error is still surfaced
-    router.destroy();
+    router.dispose();
   });
 });

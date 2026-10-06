@@ -3,7 +3,8 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSyn
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { createActionFilter } from '../src/action-filter';
 import { createMcpHandler } from '../src/mcp';
 import { coverageGaps, createVitestMcp, serveVitestMcp, VITEST_MCP_ACTIONS, type VitestMcpServer } from '../src/vitest-mcp';
 import { mcpClient } from '../src/vitest-pure';
@@ -33,16 +34,17 @@ function project(files: Record<string, string>): string {
 let root: string;
 let server: VitestMcpServer;
 let mcp: ReturnType<typeof mcpClient>;
+const tools = createActionFilter([{ any: VITEST_MCP_ACTIONS.map((action) => ({ exact: { action } })) }]);
 const json = (result: { content: { text: string }[] }) => JSON.parse(result.content[0].text);
 
 beforeAll(async () => {
   root = project({ 'src/cart.js': CART, 'tests/cart.test.js': CART_TEST, 'tests/fail.test.js': FAIL_TEST });
   server = await createVitestMcp({ root });
-  mcp = mcpClient(createMcpHandler(server.bus, { actions: VITEST_MCP_ACTIONS }));
+  mcp = mcpClient(createMcpHandler(server.bus, { actionFilter: tools }));
 });
 
 afterAll(async () => {
-  await server?.close();
+  await server?.disposeAsync();
   for (const dir of roots) rmSync(dir, { recursive: true, force: true });
 });
 
@@ -54,10 +56,10 @@ describe('the tools an agent sees', () => {
   it('getTestResults before any run is a coded tool error', async () => {
     const fresh = await createVitestMcp({ root });
     try {
-      const client = mcpClient(createMcpHandler(fresh.bus, { actions: VITEST_MCP_ACTIONS }));
+      const client = mcpClient(createMcpHandler(fresh.bus, { actionFilter: tools }));
       expect(await client.call('getTestResults')).toBeToolError(/test:missing:run/);
     } finally {
-      await fresh.close();
+      await fresh.disposeAsync();
     }
   });
 });
@@ -164,12 +166,12 @@ describe('getCoverageGaps', () => {
     const noProvider = project({ 'vitest.config.js': "export default { test: { coverage: { provider: 'custom', customProviderModule: './nowhere.js' } } };\n", 'tests/a.test.js': FAIL_TEST });
     const other = await createVitestMcp({ root: noProvider, config: join(noProvider, 'vitest.config.js') });
     try {
-      const client = mcpClient(createMcpHandler(other.bus, { actions: VITEST_MCP_ACTIONS }));
+      const client = mcpClient(createMcpHandler(other.bus, { actionFilter: tools }));
       const result = await client.call('getCoverageGaps');
       expect(result).toBeToolError(/test:missing:coverage/);
       expect(result.content[0].text).toContain('nowhere.js');
     } finally {
-      await other.close();
+      await other.disposeAsync();
     }
   });
 
@@ -196,15 +198,34 @@ describe('getCoverageGaps', () => {
 });
 
 describe('serveVitestMcp', () => {
-  it('starts a server on stdio for the working directory, and stop() detaches it and closes Vitest', async () => {
+  it('starts a server on stdio for the working directory, and its dispose detaches it and closes Vitest', async () => {
     const cwd = process.cwd();
     process.chdir(root);
     try {
-      const stop = await serveVitestMcp();
-      await stop();
+      const dispose = await serveVitestMcp();
+      await dispose();
     } finally {
       process.chdir(cwd);
     }
+  });
+
+  it('allows every tool, deliberately: all three listed, no exposure warning', async () => {
+    const cwd = process.cwd();
+    process.chdir(root);
+    const written: string[] = [];
+    const write = vi.spyOn(process.stdout, 'write').mockImplementation(((s: string) => { written.push(s); return true; }) as never);
+    const warn = vi.spyOn(console, 'warn');
+    try {
+      const dispose = await serveVitestMcp();
+      process.stdin.emit('data', `${JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' })}\n`);
+      await vi.waitFor(() => expect(written).toHaveLength(1));
+      await dispose();
+    } finally {
+      write.mockRestore();
+      process.chdir(cwd);
+    }
+    expect(JSON.parse(written[0]!).result.tools.map((t: { name: string }) => t.name)).toEqual(['runTests', 'getTestResults', 'getCoverageGaps']);
+    expect(warn).not.toHaveBeenCalledWith(expect.stringContaining('createMcpHandler'));
   });
 });
 

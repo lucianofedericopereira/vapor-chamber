@@ -81,6 +81,8 @@ export {
   type AsyncPlugin,
   type SyncPlugin,
   type PluginParts,
+  type ActionScope,
+  type ActionList,
   type Hook,
   type AsyncHook,
   type BeforeHook,
@@ -93,7 +95,7 @@ export {
   type CommandBusOptions,
   type AsyncCommandBusOptions,
   type RetryOptions,
-  type RetryDeclaration,
+  type RetryPolicy,
   type NamingConvention,
   type RegisterOptions,
   type Listener,
@@ -106,6 +108,7 @@ export {
 // Settling what `next()` gave a plugin, on either bus: what a `Plugin` uses to
 // read the result (see Plugin).
 export { onSettled, type MaybeAsyncResult } from './settled';
+export { createActionFilter, type ActionFilter, type ActionFilterExpression } from './action-filter';
 
 // What an app plugin builds a result with: the bus's own two factories, so its
 // results share the bus's one hidden class (tests/plugin-result-factories).
@@ -324,6 +327,7 @@ export {
   toOpenAITools,
   synthesize,
   type BusSchema,
+  type ActionAnnotations,
   type ActionSchema,
   type FieldMap,
   type FieldType,

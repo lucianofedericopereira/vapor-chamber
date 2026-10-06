@@ -46,13 +46,22 @@
  * separately-imported Vue dists are two disconnected reactivity instances
  * (chamber.ts §probeVue), so skipping that would silently measure nothing.
  *
+ * ORDER OF THE TWO VUE COPIES. Every Vue dev build writes
+ * `globalThis.__VUE_HMR_RUNTIME__` when it evaluates, and the HMR record map
+ * is private to the copy. The chamber's async probe loads bare `vue` (here
+ * @vue/runtime-core's cjs build), and the suite's setup does not await it.
+ * Under full-suite load it landed after the with-vapor import, so the test
+ * drove the other copy's runtime: no mounted instance, `setups` 1 (log
+ * s35.124 and s35.202). A copy evaluated after with-vapor reproduces exactly
+ * that. `waitForVueDetection()` first fixes the order.
+ *
  * VERIFIED AGAINST THE PRE-FIX CODE, which is the standard this repo holds
  * fixtures to: on vue@3.6.0-rc.5 this file fails - `disposals` stays 0 and the
  * fan-out assertion sees `['gen1','gen2','gen3']` instead of `['gen3']`.
  */
 
 import { beforeEach, describe, expect, it } from 'vitest';
-import { configureVue, getCommandBus, setCommandBus, useCommand } from '../src/chamber';
+import { configureVue, getCommandBus, setCommandBus, useCommand, waitForVueDetection } from '../src/chamber';
 import { createCommandBus } from '../src/command-bus';
 
 const WITH_VAPOR = 'vue/dist/vue.runtime-with-vapor.esm-browser.js';
@@ -70,6 +79,9 @@ describe('useCommand across real HMR rerenders (rc.6)', () => {
   });
 
   it('disposes each superseded generation of an element-nested child', async () => {
+    // The probe's `import('vue')` loads a second Vue that also writes
+    // __VUE_HMR_RUNTIME__. Settled first, the with-vapor build writes last.
+    await waitForVueDetection();
     const v = await vapor();
     configureVue(v);
     const hmr = (globalThis as any).__VUE_HMR_RUNTIME__;

@@ -8,7 +8,7 @@ import { defineChamberStore, fieldRef } from '../src/store';
 type S = { a: number; b: number; list: number[] };
 const useS = defineChamberStore('fields', {
   state: (): S => ({ a: 0, b: 0, list: [] }),
-  actions: {
+  reducers: {
     setA: (s: S, a: number) => ({ ...s, a }),
     setB: (s: S, b: number) => ({ ...s, b }),
   },
@@ -64,7 +64,7 @@ describe('$onField', () => {
   });
 
   it('$onField is a store member an action cannot take', () => {
-    expect(() => defineChamberStore('x', { state: () => ({}), actions: { $onField: (s: object) => s } })).toThrow(/would replace the store's own "\$onField"/);
+    expect(() => defineChamberStore('x', { state: () => ({}), reducers: { $onField: (s: object) => s } })).toThrow(/would replace the store's own "\$onField"/);
   });
 });
 

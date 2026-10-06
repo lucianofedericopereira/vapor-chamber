@@ -20,7 +20,8 @@ export type RouterHistory = {
   listen: (cb: HistoryListener) => () => void;
   /** Absolute href for the DOM: base + fullPath. */
   createHref: (fullPath: string) => string;
-  destroy: () => void;
+  /** Drops every `listen()` callback; the web history also stops reading popstate. */
+  dispose: () => void;
 };
 
 /** '' stays '', anything else gets a leading slash and loses the trailing one. */
@@ -160,7 +161,7 @@ export function createWebHistory(rawBase?: string): RouterHistory {
       return () => listeners.delete(cb);
     },
     createHref: (fullPath) => base + fullPath,
-    destroy: () => {
+    dispose: () => {
       listeners.clear();
       window.removeEventListener('popstate', onPopState);
     },
@@ -199,6 +200,6 @@ export function createMemoryHistory(rawBase?: string, initialFullPath = '/'): Ro
       return () => listeners.delete(cb);
     },
     createHref: (fullPath) => base + fullPath,
-    destroy: () => listeners.clear(),
+    dispose: () => listeners.clear(),
   };
 }

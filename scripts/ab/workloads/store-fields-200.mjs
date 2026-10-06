@@ -20,7 +20,7 @@ function make(id, fields, readers, readKey) {
   for (const f of fields) init[f] = 0;
   const store = defineChamberStore(id, {
     state: () => ({ ...init }),
-    actions: { inc: (s) => ({ ...s, [fields[0]]: s[fields[0]] + 1 }) },
+    reducers: { inc: (s) => ({ ...s, [fields[0]]: s[fields[0]] + 1 }) },
   })(bus);
   const shared = new Map();
   for (let i = 0; i < readers; i++) {

@@ -9,7 +9,7 @@
  *  - CDCC-compliant function sizes
  *  - `AbortSignal.any` with manual fallback for older environments
  *  - Jitter on exponential backoff (avoids thundering herd)
- *  - `Retry-After` honoured on any status (RFC 9110); `X-RateLimit-Reset` as its fallback for the wait
+ *  - A declared wait sets when to re-send, never whether: `Retry-After` (RFC 9110), else `RateLimit` `t`, else `X-RateLimit-Reset`
  *  - 419 CSRF refresh coalesces concurrent requests (no duplicate refreshes)
  *  - `session-expired` CustomEvent + configurable callback
  *  - The caller's abort (`transport:aborted:request`) distinct from no reply in time (`transport:timeout:reply`)
@@ -38,14 +38,16 @@ export type HttpConfig = {
   timeout?: number;
   /**
    * Max re-sends of a failure the bus's rule allows (`retryClass`): a
-   * transient one for any method, an uncertain one only for an idempotent
-   * method or an `Idempotency-Key`. **0 through `postCommand`**, and through a
-   * client **2 for reads (GET), 0 for other methods**.
+   * transient one (408, 429, 503) for any method; an uncertain one, or an
+   * answer with a declared wait, only for an idempotent method or an
+   * `Idempotency-Key`. An unidentified request with no reply, a 502 or a 504
+   * fails with `context.outcome: 'unknown'`. **0 through `postCommand`**, and
+   * through a client **2 for reads (GET), 0 for other methods**.
    */
   retry?: number;
   /** External abort signal (e.g. from component unmount) */
   signal?: AbortSignal;
-  /** Read CSRF token from DOM and attach as header. Default: false */
+  /** Read the CSRF token from the DOM and attach it as a header. An app header of that name, in any spelling, goes out once with the token. Default: false */
   csrf?: boolean;
   /**
    * URL to fetch when a CSRF-expiry response (HTTP 419) occurs, to obtain a
@@ -56,7 +58,7 @@ export type HttpConfig = {
    * Default: '/sanctum/csrf-cookie'.
    */
   csrfCookieUrl?: string;
-  /** Additional headers merged into every request */
+  /** Additional headers merged into every request. A name matches in any case: its first spelling is kept and the last value wins (the Fetch Standard's "set"), so it goes out once. */
   headers?: Record<string, string>;
   /** Called when a 401 session-expired response is received */
   onSessionExpired?: (status: number) => void;
@@ -136,18 +138,59 @@ export function readCsrfToken(): CsrfResult | null {
 
 /** Every CSRF header this library may set - both are cleared before a refresh
  *  attaches the fresh one, so a stale header cannot outrank it (Laravel reads
- *  X-CSRF-TOKEN before X-XSRF-TOKEN; getTokenFromRequest, verified at source). */
-const CSRF_HEADER_NAMES = ['X-CSRF-TOKEN', 'X-XSRF-TOKEN'] as const;
+ *  X-CSRF-TOKEN before X-XSRF-TOKEN; getTokenFromRequest, verified at source).
+ *  Lowercase: deleted in any spelling. */
+const CSRF_HEADER_NAMES = ['x-csrf-token', 'x-xsrf-token'];
 
-/** Set `token` as the ONLY csrf header - clears the other name first. */
+/** Set `token` as the csrf header. An app's other spelling of that name is merged by `oneSpelling`. */
 function attachCsrf(headers: Record<string, string>): void {
   const token = readCsrfToken();
   if (token) headers[token.headerName] = token.token;
 }
 
 function setCsrfHeader(headers: Record<string, string>, result: CsrfResult): void {
-  for (const name of CSRF_HEADER_NAMES) delete headers[name];
+  dropHeaders(headers, CSRF_HEADER_NAMES);
   headers[result.headerName] = result.token;
+}
+
+/**
+ * A request's headers with one spelling per name, merged as the Fetch
+ * Standard's header list "set": a name matches case-insensitively (RFC 9110
+ * 5.1), its first spelling is kept and the last value wins, so one name is
+ * one header, never two joined "a, b". Two spellings of one name have one
+ * length, so one pass sets a bit per length (mod 32) and a request whose
+ * names all differ in length does no string work. Measured: a merge into a
+ * prototype-free dictionary cost every request about 200 ns, a pairwise
+ * check over the names about 60 ns (log s35.163).
+ * tests/header-one-spelling.test.ts.
+ */
+function oneSpelling(headers: Record<string, string>): Record<string, string> {
+  let lengths = 0;
+  for (const name in headers) {
+    const bit = 1 << (name.length & 31);
+    if (lengths & bit) return spelledOnce(headers);
+    lengths |= bit;
+  }
+  return headers;
+}
+
+// Two names share a length: first spelling, last value. `fromEntries` defines
+// own properties, so a `__proto__` name stays a header (src/dict.ts).
+function spelledOnce(headers: Record<string, string>): Record<string, string> {
+  const kept = new Map<string, [string, string]>();
+  const names = Object.keys(headers);
+  for (const name of names) {
+    const low = name.toLowerCase();
+    const entry = kept.get(low);
+    if (entry) entry[1] = headers[name];
+    else kept.set(low, [name, headers[name]]);
+  }
+  return kept.size === names.length ? headers : Object.fromEntries(kept.values());
+}
+
+/** Delete every spelling of each lowercase name (the Fetch Standard's "delete"). */
+function dropHeaders(headers: Record<string, string>, names: string[]): void {
+  for (const key of Object.keys(headers)) if (names.includes(key.toLowerCase())) delete headers[key];
 }
 
 /**
@@ -472,13 +515,30 @@ function parseJson(text: string, ok: boolean): unknown {
   try { return JSON.parse(text); } catch (e) { if (ok) throw e; return null; }
 }
 
-// The bus's one rule (retryClass): a transient failure for any request, an
-// uncertain one only when safe to send twice - an idempotent method, or an
-// Idempotency-Key (any case, RFC 9110 5.1), the bus's keyed command.
-function resendable(failure: BusError, method: string, headers: Record<string, string>): boolean {
+// The bus's one rule (retryClass): a transient failure for any request; an
+// uncertain one, or a declared wait, only when the request is identified,
+// safe to send twice - an idempotent method, or an Idempotency-Key (any case,
+// RFC 9110 5.1), the bus's keyed command.
+function resendable(failure: BusError, method: string, headers: Record<string, string>, declared?: number): boolean {
   const cls = retryClass(failure);
-  return cls === 'transient' || (cls === 'uncertain'
+  return cls === 'transient' || ((cls === 'uncertain' || declared !== undefined)
     && (IDEMPOTENT_METHODS.has(method) || Object.keys(headers).some((k) => k.toLowerCase() === 'idempotency-key')));
+}
+
+/**
+ * The wait an answer declares: Retry-After (RFC 9110 10.2.3), else the
+ * RateLimit field's `t` seconds for a policy with no quota left (`r=0`),
+ * else `X-RateLimit-Reset` (docs/plan-shape.md 4). draft-ietf-httpapi-
+ * ratelimit-headers-11: a List of items, each `"policy";r=<n>;t=<s>`.
+ * Retry-After "MUST take precedence". tests/retry-unidentified.test.ts.
+ */
+function declaredWait(headers: Record<string, string>): number | undefined {
+  let t: number | undefined;
+  for (const item of headers.ratelimit?.split(',') ?? []) {
+    const m = /;\s*t=(\d+)/.exec(item);
+    if (m && /;\s*r=0\b/.test(item)) t = Math.max(t ?? 0, +m[1]);
+  }
+  return _parseRetryAfter(headers['retry-after'] ?? (t === undefined ? headers['x-ratelimit-reset'] : String(t)));
 }
 
 async function doFetch<T>(url: string, serialized: string, headers: Record<string, string>, signal: AbortSignal): Promise<HttpResponse<T>> {
@@ -547,14 +607,17 @@ async function runWithRetry<T>(
           continue;
         }
 
-        // A declared wait (Retry-After, RFC 9110) re-sends any request, else
-        // the rule. Waiting what it says, never less; a declared wait over
-        // 30 s is not slept inside the request, it ends it.
+        // A declared wait sets when, never whether: the rule decides. Waiting
+        // what it says, never less; a declared wait over 30 s is not slept
+        // inside the request, it ends it.
         const failure = _answered(res.status, res.data, res.headers);
-        const declared = _parseRetryAfter(res.headers['retry-after'] ?? res.headers['x-ratelimit-reset']);
-        if (attempt < retry && (declared !== undefined || resendable(failure, opts.method, headers)) && !((declared ?? 0) > MAX_RETRY_AFTER_MS)) {
-          await sleepMs(declared ?? backoffMs(attempt), userSignal);
-          continue;
+        const declared = declaredWait(res.headers);
+        if (attempt < retry && !((declared ?? 0) > MAX_RETRY_AFTER_MS)) {
+          if (resendable(failure, opts.method, headers, declared)) {
+            await sleepMs(declared ?? backoffMs(attempt), userSignal);
+            continue;
+          }
+          _heldBack(failure, declared, opts.method, url);
         }
         throw asSilent(failure, silent);
       }
@@ -567,14 +630,19 @@ async function runWithRetry<T>(
       // re-enters here only to leave.
       if (e instanceof BusError) throw e;
       if (userSignal?.aborted) throw asSilent(abortedRequest(url), silent);
-      // A timeout-triggered abort is transient; a body that is not the JSON it
-      // declared is an off-protocol answer; anything else is no response.
+      // A timeout-triggered abort is no reply in time; a body that is not the
+      // JSON it declared is an off-protocol answer; anything else is no
+      // response. The first and the last may have landed.
       const failure = (e as Error)?.name === 'AbortError'
         ? transportFail('timeout:reply', `"${url}" timed out after ${timeout}ms.`, { context: { url, timeout } })
         : e instanceof SyntaxError
           ? remoteFail('unexpected:json', `"${url}" answered a body that is not valid JSON.`, { context: { url }, cause: e })
           : transportFail('lost:reply', `No response from "${url}".`, { context: { url }, cause: e });
-      if (attempt >= retry || !resendable(failure, opts.method, headers)) throw asSilent(failure, silent);
+      if (attempt >= retry) throw asSilent(failure, silent);
+      if (!resendable(failure, opts.method, headers)) {
+        _heldBack(failure, undefined, opts.method, url);
+        throw asSilent(failure, silent);
+      }
       try {
         await sleepMs(backoffMs(attempt), userSignal);
       } catch {
@@ -604,13 +672,13 @@ export async function postCommand<T = unknown>(
   // tests/http-timeout-bounds.test.ts.
   const timeout = rawTimeout < MAX_TIMEOUT_MS ? rawTimeout : rawTimeout > 0 ? MAX_TIMEOUT_MS : 10_000;
 
-  const headers: Record<string, string> = {
+  const merged: Record<string, string> = {
     'Content-Type': 'application/json',
     'X-Requested-With': 'XMLHttpRequest',
     ...extra,
   };
-
-  if (csrf) attachCsrf(headers);
+  if (csrf) attachCsrf(merged);
+  const headers = oneSpelling(merged);
 
   const serialized = JSON.stringify(body);
   return runWithRetry<T>(
@@ -745,7 +813,7 @@ function createInterceptorManager<T>(): InterceptorManager<T> & { forEach(fn: (h
 import { MAX_TIMEOUT_MS } from './bounds';
 import { createResponseCache, CACHE_DEFAULT_TTL } from './http-cache';
 import { classifyError, type ProblemDetails } from './http-errors';
-import { BusError, _failures, conditionOfStatus, retryClass, type FailCode } from './failure';
+import { BusError, _failures, _heldBack, conditionOfStatus, retryClass, type FailCode } from './failure';
 import { buildFullUrl } from './http-query';
 
 // ---------------------------------------------------------------------------
@@ -822,12 +890,50 @@ async function clientRequest<T>(
 ): Promise<HttpResponse<T>> {
   // Attach CSRF for mutation methods
   if (csrf && MUTATION_METHODS.includes(method)) attachCsrf(headersObj);
+  const headers = oneSpelling(headersObj);
 
   return runWithRetry<T>(
-    (signal) => doClientFetch<T>(fullUrl, method, headersObj, body, responseType, signal),
-    headersObj,
+    (signal) => doClientFetch<T>(fullUrl, method, headers, body, responseType, signal),
+    headers,
     { retry: maxRetries, timeout, userSignal, csrfCookieUrl, onSessionExpired, url: fullUrl, method, notModified },
   );
+}
+
+/**
+ * What a write's answer invalidates (RFC 9111 4.4): its target URI, which a
+ * cache MUST, and the URIs in `Location` and `Content-Location`, which it MAY,
+ * only on the target's origin (scheme, host, port; RFC 9110 4.3.1). A relative
+ * value resolves against the target (RFC 9110 10.2.2, 8.7), a client URL
+ * against the base fetch resolves it with. The target matches as given.
+ * tests/http-location-invalidation.test.ts.
+ */
+function invalidatedBy(fullUrl: string, res: HttpResponse): (url: string) => boolean {
+  const { location, 'content-location': contentLocation } = res.headers;
+  if (location || contentLocation) {
+    const base = globalThis.document?.baseURI ?? globalThis.location?.href;
+    const target = absolute(res.url || fullUrl, base);
+    const named: string[] = [];
+    for (const value of [location, contentLocation]) {
+      const uri = target && absolute(value, target.href);
+      // RFC 9111 4.4: "MUST NOT ... if the origin ... differs".
+      if (uri && uri.origin === target.origin) named.push(uri.href);
+    }
+    if (named.length) return (url) => url === fullUrl || named.includes(absolute(url, base)?.href as string);
+  }
+  return (url) => url === fullUrl;
+}
+
+// A target URI has no fragment (RFC 9110 7.1). Undefined when `url` does not
+// parse: a relative URL with no base, outside a browser, where fetch refuses it.
+function absolute(url: string | undefined, base?: string): URL | undefined {
+  if (!url) return undefined;
+  try {
+    const uri = new URL(url, base);
+    uri.hash = '';
+    return uri;
+  } catch {
+    return undefined;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -973,7 +1079,8 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
       if (cached) staleResponse = cached.data as HttpResponse;
     }
 
-    // Build headers and body
+    // Build headers and body. One spelling per name is settled in
+    // clientRequest, after the interceptors, so they see what they always saw.
     const headersObj: Record<string, string> = { ...config.headers } as Record<string, string>;
     let body: string | FormData | undefined;
     const rawData = config.data;
@@ -981,7 +1088,7 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
     if (rawData !== undefined && rawData !== null) {
       if (rawData instanceof FormData) {
         body = rawData;
-        delete headersObj['Content-Type']; // let browser set boundary
+        dropHeaders(headersObj, ['content-type']); // let browser set boundary, in any spelling
       } else if (typeof rawData === 'object') {
         body = JSON.stringify(rawData);
         headersObj['Content-Type'] = 'application/json';
@@ -1012,9 +1119,10 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
       if (ticket && cache.done(ticket) && response.ok) {
         cache.set(cacheKey, response, cacheCfg.ttl ?? CACHE_DEFAULT_TTL, cacheCfg.staleTtl ?? 0);
       }
-      // A write that resolved invalidates exactly its URL (RFC 9111 section
-      // 4.4). Only a 2xx gets here: the retry loop throws a non-ok response.
-      if (!isRead) cache.invalidate((u) => u === fullUrl);
+      // A write that resolved invalidates its URL and the URIs its answer
+      // names (invalidatedBy). Only a non-error answer gets here: the retry
+      // loop throws the rest. The answer as received, before interceptors.
+      if (!isRead) cache.invalidate(invalidatedBy(fullUrl, res));
 
       return response as HttpResponse<T>;
     }).catch((err) => {
@@ -1053,7 +1161,7 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
 
     // Track in-flight GET for deduplication
     if (joinable) {
-      cache.setInflight(dedupeKey, sharedPromise);
+      cache.setInflight(dedupeKey, sharedPromise, fullUrl);
       if (share) shares.set(sharedPromise, share);
     }
     // This caller holds its own read like any joiner (see hold).

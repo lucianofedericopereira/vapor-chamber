@@ -29,7 +29,7 @@ Gaps from an Istanbul `coverage-final.json`, files with none left out.
 
 ### createVitestMcp
 
-**Function** - [src/vitest-mcp.ts:197](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-mcp.ts#L197)
+**Function** - [src/vitest-mcp.ts:198](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-mcp.ts#L198)
 
 ```ts
 createVitestMcp(options?: VitestMcpOptions) => Promise<VitestMcpServer>
@@ -37,18 +37,19 @@ createVitestMcp(options?: VitestMcpOptions) => Promise<VitestMcpServer>
 
 Start the server: a warm Vitest on `root`, a file watcher, and a schema bus
 whose handlers are the three tools. Serve `bus` with `createMcpHandler` or
-`serveMcpStdio`, passing {@link VITEST_MCP_ACTIONS} (or fewer) as `actions`.
+`serveMcpStdio`, passing an `actionFilter` that allows the tools
+({@link VITEST_MCP_ACTIONS}, or fewer).
 
 ### serveVitestMcp
 
-**Function** - [src/vitest-mcp.ts:295](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-mcp.ts#L295)
+**Function** - [src/vitest-mcp.ts:296](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vitest-mcp.ts#L296)
 
 ```ts
 serveVitestMcp(options?: VitestMcpOptions) => Promise<() => Promise<void>>
 ```
 
 {@link createVitestMcp}, served over stdio with every tool allowed. Resolves
-to a `stop()` that detaches from stdin and closes Vitest.
+to its async dispose: it detaches from stdin and closes Vitest.
 
 ## Interfaces
 
@@ -120,11 +121,11 @@ What `runTests` returns.
 ```ts
 export interface VitestMcpServer {
   bus: ReturnType<typeof createAsyncSchemaCommandBus<BusSchema>>;
-  close(): Promise<void>;
+  disposeAsync(): Promise<void>;
 }
 ```
 
-A running server: the bus to serve, and `close()`.
+A running server: the bus to serve, and `disposeAsync()`, which stops the watcher and closes Vitest.
 
 ## Variables
 
@@ -136,7 +137,7 @@ A running server: the bus to serve, and `close()`.
 VITEST_MCP_ACTIONS: string[]
 ```
 
-Every tool name, the default allow-list.
+Every tool name.
 
 ### VITEST_MCP_SCHEMA
 

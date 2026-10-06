@@ -13697,3 +13697,2141 @@ Owner: speed, correctness, symmetry, shape, room to grow.
   exist only there; patterns-ambient.d.ts stubs them), type-checked only.
 - vue-vapor-component.vue mounted and used: add, toggle, undo, redo; an
   empty submit refused with the validator's alert.
+
+### 35.146 `actions` means one thing: ActionScope (2026-10-05)
+
+- Plan .probes/1.27-plan.md item 5. `actions` had two meanings: debounce,
+  throttle and optimisticUndo took a list where `[]` acted on nothing (1.25,
+  a Set); the 12 optional filters read `!actions?.length` as every action.
+  35.141 moved the filtering into the bus and applied the second reading to
+  both: `debounce([], 50)` answered `{ pending: true }` for every dispatch,
+  `throttle([])` refused, `optimisticUndo(bus, [])` predicted and rolled back.
+  Red first: tests/plugin-empty-list.test.ts (4 failed, controls passed).
+- Owner rule: a term always means the same; what behaves differently is
+  named differently; nothing hand-rolled per site. A first fix translated at
+  12 factory sites (`_scopeActions`, `[]` -> undefined for the optional
+  filters) and was replaced before landing.
+- Shape: one named type, `ActionScope` (command-bus.ts), for every `actions`
+  that selects actions (11 plugin options, the 3 required parameters,
+  `PluginParts.actions`, `createMcpHandler`): absent all, `[]` none, entries
+  names or patterns. `createMcpHandler` already read it this way. Read in one
+  place, `perAction` (`p.actions != null`, `a == null ||`; a plain-JS null is
+  all, as in 1.26, pinned). The factories pass the option as given. A guard
+  test fails if any other src file reads a list (`actions.length/some/...`),
+  seeded with a failure.
+- Behaviour change, stated in the CHANGELOG: an optional filter given `[]`
+  now acts on nothing (it was all). No repo example or doc passed `[]` to
+  one. Gain: a list built at run time that ends empty matches nothing, not
+  everything (an outbox capturing every command, a bridge forwarding every
+  action), as MCP already did.
+- Per dispatch: unchanged in every configuration (the engagement test runs at
+  runner build, the selection once per action). A required list given `[]`
+  engages `perAction` (one Map read) and never calls the plugin. No A/B: no
+  per-dispatch path changed.
+- Bytes against c7184b6: raw -5 in all three IIFEs (`!= null` shorter than
+  `?.length`); brotli full +5, core +4, elements -2; Blade vite brotli 7_755
+  -> 7_753. Budgets set to measured.
+- docs/BUNDLE-SIZES.md regenerated: its gzip columns move +0.1 KB on several
+  rows (alien-signals included) from this machine alone: the release dist
+  measured here gives the same moves against the committed release file (26
+  lines), which upstream CI generated. Not this change.
+- Found, not changed: the store's `actions` (its action definitions, a map)
+  and `inspectBus().actions` (registered names) use the same word for other
+  things than a scope. Recorded for the owner's naming rule.
+
+### 35.147 The store's map is `reducers` (2026-10-05)
+
+- Plan item 5b, owner: "fix it" (the naming debts s35.146 recorded). The
+  store's `actions` option is a map of functions `(state, target, payload)
+  => nextState`, its type documented "A reducer"; `actions` elsewhere is an
+  ActionScope (names). Renamed `reducers` (Redux Toolkit's `createSlice`
+  word for the same map, whose keys generate the actions, as `add` on store
+  `cart` gives `cartAdd`). Type `StoreReducer<S>`; `StoreAction<S>` stays as a
+  `@deprecated` alias.
+- Corrected from s35.146: `inspectBus().actions` is not a debt. It lists the
+  action names that have handlers, the same kind of value an ActionScope
+  holds (`[]` none); no rename.
+- Compatibility (ESM strict semver, docs/performance.md): `actions` is still
+  read once at define time (`options.reducers ?? options.actions`), typed
+  `@deprecated` in a union with `reducers`, and DEV warns once per
+  definition; both given (plain JS), `reducers` wins and DEV says so.
+  Removal at 2.0, noted in ROADMAP.md. Red first on the release dist:
+  `{ reducers }` threw `TypeError: Cannot convert undefined or null to
+  object`. tests/store-reducers-name.test.ts.
+- Migration found by the compiler: the deprecated branch disabled on a
+  scratch pass, `typecheck` listed 44 TS sites (tests, two examples); a script
+  renamed the key at exactly those sites (inline, multi-line, shorthand with
+  its `const`, one shared object), and the same pass then reported 0. .md,
+  .vue and the src doc example by grep (docs/store.md 6, the Vapor example,
+  src/store.ts). Prose that calls the store's commands "actions" is kept:
+  they are actions.
+- Cost: define time only. The IIFEs carry no store (unchanged); the store
+  entries gain the `??` and the DEV warning (folds in production), measured
+  in docs/BUNDLE-SIZES.md.
+
+### 35.148 Item 5 again: fix the three plugins, keep the filters' `[]` (2026-10-05)
+
+- Owner: "stop killing features", "instead of fix". s35.146 made `[]` mean
+  none for every `actions`, which removed a released behaviour of the 12
+  optional filters (absent or `[]`: every action, 1.25 and 1.26) to fix a
+  defect in 3 plugins. Corrected here; s35.146's bug fix stays, its removal
+  does not.
+- Three things, three names, each with its released behaviour:
+  `ActionScope` (a plugin's filter and the `actions` it declares: absent or
+  `[]` every action; the bus reads it, alone, `perAction` byte-identical to
+  c7184b6 again); `ActionList` (the required first list of debounce,
+  throttle, optimisticUndo: `[]` none, 1.25); createMcpHandler's `actions`
+  (an allowlist, `[]` none, released type `string[]` back, one doc sentence
+  stating it).
+- The fix: `forList(list, plugin)` in plugins-core.ts gives an empty list a
+  fresh plugin that only hands on (fresh: Object.assign writes each plugin's
+  id onto it; pinned). A bus with `debounce([])` pays one plugin call a
+  dispatch, what 1.25 paid without its Set lookup; 1.26 ran the whole
+  debounce body.
+- Tests (tests/plugin-empty-list.test.ts): the three `[]` cases red on the
+  release (s35.146); the filters' `[]` and absent are every action again
+  (cache, rateLimit, a bridge), the declared scope is what was given, a
+  plain-JS null is every action, MCP's `[]` exposes none; the guard (no
+  plugin reads its own scope) kept.
+- Removed from s35.146: the CHANGELOG "Changed" entry that announced `[]` as
+  none for the filters.
+
+### 35.149 Examples: the Vue todo keeps its id across undo and redo (2026-10-05)
+
+- Owner: "also update and fix examples". Every example searched (all file
+  types): four define a store, all on `reducers` (s35.147). One defect:
+  examples/vue-vapor-component.vue minted `id: Date.now()` inside the `add`
+  reducer, and history's redo re-dispatches the action (ledger.ts:133), so a
+  redone todo came back with a new id (a new list key). Proof,
+  .probes/p5-redo-id-example.mjs on the fixes-1.27 build: old shape "id before
+  undo 1791195999011, after redo 1791195999047: DIFFERENT"; fixed shape SAME.
+- Fixed in the example only: `addTodo` sends `{ id: Date.now() }` as the
+  command's payload and the reducer places it; the validator still reads the
+  text from the target. A comment says why.
+- Checked: `npm run check:example` builds vapor-sfc (its vue-tsc covers
+  ../vue-vapor-component.vue), vapor-island-cart and exo-astro, green;
+  positive control: a seeded `p.nope` in the example failed vue-tsc (TS2339),
+  restored, 0 errors. The TS snippets type-check in the gate
+  (examples/tsconfig.patterns.json). The examples run end to end in the
+  final sanity pass, after the remaining fixes land.
+
+### 35.150 Item 6: `$` commands are never answered from a plugin's memory (2026-10-05)
+
+- Plan .probes/1.27-plan.md item 6, built as written. cache() stored the
+  first `<id>$reset` and answered the second from memory (`ok: true`, state
+  not reset); idempotent() collapsed it the same way; debounce(['cart*'])
+  answered `cart$reset` with `{ pending }`. history sends the SAME recorded
+  command to `$undo` after a redo (ledger.ts), so a second undo of one step
+  was answered from memory too.
+- Change: cache does not store a `$` result (its miss path; a hit pays
+  nothing); idempotent does not record one in `done` (its completion path);
+  debounce hands one on (its body). supersede: docs only, as planned
+  (RegisterOptions.undo states the inverse receives the original command,
+  whose signal supersede may have aborted; pinned).
+- Tests: tests/library-commands-memory.test.ts, 10; 4 red on the release (the
+  plan's three and the repeated `$undo`), 6 controls green before and after
+  (app actions still cached and collapsed and postponed, throttle still
+  refuses a `$reset`, a plain plugin still sees `$` commands, supersede's
+  signal). Suite 3128 passed, coverage 100 x4.
+- Bytes: cache and idempotent are not in the IIFEs. debounce's line: +26 raw
+  in all three; brotli against the budgets full -17, core -9, elements -9.
+  Raw budgets raised to measured. Blade consumer bundle under its ceiling,
+  unchanged.
+- Process record: before this, in the same window, I replaced the plan's
+  design without approval three times (a check at the top of each plugin;
+  then a per-action exclusion with a `forget` hook), measured each, and
+  committed the last (e6f2583). It made a bus whose only memory plugin has
+  no actions list 10 to 12 ns slower per dispatch; reverted (27b467f). The
+  measurements stand as facts for later: a `$` check per dispatch in a
+  plugin body +4 to +6 ns, an origin read +2 ns, the per-action exclusion
+  free on scoped buses. Findings outside item 6, written into the plan and
+  not built: history's redo answered from a scoped cache/idempotent entry
+  (proven, a positive control), a custom `key` landing a `$` command on an
+  app entry, idempotent's in-flight map collapsing a concurrent `$` command.
+
+### 35.151 Type regressions from s35.146-148 and s35.147 fixed; 1.26 code compiles (2026-10-05)
+
+- Found by the owner's sanity check, measured, not argued: consumer code that
+  compiles against the 1.26 release (c7184b6, positive control: only a seeded
+  error) failed against fixes-1.27 at 13 places. 12 from s35.146/148: every
+  plugin option's `actions` had become `readonly string[]` (ActionScope), so
+  an app holding options in a typed variable and treating `actions` as a
+  `string[]`, or calling `.push`, no longer compiled (cache, circuitBreaker,
+  rateLimit, metrics, serialize, idempotent, supersede, both bridges, outbox,
+  pollWith). 1 from s35.147: `ChamberStoreOptions` became a union, so a
+  function reading `options.actions` got `R | undefined`.
+- Fix, types only, nothing lost: `ActionScope` and `ActionList` are
+  `string[]`, as the options were in 1.26; `PluginParts.actions` is
+  `Readonly<ActionScope>`, 1.26's `readonly string[]`. `ChamberStoreOptions`
+  is 1.26's shape again (`actions` required), marked deprecated; the options
+  with `reducers` are `DefineChamberStoreOptions` (Redux Toolkit's
+  `<function>Options`, `CreateSliceOptions`), either form accepted, each
+  carrying the other key as optional `undefined` so the read
+  `options.reducers ?? options.actions` is unchanged. The built JavaScript is
+  byte-identical (an alias variable that leaked into store-base.js was
+  removed for that).
+- Guard: tests/compat-1.26.test-d.ts, the consumer code, compiled by
+  `typecheck` (tsconfig.typecheck.json). Seeded red: against the source
+  before this fix it reports the 13 errors; 0 after.
+
+### 35.152 `createActionFilter` / `actionFilter`: CloudEvents filter expressions (2026-10-05)
+
+- Plan .probes/1.27-plan.md item 9 (research and build spec). Owner: one
+  name, one meaning; names and semantics from a standard, not invented; the
+  root of item 5's defect is that each option decided what an empty list
+  meant. Sources read at the source: CloudEvents Subscriptions API 3.2.4
+  (filter dialects; an empty `all`/`any` MUST be rejected), Kubernetes
+  LabelSelector (empty and null defined by the type), Rollup `createFilter`
+  and the OpenAI Agents SDK `create_static_tool_filter` (a function the app
+  calls, its result passed in), Redux Toolkit matchers, MCP ToolAnnotations,
+  gRPC A6, W3C TAG design principles, Google AIP-160.
+- Shape: `createActionFilter(expressions)` compiles CloudEvents expressions
+  (`exact`, `prefix`, `suffix` over the `action` attribute; `all`, `any`,
+  `not`; a set ANDed; an empty set every action) into an `ActionFilter`, a
+  predicate on the action NAME, and throws `core:invalid:filter` on what the
+  spec rejects (catalogue row, docs/errors.md). Every plugin option that has
+  `actions`, `PluginParts` and `createMcpHandler` take `actionFilter`; both
+  given, both must match. The bus asks it once per action when it builds
+  that action's chain (perAction), never per dispatch. `actions` unchanged
+  (its type change broke 1.26 code, s35.151). `filter` keeps its meaning (a
+  predicate on the command, five sites); `actionFilter` is a predicate on the
+  name, asked once: two behaviours, two names.
+- Measured and rejected on the way: compiling inside the bus cost EVERY app
+  +304 brotli on the Blade consumer bundle (+835 raw / +296 brotli core IIFE)
+  for a feature few use; the first module was also loose (1,845 raw: one
+  message per case, three copies of the string path, a per-array cache),
+  rewritten to 1,359 raw. Passed in, the bus's glue is, raw/brotli: perAction
+  reads `actionFilter` (Blade +17; full +55/+17, core +55/+32, elements
+  +55/+16), the bridges pass it on (Blade +5; full +56/+9, core +28/+11,
+  elements +28/0); total Blade 7_755 -> 7_780, full +111/+12, core +83/+42,
+  elements +83/+28. An app calling `createActionFilter` adds about 318 brotli.
+  Budgets set to measured.
+- A/B (A a4251dd, B m9-actionfilter d4f6c78, K 10, two lengths), released
+  array forms: no row slower. filter1_miss, mixed4,
+  mixed4_listener, plugins3_listener1, tracked_mixed_keys, bare_dispatch,
+  four_scoped_miss, no_bridge, bridge_miss: no result, every interval
+  includes 1. filter5_miss: no result overall (short length 1.036x, +2.0 ns;
+  long length failed its own control, 3.4% spread); the code a dispatch runs
+  there is identical in both arms (only the chain build, once per action,
+  changed), V8-RULES 12's untouched-path movement, not a cost.
+
+- Tests: tests/action-filter.test.ts, 23 (spec semantics, each MUST-reject
+  case and a control, plugin and MCP selection, both given, asked once per
+  action); 6 wiring tests red with the bus wiring removed.
+- Still in item 9, not built: B3 (MCP ToolAnnotations on the action schema,
+  `idempotentHint` feeding retry), B4 (the retry map's name, from gRPC A6),
+  `createMcpHandler`'s `actions` allowlist name.
+
+### 35.153 Compat guard: an interface that extends `ChamberStoreOptions` (2026-10-05)
+
+- Lead from the independent audit of a4251dd (.probes/audit-2026-10-05.md,
+  R1): 1.26 code `interface X extends ChamberStoreOptions<S, R> { ... }` failed
+  on the branch with TS2312 (an interface needs an object type; the options
+  had become a union). s35.151 restored 1.26's object type, so it compiles on
+  efa1ed1, but tests/compat-1.26.test-d.ts did not hold the case.
+- Added the line. Seeded red: the same guard file against a4251dd reports 14
+  errors (s35.151's 13 and TS2312 on the new line); 0 on this tree. The
+  audit's compile probe (C1-C8) on efa1ed1: R1, R2, R3 gone; only C6 remains,
+  identical on the release (audit D3: optimisticUndo's type rejects an async
+  bus), recorded in the plan. Types only, no built byte moves.
+
+### 35.154 Item 7: one shape for a dispatch's own abort (2026-10-05)
+
+- Plan item 7, decided shape (R1 variant B, R2, R3). Before, P3 showed the
+  same cause in three shapes: before start `core:aborted:dispatch`. A
+  handler's rethrow the raw DOMException. A plugin's rethrow
+  `plugin:failed:plugin` with DEV "Fix the plugin".
+- R1 (src/failure.ts): an `aborted:*` BusError is named `AbortError`
+  (`code.charCodeAt(1) === 98`, 'b' at index 1 is `aborted` alone). Measured
+  before this section (m7-r1b): +1.3 ns on creating an aborted BusError only.
+- R2 (src/command-bus.ts `ownAbort`): a throw that IS the dispatch's own
+  signal's reason, in `tryCatchAsyncHandler`'s catch or in `pluginThrew`,
+  becomes `abortedResult(action, signal)`. Failure path only.
+- R3: `abortedResult` puts the reason in `cause`.
+- Readers checked: `failureCondition` reads the code first. `unanswered`
+  and the client test `instanceof BusError` before the name. `problemOf`
+  reads `name === 'BusError'` only for `remote:` codes. No repo test pins
+  the name of an abort.
+- Tests: tests/abort-one-shape.test.ts, 8. Before the src change 4 red (the
+  name, before start, handler, plugin), the 4 controls green (custom reason,
+  a handler ignoring the signal, an unrelated AbortError, an unrelated
+  plugin throw with its DEV message).
+- Bytes, raw/brotli, full, core, elements IIFE: name +34/+32, +34/+10,
+  +34/+16. Cause +8/-16, +8/-11, +8/+6. Rethrow read +103/+83, +102/+21,
+  +102/+43. Total +145/+99, +144/+20, +144/+65. Blade bundle brotli 7780 ->
+  7833: name +9, cause +3, rethrow +41. A `const` arrow helper measured 2 B
+  more on Blade than the function with a local `signal`. Ceilings raised to
+  measured (scripts/check-size.mjs, tests/esm-treeshake.test.ts).
+- Docs: AsyncCommandBus.dispatch JSDoc (audit D2 now true), docs/performance.md
+  "cancelable async dispatch".
+
+### 35.155 Item 2: a transactional batch undoes the Command that ran (2026-10-05)
+
+- Plan item 2, audit B2. Before, `syncRollback` / `asyncRollback` built a
+  fresh Command per step (new `meta.id`), so an `undo: true` store could not
+  find its step and wrote the copy into its state. The `$undo` command's
+  `causationId` named a command that never ran.
+- Shape (rev 3): each dispatch builds its Command, then runs it
+  (`_syncRun`, `_asyncRun`). The sync bare-bus fast path stays inside
+  `_syncDispatchInner`, before the run. A batch builds each Command, keeps
+  it, runs it through `syncDispatchCommand` / `asyncDispatchCommand` (the
+  same depth bound and naming rule), and its rollback undoes that object.
+- Measured (npm run ab, K 10, two lengths, A 845a610, 7 min per arm),
+  `bare_dispatch` on meta-slot and plugins-miss:
+  - rev 1, a `prebuilt` parameter on the dispatch (m2-prebuilt 6ef5d91):
+    +8.5 to +12.9 ns (1.33-1.47x), SLOWER. Rejected.
+  - rev 2, every dispatch through the run function (m2-split 658790a):
+    +6.0 to +10.3 ns, SLOWER. Rejected.
+  - rev 3, the bare path kept inline (m2-split3 8c65c95): +2.2 to +5.7 ns
+    counted on the bare path. history-undo was faster on every row (-3 to -5
+    ns), the other rows no result. Owner: a few ns is this machine's noise, not a
+    regression. Landed.
+  - rev 4, a batch entry copying the dispatch body (m2-copy d2bacbf): run
+    stopped by the owner's ruling, not measured.
+- Tests: tests/batch-rollback-command.test.ts, 5. Before the change 3 red
+  (sync store, async store, the undone object and its causationId), the
+  control green. Plus the batch entry's depth bound and naming rule.
+- Bytes, raw/brotli, full, core, elements IIFE: sync +183/-6, +183/+46,
+  +184/+39. Async +171/+69, +171/+56, +170/+49. Total +354/+63, +354/+102,
+  +354/+88. Blade bundle brotli 7833 -> 7873: sync +33, async +7. Ceilings
+  raised to measured.
+
+### 35.156 The store rename is clean: no deprecated name, no warning (2026-10-05)
+
+- Owner ruling, 2026-10-05: no deprecations. The repo has no outside user
+  base, and every consumer is refactored in the same change.
+- Found first: the 1.26 test suite (c7184b6's tests/) run against b15293e
+  failed 5 of 3107 tests. Positive control: the same tests on the release
+  source pass 3102 of 3102 (1 expected fail, 4 skipped). Four failures were
+  s35.147's DEV warning, printed for every store defined with `actions`
+  (store-redefine, store-review x3). The fifth is the Blade bundle ceiling,
+  7_873 against 1.26's 7_756 brotli (s35.152 +25, s35.154 +53, s35.155 +40),
+  each raise attributed in its own section.
+- Change: `ChamberStoreOptions` holds the map under `reducers`, the only key
+  read. Removed: the `actions` fallback and its warning, the `StoreAction`
+  alias, the 1.26 options shape and `DefineChamberStoreOptions` (added in
+  s35.151, never released). The ROADMAP's removal schedule for them is
+  gone.
+- Consumers: every typed store caller in src, tests and examples already
+  used `reducers` (typecheck clean before and after). The seven store
+  workloads in scripts/ab/workloads move to `reducers`. They no longer run
+  against builds before s35.147. No other consumer defines a store.
+- Tests: tests/store-reducers-name.test.ts keeps the `reducers` test and a
+  "defining a store prints nothing" test. The two tests that pinned the old
+  name are deleted. tests/compat-1.26.test-d.ts keeps the type shapes that
+  were not renamed (mutable option arrays, an interface extending the store
+  options). Suite 3162 passed, coverage 100 x4.
+- Bytes: dist/store-base.js 7_853 -> 7_580 raw, 2_198 -> 2_099 brotli. The
+  IIFEs do not hold the store: unchanged.
+
+### 35.157 Item 1, part 1: a store rollback rebases, an unknown undo changes nothing (2026-10-05)
+
+- Plan .probes/1.27-plan.md item 1, rules R1 to R4. Item 1 lands in parts,
+  each green on its own: this one. Redo restoring the recorded state (R5).
+  canUndo at `$undo` (R7) and transport-answered steps (R9). The DEV
+  double run, docs and example (R6).
+- Fixed: undoing step A after A, B erased B and answered `ok` (plan P0).
+  An undo for a step the ring does not hold wrote the oldest step's Command
+  into the state (audit B1). optimisticUndo and a transactional batch reach
+  both. A tab's write (`<id>$sync`) bypassed the ring, so a rollback erased
+  it too.
+- Shape: undoing step i starts from its "before" and re-applies every later
+  step: an action by calling its reducer directly (plugins and bridges never
+  see it again), `$reset` and `$sync` by keeping the state they set. The
+  undone step is marked in the ring, so a later replay skips it and a second
+  `$undo` of it is the identity, as is an undo for a step the ring does not
+  hold. The replay is computed first and written after: a reducer that
+  throws leaves the ring and the state as they were, and `$undo` fails.
+  `<id>$sync` is now a step (R1).
+- Tests: tests/store-rollback-rebase.test.ts, 12. Red on a5f1c45: 10
+  (sync and async P0, persist, second undo, replay over `$reset`, replay
+  over an undone step, a throwing replay, an unheld undo, optimisticUndo on
+  a failed action, a tab's write). Controls green before and after: newest
+  step exact, history undo/redo. Suite 3174 passed, coverage 100 x4.
+- Speed: the action handler is unchanged. The undo path and a tab's
+  incoming write change (owner rule: rare paths may pay measured ns), so no
+  A/B here. Part 2 changes the handler and is measured.
+- Bytes, store-base.js minified (esbuild) against a5f1c45: 3_609 -> 3_978
+  raw, 1_578 -> 1_733 brotli (+155): the rebase loop and the reducer map. A
+  first version was +187: two arrays and `$reset`/`$sync` replay entries,
+  replaced by one triple list and the recorded state. Only apps that import
+  the store pay it. The IIFEs and the Blade bundle hold no store.
+
+### 35.158 Item 1, part 2: a store redo writes the state the action produced (2026-10-05)
+
+- Plan item 1, R5. Fixed: history's redo re-dispatched the action and the
+  store ran the reducer again, so a reducer that mints a value (an id, a
+  time) brought the item back with a new one.
+- Shape: redo is still the action with origin 'redo' (`ledger.ts`), so
+  plugins, listeners, persist and devtools hear what they heard. An undo
+  keeps the undone step as [cmd, before, after]. In the store's handler, a
+  redo of that step, while the state is still the one the undo restored,
+  writes the recorded "after" instead of running the reducer: same object,
+  same ids (Memento). Otherwise the reducer runs, as before. `step` now takes
+  the reducer and writes the state. It reads `undone.length` before the
+  origin, so an action with nothing undone never reads the origin. The
+  reducer runs before anything moves, so a throw leaves the ring and the
+  undone steps as they were. `$reset` and `$sync` pass hoisted functions.
+- Tests: tests/store-redo-recorded.test.ts, 6. Red on af6b919: 4 (same
+  object, reducer not run again, `$reset`, undo/redo back and forth).
+  Controls: listeners hear the redo as the action. After a change history
+  did not record, the reducer runs. Suite 3180 passed, coverage 100 x4.
+- A/B (npm run ab, K 10, two lengths, A af6b919, B m11-redo 5b72ba9, only
+  store-base.js differs): store_undo_on -1.1 / -1.6 ns, store_undo_off
+  +0.5 / +0.4, store_shared +0.8 / +1.6, store_plain -0.5 / -0.4. Every row
+  no result. No row slower.
+- Bytes, store-base.js minified: 3_965 -> 4_016 raw, 1_725 -> 1_787 brotli
+  (+62), store users only.
+- Found, not built: R7 (the bus checks `canUndo` at `$undo`) conflicts with
+  the store's released `canUndo`, which means "history may undo" (false
+  after a change history did not record, false past 256 steps, pinned by
+  tests/store-undo.test.ts). Checked at `$undo`, it would refuse the store's
+  rebase and turn an unheld undo into a `conflict`. Owner question, in the
+  plan.
+
+### 35.159 Item 1, part 3: history never undoes or redoes locally a command a bridge carried out (2026-10-05)
+
+- Plan item 1, R9 (from P1). Fixed: a bridge replaces the local handler for
+  the actions it matches, but history recorded the command. Undo then ran
+  the LOCAL inverse of a change made only on the server, and redo sent the
+  write again with no Idempotency-Key: the client off by one, the server
+  holding the write twice.
+- Shape: the three bridges turn a server answer into a result in one place,
+  `answerOf`. It now records the command in `_appliedRemotely`, a WeakSet in
+  command-bus.ts (a set, not a field: the command keeps its hidden class).
+  The ledger's one precondition, shared by canUndo and undo(), reads it: a
+  step a bridge carried out reads canUndo false and undo() does nothing, so
+  nothing is redone either. Undo is local (R8): reversing a server write is
+  the app's compensating command. Not used: `meta.response`, which is the
+  HTTP response and has no WebSocket form, so it would be a second mechanism
+  for one fact.
+- Tests: tests/undo-remote-step.test.ts, 5. Red on d7c7e3f: 4 (HTTP,
+  batching and WebSocket bridges, a local step after a bridged one).
+  Control: without a bridge the action undoes and redoes locally. Suite 3185
+  passed, coverage 100 x4.
+- Speed: only the bridged path (a network round trip) and history's undo
+  check change. A dispatch without a bridge runs identical code. No A/B.
+- Bytes, raw/brotli, full, core, elements IIFE: the mark +34/+36, +31/+17,
+  +32/+10. The ledger reading it +13/-5, 0/0, 0/0. Total +47/+31, +31/+17,
+  +32/+10. Blade +27 (7_873 -> 7_900), the mark alone. Merging canUndo and
+  undo() into one precondition saved 22 raw on the full IIFE and cost 6
+  brotli: kept, one rule in one place. Budgets raised to measured.
+- R7 stays open (log s35.158). Next: part 4 (R6: DEV double run, docs,
+  R8 note).
+
+### 35.160 Item 1, part 4: development runs a store reducer twice, undo is local, in the docs (2026-10-05)
+
+- Plan item 1, R6 and R8. A rollback replays reducers (s35.157), so one that
+  mints a value (an id, a time) rebases to a different state. In
+  development an `undo: true` store runs each reducer twice, as React's
+  StrictMode does, compares the results as JSON, and warns once per action
+  when they differ, naming the fix: mint in the call. A state JSON cannot
+  hold is not compared. `$reset` and `$sync` are not checked: a rollback
+  keeps the state they set. Production runs each reducer once: the check is
+  `DEV ? twice(...) : f(...)` inside `step`, so the production branch is the
+  call it was.
+- Docs: docs/store.md states the check and the recommendation, and R8:
+  undo is local, a command a bridge carried out reads canUndo false, the
+  server's write is reversed by a compensating command.
+- Tests: tests/store-reducer-twice.test.ts, 6. Red on 1d4cc62: 2 (a minting
+  reducer warns once, a pure reducer runs twice without a warning).
+  Controls: a non-JSON state, `$reset`, a store without undo (one run),
+  production (one run, no warning). Suite 3191 passed, coverage 100 x4.
+- Bytes, store-base.js bundled and minified by esbuild with
+  NODE_ENV=production: 3_909 -> 4_370 raw, 1_755 -> 1_944 brotli. esbuild
+  cannot fold the library's DEV expression (`typeof process`), so this is
+  the development cost: the warning text and `twice`. A Vite production
+  build folds DEV (scripts/build.mjs). The IIFEs hold no store.
+- Item 1 delivered in four parts (s35.157 to s35.160). R7 stays open for
+  the owner (log s35.158).
+
+### 35.161 Item 1, R7 closed: a rollback does not consult canUndo, in the docs (2026-10-05)
+
+- Plan item 1, R7, decided by the owner on 2026-10-05: not built.
+  `RegisterOptions.canUndo` is history's check by its own doc ("history
+  undoes only when true"). History undoes by turn, newest first. A rollback
+  (optimisticUndo, a transactional batch) is wired once to reverse the step
+  that failed and never reads it. The store's rebase (s35.157) depends on
+  that: a store's canUndo is false for any step but the newest.
+- Docs: the `canUndo` JSDoc and docs/store.md (Undo) say so.
+- Tests: tests/undo-check.test.ts, 2 more, pinning the stated rule. A
+  `register({ undo, canUndo: () => false })` action: history refuses it
+  (the positive control, in the same test), a transactional batch and
+  optimisticUndo still reverse it. Green before and after: no code changed.
+  Suite 3193 passed, coverage 100 x4.
+- Bytes: none, a comment only.
+
+### 35.162 Item 3: no reply on an unidentified command is not re-sent, a declared wait sets when, never whether (2026-10-06)
+
+- Plan .probes/1.27-plan.md item 3, audit S3 and N5. Fixed: every
+  `timeout` was transient, so the async bus re-sent an unkeyed bridged write
+  after no reply (3 POSTs for one `cartAdd`), and the HTTP client re-sent a
+  POST asked to retry. A Retry-After on any status re-sent any request: an
+  unkeyed POST answered 409, 422, 500 or 502 with one went out again. The
+  first attempt may have landed: a double apply.
+- Standard: RFC 9110 9.2.2 (no automatic retry of a non-idempotent request
+  without a means to know it is safe), 10.2.3 (Retry-After is a wait), 15.6.3
+  and 15.6.5 (502 and 504 may have applied). urllib3, gRPC A6, ky and
+  AIP-194 read the wait as when only. RateLimit field,
+  draft-ietf-httpapi-ratelimit-headers-11: a List of items, `r` the
+  available quota, `t` "the number of seconds within which the client can
+  use no more than the available quota", and Retry-After "MUST take
+  precedence".
+- Shape, one rule for the bus and the client: re-send = transient OR
+  (identified AND (uncertain OR a declared wait)). Transient: `limited`, a
+  408. Uncertain gains no reply: a transport's own `timeout:` (`lost:` was
+  already), a 502 or a 504 (`_noReply` in failure.ts, read by
+  `retryClass`). Identified: an idempotency key, an action declared
+  idempotent, an idempotent method, an `Idempotency-Key` header. Held back
+  for want of identity while retries are on with attempts left,
+  `_heldBack` marks a no-reply failure `context.outcome: 'unknown'` and DEV
+  warns once per action (bus) or method and URL (client) and cause, worded
+  on the cause. A verdict with a declared wait is not marked (the condition
+  says not applied), only warned. `retry: false` or 0 marks nothing. The
+  client's declared wait: Retry-After, else the largest `t` of a RateLimit
+  item with `r=0`, else X-RateLimit-Reset. The bridges' `context.retryIn`
+  stays Retry-After, so the outbox is unchanged (plan). Registry:
+  `transport:timeout:reply` retryable false. The registry test now derives
+  the column from `retryClass` (every other row still equals
+  RETRYABLE_CONDITIONS).
+- Tests: tests/retry-unidentified.test.ts, 19. Red on 69cf3ab: 9 (bridge
+  timeout, 504 and 502 through the bridge, optimisticUndo's onRollback
+  reading the outcome, a 409 with Retry-After on the bus and on the client,
+  a client POST timeout, client 504 and 502, RateLimit `t`, production
+  marks without a warning). Controls green before and after: declared
+  idempotent and keyed re-sent, `retry: false`, 429, 503 and 408 re-sent
+  unkeyed, a 500 not marked, any-case Idempotency-Key, a GET, RateLimit
+  with quota left, Retry-After over RateLimit, a 2xx that is not JSON.
+  Rewritten as the plan's pairs, they pinned the released re-send:
+  tests/http.test.ts (409 + Retry-After: unkeyed once with `retryIn`, keyed
+  re-sent), tests/wire-contract.test.ts (504 moves to the uncertain row, 409
+  + Retry-After keyed re-sent, unkeyed once), tests/http-one-shape.test.ts
+  (504 and a timeout re-sent only identified), tests/schema.test.ts (the
+  registry rule). Suite 3213 passed, coverage 100 x4.
+- Speed: failure paths only (a failed call, a failed request). A success
+  runs the same code in the bus and the client. No A/B (owner rule: rare
+  paths may pay).
+- Bytes, brotli, each piece left out of the build alone (brotli is not
+  additive):
+
+  | Piece | full IIFE | Blade |
+  |---|---|---|
+  | the rule (no reply uncertain, a wait only when identified) | +47 | +61 |
+  | the RateLimit read | +72 | +70 |
+  | the held-back report (mark, two call sites, DEV text folds) | +83 | +46 |
+  | total | +188 | +177 |
+
+  Raw/brotli full, core, elements: +521/+188, +520/+188, +519/+187. Blade
+  7_900 -> 8_077. Squeezed first: the call sites passed a built subject
+  string that shipped in production (now built inside DEV), and the
+  no-reply test moved into `_heldBack` (one call per site). Budgets raised
+  to measured.
+- Docs: README (failure conditions, retry, bridge, client rules,
+  optimisticUndo), whitepaper 4.7 and the client list, docs/store.md,
+  docs/integrations/laravel.md, docs/plan-failures-and-contract.md, the
+  comments on RETRYABLE_CONDITIONS, the retry option, the class rule,
+  HttpConfig.retry, http.ts and http-errors.ts headers.
+- Found for task 10 (docs pass): README's optimisticUndo example registers
+  an inverse that calls `api.removeFromCart`, I/O in an undo, against item 1
+  R8 (undo is local).
+
+### 35.163 Item 4: one spelling per request header name (2026-10-06)
+
+- Plan item 4 rev 2, audit S4 and D7. Fixed: a request's headers live in a
+  plain object, so one name could sit under two keys, and fetch sends them as
+  one header, the values joined "a, b". On the release: an app
+  `idempotency-key` beside the bridge's `Idempotency-Key`, an app
+  `content-type` beside the default, a FormData request keeping an app
+  `content-type` (no multipart boundary), a 419 refresh deleting only
+  `X-CSRF-TOKEN`, so an app `x-csrf-token` went out stale.
+- Standard: RFC 9110 5.1 (field names are case-insensitive). The Fetch
+  Standard's header list "set": "set the value of the first such header to
+  value and remove the others". Lowercasing on the wire stays the
+  platform's (RFC 9113 8.2).
+- Shape: the release builds each request's headers as before (postCommand's
+  literal plus the app's, the client's copy after its interceptors, the
+  JSON Content-Type, the CSRF token). One check, `oneSpelling`, then runs on
+  the finished object: two spellings of one name have one length, so one
+  pass sets a bit per name length, and only a shared length lowercases and
+  rebuilds (`spelledOnce`: first spelling, last value, `Object.fromEntries`,
+  so a `__proto__` name stays a header). The 419 refresh and FormData delete
+  a name in every spelling. The bridges need no change: their spread keeps
+  insertion order, so the app's spelling is kept with the command's key.
+  The library keeps writing its own names as it did. D7: `attachCsrf`'s
+  comment claimed it cleared the other CSRF name. It sets the token, an app's
+  other spelling of that name merges through the check, and the 419 path
+  still deletes both names (now in every spelling). Comment fixed to what
+  the code does.
+- Tests: tests/header-one-spelling.test.ts, 13. Red on 4a37e7b: 8
+  (postCommand content-type, the bridge's Idempotency-Key, the batching
+  bridge, FormData, an object body, the 419 refresh, csrf on postCommand
+  and on the client). Controls green before and after: names with no
+  collision go out as the release sent them, csrf with no token leaves the
+  app's header, an interceptor returning no headers, an any-case
+  Idempotency-Key still identifies, a `__proto__` header. The 25 tests that
+  pin capitalised names pass unchanged. Suite 3226 passed, coverage 100 x4.
+- Speed (npm run ab, K 10, two lengths, A = 4a37e7b, B = a real build of
+  the tree, one at a time, about 12 minutes per pair of workloads):
+  - rev 1, a merge into a prototype-free dictionary: every http-failures
+    row +205 to +267 ns, counted slower (client_get_ok 1.20-1.22x).
+    `Object.create(null)` keeps the object in dictionary mode. Rejected.
+  - rev 2, `{ ...base, ...extra }` and a pairwise check of the app's names:
+    client_get_ok +59 to +71 ns, post_409 and the bridge rows +14 to +25 ns,
+    counted slower. A two-spread literal leaves V8's clone fast path that
+    the release's single spread and literal-plus-spread take. Rejected.
+  - rev 3 (landed): the release's builds untouched, the length pass on the
+    result. A lead probe (scratchpad, node, no A/B) put it at +4 to +6 ns
+    over the release's build. Owner, 2026-10-06: a few ns is noise, and an
+    A/B of a fix compares buggy code with code that does more, so no third
+    run. bridge-miss (no HTTP request) read no result on rev 1 and rev 2.
+- Bytes, brotli, each piece left out alone:
+
+  | Piece | full IIFE | Blade |
+  |---|---|---|
+  | the spelling check and its rebuild | +78 | +95 |
+  | deleting every spelling (419, FormData) | +24 | +28 |
+  | total | +102 | +123 |
+
+  Raw/brotli full, core, elements +354/+102, +354/+114, +354/+109. Blade
+  8_077 -> 8_200. Budgets raised to measured.
+
+### 35.164 Item 8: a shared store opened later asks for the current state (2026-10-06)
+
+- Plan item 8 (a bug found on the way, verified against this repo's rule:
+  tests/store-share.test.ts "a write in one tab becomes every tab's state").
+  Fixed: each tab numbers its own writes from 0 and applies only a higher
+  number. A tab opened after another wrote three times started at 0, its
+  first write (version 1) was ignored, and the older tab's next write
+  replaced it everywhere: the later tab's write was lost (probe P4).
+- Shape: on open the tab sends one `{ ask: true, version: -1, tab }` on the
+  same `<id>$state` event. A tab that has written (version > 0) answers with
+  its current `{ state, version, tab, to }`. Only the asker reads an answer
+  (`to`), and only a strictly newer one applies, so peers in step are not
+  written again. Message shape, counter and tie-break are otherwise
+  unchanged. A 1.26 tab compares versions only, and -1 is below every
+  version, so it never applies an ask.
+- Found while building: createChannel drops what the lane emits while the
+  channel delivers an incoming message (its echo flag, `applying`), so an
+  answer sent from inside the ask's delivery never crossed. The answer goes
+  out on a microtask, after the delivery.
+- Measured (the plan's open point): Node 24's BroadcastChannel, 30 runs,
+  open to caught up, min 0.05 ms, median 1.20 ms, max 9.31 ms. A write made
+  in that window is a concurrent write: every tab ends on one state (tested).
+- Tests: tests/store-share-late-tab.test.ts, 6. Red on dc62841: 2 (the
+  late tab's write survives, a write within the window converges instead of
+  leaving two tabs on two states). Controls green before and after: peers in
+  step not written again, a tab that never wrote does not answer, a 1.26
+  tab at version 0 ignores the ask, a 1.26 tab still applies a newer write.
+  Two tests that counted lane messages now name what they count:
+  tests/store-core.test.ts (the writes, not the ask) and
+  tests/store-share.test.ts (the receiving tab sends nothing of its own, a
+  peer's answer may cross). Suite 3232 passed, coverage 100 x4.
+- Cost: one message when a shared store is created, one answer per peer
+  that has written. Nothing per write. Bytes, store-base.js bundled and
+  minified (NODE_ENV production): 4_370 -> 4_546 raw, 1_944 -> 2_008 brotli
+  (+64). The IIFEs and the Blade bundle hold no store.
+
+### 35.165 Section 10.2: authGuard's `'admin*'` protects what it says (2026-10-06)
+
+- Plan 10.2, audit B4 (security) and N2. Fixed: `protected` compared each
+  entry as a raw prefix, while every other action list in the library takes
+  the pattern form (`matchesPattern`: a name, `prefix*`, `*`). So
+  `protected: ['admin*']` matched only names holding a literal `*`:
+  `adminDelete` ran signed out, with no warning.
+- Shape: the list is compiled once in the factory, a trailing `*` dropped,
+  so `'admin*'` is the prefix `admin` and `'*'` the empty prefix, every
+  action. A list without `*` behaves as released. The per-dispatch check is
+  the released `some(startsWith)`, unchanged, so no A/B.
+- Tests: tests/auth-guard-pattern.test.ts, 5. Red on deeb55e: 2 (`'admin*'`,
+  `'*'`). Controls green before and after: `'admin'` as released, an action
+  outside the list runs, a signed-in user runs a protected action. Suite
+  3237 passed, coverage 100 x4.
+- Bytes, raw/brotli full, core, elements: +42/+29, +42/+21, +42/+33, the
+  one map in the factory. Blade unchanged (no authGuard). Budgets raised to
+  measured.
+- Docs: the `protected` option's comment. README's example uses `'admin*'`.
+
+### 35.166 Section 10.5: an idempotency key names one request payload (2026-10-06)
+
+- Plan 10.5, audit B8, B9 and N6. Standard: draft-ietf-httpapi-idempotency-
+  key-header-07, "The idempotency key MUST be unique and MUST NOT be reused
+  with another request with a different request payload."
+- Fixed: `idempotent()` keyed on action and target only, and stamps its key
+  as the Idempotency-Key header, so `orderCreate {sku:1}` with qty 5 was
+  answered with the earlier qty 1 order's result (B8). The outbox keyed each
+  record the same way, so two offline `cartAdd {id:1}` writes went out under
+  one key: a backend honouring the draft applies the first and drops the
+  second, reported `replayed` (B9).
+- Shape: idempotent's default key is `commandKey(action, [target,
+  payload])` when a payload is given, else the released `commandKey(action,
+  target)`, byte for byte. The outbox's default record key is
+  `${commandKey(action, target)}:${record.id}`, the readable prefix kept.
+  A custom `key`, and a record stored by 1.26 (it replays its stored key),
+  are untouched. supersede keeps `commandKey(action, target)`: a newer
+  keystroke cancels the one in flight whatever its payload. Its comment no
+  longer says it shares idempotent's default.
+- Observable (owner rule: a state change needs a reason, the draft's MUST
+  and a lost write): payload-carrying commands get a new key string. A
+  double-click with the same payload still collapses.
+- Tests: tests/idempotency-key-payload.test.ts, 7. Red on f76834d: 2 (two
+  payloads on one target, two offline writes on one target). Controls green
+  before and after: the same payload collapses, a payload-less key is the
+  released one, a custom key (idempotent and outbox), a 1.26 record replays
+  its own key. tests/outbox.test.ts's record key now reads the new form.
+  Suite 3244 passed, coverage 100 x4.
+- Speed: no A/B. The cost is the payload inside the key, which is the fix
+  (owner, 2026-10-06: an A/B of a fix compares buggy code with code that
+  does more).
+- Bytes, a consumer importing only the export, esbuild minified, NODE_ENV
+  production: `idempotent` +40 raw / +16 brotli. `createOutbox` +14 / +13.
+  The IIFEs and the Blade bundle hold neither.
+
+### 35.167 Section 10.4: async request(), identical means identical, each caller its own wait (2026-10-06)
+
+- Plan 10.4, audit B6, B7, B17. Contract (AsyncCommandBus.request):
+  identical in-flight requests share one promise, a timeout bounds the
+  wait, `signal` settles the request and reaches the responder on
+  cmd.signal. The sync bus hands its responder the chain's command.
+- Fixed: the dedupe key left out the payload, so `request('price', {id:1},
+  {qty:1})` and `{qty:5}` both got 10 (B6). The responder got a fresh
+  Command, so a plugin's `idempotencyKey` and the dispatch's `meta.id` never
+  reached it (B7). A joined caller got the first caller's promise, with the
+  first caller's timeout and signal: aborted at 10 ms it settled late and
+  `ok`, and a 20 ms timeout beside 500 ms waited 500 (B17).
+- Shape, the HTTP client's dedupe rule ("its signal stays its own: it
+  cancels its promise, never another caller's"): the key includes the
+  payload when one is given (payload-less keys unchanged). The shared
+  request is its dispatch plus a controller. Every caller, the first
+  included, races it with its own timer and signal. The responder reads the
+  controller on cmd.signal, aborted with the caller's reason once every
+  caller holding the request has aborted (a caller without a signal holds it
+  until it lands). An identical request after every caller aborted starts
+  afresh. `executeOverride` now takes the command, so the responder gets the
+  chain's own.
+- Observable: the responder's cmd.signal is the bus's controller, not the
+  caller's signal object. Its abort and reason are the caller's.
+  tests/request-dispose.test.ts pinned the object identity. It now pins the
+  behaviour (a lone caller's abort reaches cmd.signal with its reason).
+- Tests: tests/request-join.test.ts, 10. Red on ed9e228: 6 (B6, B7, a
+  joined abort, a joined timeout, the first caller's abort not settling a
+  joined one, the responder told only when every caller aborted). Controls
+  green before and after: identical requests share one run, a lone caller's
+  abort reaches the responder with its reason, dispose() settles every
+  caller. The fresh-start case covers the cleanup branch.
+  tests/async-execute-ab.test.ts's revert target follows the `execute` line.
+  Suite 3255 passed, coverage 100 x4.
+- Speed: request() only. A dispatch tests `executeOverride` once, as before.
+  No A/B (owner, 2026-10-06).
+- Bytes, brotli, full IIFE, each piece left out alone: the payload in the
+  key +9. The shared controller +28. The per-caller race and the command
+  handed through +39. Raw/brotli full, core, elements +167/+76, +167/+89,
+  +167/+84. Blade +13 (the `execute` line, in the module the sync bus
+  shares). Budgets raised to measured.
+
+### 35.168 Section 10.6: the batching bridge settles a dispatch's abort (2026-10-06)
+
+- Plan 10.6, audit B10 and D1. Contract: `Command.signal` says transport
+  plugins (HTTP) auto-propagate it. README and supersede's comment named the
+  batching bridge. It checked the signal only before queueing: a dispatch
+  aborted 5 ms into a 30 ms window went out in the batch and reported `ok`
+  (probe W1, the single HTTP bridge, the control, reported
+  `core:aborted:dispatch`).
+- Shape: each queued command that carries a signal listens for its abort.
+  Before the flush the command leaves the queue, never sent, and settles
+  `core:aborted:dispatch`. A flush whose queue emptied sends nothing. After
+  the flush it settles at once and counts itself out of the request: the
+  request runs under a per-batch controller (made only when some command
+  carries a signal, joined to the bridge's signal through `AbortSignal.any`,
+  else the bridge's signal as released) and is cancelled once every command
+  in it has aborted, the HTTP client's dedupe rule. A command without a
+  signal runs as released.
+- Docs: README's supersede note and supersede's comment (D1) say what each
+  bridge does with a superseded command.
+- Tests: tests/batching-abort.test.ts, 8. Red on ef156e9: 7 (aborted before
+  the flush, after it, a neighbour's result, the rest of a batch going, all
+  aborted cancelling, with the bridge's own signal, without
+  `AbortSignal.any`). Control green before and after: no signal, as
+  released. The last two read "green before" here until s35.202.
+  tests/batching-flush-never-empty.test.ts pinned the bug ("a dispatch
+  aborted while it waits in the queue is still sent"). It now pins the
+  empty flush sending nothing. Suite 3263 passed, coverage 100 x4.
+- Cost: one listener per queued command that carries a signal, removed when
+  it settles. A controller per batch only when one does. Nothing for
+  commands without a signal.
+- Bytes: a consumer of `createBatchingHttpBridge`, esbuild minified,
+  NODE_ENV production: 12_323 -> 12_757 raw, 4_778 -> 4_930 brotli (+152).
+  The IIFEs and the Blade bundle hold no batching bridge.
+
+### 35.169 Section 10.7: a write's invalidation stops new joins of an older read (2026-10-06)
+
+- Plan 10.7, audit B11 and D8. Contract (http-cache): "A read made after
+  this must not join one already on the wire, which may answer from
+  before". RFC 9111 4.4 makes the target URI's invalidation a MUST.
+- Fixed: the dedupe key became `method:responseType:[304:]JSON(headers):
+  fullUrl` when request headers joined it (s35.83), but the invalidation
+  still parsed the URL after the key's second `:`. A write's exact-URL match
+  never found the read in flight: GET `/api/a` in flight, POST `/api/a`
+  resolves, GET `/api/a` joined the read from before the write (probe W3).
+  An anchored RegExp missed too.
+- Shape: the in-flight entry records its URL beside the promise
+  (`setInflight(key, promise, url)`), and the invalidation matches that
+  URL, never a parse of the key. The stale comment on the key format is
+  gone (D8).
+- Tests: tests/http-write-stops-join.test.ts, 6. Red on 2e188d9: 3 (a POST,
+  a PUT with instance headers, `invalidateCache` with a substring and an
+  anchored RegExp). Controls green before and after: with nothing between,
+  the second GET joins. A write to another URL leaves the join. Reads with
+  different headers stay apart. tests/http-coverage.test.ts passes the URL
+  to `setInflight`. Suite 3269 passed, coverage 100 x4.
+- Bytes: a consumer of `createHttpClient`, esbuild minified, NODE_ENV
+  production: +1 raw, 0 brotli (the URL field replaces the key parse). The
+  client is in neither the IIFEs nor the Blade bundle.
+
+### 35.170 Section 10.3: circuitBreaker does not count a cancel (2026-10-06)
+
+- Plan 10.3, audit B5. The breaker skipped a pipeline bug but counted every
+  other failure, so `supersede` cancelling three keystrokes opened the
+  circuit and refused the next search (probe P4). Precedent: Polly's
+  circuit breaker handles "Any exceptions other than
+  OperationCanceledException".
+- Shape: the failure branch also skips an abort, read by its name: since
+  item 7 every abort is named `AbortError` (a raw one, and the library's
+  `aborted:` codes). The plan named `failureCondition`. It pulled the status
+  table into a circuitBreaker consumer (+177 brotli), and the name reads the
+  same set, so the name is used. An abort neither counts nor resets the run
+  of real failures, as a bug does.
+- Tests: tests/circuit-breaker-cancel.test.ts, 5. Red on 7944e2f: 2
+  (supersede's cancels, the caller's abort). Green after, and pinning the
+  comment: a library `aborted:` code and a raw AbortError. Controls green
+  before and after: a backend failure opens it, a plugin's bug does not
+  count. Suite green, coverage 100 x4.
+- Bytes: a consumer of `circuitBreaker`, esbuild minified, NODE_ENV
+  production: +31 raw, +14 brotli. The IIFEs and Blade unchanged.
+
+### 35.171 Section 10.1: reactions share one hop count per bus, docs say what bounds a loop (2026-10-06)
+
+- Plan 10.1, audit B3, D5, D12. Contract: `maxHops` "Catches INDIRECT
+  cycles (A->B, B->A)". Each reaction kept its own hop map, so B->A never
+  found the id A->B recorded, every hop read 1, and `a -> b` plus `b -> a`
+  with maxHops 3 ran 16 times (the dispatch depth bound), not 4.
+- Shape: one hop map per bus, shared by every reaction installed on it, a
+  module `WeakMap<BaseBus, Map<string, number>>` read once at `install()`.
+  The CHAIN_MAX cap and eviction are unchanged. Two buses keep separate
+  counts.
+- D12: the docs said an async self loop is unbounded. A reaction
+  re-dispatches synchronously from its listener and both buses run listeners
+  at the dispatch's depth, so MAX_DISPATCH_DEPTH stops it at 16 (probe
+  p-loop-hook). Only a listener that re-dispatches after an await escapes
+  (p-loop-ctl). Fixed in `allowSelfMatch`'s comment, the install message, the
+  hop-map comment and whitepaper's history line.
+- Tests: tests/reaction-indirect-cycle.test.ts, 6. Red on 09814c8: 3 (the
+  cycle on the sync and async bus, two buses each stopping at maxHops).
+  Controls green before and after: a self loop at maxHops, unrelated chains
+  counted apart, the async depth bound of 16 (D12 pinned). Suite green,
+  coverage 100 x4.
+- Bytes: a consumer of `createReaction`, esbuild minified, NODE_ENV
+  production: +49 raw, +24 brotli. Not in the IIFEs or Blade.
+
+### 35.172 Section 10.9: MCP version negotiation and protocol errors as the spec states them (2026-10-06)
+
+- Plan 10.9, audit S1, S2. MCP 2025-06-18, read at the source: lifecycle
+  "If the server supports the requested protocol version, it MUST respond
+  with the same version. Otherwise, the server MUST respond with another
+  protocol version it supports". Tools "Protocol Errors: Standard JSON-RPC
+  errors for issues like: Unknown tools" (the example is -32602). Basic
+  "Unlike base JSON-RPC, the ID MUST NOT be null".
+- Fixed: `initialize` echoed any string (`1999-01-01` came back). An unknown
+  or not allowed tool was a tool result with `isError`. A request with
+  `id: null` got no reply, as if it were a notification.
+- Shape: `initialize` echoes a version only from the set the handler speaks
+  (`2024-11-05`, `2025-03-26`, `2025-06-18`), else answers `2025-06-18`. A
+  tool not listed, unknown or not allowed (the client cannot tell which,
+  so an unlisted tool stays private), is `rpcError(id, -32602, 'Unknown
+  tool: <name>')`. A missing name is -32602 too (invalid params, the same
+  class). `id: null` is answered -32600 Invalid Request with id null
+  (JSON-RPC 2.0). A listed tool's failure stays a result, as the spec has
+  it. `callTool` now returns the whole reply.
+- Observable (owner: the spec's MUSTs): an unlisted tool's reply is a
+  JSON-RPC error, so `vapor-chamber/vitest`'s `mcpClient().call` rejects
+  with `code: -32602` (it already threw on any protocol error). Its doc,
+  its example and docs/integrations/vitest.md say so.
+- Tests: tests/mcp-protocol-errors.test.ts, 6. Red on 3e030b9: 3 (the
+  version, an unlisted tool, a null id). Controls green before and after: a
+  supported version echoed, a listed tool's failure a result, a
+  notification unanswered. Moved to the new reply shape: tests/mcp.test.ts
+  (3), tests/mcp-gaps.test.ts (7), tests/vitest-mcp.test.ts (1),
+  tests/action-filter.test.ts (1). Suite green, coverage 100 x4.
+- Bytes: a consumer of `createMcpHandler`, esbuild minified, NODE_ENV
+  production: +76 raw, +28 brotli. Not in the IIFEs or Blade.
+
+### 35.173 Section 10.10: composables observe a sealed bus (2026-10-06)
+
+- Plan 10.10, audit B13. Contract: `seal()` "protects the handler/plugin
+  topology, not the observation layer", and useSharedCommandState already
+  installed its hook past the seal (trackLoading). useCommandError and
+  useCommandHistory called `bus.onAfter` directly: on a sealed bus both
+  threw `core:refused:bus` (probe W9).
+- Shape: one helper, `pastSeal(bus, install)`, unseals, installs, and seals
+  again in a `finally`. trackLoading and the two composables use it. A
+  `register` on the bus is still refused afterwards, and dispose works on the
+  sealed bus.
+- Tests: tests/composables-sealed-bus.test.ts, 4. Red on 479ad67: 2
+  (useCommandError, useCommandHistory). Controls green before and after:
+  useSharedCommandState on a sealed bus, an unsealed bus stays unsealed.
+  Suite green, coverage 100 x4.
+- Bytes, full IIFE (the only one holding the composables): +58 raw, +14
+  brotli, the helper and its two new call sites. Budget raised to measured.
+
+### 35.174 Section 10.11: a NaN option behaves like the default, at seven sites (2026-10-06)
+
+- Plan 10.11, audit B14. bounds.ts's rule: "A NaN option is
+  indistinguishable in intent from a missing one ... so it now behaves like
+  a missing one", through `countOption`. Seven sites read their option raw:
+  `rateLimit({ max: NaN })` let 20 of 20 through, `window: NaN` refused for
+  good with `retryIn` NaN. `createReaction({ maxHops: NaN })` ran a self loop
+  to the depth bound. `pollWith({ interval: NaN })` polled in a hot loop and
+  `maxWait: NaN` never ended. `errorCap: NaN` kept every error in
+  useCommandError and useSharedCommandState. `createSSRPlugin({ maxCommands:
+  NaN })` recorded nothing.
+- Shape: each reads through `countOption(option, default)`. Delays
+  (`window`, `interval`) take the `MAX_TIMEOUT_MS` ceiling. Deviation from
+  the plan, by the no-kill rule: the plan named min 1 for `max`, `maxHops`
+  and `interval`, but 0 is a released, meaningful value at each
+  (`rateLimit({ max: 0 })` refuses every call, `maxHops: 0` never fires), so
+  the minimum stays 0. A fractional or negative value is now truncated and
+  floored at 0, as at every other `countOption` site.
+- Tests: tests/nan-options.test.ts, 7, each with a finite control. Red on
+  92fc347: 7. Suite green, coverage 100 x4.
+- Bytes: the full IIFE +2 raw, -7 brotli (raw budget raised by 2). Core,
+  elements and Blade unchanged. A consumer importing one of these alone
+  also pulls `countOption`: +47 to +82 brotli. Imported beside
+  `createAsyncCommandBus`, which already holds it: rateLimit -3,
+  createReaction +2, pollWith +2, the two composables together +39.
+
+### 35.175 Section 10.8: schema keys, the typed names are the run-time names (2026-10-06)
+
+- Plan 10.8, audit B12. normalizeSchema camel-cases every key at run time
+  (`cart_add` -> `cartAdd`), but InferMap typed the bus with the raw keys:
+  typed code registered and dispatched `cart_add`, which the validator,
+  getSchema and MCP know as `cartAdd`, so validation was skipped and MCP
+  listed a tool the code never registered (probe P11).
+- Shape: types at compile time, data at run time (owner, 2026-10-06: not a
+  Vite transform, which would fix only Vite apps, and Vite strips types
+  without checking them). `ToCamel`, toCamel's rules at the type level,
+  gives InferMap each key's camelCase name, beside the key as written, so
+  the name that validates is typed and 1.26 code still compiles.
+- Placement (owner, 2026-10-06: "take care on where we place"): the plan
+  named a register-time DEV warning on a raw name. Not built: it would wrap
+  every schema bus's `register` for a fact normalizeSchema decides at
+  creation, where it already warned. The one warning stays there, now
+  DEV-only (it printed in production) and naming what to do: "register and
+  dispatch it as cartAdd".
+- Tests: tests/schema-camel-keys.test.ts, 5, and a line in
+  tests/compat-1.26.test-d.ts (a raw key types its register and dispatch).
+  Red on 27489ec: the typecheck (the camel name not a key of InferMap), the
+  development message, production silence. Controls: the camel name
+  validates, a camelCase schema warns about nothing. Suite green, coverage
+  100 x4.
+- Bytes: a `createSchemaCommandBus` consumer bundled by esbuild (which
+  cannot fold the library's DEV) +167 raw / +45 brotli, the longer message.
+  A Vite production build folds it away, below the release's unguarded
+  message. The IIFEs and Blade unchanged.
+
+### 35.176 Section 10.13: tests that can fail, a test double that does not diverge (2026-10-06)
+
+- Plan 10.13, audit T1, T2.
+- T1: three tests asserted nothing. tests/directives.test.ts "updated()
+  changes the action" now clicks and expects action2 alone to run.
+  "beforeUnmount() removes click handler" expects the listener gone and a
+  click to run nothing. tests/plugins.test.ts "cancels all pending debounce
+  timers" expects the debounced call never to run. Each seeded red (the
+  call it checks removed: 3 of 3 failed), then green.
+- T2: `createTestBus().dispatchBatch` ignored `transactional` and
+  `continueOnError` (probe L3: TestBus `[1, null]`, the real bus `[0, 1]`),
+  against testing.ts's own rule that a double must not diverge. Shape, no
+  copy: the sync bus's batch body became `_syncBatch(commands, opts, run,
+  undoable, dispatch)` in command-bus.ts, rollback included. The sync bus
+  and the TestBus both call it. TestBus gained `dispatchCommand(cmd)`, so a
+  rollback undoes the Command that ran (item 2's rule).
+- Tests: tests/testbus-batch.test.ts, 6 (three cases on each bus). Red on
+  a7b3339: 2 (TestBus transactional, continueOnError). Controls: the real
+  bus's three, TestBus with no option. Suite green, coverage 100 x4.
+- Bytes, raw/brotli full, core, elements: +12/+36, +12/+42, +12/+25, the
+  shared rule's three callbacks. Blade unchanged. Budgets raised to measured.
+
+### 35.177 Sections 10.12 and 10.14: docs and types that say what the code does, ssr's isThenable (2026-10-06)
+
+- 10.12, audit B15/N4/D11: `ErrorCodeEntry.retryable` read "Whether the
+  async bus re-sends it for any action". It names a transient condition. The
+  bus re-sends it only when the call it retries (a handler, a transport)
+  produced it, never a plugin's refusal or a `register({ throttle })` refusal
+  (probe P10). Doc rewritten. tests/retryable-column.test.ts, 3, pins it (a
+  throttle refusal and a rateLimit refusal each run the handler once, a
+  handler's transient failure is re-sent: green before and after, the doc
+  was the defect).
+- D3: `optimisticUndo(bus: CommandBus | AsyncCommandBus, ...)`, as
+  `history()` takes. Its async JSDoc example compiles. A wider parameter, so
+  every 1.26 call compiles. tests/compat-1.26.test-d.ts gains the async form,
+  and tests/retry-unidentified.test.ts drops its `as never`.
+- D4: inspectBus's example skips the library's `$` names
+  (`cartAdd$undo` read as "Missing undo for").
+- D6: testing.ts's example `rateLimit({ windowMs })` is `window` (tsc
+  rejected it).
+- D9: command-bus.ts quoted a "Default: all" the option docs no longer
+  carry. It now says ActionScope's rule is stated there, once.
+- D12: done in s35.171.
+- 10.14: ssr.ts keeps its own `isThenable`. Importing settled.ts's measured
+  on an ssr consumer (createSSRPlugin, rehydrate): -8 raw, +1 brotli. The
+  plan lands it only if no bundle grows, so a one-line comment says why the
+  copy stays.
+- Suite green, coverage 100 x4. Bytes: no bundle moves (comments and a
+  type).
+
+### 35.178 Item 9, B3: the action's facts as MCP ToolAnnotations (2026-10-06)
+
+- Plan item 9 B3. Sources (read 2026-10-05, plan R1-R3, R8): MCP schema
+  2025-06-18 and the draft `ToolAnnotations` (`title`, `readOnlyHint`,
+  `destructiveHint`, `idempotentHint`, `openWorldHint`, hints). Smithy's
+  `readonly` and `idempotent` traits "are considered idempotent as defined in
+  RFC 9110 Section 9.2.2". Protocol Buffers' `NO_SIDE_EFFECTS` "implies
+  idempotent".
+- Shape: `ActionSchema.annotations?: ActionAnnotations`, the five fields
+  verbatim (type exported). `tools/list` emits them as the tool's
+  `annotations`, a copy. Anthropic and OpenAI tools do not (no such field).
+  The async schema bus's retry merge reads `readOnlyHint` or
+  `idempotentHint` as `retry: 'idempotent'` when `retry` is unset. An
+  explicit `retry` is policy and wins, the bus's own map wins over both
+  (released order). So "idempotent" is declared once and read by MCP clients
+  and by the retry, and item 3's rule counts such an action as identified.
+  The server reads its own declaration, not a client trusting a server.
+- Not done (no-kill): exposing only read-only actions by default would change
+  `createMcpHandler`'s released default.
+- Tests: tests/schema-annotations.test.ts, 5. Red on dc9db9b: 2 (tools/list
+  annotations, a hint re-sends an uncertain failure). Controls green before
+  and after: explicit retry and the bus map win, no annotations unchanged,
+  Anthropic and OpenAI output without annotations. Suite green, coverage
+  100 x4.
+- Bytes, a consumer bundled by esbuild, NODE_ENV production:
+  `createAsyncSchemaCommandBus` +77 raw / +59 brotli (the merge reads the
+  hints), `createMcpHandler` +50 / +13. Not in the IIFEs or Blade.
+
+### 35.179 Item 9, B4: retry.actionPolicies, the most specific match, resolved once per action (2026-10-06)
+
+- Plan item 9 B4 (review rev), audit B16, N1. Fixed: the retry map read its
+  keys in object order, the first match winning, so `{ 'cart*': 'idempotent',
+  cartAdd: false }` re-sent `cartAdd` after a lost reply (3 runs), a declared
+  `false` re-sent. Integer-like keys iterate first, so written order was not
+  even kept. It also scanned the patterns on every dispatch.
+- Name (the handoff: from gRPC `methodConfig` and Apollo's key-kind + value
+  rule): Apollo names a map by its key kind and value kind (`typePolicies`:
+  type -> TypePolicy). gRPC calls the per-method setting a `retryPolicy`.
+  Ours maps an action (name or pattern) to a retry policy: `retry: {
+  actionPolicies }`, values `RetryPolicy`. Renamed cleanly, no alias:
+  `RetryOptions.actions` -> `actionPolicies`, `RetryDeclaration` ->
+  `RetryPolicy` (the internal runner type, also named RetryPolicy, became
+  `Retrier`, `createRetrier`). `retry.actions` stays the plugin-filter word
+  elsewhere: one word, one meaning (audit N1).
+- Resolution, gRPC service_config.proto ("the most specific match wins"):
+  keys ranked once at creation (an exact name, then the longest prefix, then
+  `*`). Two different patterns of one rank never match one action. Each
+  action's policy resolved once and cached (m10-retry-once, measured M1:
+  decl50 0.48x, no row slower), bounded like the bus's chain cache.
+  Behaviour change, stated in the plan: a map relying on an earlier pattern
+  shadowing a later exact name now gets the exact name's policy (that entry
+  re-sent what it forbade).
+- Consumers refactored in this commit: src (schema merge, failure.ts's DEV
+  text, transports.ts's example), tests (dispose-plugins, retry-policy,
+  retry-unidentified, wire-contract, schema-annotations), examples
+  (async-api, feature-retry, pattern-2-laravel-vite, sprinkled-blade and
+  laravel-backend READMEs, the controller's comment), README, whitepaper,
+  docs/integrations/laravel.md, docs/plan-shape.md.
+- Tests: tests/retry-action-policies.test.ts, 7. F1 red on 9a7572c with the
+  old key (`{ 'cart*': 'idempotent', cartAdd: false }`: 3 runs, audit
+  p-shadow). The new key does not compile there. Controls: one policy alone,
+  an unnamed action, the schema's exact name over the bus's pattern and the
+  bus's exact name over the schema's (F2, unchanged), the cache's hit and
+  its clear past 512 actions. Suite green, coverage 100 x4.
+- Bytes, raw/brotli full, each piece left out alone: the ranking +66/+58,
+  the per-action cache +99/+33. Total full, core, elements +165/+91,
+  +165/+55, +164/+68. Blade unchanged. Budgets raised to measured.
+
+### 35.180 Item 9, MCP allowlist: `actionFilter` is createMcpHandler's one selection (2026-10-06)
+
+- Plan item 9 (MCP allowlist), owner decision D2, audit N1 and N7.
+  `createMcpHandler`'s `actions` was an allowlist where `[]` exposed none,
+  while every plugin's `actions` reads `[]` as every action: one word, two
+  opposite rules. Removed cleanly, no alias. `actionFilter` (CloudEvents
+  Subscriptions API 3.2.4, s35.152) is now the handler's one selection.
+- Name: no new word. Claude Agent SDK's `allowedTools` auto-approves, OpenAI
+  Agents SDK's `allowed_tool_names` restricts (plan R5), so "allowed..." is
+  ambiguous by precedent. The prose says "allowlist" (W3C TAG design
+  principles: "use allowlist and blocklist"). "whitelist" is gone from src,
+  README, whitepaper and SECURITY.md.
+- Forms: a pattern `'cart*'` is `{ prefix: { action: 'cart' } }`, names are
+  an `any` of `exact`, and `['*']` is `createActionFilter([])` (an empty
+  CloudEvents set selects every action). Exposing nothing has no filter
+  form, since the spec rejects an empty `any`: an app that exposes nothing
+  does not mount the handler. Absent `actionFilter`: every schema action, with
+  the released DEV warning, which now names `actionFilter` and the allowlist.
+- Not kept: a JS caller still passing `actions` gets every action and the DEV
+  warning (no fallback read, owner rule: no deprecations).
+- `serveVitestMcp` passes `actionFilter: () => true`, the same value as
+  `createActionFilter([])`: importing `createActionFilter` there cost
+  `./vitest/mcp` +0.7 KB raw, +0.3 KB brotli (size:doc).
+  `VITEST_MCP_ACTIONS` stays, a list of the tool names.
+- Consumers refactored in this commit: src (mcp.ts, vitest-mcp.ts,
+  vitest-pure.ts examples, command-bus.ts's matchesPattern note), tests
+  (mcp, mcp-gaps, mcp-protocol-errors, schema-annotations, action-filter,
+  plugin-empty-list, vitest-mcp, vitest-mcp-server), README, whitepaper,
+  SECURITY.md, docs/integrations/vitest.md.
+- Tests: tests/mcp-allowlist.test.ts, 5. Red on 5b27594: 2 (the warning
+  names `actionFilter` and the allowlist, `actions` selects nothing).
+  Controls green before and after: exact names and a prefix select silently,
+  `createActionFilter([])` exposes all silently, a call outside the filter is
+  -32602 and never dispatched. tests/vitest-mcp-server.test.ts gains one:
+  `serveVitestMcp` lists the three tools with no exposure warning, seeded
+  red by removing its `actionFilter`. Suite green, coverage 100 x4.
+- Bytes, a consumer of `createMcpHandler` bundled by esbuild, NODE_ENV
+  production: 4_562 to 4_344 raw (-218), 1_945 to 1_833 brotli (-112): the
+  `matchesPattern` matcher left the module. IIFEs, `command-bus.js` and
+  `index.js` byte-identical to 5b27594, so Blade is unchanged.
+
+### 35.181 Item 6, F6a: a landed undo makes every plugin forget the command (2026-10-06)
+
+- Plan entry 6.F6a (written this session, before the code). Fixed: history's
+  redo dispatches the recorded action again, and a `cache` or `idempotent`
+  plugin that kept the first run's answer gave it back. The handler never
+  ran, the store stayed undone, and history read the step as redone, `ok:
+  true` (log s35.150, proven there with a positive control).
+- Rule: item 6's, a state change is never answered from memory. An undo
+  that lands makes the kept answer stale, as a write makes a stored response
+  stale in RFC 9111 4.4.
+- Shape: `PluginParts.forget?(cmd)`. `register()`'s `$undo` wrapper calls it
+  on every installed plugin once the inverse lands, whatever the plugin's
+  scope, so an exact `['cartAdd']` hears it although `cartAdd$undo` is
+  outside it. Landed is the ledger's rule: no throw, no rejection, no
+  returned `{ ok: false }`. An async inverse settles through `onSettled`.
+  cache drops the command's key. idempotent drops it from `done`, and reads
+  its key through one local `getKey`, the shape cache already has.
+- Name: `forget`, the plan's measured candidate from s35.150.
+  `cache().invalidate(action, target)` holds the RFC 9111 word with another
+  argument.
+- Cost: the undo path only. Nothing per dispatch: idempotent's key read moved
+  into `getKey`, the same expression.
+- Tests: tests/undo-forgets-memory.test.ts, 10. Red on b89bf56: 5 (redo past
+  cache `cart*` and `cartAdd`, idempotent async, an app handler behind
+  idempotent, a repeat after a landed undo). Controls green before and after:
+  an undo that throws or answers `{ ok: false }` forgets nothing, redo with
+  no plugin, a cached read kept across another command's undo, a double
+  click still collapsed, a command a custom key skips. Suite green,
+  coverage 100 x4.
+- Bytes, raw/brotli, each piece left out alone (brotli is not additive):
+  the `{ ok: false }` check full +14, core +10, elements +6, Blade +8.
+  onSettled full +11, core -16, elements +15, Blade +7. Totals full
+  +85/+47, core +81/+38, elements +82/+55, Blade +81/+41 (8_211 to 8_252).
+  An inline thenable test (Blade +56), a for loop (+46) and a block-bodied
+  forEach (+48) measured larger. Budgets and the Blade ceiling raised to
+  measured.
+
+### 35.182 Item 6, F6b and F6c: a `$` command never meets an app's memory (2026-10-06)
+
+- Plan entries 6.F6b and 6.F6c (written this session, before the code).
+  Item 6's rule: a `$` command is a state change, never answered from
+  memory. Two paths the s35.150 change left open.
+- F6b fixed: a custom `key` that ignores the action gave `load(null)` and
+  `cart$reset` one key ("null"), so the reset got `load`'s stored answer and
+  never ran, in cache and in idempotent. A `$` command now takes the default
+  key (`commandKey`, which holds the `$` name): `keyFn && !_isLibraryAction(a)
+  ? keyFn(cmd) : commandKey(...)`. A `$` result is never stored, so that key
+  always misses. Without a custom key the read is the one falsy `keyFn` it
+  was. With one, a dispatch pays one `includes('$')`.
+- F6c fixed: idempotent put every key in flight, so a second `cart$reset`
+  sent while the first was in flight got the first's promise and never ran,
+  and a write between the two survived it. A `$` command is no longer put in
+  flight. The `$` read moved to the miss path, read once for both maps, as
+  `done` already read it at completion: no read added, nothing on a hit.
+- Tests: tests/library-commands-keys.test.ts, 5. Red on bda03ca: 3 (cache
+  and idempotent with a target-only key and a reset, write-reset-write-reset
+  in flight). Controls green before and after: the custom key still answers
+  an app hit, two identical app commands in flight share one run. Suite
+  green, coverage 100 x4.
+- Bytes, an esbuild consumer importing one export, NODE_ENV production:
+  `cache` +14 raw / +3 brotli, `idempotent` +21 / +13. IIFEs and
+  `command-bus.js` byte-identical to bda03ca, Blade 8_252 unchanged.
+
+### 35.183 The `$undo` hook walks the plugins with the index loop the hook runners use (2026-10-06)
+
+- Owner, 2026-10-06: "why not match the proper shape the rest of code".
+  s35.181 walked `s.pluginEntries` with `forEach((e) => void ...)`, picked
+  because it measured smallest. Every list walk in command-bus.ts is an index
+  loop (the before and after hooks, the listeners, `disposeBus`), and the
+  owner's rule puts speed over size, so the shape follows the code, not the
+  byte count.
+- Shape: `for (let i = 0, len = pe.length; i < len; i++)
+  pe[i].plugin.forget?.(c.target)`, forward, as the hook runners.
+- Bytes over the forEach, raw/brotli: full +33/-1, core +33/+13, elements
+  +33/+9, Blade +33/+6 (8_252 to 8_258). Budgets and the Blade ceiling
+  raised to measured. Suite green, coverage 100 x4.
+
+### 35.184 D3: a store applies a bridged action's answer (2026-10-06)
+
+- Plan entry D3 (written this session, before the code). Probe p-d3 on
+  2cc4651's dist: a store action a bridge answers is `ok`, its value the
+  server's `state`, and the store stays as it was. Control without a bridge:
+  value and state agree. With `optimisticUndo` and `predict`, the caller gets
+  the prediction and the store never changes.
+- Sources, read 2026-10-06: TanStack Query, "Updates from Mutation
+  Responses" (write the returned object with `setQueryData` in `onSuccess`).
+  Apollo Client mutations (a returned entity merges by id, anything else needs
+  an `update` function). Pinia Colada optimistic updates (write the prediction,
+  then the server's data, roll back only over the prediction). Pinia 4.0.3 (an
+  action assigns what it awaited). Common rule: the answer becomes local state
+  through code the app declares. So the store's option is opt-in.
+- Shape: `RegisterOptions.answer(cmd, value)`. The async runner calls it at a
+  transport's level, once the transport answered (`_appliedRemotely`), inside
+  the chain, so a plugin outside the bridge (persist) sees the write. A throw
+  fails the dispatch, as a handler's does. The store option
+  `answer(state, value, cmd) => S` registers it for the store's actions and
+  writes the result as a step of the same command: history records it once
+  and R9 keeps `canUndo` false. A rollback's rebase keeps a remote step's
+  state, as it keeps `$reset` and `$sync`. `_appliedRemotely` moved to
+  src/applied-remotely.ts, so the store reads it without importing the bus.
+  optimisticUndo is unchanged: `predict` answers the caller, the store changes
+  when the answer lands, a failure has nothing to roll back.
+- Speed: a level that is not a transport reads `plugin.transport` alone,
+  where it read `!retry` first. A transport's level reads `answers.size`, and
+  settles once more only when a handler registered `answer`. Not A/B measured:
+  no added work on a local action beyond one property read on a bus with
+  `retry: false`, below the noise floor.
+- Tests: tests/store-bridged-answer.test.ts, 10. Red on 2cc4651: 6 (the HTTP
+  and batching bridges, persist outside the bridge, the rebase, register's
+  `answer` called, a throwing `answer`). The rebase test seeded red by
+  replaying the remote step with the local reducer. Controls green before and
+  after: no `answer` as released, a local action never calls it, a failed
+  bridged action writes nothing, history `canUndo` false. The store's import
+  guard (tests/chamber-store.test.ts) now reads one chunk,
+  applied-remotely.js, holding the library's names and the set. Suite green,
+  coverage 100 x4.
+- Bytes, raw/brotli, each piece left out alone (brotli is not additive): the
+  `answers` map in register and the bus state, full +48, core +17, elements
+  +21, Blade +28. The transport-level settle, full +71, core +56, elements
+  +44, Blade +6 (shaken out, brotli context). Totals against 2cc4651: full
+  +268/+109, core +270/+84, elements +270/+82, Blade +88/+32 (8_258 to
+  8_290), store/core +136/+59. The map keeps the shape the two bus states
+  share in register. Budgets and the Blade ceiling raised to measured.
+
+### 35.185 D3 rev 2: a store orders answers by the server's version, no state, no write (2026-10-06)
+
+- Owner, 2026-10-06, on how to protect a store from wrong answers: "server
+  version vs b", then "go a". Two writes in flight can be applied by the
+  server in either order and answered in either order.
+- Rejected, (b) newest dispatch wins: a client guess that the server applies
+  in send order. Two workers can apply milk after eggs. Milk's reply then
+  holds the newer state and (b) drops it, leaving the stale one. An ETag
+  cannot order either: RFC 9110 defines it for equality.
+- Shape: store option `version(state) => number`, the server's revision. An
+  answer is written only when `version(next) > version(held)`, the rule
+  `share` uses between tabs. A value that is not a finite number falls back
+  to arrival order, and development warns once per store. Without `version`
+  the last answer to arrive wins (documented with `serialize`, which makes
+  send, apply and reply order one). An answer with no `state` (a handler that
+  returned nothing) writes nothing and does not call `answer`.
+- Tests: tests/store-answer-version.test.ts, 5. Red on 0820392: 3 (an older
+  answer arriving last, an equal version and the non-number fallback, an
+  answer with no state). Controls green before and after: without `version`
+  the last reply wins, a newer answer arriving last is applied. Suite green,
+  coverage 100 x4.
+- Bytes: store/core and store 4.9 to 5.0 KB raw, 2.3 to 2.4 gzip, brotli 2.1
+  unchanged (docs/BUNDLE-SIZES.md). The IIFEs and Blade do not carry it.
+- Docs: docs/store.md line 5 said the store imports the failure module and
+  nothing else. It also imports the chunk holding the library's names (since
+  s35.130) and the remote set (s35.184). Corrected.
+
+### 35.186 D3 rev 3: the server declares store states, `stores` (2026-10-06)
+
+- Owner, 2026-10-06, after opt-in, opt-out, no option and backend-driven were
+  laid side by side: "lets go with the most correct". Opt-in, opt-out and no
+  option each leave one side guessing whether a reply's `state` is a store's
+  state. The side that knows declares it: the server per reply (`stores`), the
+  app per store (`answer`, s35.184). Neither: nothing changes, as 1.26.
+- Precedents for a server-declared state: Livewire returns component
+  snapshots, Inertia props per page, Turbo Streams name what to replace,
+  Apollo identifies cache entries by the `__typename` and `id` the server
+  sends.
+- Wire: `BackendResponse.stores`, store states by store id, beside `state`
+  on a single answer, a batched result and a WebSocket frame
+  (docs/plan-failures-and-contract.md 4.4). `answerOf`, which all three
+  bridges share, keeps it beside the command: `_appliedRemotely` became a
+  WeakMap (command -> declared stores).
+- Placement: each async bus publishes a Map of store id -> receiver
+  (`_storeReceivers`, src/applied-remotely.ts, keyed by the bus object). A
+  store adds its receiver, removes only its own on `$dispose` (a takeover
+  replaces it), and `bus.clear()` empties the map. At the transport's level
+  the bus runs the command's own `answer`, then each declared state's
+  receiver, last, so what the server named wins. Ids are read as own keys
+  and looked up in a Map (src/dict.ts). Rejected: registering `<id>$sync` on
+  every store as the receiver. It changed the released `registeredActions()`
+  and `inspectBus` lists (three tests pinned them) and made `cart$sync` a
+  setter on every store.
+- Guards: a declared state that is not an object (`null`, a number) is not
+  written, and development warns once per store. `version` orders declared
+  states as it orders answers. Each write is a step of the command that got
+  the reply: history records it once and cannot undo it (R9), a rebase keeps
+  it, persist outside the bridge saves it.
+- Laravel example: `VaporChamberController::body()` lifts exactly the key set
+  `state` + `stores`, or `stores` alone, as it lifts `redirect`. A state
+  that merely has such a key among others is data (probed with php on 8
+  shapes). docs/integrations/laravel.md shows the action's return.
+- Tests: tests/store-declared-by-server.test.ts, 10. Red on 6445bf6: 7 (a
+  checkout declaring cart and stock, a batched result, the declared state
+  winning over `answer`, persist and history, the version test with its
+  positive control, a non-object state with one warning, a takeover). Until
+  s35.202 this line read 4 red, with the last two among the controls.
+  Controls green before and after: no `stores`, a disposed store and a
+  cleared bus (seeded red by removing the clear), unknown and inherited ids.
+  Suite green, coverage 100 x4.
+- Bytes against 6445bf6, raw/brotli: full +187/+15, core +189/+69, elements
+  +190/+48. Each piece left out alone (brotli full, core, elements): the
+  bus's receivers +3, +50, +32, `answerOf` keeping `stores` +1, +9, +3.
+  Blade +9/-8 (8_282, under its ceiling). store/core +298/+82. Budgets
+  raised to measured.
+
+### 35.187 D4 S5: a write's answer also invalidates its Location and Content-Location (2026-10-06)
+
+- Owner decision D4 (handoff, 2026-10-05): include audit S5. It overrides
+  the plan's section 10 "Rejected" line, which called it a MAY and out of
+  scope. Plan entry D4.S5, written before the code.
+- Evidence: audit S5, probe L2. GET `/api/items/1` cached, POST `/api/items`
+  answered 201 with `Location: /api/items/1`, GET again served stale with 1
+  fetch. Control: a PUT to the URI itself refetches.
+- Standard, RFC 9111 4.4, read at the source 2026-10-06: the target URI is a
+  MUST. "the URI(s) in the Location and Content-Location response header
+  fields (if present) are candidates for invalidation" (a MAY). A cache "MUST
+  NOT trigger an invalidation under these conditions if the origin ... of the
+  URI to be invalidated differs from that of the target URI". A non-error
+  response is 2xx or 3xx. RFC 9110 4.3.1 (origin: scheme, host, port), 10.2.2
+  and 8.7 (a relative value resolves against the target URI), 7.1 (a target
+  URI has no fragment).
+- Shape: `invalidatedBy(fullUrl, res)` in src/http.ts builds the matcher the
+  write passes to `cache.invalidate`, from the answer as received (before the
+  response interceptors). The target matches as released. A named URI is
+  resolved against the target (`res.url`, else `fullUrl`), its fragment
+  dropped, and kept only on the target's origin. A cached URL is resolved
+  against the base fetch uses (`document.baseURI`, else `location.href`)
+  before the compare. The same matcher drops entries, marks read tickets and
+  stops joins of reads in flight (s35.169), so a named URI is treated exactly
+  like the target. A URL that does not parse adds nothing: outside a browser
+  a relative URL has no base, and fetch refuses it there.
+- Tests: tests/http-location-invalidation.test.ts, 11. Red on 563c728: 6
+  (Location absolute and relative, Content-Location, a fragment, a cached
+  relative URL with a page base, a read in flight). Controls green before
+  and after: no Location keeps the entry, a cross-origin Location keeps the
+  entry there, a failed write invalidates nothing, no base keeps the target
+  match, a read in flight with no Location is still joined. Suite green,
+  coverage 100 x4.
+- Bytes: the client is in no IIFE and not in the Blade bundle. An esbuild
+  consumer importing only `createHttpClient`, raw/gzip/brotli: 15_223/6_516/
+  5_917 to 15_608/6_670/6_056 (+385/+154/+139). Each piece left out alone,
+  brotli: the fragment drop +8, the browser base +18, the origin check +5,
+  Content-Location 0. The rest is the header read, the target parse and the
+  matcher. No budget covers this module. docs/BUNDLE-SIZES.md, the exports
+  that carry the client, brotli: `.` 31.6 to 31.7 KB, `./router/remote` 5.1
+  to 5.3, `./router-fetch` 5.5 to 5.6, `./vitest` 34.4 to 34.5.
+- Speed: a write's success path only, a network path. No Location: two
+  header reads per write. With one: a URL parse per entry the invalidation
+  walks. Nothing per read, nothing per dispatch. No A/B (no normal action's
+  code changes).
+- Docs: README "Caching" and whitepaper section 6 said "exactly its URL",
+  false once fixed. The `ResponseCache.invalidate` comment said the client's
+  function was an exact-URL match.
+
+### 35.188 D4 N8, part 1: one name for a cap on retained entries, `maxSize` (2026-10-06)
+
+- Owner decision D4: include audit N8. Plan entry D4.N8, written before the
+  code. Owner, 2026-10-06: no backward compatibility, "we only refactor and
+  then move forward examples no deprecation notice nothing".
+- Sites, by a TypeScript AST scan of src (every property, method and option
+  name), then a wider one (`*Size`, `*Count`, `*Capacity`): eight names for
+  one meaning, no other cap. The rest are tallies (`errorCount`, `failCount`).
+- Standards, read at the source 2026-10-06: ECMA-262 (2027 draft) 24.1.3.12,
+  `get Map.prototype.size` counts entries. W3C Resource Timing,
+  `setResourceTimingBufferSize(unsigned long maxSize)`, a count of entries.
+  The library's own `size()` counts entries, and `maxSize` was its most used
+  name. Read and rejected: lru-cache's `maxSize` (total weight, its count is
+  `max`), and `max`, which `rateLimit` uses for dispatches per window.
+- Renamed: `idempotent` `maxKeys`, `metrics` `maxEntries`, `createOutbox`
+  `maxQueue`, `createSSRPlugin` `maxCommands`, `useCommandError` and
+  `useSharedCommandState` `errorCap`, all to `maxSize`. On an options object
+  that configures more than its collection, the collection's name sits
+  inside, as W3C's "buffer size": the bus's `bufferLimit` is `maxBufferSize`
+  (beside `bufferTTL`). The WebSocket bridge keeps `maxQueueSize` (beside the
+  connection). Kept: `maxSize` on cache, history, useCommandHistory, the
+  ledger. The outbox, SSR and bus warnings name the new option, and
+  scripts/check-console-shape.mjs's copy follows.
+- Consumers moved: src 6 files, tests 12, examples/vapor-sfc StatusBar.vue,
+  two ab workloads, docs/performance.md, docs/whitepaper.md, docs/api
+  (regenerated). No old name left outside history (n8-consumers.mjs).
+- Tests: tests/one-name-per-meaning.test.ts, 8. Red on bf87f4e's src: 6 (each
+  new name ignored, the default kept). Controls green before and after: each
+  default with no option, `cache({ maxSize })`. Suite green, coverage 100 x4.
+- Bytes against bf87f4e, raw/brotli, each piece left out alone: the bus's
+  `maxBufferSize` full +2/+9, core +2/-6, elements +2/+13, Blade +8 (8_282 to
+  8_290, under its 8_291 ceiling). The composables' `maxSize` full -6/+1.
+  Totals full -4/+8, core +2/-6, elements +2/+13. The cost is the name.
+  Budgets raised to measured.
+- CHANGELOG, owner 2026-10-06 ("check changelog style on newer entries short
+  shape verb"): the newest bullets shortened, one change per line. Removed,
+  and where each went: "reads in flight included" (S5) to log s35.187.
+  "whatever the command was" (stores) dropped, "by store id" says it. "so an
+  older answer arriving last never replaces a newer one" (version) kept
+  shorter as "an answer older than the held state is not written". "lifts
+  `['state' => ..., 'stores' => [...]]` from an action" kept shorter as "returns
+  it", the shape in docs/integrations/laravel.md. "which the bus calls ...
+  before the plugins outside the transport see the result" kept shorter.
+
+### 35.189 D4 N8, part 2: one name for teardown, `dispose` (2026-10-06)
+
+- Plan entry D4.N8, part 2. Teardown had five names: `dispose` (the buses,
+  `PluginParts`, the composables, the outbox, the form bus, `pollWith`),
+  `teardown` (the SSE and Echo bridges), `close` (`createChannel`,
+  `VitestMcpServer`), `destroy` (the router and its history, found by the
+  wide scan, not in the audit) and `stop`, the docs' name for the function
+  `serveMcpStdio` and `serveVitestMcp` return.
+- Standard, read at the source 2026-10-06: ECMA-262 (2027 draft)
+  `%Symbol.dispose%`, "A method that performs explicit resource cleanup on
+  an object", `DisposableStack.prototype.dispose()`. The async form
+  `%Symbol.asyncDispose%` and `AsyncDisposableStack.prototype.disposeAsync()`
+  (27.4.3.4). `VitestMcpServer`'s teardown returns a promise, so it is
+  `disposeAsync()`: different behaviour, different name.
+- Kept, with the reason: the WebSocket bridge's `disconnect()`, the inverse
+  of `connect()` (a later `connect()` opens a new socket). The Observable
+  `unsubscribe()`, the TC39 protocol RxJS reads. `clear()` and `reset()`, which
+  leave the object in use. The directives' `.stop`, Vue's event modifier.
+  vue-router's `RouterHistory.destroy()` is no interop reason: this router's
+  history differs from it (`location` is a function here).
+- Consumers: src 9 files (the router's `destroyed` flag is `disposed`, the
+  `router:aborted:navigation` message reads "or dispose"), about 200 router
+  test lines and two test files renamed (`dispose-cancels-navigation`,
+  `dispose-during-start`), 29 `close` call sites fixed at the compiler's
+  line and column, the bin script, README, the whitepaper,
+  docs/integrations (laravel, vitest), docs/performance.md, two examples.
+  `Router.dispose` and `RouterHistory.dispose` gained a contract comment.
+- Tests: tests/one-name-per-meaning.test.ts, 4 more. Red on ca1b773's src:
+  18 across it and the router, history and Vitest MCP suites (each `dispose`
+  not a function). Control green before and after: the WebSocket bridge
+  keeps `connect()` and `disconnect()`. Suite green, coverage 100 x4.
+- Bytes against ca1b773, raw/brotli: full IIFE +1/+16, core and elements
+  unchanged, Blade unchanged (8_290). Each rename left out alone, the other
+  costs full +2/+48 and -1/+47: a repeated `dispose` compresses, brotli is
+  not additive. Full brotli budget raised to measured. No export row moves
+  at docs/BUNDLE-SIZES.md's 0.1 KB. The Vapor outlet stamps
+  (tests/vapor/vapor-outlet-size.test.ts) move with the router's rename:
+  own arm 4.68 to 4.71 KB (ceiling 5.0), saving 22.07 to 22.06 KB (floor
+  15.0).
+
+### 35.190 Docs pass 1: five small docs against the code and the writing rules (2026-10-06)
+
+- Task 10, first batch: docs/timestamps.md, SECURITY.md,
+  docs/migrating/from-mitt.md, docs/migrating/from-event-emitter.md,
+  CONTRIBUTING.md. Each read in full with the code it describes. A scratchpad
+  checker (prose-check.mjs) strips code, comments and markers, then lists
+  prose semicolons, the words not to write, non-ASCII and sentences over 25
+  words. Its remaining hits are false positives: a sentence that starts with
+  lowercase `vapor-chamber` is joined to the one before.
+- Claims the code contradicts, fixed:
+  - SECURITY.md: "`csrf: 'inertia'` turns our reading off again". No such
+    value: `csrf` is a boolean on both bridges (transports.ts, http.ts). An
+    Inertia app on Laravel passes `true` and the bridge reads the
+    `XSRF-TOKEN` cookie (the bridge's own JSDoc).
+  - SECURITY.md: "`tools/call` checks the action against its own allowlist
+    (`Object.hasOwn`)". It checks `actionFilter` (s35.180) and the schema's
+    own keys, and answers an unlisted tool with -32602 (s35.171).
+  - CONTRIBUTING.md: the layout gave plugins-io.ts "retry". Retry is the
+    async bus's own (plugins-io.ts header). The module holds `persist` and
+    `createChannel`.
+  - CONTRIBUTING.md: "CI runs the same set on Node 22 and 24, on Linux and
+    macOS". ci.yml runs `lint:check` and the typecheck on Node 22, Linux only.
+    The build, both test projects and the size check run on Node 22 and 24,
+    Linux and macOS.
+- Verified and kept: the timestamp table (every produced timestamp, from
+  the clock reads in src), `emit` putting its data on `cmd.target`, the
+  frozen ok result for an emit, `inspectBus().listenerPatterns`,
+  `createFastLane({ removal })` and `compile()`, `toAnthropicTools` on the
+  root, the gate's eleven steps, `prepublishOnly`'s seven, the Node engine
+  `>=22.12.0`, LGPL-2.1, the HMR key and `apply: 'serve'`.
+- Removed, and where each went: SECURITY.md's check and cross marks (the
+  words beside them carry the meaning, ASCII rule). "consumers should
+  restrict" kept shorter as "Restrict". From-mitt and from-event-emitter
+  "unsubscribe via the closure returned from" kept as "the unsubscribe
+  function `bus.on(...)` returns", and "Inspect via" dropped (the cell names
+  the call). CONTRIBUTING.md "Requirements:" became "You need:", "via" became
+  "through", "Additional" became "More". Every other change splits a sentence
+  at a semicolon or past 25 words, the same words kept. CONTRIBUTING's two
+  run-on paragraphs (the bench exclusions, the lint guards) became lists.
+- Nothing in src changed. Gate green.
+
+### 35.191 Docs pass 2: the Vitest page, the store page, the Pinia figure (2026-10-06)
+
+- docs/integrations/vitest.md: prose only. Its code blocks are run or
+  compared by tests/vitest-consumer.test.ts, so none changed. Semicolons and
+  sentences past 25 words split, "Requires" became "Needs".
+- docs/store.md, rewritten under the writing rules, every code block and
+  `vc:` marker unchanged. Claims checked against src/store-base.ts,
+  src/ledger.ts, src/command-bus.ts, src/schema.ts and the store tests.
+  Fixed to the code:
+  - "`tests/chamber-store.test.ts` asserts the built entry's import list is
+    exactly `vue` and `./failure.js`". Since s35.184 the entry imports `vue`
+    and the store's base, and the base `./failure.js` and
+    `./applied-remotely.js`. The test says so, the page did not.
+  - The refusal list lacked `store:invalid:name` (schema.ts).
+  - Pinia's "roughly 70-line bus" restated from the 2026-10-06 reading of
+    Pinia 4.0.3: about 60 lines, `action()` 44 and its subscriptions 15. The
+    same fix at src/store.ts, tests/chamber-store.test.ts and
+    docs/whitepaper.md A.3 (comments only, no line moved).
+  Verified and kept: the 256-step ring, history's 50, `state.value` getter
+  with no setter, `__origin` read from the payload by `stampMeta`, the share
+  and late-tab rules.
+- Removed from docs/store.md, and where each went: "Up to 1.26 the option
+  was named `actions`. It was renamed because" kept as "The name is
+  `reducers`, not `actions`:" (owner 2026-10-06, no backward-compatibility
+  notes). "Off by default, a store's actions run exactly as without it" kept
+  as "Without `undo: true`, a store's actions run exactly as they would with
+  no history" (the old subject was ambiguous). Heading "The bus is a required
+  argument" kept as "The bus is always an argument", "with the argument
+  required" as "with the bus a mandatory argument", "One implementation" as
+  "The same code" (words not to write). Every other change splits a sentence
+  at a semicolon or past 25 words, the same words kept.
+- CONTRIBUTING.md: the CI split gains its reason (owner, 2026-10-06): every
+  check on every cell takes too long and races on GitHub. ci.yml unchanged.
+- Gate green.
+
+### 35.192 Docs pass 3: docs/router.md (2026-10-06)
+
+- Read in full, claims checked against src/router (index.ts, history.ts,
+  loaders.ts, composables.ts, errors.ts, revalidate.ts), src/router-fetch,
+  src/schema.ts and the boundary tests. Every router code the page names is in
+  `ERROR_CODE_REGISTRY`. `HARD_NAV_CODES` is the four the page describes. The
+  default `affects`, the pagination extractors, `meta.cache`, `'affected'` and
+  the composables list match the code. "Needs Vue >= 3.6, by design" matches
+  src/router/index.ts's header (the package peer range also admits 3.5 for the
+  core). The retained-bindings table was re-measured with the boundary tests'
+  own harness (scratchpad retained.mjs): all three rows match. Only the
+  `router/vapor` row is asserted exactly by a test, and the page now says so.
+- Fixed: "the whole ~20 KB brotli the subpath exists to avoid", a hand-typed
+  figure beside the stamped saving (22.06 KB), now "the whole interop cost the
+  subpath exists to avoid (the saving above)".
+- Rewritten under the writing rules: semicolons and sentences past 25 words
+  split, the SPI's three parts and the revalidation rules as lists.
+- Removed, and where each went:
+  - "requires", "require", "required" became "needs", "need", "mandatory".
+    "via" became "through". "implement `LoaderHandlers`" became "write a
+    `LoaderHandlers`". "a worked implementation" became "a worked example".
+    "the app provides" became "the app gives". Vue's API names
+    (`provide`/`inject`) stay: a source's own vocabulary.
+  - "probeVue" and "9.6", each after a section sign, became "`probeVue` in
+    `chamber.ts`" and "section 9.6" (ASCII). "Jul 20" became "July 20".
+  - The KeepAlive section's narrative ("A second correction, from the rc.4
+    read. The paragraph above is right that the guard should stay - but for
+    most of its life it was not running", "A third pass, from the rc.5 cycle",
+    "The rc.4 note above rested on measurement alone, which left open whether
+    the null was a Vapor gap that would eventually be fixed - in which case the
+    new gate would be temporary scaffolding. It is not.") kept as the facts it
+    established: the gate is `hasInjectionContext()`, `getCurrentInstance()`
+    is null in Vapor (measured on rc.4), the old gate let the two composables
+    record into a deactivated Vapor view, and upstream confirmed the null is
+    intentional (#13687). The investigation's order is in the rc.4 and rc.5
+    log sections.
+- Gate green.
+
+### 35.193 Docs pass 4: docs/plan-failures-and-contract.md (2026-10-06)
+
+- Read in full. The parts that state current behaviour were checked against
+  src/failure.ts (`conditionOfStatus`, `retryClass`, `_heldBack`),
+  src/outbox.ts (`outboxIsRetryable`) and src/transports.ts. The status table,
+  the retry paragraph of 4.4, the off-contract shapes and the outbox rule
+  match the code.
+- Fixed: 4.2's "retry by default" column predated 1.27's rule. It said
+  `timeout` yes and `failed`, `unexpected`, `unknown` no. `retryClass` makes a
+  408 transient, and no reply (a transport's own timeout, a 502, a 504), a
+  backend's `failed`, `unexpected` and `unknown` uncertain: re-sent only when
+  the command is identified. The column now names the class, and a sentence
+  above the table says what each word means.
+- The 1.24 defect table, the measurements, the sources and the dated
+  sections are history. Their facts stand as written. Only their sentences
+  changed.
+- Rewritten under the writing rules (a plan: 20 words where it plans, 25
+  where it reports): semicolons removed (153 hits before, none after), long
+  enumerations turned into lists (the status table, off contract, the retry
+  rule, the phase checklist, the open accessibility items). The checker's 15
+  remaining hits are enumerations, an owner quote kept verbatim, and
+  sentences joined by its splitter.
+- Removed, and where each went: "requirement" became "need" in the 8e heading
+  and rev 12, and "Accessibility is a requirement" became "Accessibility is
+  mandatory" in the draft decision-log entry (word not to write). Rev 24 added
+  to the plan's own revision log. Nothing else removed.
+- Gate green.
+
+### 35.194 Docs pass 5: ROADMAP.md (2026-10-06)
+
+- Read in full. Names checked against the built entries
+  (scratchpad check-roadmap.mjs): `HttpError`, the `retry` plugin, `retrying`
+  and `noRetry` are gone. Every other name the feature matrix lists exists.
+- Facts fixed to the code:
+  - The stable plugins list named `retry`. Retry is the async bus's own (its
+    `retry` option) since v1.25.0. The list drops it and the command-bus line
+    names it.
+  - The feature matrix rows for `retry`, `HttpError.code` and
+    `HttpBridgeOptions.noRetry` are struck with the reason, as the file's own
+    convention asks ("items that die are struck with the reason, not
+    deleted").
+  - "`BusError` structured error class (code, severity, emitter)": severity
+    and emitter left the object (plan 4.5). The row names the
+    `owner:condition:subject` code and the `toJSON` problem document.
+  - The general bus's list said "persist/sync/retry". `sync` is
+    `createChannel` since 2026-09-23 and retry is the bus's own.
+- Policy fixed to the owner's rule (2026-10-05, restated 2026-10-06: no
+  deprecations, no backward compatibility). The transitional section promised
+  "a deprecation cycle with a working escape hatch". `createVaporChamberApp`
+  was planned to become "soft-deprecated" with a `@deprecated` tag at v2.0.
+  "How to read" promised "the escape hatch will always exist for one minor".
+  The stable checklist ended on "the deprecation cycle ... makes safe". Each
+  now says a rename or removal lands in one release, every consumer and
+  example moved, and the CHANGELOG names it. `createVaporChamberApp` is kept or
+  removed cleanly at v2.0. Its fact stays: while Vapor ships in a separate
+  dist, its clear throw is the feature.
+- Removed, and where each went:
+  - "This line once read '~36x (25,400 vs 700)', a third copy of a number
+    maintained in docs/performance.md, and both halves had drifted": the
+    stamped figure replaced that number long ago, and the history is in this
+    log. Deleted.
+  - "The project tracks pre-release Vue with a tiny userbase, so it chose the
+    clean removal over a deprecation cycle": now the general rule at the head
+    of the transitional section.
+  - "Holding the tag is deliberate" and "Soft-deprecation here means a JSDoc
+    tag and a doc pointer: no runtime warning, no behaviour change, no
+    break": the plan they explained is withdrawn (above).
+  - The contributing note's story ("This line used to name ... Both halves are
+    dead ... The two statements sat in the same file contradicting each other
+    for two cycles") kept as its current facts: the work was withdrawn at
+    rc.3, and the RC gate it waited on has passed.
+  - Non-ASCII: the check, cross and wrench marks (the words beside them carry
+    the meaning), and the comparison, delta and section signs, written in
+    ASCII.
+  - Words not to write: "via" became "through", "requires" became "needs",
+    "provide" became "give", "re-implementing" became "rebuilding", "real
+    implementations" became "real, not stubs". Vue's `provide`/`inject` stays.
+    "real-real-hot path" became "the real hot path".
+  - Every other change splits a sentence at a semicolon or past 25 words, the
+    same words kept. The checker's remaining hits are Vue's API names.
+- Gate green.
+
+### 35.195 Docs pass 6: docs/performance.md (2026-10-06)
+
+- Read in full. Each claim checked against `src/` and `package.json`.
+- Facts fixed to the code:
+  - `stampMeta`'s field list lacked `response` and `request`. The meta object
+    is `{ ts, id, correlationId, causationId, origin, idempotencyKey,
+    response, request }` (`src/command-bus.ts`). The dispatch comparison's
+    "meta object allocation" list now names all eight.
+  - "`alien-signals` ... npm installs it as a declared dependency" was false.
+    It is an optional peer (`>=3.1.2`, `peerDependenciesMeta.optional`), bundled
+    only if the app installs and imports it.
+  - "`matchesPattern` caches the prefix ... in a 256-entry LRU" was false.
+    `_prefixCache` evicts the oldest inserted pattern and a hit does not
+    refresh it, so it is first in, first out. The same word is fixed in
+    ROADMAP.md and in two `src/command-bus.ts` comments ("`matchesPattern`'s
+    cache"). The `cache` plugin and the HTTP cache are true LRU and keep the
+    word. The whitepaper's two uses go in its own pass.
+  - The `meta.ts` section listed the outbox among TTL decisions. The outbox
+    reads `Date.now()` only to build a record id and has no expiry, so it
+    leaves the list. The containment test pins `cache` and `idempotent`, and
+    the sentence now says so instead of "those".
+  - "two escapes, neither of which costs anyone else a byte": the code block
+    shows one escape. It now reads "an escape".
+  - "Unreleased (log section 35.67)": the fast lane's `off` mark shipped in
+    v1.26.0. Now "v1.26.0 (log section 35.67)". "beta.17 (unreleased)" lost
+    "(unreleased)" for the same reason.
+  - "`inspectBus(bus)` returns the registered listener pattern count": it
+    returns the patterns (`listenerPatterns`, an array).
+- Removed, and where each went:
+  - Measuring item 3's history aside ("This line used to reach for the symbol
+    directly ... `inspectBus` is the public door anyway"): the line names
+    `inspectBus`, and the history is this entry.
+  - "### Implementation notes for the curious" became "### How the emit fast
+    path works". "**Implementation note:**" became "**How it is wired:**".
+  - "provide your own signal implementation" became "bring your own signal".
+  - "(real-real-hot)" became "(the real hot path)".
+  - Non-ASCII: the section sign, the at-most sign, the micro sign and the box
+    drawing in both decision trees, written in ASCII. "finding #5" became
+    "finding 5".
+  - Words not to write: "via" became "through", "requires" became "needs",
+    "provided" became "given". "requires annotating every API with `@export`,
+    writing externs files, and removing all dynamic property access" became
+    "needs `@export` on every API, externs files, and no dynamic property
+    access".
+  - Every other change splits a sentence at a semicolon, a dash aside or past
+    25 words, the same words kept. Code blocks and `vc:` markers are unchanged.
+    The checker's five remaining hits are its own sentence-split misses.
+- Gate green.
+
+### 35.196 Docs pass 7: docs/integrations/laravel.md, the sprinkled-blade README (2026-10-06)
+
+- Read in full. Each claim checked against `src/`, the example controller and
+  Laravel 13's own source.
+- Checked and true: the status table is `conditionOfStatus` (`src/failure.ts`)
+  row for row. The retry list is `retryClass` and the async bus's retrier. The
+  CSRF read order is meta tag, cookie, hidden input, and cookie first after a
+  419 refresh. `createEchoBridge`, `pollWith`, `emitDOMEvent`'s default
+  `composed: true`, `serialize`'s default key and the `Idempotency-Key`
+  Structured Field String hold. `VerifyCsrfToken` still exists in Laravel 13, as
+  a subclass of `PreventRequestForgery`, so both names on the page are true.
+- The pre-noted check: `connect()` takes the async bus's `RetryOptions` in all
+  three IIFE variants (`retry` is passed to `createApp`). A probe on the built
+  core IIFE (scratchpad probe-connect-retry.mjs) counted fetch calls, a 200
+  after the first failure:
+
+  | Answer | `retry` | Fetches | Result |
+  |---|---|---|---|
+  | 502 | no declaration | 1 | `remote:unexpected:x` |
+  | 502 | `actionPolicies: { cartSet: 'idempotent' }` | 2 | ok |
+  | 408 | no declaration | 2 | ok |
+  | 408 | `false` | 1 | `remote:timeout:x` |
+
+- Facts fixed to the code:
+  - The page's abridged copy of `dispatchOne()` was stale. Its comment still
+    said a busy key's 409 is `conflict`, "which no re-send repeats". The
+    example now answers 409 with `Retry-After: 1`. The cache hit, the 202
+    shape and the cached value also changed. The excerpt is copied again from
+    the example, and one line says `__invoke()` adds the header.
+  - "With no `onRedirect` configured the same code arrives with a message
+    saying so": the message names the missing handler in development only
+    (`DEV &&` in `src/transports.ts`). The sentence says so.
+  - "The controller lifts exactly that shape" (redirect, stores): the page's
+    minimal controller lifts nothing. It is the example controller that does,
+    and the sentences name it. One added sentence lists what the example adds.
+  - "list `Location` and `Retry-After` in `exposed_headers` (CORS, below)": the
+    CORS section is above. Now "above".
+  - The example controller's comment placed `conditionOfStatus` in
+    `http-errors.ts`. It is in `src/failure.ts`.
+  - The sprinkled-blade README said the bus re-sends "a 429, 503 or timeout".
+    Only a 408 is re-sent for any command. A timeout with no reply, or a 504,
+    may have landed and is re-sent only for an identified command. The line
+    now says both, and the probe above is its evidence.
+- Removed, and where each went: nothing. Every change splits a sentence at a
+  semicolon, a dash aside or past 25 words, or makes a run-on list bullets. The
+  words stay the same.
+- Words not to write: "required" became "needed" in a heading and a code
+  comment. "via Reverb" became "through Reverb", "participate" became "take
+  part". In the sprinkled-blade README "implement" became "build" and
+  "implementation" became "backend".
+- Gate green.
+
+### 35.197 Docs pass 8: README.md (2026-10-06)
+
+- Read in full. Names and shapes checked against the built `dist/`
+  (scratchpad check-readme.mjs, check-readme2.mjs, check-readme3.mjs). Every
+  root name the README uses exists. `inspectBus`, `history().getState()`,
+  `metrics().summary()`, `dispatchBatch`, `useCommandError`, `createFormBus`
+  and `createHttpClient` return the keys shown. Plugin option names, the
+  directive names, the stream parser, the three IIFE globals and the client's
+  default retries (2 for GET, 0 for mutations) hold.
+- The pre-noted check, item 1 R8 ("An inverse never does I/O"): the
+  `optimisticUndo` example registered `undo: (cmd) =>
+  api.removeFromCart(cmd.target.id)`. That inverse runs when the write failed,
+  so it called the server to remove what was never added. The example now
+  makes the local change in the handler, then sends the write. The inverse
+  reverses the local change only, and two sentences state R8. The other
+  registered inverses in `examples/` and `docs/` do no server I/O.
+- Facts fixed to the code:
+  - The subpath list lacked `vapor-chamber/vitest`, `/vitest/pure` and
+    `/vitest/mcp`, all in `package.json` `exports`. Added.
+  - `register`'s options listed `{ undo?, throttle? }`. `RegisterOptions` also
+    has `canUndo` and `answer` (item 1, task 8). Added.
+  - `cmd.meta.ts; // Date.now()`: it is read once per microtask turn
+    (docs/performance.md). The comment says so.
+  - The examples table described `async-api.ts` as "Async handlers with retry
+    plugin". The retry plugin left in v1.25.0, and the file uses the bus's own
+    `retry`. Now "with the bus's own retry".
+  - The IIFE variant table named "HTTP transport" and "WebSocket / SSE". The
+    globals are `http`, `ws` and `sse`, now named. `emitDOMEvent()` joins the
+    elements row, where it ships.
+- Removed, and where each went:
+  - "Requirements:" became "What it needs:".
+  - "(set by the bus, never by the raiser)" became its own sentence, "The bus
+    sets the owner, never the raiser."
+  - "Requires `@vue/devtools-api`; silently no-ops if not installed" became
+    "Needs `@vue/devtools-api`. Without it, it silently does nothing."
+  - "a host-provided global error handler" became "a global error handler the
+    host installs".
+  - "real-real-hot loops" became "the real hot loops".
+  - Non-ASCII, now in ASCII: the at-least sign, the middle dot (Contents line,
+    coverage line, docs table) and the architecture diagram's box drawing. The
+    check and cross marks became "yes" and "-" in the variant table, "ok" and
+    "throws" in the naming example.
+  - Words not to write: "via" became "through" (six sites), "required" became
+    "needs" or "need", "provide" stays in Vue's `provide`/`inject`.
+  - Every other change splits a sentence at a semicolon, a dash aside or past
+    25 words, or makes a run-on list bullets. The words stay the same. The
+    checker's three remaining hits are Vue's API name and two splitter misses.
+- Gate green.
+
+### 35.198 Docs pass 9: docs/whitepaper.md sections 1 to 8 (2026-10-06)
+
+- Read in full. Claims checked against `src/` and the built `dist/`. The
+  checks covered the naming default, `PluginParts`, the fourteen conditions,
+  the status table and the retry rule. They covered the CSRF cache's 5
+  minutes, the `session-expired` event and the build profile. They covered
+  `useCommandHistory`'s `maxSize`, `useCommandQuery`, `useTransitionCommand`
+  and the three Vapor directive names. `revalidateRoutes`' signature and every
+  test file named hold too.
+- Facts fixed to the code:
+  - The dispatch flow's meta listed `{ ts, id, correlationId, causationId,
+    origin }`. It also carries `idempotencyKey`, `response` and `request`.
+  - "cached runner - rebuilt only on use()/unuse()": there is no `unuse()`.
+    `use()` returns the remover. Now "rebuilt only when a plugin is added or
+    removed", and the surface listing says `use()` returns its remover.
+  - `register`'s options listed `{ undo?, throttle? }`. `canUndo` and `answer`
+    are added. `request` gains its `options` argument.
+  - The composed-surface example imported `defineChamberStore` and called a
+    `useCart` it never defined. One line defines it.
+- Removed, and where each went:
+  - "provides the data flow layer" became "gives the data flow layer".
+  - "a convention, not a requirement" became "a convention, not a rule".
+  - "Build required" became "Build needed". "without requiring a handler"
+    became "and needs no handler". "`getState` is required" became "It needs
+    `getState`". "does not treat them as required" became "as needed".
+  - "via" became "through" or "from" (five sites, one a table header).
+  - "the corrections this document made to itself" became "this document's
+    corrections to itself".
+  - "though the core can be used in any TypeScript project" became "though any
+    TypeScript project can use the core".
+  - "(set by the bus, never by the raiser)" became "The bus sets the owner,
+    never the raiser."
+  - Non-ASCII: the section sign became "section". Inside the two quotations
+    the Greek rho became "[rho]", brackets marking the change, and "rho"
+    outside them. The at-most sign became "<=". The check and cross marks
+    became "passes" and "throws". The layer diagram's box drawing and middle
+    dots are ASCII.
+  - Run-on lists became bullets: the two honesty rules, the owner's names, the
+    retry rule, Vue's reported gains, the HTTP client's three rules.
+  - Every other change splits a sentence at a semicolon, a dash aside or past
+    25 words. The words stay the same. Two checker hits remain, both its
+    sentence-split misses after a bold lead.
+- Gate green.
+
+### 35.199 Docs pass 10: docs/whitepaper.md sections 9 to 17 (2026-10-06)
+
+- Read in full. Claims checked against `src/`, `package.json`, `vitest.config.ts`
+  and `.github/workflows/ci.yml`. The file map was checked against `src/` by a
+  script (scratchpad check-filemap.mjs).
+- Facts fixed to the code:
+  - 9.5 said a framework's protocol could be parsed "inside an `onReceive`
+    callback" of `createWsBridge`. The bridge has no such option. Its
+    `onmessage` pairs an answer with its request by id and ignores any other
+    frame. The section now says so, and that another protocol takes a plugin of
+    the app's own.
+  - 9.6 said variant contents "are not stable across major versions before
+    v2.0". Before v2.0 there is no major version. Now "minor versions", as
+    README and docs/performance.md say.
+  - 13 named `vapor-chamber/vitest-pure`. The subpath is
+    `vapor-chamber/vitest/pure`.
+  - 14.2 said CI runs the A/B "on every push and pull request". The workflow
+    runs on pushes to main and pull requests against it. The job also fails on
+    a workload that measured nothing (`scripts/ab/ci.mjs`), now listed.
+  - 15 claimed "100% line + branch + function coverage" with "3
+    provably-unreachable defensive guards excluded with rationale". The gate is
+    100 on all four axes, statements included, and no line of `src/` carries an
+    ignore pragma. Both are fixed.
+  - 16, the file map, lacked seven files: `failure.ts`, `action-filter.ts`,
+    `library-names.ts`, `applied-remotely.ts`, `poll-with.ts`, `store-base.ts`
+    and `store/core.ts`. Each now has a line from its own header. `BusError`
+    moves from the `command-bus.ts` line to `failure.ts`, where it lives.
+- Removed, and where each went:
+  - "implement protocol-specific message parsing inside an `onReceive`
+    callback": false (above). "write a plugin of your own around that
+    protocol's client" says what an app does instead.
+  - "no code changes required" became "no code changes needed".
+  - "via" became "through" (four sites).
+  - Run-on lists became bullets: the A/A control's four conditions, the seven
+    open questions of 14.5.
+  - Every other change splits a sentence at a semicolon, a dash aside or past
+    25 words. The words stay the same. Three checker hits remain, its
+    sentence-split misses after a bold lead.
+- Gate green.
+
+### 35.200 Docs pass 11: docs/whitepaper.md, the appendix (2026-10-06)
+
+- Read in full. The appendix is dated history, so a claim is checked for what
+  it says of now: a section number, a current name, a pointer.
+- Facts fixed:
+  - Section references still used the old numbering. "(11.6)" for the IIFE
+    variants is now 9.6. "see 11.6" for the Vue entry is now 7.2, and for the
+    owned global slot and `configureVue()` now 9.6. "(14)" for SSR is now 12.
+    "That is 9.5's discipline" (the old memory section, "estimates, never
+    measured") is now 7.6, where "No heap is measured here" stands. Part D's
+    "section 21", "section 9" and "section 18" point at part C's "From 21 File
+    Map", part B's table and D's own Roadmap entry.
+  - rc.6 named `matchesPattern`'s cache an LRU twice. It is first in, first
+    out (35.195). Now "a `Map.get` on its prefix cache" and "keeps its prefix
+    cache untouched".
+  - rc.9's still-watching item said `aria-disabled` replaced `disabled` in
+    "the Unreleased CHANGELOG entry". It shipped in v1.25.0. The bullet's
+    title stays word for word, since the v1.25.0 CHANGELOG quotes it.
+  - Two entries ran into the next heading with no blank line (rc.4 into rc.5,
+    rc.6 into rc.7). A bullet list in rc.9 swallowed the paragraph after it.
+    Blank lines added.
+  - The intro said everything below was moved "verbatim". Parts A, B and D are
+    now edited to the writing rules, facts unchanged. Part C still quotes each
+    passage as it stood, its non-ASCII marks written in ASCII. The intro and
+    C's own lead say exactly that.
+- How it was edited:
+  - Semicolons in A and B: 152, by a script (scratchpad semis.mjs) that skips
+    code, comments and `vc:` markers. Inside parentheses or a table cell one
+    became a comma. Elsewhere it ended the sentence, and a plain lowercase word
+    after it was capitalized (a `v-` name stays lowercase). The diff was read
+    before it was written, and one parenthetical comma splice was fixed by
+    hand.
+  - Long sentences: split by hand, every one, the same words kept. Run-on
+    lists of Vue fixes and of findings became bullets. The checker's
+    remaining hits in A, B and D are its own misses. Each is a sentence after
+    a bold lead, or one starting "rc.4", "1000", "3.5" or "vue-tsc".
+  - Part C is left as quoted. Only the section sign, the check mark and the
+    at-most sign changed, written in ASCII. Two of C's headings are our notes,
+    not quotes, and lost their semicolons.
+- Removed, and where each went:
+  - "provides a semantic ... dispatch layer" (A.2) became "gives".
+  - "reimplements persistence, history and sync" (A.3) became "rebuilds".
+  - "rather than required by it" became "rather than needed for it". "the
+    required version" became "the version needed". "The two requirements"
+    became "The two needs". "does not require enumerability" became "does not
+    need". "keep requiring the vDOM outlet" became "still need".
+  - "the same mechanism `setActiveSub` implements" became "the same mechanism
+    as `setActiveSub`". "one implementation to satisfy both signatures" became
+    "one body". "implemented on Vue's side" became "built on Vue's side".
+  - "via" became "through" (eight sites).
+  - "the rule `directives.ts` enforces ... added in the rc.2 cycle after a
+    single global count stranded the shared listener": the same facts, in
+    three sentences.
+  - Kept as a quote: "requires component teardown ordering", upstream's own
+    wording for `IS_COMPONENT`.
+- Gate green.
+
+### 35.201 Task 10 closed: two CHANGELOG bullets for the docs pass (2026-10-06)
+
+- The docs pass (35.190 to 35.200) is done over every file the handoff named.
+  Two of its fixes change what an app would copy, so they get Unreleased
+  bullets in the CHANGELOG's own "Fixed the docs" style:
+  - the README's `optimisticUndo` example, whose inverse called the server
+    (item 1 R8, 35.197)
+  - the names the docs gave that the code lacks: `createWsBridge`'s
+    `onReceive` (35.199), the LRU in `matchesPattern` (35.195, 35.200), the
+    `vitest-pure` subpath (35.199)
+- Every other fix of the pass is a docs-only correction an app does not act
+  on, recorded in its own log section.
+- Gate green.
+
+### 35.202 Task 11: the checks before the merge (2026-10-06)
+
+- Scope: the 49 commits in 1534810..939dc60, oldest first, by
+  .probes/prompt-audit-commits.md. Verdicts in .probes/audit-1.27-commits.md
+  (untracked): 49 ACCEPT, every finding fixed forward in this commit.
+- Gates: one clean detached worktree, `git clean -xfd` keeping node_modules
+  before each commit, one `npm ci`, build, `node scripts/gate.mjs`. 47 GREEN
+  at once (64 to 179 s each, 72 min in all over two sessions). Two RED at
+  test:run, both GREEN on one rerun (107 s, 126 s): ef156e9 and 320be1a,
+  each a test that depends on timing, traced below.
+- Fails-before: for the 37 commits that change src and tests, the commit's
+  tests on `<hash>~1`'s build (4 min, plus 30 min on one hung file). Every
+  red set is the assertions the fix targets. The three renames fail on the
+  new name the old code does not read: 5b27594 16, ca1b773 26, a8eb0c7 238.
+  Counts above a section's record are tests the commit rewrote and named
+  there. Two records were wrong, corrected in place:
+  - s35.168: the "controls" with the bridge's own signal and without
+    `AbortSignal.any` are red on ef156e9 (7 red, not 5). They assert the
+    fix. tests/batching-abort.test.ts now holds the 7 fix tests in one block
+    and the one control in another.
+  - s35.186: red on 6445bf6 is 7, not 4. The non-object warning and the
+    takeover sat under "controls". Regrouped the same way.
+- Tests that could fail or hang without a defect, fixed forward:
+  - tests/request-join.test.ts: three tests compared wall time to a 50 ms
+    margin (abort at 10 ms, "late" from 60 ms). Under the gate's 287 parallel
+    workers the 10 ms timer fired more than 50 ms late. The responder now
+    waits for a `release()` the test calls, so a caller that settles first
+    settled on its own abort or timeout. On ed9e228's src: the same 6 red as
+    s35.167, the two rewritten ones at the 1 s cap.
+  - tests/hmr-render-scope-fixture.test.ts (the flake s35.124 recorded, since
+    v1.25): the chamber's probe imports bare `vue` (@vue/runtime-core's cjs
+    build), and the setup does not await it. That build also writes
+    `globalThis.__VUE_HMR_RUNTIME__`, whose record map is private to each
+    copy. A setter on the global showed the cjs write before the test body.
+    An esbuild metafile of src/index.ts and src/vitest.ts showed no static
+    `vue` import, so the write is the probe's. Landing after the with-vapor
+    import, it handed the test the other copy: `setups` 1. Control: a Vue
+    copy imported after with-vapor gives `setups` 1, `vue` imported first
+    gives 3. Now `await waitForVueDetection()` runs first. The `tests/vapor/`
+    project aliases `vue` to the with-vapor build: one copy, no race.
+  - tests/wire-contract.test.ts: under fake timers the unkeyed Retry-After
+    row awaited its dispatch without advancing time. On the pre-fix bus,
+    which waits the 2 s, it hung for 30 min in the fails-before run. It now
+    advances 6 s first. On 69cf3ab's src it fails in 4 ms.
+  - tests/batching-abort.test.ts: "at once" had a 30 ms margin. The backend
+    now answers in 1 s and the bound is 500 ms.
+- The 1.26 regression run: c7184b6's tests/ against the branch build, both
+  vitest projects and tsc (about 4 min). 3_052 tests and 38 Vapor tests:
+  316 fail, 5 files fail to load. Every one is named, by a script over the
+  JSON report (0 unmatched):
+
+  | CHANGELOG Unreleased | failures |
+  |---|---|
+  | `destroy`, `close`, `teardown` to `dispose` | 223 |
+  | store option `actions` to `reducers` | 45 |
+  | `maxSize` and `maxBufferSize` | 20 |
+  | MCP -32602 (10.9) and `actionFilter` (D2) | 14 |
+  | retry `actions` to `actionPolicies` | 7 |
+  | item 3: no reply re-sent only when identified | 7 |
+  | `request()`, `idempotent` key, batching abort (10.4, 10.5, 10.6) | 3 |
+  | the Blade ceiling raised to measured | 1 |
+  | async-execute-ab's revert target, 1.26 code | 1 |
+
+  One router row failed on a click, not a rename: the test before it threw
+  at `router.destroy()` and left its router listening. 1.26's file with only
+  `destroy` renamed passes 21 of 21. tsc on the 1.26 tests: 408 errors, the
+  same renames and their cascades (a store typed `object` once `actions` is
+  unknown). `setInflight`'s third argument is internal (not exported).
+  tsconfig.typecheck.json: 0 errors.
+- Found by that run: a 1.26 app passing `createMcpHandler(bus, { actions:
+  ['cartClear'] })` serves `cartAdd`. s35.180 decided it (no fallback read,
+  owner rule). The CHANGELOG bullet now says what such an app sees.
+- Probes, run in session 3 (scripts in .probes/task11/), all rows OK. The
+  cross-feature matrix: undo with `$` commands under idempotent and cache,
+  no reply with optimisticUndo, share with undo. Laravel 13.34: /cart IIFE,
+  a replayed idempotency key, a 422 with /payload/qty, the batch endpoint,
+  202 then pollWith.
+- Examples: `npm run check:example` (11 s), then each example's own server in
+  headless Chromium: 7 of 7. The probe's router-demo check read
+  `textContent('body')`, which includes the page's inline script and its
+  "did not render" string: a false FAIL. It now reads the boot-error box and
+  `#app`. Control: with the router import blocked it reports FAIL.
+- A/B, the plan's standing go: `npm run ab`, A = c7184b6 (1.26), B =
+  939dc60, K 10, two lengths, one workload at a time. 27 min of workloads
+  plus two builds, load 7 to 8 (the rows validate themselves). Ten
+  workloads ran. store-share and store-undo cannot run on 1.26: they pass
+  `reducers`, which the 1.26 store does not read (checked: it throws, and
+  `actions` defines the store), as s35.156 recorded.
+  - No verdict SLOWER. Counted FASTER: history-undo's bare_control (-4 ns),
+    http-failures' bridge_409 (-20 to -30 ns). Mixed and plugin rows lean
+    faster (filter-mixed -11 to -22 ns, plugins3_listener1 -10 ns).
+  - Two leads, each counted at one length. Bare `dispatch` on a bus with no
+    plugin: +4.7, +7.0, +5.0 and +4.9 ns at the long length in four
+    workloads. A bridged success, `bridge_ok`, with a fake fetch: +140 /
+    +199 ns, fit +219 ns, 12 to 15 percent.
+- Attribution, owner go 2026-10-06, consecutive pairs of real builds on one
+  workload (19 min plus builds):
+  - Bare dispatch, plugins-miss over c7184b6, 1534810, 845a610, b15293e,
+    939dc60: all of it is b15293e (item 2). It reads +2.3 / +5.4 ns,
+    counted SLOWER at both lengths, fit +6.5 ns. Every other pair is within
+    0.3 ns. It is the cost s35.155 measured (+2.2 to +5.7 ns) and the owner
+    accepted.
+    The same commit makes four_scoped_miss 1.8 ns faster. In history-undo's
+    process, where a bus with plugins also runs, the bare bus is faster.
+  - Bridged success, `bridge_ok` alone, coarse then fine: all of it is
+    1d4cc62 (item 1 part 3), +160 / +239 ns, fit +265 ns. Every other pair
+    is within 35 ns. That commit adds each bridged command to
+    `_appliedRemotely`, a WeakSet (s35.159: a set, not a field, so the
+    Command keeps its hidden class). s35.159 ran no A/B, as a network path.
+    A network path may pay (handoff, "Decided"): +0.24 us on a request
+    that takes a round trip. Recorded, not changed. A field instead is a
+    change to the Command's shape on every path, a plan entry of its own.
+- Docs fixed forward: 129 prose semicolons in log sections 35.154 to 35.189,
+  by .probes/task11/semis.mjs. Inside parentheses, tables and headings each
+  became a comma, else a new sentence. Hand fixes: 35.155, 35.171, 35.175,
+  35.185 and 35.190, and the section-sign quote in 35.192 is now ASCII.
+  "required" in an Unreleased bullet is now "mandatory".
+- Gate green.
+
+### 35.203 1.27 closed: the last read (2026-10-06)
+
+- Owner, 2026-10-06: test only what smells like a regression, read the code
+  for a cheaper way, then close 1.27. No more A/B against 1.26: 1.26 has the
+  bugs 1.27 fixes, so the pair measures only the work the fixes do. 1.27.0 is
+  the baseline from here.
+- Checked on main 2a84d01 before the read: the gate green, `test:browser` 21
+  of 21, `check:example` and the seven demos in Chromium. The API reference
+  page (index.html) renders three pages with no error, and a control with
+  docs/api blocked fails.
+- Read in full: the src diff c7184b6..2a84d01, 31 files, against
+  docs/V8-RULES.md. On a normal action (a dispatch with plugins or
+  listeners, a store action, an HTTP request) nothing new runs per call
+  beyond what s35.202 attributed. The new work sits on failure, undo, batch,
+  `request()`, offline, setup or development paths, or behind a check
+  decided once. The retrier reads its policy map only when one is declared
+  (src/command-bus.ts:2457). The transport level settles an answer only when
+  a store or an `answer` is registered (src/command-bus.ts:2334).
+- Bare dispatch's +5 ns (item 2) is an inlining decision, not more work. The
+  bare path's code is the same in 845a610 and b15293e.
+  `--trace-turbo-inlining` on a bare loop: before item 2 TurboFan refused
+  `_syncDispatchInner` as too large and compiled it alone. After it, the
+  function is inlined through `syncDispatch` and `dispatch` into the caller.
+  The only lever is a function shaped to stay out of line, which the rules
+  decline.
+- Leads after 1.27, none measured, each a plan entry first:
+  - The `_appliedRemotely` mark on a bridged success (src/transports.ts:121,
+    +240 ns in the harness, 1d4cc62). The harness keeps tens of thousands of
+    entries alive between two collections. The long length cost more than
+    the short one, so an app likely pays less.
+  - The id string per dispatch (src/command-bus.ts:762) joins the constant
+    `_uidPrefix + '-'` on every call. A profile lead.
+  - Development only: an `undo: true` store runs each reducer twice and
+    compares two `JSON.stringify` on every action, for the page's life
+    (src/store-base.ts:315). A reducer that mints an id or a time differs on
+    its first call, so checking the first dispatch of each action catches it.
+- Notes and the profiles: .probes/speed-analysis-1.28.md (untracked).
+- Gate green.
+
+### 35.204 Bare dispatch: the Command built before the depth's try (2026-10-06)
+
+- The question (s35.203): bare sync `dispatch` read 5 ns slower since item 2
+  (b15293e), though its code did not change. Diagnosed by a separate session
+  on the owner's prompt, no src edit. Its findings now sit in
+  docs/V8-RULES.md (rule 2, and the Open items on inlining, flags as a
+  control, seeing what V8 kept, the `ts` box). The report file is discarded
+  (owner).
+- Cause: item 2 shrank `_syncDispatchInner` from 699 to 225 bytecode bytes,
+  under V8's 460 budget, so it inlined into its caller inside
+  `syncDispatch`'s try/finally. Its Command literal
+  `{ action, target, payload, meta: stampMeta(payload) }` is allocated
+  before `stampMeta` runs. So `stampMeta`'s exception edges saw the Command
+  half built, and escape analysis made a merge value for its `meta`. A meta
+  nothing reads was then kept on every bare dispatch: 104 bytes, nine field
+  stores, the id string joins. Out of line (1.26) it was deleted. Killed:
+  the depth counter reloaded around the handler (two loads, two stores in
+  both), the six bare-path reads (cheaper inlined, `s` folds to a constant).
+- Candidate 1, stamp into a local then build, changes nothing an app runs.
+  The build (Vite, `minify: false`) folds a one-use `const` back into the
+  literal, so 71bd6a0 and the candidate built byte-identical `dist`. Its
+  first A/B compared identical code (B/A 1.000) and was stopped. The A/B
+  script now refuses identical arms.
+- Landed, candidate 2: `syncDispatch` guards (depth), validates the name,
+  builds the Command, then increments the depth and runs
+  `_syncDispatchInner(s, cmd, executeOverride)` inside the try/finally, as
+  `syncDispatchCommand` does. Same order of everything an app can observe:
+  a naming throw still leaves the depth as it was, and `stampMeta` reads no
+  depth. Query was not regressed and is unchanged.
+- A/B, owner go, `npm run ab`, A = 71bd6a0, B = cad031a, K 10, two lengths:
+  - plugins-miss (142 s): bare_dispatch 26.5 -> 18.8 ns and 31.4 -> 19.5
+    ns (0.71x, 0.62x), verdict FASTER, fit -13.4 ns. four_scoped_miss +2.4
+    ns counted at one length, +3.0 not counted, fit +3.2 ns: no result.
+  - meta-slot (73 s): bare_dispatch -6.2 and -10.0 ns, counted at the long
+    length (0.64x). listener_reads_meta +3.1 and +3.8 ns, counted at the
+    long length, fit +4.1 ns: no result.
+  - Owner, 2026-10-06: "mixed data is hard to optimize, conclude this shape
+    and not argue 4 ns". The mixed workloads were not run.
+- Tests: typecheck clean, suite 3390 passed, coverage 100 x4. No test
+  changes behaviour: tests/v8-shapes.test.ts pins the Command and meta maps.
+- Bytes, one piece. Raw/brotli full, core, elements IIFE +7/-39, +7/-13,
+  +7/-11: raw budgets raised to measured, brotli kept. Blade consumer 8_290
+  -> 8_295 brotli (+5): ceiling raised to measured
+  (tests/esm-treeshake.test.ts).
+- CHANGELOG: one bullet under `## v1.27.0 - 2026-10-06` (owner: 1.27, dated
+  today), no version change.
+- Gate green.

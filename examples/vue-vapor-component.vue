@@ -27,11 +27,15 @@ interface Todo {
 }
 
 // The todos are a store: every change is a command (`todoAdd`, ...), and with
-// `undo: true` each one can be undone through the history below.
+// `undo: true` each one can be undone through the history below. The new
+// todo's id is minted where the command is sent (addTodo) and arrives as its
+// payload: a redo dispatches the same command again, so the todo comes back
+// with the same id (a key the list keeps), where an id minted inside the
+// reducer would be a new one.
 const useTodos = defineChamberStore('todo', {
   state: () => ({ items: [] as Todo[] }),
-  actions: {
-    add: (s, text: string) => ({ items: [...s.items, { id: Date.now(), text, done: false }] }),
+  reducers: {
+    add: (s, text: string, p: { id: number }) => ({ items: [...s.items, { id: p.id, text, done: false }] }),
     toggle: (s, id: number) => ({ items: s.items.map((t) => (t.id === id ? { ...t, done: !t.done } : t)) }),
     remove: (s, id: number) => ({ items: s.items.filter((t) => t.id !== id) }),
     clearCompleted: (s) => ({ items: s.items.filter((t) => !t.done) }),
@@ -67,7 +71,7 @@ const stats = computed(() => {
 
 function addTodo() {
   // Dispatched through useCommand, so its loading and lastError track it.
-  const result = cmd.dispatch('todoAdd', newTodoText.value.trim());
+  const result = cmd.dispatch('todoAdd', newTodoText.value.trim(), { id: Date.now() });
   if (!(result instanceof Promise) && result.ok) newTodoText.value = '';
 }
 </script>

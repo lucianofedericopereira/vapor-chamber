@@ -19,6 +19,7 @@ import {
   type BusSchema,
 } from '../src/schema';
 import { RETRYABLE_CONDITIONS } from '../src/command-bus';
+import { _failures, retryClass, type FailCode } from '../src/failure';
 import { it } from '../src/vitest';
 
 
@@ -603,9 +604,13 @@ describe('ERROR_CODE_REGISTRY retry metadata', () => {
     }
   });
 
-  it('a row is retryable exactly when its condition is (the column is an outcome)', () => {
+  it('a row is retryable exactly when the retry rule reads its code as transient (the column is an outcome)', () => {
     for (const e of ERROR_CODE_REGISTRY) {
-      expect(e.retryable, e.code).toBe(RETRYABLE_CONDITIONS.has(e.code.split(':')[1]));
+      const owner = e.code.slice(0, e.code.indexOf(':'));
+      const transient = retryClass(_failures(owner)(e.code.slice(owner.length + 1) as FailCode, '')) === 'transient';
+      expect(e.retryable, e.code).toBe(transient);
+      // Every condition but a transport's own timeout reads as RETRYABLE_CONDITIONS says.
+      if (!e.code.startsWith('transport:timeout:')) expect(e.retryable, e.code).toBe(RETRYABLE_CONDITIONS.has(e.code.split(':')[1]));
     }
   });
 

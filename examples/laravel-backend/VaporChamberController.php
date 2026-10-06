@@ -136,7 +136,7 @@ class VaporChamberController extends Controller
         }
 
         // Wire half of exactly-once: an action declared idempotent on the JS bus
-        // (`retry: { actions: { cartSet: 'idempotent' } }`, one key for all its
+        // (`retry: { actionPolicies: { cartSet: 'idempotent' } }`, one key for all its
         // attempts) or the `idempotent()` plugin stamps an Idempotency-Key;
         // every bridge sends it in the envelope's `meta`.
         // Replay the cached response for a key we've already processed so a
@@ -162,13 +162,6 @@ class VaporChamberController extends Controller
             }
 
             $state = app($handler)($target, $payload, $user);
-            // An action hands a navigation back by returning exactly
-            // ['redirect' => url] (docs/integrations/laravel.md). Both bridges
-            // read `redirect` at the top of the envelope - per result on a
-            // batch - so it is lifted there; wrapped as `state` it would be a
-            // success whose value is a URL. Only that exact shape is lifted: a
-            // state that merely HAS a `redirect` key among others is data.
-            //
             // A queued job answers by returning exactly
             // ['accepted' => ['location' => url, 'retryAfter' => seconds]]:
             // 202 Accepted (RFC 9110 15.3.3), its status monitor in Location,
@@ -180,10 +173,7 @@ class VaporChamberController extends Controller
                     'Retry-After' => isset($state['accepted']['retryAfter']) ? (string) $state['accepted']['retryAfter'] : null,
                 ])];
             } else {
-                $body = is_array($state) && array_keys($state) === ['redirect']
-                    ? ['redirect' => $state['redirect']]
-                    : ['state' => $state];
-                $result = ['body' => $body, 'status' => 200];
+                $result = ['body' => $this->body($state), 'status' => 200];
             }
             if ($cacheKey) {
                 Cache::put($cacheKey, $result, self::IDEMPOTENCY_TTL_SECONDS);
@@ -222,6 +212,34 @@ class VaporChamberController extends Controller
     }
 
     /**
+     * The success body for an action's return value. Two exact shapes are
+     * lifted to the top of the envelope, where the bridges read them, per
+     * result on a batch (docs/integrations/laravel.md):
+     *   - ['redirect' => url]: a navigation. Wrapped as `state` it would be a
+     *     success whose value is a URL.
+     *   - ['state' => ..., 'stores' => [id => state]], or ['stores' => ...]:
+     *     store states the client applies to the stores with those ids
+     *     (docs/store.md, A store behind a bridge).
+     * Only those exact key sets are lifted: a state that merely HAS such a key
+     * among others is data.
+     */
+    private function body(mixed $state): array
+    {
+        if (!is_array($state)) {
+            return ['state' => $state];
+        }
+        $keys = array_keys($state);
+        sort($keys);
+        if ($keys === ['redirect']) {
+            return ['redirect' => $state['redirect']];
+        }
+        if ($keys === ['state', 'stores'] || $keys === ['stores']) {
+            return $state;
+        }
+        return ['state' => $state];
+    }
+
+    /**
      * The key from the envelope's `meta`, the one place the contract carries
      * it on every transport (docs/plan-failures-and-contract.md 4.4). The
      * `Idempotency-Key` header the client also sends is for other tooling.
@@ -240,7 +258,7 @@ class VaporChamberController extends Controller
      * sent: `code` is the identity and `title` repeated the status.
      *
      * The client reads the failure's condition from `status`, by the status
-     * table (`conditionOfStatus` in http-errors.ts): send the status that says
+     * table (`conditionOfStatus` in src/failure.ts): send the status that says
      * what the failure is - 409 for a state conflict, 429 or 503 for "come back
      * later", 422 for input that broke a rule. For __invoke() it is the
      * response, sent with that status; for batch() it is one result's

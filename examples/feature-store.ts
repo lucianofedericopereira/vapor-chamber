@@ -22,7 +22,7 @@ type Cart = { items: number[]; count: number }
 
 const useCart = defineChamberStore('cart', {
   state: (): Cart => ({ items: [], count: 0 }),
-  actions: {
+  reducers: {
     add: (s: Cart, id: number) => ({ items: [...s.items, id], count: s.count + 1 }),
     clear: () => ({ items: [], count: 0 }),
   },

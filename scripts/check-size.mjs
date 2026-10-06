@@ -529,14 +529,102 @@ const BUDGETS = {
   // Then meta.request (log s35.139). Owner: raised to measured.
   // Then P1, a chain per action for plugins that declare actions (log s35.141). Owner: raised to measured.
   // Then a sync dispatch with no plugin skips the runner (log s35.143). Owner: raised to measured.
-  'vapor-chamber.iife.min.js':          { rawMax: 44_504, brotliMax: 13_850 },
+  // Then debounce([]), throttle([]), optimisticUndo(bus, []) act on nothing
+  // again (log s35.146, s35.148): `forList` (about 40 B) and its three wraps,
+  // +62 raw in all three; brotli full +53, core +44, elements +27. perAction is
+  // byte-identical to the release. Raised to measured; attribution in the log.
+  // Then debounce hands a $ command on (log s35.150): its one line, +26 raw in
+  // all three; brotli full -17, core -9, elements -9 (budgets kept). cache and
+  // idempotent are not in these bundles. Raw raised to measured.
+  // Then actionFilter (log s35.152), raw/brotli full, core, elements: the bus
+  // reads it per action +55/+17, +55/+32, +55/+16; the bridges pass it on
+  // +56/+9, +28/+11, +28/0; total +111/+12, +83/+42, +83/+28. The filter
+  // compiler is not in these bundles (createActionFilter, imported by the
+  // app; inside the bus it cost every app +296 brotli here). Raised to measured.
+  // Then one abort shape (log s35.154), raw/brotli full, core, elements: the
+  // AbortError name +34/+32, +34/+10, +34/+16; the reason as cause +8/-16,
+  // +8/-11, +8/+6; a rethrown reason read as the abort +103/+83, +102/+21,
+  // +102/+43; total +145/+99, +144/+20, +144/+65. Raised to measured.
+  // Then a transactional batch rolls back the Command that ran (log s35.155):
+  // each dispatch builds its Command, then runs it; the batch runs the one it
+  // keeps. Raw/brotli full, core, elements: sync +183/-6, +183/+46, +184/+39;
+  // async +171/+69, +171/+56, +170/+49; total +354/+63, +354/+102, +354/+88.
+  // Raised to measured.
+  // Then history never undoes locally a command a bridge carried out (log
+  // s35.159). Raw/brotli full, core, elements: the mark (a WeakSet, `answerOf`
+  // adds to it, the WebSocket record keeps the command) +34/+36, +31/+17,
+  // +32/+10; the ledger reading it (one precondition for canUndo and undo)
+  // +13/-5, 0/0, 0/0; total +47/+31, +31/+17, +32/+10. Raised to measured.
+  // Then no reply on an unidentified command is not re-sent, and a declared
+  // wait sets when, never whether (log s35.162). Brotli, full IIFE, each
+  // piece left out of the build: the rule (no reply uncertain, a wait only
+  // when identified) +47; the RateLimit read +72; the held-back report (the
+  // outcome mark, the bus's and the client's call; the DEV warning folds)
+  // +83. Total raw/brotli full, core, elements +521/+188, +520/+188,
+  // +519/+187. Raised to measured.
+  // Then one spelling per request header name (log s35.163). Brotli, full
+  // IIFE, each piece left out alone: the spelling check and its rebuild +78;
+  // deleting every spelling (the 419 refresh, FormData) +24. Total raw/brotli
+  // full, core, elements +354/+102, +354/+114, +354/+109. Raised to measured.
+  // Then authGuard reads 'admin*' and '*' as the prefixes they name (log s35.165):
+  // the list compiled once in the factory, raw/brotli full, core, elements
+  // +42/+29, +42/+21, +42/+33. Raised to measured.
+  // Then async request(): the payload in its key, each caller its own wait, the
+  // responder the chain's command (log s35.167). Brotli, full IIFE, each piece
+  // left out alone: the payload in the key +9; the shared controller, aborted
+  // when every caller has aborted, +28; the per-caller race and the command
+  // handed through +39. Total raw/brotli full, core, elements +167/+76,
+  // +167/+89, +167/+84. Raised to measured.
+  // Then composables observe a sealed bus (log s35.173): one helper,
+  // pastSeal, and its two new call sites, full only: +58/+14. Raised to measured.
+  // Then a NaN option reads as its default (log s35.174): full +2/-7. Raw
+  // raised to measured, brotli kept.
+  // Then one sync batch rule for the bus and createTestBus (log s35.176):
+  // _syncBatch takes run, undoable and dispatch; raw/brotli full, core,
+  // elements +12/+36, +12/+42, +12/+25. Raised to measured.
+  // Then retry.actionPolicies, the most specific match resolved once per
+  // action (log s35.179). Raw/brotli full, each piece left out alone: the
+  // ranking +66/+58, the per-action cache +99/+33. Total full, core,
+  // elements +165/+91, +165/+55, +164/+68. Raised to measured.
+  // Then a landed undo makes every plugin forget the command (log s35.181).
+  // Brotli full, core, elements, each piece left out alone: the `{ ok: false }`
+  // check +14, +10, +6; settling an async inverse through onSettled +11, -16,
+  // +15 (brotli is not additive). The plugin walk is the index loop every
+  // hook runner here uses (log s35.183): +33/-1, +33/+13, +33/+9 over a
+  // forEach, kept for one shape and the speed rule. Total raw/brotli full,
+  // core, elements +118/+46, +114/+51, +115/+64. Raised to measured.
+  // Then a transport's answer handed to the handler's `answer`, a store's
+  // `answer` option (log s35.184). Brotli full, core, elements, each piece
+  // left out alone: the `answers` map in register and the bus state +48,
+  // +17, +21; the settle at the transport's level +71, +56, +44 (brotli is
+  // not additive). Total raw/brotli full, core, elements +268/+109,
+  // +270/+84, +270/+82. Raised to measured.
+  // Then a server's reply declares store states, `stores` (log s35.186).
+  // Brotli full, core, elements, each piece left out alone: the bus's store
+  // receivers (the map, publishing it, the loop at the transport's level) +3,
+  // +50, +32; `answerOf` keeping the reply's `stores` +1, +9, +3. Total
+  // raw/brotli full, core, elements +187/+15, +189/+69, +190/+48. Raised to
+  // measured.
+  // Then one name for a cap on retained entries (log s35.188). Raw/brotli,
+  // each piece left out alone: the bus's `maxBufferSize` (was `bufferLimit`)
+  // full +2/+9, core +2/-6, elements +2/+13; the composables' `maxSize` (was
+  // `errorCap`) full -6/+1. The cost is the name. Raised to measured.
+  // Then one name for teardown, `dispose` (log s35.189), full only: the SSE
+  // and Echo bridges' (was `teardown`) and createChannel's (was `close`)
+  // together +1/+16; each left out alone, the other costs +2/+48 and -1/+47
+  // (a repeated `dispose` compresses, brotli is not additive). Raised to
+  // measured.
+  // Then sync dispatch guards, builds, then runs the Command (log s35.204),
+  // one piece: raw/brotli full, core, elements +7/-39, +7/-13, +7/-11. Raw
+  // raised to measured, brotli kept.
+  'vapor-chamber.iife.min.js':          { rawMax: 47_147, brotliMax: 14_814 },
   // Then (log s35.107) BusError and its vocabulary moved to src/failure.ts so
   // the router raises the core's failure without importing the bus. A pure
   // move: raw bytes identical in all three IIFEs once the import sits where
   // the code was; brotli moves with the arrangement: full -8 (budget kept),
   // core +5, elements +7. Owner: raised to measured ("size no issue").
-  'vapor-chamber-core.iife.min.js':     { rawMax: 30_280, brotliMax: 9_430  },
-  'vapor-chamber-elements.iife.min.js': { rawMax: 31_892, brotliMax: 9_909  },
+  'vapor-chamber-core.iife.min.js':     { rawMax: 32_822, brotliMax: 10_359 },
+  'vapor-chamber-elements.iife.min.js': { rawMax: 34_435, brotliMax: 10_831 },
 };
 
 const BR_OPTS = { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } };

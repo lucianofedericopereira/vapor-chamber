@@ -8,7 +8,7 @@ state coordination and outgrew it.
 
 If you only need pub/sub event broadcast (no return values, no plugins,
 no transports), **stay on EventEmitter** or use vapor-chamber's
-[fast lane](../performance.md) - both are smaller and faster than the
+[fast lane](../performance.md). Both are smaller and faster than the
 general-purpose bus.
 
 ---
@@ -20,11 +20,11 @@ general-purpose bus.
 | `new EventEmitter()`                            | `createCommandBus()`                                       |
 | `emitter.on('foo', fn)` / `addListener`         | `bus.on('foo', fn)`                                        |
 | `emitter.once('foo', fn)`                       | `bus.once('foo', fn)`                                      |
-| `emitter.off('foo', fn)` / `removeListener`     | unsubscribe via closure returned from `bus.on('foo', fn)`  |
+| `emitter.off('foo', fn)` / `removeListener`     | the unsubscribe function `bus.on('foo', fn)` returns       |
 | `emitter.removeAllListeners('foo')`             | `bus.offAll('foo')`                                        |
 | `emitter.removeAllListeners()`                  | `bus.offAll()` (no arg removes everything)                 |
 | `emitter.emit('foo', a, b, c)`                  | `bus.emit('foo', { a, b, c })` *(single-arg payload)*      |
-| `emitter.listeners('foo')`                      | Inspect via `inspectBus(bus).listenerPatterns`             |
+| `emitter.listeners('foo')`                      | `inspectBus(bus).listenerPatterns`                         |
 | `emitter.listenerCount('foo')`                  | No per-pattern count - `listenerPatterns` lists patterns   |
 | `setMaxListeners(n)`                            | No equivalent - vapor-chamber doesn't cap listener count   |
 
@@ -115,7 +115,7 @@ const tools = toAnthropicTools(busSchema);
 EventEmitter's `setMaxListeners(n)` is a leak detector: it warns if you
 accumulate too many listeners. vapor-chamber has no equivalent because the
 lib's composables (`useCommand`, `useSharedCommandState`) clean up
-automatically via `tryAutoCleanup`, on Vue scope or component disposal.
+automatically through `tryAutoCleanup`, on Vue scope or component disposal.
 
 For non-Vue code, capture the unsubscribe closure:
 ```ts
@@ -148,13 +148,13 @@ and **<!-- vc:benchFastLaneVsMitt -->1.84-1.95<!-- /vc:benchFastLaneVsMitt -->x 
 Against eventemitter3 that is level: the band falls on both sides of 1. The
 general bus's `emit` is behind eventemitter3 on the same fan-out, at
 **<!-- vc:benchEmitVsEventEmitter3Fanout -->0.78-0.82<!-- /vc:benchEmitVsEventEmitter3Fanout -->x**.
-So moving EventEmitter pub/sub onto the bus costs some speed on this path;
-onto the fast lane, about none.
-The fast lane figure is the default removal mode (`'live'`, which matches the
-main bus - a listener removed mid-emit does not run, and one added mid-emit
-runs from the next emit).
+So moving EventEmitter pub/sub onto the bus costs some speed on this path.
+Onto the fast lane, it costs about none.
+The fast lane figure is the default removal mode, `'live'`, which matches the
+main bus. A listener removed mid-emit does not run, and one added mid-emit
+runs from the next emit.
 `createFastLane({ removal: 'snapshot' })` skips the per-listener `off` check
-and runs somewhat faster; the check is the price of that correctness
+and runs somewhat faster. The check is the price of that correctness
 (the measured gap is in [performance.md](../performance.md)).
 
 Single-handler `compile()` dispatch runs
@@ -168,8 +168,8 @@ and nothing above affects it. For the mode trade-off, see
 > than hz on purpose: an absolute hz figure is host state (rows here swing
 > 20-30% run to run) and a same-run ratio is not. Even a ratio moves. A ratio
 > between two libraries is a fact about one host (docs/V8-RULES.md rule 15),
-> so it is printed as the range over the runs; a ratio between two of this
+> so it is printed as the range over the runs. A ratio between two of this
 > library's own paths is the median. These: <!-- vc:benchProvenance -->Node 24.21.0, vitest 5.0.1, mitt 3.0.1, eventemitter3 5.0.4, 5 runs<!-- /vc:benchProvenance -->,
 > one Apple Silicon Mac. A
 > micro-loop emitting one name over and over flatters emitters keyed by a
-> plain object; with varying names they fall behind (docs/performance.md).
+> plain object. With varying names they fall behind (docs/performance.md).

@@ -17,7 +17,7 @@ import { ... } from 'vapor-chamber/ssr';
 
 ### createSSRPlugin
 
-**Function** - [src/ssr.ts:131](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L131)
+**Function** - [src/ssr.ts:132](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L132)
 
 ```ts
 createSSRPlugin(options?: SSRPluginOptions) => SSRPlugin
@@ -30,7 +30,7 @@ to get a serializable command list for embedding in the HTML payload.
 
 ### rehydrate
 
-**Function** - [src/ssr.ts:200](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L200)
+**Function** - [src/ssr.ts:202](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L202)
 
 ```ts
 rehydrate(bus: BaseBus, commands: DehydratedCommand[], options?: RehydrateOptions) => CommandResult[]
@@ -47,7 +47,7 @@ early client bootstrap).
 
 ### rehydrateAsync
 
-**Function** - [src/ssr.ts:263](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L263)
+**Function** - [src/ssr.ts:267](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L267)
 
 ```ts
 rehydrateAsync(bus: BaseBus, commands: DehydratedCommand[], options?: RehydrateOptions) => Promise<CommandResult[]>
@@ -65,7 +65,7 @@ on the sync path - never an unhandled rejection.
 
 ### DehydratedCommand
 
-**Type alias** - [src/ssr.ts:63](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L63)
+**Type alias** - [src/ssr.ts:64](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L64)
 
 ```ts
 export type DehydratedCommand = {
@@ -79,7 +79,7 @@ Serializable command entry for transport between server and client.
 
 ### RehydrateOptions
 
-**Type alias** - [src/ssr.ts:107](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L107)
+**Type alias** - [src/ssr.ts:108](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L108)
 
 ```ts
 export type RehydrateOptions = {
@@ -99,7 +99,7 @@ export type RehydrateOptions = {
 
 ### SSRPlugin
 
-**Type alias** - [src/ssr.ts:85](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L85)
+**Type alias** - [src/ssr.ts:86](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L86)
 
 ```ts
 export type SSRPlugin = {
@@ -115,7 +115,7 @@ export type SSRPlugin = {
   /** Number of recorded commands. */
   size(): number;
   /**
-   * How many commands were dropped at the `maxCommands` cap. Non-zero means
+   * How many commands were dropped at the `maxSize` cap. Non-zero means
    * the client will rehydrate PARTIAL state - server/client divergence. Check
    * it after `dehydrate()` rather than trusting the render silently: a cap
    * that reads as "recorded everything" when it didn't is the failure mode
@@ -127,7 +127,7 @@ export type SSRPlugin = {
 
 ### SSRPluginOptions
 
-**Type alias** - [src/ssr.ts:69](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L69)
+**Type alias** - [src/ssr.ts:70](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L70)
 
 ```ts
 export type SSRPluginOptions = {
@@ -143,6 +143,6 @@ export type SSRPluginOptions = {
    * Maximum number of commands to record. Prevents unbounded growth in
    * long SSR renders. Default: 500.
    */
-  maxCommands?: number;
+  maxSize?: number;
 };
 ```

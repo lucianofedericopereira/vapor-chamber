@@ -36,7 +36,7 @@ describe('inline routes that are not JSON', () => {
     expect((failure as Error).message).toContain('#vcr-routes');
     expect((failure as Error).cause).toBeInstanceOf(SyntaxError);
     expect(errors).toEqual([failure]);
-    router.destroy();
+    router.dispose();
   });
 
   it('control: JSON without a routes array is the same code', async () => {
@@ -44,7 +44,7 @@ describe('inline routes that are not JSON', () => {
     const { router } = build();
     const failure = await router.start().then(() => null, (error: unknown) => error);
     expect(isRouterError(failure, 'router:unexpected:routes')).toBe(true);
-    router.destroy();
+    router.dispose();
   });
 });
 

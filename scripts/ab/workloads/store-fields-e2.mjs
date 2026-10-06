@@ -3,9 +3,9 @@
 import { createCommandBus } from '__DIST__/index.js';
 import { defineChamberStore } from '__DIST__/store.js';
 
-const actions = { set: (s, n) => ({ ...s, n }) };
-const usePlain = defineChamberStore('plain', { state: () => ({ n: 0, other: 0 }), actions });
-const useWatched = defineChamberStore('watched', { state: () => ({ n: 0, other: 0 }), actions });
+const reducers = { set: (s, n) => ({ ...s, n }) };
+const usePlain = defineChamberStore('plain', { state: () => ({ n: 0, other: 0 }), reducers });
+const useWatched = defineChamberStore('watched', { state: () => ({ n: 0, other: 0 }), reducers });
 const plain = usePlain(createCommandBus());
 const watched = useWatched(createCommandBus());
 if (typeof watched.$onField === 'function') watched.$onField('other', () => {});

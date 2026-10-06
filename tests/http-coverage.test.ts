@@ -542,7 +542,7 @@ describe('response cache - per-instance LRU', () => {
     const a = createResponseCache();
     const b = createResponseCache();
     const promise = Promise.resolve('A');
-    a.setInflight('GET:json:/api/me', promise);
+    a.setInflight('GET:json:/api/me', promise, '/api/me');
 
     expect(a.getInflight('GET:json:/api/me')).toBe(promise);
     expect(b.getInflight('GET:json:/api/me')).toBeUndefined();

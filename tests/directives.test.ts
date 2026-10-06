@@ -128,18 +128,27 @@ describe('createDirectivePlugin', () => {
 
     it('updated() changes the action', () => {
       const el = createElement();
+      const ran: string[] = [];
+      bus.register('action1', () => { ran.push('action1'); });
+      bus.register('action2', () => { ran.push('action2'); });
       const vcDir = app.getDirective('vc-command');
       vcDir.mounted(el, { value: 'action1', modifiers: {} });
-      vcDir.updated(el, { value: 'action2' });
-      // Should not throw
+      vcDir.updated(el, { value: 'action2', modifiers: {} });
+      el.triggerClick();
+      expect(ran).toEqual(['action2']);
     });
 
     it('beforeUnmount() removes click handler', () => {
       const el = createElement();
+      let calls = 0;
+      bus.register('test', () => { calls++; });
       const vcDir = app.getDirective('vc-command');
       vcDir.mounted(el, { value: 'test', modifiers: {} });
+      expect(el.hasClick()).toBe(true);
       vcDir.beforeUnmount(el);
-      // After unmount, triggering click should do nothing
+      expect(el.hasClick()).toBe(false);
+      el.triggerClick();
+      expect(calls).toBe(0);
     });
 
     // Vue 3.6.0-beta.15 alignment: skip disabled / in-flight direct handlers.

@@ -22,8 +22,11 @@ import { DEV } from './dev';
 import { dict } from './dict';
 import { MAX_TIMEOUT_MS, countOption } from './bounds';
 import { createSleeper } from './scheduler';
+import { onSettled } from './settled';
 import { _asLibrary, _isLibraryAction, _isLibraryRegister } from './library-names';
-import { BusError, _failures, _isBug, conditionOf, conditionOfStatus, ownerOf, retryClass, type BusErrorCode, type Condition, type Fail, type FailCode, type FailOptions } from './failure';
+import { _appliedRemotely, _storeReceivers } from './applied-remotely';
+import type { ActionFilter } from './action-filter';
+import { BusError, _failures, _heldBack, _isBug, conditionOf, conditionOfStatus, ownerOf, retryClass, type BusErrorCode, type Condition, type Fail, type FailCode, type FailOptions } from './failure';
 export { BusError, _failures, _isBug, conditionOf, conditionOfStatus, ownerOf, type BusErrorCode, type Condition, type Fail, type FailCode, type FailOptions };
 export type BusSeverity = 'error' | 'warn' | 'info';
 
@@ -56,11 +59,13 @@ export function failureCondition(error: unknown): Condition {
 }
 
 /**
- * The transient conditions: held back (`limited`) or no reply in time
- * (`timeout`). The async bus re-sends them for any action. The uncertain ones
+ * The transient conditions: held back (`limited`) or a timeout the other side
+ * declared (`timeout`, a 408). The async bus re-sends them for any action.
+ * No reply (a transport's own `timeout`, a 504) and the uncertain ones
  * (`lost`, `failed`, `unexpected`, `unknown`: the first attempt may have
- * landed) it re-sends only for an idempotent action or a keyed command; the
- * other side's verdict, an abort and a depth bound never (docs/plan-shape.md 4).
+ * landed) it re-sends only for an idempotent action or a keyed command. The
+ * other side's verdict, an abort and a depth bound never (docs/plan-shape.md
+ * 4, log s35.162).
  */
 export const RETRYABLE_CONDITIONS: ReadonlySet<string> = new Set(['limited', 'timeout']);
 
@@ -199,11 +204,34 @@ export type AsyncHandler<T = any, P = any, R = any> = (cmd: Command<string, T, P
 /**
  * What a plugin declares besides its function: `dispose` (the bus's dispose()
  * runs it), `id` (the owner of its failures), `actions` (the only actions the
- * bus runs it on; patterns as elsewhere, log s35.141), and `transport` - it
+ * bus runs it on, an {@link ActionScope}; log s35.141), and `transport` - it
  * answers the command itself, over a wire, so the async bus re-sends through it
  * as it does a handler (docs/plan-shape.md 4). The bridges declare it.
+ * `actionFilter`: a predicate on the action name (src/action-filter.ts), ANDed
+ * with `actions` when both are given, asked once per action (log s35.152).
+ * `forget(cmd)`: the bus calls it on every installed plugin once an undo of
+ * `cmd` lands, so a plugin drops what it keeps for that command (cache and
+ * idempotent drop its stored answer) and a redo runs (log s35.181).
  */
-export type PluginParts = { dispose?: () => void; readonly id?: string; readonly actions?: readonly string[]; readonly transport?: boolean };
+export type PluginParts = { dispose?: () => void; readonly id?: string; readonly actions?: Readonly<ActionScope>; readonly actionFilter?: ActionFilter; readonly transport?: boolean; forget?: (cmd: Command) => void };
+
+/**
+ * A plugin's action filter, the `actions` option of every plugin that takes
+ * one and the `actions` it declares to the bus: absent or `[]` is every action
+ * (ActionScope's own rule, stated here once), each entry an action name or a pattern
+ * (`'cart*'`, `'*'`). Read by the bus alone. Log s35.146 and s35.148,
+ * tests/plugin-empty-list.test.ts. `string[]`, as the options were typed in
+ * 1.26; a plugin declares it read-only (`Readonly<ActionScope>`, the 1.26
+ * `readonly string[]`). tests/compat-1.26.test-d.ts.
+ */
+export type ActionScope = string[];
+
+/**
+ * The actions a plugin is FOR, the required first list of `debounce`,
+ * `throttle` and `optimisticUndo`: it names what the plugin acts on, so `[]`
+ * is none. Not a filter, so not an {@link ActionScope}. Log s35.148.
+ */
+export type ActionList = string[];
 /**
  * A plugin for either bus: it hands on what `next()` gave it (`R`, a result on
  * the sync bus, possibly a promise on the async one), settling it through
@@ -285,7 +313,7 @@ export type BatchResult = {
  *   lost, it fires when the handler arrives. The synchronous dispatch returns
  *   `{ ok: true, value: undefined }` (the real handler runs later). `query`
  *   never buffers (it must return a value) - it falls back to `'error'`.
- *   Bounded by `bufferLimit` (drop-oldest + dev warning on overflow).
+ *   Bounded by `maxBufferSize` (drop-oldest + dev warning on overflow).
  * - function: called with the command, return value used as result
  */
 export type DeadLetterMode = 'error' | 'throw' | 'ignore' | 'buffer' | ((cmd: Command) => CommandResult);
@@ -307,10 +335,28 @@ export type NamingConvention = {
 export type RegisterOptions = {
   /** Throttle this handler: execute immediately, then block for N ms. */
   throttle?: number;
-  /** Inverse handler for undo support, run by the `<action>$undo` command. Called with the original command. */
+  /**
+   * Inverse handler for undo support, run by the `<action>$undo` command.
+   * Called with the original command, which still carries that dispatch's
+   * `signal`: aborted when the dispatch was cancelled (by `supersede`, or by
+   * the caller), so it cannot serve the inverse's own work.
+   * tests/library-commands-memory.test.ts.
+   */
   undo?: Handler;
-  /** Whether `undo` can still run for this recorded command; history undoes only when true. */
+  /**
+   * Whether history may still undo this recorded command. History undoes only
+   * when true. A rollback (`optimisticUndo`, a transactional batch) reverses
+   * the step that failed and does not consult it. tests/undo-check.test.ts.
+   */
   canUndo?: (cmd: Command) => boolean;
+  /**
+   * Called when a transport (a bridge) answered the command in place of this
+   * handler, with the answer's value: the handler did not run. It runs at the
+   * transport's level, so the plugins outside it see what it changes. A throw
+   * fails the dispatch, as the handler's would. A store's `answer` option is
+   * one. tests/store-bridged-answer.test.ts.
+   */
+  answer?: (cmd: Command, value: unknown) => void;
 };
 
 export type CommandBusOptions = {
@@ -322,19 +368,19 @@ export type CommandBusOptions = {
    * the oldest queued command for that action is dropped (with a dev warning).
    * Default: 256.
    */
-  bufferLimit?: number;
+  maxBufferSize?: number;
   /**
    * Max age (ms) a buffered command may wait for its handler when
    * `onMissing: 'buffer'`. Expired entries are reaped lazily - on the next
    * buffer push for that action and at flush time - so a handler that never
    * arrives (e.g. an island that fails to hydrate) cannot pin stale commands
-   * in memory indefinitely. Default: no TTL (entries wait until `bufferLimit`
+   * in memory indefinitely. Default: no TTL (entries wait until `maxBufferSize`
    * pushes them out).
    */
   bufferTTL?: number;
   /**
    * Called when `onMissing: 'buffer'` drops a queued command - either because
-   * the per-action queue hit `bufferLimit` (oldest dropped) or because the
+   * the per-action queue hit `maxBufferSize` (oldest dropped) or because the
    * entry outlived `bufferTTL`. Use for observability: without this, drops are
    * only visible as dev-mode console warnings.
    */
@@ -342,11 +388,12 @@ export type CommandBusOptions = {
 };
 
 /**
- * What an action declares to the async bus's retry: `'idempotent'` (running it
- * twice is safe, so an uncertain failure is re-sent too, under one idempotency
- * key), `false` (never re-sent) or an attempt count.
+ * What the async bus's retry does with an action (gRPC's per-method
+ * `retryPolicy`): `'idempotent'` (running it twice is safe, so an uncertain
+ * failure is re-sent too, under one idempotency key), `false` (never re-sent)
+ * or an attempt count.
  */
-export type RetryDeclaration = 'idempotent' | false | number;
+export type RetryPolicy = 'idempotent' | false | number;
 
 /** The async bus's retry (docs/plan-shape.md 4). Every field has a default. */
 export type RetryOptions = {
@@ -357,15 +404,21 @@ export type RetryOptions = {
   /** The longest wait, in ms. Default 20_000. A computed wait is capped at it; a
    *  declared `retryIn` longer than it is not re-sent: the failure is returned. */
   maxDelay?: number;
-  /** Per-action declarations, by action name or `prefix*` pattern; the first match wins. */
-  actions?: Readonly<Record<string, RetryDeclaration>>;
+  /**
+   * A policy per action name or pattern (`'cart*'`, `'*'`). The most specific
+   * match wins, whatever the written order: the exact name, then the longest
+   * prefix, then `*` (gRPC service config). tests/retry-action-policies.test.ts.
+   */
+  actionPolicies?: Readonly<Record<string, RetryPolicy>>;
 };
 
 export type AsyncCommandBusOptions = CommandBusOptions & {
   /**
-   * The retry, on by default: a transient failure (`limited`, `timeout`, a
-   * declared `retryIn`) is re-sent for any action, an uncertain one for an
-   * action declared idempotent or a keyed command. `false` turns it off.
+   * The retry, on by default: a transient failure (`limited`, a 408) is
+   * re-sent for any action. An uncertain one (no reply, a 502, 504 or 500),
+   * or one with a declared `retryIn`, only for an action declared idempotent
+   * or a keyed command. An unidentified command that got no reply fails with
+   * `context.outcome: 'unknown'`. `false` turns it off.
    */
   retry?: RetryOptions | false;
 };
@@ -521,10 +574,13 @@ export interface CommandBus<M extends CommandMap = CommandMap> extends BaseBus {
 export interface AsyncCommandBus<M extends CommandMap = CommandMap> extends BaseBus {
   /**
    * Async dispatch with optional `AbortSignal`. If `options.signal` is already
-   * aborted at call time, resolves immediately with `{ ok: false, error: AbortError }`
+   * aborted at call time, resolves immediately with `core:aborted:dispatch`
    * without invoking the handler. If aborted mid-flight, the handler observes
    * `cmd.signal.aborted === true`; HTTP transport plugins propagate the signal
-   * to the underlying fetch automatically.
+   * to the underlying fetch automatically. A handler or plugin that rethrows
+   * the signal's reason gets the same `core:aborted:dispatch`. Every abort is
+   * a BusError named `AbortError` with the reason as `cause`; a custom Error
+   * reason (`ac.abort(myError)`) passes through as itself.
    */
   dispatch<A extends keyof M & string>(
     action: A,
@@ -548,9 +604,12 @@ export interface AsyncCommandBus<M extends CommandMap = CommandMap> extends Base
   once(pattern: string, listener: Listener, options?: ListenerOptions): () => void;
   offAll(pattern?: string): void;
   /**
-   * Request/response: a responder answers, a timeout (default 5000 ms) bounds the wait, identical
-   * in-flight requests share one promise, and `signal` settles the request and reaches the
-   * responder on cmd.signal; without a responder this is a dispatch.
+   * Request/response: a responder answers, receiving the command the plugins saw. Identical
+   * in-flight requests (same action, target and payload) share one responder run, and each
+   * caller keeps its own timeout (default 5000 ms) and `signal`: its abort settles its own
+   * promise at once. The responder's cmd.signal aborts, with the caller's reason, once every
+   * caller holding the request has aborted. Without a responder this is a dispatch.
+   * tests/request-join.test.ts.
    */
   request<A extends keyof M & string>(action: A, target: TargetOf<M, A>, payload?: PayloadOf<M, A>, options?: { timeout?: number; signal?: AbortSignal }): Promise<CommandResult<ResultOf<M, A>>>;
   respond(action: string, handler: (cmd: Command) => any | Promise<any>): () => void;
@@ -608,6 +667,8 @@ type SyncState = {
   readonly opts: CommandBusOptions;
   handlers: Map<string, Handler>;
   undoHandlers: Map<string, RegisterOptions>;
+  /** `RegisterOptions.answer` per action: what a transport's answer is handed to. */
+  answers: Map<string, (cmd: Command, value: unknown) => void>;
   pluginEntries: Array<{ plugin: SyncPlugin; priority: number }>;
   beforeHooks: BeforeHook[];
   afterHooks: Hook[];
@@ -638,6 +699,8 @@ type AsyncState = {
   readonly opts: CommandBusOptions;
   handlers: Map<string, AsyncHandler>;
   undoHandlers: Map<string, RegisterOptions>;
+  /** `RegisterOptions.answer` per action: what a transport's answer is handed to. */
+  answers: Map<string, (cmd: Command, value: unknown) => void>;
   pluginEntries: Array<{ plugin: AsyncPlugin; priority: number }>;
   beforeHooks: AsyncBeforeHook[];
   afterHooks: AsyncHook[];
@@ -648,7 +711,7 @@ type AsyncState = {
   responders: Map<string, (cmd: Command) => any | Promise<any>>;
   runner: (cmd: Command, execute: () => Promise<CommandResult>) => Promise<CommandResult>;
   /** Per-instance dedup map for in-flight async requests - avoids module-level singleton leak in SSR. */
-  pendingRequests: Map<string, Promise<CommandResult>>;
+  pendingRequests: Map<string, SharedRequest>;
   /** Current nested dispatch depth - guards against infinite recursion. */
   dispatchDepth: number;
   /** When true, register/use/onBefore/onAfter/respond throw. */
@@ -665,8 +728,12 @@ type AsyncState = {
    *  Lazily null until the first such request, like `deferred`. */
   waiting: Set<() => void> | null;
   /** The retry policy (budget, waits), or null when `retry: false`. */
-  retry: RetryPolicy | null;
+  retry: Retrier | null;
+  /** Store id -> what writes a state a reply declares for it (`_storeReceivers`). */
+  receivers: StoreReceivers;
 };
+
+type StoreReceivers = NonNullable<ReturnType<typeof _storeReceivers.get>>;
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -808,7 +875,18 @@ function tryCatchHandler(handler: Handler, cmd: Command): CommandResult {
 }
 async function tryCatchAsyncHandler(handler: AsyncHandler, cmd: Command): Promise<CommandResult> {
   try { return okResult(await handler(cmd)); }
-  catch (e) { return errResult(e as Error); }
+  catch (e) { return ownAbort(e, cmd) ?? errResult(e as Error); }
+}
+
+/**
+ * A throw that IS the dispatch's own signal's reason is that abort, reported
+ * as an abort before start is (`abortedResult`). The DOM tells this abort
+ * from any other by the reason's identity (`throwIfAborted`, Fetch's
+ * rejection). Failure path only.
+ */
+function ownAbort(e: unknown, cmd: Command): CommandResult | undefined {
+  const signal = cmd.signal;
+  return signal?.aborted && e === signal.reason ? abortedResult(cmd.action, signal) : undefined;
 }
 
 /**
@@ -1022,14 +1100,14 @@ function isWildcardPattern(pattern: string): boolean {
  * `startsWith` per listener with no branch, no `charCodeAt`, and no cache
  * lookup.
  *
- * WHY IT LIVES ON THE ENTRY rather than in `matchesPattern`'s LRU. `on()`
+ * WHY IT LIVES ON THE ENTRY rather than in `matchesPattern`'s cache. `on()`
  * has already classified the pattern as a wildcard to decide which bucket it
  * goes in, so by the time the entry exists the parse is a known result being
  * thrown away. Storing it is the same move Vue made in 3.6.0-rc.6's `29ed4b0`
  * (`parseAdoptTarget`): hoist a per-call string scan into a descriptor computed
  * once by the factory, then compare cheap values on the hot path.
  * `matchesPattern` keeps its cache - it is public API taking arbitrary
- * caller-supplied patterns (plugin `actions:` filters, `mcp` whitelists), where
+ * caller-supplied patterns (plugin `actions:` filters), where
  * nothing has classified anything in advance.
  *
  * Measured, real dispatch path, interleaved A/B - see
@@ -1080,7 +1158,7 @@ function fanOutListeners(
     // WildcardEntry. `'*'` slices to `''` and `''.startsWith` is always true,
     // so match-all needs no branch of its own and this loop is a single
     // `startsWith` per listener. `matchesPattern` (public API, arbitrary
-    // caller-supplied patterns) still re-derives the prefix through its LRU;
+    // caller-supplied patterns) still re-derives the prefix through its cache;
     // only this loop knows the pattern was classified at subscribe time.
     if (!entry.off && action.startsWith(entry.prefix)) {
       try { entry.listener(cmd, result); } catch (e) { console.error('[vapor-chamber] Listener error:', e); }
@@ -1332,9 +1410,11 @@ export function buildRunner(plugins: SyncPlugin[], at?: number[]): SyncRun {
 // Map read a dispatch; a non-matching plugin costs nothing). `at` keeps each
 // plugin's place in the whole chain for `context.index`. None declaring: the
 // plain runner, unchanged. Log s35.141.
+// The manifest is an ActionScope: absent or `[]` is every action, patterns
+// what they match. tests/plugin-empty-list.test.ts.
 const CHAINS_MAX = 512;
 function perAction<P extends PluginParts, R extends (cmd: Command, execute: any) => any>(plugins: P[], build: (picked: P[], at: number[]) => R): R | undefined {
-  if (!plugins.some((p) => p.actions?.length)) return undefined;
+  if (!plugins.some((p) => p.actions?.length || p.actionFilter)) return undefined;
   const chains = new Map<string, R>();
   return ((cmd: Command, execute: unknown) => {
     let run = chains.get(cmd.action);
@@ -1342,7 +1422,8 @@ function perAction<P extends PluginParts, R extends (cmd: Command, execute: any)
       const at: number[] = [];
       for (let i = 0; i < plugins.length; i++) {
         const a = plugins[i].actions;
-        if (!a?.length || a.some((p) => matchesPattern(p, cmd.action))) at.push(i);
+        const f = plugins[i].actionFilter;
+        if ((!a?.length || a.some((p) => matchesPattern(p, cmd.action))) && (!f || f(cmd.action))) at.push(i);
       }
       run = build(at.map((i) => plugins[i]), at);
       if (chains.size >= CHAINS_MAX) chains.clear();
@@ -1373,6 +1454,9 @@ function perAction<P extends PluginParts, R extends (cmd: Command, execute: any)
  */
 function pluginThrew(e: unknown, cmd: Command, plugin: Function, index: number, fail: Fail): CommandResult {
   if (e instanceof BusError && e.code === 'core:missing:handler') throw e;
+  // The caller's cancel, rethrown by a plugin, is not a plugin bug.
+  const aborted = ownAbort(e, cmd);
+  if (aborted) return aborted;
   if (DEV) {
     console.error(`[vapor-chamber] Plugin "${plugin.name || 'anonymous'}" (#${index} in the chain, 0 = outermost) threw on "${cmd.action}"; the dispatch returns ${(plugin as Plugin).id ?? 'plugin'}:failed:plugin. Fix the plugin: return next() or an errResult instead of throwing.`, e);
   }
@@ -1430,9 +1514,21 @@ function register(s: SyncState | AsyncState, action: string, handler: any, opts:
   // An undo is a command, `<action>$undo`, whose target is the command it
   // reverses: plugins, listeners and persist hear it (log s35.114).
   const undoKey = action + '$undo';
-  const undoH = opts.undo && ((c: Command) => (opts.undo as Handler)(c.target));
+  // A landed undo makes what a plugin keeps for the command stale, as a write
+  // makes a stored response stale (RFC 9111 4.4): every installed plugin
+  // forgets it, its scope aside. Landed is the ledger's rule: no throw, no
+  // rejection, no `{ ok: false }`. The undo path only.
+  // tests/undo-forgets-memory.test.ts.
+  const undoH = opts.undo && ((c: Command): any => onSettled((opts.undo as Handler)(c.target), (v: any) => {
+    if (v?.ok !== false) {
+      const pe = s.pluginEntries;
+      for (let i = 0, len = pe.length; i < len; i++) pe[i].plugin.forget?.(c.target);
+    }
+    return v;
+  }));
   s.handlers.set(action, h);
   if (undoH) { s.undoHandlers.set(action, opts); s.handlers.set(undoKey, undoH); }
+  if (opts.answer) s.answers.set(action, opts.answer);
   // onMissing:'buffer' - replay any commands that arrived before this handler.
   if (s.deferred !== null && s.deferred.size !== 0) flushDeferred(s, action);
   // The cleanup removes only what THIS call registered: KeepAlive with a max
@@ -1443,6 +1539,7 @@ function register(s: SyncState | AsyncState, action: string, handler: any, opts:
   return () => {
     drop(s.handlers, h);
     drop(s.undoHandlers, opts);
+    drop(s.answers, opts.answer);
     if (undoH && s.handlers.get(undoKey) === undoH) s.handlers.delete(undoKey);
   };
 }
@@ -1451,6 +1548,7 @@ function register(s: SyncState | AsyncState, action: string, handler: any, opts:
 function clearState(s: SyncState | AsyncState): void {
   s.handlers.clear();
   s.undoHandlers.clear();
+  s.answers.clear();
   s.pluginEntries.length = 0;
   s.beforeHooks.length = 0;
   s.afterHooks.length = 0;
@@ -1506,7 +1604,7 @@ function handleMissing(s: SyncState | AsyncState, cmd: Command, canDefer: boolea
       }
     }
     // Clamped, and the push moved AHEAD of the eviction, because the old
-    // drop-then-push form crashed on a degenerate bound. With `bufferLimit: 0`
+    // drop-then-push form crashed on a degenerate bound. With `maxBufferSize: 0`
     // the empty queue still satisfied `q.length >= limit`, so `q.shift()`
     // returned undefined and the overflow callback dereferenced it:
     // `TypeError: Cannot read properties of undefined (reading 'target')`, out
@@ -1530,7 +1628,7 @@ function handleMissing(s: SyncState | AsyncState, cmd: Command, canDefer: boolea
     // breach that ceiling on its own, because this module is the one thing
     // every consumer pulls. `| 0` is already correct for the NaN case, which is
     // the case that bites; what it does not do is preserve `Infinity`, which it
-    // maps to 0 - so `bufferLimit: Infinity` buffers NOTHING rather than never
+    // maps to 0 - so `maxBufferSize: Infinity` buffers NOTHING rather than never
     // dropping. That is the price of the exception, stated here so it is a
     // known trade and not a discovery. Write a large finite number instead.
     //
@@ -1540,13 +1638,13 @@ function handleMissing(s: SyncState | AsyncState, cmd: Command, canDefer: boolea
     // the bound is. That is also why this is an `if` rather than a `while` -
     // one push can put the queue at most one over - and why it is cheaper than
     // the clamp-plus-loop form it replaces.
-    const limit = (s.opts.bufferLimit ?? 256) | 0;
+    const limit = (s.opts.maxBufferSize ?? 256) | 0;
     q.push({ target: cmd.target, payload: cmd.payload, at: now });
     if (q.length > limit) {
       const dropped = q.shift()!; // push-first guarantees a non-empty queue here
       s.opts.onBufferOverflow?.(cmd.action, { target: dropped.target, payload: dropped.payload });
       if (DEV) {
-        console.warn(`[vapor-chamber] onMissing:'buffer' queue for "${cmd.action}" hit bufferLimit (${limit}); dropped the oldest pending command. Register a handler, or raise bufferLimit.`);
+        console.warn(`[vapor-chamber] onMissing:'buffer' queue for "${cmd.action}" hit maxBufferSize (${limit}); dropped the oldest pending command. Register a handler, or raise maxBufferSize.`);
       }
     }
     return okResult(undefined); // accepted; the real handler runs on register()
@@ -1635,18 +1733,23 @@ function syncRunSettling(s: SyncState, cmd: Command, execute: () => CommandResul
   catch (e) { syncRunHooks(s, cmd, errResult(e as Error)); throw e; }
 }
 
+// Guard, build, run, as syncDispatchCommand does: the Command is built
+// before the depth's try/finally, so no exception edge of `stampMeta` lands
+// inside it while the literal is half built, and V8 can drop a meta nothing
+// reads on the bare path (docs/V8-RULES.md rule 2, log s35.204).
 function syncDispatch(s: SyncState, action: string, target: any, payload?: any, executeOverride?: () => CommandResult): CommandResult {
   if (s.dispatchDepth >= MAX_DISPATCH_DEPTH) {
     return maxDepthResult(action);
   }
+  if (s.opts.naming !== undefined) validateNaming(action, s.opts.naming);
+  const cmd: Command = { action, target, payload, meta: stampMeta(payload) };
   s.dispatchDepth++;
-  try { return _syncDispatchInner(s, action, target, payload, executeOverride); }
+  try { return _syncDispatchInner(s, cmd, executeOverride); }
   finally { s.dispatchDepth--; }
 }
 
-function _syncDispatchInner(s: SyncState, action: string, target: any, payload?: any, executeOverride?: () => CommandResult): CommandResult {
-  if (s.opts.naming !== undefined) validateNaming(action, s.opts.naming);
-  const cmd: Command = { action, target, payload, meta: stampMeta(payload) };
+function _syncDispatchInner(s: SyncState, cmd: Command, executeOverride?: () => CommandResult): CommandResult {
+  const action = cmd.action;
 
   // Bare-bus fast path. When the bus has no plugins / hooks / listeners
   // and there's no executeOverride (request/respond path), skip the runner
@@ -1668,10 +1771,31 @@ function _syncDispatchInner(s: SyncState, action: string, target: any, payload?:
     if (handler === undefined) return handleMissing(s, cmd, true);
     return tryCatchHandler(handler, cmd);
   }
+  return _syncRun(s, cmd, executeOverride);
+}
+
+/**
+ * A transactional batch dispatches a Command it built and keeps, so its
+ * rollback undoes the step that ran (Compensating Transaction). The guard and
+ * the run are a normal dispatch's; only the Command comes from the caller.
+ */
+function syncDispatchCommand(s: SyncState, cmd: Command): CommandResult {
+  if (s.dispatchDepth >= MAX_DISPATCH_DEPTH) return maxDepthResult(cmd.action);
+  s.dispatchDepth++;
+  try {
+    if (s.opts.naming !== undefined) validateNaming(cmd.action, s.opts.naming);
+    return _syncRun(s, cmd);
+  }
+  finally { s.dispatchDepth--; }
+}
+
+/** Run a built Command: every sync dispatch past the bare path, and a batch's. */
+function _syncRun(s: SyncState, cmd: Command, executeOverride?: () => CommandResult): CommandResult {
+  const action = cmd.action;
 
   // onMissing:'buffer' - when there's no handler yet, queue WITHOUT running the
   // pipeline (plugins/hooks/listeners must fire on replay, not now). The
-  // bare-path above already buffers correctly (nothing fires there). Skipped
+  // bare path in _syncDispatchInner already buffers correctly (nothing fires there). Skipped
   // for the request/respond path (executeOverride) and non-buffer buses.
   if (executeOverride === undefined && s.opts.onMissing === 'buffer' && !s.handlers.has(action)) {
     return handleMissing(s, cmd, true);
@@ -1817,19 +1941,41 @@ function warnBatchOptionConflict(opts: BatchOptions): void {
 }
 
 function syncDispatchBatch(s: SyncState, commands: BatchCommand[], opts: BatchOptions = {}): BatchResult {
+  return _syncBatch(commands, opts, (cmd) => syncDispatchCommand(s, cmd), (action) => s.undoHandlers.has(action), (a, t) => syncDispatch(s, a, t));
+}
+
+/**
+ * @internal The sync batch rule, for the bus and its test double
+ * (`createTestBus`): one rule, so the double cannot diverge
+ * (tests/testbus-batch.test.ts). `run` dispatches a built Command; a
+ * transactional batch undoes the Commands that ran, newest first, through
+ * `dispatch`, for the actions `undoable` names.
+ */
+export function _syncBatch(
+  commands: BatchCommand[],
+  opts: BatchOptions,
+  run: (cmd: Command) => CommandResult,
+  undoable: (action: string) => boolean,
+  dispatch: (action: string, target: any) => CommandResult,
+): BatchResult {
   warnBatchOptionConflict(opts);
   const results: CommandResult[] = [];
+  const ran: Command[] = [];
   let firstError: Error | undefined;
   let failCount = 0;
   for (let ci = 0; ci < commands.length; ci++) {
     const { action, target, payload } = commands[ci];
-    const result = syncDispatch(s, action, target, payload);
+    const cmd: Command = { action, target, payload, meta: stampMeta(payload) };
+    ran.push(cmd);
+    const result = run(cmd);
     results.push(result);
     if (!result.ok) {
       failCount++;
       if (opts.transactional) {
-        // Rollback: run undo handlers for all previously succeeded commands in reverse order
-        const rollbacks = syncRollback(s, commands, ci);
+        // Rollback: undo every command that succeeded, newest first. All of
+        // 0..ci-1 succeeded: a transactional batch stops at its first failure.
+        const rollbacks: CommandResult[] = [];
+        for (let j = ci - 1; j >= 0; j--) if (undoable(ran[j].action)) rollbacks.push(_undo({ dispatch }, ran[j]));
         return { ok: false, results, error: result.error, successCount: ci, failCount: 1, rollbacks };
       }
       if (!opts.continueOnError) return { ok: false, results, error: result.error, successCount: results.length - failCount, failCount };
@@ -1838,17 +1984,6 @@ function syncDispatchBatch(s: SyncState, commands: BatchCommand[], opts: BatchOp
   }
   const successCount = results.length - failCount;
   return firstError ? { ok: false, results, error: firstError, successCount, failCount } : { ok: true, results, successCount, failCount };
-}
-
-/** Undo commands 0..failedAt-1 in reverse order: all succeeded, as a transactional batch stops at its first failure. */
-function syncRollback(s: SyncState, commands: BatchCommand[], failedAt: number): CommandResult[] {
-  const rollbacks: CommandResult[] = [];
-  for (let j = failedAt - 1; j >= 0; j--) {
-    if (!s.undoHandlers.has(commands[j].action)) continue;
-    const cmd: Command = { action: commands[j].action, target: commands[j].target, payload: commands[j].payload, meta: stampMeta(commands[j].payload) };
-    rollbacks.push(_undo({ dispatch: (a, t) => syncDispatch(s, a, t) }, cmd));
-  }
-  return rollbacks;
 }
 
 
@@ -2113,7 +2248,7 @@ function busParts<S extends SyncState | AsyncState>(s: S, clear: (s: S) => void)
 export function createCommandBus<M extends CommandMap = CommandMap>(options: CommandBusOptions = {}): CommandBus<M> {
   const s: SyncState = {
     opts: options,
-    handlers: new Map(), undoHandlers: new Map(),
+    handlers: new Map(), undoHandlers: new Map(), answers: new Map(),
     pluginEntries: [], beforeHooks: [], afterHooks: [],
     exactListeners: new Map(), wildcardListeners: [],
     responders: new Map(),
@@ -2157,8 +2292,8 @@ export function createCommandBus<M extends CommandMap = CommandMap>(options: Com
 // saw. The async path is dominated by the awaits around it, so the
 // per-level closure does not register here.
 type AsyncRun = (cmd: Command, execute: () => Promise<CommandResult>) => Promise<CommandResult>;
-function buildAsyncRunner(plugins: AsyncPlugin[], retry: RetryPolicy | null, at?: number[]): AsyncRun {
-  const scoped = at ? undefined : perAction(plugins, (picked, idx): AsyncRun => buildAsyncRunner(picked, retry, idx));
+function buildAsyncRunner(plugins: AsyncPlugin[], retry: Retrier | null, answers: AsyncState['answers'], receivers: StoreReceivers, at?: number[]): AsyncRun {
+  const scoped = at ? undefined : perAction(plugins, (picked, idx): AsyncRun => buildAsyncRunner(picked, retry, answers, receivers, idx));
   if (scoped) return scoped;
   const fails = failsFor(plugins);
   return function run(cmd: Command, execute: () => Promise<CommandResult>): Promise<CommandResult> {
@@ -2188,12 +2323,28 @@ function buildAsyncRunner(plugins: AsyncPlugin[], retry: RetryPolicy | null, at?
     function nextFrom(idx: number): CommandResult | Promise<CommandResult> {
       const plugin = plugins[idx];
       if (!plugin) return (last = retry ? retry.run(cmd, execute) : execute());
-      if (!retry || !plugin.transport) return level(idx, () => nextFrom(idx + 1));
+      if (!plugin.transport) return level(idx, () => nextFrom(idx + 1));
       let passedOn = false;
-      return (last = retry.run(cmd, () => {
-        passedOn = false;
-        return level(idx, () => { passedOn = true; return nextFrom(idx + 1); });
-      }, () => passedOn));
+      const r = retry
+        ? retry.run(cmd, () => {
+          passedOn = false;
+          return level(idx, () => { passedOn = true; return nextFrom(idx + 1); });
+        }, () => passedOn)
+        : level(idx, () => nextFrom(idx + 1));
+      // A transport that answered hands the answer to the action's `answer`,
+      // then each store state its reply declared to that store, last, so what
+      // the server named wins. Here, inside the chain, so the plugins outside
+      // see what they write. Store ids are external strings: own keys only,
+      // looked up in a Map (src/dict.ts).
+      return (last = answers.size === 0 && receivers.size === 0 ? r : onSettled(r, (res) => {
+        if (!res.ok || !_appliedRemotely.has(cmd)) return res;
+        const stores = _appliedRemotely.get(cmd);
+        try {
+          answers.get(cmd.action)?.(cmd, res.value);
+          if (stores) for (const id of Object.keys(stores)) receivers.get(id)?.(cmd, stores[id]);
+        } catch (e) { return errResult(e as Error); }
+        return res;
+      }));
     }
     return Promise.resolve(nextFrom(0));
   };
@@ -2203,7 +2354,7 @@ function buildAsyncRunner(plugins: AsyncPlugin[], retry: RetryPolicy | null, at?
 // Retry policy (docs/plan-shape.md 4)
 // ---------------------------------------------------------------------------
 
-type RetryPolicy = {
+type Retrier = {
   /** Call, and re-send by the class rule; `passedOn` says the call handed the command on. */
   run(cmd: Command, call: () => CommandResult | Promise<CommandResult>, passedOn?: () => boolean): CommandResult | Promise<CommandResult>;
   /** End every wait (the bus's dispose()). */
@@ -2219,9 +2370,12 @@ const RETRY_TOKENS = 10;
  * produces the outcome, bounded, jittered and budgeted.
  *
  * - **Class rule.** Final, never: the other side's verdict, an abort, a depth
- *   bound, a library bug. Transient, always: `limited`, `timeout`, a declared
- *   `retryIn`. Uncertain (the first attempt may have landed): only for an
- *   action declared idempotent, or a command carrying an idempotency key. An
+ *   bound, a library bug. Transient, always: `limited`, a 408 `timeout`.
+ *   Uncertain (the first attempt may have landed: no reply, a 502 or 504),
+ *   and any failure with a declared `retryIn`: only for an action declared
+ *   idempotent, or a command carrying an idempotency key (RFC 9110 9.2.2,
+ *   10.2.3: a wait says when, never whether). Held back for want of either,
+ *   a no-reply failure is marked `outcome: 'unknown'` and DEV warns. An
  *   action declared idempotent gets its dispatch's id as its key, so every
  *   attempt carries the same one. A replay (`meta.origin: 'replay'`, the
  *   outbox's) is already a scheduled re-send: its scheduler owns the retry,
@@ -2241,20 +2395,32 @@ const RETRY_TOKENS = 10;
  * A success costs one `.then` and no allocation beyond it; the loop and its
  * waits exist only for a failure (tests/retry-happy-path.test.ts).
  */
-function createRetryPolicy(options: RetryOptions): RetryPolicy {
+function createRetrier(options: RetryOptions): Retrier {
   const maxAttempts = countOption(options.maxAttempts, 3, 1);
   const baseDelay = countOption(options.baseDelay, 200);
   const maxDelay = countOption(options.maxDelay, 20_000, 0, MAX_TIMEOUT_MS);
-  const actions = options.actions ?? {};
-  const patterns = Object.keys(actions);
+  const policies = options.actionPolicies ?? {};
+  // Most specific first, ranked once: an exact name, then the longest prefix,
+  // then `*`. Two different patterns of one rank never match the same action.
+  const rank = (p: string): number => (p.endsWith('*') ? p.length - 1 : Infinity);
+  const patterns = Object.keys(policies).sort((a, b) => rank(b) - rank(a));
   const waits = createSleeper();
   let tokens = RETRY_TOKENS;
 
-  const declared = (action: string): RetryDeclaration | undefined => {
-    for (const p of patterns) if (matchesPattern(p, action)) return actions[p];
+  // Resolved once per action (V8-RULES 3, measured M1): `null` is "none".
+  const known = new Map<string, RetryPolicy | null>();
+  const declared = (action: string): RetryPolicy | undefined => {
+    let policy = known.get(action);
+    if (policy === undefined) {
+      policy = null;
+      for (const p of patterns) if (matchesPattern(p, action)) { policy = policies[p]; break; }
+      if (known.size >= CHAINS_MAX) known.clear();
+      known.set(action, policy);
+    }
+    return policy ?? undefined;
   };
 
-  function settled(result: CommandResult, cmd: Command, call: () => CommandResult | Promise<CommandResult>, passedOn: (() => boolean) | undefined, declaration: RetryDeclaration | undefined): CommandResult | Promise<CommandResult> {
+  function settled(result: CommandResult, cmd: Command, call: () => CommandResult | Promise<CommandResult>, passedOn: (() => boolean) | undefined, declaration: RetryPolicy | undefined): CommandResult | Promise<CommandResult> {
     if (result.ok) {
       if (tokens < RETRY_TOKENS) tokens = Math.min(RETRY_TOKENS, tokens + 0.1);
       return result;
@@ -2262,7 +2428,7 @@ function createRetryPolicy(options: RetryOptions): RetryPolicy {
     return again(result, cmd, call, passedOn, declaration);
   }
 
-  async function again(result: CommandResult, cmd: Command, call: () => CommandResult | Promise<CommandResult>, passedOn: (() => boolean) | undefined, declaration: RetryDeclaration | undefined): Promise<CommandResult> {
+  async function again(result: CommandResult, cmd: Command, call: () => CommandResult | Promise<CommandResult>, passedOn: (() => boolean) | undefined, declaration: RetryPolicy | undefined): Promise<CommandResult> {
     const bound = declaration === false ? 1 : typeof declaration === 'number' ? countOption(declaration, maxAttempts, 1) : maxAttempts;
     for (let attempt = 1; ; attempt++) {
       if (result.ok) return settled(result, cmd, call, passedOn, declaration);
@@ -2272,14 +2438,17 @@ function createRetryPolicy(options: RetryOptions): RetryPolicy {
       // A declared wait longer than maxDelay is returned, never re-sent early:
       // Retry-After is a minimum (RFC 9110). tests/retry-after-long.test.ts.
       // The one rule (retryClass, shared with the http client): transient for
-      // any action, uncertain only for one safe to send twice.
+      // any action; uncertain, or a declared wait, only for an identified one.
       const cls = retryClass(error, condition);
-      const eligible = !(typeof retryIn === 'number' && retryIn > maxDelay) && !passedOn?.() && cmd.meta?.origin !== 'replay' && error?.code !== 'core:limited:handler' && (typeof retryIn === 'number' || cls === 'transient' ||
-        (cls === 'uncertain' && (declaration === 'idempotent' || cmd.meta?.idempotencyKey !== undefined)));
+      const open = !(typeof retryIn === 'number' && retryIn > maxDelay) && !passedOn?.() && cmd.meta?.origin !== 'replay' && error?.code !== 'core:limited:handler';
+      const eligible = open && (cls === 'transient' || ((cls === 'uncertain' || typeof retryIn === 'number') &&
+        (declaration === 'idempotent' || cmd.meta?.idempotencyKey !== undefined)));
       if (eligible) tokens = Math.max(0, tokens - 1);
       if (!eligible || attempt >= bound || tokens <= RETRY_TOKENS / 2) {
         // A failure that was sent more than once says how many times.
         if (attempt > 1 && error instanceof BusError) (error as { context?: object }).context = { ...error.context, attempts: attempt };
+        // Held back for lack of identity: reported, never silent.
+        if (!eligible && open && attempt < bound) _heldBack(error, retryIn, cmd.action);
         return result;
       }
       const wait = typeof retryIn === 'number' ? retryIn : Math.random() * baseDelay * 2 ** (attempt - 1);
@@ -2306,7 +2475,7 @@ function createRetryPolicy(options: RetryOptions): RetryPolicy {
 // ---------------------------------------------------------------------------
 
 function asyncRebuildRunner(s: AsyncState): void {
-  s.runner = buildAsyncRunner(s.pluginEntries.slice().sort(byPriority).map(e => e.plugin), s.retry);
+  s.runner = buildAsyncRunner(s.pluginEntries.slice().sort(byPriority).map(e => e.plugin), s.retry, s.answers, s.receivers);
 }
 
 // Returns void (not a promise) when there are no after-hooks, so callers can
@@ -2358,7 +2527,7 @@ async function asyncRunAfterHooks(s: AsyncState, cmd: Command, result: CommandRe
  * Not `async`: the first stretch runs synchronously inside the caller, and
  * the inner promise is returned as is (no second frame).
  */
-function asyncDispatch(s: AsyncState, action: string, target: any, payload?: any, executeOverride?: () => Promise<CommandResult>, signal?: AbortSignal): Promise<CommandResult> {
+function asyncDispatch(s: AsyncState, action: string, target: any, payload?: any, executeOverride?: (cmd: Command) => Promise<CommandResult>, signal?: AbortSignal): Promise<CommandResult> {
   const outer = s.dispatchDepth;
   if (outer >= MAX_DISPATCH_DEPTH) {
     return Promise.resolve(maxDepthResult(action));
@@ -2386,12 +2555,27 @@ export function abortedResult(action: string, signal?: AbortSignal): CommandResu
   // with no arg; substitute our BusError so the code field is queryable.
   const isDefaultAbort = reason && reason.name === 'AbortError' && reason.constructor !== BusError;
   if (reason instanceof Error && !isDefaultAbort) return errResult(reason);
-  return errResult(fail('aborted:dispatch', `Dispatch "${action}" was aborted.`, { action }));
+  return errResult(fail('aborted:dispatch', `Dispatch "${action}" was aborted.`, { action, cause: reason }));
 }
 
-async function _asyncDispatchInner(s: AsyncState, depth: number, action: string, target: any, payload?: any, executeOverride?: () => Promise<CommandResult>, signal?: AbortSignal): Promise<CommandResult> {
+function _asyncDispatchInner(s: AsyncState, depth: number, action: string, target: any, payload?: any, executeOverride?: (cmd: Command) => Promise<CommandResult>, signal?: AbortSignal): Promise<CommandResult> {
+  return _asyncRun(s, depth, { action, target, payload, meta: stampMeta(payload), signal }, executeOverride);
+}
+
+/** The async side of `syncDispatchCommand`: a batch runs the Command it keeps. */
+function asyncDispatchCommand(s: AsyncState, cmd: Command): Promise<CommandResult> {
+  const outer = s.dispatchDepth;
+  if (outer >= MAX_DISPATCH_DEPTH) return Promise.resolve(maxDepthResult(cmd.action));
+  s.dispatchDepth = outer + 1;
+  try { return _asyncRun(s, outer + 1, cmd); }
+  finally { s.dispatchDepth = outer; }
+}
+
+/** Run a built Command: the body every async dispatch shares. */
+async function _asyncRun(s: AsyncState, depth: number, cmd: Command, executeOverride?: (cmd: Command) => Promise<CommandResult>): Promise<CommandResult> {
+  const action = cmd.action;
+  const signal = cmd.signal;
   if (s.opts.naming !== undefined) validateNaming(action, s.opts.naming);
-  const cmd: Command = { action, target, payload, meta: stampMeta(payload), signal };
 
   // Pre-flight abort: if the signal is already tripped, skip the handler entirely.
   // After-hooks still run so loggers / metrics see the aborted command.
@@ -2436,7 +2620,8 @@ async function _asyncDispatchInner(s: AsyncState, depth: number, action: string,
       return result;
     }
   }
-  const execute = executeOverride ?? ((): Promise<CommandResult> => {
+  // request() hands its responder the chain's own command, as the sync bus does.
+  const execute = executeOverride ? (): Promise<CommandResult> => executeOverride(cmd) : ((): Promise<CommandResult> => {
     const handler = s.handlers.get(action);
     return handler ? tryCatchAsyncHandler(handler, cmd) : asyncMissing(s, cmd, true);
   });
@@ -2503,6 +2688,7 @@ async function asyncDispatchBatch(s: AsyncState, commands: BatchCommand[], opts:
   warnBatchOptionConflict(opts);
   const signal = opts.signal;
   const results: CommandResult[] = [];
+  const ran: Command[] = [];
   let firstError: Error | undefined;
   let failCount = 0;
 
@@ -2519,7 +2705,7 @@ async function asyncDispatchBatch(s: AsyncState, commands: BatchCommand[], opts:
       const abortErr = abortedResult('batch', signal).error!;
       const successCount = results.length - failCount;
       if (opts.transactional && successCount > 0) {
-        const rollbacks = await asyncRollback(s, commands, results.length);
+        const rollbacks = await asyncRollback(s, ran, results.length);
         return { ok: false, results, error: abortErr, successCount: 0, failCount, rollbacks };
       }
       return { ok: false, results, error: abortErr, successCount, failCount };
@@ -2527,12 +2713,14 @@ async function asyncDispatchBatch(s: AsyncState, commands: BatchCommand[], opts:
 
     const { action, target, payload } = commands[ci];
     // Per-command signal flows through dispatch so individual handlers can observe abort.
-    const result = await asyncDispatch(s, action, target, payload, undefined, signal);
+    const cmd: Command = { action, target, payload, meta: stampMeta(payload), signal };
+    ran.push(cmd);
+    const result = await asyncDispatchCommand(s, cmd);
     results.push(result);
     if (!result.ok) {
       failCount++;
       if (opts.transactional) {
-        const rollbacks = await asyncRollback(s, commands, ci);
+        const rollbacks = await asyncRollback(s, ran, ci);
         return { ok: false, results, error: result.error, successCount: ci, failCount: 1, rollbacks };
       }
       if (!opts.continueOnError) return { ok: false, results, error: result.error, successCount: results.length - failCount, failCount };
@@ -2544,22 +2732,28 @@ async function asyncDispatchBatch(s: AsyncState, commands: BatchCommand[], opts:
 }
 
 /** Async rollback: commands 0..failedAt-1 in reverse order, all succeeded (a transactional batch stops at its first failure). */
-async function asyncRollback(s: AsyncState, commands: BatchCommand[], failedAt: number): Promise<CommandResult[]> {
+async function asyncRollback(s: AsyncState, ran: Command[], failedAt: number): Promise<CommandResult[]> {
   const rollbacks: CommandResult[] = [];
   for (let j = failedAt - 1; j >= 0; j--) {
-    if (!s.undoHandlers.has(commands[j].action)) continue;
-    const cmd: Command = { action: commands[j].action, target: commands[j].target, payload: commands[j].payload, meta: stampMeta(commands[j].payload) };
-    rollbacks.push(await _undo({ dispatch: (a, t) => asyncDispatch(s, a, t) }, cmd));
+    if (!s.undoHandlers.has(ran[j].action)) continue;
+    rollbacks.push(await _undo({ dispatch: (a, t) => asyncDispatch(s, a, t) }, ran[j]));
   }
   return rollbacks;
 }
 
 
 
+/**
+ * A request in flight that identical callers join: its dispatch, and the
+ * controller the responder reads on cmd.signal (when the first caller gave a
+ * signal), aborted once every caller holding the request has aborted. A
+ * caller with no signal holds it until it lands (`live` Infinity).
+ */
+type SharedRequest = { done: Promise<CommandResult>; ctrl: AbortController | undefined; live: number };
+
 async function asyncRequest(s: AsyncState, action: string, target: any, payload?: any, reqOpts: { timeout?: number; signal?: AbortSignal } = {}): Promise<CommandResult> {
   const timeout = reqOpts.timeout ?? 5000;
   const signal = reqOpts.signal;
-  const responder = s.responders.get(action);
 
   // Pre-flight abort - return immediately, don't dedup or dispatch.
   if (signal?.aborted) return abortedResult(action, signal);
@@ -2567,49 +2761,60 @@ async function asyncRequest(s: AsyncState, action: string, target: any, payload?
   // Dedup key - the canonical commandKey: order-independent and nested-faithful,
   // so the same logical request collapses regardless of key order while distinct
   // nested targets stay separate (no false-dedup). Shared with debounce/throttle/cache.
-  const dedupKey = commandKey(action, target);
+  // Identical means the payload too, when one is given: two payloads are two
+  // requests (tests/request-join.test.ts).
+  const dedupKey = commandKey(action, payload === undefined ? target : [target, payload]);
 
-  // If an identical request is already in-flight, piggyback on it
-  const inflight = s.pendingRequests.get(dedupKey);
-  if (inflight) return inflight;
+  // Join an identical request in flight, unless every caller holding it has
+  // aborted; else start one. Its responder runs inside the plugin chain and
+  // receives the chain's own command.
+  let run = s.pendingRequests.get(dedupKey);
+  if (run && !run.ctrl?.signal.aborted) run.live += signal ? 1 : Infinity;
+  else {
+    const responder = s.responders.get(action);
+    const executeOverride = responder ? async (cmd: Command): Promise<CommandResult> => {
+      try { return okResult(await responder(cmd)); }
+      catch (e) { return errResult(e as Error); }
+    } : undefined;
+    const ctrl = signal ? new AbortController() : undefined;
+    const started: SharedRequest = { done: asyncDispatch(s, action, target, payload, executeOverride, ctrl?.signal), ctrl, live: signal ? 1 : Infinity };
+    // Removed only if it is still this request's: a later one may own the key.
+    started.done.then(() => { if (s.pendingRequests.get(dedupKey) === started) s.pendingRequests.delete(dedupKey); });
+    s.pendingRequests.set(dedupKey, started);
+    run = started;
+  }
+  const shared = run;
 
-  // Route through the plugin chain with responder as the execute function.
-  // The signal also flows to cmd.signal so the responder can observe abort.
-  const executeOverride = responder ? async (): Promise<CommandResult> => {
-    try { return okResult(await responder({ action, target, payload, meta: stampMeta(payload), signal } as Command)); }
-    catch (e) { return errResult(e as Error); }
-  } : undefined;
-
-  const dispatchPromise = asyncDispatch(s, action, target, payload, executeOverride, signal);
-
-  // One promise settles the request, as on the sync bus: the dispatch, the
-  // timer, the caller's abort and dispose() (see AsyncState.waiting) all call
-  // done(), and the first one wins. The dedup entry is removed only if it is
-  // still this request's, since a later identical request may own the key.
+  // Each caller's own promise, as on the sync bus: the dispatch, its timer,
+  // its abort and dispose() (see AsyncState.waiting) all call done(), and the
+  // first one wins. Its signal cancels its promise, never another caller's
+  // (the HTTP client's dedupe rule).
   const pending = (s.waiting ||= new Set());
-  const racePromise = new Promise<CommandResult>((resolve) => {
+  return new Promise<CommandResult>((resolve) => {
     const done = (r: CommandResult): void => {
       clearTimeout(timeoutId);
       pending.delete(cancel);
-      signal?.removeEventListener('abort', cancel);
-      if (s.pendingRequests.get(dedupKey) === racePromise) s.pendingRequests.delete(dedupKey);
+      signal?.removeEventListener('abort', onAbort);
       resolve(r);
     };
     const cancel = (): void => done(abortedResult(action, signal));
+    const onAbort = (): void => {
+      cancel();
+      if (--shared.live === 0) shared.ctrl?.abort(signal!.reason);
+    };
     const timeoutId = setTimeout(() => done(requestTimeoutResult(action, timeout)), timeout);
     pending.add(cancel);
-    signal?.addEventListener('abort', cancel);
-    dispatchPromise.then(done);
+    signal?.addEventListener('abort', onAbort);
+    shared.done.then(done);
   });
-
-  s.pendingRequests.set(dedupKey, racePromise);
-  return racePromise;
 }
+
 
 function asyncClear(s: AsyncState): void {
   clearState(s);
   s.pendingRequests.clear();
-  s.runner = buildAsyncRunner([], s.retry);
+  s.receivers.clear();
+  s.runner = buildAsyncRunner([], s.retry, s.answers, s.receivers);
 }
 
 // ---------------------------------------------------------------------------
@@ -2629,16 +2834,19 @@ function asyncClear(s: AsyncState): void {
  * if (result.ok) console.log(result.value); // { name: 'Alice', ... }
  */
 export function createAsyncCommandBus<M extends CommandMap = CommandMap>(options: AsyncCommandBusOptions = {}): AsyncCommandBus<M> {
-  const retry = options.retry === false ? null : createRetryPolicy(options.retry ?? {});
+  const retry = options.retry === false ? null : createRetrier(options.retry ?? {});
+  const answers: AsyncState['answers'] = new Map();
+  const receivers: StoreReceivers = new Map();
   const s: AsyncState = {
     opts: options,
-    handlers: new Map(), undoHandlers: new Map(),
+    handlers: new Map(), undoHandlers: new Map(), answers,
     pluginEntries: [], beforeHooks: [], afterHooks: [],
     exactListeners: new Map(), wildcardListeners: [],
     responders: new Map(),
     pendingRequests: new Map(),
-    runner: buildAsyncRunner([], retry),
+    runner: buildAsyncRunner([], retry, answers, receivers),
     retry,
+    receivers,
     dispatchDepth: 0,
     sealed: false,
     throttleTimers: new Set(),
@@ -2657,6 +2865,7 @@ export function createAsyncCommandBus<M extends CommandMap = CommandMap>(options
     request:           (a, t, p, o)  => asyncRequest(s, a as string, t, p, o),
     ...busParts(s, asyncClear),
   };
+  _storeReceivers.set(bus, receivers);
   return bus;
 }
 
@@ -2747,7 +2956,7 @@ export type BusInspection = {
  * console.table(info);
  *
  * // Check if all checkout actions have undo handlers
- * const missing = info.actions.filter(a => !info.undoActions.includes(a));
+ * const missing = info.actions.filter(a => !a.includes('$') && !info.undoActions.includes(a)); // `$` names are the library's (`cartAdd$undo`)
  * if (missing.length) console.warn('Missing undo for:', missing);
  */
 export function inspectBus(bus: BaseBus): BusInspection {

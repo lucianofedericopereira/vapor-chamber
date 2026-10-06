@@ -8,12 +8,12 @@ import { it } from '../src/vitest';
 const v1 = () =>
   defineChamberStore('cart', {
     state: () => ({ items: [] as number[] }),
-    actions: { add: (s, n: number) => ({ items: [...s.items, n] }), clear: () => ({ items: [] }) },
+    reducers: { add: (s, n: number) => ({ items: [...s.items, n] }), clear: () => ({ items: [] }) },
   });
 const v2 = () =>
   defineChamberStore('cart', {
     state: () => ({ items: [] as number[] }),
-    actions: { add: (s, n: number) => ({ items: [...s.items, n * 10] }), bump: (s) => s },
+    reducers: { add: (s, n: number) => ({ items: [...s.items, n * 10] }), bump: (s) => s },
   });
 
 describe('one definition', () => {

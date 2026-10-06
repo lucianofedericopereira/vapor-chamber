@@ -100,13 +100,13 @@ describe('idempotent plugin', () => {
 // ---------------------------------------------------------------------------
 
 describe('idempotent - done-cache eviction and rejection', () => {
-  it('evicts the oldest done entry past maxKeys, so the evicted command re-runs', async ({ asyncBus: bus }) => {
-    bus.use(idempotent({ maxKeys: 1 }));
+  it('evicts the oldest done entry past maxSize, so the evicted command re-runs', async ({ asyncBus: bus }) => {
+    bus.use(idempotent({ maxSize: 1 }));
     let runs = 0;
     bus.register('op', async (cmd) => { runs++; return cmd.target.id; });
 
     await bus.dispatch('op', { id: 'a' });   // cached
-    await bus.dispatch('op', { id: 'b' });   // caches b, evicts a (maxKeys: 1)
+    await bus.dispatch('op', { id: 'b' });   // caches b, evicts a (maxSize: 1)
     await bus.dispatch('op', { id: 'a' });   // a was evicted - must run again
 
     expect(runs).toBe(3);

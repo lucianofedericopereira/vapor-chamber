@@ -91,7 +91,7 @@ describe('RouterOutlet - default slot', () => {
 
     expect(host.innerHTML).toContain('empty');
     app.unmount();
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -109,6 +109,6 @@ describe('RouterOutlet - nothing to render and no slot', () => {
     const host = document.createElement('div');
     expect(() => app.mount(host)).not.toThrow();
     app.unmount();
-    router.destroy();
+    router.dispose();
   });
 });

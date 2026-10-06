@@ -50,7 +50,7 @@ describe('createOutbox - queueing', () => {
       action: 'cartAdd',
       target: { id: 1 },
       payload: { qty: 2 },
-      key: commandKey('cartAdd', { id: 1 }),
+      key: `${commandKey('cartAdd', { id: 1 })}:${result.value.id}`, // one key per record (s35.166)
     });
 
     // 'outboxQueued' fires with the record
@@ -199,10 +199,10 @@ describe('createOutbox - queueing', () => {
     expect(outbox.pending.value).toBe(0);
   });
 
-  it('maxQueue drops the oldest record with a warning', async () => {
+  it('maxSize drops the oldest record with a warning', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const storage = memoryStorage();
-    const outbox = createOutbox({ storage, isOnline: () => false, autoFlush: false, maxQueue: 2 });
+    const outbox = createOutbox({ storage, isOnline: () => false, autoFlush: false, maxSize: 2 });
     const bus = createAsyncCommandBus({ onMissing: 'ignore' });
     outbox.install(bus);
 
@@ -212,37 +212,37 @@ describe('createOutbox - queueing', () => {
 
     expect(outbox.pending.value).toBe(2);
     expect(storage.data!.map(r => r.action)).toEqual(['b', 'c']); // oldest ('a') dropped
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('maxQueue'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('maxSize'));
   });
 
   // Same class as `cache({ maxSize: -1 })`, which hung its eviction loop. Here
   // the identical `while (length > max)` shape threw instead: on a negative
   // bound the condition stays true once the queue is empty, `shift()` returns
   // undefined, and the warning dereferenced it.
-  it('a negative maxQueue is clamped instead of throwing', async () => {
+  it('a negative maxSize is clamped instead of throwing', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const storage = memoryStorage();
-    const outbox = createOutbox({ storage, isOnline: () => false, autoFlush: false, maxQueue: -1 });
+    const outbox = createOutbox({ storage, isOnline: () => false, autoFlush: false, maxSize: -1 });
     const bus = createAsyncCommandBus({ onMissing: 'ignore' });
     outbox.install(bus);
 
     const result = await bus.dispatch('a', { n: 1 });
 
     // Clamped to 0: the record is queued, then immediately dropped by the
-    // bound, which is what maxQueue 0 means.
+    // bound, which is what maxSize 0 means.
     expect(result.ok).toBe(true);
     expect(outbox.pending.value).toBe(0);
   });
 
   // NaN propagates through Math.trunc/Math.max and loses every comparison, so
-  // `queue.length > maxQueue` never fired and the bound vanished - measured at
+  // `queue.length > maxSize` never fired and the bound vanished - measured at
   // 300 records queued before this guard, which is the unbounded growth the
   // option exists to prevent.
-  it('a NaN maxQueue queues nothing instead of unbounding', async () => {
+  it('a NaN maxSize queues nothing instead of unbounding', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     const storage = memoryStorage();
     const outbox = createOutbox({
-      storage, isOnline: () => false, autoFlush: false, maxQueue: Number('nope'),
+      storage, isOnline: () => false, autoFlush: false, maxSize: Number('nope'),
     });
     const bus = createAsyncCommandBus({ onMissing: 'ignore' });
     outbox.install(bus);
@@ -270,7 +270,7 @@ describe('createOutbox - queueing', () => {
       })),
     );
 
-    const outbox = createOutbox({ storage, isOnline: () => false, autoFlush: false, maxQueue: 2 });
+    const outbox = createOutbox({ storage, isOnline: () => false, autoFlush: false, maxSize: 2 });
     await outbox.hydrate();
 
     expect(outbox.pending.value).toBe(2);
@@ -282,7 +282,7 @@ describe('createOutbox - queueing', () => {
   it('hydrate does not rewrite storage when nothing is dropped', async () => {
     const storage = memoryStorage([{ id: '1', action: 'a1', target: { n: 1 }, key: 'k1', queuedAt: '1970-01-01T00:00:00.001Z' }]);
 
-    const outbox = createOutbox({ storage, isOnline: () => false, autoFlush: false, maxQueue: 10 });
+    const outbox = createOutbox({ storage, isOnline: () => false, autoFlush: false, maxSize: 10 });
     await outbox.hydrate();
 
     expect(outbox.pending.value).toBe(1);

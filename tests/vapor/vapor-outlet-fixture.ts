@@ -126,7 +126,7 @@ function describeNode(node: Node): string {
 type FixtureRouter = {
   isReady: () => Promise<void>;
   push: (to: string) => Promise<unknown>;
-  destroy: () => void;
+  dispose: () => void;
 };
 
 function makeRouter(components: Record<string, unknown>) {
@@ -160,7 +160,7 @@ async function scenario(components: Record<string, unknown>, root?: unknown) {
     done: () => {
       app.unmount();
       host.remove();
-      router.destroy();
+      router.dispose();
     },
   };
 }
@@ -211,7 +211,7 @@ async function guardAtMount(path: string, components: Record<string, unknown>) {
     /* a failed mount may leave nothing to unmount */
   }
   host.remove();
-  router.destroy();
+  router.dispose();
   const error = caught as { name?: string; code?: unknown } | null;
   return { name: error?.name ?? null, code: error?.code };
 }

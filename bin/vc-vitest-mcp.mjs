@@ -9,12 +9,12 @@ import { parseArgs } from 'node:util';
 import { serveVitestMcp } from '../dist/vitest-mcp.js';
 
 const { values } = parseArgs({ options: { root: { type: 'string' }, config: { type: 'string' } } });
-const stop = await serveVitestMcp({ root: values.root, config: values.config });
+const dispose = await serveVitestMcp({ root: values.root, config: values.config });
 for (const signal of ['SIGINT', 'SIGTERM']) {
   process.on(signal, () => {
-    void stop().then(() => process.exit(0));
+    void dispose().then(() => process.exit(0));
   });
 }
 process.stdin.on('end', () => {
-  void stop().then(() => process.exit(0));
+  void dispose().then(() => process.exit(0));
 });

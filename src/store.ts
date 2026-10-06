@@ -12,7 +12,7 @@
  *
  *   const useCart = defineChamberStore('cart', {
  *     state: () => ({ items: [] as number[] }),
- *     actions: {
+ *     reducers: {
  *       add:   (s, id: number) => ({ items: [...s.items, id] }),
  *       clear: () => ({ items: [] }),
  *     },
@@ -28,8 +28,8 @@
  * with `undo: true`), `share` keeps the same state in every tab,
  * `optimistic` rolls it back, `idempotent` collapses a double-submit,
  * `serialize` orders same-key writes, and the devtools timeline shows it. Pinia
- * grew a ~70-line bus inside itself (`action()` / `$onAction`) to reach a
- * fraction of that, because no bus existed underneath. Here the bus is the
+ * grew a bus of about 60 lines inside itself (4.0.3: `action()` / `$onAction`)
+ * to reach a fraction of that, because no bus existed underneath. Here the bus is the
  * foundation and the store is the thin part.
  *
  * VUE IS IMPORTED STATICALLY, not resolved through `chamber.ts`'s registry.
@@ -62,7 +62,7 @@
 import { type ShallowRef, effect, effectScope, getCurrentScope, onScopeDispose, shallowRef } from 'vue';
 import { type DefineChamberStore, type StoreRuntime, createStoreDefiner } from './store-base';
 
-export type { ChamberStore, ChamberStoreOptions, StoreAction, StoreRouter } from './store-base';
+export type { ChamberStore, ChamberStoreOptions, StoreReducer, StoreRouter } from './store-base';
 
 const vueRuntime: StoreRuntime = {
   cell: (initial) => shallowRef(initial),

@@ -48,7 +48,7 @@ describe('a navigation to the page on screen', () => {
     expect(isRouterError(await going, 'router:aborted:navigation')).toBe(true);
     expect(router.currentRoute.value.location.fullPath).toBe('/');
     expect(history.location()).toBe('/');
-    router.destroy();
+    router.dispose();
   });
 
   it('pop: Forward back to the page during a held Back keeps the page and the address bar together', async () => {
@@ -63,7 +63,7 @@ describe('a navigation to the page on screen', () => {
     expect(router.currentRoute.value.location.fullPath).toBe('/list');
     expect(history.location()).toBe('/list');
     expect(go.mock.calls).toEqual([[-1], [1]]);
-    router.destroy();
+    router.dispose();
   });
 
   it('push: the superseded navigation loses its loading state and its loaders', async () => {
@@ -87,7 +87,7 @@ describe('a navigation to the page on screen', () => {
     release();
     expect(isRouterError(await going, 'router:aborted:navigation')).toBe(true);
     expect(router.currentRoute.value.location.fullPath).toBe('/');
-    router.destroy();
+    router.dispose();
   });
 
   it('control: with nothing in flight it answers null and changes nothing', async () => {
@@ -97,7 +97,7 @@ describe('a navigation to the page on screen', () => {
     expect(await router.push('/list')).toBeNull();
     expect(router.currentRoute.value).toBe(before);
     expect(history.location()).toBe('/list');
-    router.destroy();
+    router.dispose();
   });
 });
 

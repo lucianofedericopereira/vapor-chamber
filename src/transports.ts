@@ -5,10 +5,12 @@
  * Use with createAsyncCommandBus() for full async dispatch support.
  */
 
-import type { Command, CommandResult, AsyncPlugin, BaseBus, BusError, FailCode, MetaResponse } from './command-bus';
+import type { ActionScope, Command, CommandResult, AsyncPlugin, BaseBus, BusError, FailCode, MetaResponse } from './command-bus';
+import type { ActionFilter } from './action-filter';
 import { MAX_TIMEOUT_MS, countOption } from './bounds';
 import { DEV } from './dev';
 import { abortedResult, BusError as BusErrorClass, _failures, _okResult, _errResult, _isLibraryAction } from './command-bus';
+import { _appliedRemotely } from './applied-remotely';
 import { _answered, _remoteProblem, postCommand } from './http';
 import type { HttpClient } from './http';
 import type { ProblemDetails } from './http-errors';
@@ -60,6 +62,12 @@ function envelopeOf(cmd: Command, id?: string): CommandEnvelope {
  */
 export type BackendResponse = {
   state?: unknown;
+  /**
+   * Store states the server declares beside a success, by store id: each
+   * store with that id on the bus takes its state, whatever the command was
+   * (docs/store.md, A store behind a bridge). Log s35.186.
+   */
+  stores?: Record<string, unknown>;
   /** A navigation the backend hands back instead of a result - see `onRedirect`. */
   redirect?: string;
   problem?: ProblemDetails;
@@ -105,9 +113,12 @@ const redirected = (url: string, action: string, handled: boolean): BusError =>
 const responseOf = (res: { status: number; headers?: Record<string, string>; url?: string; redirected?: boolean }): MetaResponse =>
   ({ status: res.status, headers: res.headers ?? {}, url: res.url, redirected: res.redirected });
 
-function answerOf(r: BackendResponse, action: string): CommandResult {
+function answerOf(r: BackendResponse, cmd: Command): CommandResult {
   if (r.problem) return _errResult(_remoteProblem(r.problem));
-  if (typeof r.redirect === 'string') return _errResult(redirected(r.redirect, action, false));
+  if (typeof r.redirect === 'string') return _errResult(redirected(r.redirect, cmd.action, false));
+  // The server applied it: history must not undo or redo it locally (R9).
+  // The store states its reply declares travel with it to the bus.
+  _appliedRemotely.set(cmd, r.stores);
   return _okResult(r.state);
 }
 
@@ -138,7 +149,7 @@ export type HttpBridgeOptions = {
    * Default: '/sanctum/csrf-cookie'.
    */
   csrfCookieUrl?: string;
-  /** Additional headers merged into every request */
+  /** Additional headers merged into every request. A name matches in any case: its first spelling is kept and the last value wins (the Fetch Standard's "set"), so it goes out once. */
   headers?: Record<string, string>;
   /** Request timeout in ms. Default: 10_000 */
   timeout?: number;
@@ -169,9 +180,11 @@ export type HttpBridgeOptions = {
   onRedirect?: (url: string) => void;
   /**
    * Which actions to forward. Glob patterns supported: '*', 'cart*'.
-   * Default: all actions.
+   * An {@link ActionScope}.
    */
-  actions?: string[];
+  actions?: ActionScope;
+  /** Selects actions by name, ANDed with `actions`: an {@link ActionFilter} (`createActionFilter`). Log s35.152. */
+  actionFilter?: ActionFilter;
   /**
    * Abort controller whose signal cancels all in-flight requests when the
    * owning scope/component is disposed. In Vapor components, create an
@@ -216,7 +229,7 @@ export type HttpBridgeOptions = {
  * failure's condition, after a declared Retry-After (docs/plan-shape.md 4).
  *
  * @example
- * const bus = createAsyncCommandBus({ retry: { actions: { 'cart*': 'idempotent' } } })
+ * const bus = createAsyncCommandBus({ retry: { actionPolicies: { 'cart*': 'idempotent' } } })
  * bus.use(createHttpBridge({ endpoint: '/api/vc', csrf: true }))
  *
  * await bus.dispatch('cartAdd', product, { quantity: 2 })
@@ -287,11 +300,11 @@ export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
         onRedirect?.(d.redirect);
         return _errResult(redirected(d.redirect, cmd.action, !!onRedirect));
       }
-      return answerOf(d, cmd.action);
+      return answerOf(d, cmd);
     } catch (e) {
       return unanswered(e, cmd.action, perCallSignal);
     }
-  }, TRANSPORT, { actions });
+  }, TRANSPORT, { actions, actionFilter: options.actionFilter });
 }
 
 // ---------------------------------------------------------------------------
@@ -324,7 +337,8 @@ export type BatchingHttpBridgeOptions = HttpBridgeOptions & {
 type BatchedResult = { id: string } & BackendResponse;
 type BatchResponse = { results?: BatchedResult[] };
 
-type QueuedBatchEntry = { id: string; cmd: Command; resolve: (result: CommandResult) => void };
+// `leave`: set at the flush for a command that carries a signal; its abort counts it out of the request.
+type QueuedBatchEntry = { id: string; cmd: Command; resolve: (result: CommandResult) => void; leave?: () => void };
 
 /**
  * createBatchingHttpBridge - coalescing fetch-based transport plugin.
@@ -374,6 +388,20 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
     const batch = queue;
     queue = [];
     scheduled = false;
+    // Every command aborted while it waited for the window: nothing to send.
+    if (batch.length === 0) return;
+
+    // A command that carries a signal settles on its abort; the request is
+    // cancelled once every command in it has aborted (the HTTP client's rule).
+    let requestSignal = effectiveSignal;
+    if (batch.some((entry) => entry.cmd.signal)) {
+      const ctrl = new AbortController();
+      let live = batch.length;
+      for (const entry of batch) if (entry.cmd.signal) entry.leave = () => { if (--live === 0) ctrl.abort(); };
+      requestSignal = effectiveSignal
+        ? (typeof AbortSignal.any === 'function' ? AbortSignal.any([effectiveSignal, ctrl.signal]) : effectiveSignal) // fallback: the bridge's signal, as released
+        : ctrl.signal;
+    }
 
     const commands = batch.map(({ id, cmd }) => envelopeOf(cmd, id));
     // One request: its commands' `meta.request` headers merged in queue order.
@@ -386,10 +414,10 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
     try {
       const res = httpClient
         ? await httpClient.post<BatchResponse>(endpoint, { commands }, {
-            csrf, csrfCookieUrl, headers: batchHeaders, timeout, retry: 0, signal: effectiveSignal, onSessionExpired,
+            csrf, csrfCookieUrl, headers: batchHeaders, timeout, retry: 0, signal: requestSignal, onSessionExpired,
           })
         : await postCommand<BatchResponse>(endpoint, { commands }, {
-            csrf, csrfCookieUrl, headers: batchHeaders, timeout, retry: 0, signal: effectiveSignal, onSessionExpired,
+            csrf, csrfCookieUrl, headers: batchHeaders, timeout, retry: 0, signal: requestSignal, onSessionExpired,
           });
 
       if (!res.ok) {
@@ -416,7 +444,7 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
           }
           entry.resolve(_errResult(redirected(r.redirect, entry.cmd.action, !!onRedirect)));
         } else {
-          entry.resolve(answerOf(r, entry.cmd.action));
+          entry.resolve(answerOf(r, entry.cmd));
         }
       }
     } catch (e) {
@@ -430,10 +458,24 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
 
     return new Promise<CommandResult>((resolve) => {
       const id = `${Date.now()}-${++seq}`;
-      queue.push({ id, cmd, resolve });
+      const entry: QueuedBatchEntry = { id, cmd, resolve };
+      const signal = cmd.signal;
+      if (signal) {
+        // Before the flush the command leaves the queue, never sent; after,
+        // it settles now and counts itself out of the request.
+        const onAbort = (): void => {
+          const at = queue.indexOf(entry);
+          if (at !== -1) queue.splice(at, 1);
+          else entry.leave?.();
+          resolve(abortedResult(cmd.action, signal));
+        };
+        signal.addEventListener('abort', onAbort, { once: true });
+        entry.resolve = (r) => { signal.removeEventListener('abort', onAbort); resolve(r); };
+      }
+      queue.push(entry);
       scheduleFlush();
     });
-  }, TRANSPORT, { actions });
+  }, TRANSPORT, { actions, actionFilter: options.actionFilter });
 }
 
 // ---------------------------------------------------------------------------
@@ -445,9 +487,11 @@ export type WsBridgeOptions = {
   url: string;
   /**
    * Which actions to forward. Glob patterns supported: '*', 'cart*'.
-   * Default: all actions.
+   * An {@link ActionScope}.
    */
-  actions?: string[];
+  actions?: ActionScope;
+  /** Selects actions by name, ANDed with `actions`: an {@link ActionFilter} (`createActionFilter`). Log s35.152. */
+  actionFilter?: ActionFilter;
   /** Automatically reconnect on disconnect. Default: true */
   reconnect?: boolean;
   /** Base reconnect delay in ms. Default: 1000 */
@@ -471,6 +515,7 @@ export type WsBridgeOptions = {
 };
 
 type PendingRequest = {
+  cmd: Command;
   action: string;
   resolve: (result: CommandResult) => void;
   timeoutId: ReturnType<typeof setTimeout>;
@@ -635,7 +680,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
         if (req) {
           clearTimeout(req.timeoutId);
           pending.delete(data.id);
-          req.resolve(answerOf(data, req.action));
+          req.resolve(answerOf(data, req.cmd));
         }
       } catch {
         // ignore malformed frames
@@ -726,6 +771,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
       }, wsTimeout);
 
       pending.set(id, {
+        cmd,
         action: cmd.action,
         resolve: settle,
         timeoutId,
@@ -743,7 +789,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
     });
   };
 
-  return Object.assign(plugin, { connect, disconnect, isConnected, connected }, TRANSPORT, { actions });
+  return Object.assign(plugin, { connect, disconnect, isConnected, connected }, TRANSPORT, { actions, actionFilter: options.actionFilter });
 }
 
 // ---------------------------------------------------------------------------
@@ -790,11 +836,11 @@ export type SseBridgeOptions = {
  * sse.install(bus)
  *
  * // Later, on component unmount:
- * sse.teardown()
+ * sse.dispose()
  */
 export function createSseBridge(options: SseBridgeOptions): {
   install(bus: BaseBus): void;
-  teardown(): void;
+  dispose(): void;
   isConnected(): boolean;
 } {
   const { url, onEvent, withCredentials = false, reconnect = true } = options;
@@ -819,11 +865,11 @@ export function createSseBridge(options: SseBridgeOptions): {
       // documented with a default, and never read - setting it did nothing at
       // all. Closing the stream is the only way to stop EventSource retrying,
       // so that is what it means.
-      if (!reconnect) teardown();
+      if (!reconnect) dispose();
     };
   }
 
-  function teardown(): void {
+  function dispose(): void {
     source?.close();
     source = null;
   }
@@ -832,7 +878,7 @@ export function createSseBridge(options: SseBridgeOptions): {
     return source !== null && source.readyState === EventSource.OPEN;
   }
 
-  return { install, teardown, isConnected };
+  return { install, dispose, isConnected };
 }
 
 // ---------------------------------------------------------------------------
@@ -895,11 +941,11 @@ export type EchoBridgeOptions = {
  * });
  * realtime.install(bus);   // OrderShipped -> bus.emit('OrderShipped', payload)
  * // on teardown:
- * realtime.teardown();
+ * realtime.dispose();
  */
 export function createEchoBridge(options: EchoBridgeOptions): {
   install(bus: BaseBus): void;
-  teardown(): void;
+  dispose(): void;
 } {
   const { echo, channels, onBroadcast, presenceEvents = true } = options;
   const joined: string[] = [];
@@ -931,12 +977,12 @@ export function createEchoBridge(options: EchoBridgeOptions): {
     }
   }
 
-  function teardown(): void {
+  function dispose(): void {
     for (const name of joined) {
       try { echo.leave(name); } catch { /* echo may already be torn down */ }
     }
     joined.length = 0;
   }
 
-  return { install, teardown };
+  return { install, dispose };
 }

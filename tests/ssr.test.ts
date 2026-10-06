@@ -58,9 +58,9 @@ describe('createSSRPlugin', () => {
     expect(ssr.dehydrate()[0].action).toBe('cartAdd');
   });
 
-  it('maxCommands limits recording', () => {
+  it('maxSize limits recording', () => {
     bus.register('cmd', () => 'ok');
-    const ssr = createSSRPlugin({ maxCommands: 3 });
+    const ssr = createSSRPlugin({ maxSize: 3 });
     bus.use(ssr.plugin);
 
     for (let i = 0; i < 10; i++) bus.dispatch('cmd', { i });
@@ -292,15 +292,15 @@ describe('rehydrate on an async bus', () => {
 });
 
 // ---------------------------------------------------------------------------
-// maxCommands: the cap dropped everything past it with no warning and no
+// maxSize: the cap dropped everything past it with no warning and no
 // signal - the client rehydrated partial state and nothing said so.
 // ---------------------------------------------------------------------------
 
-describe('createSSRPlugin - maxCommands truncation', () => {
+describe('createSSRPlugin - maxSize truncation', () => {
   it('warns once and counts what it dropped', () => {
     using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createCommandBus();
-    const ssr = createSSRPlugin({ maxCommands: 2 });
+    const ssr = createSSRPlugin({ maxSize: 2 });
     bus.use(ssr.plugin);
     bus.register('inc', () => 'ok');
 
@@ -310,11 +310,11 @@ describe('createSSRPlugin - maxCommands truncation', () => {
     expect(ssr.dehydrate()).toHaveLength(2);
     expect(ssr.dropped()).toBe(3);
     expect(warn).toHaveBeenCalledTimes(1); // once, not once per dropped command
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining('maxCommands'));
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('maxSize'));
   });
 
   it('dropped() is 0 under the cap, and clear() resets it', ({ bus }) => {
-    const ssr = createSSRPlugin({ maxCommands: 10 });
+    const ssr = createSSRPlugin({ maxSize: 10 });
     bus.use(ssr.plugin);
     bus.register('inc', () => 'ok');
 

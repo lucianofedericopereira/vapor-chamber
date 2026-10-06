@@ -68,9 +68,9 @@ describe('the bounds that had silently ceased to exist', () => {
     expect(h.getState().past.length).toBe(50);
   });
 
-  it('metrics keeps its cap under a NaN maxEntries (measured: 1500 kept against 1000)', ({ bus }) => {
+  it('metrics keeps its cap under a NaN maxSize (measured: 1500 kept against 1000)', ({ bus }) => {
     bus.register('x', () => 'ok');
-    const m = metrics({ maxEntries: NAN });
+    const m = metrics({ maxSize: NAN });
     bus.use(m);
     for (let i = 0; i < 1500; i++) bus.dispatch('x', {});
     expect(m.entries().length).toBe(1000);

@@ -14,7 +14,7 @@ function make(listener) {
   bus.use(cache({ actions: ['never*'] }));
   bus.use(circuitBreaker({ actions: ['pay*', 'checkout*'], threshold: 1e9 }));
   bus.use(rateLimit({ actions: ['zz*', 'yy*', 'searchRunX'], max: 1e9, window: 1e9 }));
-  bus.use(metrics({ actions: ['cart*', 'pay*', 'search*', 'ui*'], maxEntries: 8 }));
+  bus.use(metrics({ actions: ['cart*', 'pay*', 'search*', 'ui*'], maxSize: 8 }));
   if (listener) bus.on('cart*', () => {});
   return bus;
 }

@@ -54,7 +54,7 @@ describe('revalidateRoutes past the fetchLoaders cache', () => {
       await new Promise((r) => setTimeout(r, 20));
       expect(s.gets).toBe(before + 1);
       expect((router.currentRoute.value.data.get('shop.cart') as { v: string }).v).toBe('new');
-      router.destroy();
+      router.dispose();
     });
   }
 
@@ -65,7 +65,7 @@ describe('revalidateRoutes past the fetchLoaders cache', () => {
     await router.push('/');
     await router.push('/cart');
     expect(s.gets).toBe(1);
-    router.destroy();
+    router.dispose();
   });
 
   it('LoaderContext.refresh is false on a navigation, true when runLoaders is asked to refresh', async () => {

@@ -25,14 +25,14 @@
 
 import type {
   AsyncPlugin, Command, CommandResult, Handler, Plugin, Hook, BeforeHook,
-  PluginOptions, BatchCommand, BatchResult, CommandBus,
+  PluginOptions, BatchCommand, BatchOptions, BatchResult, CommandBus,
   Listener, RegisterOptions, BusInspection,
 } from './command-bus';
 
 // The double stands in for the bus, so its failures are core's: a test must
 // read the same code it will meet in production.
 const testFail = _failures('core');
-import { buildRunner, matchesPattern, abortedResult, _failures, _beforeCancel, _errResult, _okResult, _stampMeta, _UNSEAL, _tryCatchHandler } from './command-bus';
+import { buildRunner, matchesPattern, abortedResult, _failures, _beforeCancel, _errResult, _okResult, _stampMeta, _syncBatch, _UNSEAL, _tryCatchHandler } from './command-bus';
 import { isThenable } from './settled';
 import { _isLibraryAction, _isLibraryRegister } from './library-names';
 
@@ -138,22 +138,27 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
   }
 
   function dispatch(action: string, target: any, payload?: any): CommandResult {
-    if (dispatchDepth >= MAX_DISPATCH_DEPTH) {
-      return _errResult(testFail('exceeded:depth', `Maximum dispatch depth (${MAX_DISPATCH_DEPTH}) exceeded for "${action}".`, { action, context: { depth: MAX_DISPATCH_DEPTH } }));
-    }
-    dispatchDepth++;
-    try { return _dispatchInner(action, target, payload); }
-    finally { dispatchDepth--; }
-  }
-
-  function _dispatchInner(action: string, target: any, payload?: any): CommandResult {
     // Stamped exactly like the real buses. Without meta, every meta consumer
     // takes its defensive no-op branch under test and NOTHING FAILS - the
     // `idempotent` plugin never stamps a key, the outbox never sets its replay
     // key, the HTTP bridge never forwards `Idempotency-Key`. A test wiring
     // those plugins to a TestBus exercised the degraded path and passed,
     // verifying nothing about the behaviour it named.
-    const cmd: Command = { action, target, payload, meta: _stampMeta(payload) };
+    return dispatchCommand({ action, target, payload, meta: _stampMeta(payload) });
+  }
+
+  // Runs a built Command: a batch keeps the one it dispatched, to undo it.
+  function dispatchCommand(cmd: Command): CommandResult {
+    if (dispatchDepth >= MAX_DISPATCH_DEPTH) {
+      return _errResult(testFail('exceeded:depth', `Maximum dispatch depth (${MAX_DISPATCH_DEPTH}) exceeded for "${cmd.action}".`, { action: cmd.action, context: { depth: MAX_DISPATCH_DEPTH } }));
+    }
+    dispatchDepth++;
+    try { return _dispatchInner(cmd); }
+    finally { dispatchDepth--; }
+  }
+
+  function _dispatchInner(cmd: Command): CommandResult {
+    const action = cmd.action;
 
     // Run beforeHooks - throw cancels dispatch
     const bh = beforeHooks;
@@ -201,18 +206,9 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
     fanOut(cmd, result, event);
   }
 
-  function dispatchBatch(commands: BatchCommand[]): BatchResult {
-    const results: CommandResult[] = [];
-    let failCount = 0;
-    for (const { action, target, payload } of commands) {
-      const result = dispatch(action, target, payload);
-      results.push(result);
-      if (!result.ok) {
-        failCount++;
-        return { ok: false, results, error: result.error, successCount: results.length - failCount, failCount };
-      }
-    }
-    return { ok: true, results, successCount: results.length, failCount: 0 };
+  // The bus's own batch rule, not a copy (tests/testbus-batch.test.ts).
+  function dispatchBatch(commands: BatchCommand[], options: BatchOptions = {}): BatchResult {
+    return _syncBatch(commands, options, dispatchCommand, (action) => undoHandlers.has(action), dispatch);
   }
 
   function register(action: string, handler: Handler, regOpts: RegisterOptions = {}): () => void {
@@ -402,7 +398,7 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
  * imports nothing from the library at runtime.
  *
  * @example
- * const call = wired(rateLimit({ max: 1, windowMs: 1000 }));
+ * const call = wired(rateLimit({ max: 1, window: 1000 }));
  * call(cmd, next);
  * expect(call(cmd, next)).toFailWith('rateLimit:limited:action');
  */

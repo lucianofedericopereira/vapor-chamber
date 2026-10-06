@@ -163,6 +163,21 @@ describe('async bus: the caller signal still reaches the responder', () => {
     const r = await bus.request('q', {}, undefined, { signal: caller.signal });
 
     expect(r.value).toBe('answer');
-    expect(seen).toBe(caller.signal);
+    // The bus's own signal, aborted once every caller holding the request has
+    // aborted (tests/request-join.test.ts): with one caller, that caller's abort.
+    expect(seen).toBeInstanceOf(AbortSignal);
+    expect(seen?.aborted).toBe(false);
+  });
+
+  it('a lone caller abort reaches cmd.signal with its reason', async ({ asyncBus: bus }) => {
+    let seen: AbortSignal | undefined;
+    bus.respond('q', (cmd) => new Promise((resolve) => { seen = cmd.signal; cmd.signal?.addEventListener('abort', () => resolve(0)); }));
+    const caller = new AbortController();
+    const p = bus.request('q', {}, undefined, { signal: caller.signal });
+    const why = new Error('gone');
+    caller.abort(why);
+    await p;
+    expect(seen?.aborted).toBe(true);
+    expect(seen?.reason).toBe(why);
   });
 });

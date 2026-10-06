@@ -13,14 +13,18 @@
  * bus.use(pollWith({ bus, actions: ['report*'] }));
  * bus.on('reportExport$done', (e) => e.target.result);
  */
-import { type AsyncPlugin, type BaseBus, type Command, type CommandResult, _errResult, _failures, _okResult } from './command-bus';
+import { type ActionScope, type AsyncPlugin, type BaseBus, type Command, type CommandResult, _errResult, _failures, _okResult } from './command-bus';
+import type { ActionFilter } from './action-filter';
+import { MAX_TIMEOUT_MS, countOption } from './bounds';
 import { type HttpClient, _parseRetryAfter, _remoteProblem, createHttpClient } from './http';
 
 export type PollWithOptions = {
   /** The bus `<action>$done` is emitted on. */
   bus: Pick<BaseBus, 'emit'>;
-  /** Follow only these actions (patterns as elsewhere). Default: every action. */
-  actions?: string[];
+  /** Follow only these actions (patterns as elsewhere). An {@link ActionScope}. */
+  actions?: ActionScope;
+  /** Selects actions by name, ANDed with `actions`: an {@link ActionFilter} (`createActionFilter`). Log s35.152. */
+  actionFilter?: ActionFilter;
   /** The wait when a response carries no `Retry-After`, in ms. Default: 1000. */
   interval?: number;
   /** Give up after this long, in ms: `pollWith:timeout:job`. Default: 300_000. */
@@ -40,7 +44,10 @@ const sleep = (ms: number, signal: AbortSignal): Promise<void> => new Promise((r
 });
 
 export function pollWith(options: PollWithOptions): AsyncPlugin & { dispose(): void } {
-  const { bus, interval = 1000, maxWait = 300_000 } = options;
+  const { bus } = options;
+  // A NaN behaves like a missing option (bounds.ts): never a hot loop or an endless wait.
+  const interval = countOption(options.interval, 1000, 0, MAX_TIMEOUT_MS);
+  const maxWait = countOption(options.maxWait, 300_000);
   const http = options.httpClient ?? createHttpClient({ retry: 0 });
   const live = new Set<AbortController>();
 
@@ -89,6 +96,7 @@ export function pollWith(options: PollWithOptions): AsyncPlugin & { dispose(): v
   return Object.assign(plugin, {
     id: 'pollWith',
     actions: options.actions,
+    actionFilter: options.actionFilter,
     dispose() { for (const c of live) c.abort(); live.clear(); },
   });
 }

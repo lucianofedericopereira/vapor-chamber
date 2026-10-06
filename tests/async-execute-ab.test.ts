@@ -36,11 +36,11 @@ const BASELINE = resolve(REF_DIR, 'command-bus-async-execute-baseline.ts');
 
 const REVERTS: Array<[string, string]> = [
   [
-    `  const execute = executeOverride ?? ((): Promise<CommandResult> => {
+    `  const execute = executeOverride ? (): Promise<CommandResult> => executeOverride(cmd) : ((): Promise<CommandResult> => {
     const handler = s.handlers.get(action);
     return handler ? tryCatchAsyncHandler(handler, cmd) : asyncMissing(s, cmd, true);
   });`,
-    `  const execute = executeOverride ?? (async (): Promise<CommandResult> => {
+    `  const execute = executeOverride ? (): Promise<CommandResult> => executeOverride(cmd) : (async (): Promise<CommandResult> => {
     const handler = s.handlers.get(action);
     if (!handler) return handleMissing(s, cmd, true);
     return tryCatchAsyncHandler(handler, cmd);

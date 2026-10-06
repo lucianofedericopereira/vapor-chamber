@@ -57,7 +57,7 @@ describe('inline routes source', () => {
 
     expect(router.routes.value).toHaveLength(3);
     expect(router.base).toBe('/shop');
-    router.destroy();
+    router.dispose();
   });
 
   it('throws router:missing:inline when the selector matches nothing', async () => {
@@ -66,7 +66,7 @@ describe('inline routes source', () => {
       components: {},
     });
     await expect(router.isReady()).rejects.toThrow(/no inline routes element matches/);
-    router.destroy();
+    router.dispose();
   });
 
   it('throws router:missing:inline for an empty element', async () => {
@@ -76,7 +76,7 @@ describe('inline routes source', () => {
       components: {},
     });
     await expect(router.isReady()).rejects.toThrow(/no inline routes element matches/);
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -98,7 +98,7 @@ describe('remote routes source', () => {
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0]![0]).toContain('/from-payload');
     expect(router.routes.value).toHaveLength(3);
-    router.destroy();
+    router.dispose();
   });
 
   it('does not warn when the caller passed base explicitly', async () => {
@@ -113,7 +113,7 @@ describe('remote routes source', () => {
     await router.isReady();
 
     expect(warn).not.toHaveBeenCalled();
-    router.destroy();
+    router.dispose();
   });
 
   it('wraps a transport failure as router:failed:routes', async () => {
@@ -125,7 +125,7 @@ describe('remote routes source', () => {
     });
 
     await expect(router.isReady()).rejects.toThrow(/could not load routes/);
-    router.destroy();
+    router.dispose();
   });
 
   it('passes a coded router error through unwrapped', async () => {
@@ -139,7 +139,7 @@ describe('remote routes source', () => {
     });
 
     await expect(router.isReady()).rejects.toThrow(/no routes array/);
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -168,7 +168,7 @@ describe('preheat wiring', () => {
     hover(document.getElementById('to-list')!);
     await new Promise(r => setTimeout(r, 200));
     expect(lazy).toHaveBeenCalledTimes(1);
-    router.destroy();
+    router.dispose();
   });
 
   it('ignores a hovered link whose path resolves to nothing', async () => {
@@ -182,7 +182,7 @@ describe('preheat wiring', () => {
     hover(document.getElementById('nowhere')!);
     await new Promise(r => setTimeout(r, 200));
     expect(lazy).not.toHaveBeenCalled();
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -206,7 +206,7 @@ describe('inline routes injected after construction', () => {
 
     await router.isReady();
     expect(router.routes.value).toHaveLength(3);
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -233,7 +233,7 @@ describe('preheat racing a table swap', () => {
 
     await new Promise(r => setTimeout(r, 250));
     expect(lazy).not.toHaveBeenCalled();
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -253,7 +253,7 @@ describe('createRouter - table source and base variants', () => {
     });
     await router.isReady();
     expect(router.routes.value.map((r) => r.name)).toEqual(['shell', 'home', 'list']);
-    router.destroy();
+    router.dispose();
   });
 
   it('exposes a frozen empty routes list before any table exists', () => {
@@ -266,7 +266,7 @@ describe('createRouter - table source and base variants', () => {
     });
     expect(router.routes.value).toEqual([]);
     expect(Object.isFrozen(router.routes.value)).toBe(true);
-    router.destroy();
+    router.dispose();
   });
 
   it('setQuery before a route is matched finds no leaf defs', () => {
@@ -277,7 +277,7 @@ describe('createRouter - table source and base variants', () => {
     });
     expect(router.currentRoute.value.location.matched).toEqual([]);
     expect(() => router.setQuery({ q: 'x' })).not.toThrow();
-    router.destroy();
+    router.dispose();
   });
 
   it('falls back to memory history and normalizes a slashless base', () => {
@@ -296,7 +296,7 @@ describe('createRouter - table source and base variants', () => {
     });
     expect(router.base).toBe('/admin');
     spy.mockRestore();
-    router.destroy();
+    router.dispose();
   });
 
   it('scopes link stamping to linksRoot when one is given', async () => {
@@ -310,7 +310,7 @@ describe('createRouter - table source and base variants', () => {
     await router.isReady();
     await router.push('/list');
     expect(router.currentRoute.value.location.name).toBe('list');
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -349,7 +349,7 @@ describe('preheat failure and idle arming', () => {
       expect(unhandled).toEqual([]);
       // Hover failure is best-effort: the router is untouched by it.
       expect(router.currentRoute.value.location.name).toBe('home');
-      router.destroy();
+      router.dispose();
     } finally {
       process.off('unhandledRejection', onUnhandled);
     }
@@ -372,7 +372,7 @@ describe('preheat failure and idle arming', () => {
     await new Promise((r) => setTimeout(r, 0));
 
     expect(heavy).toHaveBeenCalled(); // loaded without ever navigating there
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -408,7 +408,7 @@ describe('bladeFetcher', () => {
     await router.push('/legacy');
     expect(http.get).toHaveBeenCalled();
     expect(router.currentRoute.value.location.name).toBe('legacy');
-    router.destroy();
+    router.dispose();
   });
 
   it('returns the raw body when DOMParser is unavailable', async () => {
@@ -427,6 +427,6 @@ describe('bladeFetcher', () => {
     await router.push('/legacy');
     expect(http.get).toHaveBeenCalled();
     expect(router.currentRoute.value.location.name).toBe('legacy');
-    router.destroy();
+    router.dispose();
   });
 });

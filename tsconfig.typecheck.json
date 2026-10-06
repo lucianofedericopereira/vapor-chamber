@@ -21,6 +21,7 @@
     "src/**/*",
     "tests/typed-contract.typecheck.ts",
     "tests/router/typed-names.test-d.ts",
-    "tests/csrf-option.test-d.ts"
+    "tests/csrf-option.test-d.ts",
+    "tests/compat-1.26.test-d.ts"
   ]
 }

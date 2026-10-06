@@ -18,7 +18,7 @@ describe('a store shared by two component scopes', () => {
   const makeStore = () =>
     defineChamberStore('cart', {
       state: () => ({ items: [] as number[] }),
-      actions: { add: (s, id: number) => ({ items: [...s.items, id] }) },
+      reducers: { add: (s, id: number) => ({ items: [...s.items, id] }) },
     });
 
   it('survives the FIRST holder unmounting while a second still holds it', () => {

@@ -130,7 +130,7 @@ describe('createEchoBridge', () => {
       ],
     });
     bridge.install(bus);
-    bridge.teardown();
+    bridge.dispose();
     expect(echo._left.sort()).toEqual(['lobby', 'orders']);
   });
 });

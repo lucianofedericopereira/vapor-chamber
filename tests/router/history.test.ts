@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 /**
  * Tests for router/history.ts - createWebHistory (browser path, exercised under
- * happy-dom) and the createMemoryHistory state()/destroy() branches.
+ * happy-dom) and the createMemoryHistory state()/dispose() branches.
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -24,7 +24,7 @@ describe('createWebHistory (happy-dom)', () => {
     h.replace('/other');
     expect(h.location()).toBe('/other');
 
-    h.destroy();
+    h.dispose();
   });
 
   it('notifies listeners on popstate with a computed delta', () => {
@@ -44,7 +44,7 @@ describe('createWebHistory (happy-dom)', () => {
     window.dispatchEvent(new PopStateEvent('popstate', { state: { __vr: 0 } }));
     expect(cb).toHaveBeenCalledTimes(1);
 
-    h.destroy();
+    h.dispose();
   });
 
   it('treats a non-numeric __vr already in history state as position 0', () => {
@@ -67,7 +67,7 @@ describe('createWebHistory (happy-dom)', () => {
     window.dispatchEvent(new PopStateEvent('popstate', { state: { __vr: 0 } }));
     expect(cb.mock.calls[0][1].delta).toBe(-1);
 
-    h.destroy();
+    h.dispose();
   });
 
   it('go delegates to window.history.go', () => {
@@ -77,7 +77,7 @@ describe('createWebHistory (happy-dom)', () => {
       h.go(-2);
       expect(spy).toHaveBeenCalledWith(-2);
     }
-    h.destroy();
+    h.dispose();
   });
 
   it('falls back to a full navigation when pushState throws (Safari throttle)', () => {
@@ -92,7 +92,7 @@ describe('createWebHistory (happy-dom)', () => {
 
       expect(assignSpy).toHaveBeenCalledWith('/admin/throttled');
     }
-    h.destroy();
+    h.dispose();
   });
 
   it('falls back to location.replace when replaceState throws', () => {
@@ -107,12 +107,12 @@ describe('createWebHistory (happy-dom)', () => {
 
       expect(replaceSpy).toHaveBeenCalledWith('/admin/throttled-too');
     }
-    h.destroy();
+    h.dispose();
   });
 });
 
-describe('createMemoryHistory - state() and destroy()', () => {
-  it('exposes committed state and clears listeners on destroy', () => {
+describe('createMemoryHistory - state() and dispose()', () => {
+  it('exposes committed state and clears listeners on dispose', () => {
     const h = createMemoryHistory('/admin', '/start');
     expect(h.location()).toBe('/start');
 
@@ -122,7 +122,7 @@ describe('createMemoryHistory - state() and destroy()', () => {
 
     const cb = vi.fn();
     h.listen(cb);
-    h.destroy(); // clears listeners
+    h.dispose(); // clears listeners
     h.go(-1); // no listeners left -> cb never fires
     expect(cb).not.toHaveBeenCalled();
   });
@@ -139,7 +139,7 @@ describe('createWebHistory - fallback branches', () => {
     const history = createWebHistory('/app');
     // '/elsewhere/page' does not start with '/app' -> stripBase null -> '/'
     expect(history.location()).toBe('/');
-    history.destroy();
+    history.dispose();
   });
 
   it('a popstate whose state carries no __vr computes delta against position 0', () => {
@@ -154,7 +154,7 @@ describe('createWebHistory - fallback branches', () => {
 
     expect(seen).toHaveLength(1);
     expect(seen[0].delta).toBe(-1); // 0 (no __vr) minus lastPosition 1
-    history.destroy();
+    history.dispose();
   });
 
   it('boot on a history entry that already has __vr does not restamp position 0', () => {
@@ -162,7 +162,7 @@ describe('createWebHistory - fallback branches', () => {
     const history = createWebHistory('');
     history.push('/next'); // 3 -> 4
     expect((window.history.state as { __vr: number }).__vr).toBe(4);
-    history.destroy();
+    history.dispose();
   });
 });
 

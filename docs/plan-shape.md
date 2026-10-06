@@ -77,7 +77,7 @@ The mechanics the decision leaves open, settled from the code:
    declared `retryIn`); uncertain (`lost`, `failed`, `unexpected`, `unknown`)
    only for an action declared idempotent, or a command carrying an
    idempotency key.
-5. **Declarations.** `createAsyncCommandBus({ retry: { actions: { pattern:
+5. **Declarations.** `createAsyncCommandBus({ retry: { actionPolicies: { pattern:
    'idempotent' | false | n } } })`, and `retry` on a schema action, which the
    schema bus maps to the same option; `retry: false` turns the default off.
 6. **Removed:** `retry()`, `retrying()`, the IIFEs' `connect({ retry })` (the

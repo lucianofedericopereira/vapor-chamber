@@ -448,9 +448,9 @@ describe('metrics', () => {
     expect(m.summary()).toEqual({});
   });
 
-  it('respects maxEntries with O(1) eviction', ({ bus }) => {
+  it('respects maxSize with O(1) eviction', ({ bus }) => {
     bus.register('op', () => 1);
-    const m = metrics({ maxEntries: 3 });
+    const m = metrics({ maxSize: 3 });
     bus.use(m);
 
     for (let i = 0; i < 5; i++) bus.dispatch('op', {});

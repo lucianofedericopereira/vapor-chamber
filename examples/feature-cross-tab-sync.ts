@@ -118,10 +118,10 @@ bus.dispatch('prefsSetTheme', { theme: 'dark', lang: 'en' })
 // ─── Cleanup ──────────────────────────────────────────────────────────────────
 
 window.addEventListener('beforeunload', () => {
-  tabSync.close()
-  authSync.close()
-  notificationSync.close()
-  prefsSync.close()
+  tabSync.dispose()
+  authSync.dispose()
+  notificationSync.dispose()
+  prefsSync.dispose()
 })
 
 console.log('BroadcastChannel open?', tabSync.isOpen())

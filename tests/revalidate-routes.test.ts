@@ -129,7 +129,7 @@ describe('composition surface - the plugin depends on exactly this', () => {
     const router = makeRouter(() => ({ items: [] }));
     await router.isReady();
     expect(typeof router.setRouteData).toBe('function');
-    router.destroy();
+    router.dispose();
   });
 
   it('exposes the current matched records, which is what "affected" resolves against', async () => {
@@ -142,7 +142,7 @@ describe('composition surface - the plugin depends on exactly this', () => {
     // The load chain is precomputed on the record - the plugin re-runs this,
     // it does not rediscover it.
     expect(matched[matched.length - 1]?.loadChain.map((r) => r.name)).toEqual(['shop.cart']);
-    router.destroy();
+    router.dispose();
   });
 
   it('reuses the bus pattern matcher rather than inventing glob semantics', () => {
@@ -157,7 +157,7 @@ describe('composition surface - the plugin depends on exactly this', () => {
     // If this ever becomes public, decision 2 is worth revisiting: the plugin
     // could then drive router.isRevalidating without reaching into internals.
     expect((router as unknown as Record<string, unknown>).trackRevalidation).toBeUndefined();
-    router.destroy();
+    router.dispose();
   });
 
   it('types isRevalidating as read-only, which is why the plugin owns its own flag', async () => {
@@ -167,7 +167,7 @@ describe('composition surface - the plugin depends on exactly this', () => {
     // exists and starts false pins what the plugin must NOT try to drive.
     const typed: Router = router;
     expect(typed.isRevalidating.value).toBe(false);
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -185,7 +185,7 @@ describe('revalidateRoutes - behaviour', () => {
 
     expect(router.currentRoute.value.data.get('shop.cart')).toEqual({ n: 2 });
     plugin.dispose();
-    router.destroy();
+    router.dispose();
   });
 
   it('performs ZERO loader fetches for a non-matching command', async () => {
@@ -201,7 +201,7 @@ describe('revalidateRoutes - behaviour', () => {
 
     expect(n).toBe(before);
     plugin.dispose();
-    router.destroy();
+    router.dispose();
   });
 
   it('does not refresh when the command itself failed', async () => {
@@ -217,7 +217,7 @@ describe('revalidateRoutes - behaviour', () => {
 
     expect(n).toBe(before);
     plugin.dispose();
-    router.destroy();
+    router.dispose();
   });
 
   it("resolves 'affected' to the current snapshot load chain", async () => {
@@ -232,7 +232,7 @@ describe('revalidateRoutes - behaviour', () => {
 
     expect(router.currentRoute.value.data.get('shop.cart')).toEqual({ n: 2 });
     plugin.dispose();
-    router.destroy();
+    router.dispose();
   });
 
   it('reports a record that is not in the current chain as a coded error, through onError', async () => {
@@ -246,7 +246,7 @@ describe('revalidateRoutes - behaviour', () => {
     expect(result).toEqual({ ok: true });
     expect(isRouterError(onError.mock.calls[0]?.[0], 'router:missing:record')).toBe(true);
     plugin.dispose();
-    router.destroy();
+    router.dispose();
   });
 
   it('a wiring mistake never turns a succeeded command into a failure', async () => {
@@ -262,7 +262,7 @@ describe('revalidateRoutes - behaviour', () => {
     expect(bus.dispatch('cartAdd', {})).toMatchObject({ ok: true, value: 'added' });
     expect(errors).toHaveBeenCalled();
     plugin.dispose();
-    router.destroy();
+    router.dispose();
   });
 
   it('stops revalidating after dispose', async () => {
@@ -278,7 +278,7 @@ describe('revalidateRoutes - behaviour', () => {
     await settle();
 
     expect(n).toBe(before);
-    router.destroy();
+    router.dispose();
   });
 
   it('awaits an async bus result before refreshing', async () => {
@@ -293,7 +293,7 @@ describe('revalidateRoutes - behaviour', () => {
 
     expect(router.currentRoute.value.data.get('shop.cart')).toEqual({ n: 2 });
     plugin.dispose();
-    router.destroy();
+    router.dispose();
   });
 
   it('flips its OWN isRevalidating and never the router\'s (decision 2)', async () => {
@@ -318,7 +318,7 @@ describe('revalidateRoutes - behaviour', () => {
     await settle();
     expect(plugin.isRevalidating.value).toBe(false);
     plugin.dispose();
-    router.destroy();
+    router.dispose();
   });
 
   it('leaves stale data in place when a refresh rejects, and reports it', async () => {
@@ -339,7 +339,7 @@ describe('revalidateRoutes - behaviour', () => {
     expect(errors).toHaveLength(1);
     expect(router.currentRoute.value.data.get('shop.cart')).toEqual({ good: true });
     plugin.dispose();
-    router.destroy();
+    router.dispose();
   });
 
   it('reads the map with Object.hasOwn - patterns are external strings', async () => {
@@ -358,7 +358,7 @@ describe('revalidateRoutes - behaviour', () => {
 
     expect(n).toBe(before);
     plugin.dispose();
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -375,7 +375,7 @@ describe('revalidateRoutes - edges', () => {
 
     expect(router.currentRoute.value.data.get('shop.cart')).toEqual({ n: 2 });
     plugin.dispose();
-    router.destroy();
+    router.dispose();
   });
 
   it('is a no-op before the first navigation, when nothing is matched', async () => {
@@ -388,7 +388,7 @@ describe('revalidateRoutes - edges', () => {
     await settle();
     expect(n).toBe(0);
     plugin.dispose();
-    router.destroy();
+    router.dispose();
   });
 
   it("is a no-op for 'affected' on a route with no loaders", async () => {
@@ -403,7 +403,7 @@ describe('revalidateRoutes - edges', () => {
 
     expect(n).toBe(before);
     plugin.dispose();
-    router.destroy();
+    router.dispose();
   });
 
   it("names an empty chain as 'none' in the unknown-record error", async () => {
@@ -417,7 +417,7 @@ describe('revalidateRoutes - edges', () => {
     expect(isRouterError(caught, 'router:missing:record')).toBe(true);
     expect(String((caught as Error).message)).toContain('none');
     plugin.dispose();
-    router.destroy();
+    router.dispose();
   });
 
   it('drops a refresh whose navigation was superseded before it resolved', async () => {
@@ -440,7 +440,7 @@ describe('revalidateRoutes - edges', () => {
     // The value belongs to a page nobody is looking at, so it must not land.
     expect(router.currentRoute.value.data.get('shop.cart')).toBeUndefined();
     plugin.dispose();
-    router.destroy();
+    router.dispose();
   });
 
   it('abandons an in-flight refresh when disposed mid-flight', async () => {
@@ -461,7 +461,7 @@ describe('revalidateRoutes - edges', () => {
 
     expect(router.currentRoute.value.data.get('shop.cart')).toEqual({ v: 'first' });
     expect(plugin.isRevalidating.value).toBe(false);
-    router.destroy();
+    router.dispose();
   });
 
   it('logs to console.error when no onError is supplied', async () => {
@@ -478,7 +478,7 @@ describe('revalidateRoutes - edges', () => {
     expect(seen.some((m) => String(m).includes('revalidateRoutes refresh failed'))).toBe(true);
     spy.mockRestore();
     plugin.dispose();
-    router.destroy();
+    router.dispose();
   });
 
   it('keeps the flag up until the LAST of several refreshes settles', async () => {
@@ -501,7 +501,7 @@ describe('revalidateRoutes - edges', () => {
     await settle();
     expect(plugin.isRevalidating.value).toBe(false);
     plugin.dispose();
-    router.destroy();
+    router.dispose();
   });
 
   it('stays silent when an aborted refresh rejects rather than resolves', async () => {
@@ -533,7 +533,7 @@ describe('revalidateRoutes - edges', () => {
     expect(errors).toHaveLength(0);
     expect(seen).toHaveLength(0);
     spy.mockRestore();
-    router.destroy();
+    router.dispose();
   });
 
   it('does not refresh when an async command resolves not-ok', async () => {
@@ -549,7 +549,7 @@ describe('revalidateRoutes - edges', () => {
 
     expect(n).toBe(before);
     plugin.dispose();
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -624,7 +624,7 @@ describe('revalidateRoutes - overlapping refreshes only', () => {
     expect((router.currentRoute.value.data.get('shop.wish') as { ref: string }).ref).toBe('wish');
 
     plugin.dispose();
-    router.destroy();
+    router.dispose();
   });
 
   it('still lets the later refresh of the SAME record win', async () => {
@@ -653,7 +653,7 @@ describe('revalidateRoutes - overlapping refreshes only', () => {
     expect(plugin.isRevalidating.value).toBe(false);
 
     plugin.dispose();
-    router.destroy();
+    router.dispose();
   });
 
   it('clears the flag after dispose without letting a late finally reopen it', async () => {
@@ -672,6 +672,6 @@ describe('revalidateRoutes - overlapping refreshes only', () => {
     await settle();
 
     expect(plugin.isRevalidating.value).toBe(false);
-    router.destroy();
+    router.dispose();
   });
 });

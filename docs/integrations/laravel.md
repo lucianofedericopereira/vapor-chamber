@@ -1,9 +1,9 @@
 # Laravel integration
 
-How to wire vapor-chamber into a Laravel backend: the minimum-viable shape
-(one route, one controller, action classes) and the optional pieces (Sanctum
-SPA flow, Filament panels, Inertia coexistence, Reverb / Echo realtime,
-queued commands).
+How to wire vapor-chamber into a Laravel backend. First the minimum-viable
+shape: one route, one controller, action classes. Then the optional pieces:
+Sanctum SPA flow, Filament panels, Inertia coexistence, Reverb / Echo realtime,
+queued commands.
 
 The examples ship as runnable PHP files under
 [`examples/laravel-backend/`](../../examples/laravel-backend/), ready to copy
@@ -14,7 +14,7 @@ but not auto-loaded. Adapt namespaces and table names to your project.
 ## What the lib expects from your backend
 
 The HTTP bridge POSTs every dispatch to a single endpoint. There is **one
-route, not one-per-command** - the action name is in the JSON body.
+route, not one-per-command**: the action name is in the JSON body.
 
 **Request body** (every dispatch):
 ```json
@@ -28,10 +28,10 @@ route, not one-per-command** - the action name is in the JSON body.
 or `{ "redirect": "/login" }` for a navigation (see `onRedirect`).
 
 **Response body** (failure): an [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457)
-problem, sent with the status and `Content-Type: application/problem+json`,
-carrying the members the contract uses and nothing else. A 2xx whose body is
-`{ "problem": { ... } }` is read as the same failure, by the problem's own
-`status`, for a backend that cannot set the HTTP status:
+problem, sent with the status and `Content-Type: application/problem+json`. It
+carries the members the contract uses and nothing else. Some backends cannot
+set the HTTP status. For them, a 2xx whose body is `{ "problem": { ... } }` is
+read as the same failure, by the problem's own `status`:
 ```json
 {
   "status": 422,
@@ -42,10 +42,11 @@ carrying the members the contract uses and nothing else. A 2xx whose body is
 ```
 
 `state` becomes `result.value`. A failure becomes a `BusError` whose code is
-`remote:<condition>:<your code>`: the owner is the client's fact (the backend
-answered), the condition is what your `status` declares, read through one
-table that says only what RFC 9110 says of a status. `detail` is the message;
+`remote:<condition>:<your code>`. The owner is the client's fact: the backend
+answered. The condition is what your `status` declares, read through one table
+that says only what RFC 9110 says of a status. `detail` is the message.
 `code`, `status`, `errors` and any other member are in `error.context`.
+
 `errors` points into the envelope the client sent (`/payload/<field>`, RFC
 6901), which is what `FormBus` puts on its fields. There is no `ok` flag, no
 `error` or `message`, no `type` or `title`: one member per fact.
@@ -62,14 +63,18 @@ table that says only what RFC 9110 says of a status. `detail` is the message;
 | any other 5xx | `failed` |
 | any other 4xx | `invalid` |
 
-So the status you send IS the declaration of what the failure is: 409 for a
-conflict with the current state, 401 or 419 for "sign in, then try again", 403
-for "not allowed", 429 or 503 for "come back later", 422 for
-input that broke a rule. A `Retry-After` header (RFC 9110) goes to
-`error.context.retryIn`.
+So the status you send IS the declaration of what the failure is:
 
-**On the batch endpoint** the response is a 200 and each command's answer rides
-on its own result, the problem carrying the command's own `status`:
+- 409 for a conflict with the current state.
+- 401 or 419 for "sign in, then try again".
+- 403 for "not allowed".
+- 429 or 503 for "come back later".
+- 422 for input that broke a rule.
+
+A `Retry-After` header (RFC 9110) goes to `error.context.retryIn`.
+
+**On the batch endpoint** the response is a 200. Each command's answer rides on
+its own result, the problem carrying the command's own `status`:
 ```json
 { "results": [
   { "id": "1", "state": { "count": 3 } },
@@ -85,14 +90,22 @@ const result = await bus.dispatch('cartAdd', product, { qty: 2 })
 if (!result.ok && result.error.code === 'remote:limited:stock_depleted') showRestockNotice()
 ```
 
-**Retries follow the condition.** The async bus re-sends through the bridge,
-on by default: a 429, 503, 504 or 408, and any status carrying `Retry-After`
-after the wait it declares; a 4xx verdict (422, 404, 403, 409) is not re-sent.
-A network failure (`transport:lost:reply`) or a 500 may have landed, so it is
-re-sent only for an action declared idempotent
-(`createAsyncCommandBus({ retry: { actions: { cartSet: 'idempotent' } } })`,
-or `retry: 'idempotent'` on the schema action) or a command carrying a key. A
-declared action sends one `Idempotency-Key` on every attempt.
+**Retries follow the condition.** The async bus re-sends through the bridge, on
+by default:
+
+- A 429, 503 or 408 is re-sent, after the `Retry-After` it declares.
+- A 4xx verdict (422, 404, 403, 409) is not re-sent.
+- No reply (`transport:timeout:reply`, `transport:lost:reply`), a 502, 504 or
+  500 may have landed. It is re-sent only for an identified command: an action
+  declared idempotent, or a command carrying a key.
+- A verdict that carries `Retry-After` follows the same rule. The header sets
+  the wait, never whether.
+
+Declare an action idempotent with
+`createAsyncCommandBus({ retry: { actionPolicies: { cartSet: 'idempotent' } } })`,
+or with `retry: 'idempotent'` on the schema action. A declared action sends one
+`Idempotency-Key` on every attempt. An unkeyed command that got no reply fails
+with `context.outcome: 'unknown'`: check its status on the server.
 
 ---
 
@@ -109,7 +122,7 @@ Route::post('/api/vc', VaporChamberController::class)->middleware(['web']);
 
 For Sanctum SPA cookie auth, register it in `routes/api.php` instead, and mind
 the path. Laravel prefixes routes in that file with `api`, so `'/vc'` resolves
-to `/api/vc`; writing `'/api/vc'` would resolve to `/api/api/vc` and 404 every
+to `/api/vc`. Writing `'/api/vc'` would resolve to `/api/api/vc` and 404 every
 dispatch:
 
 ```php
@@ -178,8 +191,10 @@ class VaporChamberController extends Controller
 }
 ```
 
-Keep the controller a dispatcher with no logic of its own; per-command
-behavior belongs in action classes.
+Keep the controller a dispatcher with no logic of its own. Per-command
+behavior belongs in action classes. The example controller adds what this
+minimal one leaves out: the batch endpoint, `Idempotency-Key` replay, and the
+redirect, stores and 202 shapes below.
 
 ### 3. Action classes
 
@@ -301,26 +316,30 @@ const { dispatch } = VaporChamber.connect({ endpoint: '/api/vc' });
 ```
 
 On a 419 response the lib fetches `/sanctum/csrf-cookie` and retries once,
-with no extra client config. A 419 on that retry fails the dispatch; it never
+with no extra client config. A 419 on that retry fails the dispatch. It never
 calls `onSessionExpired`, which is reserved for 401.
 
 With `csrfCookieUrl: ''` the lib skips the refresh fetch, but the retry still
 re-reads the token, cookie first. Laravel's CSRF middleware sets a fresh
-`XSRF-TOKEN` cookie on every response it passes, GET included
-(`PreventRequestForgery::handle`, Laravel 13; off under `useOriginOnly()`), so
+`XSRF-TOKEN` cookie on every response it passes, GET included. That is
+`PreventRequestForgery::handle` in Laravel 13, off under `useOriginOnly()`. So
 after any request through the `web` group the re-read finds a live token.
 
-### CORS: required when the page and the API are different origins
+### CORS: needed when the page and the API are different origins
 
 Flow B typically means a Vite dev server (`localhost:5173`) talking to
 `localhost:8000`. Those are two origins, so the browser sends a preflight
-before every dispatch. The bridge always sends `X-Requested-With: XMLHttpRequest`
-(it is what makes Laravel answer 419/401 as **JSON** instead of redirecting to
-a login page), and `Idempotency-Key` whenever the command carries one - the
+before every dispatch.
+
+The bridge always sends `X-Requested-With: XMLHttpRequest`. It is what makes
+Laravel answer 419/401 as **JSON** instead of redirecting to a login page. It
+also sends `Idempotency-Key` whenever the command carries one. The
 `idempotent()` plugin stamps it, and so does `vapor-chamber/outbox` on every
-delivery attempt of a queued command. If the preflight does not allow a header, the whole request fails
-*before it reaches Laravel*, and the browser error says little: Chrome reports
-only `Failed to fetch`; Firefox at least names the header.
+delivery attempt of a queued command.
+
+If the preflight does not allow a header, the whole request fails *before it
+reaches Laravel*, and the browser error says little. Chrome reports only
+`Failed to fetch`. Firefox at least names the header.
 
 ```php
 // config/cors.php  - `php artisan config:publish cors` to create it
@@ -335,10 +354,10 @@ only `Failed to fetch`; Firefox at least names the header.
     'Idempotency-Key',     // <- with idempotent() or the outbox
 ],
 'exposed_headers' => ['Location', 'Retry-After'],   // <- pollWith reads them
-'supports_credentials' => true,   // required for the cookie flows
+'supports_credentials' => true,   // needed for the cookie flows
 ```
 
-`'allowed_headers' => ['*']` also works and is common in dev, but it does
+`'allowed_headers' => ['*']` also works and is common in dev. But it does
 **not** cover credentials in every proxy setup, so listing the headers is the
 safer default. Same-origin deployments (Blade serves both the page and the
 endpoint, as in Flow A) send no preflight and need none of this.
@@ -349,13 +368,15 @@ endpoint, as in Flow A) send no preflight and need none of this.
 
 For Blade apps the first-choice navigation layer is the in-box
 `vapor-chamber/router` subpath. Laravel keeps ONE catch-all
-(`Route::view('/admin/{any?}', 'admin.shell')->where('any', '.*')`), the
-Blade shell inlines the permission-filtered route table as JSON, and the
-router owns everything inside. Reads go through route-declared loaders
-(`load: "/api/vc/products?page={page}"`), aborted on supersede; the in-box
-`vapor-chamber/router-fetch` preset covers plain JSON, or supply your own
-preset to unwrap a house envelope. Writes go through this package's commands.
-The split is CQRS across the two subpaths:
+(`Route::view('/admin/{any?}', 'admin.shell')->where('any', '.*')`). The Blade
+shell inlines the permission-filtered route table as JSON, and the router owns
+everything inside.
+
+Reads go through route-declared loaders
+(`load: "/api/vc/products?page={page}"`), aborted on supersede. The in-box
+`vapor-chamber/router-fetch` preset covers plain JSON, or supply your own preset
+to unwrap a house envelope. Writes go through this package's commands. The
+split is CQRS across the two subpaths:
 **bus = C (writes), router = R + URL state (reads)**. See
 `examples/pattern-6-vapor-router.ts`.
 
@@ -363,7 +384,7 @@ The split is CQRS across the two subpaths:
 
 ## Inertia coexistence
 
-vapor-chamber and Inertia are complementary and do not overlap: Inertia owns
+vapor-chamber and Inertia are complementary and do not overlap. Inertia owns
 navigation and page props, vapor-chamber owns in-page actions.
 
 **Where the endpoint lives:** outside Inertia's middleware, so it returns
@@ -397,14 +418,15 @@ async function cancelOrder(id: number) {
 ```
 
 `createHttpBridge` takes `csrf: true` and `onRedirect` in an Inertia app.
-`csrf: true` reads the token from the page; with no meta tag it reads the
+`csrf: true` reads the token from the page. With no meta tag it reads the
 `XSRF-TOKEN` cookie Laravel sets and sends it as `X-XSRF-TOKEN`. The bridge
-makes its own requests, so an Axios interceptor of the app does not reach
-them. `onRedirect(url)` is called when the backend returns a
-`{ redirect: '/path' }` field **in the JSON body**; wire it to
-`router.visit(url)` so Inertia takes the navigation.
+makes its own requests, so an Axios interceptor of the app does not reach them.
 
-The contract is a body field, not a 302: `fetch` follows redirects itself, so
+`onRedirect(url)` is called when the backend returns a `{ redirect: '/path' }`
+field **in the JSON body**. Wire it to `router.visit(url)` so Inertia takes the
+navigation.
+
+The contract is a body field, not a 302. `fetch` follows redirects itself, so
 the bridge receives only the final response and never sees the 3xx. Your action
 returns the redirect instead of issuing one:
 
@@ -413,14 +435,31 @@ returns the redirect instead of issuing one:
 return ['redirect' => route('login')];
 ```
 
-The controller lifts exactly that shape - an array whose only key is
-`redirect` - to the top of the envelope (`{ redirect }`, and per result on the
-batch endpoint), which is where the bridges read it. A state that merely
+The example controller lifts exactly that shape, an array whose only key is
+`redirect`, to the top of the envelope (`{ redirect }`). On the batch endpoint
+it does so per result. That is where the bridges read it. A state that merely
 contains a `redirect` key among others is returned as data.
 
 `createBatchingHttpBridge` honours `onRedirect` too. It navigates once per
-batch, with the first URL; every redirected command still fails with its own
+batch, with the first URL. Every redirected command still fails with its own
 `error.context.url`.
+
+An action can also tell the client which stores changed. It returns the
+states by store id, beside its own `state` or alone:
+
+```php
+// in a checkout action - the cart and the stock both changed
+return ['state' => ['order' => $order->id], 'stores' => [
+    'cart'  => ['rev' => $cart->rev, 'items' => []],
+    'stock' => ['left' => $product->stock],
+]];
+```
+
+The example controller lifts exactly that key set (`state` and `stores`, or
+`stores` alone) to the top of the envelope. On the batch endpoint it does so
+per result. Each store with that id on the client's bus takes its state, whatever the
+command was (docs/store.md, A store behind a bridge). A state that merely
+contains a `stores` key among others is returned as data.
 
 ```ts
 const bridge = createHttpBridge({
@@ -431,9 +470,9 @@ const bridge = createHttpBridge({
 ```
 
 **A redirect is a FAILED dispatch, handler or no handler.** `onRedirect` fires
-and the dispatch still resolves `{ ok: false }` - there is no state to return, so
+and the dispatch still resolves `{ ok: false }`. There is no state to return, so
 there is nothing for `result.value` to be. Do not write `if (result.ok)` after a
-command the backend may redirect; branch on the code instead:
+command the backend may redirect. Branch on the code instead:
 
 ```ts
 const result = await dispatch('orderCancel', { id })
@@ -442,45 +481,49 @@ if (!result.ok && result.error.code === 'transport:refused:redirect') return  //
 
 That error carries `code: 'transport:refused:redirect'` and `error.context.url`,
 so you can read the target without parsing the message. Its condition is
-`refused`, so the bus does not re-send it - a backend that
-redirects will redirect again, and `onRedirect` fires once. With no `onRedirect` configured the same code
-arrives with a message saying so, which is how a missing handler surfaces instead
-of a silent no-op.
+`refused`, so the bus does not re-send it. A backend that redirects will
+redirect again, and `onRedirect` fires once. With no `onRedirect` configured the
+same code arrives, and in development its message says no handler is
+configured. That is how a missing handler surfaces instead of a silent no-op.
 
 ---
 
 ## Widget <-> Livewire / Alpine / Blade event bridging
 
-A Vapor custom element widget (`defineWidget`) embedded in a Blade page,
-Alpine controller, or Filament/Livewire panel must tell the surrounding code
-when something happens inside it: a product added, a form submitted, a step
-completed. Vue's `emit(...)` cannot do this. It goes through Vue's component
-event system and does **not** bubble out as a DOM event, so Livewire, Alpine
-and vanilla `addEventListener` never see it.
+A Vapor custom element widget (`defineWidget`) can sit in a Blade page, an
+Alpine controller, or a Filament/Livewire panel. It must tell the surrounding
+code when something happens inside it: a product added, a form submitted, a
+step completed.
+
+Vue's `emit(...)` cannot do this. It goes through Vue's component event system
+and does **not** bubble out as a DOM event, so Livewire, Alpine and vanilla
+`addEventListener` never see it.
 
 `emitDOMEvent` (shipped in the `elements` and `full` IIFE variants) bridges
 that gap by dispatching a real `CustomEvent` on the host element. The event
 bubbles, escapes shadow DOM (`composed: true` by default), and reaches every
 listener that listens for DOM events.
 
-> **What is verified here, and what is illustration.** The primitive is tested:
-> `tests/vapor/widget-shape.test.ts` mounts a real Vapor custom element and
+> **What is verified here, and what is illustration.** The primitive is tested.
+> `tests/vapor/widget-shape.test.ts` mounts a real Vapor custom element. It
 > asserts the event leaves the shadow root and arrives at the host, at
-> `document`, and at `window` - the last being what Alpine's `.window` modifier
-> and Livewire's `#[On(...)]` both rely on. The four host-framework patterns
-> below are **illustrative**: Alpine, Livewire and Filament are not dependencies
-> of this repo and nothing here executes them, so treat the snippets as the
-> shape to follow rather than as tested code. The runnable Blade example that
-> does ship - [`examples/laravel-app`](../../examples/laravel-app/) - uses plain
-> DOM and no framework at all.
+> `document`, and at `window`. The last is what Alpine's `.window` modifier and
+> Livewire's `#[On(...)]` both rely on.
+>
+> The four host-framework patterns below are **illustrative**. Alpine, Livewire
+> and Filament are not dependencies of this repo and nothing here executes
+> them. So treat the snippets as the shape to follow rather than as tested
+> code. The runnable Blade example that does ship,
+> [`examples/laravel-app`](../../examples/laravel-app/), uses plain DOM and no
+> framework at all.
 
-> **Tag naming - use the `vc-` prefix.** The recommended names are
+> **Tag naming: use the `vc-` prefix.** The recommended names are
 > `<vc-cart/>`, `<vc-title/>`, `<vc-search/>` and so on. The prefix reads
-> cleanly next to Blade components in `.blade.php` files, marks the tag as a
-> vapor-chamber widget at a glance, avoids collisions with host-page
-> elements, and is easy to grep across a codebase. If your project already
-> has a brand prefix (`<acme-cart/>`), keep that. The `defineWidget` JSDoc
-> gives the full rationale.
+> cleanly next to Blade components in `.blade.php` files, and marks the tag as a
+> vapor-chamber widget at a glance. It avoids collisions with host-page
+> elements, and is easy to grep across a codebase. If your project already has
+> a brand prefix (`<acme-cart/>`), keep that. The `defineWidget` JSDoc gives
+> the full rationale.
 
 ### Pattern 1: Blade page + Alpine.js
 
@@ -539,8 +582,8 @@ listener that listens for DOM events.
 </script>
 ```
 
-[`examples/laravel-app`](../../examples/laravel-app/) runs this page for real,
-and pins the Vue version it loads to the one this library is tested against
+[`examples/laravel-app`](../../examples/laravel-app/) runs this page for real.
+It pins the Vue version it loads to the one this library is tested against,
 instead of leaving a placeholder in the URL.
 
 Alpine's `@cart-added.window` listens at the window level, which the event
@@ -581,13 +624,13 @@ class CartSidebar extends Component
 
 The widget's `emitDOMEvent('cart-added', { count })` dispatches a DOM event
 that Livewire 3's `#[On('cart-added')]` attribute picks up. Livewire's view
-needs no JS plumbing; the Vapor widget is a drop-in component that emits
+needs no JS plumbing. The Vapor widget is a drop-in component that emits
 upward.
 
 ### Pattern 3: Filament panel widget
 
-Filament panels are Livewire under the hood, so the pattern is the same:
-embed a Vapor widget in a Filament widget's view and listen with `#[On(...)]`:
+Filament panels are Livewire under the hood, so the pattern is the same. Embed
+a Vapor widget in a Filament widget's view and listen with `#[On(...)]`:
 
 ```php
 // app/Filament/Widgets/AnalyticsIsland.php
@@ -618,9 +661,9 @@ class AnalyticsIsland extends Widget
 ```
 
 Inside `vc-search-bar`, the widget calls `emitDOMEvent(host, 'search-executed', { query })`.
-The `#[On]` listener runs on the server, as every Livewire listener does: one
-Livewire request per event, and the panel re-renders with its answer. For an
-update that needs no server, listen in Alpine instead (Pattern 1).
+The `#[On]` listener runs on the server, as every Livewire listener does. Each
+event costs one Livewire request, and the panel re-renders with its answer. For
+an update that needs no server, listen in Alpine instead (Pattern 1).
 
 ### Pattern 4: vanilla DOM, no framework
 
@@ -638,23 +681,24 @@ The same `emitDOMEvent` works without Alpine/Livewire:
 
 ### Why this matters for Laravel specifically
 
-Laravel projects typically have **multiple coexisting reactive layers**:
-Blade renders the page, Alpine handles small interactions, Livewire owns
-big component state, and Filament renders admin panels on Livewire.
-vapor-chamber's widget surface is **none** of those; it is Vue Vapor. The
+Laravel projects typically have **multiple coexisting reactive layers**. Blade
+renders the page, Alpine handles small interactions, Livewire owns big
+component state, and Filament renders admin panels on Livewire.
+
+vapor-chamber's widget surface is **none** of those: it is Vue Vapor. The
 `emitDOMEvent` bridge is the **interop primitive** that lets a Vapor widget
-participate in any of those layers without coupling to them. The same
-pattern works for anything that reads DOM events: Stimulus (Rails), HTMX
-(event listeners), Solid islands, vanilla.
+take part in any of those layers without coupling to them. The same pattern
+works for anything that reads DOM events: Stimulus (Rails), HTMX (event
+listeners), Solid islands, vanilla.
 
 ---
 
 ## Filament panel coexistence (mounting / lifecycle)
 
-The event-bridging patterns above cover how widgets *talk* to Filament; this
+The event-bridging patterns above cover how widgets *talk* to Filament. This
 section covers how to *mount* them inside a panel.
 
-Filament uses Livewire for its components; Vue Vapor + vapor-chamber lives
+Filament uses Livewire for its components. Vue Vapor + vapor-chamber lives
 inside a Filament panel as **reactive islands**, each with its own bus.
 
 ```php
@@ -703,7 +747,7 @@ php artisan reverb:install
 ```
 
 Use the protocol-aware `createEchoBridge`. It subscribes to public, private and
-presence channels, routes each broadcast to the bus, and also emits presence
+presence channels, and routes each broadcast to the bus. It also emits presence
 membership (`here` / `joining` / `leaving`). You pass your own Echo instance, so
 vapor-chamber never imports `laravel-echo`:
 
@@ -730,12 +774,13 @@ const realtime = createEchoBridge({
 realtime.install(bus); // OrderShipped -> bus.emit('OrderShipped', payload); lobby:joining on presence
 
 // on teardown (component unmount / SPA route change):
-realtime.teardown();
+realtime.dispose();
 ```
 
 To react with a *command* instead of an event, pass `onBroadcast: ({ payload }, b)
-=> b.dispatch('applyShipment', payload)`. Realtime is receive-only: outbound writes
-still go through the HTTP bridge, with CSRF and the `Idempotency-Key` header above.
+=> b.dispatch('applyShipment', payload)`. Realtime is receive-only. Outbound
+writes still go through the HTTP bridge, with CSRF and the `Idempotency-Key`
+header above.
 
 ---
 
@@ -766,15 +811,20 @@ class ProcessCheckout
 }
 ```
 
-On the client, pair it with the lib's `optimistic` plugin (apply the UI change
-immediately, roll back on failure), or push the final state via Reverb.
+On the client, pair it with the lib's `optimistic` plugin, which applies the UI
+change at once and rolls back on failure. Or push the final state through
+Reverb.
 
-To follow the job instead, answer **202 Accepted** (RFC 9110 15.3.3): the action
-returns exactly `['accepted' => ['location' => $url, 'retryAfter' => 2]]`, the
-example controller answers 202 with `Location` and `Retry-After`, and the
-status monitor at that URL answers 202 while the job runs, then `{ state }` or a
-problem. On the client, `pollWith` follows it; the dispatch resolves at once,
-and the end arrives as `<action>$done`:
+To follow the job instead, answer **202 Accepted** (RFC 9110 15.3.3):
+
+- The action returns exactly
+  `['accepted' => ['location' => $url, 'retryAfter' => 2]]`.
+- The example controller answers 202 with `Location` and `Retry-After`.
+- The status monitor at that URL answers 202 while the job runs, then
+  `{ state }` or a problem.
+
+On the client, `pollWith` follows it. The dispatch resolves at once, and the end
+arrives as `<action>$done`:
 
 ```ts
 import { pollWith } from 'vapor-chamber';
@@ -794,7 +844,7 @@ Route::get('/jobs/{order}', fn (Order $order) => $order->status === 'queued'
 
 A batch result has no status of its own, so `accepted` works on the single
 endpoint. Cross-origin, list `Location` and `Retry-After` in `exposed_headers`
-(CORS, below): the browser hides any other response header from JS.
+(CORS, above). The browser hides any other response header from JS.
 
 ---
 
@@ -850,10 +900,11 @@ class UpdateProfile
 }
 ```
 
-The controller's `ValidationException` catch maps it to a 422 problem, `code:
-'validation_failed'`, with the validator's message as `detail` and each field's
-first message in `errors` as `{ pointer: '/payload/<field>', detail }` - what
-`FormBus.setErrors` puts on its fields.
+The controller's `ValidationException` catch maps it to a 422 problem,
+`code: 'validation_failed'`, with the validator's message as `detail`. Each
+field's first message goes in `errors` as
+`{ pointer: '/payload/<field>', detail }`, which is what `FormBus.setErrors`
+puts on its fields.
 
 ---
 
@@ -862,23 +913,25 @@ first message in `errors` as `{ pointer: '/payload/<field>', detail }` - what
 The classic "user clicks Checkout twice" race has two halves, and vapor-chamber
 covers the client side of both:
 
-- **Locally** - the `idempotent` plugin collapses duplicate dispatches of the same
-  logical command, so the handler (and the request it makes) runs once. Concurrent
-  duplicates share the first in-flight promise; repeats within the TTL return the
-  cached result. Failures aren't cached, so a genuine retry still runs.
-- **On the wire** - `idempotent` stamps `cmd.meta.idempotencyKey` (so does the
+- **Locally**: the `idempotent` plugin collapses duplicate dispatches of the
+  same logical command, so the handler (and the request it makes) runs once.
+  Concurrent duplicates share the first in-flight promise. Repeats within the
+  TTL return the cached result. Failures aren't cached, so a genuine retry
+  still runs.
+- **On the wire**: `idempotent` stamps `cmd.meta.idempotencyKey`. So does the
   bus, for an action declared `'idempotent'` in its `retry` option: the
-  dispatch's id, one key for every attempt). Every bridge sends it in the
-  envelope, `meta.idempotencyKey`, on a single request, a batch and a
-  WebSocket alike; that is where the backend reads it (the example
-  controller's `idempotencyKey()`). A single request also carries the standard
-  `Idempotency-Key` header (a Structured Field String, the key percent-encoded
-  and quoted) for gateways and middleware that read it. The backend replays the
-  stored result for a key it has finished, and
-  answers **409** to a second request while the first with the same key is still
-  running, with `Retry-After: 1` - so a re-send lands once, and the bus waits
-  and comes back for the finished answer instead of settling as a conflict.
-  A 409 without `Retry-After` is `conflict` and is not re-sent.
+  dispatch's id, one key for every attempt.
+  - Every bridge sends it in the envelope, `meta.idempotencyKey`, on a single
+    request, a batch and a WebSocket alike. That is where the backend reads it
+    (the example controller's `idempotencyKey()`).
+  - A single request also carries the standard `Idempotency-Key` header, for
+    gateways and middleware that read it. It is a Structured Field String: the
+    key percent-encoded and quoted.
+  - The backend replays the stored result for a key it has finished. A second
+    request while the first with the same key is still running gets **409**
+    with `Retry-After: 1`. So a re-send lands once, and the bus waits and comes
+    back for the finished answer instead of settling as a conflict.
+  - A 409 without `Retry-After` is `conflict` and is not re-sent.
 
 ```ts
 import { createAsyncCommandBus, idempotent } from 'vapor-chamber';
@@ -894,20 +947,22 @@ bus.dispatch('checkoutSubmit', { cartId });
 bus.dispatch('checkoutSubmit', { cartId });
 ```
 
-For commands that must also never *interleave* (two writes to the same account),
-add `serialize({ key: (cmd) => cmd.target.accountId })`: it orders same-key
-commands locally while `idempotent` collapses identical ones. `key` is a
-function of the command and defaults to `cmd.action`, which serializes each
+Some commands must also never *interleave*, such as two writes to the same
+account. Add `serialize({ key: (cmd) => cmd.target.accountId })`: it orders
+same-key commands locally while `idempotent` collapses identical ones. `key` is
+a function of the command and defaults to `cmd.action`, which serializes each
 action against itself. Together they give exactly-once semantics on the client.
 
-The only backend contract: honor `meta.idempotencyKey`
-(persist the key with its result; return the stored result on a repeat), and
-never run the same key twice at once. A cache alone cannot guarantee the second
-part. It stores the result only after the action succeeds, so a retry that
-arrives while the first attempt is still running (a client timeout on a slow
-write) would miss the cache and run the action again, concurrently. The example
-controller therefore takes a lock on the key before the cache read and holds it
-for the whole run. From `dispatchOne()` in
+The only backend contract has two parts. Honor `meta.idempotencyKey`: persist
+the key with its result, and return the stored result on a repeat. And never
+run the same key twice at once.
+
+A cache alone cannot guarantee the second part. It stores the result only after
+the action succeeds. A retry can arrive while the first attempt is still
+running, after a client timeout on a slow write. It would miss the cache and run
+the action again, concurrently. The example controller therefore takes a lock
+on the key before the cache read and holds it for the whole run. From
+`dispatchOne()` in
 [`examples/laravel-backend/VaporChamberController.php`](../../examples/laravel-backend/VaporChamberController.php),
 abridged:
 
@@ -919,8 +974,9 @@ abridged:
         // attempt is still running (a client timeout on a slow write) misses
         // the cache and runs the action a second time, concurrently. The lock
         // is taken BEFORE the cache read and held for the whole run; a request
-        // that cannot get it is answered 409 (`conflict`), which no re-send repeats,
-        // so the client sees one outcome. 30s bounds a crashed holder.
+        // that cannot get it is answered 409 with Retry-After (see __invoke), so
+        // the client's re-send returns for the one outcome. 30s bounds a crashed
+        // holder.
         $lock = $cacheKey ? Cache::lock("vc:idem:lock:{$command}:{$idempotencyKey}", 30) : null;
         if ($lock && !$lock->get()) {
             return $this->problem('A request with this Idempotency-Key is still running', 409, 'in_progress');
@@ -928,17 +984,16 @@ abridged:
 
         try {
             if ($cacheKey && ($cached = Cache::get($cacheKey)) !== null) {
-                return ['body' => $cached, 'status' => 200];
+                return $cached;
             }
 
             $state = app($handler)($target, $payload, $user);
-            $body = is_array($state) && array_keys($state) === ['redirect']
-                ? ['redirect' => $state['redirect']]
-                : ['state' => $state];
+            // ... the 202 `accepted` shape, else:
+            $result = ['body' => $this->body($state), 'status' => 200];
             if ($cacheKey) {
-                Cache::put($cacheKey, $body, self::IDEMPOTENCY_TTL_SECONDS);
+                Cache::put($cacheKey, $result, self::IDEMPOTENCY_TTL_SECONDS);
             }
-            return ['body' => $body, 'status' => 200];
+            return $result;
         } catch (ValidationException $e) {
             // ... exception mapping, unchanged
         } finally {
@@ -946,9 +1001,10 @@ abridged:
         }
 ```
 
-`Cache::lock` needs a cache store that supports atomic locks (redis, memcached,
-database, dynamodb, file, array). The batch endpoint runs every command through
-the same `dispatchOne()`, so it gets the same guard.
+`__invoke()` adds `Retry-After: 1` to an `in_progress` problem. `Cache::lock`
+needs a cache store that supports atomic locks (redis, memcached, database,
+dynamodb, file, array). The batch endpoint runs every command through the same
+`dispatchOne()`, so it gets the same guard.
 
 ---
 
@@ -967,8 +1023,9 @@ php artisan serve
 </script>
 ```
 
-The server log should show one `POST /api/vc` answered `{ "state": { ... } }`,
-and the browser console the command's result, `{ ok: true, value: { count: 2, total: ... } }`.
+The server log should show one `POST /api/vc` answered `{ "state": { ... } }`.
+The browser console should show the command's result,
+`{ ok: true, value: { count: 2, total: ... } }`.
 
 Once that round-trips, every other command on your bus uses identical
 plumbing: register the action class and add a line to

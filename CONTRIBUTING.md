@@ -6,19 +6,19 @@ Thanks for considering a contribution. This document covers setting up a dev env
 
 ## Setup
 
-Requirements:
-- Node.js ≥ 22.12.0 (matches `engines.node` in [package.json](./package.json))
+You need:
+- Node.js >= 22.12.0 (matches `engines.node` in [package.json](./package.json))
 - npm 10+ (ships with the Node version above)
 
 ```bash
 git clone https://github.com/lucianofedericopereira/vapor-chamber.git
 cd vapor-chamber
 npm install
-npm run test:run    # default vitest project; `npm test` runs both projects
+npm run test:run    # default vitest project (`npm test` runs both projects)
 npm run build       # tsc + Vite library build + IIFE variants
 ```
 
-Lockfile drift from `npm install` is expected on a fresh clone; commit the
+Lockfile drift from `npm install` is expected on a fresh clone. Commit the
 resulting `package-lock.json` with your PR.
 
 ---
@@ -37,7 +37,7 @@ src/
   http-query.ts        Query helpers
   plugins-core.ts      Core plugins (logger, validator, debounce, throttle, ...)
   plugins-extra.ts     Extra plugins (cache, circuitBreaker, rateLimit, metrics)
-  plugins-io.ts        I/O plugins (retry, persist) + createChannel
+  plugins-io.ts        I/O plugins (persist) + createChannel
   plugins.ts           Re-export aggregator
   schema.ts            LLM tool-use layer (toAnthropicTools, toOpenAITools, ...)
   form.ts              Reactive form state
@@ -57,7 +57,7 @@ src/
     engine.ts          Navigation: guards, two-phase commit, query fast path
     table.ts           Rows -> compiled table (chains, query defs, matching)
     history.ts         Base-aware web + memory history
-    loaders.ts         Loader SPI; presets resolve a row's `load` string
+    loaders.ts         Loader SPI: presets resolve a row's `load` string
     composables.ts     useRoute / useQueryParam / usePagination / ...
     vdom.ts, vapor.ts  The two RouterOutlet render surfaces (subpath per cost)
   router-fetch/        In-box loader preset for plain JSON backends
@@ -69,7 +69,7 @@ scripts/
   check-doc-claims.mjs Orphaned docblocks, absent documented defaults, release
                        status in comments
   check-ascii.mjs      Plain ASCII, invisible characters included
-  stamp-docs.mjs       Republishes generated numbers into prose; --check gates
+  stamp-docs.mjs       Republishes generated numbers into prose, --check gates
   gate.mjs             The whole chain in one command, in the house order
 docs/
   whitepaper.md        Design philosophy + integration patterns
@@ -91,17 +91,17 @@ ROADMAP.md             RC tracking, version policy, feature matrix
 npm run gate           # all of the below, in order, on a committed tree
 ```
 
-That is the whole check, and it is the one to run. Eleven steps in the house
-order, one line of output each, stopping at the first failure with the step
-named - so under `git rebase --exec 'npm run gate'` a red line identifies both
-the commit and the step. It does two things the manual list below cannot: it
-REGENERATES `docs/api/` and `docs/BUNDLE-SIZES.md` and then fails on a diff,
-rather than trusting you to have run them, and it ends by asserting a clean
-tree. A chain that merely regenerates would repair the drift and report green,
-which launders the defect instead of catching it.
+That is the whole check, and it is the one to run. It runs eleven steps in the
+house order, one line of output each, and stops at the first failure with the
+step named. So under `git rebase --exec 'npm run gate'` a red line identifies
+both the commit and the step. It does two things the manual list below cannot.
+It REGENERATES `docs/api/` and `docs/BUNDLE-SIZES.md` and then fails on a
+diff, rather than trusting you to have run them. And it ends by asserting a
+clean tree. A chain that merely regenerates would repair the drift and report
+green, which launders the defect instead of catching it.
 
 Two things to know before you use it. It expects a COMMITTED tree, so running
-it with work in progress ends red at `clean tree` by design; the ten steps
+it with work in progress ends red at `clean tree` by design. The ten steps
 before it still report. And `npm run gate | tail` masks the exit code, so a red
 gate reads as green - pipe to a file instead.
 
@@ -119,13 +119,16 @@ npm run test:coverage  # 100% statements / branches / functions / lines
 
 All seven must pass, and the order is part of the gate. `npm run gate` runs them
 in exactly this order plus the drift and clean-tree steps. Deliberately NOT in
-that chain: `npm run bench` (one run, which only records its ratios) and
-`npm run bench:bands` (N runs; the one writer of the `vc:bench*` values: the
-median for this library's own ratios, the min-max band for a ratio against a
-peer library; run from a clean committed checkout, never a working tree),
-`npm run check:example` (it drives three
-example builds and belongs to the alignment cycle, not to every commit), and
-`ab:vue` (it needs a second Vue installed).
+that chain:
+
+- `npm run bench`: one run, which only records its ratios.
+- `npm run bench:bands`: N runs, the one writer of the `vc:bench*` values. It
+  writes the median for this library's own ratios and the min-max band for a
+  ratio against a peer library. Run it from a clean committed checkout, never a
+  working tree.
+- `npm run check:example`: it drives three example builds and belongs to the
+  alignment cycle, not to every commit.
+- `ab:vue`: it needs a second Vue installed.
 
 - **Build before the test runs.** The size, boundary and Vite-plugin guards read
   `dist/` and fail at load when it is absent (`tests/require-dist.ts`). They used
@@ -135,41 +138,49 @@ example builds and belongs to the alignment cycle, not to every commit), and
 - **After any change under `src/`, comments included, run `npm run docs`** and
   commit `docs/api/` with the change. The API reference carries source line
   anchors, so a comment that moves a line moves them. Run `npm run size:doc` too
-  when a change can move a size row; both must regenerate with no diff.
+  when a change can move a size row. Both must regenerate with no diff.
 - **After adding or removing tests, run `npm run docs:stamp` after
   `test:coverage`.** The test-count markers publish only from a built run with
-  coverage on, so the `stamp-docs --check` inside `lint:check`, which follows a plain
-  `test:run`, cannot see a stale count.
+  coverage on. The `stamp-docs --check` inside `lint:check` follows a plain
+  `test:run`, so it cannot see a stale count.
 
 `lint:check` runs more than biome. These guards check what the source *says*
 rather than what it does, which a test cannot:
-`check-env-guards` (no unguarded `process.env`), `check-console-shape` (a value
-with structure is a console ARGUMENT, never a substring of the message; it
-classifies by type rather than by a list of names, and `--self-test` injects the
-violations into real modules to prove it can still fail), `check-line-citations`
-(no source-line numbers in test titles), `check-doc-claims` (no docblock attached
-to nothing, no documented default whose value is absent from the file, no release
-status in a comment - that belongs in CHANGELOG.md), and `check-ascii` (plain
-ASCII, including invisible characters). `stamp-docs --check` fails on a stale
-generated number. CI runs the same set on Node 22 and 24, on Linux and macOS.
 
-`test:run` is not the whole suite: `tests/vapor/**` runs only under
-`vitest.vapor.config.ts` (it needs `vue` aliased to a build that includes
-Vapor; the config header explains why), and the router/vapor outlet's
-acceptance guards live there. `npm test` runs both projects back to back.
+- `check-env-guards`: no unguarded `process.env`.
+- `check-console-shape`: a value with structure is a console ARGUMENT, never a
+  substring of the message. It classifies by type rather than by a list of
+  names, and `--self-test` injects the violations into real modules to prove it
+  can still fail.
+- `check-line-citations`: no source-line numbers in test titles.
+- `check-doc-claims`: no docblock attached to nothing, and no documented
+  default whose value is absent from the file. No release status in a comment
+  either: that belongs in CHANGELOG.md.
+- `check-ascii`: plain ASCII, including invisible characters.
+- `stamp-docs --check`: fails on a stale generated number.
+
+CI runs these guards and the typecheck on Node 22, on Linux. It runs the build,
+both test projects and the size check on Node 22 and 24, on Linux and macOS
+(.github/workflows/ci.yml). The split is deliberate: every check on every cell
+takes too long and races on GitHub.
+
+`test:run` is not the whole suite. `tests/vapor/**` runs only under
+`vitest.vapor.config.ts`, which aliases `vue` to a build that includes Vapor
+(its header says why). The router/vapor outlet's acceptance guards live there. `npm test` runs both projects back to back.
 Run `test:vapor` after `build`, since its size guard measures a real production
 bundle.
 
-The `examples/` workspaces sit outside that gate; they build against the
-working tree on demand. `examples/exo-astro` needs Node ≥ 22.12 (Astro 7's own
-floor); its directive scanner is covered by the repo suite, so `npm test` from
+The `examples/` workspaces sit outside that gate. They build against the
+working tree on demand. `examples/exo-astro` needs Node >= 22.12 (Astro 7's own
+floor). Its directive scanner is covered by the repo suite, so `npm test` from
 the root does exercise that example's code.
 
 ### Performance work
 
 If your change is in a hot path (`command-bus.ts`, `transports.ts`, `chamber.ts`),
-read [docs/V8-RULES.md](./docs/V8-RULES.md) first: the shape, allocation and
-measuring rules this project has already settled, each with its evidence.
+read [docs/V8-RULES.md](./docs/V8-RULES.md) first. It holds the shape,
+allocation and measuring rules this project has already settled, each with its
+evidence.
 
 1. Add a bench to [tests/perf.bench.ts](./tests/perf.bench.ts) **before** changing
    the code, and capture the baseline numbers.
@@ -187,8 +198,8 @@ If your change might shift bundle size:
 
 ### Code style
 
-- Biome handles linting. Run `npm run lint` to auto-fix; CI runs `lint:check`.
-- TypeScript strict mode is on. No `any` leaks at the public API boundary; internal `any` is fine where the alternative is verbose generics.
+- Biome handles linting. Run `npm run lint` to auto-fix. CI runs `lint:check`.
+- TypeScript strict mode is on. No `any` leaks at the public API boundary. Internal `any` is fine where the alternative is verbose generics.
 - Comments are sparse by design - write them when the *why* is non-obvious (a hidden constraint, an invariant, a workaround for a specific bug). Don't paraphrase the code.
 - No emojis in source files. In CHANGELOG and docs, use them sparingly and only when explicitly asked.
 - Tests live next to the module they exercise (`src/foo.ts` <-> `tests/foo.test.ts`). Cross-cutting concerns get their own file.
@@ -213,7 +224,7 @@ the expensive way:
   isolated loop is not evidence - a loop-invariant read gets hoisted and the
   number is garbage.
 - **External strings are never keys on `{}`** (`src/dict.ts`): store ids, state
-  keys, command patterns and query params all read via `Object.hasOwn`. This
+  keys, command patterns and query params all read through `Object.hasOwn`. This
   class has been found at six sites so far.
 - **A number a human retypes is a number that drifts.** Anything a run can
   compute belongs to a `vc:` marker fed by `scripts/stamp-docs.mjs`, not to
@@ -229,10 +240,10 @@ the expensive way:
 3. Commit: `release: vX.Y.Z`.
 4. Tag: `git tag vX.Y.Z && git push --tags`.
 5. `npm publish`. The `prepublishOnly` script runs the seven gates of "Before opening a PR"
-   in that order (build before either test project, coverage last), and all must pass.
+   in that order (build before either test project, coverage last). All must pass.
 6. GitHub release notes copy the CHANGELOG section verbatim.
 
-A breaking change to a surface documented as stable needs a major; before Vue 3.6 stable, experimental surfaces take breaking changes in minors (ROADMAP, "Version policy before 3.6 stable"). Variant *contents* of the IIFE bundles are explicitly not under semver before v2.0; see [ROADMAP.md](./ROADMAP.md). The ESM main entry follows strict semver.
+A breaking change to a surface documented as stable needs a major. Before Vue 3.6 stable, experimental surfaces take breaking changes in minors (ROADMAP, "Version policy before 3.6 stable"). Variant *contents* of the IIFE bundles are explicitly not under semver before v2.0 (see [ROADMAP.md](./ROADMAP.md)). The ESM main entry follows strict semver.
 
 ---
 
@@ -253,7 +264,7 @@ See [ROADMAP.md](./ROADMAP.md) for the strategic plan. Concrete near-term items 
 
 - Comparative benchmarks vs RxJS Subject, Pinia.
 - Real-world integration examples in `examples/` (Rails, Django).
-- Additional `examples/` for the IIFE variants - embeddable widget, CDN-only Blade page.
+- More `examples/` for the IIFE variants - embeddable widget, CDN-only Blade page.
 - TypeDoc -> static API reference site (target: `vapor-chamber.dev` or similar).
 - A migration guide from Vuex.
 

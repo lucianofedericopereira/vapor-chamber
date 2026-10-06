@@ -248,7 +248,7 @@ describe('createChannel', () => {
 
     expect(a.applied).toEqual([{ count: 1, name: 'Coffee' }]);
     expect(b.applied).toEqual([{ count: 1, name: 'Coffee' }]);
-    a.bridge.close(); b.bridge.close();
+    a.bridge.dispose(); b.bridge.dispose();
   });
 
   it('applies the sender\'s values instead of re-deriving them', async () => {
@@ -262,7 +262,7 @@ describe('createChannel', () => {
 
     expect(b.applied).toEqual(a.applied);
     expect((b.applied[0] as { id: string }).id.startsWith('A-')).toBe(true);
-    a.bridge.close(); b.bridge.close();
+    a.bridge.dispose(); b.bridge.dispose();
   });
 
   it('does not echo a received fact back out', async () => {
@@ -275,7 +275,7 @@ describe('createChannel', () => {
     expect(a.applied).toHaveLength(1);
     expect(b.applied).toHaveLength(1);
     expect(c.applied).toHaveLength(1);
-    a.bridge.close(); b.bridge.close(); c.bridge.close();
+    a.bridge.dispose(); b.bridge.dispose(); c.bridge.dispose();
   });
 
   it('only the named events cross', async () => {
@@ -291,7 +291,7 @@ describe('createChannel', () => {
 
     expect(b.applied).toEqual([{ count: 1 }]);
     expect(bSawRecalc).toEqual([]);
-    a.bridge.close(); b.bridge.close();
+    a.bridge.dispose(); b.bridge.dispose();
   });
 
   it('onReceive returning false drops the fact', async () => {
@@ -311,7 +311,7 @@ describe('createChannel', () => {
 
     expect(seen).toEqual([['cartAdded', { count: 1 }]]);
     expect(applied).toEqual([]);
-    a.bridge.close(); bridge.close();
+    a.bridge.dispose(); bridge.dispose();
   });
 
   it('onReceive returning a non-false value still applies the fact', async () => {
@@ -326,7 +326,7 @@ describe('createChannel', () => {
     await flush();
 
     expect(applied).toEqual([{ count: 2 }]);
-    a.bridge.close(); bridge.close();
+    a.bridge.dispose(); bridge.dispose();
   });
 
   it('ignores messages that are not ours', async () => {
@@ -339,14 +339,14 @@ describe('createChannel', () => {
     await flush();
 
     expect(b.applied).toEqual([]);
-    foreign.close(); b.bridge.close();
+    foreign.close(); b.bridge.dispose();
   });
 
   it('close() stops the bridge and unsubscribes from the lane', async () => {
     const ch = nextChannel();
     const a = openTab(ch), b = openTab(ch);
     expect(b.bridge.isOpen()).toBe(true);
-    b.bridge.close();
+    b.bridge.dispose();
     expect(b.bridge.isOpen()).toBe(false);
 
     a.lane.emit('cartAdded', { count: 1 });
@@ -358,7 +358,7 @@ describe('createChannel', () => {
     // closed channel.
     b.lane.emit('cartAdded', { count: 99 });
     expect(b.applied).toEqual([{ count: 99 }]);
-    a.bridge.close();
+    a.bridge.dispose();
   });
 
   it('is a no-op when BroadcastChannel is not available', () => {
@@ -371,7 +371,7 @@ describe('createChannel', () => {
     expect(bridge.isOpen()).toBe(false);
     expect(() => { lane.emit('cartAdded', { count: 1 }); }).not.toThrow();
     expect(applied).toEqual([{ count: 1 }]);
-    bridge.close();
+    bridge.dispose();
   });
 
   it('a payload that cannot be cloned warns in DEV and leaves the local emit standing', () => {
@@ -391,7 +391,7 @@ describe('createChannel', () => {
     expect(said.some((m) => m.includes('cartAdded'))).toBe(true);
 
     warn.mockRestore();
-    bridge.close();
+    bridge.dispose();
   });
 
   it('...and says nothing in production', async () => {
@@ -412,7 +412,7 @@ describe('createChannel', () => {
       expect(ours).toEqual([]);
 
       warn.mockRestore();
-      bridge.close();
+      bridge.dispose();
     } finally {
       vi.unstubAllEnvs();
       vi.restoreAllMocks();
@@ -435,6 +435,6 @@ describe('createChannel', () => {
 
     expect(a.applied).toHaveLength(1);
     expect(b.applied).toHaveLength(1);
-    a.bridge.close(); b.bridge.close();
+    a.bridge.dispose(); b.bridge.dispose();
   });
 });

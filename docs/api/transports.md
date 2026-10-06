@@ -17,7 +17,7 @@ import { ... } from 'vapor-chamber/transports';
 
 ### createBatchingHttpBridge
 
-**Function** - [src/transports.ts:356](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L356)
+**Function** - [src/transports.ts:370](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L370)
 
 ```ts
 createBatchingHttpBridge(options: BatchingHttpBridgeOptions) => AsyncPlugin
@@ -52,10 +52,10 @@ bus.dispatch('cartAdd', product, { quantity: 2 })
 
 ### createEchoBridge
 
-**Function** - [src/transports.ts:900](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L900)
+**Function** - [src/transports.ts:946](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L946)
 
 ```ts
-createEchoBridge(options: EchoBridgeOptions) => { install(bus: BaseBus): void; teardown(): void; }
+createEchoBridge(options: EchoBridgeOptions) => { install(bus: BaseBus): void; dispose(): void; }
 ```
 
 createEchoBridge - wire Laravel Echo / Reverb realtime channels to the bus.
@@ -79,12 +79,12 @@ const realtime = createEchoBridge({
 });
 realtime.install(bus);   // OrderShipped -> bus.emit('OrderShipped', payload)
 // on teardown:
-realtime.teardown();
+realtime.dispose();
 ```
 
 ### createHttpBridge
 
-**Function** - [src/transports.ts:224](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L224)
+**Function** - [src/transports.ts:237](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L237)
 
 ```ts
 createHttpBridge(options: HttpBridgeOptions) => AsyncPlugin
@@ -106,7 +106,7 @@ declares `transport: true`: the async bus re-sends through it by the
 failure's condition, after a declared Retry-After (docs/plan-shape.md 4).
 
 ```ts
-const bus = createAsyncCommandBus({ retry: { actions: { 'cart*': 'idempotent' } } })
+const bus = createAsyncCommandBus({ retry: { actionPolicies: { 'cart*': 'idempotent' } } })
 bus.use(createHttpBridge({ endpoint: '/api/vc', csrf: true }))
 
 await bus.dispatch('cartAdd', product, { quantity: 2 })
@@ -114,10 +114,10 @@ await bus.dispatch('cartAdd', product, { quantity: 2 })
 
 ### createSseBridge
 
-**Function** - [src/transports.ts:795](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L795)
+**Function** - [src/transports.ts:841](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L841)
 
 ```ts
-createSseBridge(options: SseBridgeOptions) => { install(bus: BaseBus): void; teardown(): void; isConnected(): boolean; }
+createSseBridge(options: SseBridgeOptions) => { install(bus: BaseBus): void; dispose(): void; isConnected(): boolean; }
 ```
 
 createSseBridge - server-sent events bridge for unidirectional server push.
@@ -136,12 +136,12 @@ const sse = createSseBridge({
 sse.install(bus)
 
 // Later, on component unmount:
-sse.teardown()
+sse.dispose()
 ```
 
 ### createWsBridge
 
-**Function** - [src/transports.ts:491](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L491)
+**Function** - [src/transports.ts:536](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L536)
 
 ```ts
 createWsBridge(options: WsBridgeOptions) => AsyncPlugin & { connect(): void; disconnect(): void; isConnected(): boolean; connected: Signal<boolean>; }
@@ -163,11 +163,17 @@ ws.connect()
 
 ### BackendResponse
 
-**Type alias** - [src/transports.ts:61](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L61)
+**Type alias** - [src/transports.ts:63](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L63)
 
 ```ts
 export type BackendResponse = {
   state?: unknown;
+  /**
+   * Store states the server declares beside a success, by store id: each
+   * store with that id on the bus takes its state, whatever the command was
+   * (docs/store.md, A store behind a bridge). Log s35.186.
+   */
+  stores?: Record<string, unknown>;
   /** A navigation the backend hands back instead of a result - see `onRedirect`. */
   redirect?: string;
   problem?: ProblemDetails;
@@ -181,7 +187,7 @@ it; a single command's failure is its non-2xx response's body.
 
 ### BatchingHttpBridgeOptions
 
-**Type alias** - [src/transports.ts:306](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L306)
+**Type alias** - [src/transports.ts:319](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L319)
 
 ```ts
 export type BatchingHttpBridgeOptions = HttpBridgeOptions & {
@@ -201,7 +207,7 @@ export type BatchingHttpBridgeOptions = HttpBridgeOptions & {
 
 ### CommandEnvelope
 
-**Type alias** - [src/transports.ts:35](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L35)
+**Type alias** - [src/transports.ts:37](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L37)
 
 ```ts
 export type CommandEnvelope = {
@@ -219,7 +225,7 @@ only with a fact a backend can use. Log s35.138.
 
 ### EchoBridgeOptions
 
-**Type alias** - [src/transports.ts:853](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L853)
+**Type alias** - [src/transports.ts:899](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L899)
 
 ```ts
 export type EchoBridgeOptions = {
@@ -248,7 +254,7 @@ export type EchoBridgeOptions = {
 
 ### EchoChannelType
 
-**Type alias** - [src/transports.ts:842](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L842)
+**Type alias** - [src/transports.ts:888](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L888)
 
 ```ts
 export type EchoChannelType = 'public' | 'private' | 'presence';
@@ -256,7 +262,7 @@ export type EchoChannelType = 'public' | 'private' | 'presence';
 
 ### EchoSubscription
 
-**Type alias** - [src/transports.ts:844](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L844)
+**Type alias** - [src/transports.ts:890](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L890)
 
 ```ts
 export type EchoSubscription = {
@@ -271,7 +277,7 @@ export type EchoSubscription = {
 
 ### EnvelopeMeta
 
-**Type alias** - [src/transports.ts:44](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L44)
+**Type alias** - [src/transports.ts:46](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L46)
 
 ```ts
 export type EnvelopeMeta = { idempotencyKey?: string; correlationId?: string; causationId?: string };
@@ -281,7 +287,7 @@ The part of a command's meta that crosses the wire.
 
 ### HttpBridgeOptions
 
-**Type alias** - [src/transports.ts:118](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L118)
+**Type alias** - [src/transports.ts:129](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L129)
 
 ```ts
 export type HttpBridgeOptions = {
@@ -307,7 +313,7 @@ export type HttpBridgeOptions = {
    * Default: '/sanctum/csrf-cookie'.
    */
   csrfCookieUrl?: string;
-  /** Additional headers merged into every request */
+  /** Additional headers merged into every request. A name matches in any case: its first spelling is kept and the last value wins (the Fetch Standard's "set"), so it goes out once. */
   headers?: Record<string, string>;
   /** Request timeout in ms. Default: 10_000 */
   timeout?: number;
@@ -338,9 +344,11 @@ export type HttpBridgeOptions = {
   onRedirect?: (url: string) => void;
   /**
    * Which actions to forward. Glob patterns supported: '*', 'cart*'.
-   * Default: all actions.
+   * An {@link ActionScope}.
    */
-  actions?: string[];
+  actions?: ActionScope;
+  /** Selects actions by name, ANDed with `actions`: an {@link ActionFilter} (`createActionFilter`). Log s35.152. */
+  actionFilter?: ActionFilter;
   /**
    * Abort controller whose signal cancels all in-flight requests when the
    * owning scope/component is disposed. In Vapor components, create an
@@ -370,7 +378,7 @@ export type HttpBridgeOptions = {
 
 ### SseBridgeOptions
 
-**Type alias** - [src/transports.ts:753](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L753)
+**Type alias** - [src/transports.ts:799](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L799)
 
 ```ts
 export type SseBridgeOptions = {
@@ -399,7 +407,7 @@ export type SseBridgeOptions = {
 
 ### WsBridgeOptions
 
-**Type alias** - [src/transports.ts:443](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L443)
+**Type alias** - [src/transports.ts:485](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L485)
 
 ```ts
 export type WsBridgeOptions = {
@@ -407,9 +415,11 @@ export type WsBridgeOptions = {
   url: string;
   /**
    * Which actions to forward. Glob patterns supported: '*', 'cart*'.
-   * Default: all actions.
+   * An {@link ActionScope}.
    */
-  actions?: string[];
+  actions?: ActionScope;
+  /** Selects actions by name, ANDed with `actions`: an {@link ActionFilter} (`createActionFilter`). Log s35.152. */
+  actionFilter?: ActionFilter;
   /** Automatically reconnect on disconnect. Default: true */
   reconnect?: boolean;
   /** Base reconnect delay in ms. Default: 1000 */

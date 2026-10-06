@@ -88,12 +88,19 @@ describe('postCommand - retry', () => {
     expect((globalThis.fetch as any).mock.calls).toHaveLength(1);
   });
 
-  it('re-sends any status that carries Retry-After, waiting what it says', async () => {
+  it('an unkeyed request answered with Retry-After fails once, its retryIn kept', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    (globalThis.fetch as any).mockResolvedValue(mockResponse(409, null, { 'retry-after': '1' }));
+    await expect(postCommand('/api/cmd', {}, { retry: 1 })).rejects.toMatchObject({ context: { status: 409, retryIn: 1000 } });
+    expect((globalThis.fetch as any).mock.calls).toHaveLength(1);
+  });
+
+  it('re-sends a keyed request that carries Retry-After, waiting what it says', async () => {
     (globalThis.fetch as any)
       .mockResolvedValueOnce(mockResponse(409, null, { 'retry-after': '1' }))
       .mockResolvedValueOnce(mockResponse(200, { state: 1 }));
     vi.useFakeTimers();
-    const promise = postCommand('/api/cmd', {}, { retry: 1 });
+    const promise = postCommand('/api/cmd', {}, { retry: 1, headers: { 'Idempotency-Key': '"k"' } });
     await vi.advanceTimersByTimeAsync(999);
     expect((globalThis.fetch as any).mock.calls).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(1);

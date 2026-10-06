@@ -5,8 +5,8 @@
  * and deduplicate server-side via the Idempotency-Key header.
  *
  * The outbox composes three existing primitives into one headline feature:
- *   - the `idempotent()` key convention (`commandKey(action, target)` stamped
- *     onto `cmd.meta.idempotencyKey`),
+ *   - a key per record (`commandKey(action, target)` and the record's id),
+ *     stamped onto `cmd.meta.idempotencyKey` on every replay,
  *   - the HTTP bridge, which forwards `meta.idempotencyKey` as an
  *     `Idempotency-Key` header so the backend can reject duplicate writes,
  *   - the `persist()` storage style for durable, SSR-safe queue snapshots.
@@ -15,7 +15,8 @@
  * transport) so offline commands are captured before any wire work happens.
  */
 
-import type { AsyncCommandBus, AsyncPlugin, BusError, Command, CommandResult } from './command-bus';
+import type { ActionScope, AsyncCommandBus, AsyncPlugin, BusError, Command, CommandResult } from './command-bus';
+import type { ActionFilter } from './action-filter';
 import { countOption } from './bounds';
 import { commandKey, failureCondition, _okResult, _errResult, ownerOf, _isLibraryAction } from './command-bus';
 import { createSleeper } from './scheduler';
@@ -195,8 +196,10 @@ export function indexedDbOutbox(dbName: string = 'vc-outbox', storeName: string 
 // ---------------------------------------------------------------------------
 
 export type OutboxOptions = {
-  /** Which actions to capture. Glob patterns supported: '*', 'cart*'. Default: all. */
-  actions?: string[];
+  /** Which actions to capture. Glob patterns supported: '*', 'cart*'. An {@link ActionScope}. */
+  actions?: ActionScope;
+  /** Selects actions by name, ANDed with `actions`: an {@link ActionFilter} (`createActionFilter`). Log s35.152. */
+  actionFilter?: ActionFilter;
   /** Durable queue storage. Default: `localStorageOutbox()`. */
   storage?: OutboxStorage;
   /**
@@ -216,16 +219,17 @@ export type OutboxOptions = {
   autoFlush?: boolean;
   /**
    * Derive the idempotency key stored on each record and replayed to the
-   * backend. Default: `commandKey(action, target)` - the same convention the
-   * `idempotent()` plugin uses, so both layers agree on what "the same
-   * logical command" means.
+   * backend. Default: `commandKey(action, target)` followed by `:` and the
+   * record's id, so each queued write is its own request: a key names one
+   * request payload (Idempotency-Key draft-07). A record stored earlier keeps
+   * its stored key. tests/idempotency-key-payload.test.ts.
    */
   key?: (cmd: Command) => string;
   /**
    * Max queued records - bounded memory. When exceeded, the OLDEST record is
    * dropped with a console warning. Default: 200.
    */
-  maxQueue?: number;
+  maxSize?: number;
   /**
    * Whether a failed replay is worth trying again later. `true` keeps the
    * record at the head and stops the flush, so order is preserved and the
@@ -360,7 +364,7 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
     isOnline = () => (typeof navigator !== 'undefined' ? navigator.onLine : true),
     autoFlush = true,
     key: keyFn,
-    maxQueue: rawMaxQueue = 200,
+    maxSize: rawMaxSize = 200,
     isRetryable = outboxIsRetryable,
   } = options;
 
@@ -374,13 +378,13 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
   // integer makes the loop's exit condition reachable, so the `!` below is
   // sound rather than hopeful - no extra guard, and no unreachable branch to
   // leave uncovered.
-  // `queue.length > maxQueue` gates EVICTION, so a NaN bound never fired and
+  // `queue.length > maxSize` gates EVICTION, so a NaN bound never fired and
   // the cap silently vanished - measured at 300 records queued. ../bounds owns
   // that rule now, and it falls back to the documented 200 rather than to 0:
   // an outbox that queues nothing while offline LOSES the commands it exists
   // to hold, which is not a louder failure than an unbounded one, just a
   // costlier one.
-  const maxQueue = countOption(rawMaxQueue, 200);
+  const maxSize = countOption(rawMaxSize, 200);
 
   const pending = signal(0);
 
@@ -409,21 +413,23 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
   /** Drops oldest-first down to the bound. Returns how many were dropped. */
   function enforceBound(): number {
     let count = 0;
-    while (queue.length > maxQueue) {
+    while (queue.length > maxSize) {
       const dropped = queue.shift()!;
       count++;
-      console.warn(`[vapor-chamber] outbox: queue exceeded maxQueue (${maxQueue}); dropped the oldest record "${dropped.action}" (id ${dropped.id}). Raise maxQueue or flush more often.`);
+      console.warn(`[vapor-chamber] outbox: queue exceeded maxSize (${maxSize}); dropped the oldest record "${dropped.action}" (id ${dropped.id}). Raise maxSize or flush more often.`);
     }
     return count;
   }
 
   async function enqueue(cmd: Command): Promise<CommandResult> {
+    const id = genId();
     const record: OutboxRecord = {
-      id: genId(),
+      id,
       action: cmd.action,
       target: cmd.target,
       payload: cmd.payload,
-      key: keyFn ? keyFn(cmd) : commandKey(cmd.action, cmd.target),
+      // One record, one key: two offline writes are two requests.
+      key: keyFn ? keyFn(cmd) : `${commandKey(cmd.action, cmd.target)}:${id}`,
       queuedAt: new Date().toISOString(),
     };
     queue.push(record);
@@ -472,7 +478,7 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
     if (isOnline() && queue.length === 0) return next();
     return enqueue(cmd);
   };
-  Object.assign(plugin, { id: 'outbox', actions });
+  Object.assign(plugin, { id: 'outbox', actions, actionFilter: options.actionFilter });
 
   async function runFlush(bus: AsyncCommandBus): Promise<OutboxFlushSummary> {
     let replayed = 0;

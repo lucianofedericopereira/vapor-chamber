@@ -208,7 +208,7 @@ describe('failureCondition: any failure, by contract', () => {
 /** The real single bridge on a bus with the default retry, no waits; `sent` counts the POSTs. */
 function retried(answer: () => Response | [number, unknown], use: Array<unknown> = [], actions: Record<string, 'idempotent'> = {}) {
   const sent = singleServer(() => answer());
-  const bus = createAsyncCommandBus({ retry: { baseDelay: 0, actions } });
+  const bus = createAsyncCommandBus({ retry: { baseDelay: 0, actionPolicies: actions } });
   for (const p of use) bus.use(p as never);
   bus.use(createHttpBridge({ endpoint: '/api/vc' }));
   return { bus, sent };
@@ -235,8 +235,8 @@ describe('the bus re-sends through the transport by the condition', () => {
 
   it('re-sends a transient answer; an uncertain one only when idempotent; never a final one', async () => {
     const counts: Array<[number, number, number]> = [
-      [503, 3, 3], [429, 3, 3], [504, 3, 3], [408, 3, 3],
-      [500, 1, 3], [502, 1, 3],
+      [503, 3, 3], [429, 3, 3], [408, 3, 3],
+      [504, 1, 3], [500, 1, 3], [502, 1, 3],
       [422, 1, 1], [409, 1, 1], [404, 1, 1], [403, 1, 1],
     ];
     for (const [status, plain, declared] of counts) {
@@ -248,19 +248,28 @@ describe('the bus re-sends through the transport by the condition', () => {
     }
   });
 
-  it('re-sends any status carrying Retry-After, after the wait it declares', async () => {
+  it('re-sends a keyed command answered with Retry-After, after the wait it declares; an unkeyed one fails once with retryIn', async () => {
     vi.useFakeTimers();
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
     let first = true;
+    const inProgress = () => new Response(JSON.stringify(problem(409, 'in_progress')), { status: 409, headers: { 'content-type': 'application/problem+json', 'retry-after': '2' } });
     const { bus, sent } = retried(() => {
       if (!first) return [200, { state: 'done' }];
       first = false;
-      return new Response(JSON.stringify(problem(409, 'in_progress')), { status: 409, headers: { 'content-type': 'application/problem+json', 'retry-after': '2' } });
-    });
+      return inProgress();
+    }, [idempotent()]);
     const pending = bus.dispatch('save', {});
     await vi.advanceTimersByTimeAsync(1999);
     expect(sent.length).toBe(1);
     await vi.advanceTimersByTimeAsync(1);
     expect(await pending).toSucceedWith('done');
+    const plain = retried(inProgress);
+    const unkeyed = plain.bus.dispatch('save', {});
+    // Past three declared waits: a bus that re-sends fails here, never hangs.
+    await vi.advanceTimersByTimeAsync(6000);
+    const r = await unkeyed;
+    expect(plain.sent.length).toBe(1);
+    expect((r.error as BusError).context).toMatchObject({ status: 409, retryIn: 2000 });
   });
 
   it('a lost answer is re-sent only for a keyed command or an idempotent action', async () => {
@@ -343,7 +352,7 @@ describe('the bus re-sends through the transport by the condition', () => {
 
   it("a handler's own throw is uncertain: re-run only when idempotent; a plugin's throw is a bug, never", async () => {
     let calls = 0;
-    const bus = createAsyncCommandBus({ retry: { baseDelay: 0, actions: { flaky: 'idempotent' } } });
+    const bus = createAsyncCommandBus({ retry: { baseDelay: 0, actionPolicies: { flaky: 'idempotent' } } });
     bus.register('plain', async () => { calls++; throw new Error('flaky'); });
     bus.register('flaky', async () => { calls++; throw new Error('flaky'); });
     await bus.dispatch('plain', {});

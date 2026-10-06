@@ -19,7 +19,7 @@ import { asRef } from './_reactive';
 
 // asRef: signals are Vue shallowRefs at runtime - typed as such so vue-tsc
 // auto-unwraps them in the template (see _reactive.ts).
-const shared = useSharedCommandState({ errorCap: 5 });
+const shared = useSharedCommandState({ maxSize: 5 });
 const isAnyLoading = asRef(shared.isAnyLoading);
 const errors = asRef(shared.errors);
 const errorCount = asRef(shared.errorCount);

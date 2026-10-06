@@ -634,7 +634,7 @@ export function createEngine(ctx: EngineContext) {
     handlePop,
     setQuery,
     setRouteData,
-    /** Cancel the navigation in flight, as a newer one would (router.destroy).
+    /** Cancel the navigation in flight, as a newer one would (router.dispose).
      *  No successor will clear the loading flag, so this does; a cancelled
      *  navigation walks no history back (see revert). */
     cancel: () => {

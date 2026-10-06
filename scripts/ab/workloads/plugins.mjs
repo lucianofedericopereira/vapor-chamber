@@ -11,7 +11,7 @@ const chain = createCommandBus();
 chain.register('x', (cmd) => cmd.target + 1);
 chain.use(logger({ filter: () => false }));
 chain.use(cache({ actions: ['never*'] }));
-chain.use(metrics({ maxEntries: 8 }));
+chain.use(metrics({ maxSize: 8 }));
 chain.on('x', () => {});
 
 const tracked = createCommandBus();

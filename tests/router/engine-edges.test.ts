@@ -44,7 +44,7 @@ describe('resolve() shapes', () => {
     // router.resolve() swallows this into a raw href; the engine's
     // resolveLocation is the one that reports it, reached through push().
     expect(() => (router as unknown as { resolve: (t: string) => string }).resolve('/list')).not.toThrow();
-    router.destroy();
+    router.dispose();
   });
 
   it('an object `to` with no path resolves against the current path', async () => {
@@ -57,7 +57,7 @@ describe('resolve() shapes', () => {
     await router.push({ query: { tag: 'x' } } as never);
     expect(router.currentRoute.value.location.path).toBe('/list');
     expect(router.currentRoute.value.location.query.tag).toBe('x');
-    router.destroy();
+    router.dispose();
   });
 
   it('parses a string `to` carrying both query and hash', async () => {
@@ -69,7 +69,7 @@ describe('resolve() shapes', () => {
     expect(loc.path).toBe('/list');
     expect(loc.query.tag).toBe('a');
     expect(loc.hash).toBe('#frag');
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -87,7 +87,7 @@ describe('query patch cleaning', () => {
     // (not serialised as the string "null", which is the bug this guards).
     expect(q.tag).toEqual(['a', 'b']);
     expect(q.page === undefined || q.page === '1').toBe(true);
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -113,7 +113,7 @@ describe('guards', () => {
     // Without the index correction the shrinking array would slide 'second'
     // past the cursor and it would never run.
     expect(order).toEqual(['first', 'second']);
-    router.destroy();
+    router.dispose();
   });
 
   // The other direction of the same correction, and the one the bus already
@@ -147,7 +147,7 @@ describe('guards', () => {
 
     // Length-based correction walks the cursor back onto 'a' and re-awaits it.
     expect(order).toEqual(['a', 'b']);
-    router.destroy();
+    router.dispose();
   });
 
   it('a guard returning false aborts with a router error', async () => {
@@ -158,7 +158,7 @@ describe('guards', () => {
     const result = await router.push('/list');
     expect(isRouterError(result, 'router:refused:guard')).toBe(true);
     expect(router.currentRoute.value.location.path).toBe('/');
-    router.destroy();
+    router.dispose();
   });
 
   it('a guard returning a location redirects there', async () => {
@@ -169,7 +169,7 @@ describe('guards', () => {
     expect(await router.push('/list')).toBeNull();
     expect(router.currentRoute.value.location.path).toBe('/');
     off();
-    router.destroy();
+    router.dispose();
   });
 
   it('reports router:exceeded:redirects instead of hanging when two guards redirect at each other', async () => {
@@ -199,7 +199,7 @@ describe('guards', () => {
     expect(isRouterError(result, 'router:exceeded:redirects')).toBe(true);
     offA();
     offB();
-    router.destroy();
+    router.dispose();
   });
 
   it('a self-redirecting guard chain still resolves within the bound', async () => {
@@ -220,7 +220,7 @@ describe('guards', () => {
     expect(await router.push('/list')).toBeNull();
     expect(router.currentRoute.value.location.path).toBe('/');
     off();
-    router.destroy();
+    router.dispose();
   });
 
   it('a redirect during a popstate replaces rather than pushing', async () => {
@@ -239,7 +239,7 @@ describe('guards', () => {
     // hit it, redirect again, and strand the user. Replacing consumes it.
     expect(router.currentRoute.value.location.path).toBe('/list');
     off();
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -257,7 +257,7 @@ describe('navigating without a table', () => {
     // Returned as a value, not thrown: navigation errors are results here, so
     // a caller awaiting push() does not need a try/catch around every link.
     expect(isRouterError(result)).toBe(true);
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -272,7 +272,7 @@ describe('setRouteData', () => {
     // Loud in dev, lenient in prod: the value lands, but nothing reads it,
     // which is a typo nobody would otherwise notice.
     expect(warn).toHaveBeenCalledWith(expect.stringContaining('no route record by that name'));
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -294,7 +294,7 @@ describe('afterEach hooks', () => {
     await router.push('/list');
 
     expect(order).toEqual(['first', 'second']);
-    router.destroy();
+    router.dispose();
   });
 
   // Same over-correction as the guard case above, on the hook list. A one-shot
@@ -323,7 +323,7 @@ describe('afterEach hooks', () => {
     await router.push('/list');
 
     expect(order).toEqual(['a', 'b']);
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -345,6 +345,6 @@ describe('post-commit failure', () => {
     expect(result).toBeNull();
     expect(router.currentRoute.value.location.path).toBe('/list');
     expect(error).toHaveBeenCalled();
-    router.destroy();
+    router.dispose();
   });
 });

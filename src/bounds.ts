@@ -15,7 +15,7 @@
  * Two of the three are unbounded growth or a defeated guard, and they are the
  * two that are idiomatic to write. Measured through the public API before this
  * module existed: `history({ maxSize: NaN })` kept 500 entries against a cap of
- * 50, `metrics({ maxEntries: NaN })` kept 1500 against 1000,
+ * 50, `metrics({ maxSize: NaN })` kept 1500 against 1000,
  * `circuitBreaker({ threshold: NaN })` sat closed through 20 straight failures,
  * and `StreamParser({ maxDepth: NaN })` accepted 5,000 levels of nesting
  * without once firing the depth guard that exists to stop exactly that.
@@ -34,7 +34,7 @@
  *
  * ONE SITE DELIBERATELY DOES NOT USE THIS, and saying so here is the point of
  * saying it at all - an exception nobody records is just a gap. `command-bus.ts`
- * keeps its inline `| 0` for `bufferLimit`, because importing this module into
+ * keeps its inline `| 0` for `maxBufferSize`, because importing this module into
  * the one file every consumer pulls costs 50 B brotli in the minimal Blade
  * bundle `esm-treeshake.test.ts` gates, which breaches that ceiling on its own.
  * `| 0` already handles the NaN case there; what it gives up is `Infinity`,

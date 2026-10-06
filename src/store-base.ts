@@ -11,6 +11,7 @@
 import type { BaseBus, CommandResult } from './command-bus';
 import { _failures } from './failure';
 import { _asLibrary, _isLibraryAction } from './library-names';
+import { _appliedRemotely, _storeReceivers } from './applied-remotely';
 import { DEV } from './dev';
 
 // Coded like every library failure (owner:condition:subject); the owner is the
@@ -20,9 +21,18 @@ import { DEV } from './dev';
 const storeFail = _failures('store');
 
 /** A reducer: current state plus the dispatched target, returning the NEXT state. */
-export type StoreAction<S> = (state: S, target: any, payload?: any) => S;
+export type StoreReducer<S> = (state: S, target: any, payload?: any) => S;
 
-export type ChamberStoreOptions<S extends object, A extends Record<string, StoreAction<S>>> = {
+/** What defineChamberStore takes. */
+export type ChamberStoreOptions<S extends object, R extends Record<string, StoreReducer<S>>> = {
+  /**
+   * The store's reducers: each key names an action (`add` on store `cart`
+   * dispatches `cartAdd`, and becomes the method `cart.add`), each value
+   * returns the next state from the current one and the call's target and
+   * payload. `actions` elsewhere in the library is an ActionScope (names),
+   * so the map has its own word. Log s35.147.
+   */
+  reducers: R;
   /**
    * A FACTORY, never a literal. Two stores of the same shape must not share a
    * nested reference, and `$reset` must not hand back the object a previous
@@ -30,7 +40,6 @@ export type ChamberStoreOptions<S extends object, A extends Record<string, Store
    * unrepresentable.
    */
   state: () => S;
-  actions: A;
   /**
    * URL-worthy fields (pattern 4B): `storeField -> query key`. The store does
    * NOT own a signal for these - reads and writes both go through the router,
@@ -46,9 +55,28 @@ export type ChamberStoreOptions<S extends object, A extends Record<string, Store
   /**
    * Share the store across tabs over this event lane, the one an app bridges
    * with `createChannel({ lane, events: ['<id>$state'] })`. Every tab ends on
-   * the same state (docs/store.md, Across tabs). Off by default.
+   * the same state, and a tab opened later asks for it when it opens
+   * (docs/store.md, Across tabs). Off by default.
    */
   share?: { on(event: string, listener: (data: any) => void): () => void; emit(event: string, data: any): void };
+  /**
+   * The next state from a transport's answer to one of the store's actions:
+   * a bridge forwards the action, the reducer does not run, and the store
+   * takes `answer(state, value, cmd)`, the value being the answer's `state`.
+   * `(_, value) => value` when the server answers the store's whole state.
+   * Without it, a bridged action leaves the state as it is (docs/store.md,
+   * A store behind a bridge). tests/store-bridged-answer.test.ts.
+   */
+  answer?: (state: S, value: unknown, cmd: { action: string; target: any; payload?: any }) => S;
+  /**
+   * The server's version of a state, a number that grows with every write it
+   * applies: an answer is written only when its version is higher than the
+   * one the store holds, so an older answer arriving last never replaces a
+   * newer one. A version that is not a finite number falls back to arrival
+   * order. Without it, the last answer to arrive wins.
+   * tests/store-answer-version.test.ts.
+   */
+  version?: (state: S) => number;
 };
 
 /** The router surface pattern 4B needs, named structurally so this module
@@ -58,7 +86,7 @@ export type StoreRouter = {
   setQuery: (patch: Record<string, unknown>, opts?: { history?: 'push' | 'replace' }) => void;
 };
 
-export type ChamberStore<S extends object, A extends Record<string, StoreAction<S>>> = {
+export type ChamberStore<S extends object, R extends Record<string, StoreReducer<S>>> = {
   readonly $id: string;
   /** Read-only by construction: there is no setter, so a direct write throws in
    *  strict mode. The bus is the only mutation channel. */
@@ -74,7 +102,7 @@ export type ChamberStore<S extends object, A extends Record<string, StoreAction<
    *  with no subscriber writes as it would without. docs/store.md. */
   $onField: <K extends keyof S & string>(key: K, fn: (value: S[K]) => void) => () => void;
   $dispose: () => void;
-} & { [K in keyof A]: (target?: any, payload?: any) => CommandResult | Promise<CommandResult> };
+} & { [K in keyof R]: (target?: any, payload?: any) => CommandResult | Promise<CommandResult> };
 
 /**
  * A store plus the bookkeeping its LIFETIME needs.
@@ -126,6 +154,9 @@ const MEMBERS = new Set(['$id', 'state', 'url', '$reset', '$dispose', '$onField'
 /** How many steps a store with `undo: true` keeps (a power of two); history's default is 50. */
 const UNDO_RING = 256;
 
+/** Marks an undone step in the ring: no command equals it, and a replay skips it. */
+const UNDONE = {};
+
 /** `cart` + `add` -> `cartAdd`, the house convention `useCommandGroup` uses. */
 function actionName(id: string, key: string): string {
   return id + key.charAt(0).toUpperCase() + key.slice(1);
@@ -144,26 +175,27 @@ export type StoreRuntime = {
   scope?: { active(): boolean; onDispose(fn: () => void): void };
 };
 
-export type DefineChamberStore = <S extends object, A extends Record<string, StoreAction<S>>>(
+export type DefineChamberStore = <S extends object, R extends Record<string, StoreReducer<S>>>(
   id: string,
-  options: ChamberStoreOptions<S, A>,
-) => (bus: BaseBus, router?: StoreRouter) => ChamberStore<S, A>;
+  options: ChamberStoreOptions<S, R>,
+) => (bus: BaseBus, router?: StoreRouter) => ChamberStore<S, R>;
 
 /** @internal The store, over a runtime. */
 export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
-  return function defineChamberStore<S extends object, A extends Record<string, StoreAction<S>>>(
+  return function defineChamberStore<S extends object, R extends Record<string, StoreReducer<S>>>(
   id: string,
-  options: ChamberStoreOptions<S, A>,
-): (bus: BaseBus, router?: StoreRouter) => ChamberStore<S, A> {
+  options: ChamberStoreOptions<S, R>,
+): (bus: BaseBus, router?: StoreRouter) => ChamberStore<S, R> {
+  const reducers = options.reducers;
   // An action is a method on the store, so a key named like a member would
-  // replace it: `actions: { state }` left `store.state` a function. Refused
+  // replace it: `reducers: { state }` left `store.state` a function. Refused
   // here, where the options are first known. tests/store-review.test.ts.
   // A `$` name is the library's (`<id>$reset`, `<action>$undo`): an id or an
   // action key carrying one would read as the library's command. Log s35.117.
   if (_isLibraryAction(id)) {
     throw storeFail('invalid:name', `Store "${id}": a name with "$" is the library's.${DEV ? ' Rename the store.' : ''}`, { context: { id } });
   }
-  for (const key of Object.keys(options.actions)) {
+  for (const key of Object.keys(reducers)) {
     if (MEMBERS.has(key)) {
       throw storeFail('already:member', `Store "${id}": the action "${key}" would replace the store's own "${key}".${DEV ? ' Rename the action.' : ''}`, { context: { id, key } });
     }
@@ -202,7 +234,7 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
       entry.holders++;
       rt.scope.onDispose(() => {
         entry.holders--;
-        if (entry.holders <= 0 && !entry.pinned) (entry.store as ChamberStore<S, A>).$dispose();
+        if (entry.holders <= 0 && !entry.pinned) (entry.store as ChamberStore<S, R>).$dispose();
       });
     };
 
@@ -217,7 +249,7 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
     const existing = registry.get(id);
     if (existing?.def === useStore) {
       join(existing);
-      return existing.store as ChamberStore<S, A>;
+      return existing.store as ChamberStore<S, R>;
     }
 
     // Before anything is registered: thrown after, it left the handlers on the
@@ -250,19 +282,48 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
       }
     };
 
-    // `undo: true`: each action's inverse puts back the state it replaced; it
-    // runs inside the bus's `<action>$undo` command. canUndo holds while the
+    // `undo: true`: every write is a step in a ring of UNDO_RING entries
+    // (actions, `$reset`, a tab's `$sync`), not in weak maps keyed by every
+    // command (5x the action's cost, log s35.118). The inverse runs inside the
+    // bus's `<action>$undo` command and rebases (Memento for owned state, as
+    // Replicache and Apollo's optimistic layers rebase): from the undone step's
+    // "before" it re-applies every later step, calling the reducer directly, so
+    // plugins and bridges never see those steps again. canUndo holds while the
     // state is the one that command produced; a redo's write is credited to the
-    // last command undone. The steps sit in a ring of UNDO_RING entries, not in
-    // weak maps keyed by every command (5x the action's cost, log s35.118): an
-    // older step reads canUndo false. tests/store-undo.test.ts.
-    let step: ((cmd: any, prev: S) => void) | undefined;
+    // last command undone, and when the state is still the one that undo
+    // restored, a redo writes the state the step recorded instead of running
+    // the reducer again: same object, same ids. tests/store-undo.test.ts,
+    // tests/store-rollback-rebase.test.ts (log s35.157),
+    // tests/store-redo-recorded.test.ts (log s35.158).
+    let step: ((cmd: any, prev: S, f: StoreReducer<S>) => S) | undefined;
     let inverse: { undo: (cmd: any) => unknown; canUndo: (cmd: any) => boolean } | undefined;
     if (options.undo) {
       // One flat array, three slots a step: [cmd, before, after].
       const ring: unknown[] = new Array(UNDO_RING * 3).fill(undefined);
       let next = 0;
-      const undone: object[] = [];
+      // Undone steps, three slots each: [cmd, before, after].
+      const undone: unknown[] = [];
+      // The reducer that re-applies an action's step, by action name.
+      const replay = new Map<string, StoreReducer<S>>();
+      for (const key of Object.keys(reducers)) replay.set(actionName(id, key), reducers[key] as StoreReducer<S>);
+      // DEV: a rollback replays reducers, so one that mints a value (an id, a
+      // time) rebases to a different state. Run it twice, as React's
+      // StrictMode does, and warn once per action when the two differ. A state
+      // JSON cannot hold is not compared. `$reset` and `$sync` are not
+      // replayed by a rollback, so they are not checked.
+      const noticed = new Set<string>();
+      const twice = (f: StoreReducer<S>, prev: S, cmd: { action: string; target: any; payload?: any }): S => {
+        const s = f(prev, cmd.target, cmd.payload);
+        if (replay.get(cmd.action) === f && !noticed.has(cmd.action)) {
+          let same = true;
+          try { same = JSON.stringify(f(prev, cmd.target, cmd.payload)) === JSON.stringify(s); } catch { /* not JSON: not compared */ }
+          if (!same) {
+            noticed.add(cmd.action);
+            console.warn(`[vapor-chamber] Store "${id}": the reducer for "${cmd.action}" gave two different states for the same input. A rollback of an earlier step replays it and gets a different state. Mint ids and times in the call, not in the reducer.`);
+          }
+        }
+        return s;
+      };
       // The newest step holding `cmd` (its first slot), or -1.
       const find = (cmd: unknown): number => {
         for (let k = 1; k <= UNDO_RING; k++) {
@@ -271,18 +332,49 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
         }
         return -1;
       };
-      step = (cmd, prev) => {
+      // `undone.length` first: an action with nothing undone never reads
+      // its origin. The reducer runs before anything moves, so a throw leaves
+      // the ring and the undone steps as they were.
+      step = (cmd, prev, f) => {
+        const n = undone.length;
+        const redo = n !== 0 && cmd.meta?.origin === 'redo';
+        const s = redo && undone[n - 2] === prev && (undone[n - 3] as { action: string }).action === cmd.action
+          ? (undone[n - 1] as S)
+          : DEV ? twice(f, prev, cmd) : f(prev, cmd.target, cmd.payload);
         const i = next * 3;
-        ring[i] = cmd.meta?.origin === 'redo' && undone.length !== 0 ? undone.pop() : cmd;
+        ring[i] = redo ? undone[n - 3] : cmd;
+        if (redo) undone.length = n - 3;
         ring[i + 1] = prev;
-        ring[i + 2] = state.value;
+        ring[i + 2] = s;
         next = (next + 1) & (UNDO_RING - 1);
+        return (state.value = s);
       };
       inverse = {
         undo: (cmd) => {
-          undone.push(cmd);
-          state.value = ring[find(cmd) + 1] as S;
-          return state.value;
+          const i = find(cmd);
+          // A step the ring does not hold, or one already undone, changed
+          // nothing to take back: the identity, never slot 0.
+          if (i === -1) return state.value;
+          // Each later step as [slot, before, after], computed first and written
+          // after, so a reducer that throws leaves the ring and the state as
+          // they were. A reducer runs again; `$reset`, a tab's `$sync` and a
+          // server's answer set a state whatever came before, so they keep the
+          // one they set.
+          let s = ring[i + 1] as S;
+          const w: unknown[] = [];
+          for (let t = (i / 3 + 1) & (UNDO_RING - 1); t !== next; t = (t + 1) & (UNDO_RING - 1)) {
+            const c = ring[t * 3] as { action: string; target: any; payload?: any };
+            if (c === UNDONE) continue;
+            const f = _appliedRemotely.has(c) ? undefined : replay.get(c.action);
+            w.push(t * 3, s, (s = f ? f(s, c.target, c.payload) : (ring[t * 3 + 2] as S)));
+          }
+          for (let k = 0; k < w.length; k += 3) {
+            ring[(w[k] as number) + 1] = w[k + 1];
+            ring[(w[k] as number) + 2] = w[k + 2];
+          }
+          undone.push(cmd, ring[i + 1], ring[i + 2]);
+          ring[i] = UNDONE;
+          return (state.value = s);
         },
         canUndo: (cmd) => {
           const i = find(cmd);
@@ -291,22 +383,50 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
       };
     }
 
+    // A state a server answered is written as a step of the command that got
+    // the reply, the way the action's reducer writes. With `version`, a state
+    // older than the one held is dropped: the server's number orders its
+    // writes, as `share`'s orders tabs.
+    const versionOf = options.version;
+    let unversioned = false;
+    const fromServer = (cmd: { action: string; target: any; payload?: any }, next: S): void => {
+      if (versionOf) {
+        const v = versionOf(next);
+        if (Number.isFinite(v)) {
+          const held = versionOf(state.value);
+          if (Number.isFinite(held) && v <= held) return;
+        } else if (DEV && !unversioned) {
+          unversioned = true;
+          console.warn(`[vapor-chamber] Store "${id}": version() of the answer to "${cmd.action}" is ${v}, not a number. Answers without one are written in arrival order.`);
+        }
+      }
+      if (step) step(cmd, state.value, () => next);
+      else state.value = next;
+    };
+    // The app maps a command's own answer (`answer`). An answer with no `state`
+    // writes nothing.
+    const onAnswer = options.answer;
+    const registered = onAnswer
+      ? {
+          ...inverse,
+          answer: (cmd: { action: string; target: any; payload?: any }, value: unknown): void => {
+            if (value !== undefined) fromServer(cmd, onAnswer(state.value, value, cmd));
+          },
+        }
+      : inverse;
+
     // Every action becomes a registered handler. The handler is the ONLY writer
     // of `state`, so a plugin that observes the dispatch observes every change.
-    for (const key of Object.keys(options.actions)) {
-      const reducer = options.actions[key] as StoreAction<S>;
+    for (const key of Object.keys(reducers)) {
+      const reducer = reducers[key] as StoreReducer<S>;
       offs.push(
         step
-          ? bus.register(actionName(id, key), (cmd: { target: any; payload?: any }) => {
-              const prev = state.value;
-              state.value = reducer(prev, cmd.target, cmd.payload);
-              (step as (cmd: any, prev: S) => void)(cmd, prev);
-              return state.value;
-            }, inverse)
+          ? bus.register(actionName(id, key), (cmd: { target: any; payload?: any }) =>
+              (step as (cmd: any, prev: S, f: StoreReducer<S>) => S)(cmd, state.value, reducer), registered)
           : bus.register(actionName(id, key), (cmd: { target: any; payload?: any }) => {
               state.value = reducer(state.value, cmd.target, cmd.payload);
               return state.value;
-            }),
+            }, registered),
       );
     }
     // `$reset` is a command too, or persist never saw it and a reload undid it.
@@ -314,14 +434,30 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
     // and past a naming rule: names with `$` are the library's.
     // tests/store-reset-command.test.ts.
     const resetAction = id + '$reset';
+    const fresh = (): S => options.state();
     offs.push(
-      _asLibrary(() => bus.register(resetAction, (cmd: object) => {
-        const prev = state.value;
-        state.value = options.state();
-        step?.(cmd, prev);
-        return state.value;
-      }, inverse)),
+      _asLibrary(() => bus.register(resetAction, (cmd: object) =>
+        step ? step(cmd, state.value, fresh) : (state.value = options.state()), inverse)),
     );
+
+    // A state a server's reply declares for this store (`stores`, by id): the
+    // async bus hands it over at the transport's level, a step of the command
+    // that got the reply. Only an object is a state: anything else writes
+    // nothing. This store removes only its own receiver (a takeover replaces
+    // it). tests/store-declared-by-server.test.ts.
+    const receivers = _storeReceivers.get(bus);
+    if (receivers) {
+      let malformed = false;
+      const receive = (cmd: { action: string; target: any; payload?: any }, value: unknown): void => {
+        if (value !== null && typeof value === 'object') fromServer(cmd, value as S);
+        else if (DEV && !malformed) {
+          malformed = true;
+          console.warn(`[vapor-chamber] Store "${id}": the reply to "${cmd.action}" declared a state that is not an object. It is not written.`);
+        }
+      };
+      receivers.set(id, receive);
+      offs.push(() => { if (receivers.get(id) === receive) receivers.delete(id); });
+    }
 
     // `share`: each local write goes out as `<id>$state` with a version; a
     // newer one from another tab comes in as the `<id>$sync` command (origin
@@ -334,25 +470,36 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
       const tab = Math.random().toString(36).slice(2);
       let version = 0;
       let received: S | undefined;
-      offs.push(_asLibrary(() => bus.register(syncAction, (cmd: { target: S }) => {
-        state.value = cmd.target;
-        return state.value;
-      })));
+      const carried: StoreReducer<S> = (_s, target) => target;
+      // A step like any write, so a rollback replays it rather than erasing it.
+      offs.push(_asLibrary(() => bus.register(syncAction, (cmd: { target: S }) =>
+        step ? step(cmd, state.value, carried) : (state.value = cmd.target))));
       offs.push(rt.watch(state, (next) => {
         if (next === received) return; // a state from another tab is not sent back
         version++;
         lane.emit(event, { state: next, version, tab });
       }));
-      offs.push(lane.on(event, (m: { state: S; version: number; tab: string }) => {
-        if (m.tab === tab) return;
+      offs.push(lane.on(event, (m: { state: S; version: number; tab: string; ask?: true; to?: string }) => {
+        if (m.tab === tab || (m.to !== undefined && m.to !== tab)) return;
+        // A tab that opened asks; a tab that has written answers it alone.
+        // After this delivery: a channel drops what is emitted while it
+        // delivers, as an echo (createChannel's `applying`).
+        if (m.ask) {
+          if (version > 0) queueMicrotask(() => lane.emit(event, { state: state.value, version, tab, to: m.tab }));
+          return;
+        }
         // The newer version wins, a tie goes to the higher tab id: two tabs
-        // writing at once end on one state.
-        if (m.version > version || (m.version === version && m.tab > tab)) {
+        // writing at once end on one state. An answer applies only if newer.
+        if (m.version > version || (m.to === undefined && m.version === version && m.tab > tab)) {
           version = m.version;
           received = m.state;
           bus.dispatch(syncAction, m.state, { __origin: 'sync' });
         }
       }));
+      // Catch up on open: the writes made before this tab existed. Version -1
+      // is below every tab's, so a tab that reads versions only (1.26) never
+      // applies the ask. tests/store-share-late-tab.test.ts.
+      lane.emit(event, { ask: true, version: -1, tab });
     }
 
     const store = {
@@ -362,7 +509,7 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
           return state.value;
         },
       },
-      url: {} as ChamberStore<S, A>['url'],
+      url: {} as ChamberStore<S, R>['url'],
       $reset: () => bus.dispatch(resetAction, null),
       $onField(key: string, fn: (value: unknown) => void) {
         if (fieldSubs === null) {
@@ -390,9 +537,9 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
         // the NEWER store. tests/store-review.test.ts.
         if (registry.get(id) === entry) registry.delete(id);
       },
-    } as ChamberStore<S, A>;
+    } as ChamberStore<S, R>;
 
-    for (const key of Object.keys(options.actions)) {
+    for (const key of Object.keys(reducers)) {
       (store as Record<string, unknown>)[key] = (target?: any, payload?: any) =>
         bus.dispatch(actionName(id, key), target, payload);
     }

@@ -50,8 +50,8 @@
  * this module DOES contradict, is its other one, about package scope:
  * "Adding a state layer to vapor-chamber would create a fourth source of truth
  * and a competition problem." Section 3 is the counter-argument (a bus-backed
- * store is structurally different from Pinia, which grew a ~70-line bus inside
- * itself for want of one underneath), and it gets recorded in the landing
+ * store is structurally different from Pinia, which grew a bus of about 60 lines
+ * inside itself, 4.0.3, for want of one underneath), and it gets recorded in the landing
  * commit rather than assumed here.
  */
 
@@ -138,10 +138,11 @@ describe('composition surface - what the store is built from', () => {
     // module with the probe, must never appear.
     expect(imports.sort()).toEqual(['./store-base.js', 'vue']);
     // The implementation both store entries share (log s35.130): the failure
-    // module and the library's names, no bus, no probe.
+    // module, and one chunk holding the library's names and the set of
+    // commands a transport carried out (log s35.184), no bus, no probe.
     const base = readFileSync(resolve(process.cwd(), 'dist/store-base.js'), 'utf8');
     const baseImports = [...base.matchAll(/^import[^;]*?from\s*["']([^"']+)["']/gm)].map((m) => m[1]);
-    expect(baseImports.sort()).toEqual(['./failure.js', './library-names.js']);
+    expect(baseImports.sort()).toEqual(['./applied-remotely.js', './failure.js']);
   });
 
   /**
@@ -175,7 +176,7 @@ describe('composition surface - what the store is built from', () => {
 
 const useCart = defineChamberStore('cart', {
   state: () => ({ items: [] as number[] }),
-  actions: {
+  reducers: {
     add: (s, id: number) => ({ items: [...s.items, id] }),
     clear: () => ({ items: [] }),
   },
@@ -221,7 +222,7 @@ describe('defineChamberStore - behaviour', () => {
   });
 
   it('returns the same instance for one id and an independent one for another', ({ bus }) => {
-    const useOther = defineChamberStore('wish', { state: () => ({ items: [] as number[] }), actions: { add: (s, id: number) => ({ items: [...s.items, id] }) } });
+    const useOther = defineChamberStore('wish', { state: () => ({ items: [] as number[] }), reducers: { add: (s, id: number) => ({ items: [...s.items, id] }) } });
     expect(useCart(bus)).toBe(useCart(bus));
     useCart(bus).add(1);
     expect(useOther(bus).state.value.items).toEqual([]);
@@ -301,7 +302,7 @@ describe('defineChamberStore - behaviour', () => {
   });
 
   it('reads the registry with a Map, so a store id cannot collide with Object.prototype', ({ bus }) => {
-    const useCtor = defineChamberStore('constructor', { state: () => ({ n: 0 }), actions: { bump: (s) => ({ n: s.n + 1 }) } });
+    const useCtor = defineChamberStore('constructor', { state: () => ({ n: 0 }), reducers: { bump: (s) => ({ n: s.n + 1 }) } });
     const store = useCtor(bus);
     store.bump();
     expect(store.state.value.n).toBe(1);
@@ -314,7 +315,7 @@ describe('defineChamberStore - behaviour', () => {
 describe('URL-backed fields - pattern 4B', () => {
   const useCatalog = defineChamberStore('catalog', {
     state: () => ({ view: 'grid' }),
-    actions: { setView: (s, view: string) => ({ ...s, view }) },
+    reducers: { setView: (s, view: string) => ({ ...s, view }) },
     url: { page: 'page' },
   });
 

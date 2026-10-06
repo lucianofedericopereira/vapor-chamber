@@ -62,6 +62,6 @@ describe('countOption from the root', () => {
  * `err(fail(...))` is the one idiom and it carries the plugin's declared id.
  * `countOption` is the rule bounds.ts records: a caller's count is often NaN
  * (a parsed env var, a storage read), and a hand-written `| 0` or `x > max`
- * gate fails open; app plugins with a `maxQueue`-style option meet the same
+ * gate fails open; app plugins with a `maxSize`-style option meet the same
  * class the library met in cache() and createOutbox().
  */

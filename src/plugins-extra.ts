@@ -22,7 +22,7 @@
  *     and the treeshake ceiling scenario does not include them either.
  *   - Correctness: the two evictions are not the same operation. `cache()`
  *     evicts DOWN TO the bound; `idempotent()` evicts ONE oldest entry before
- *     inserting. Unifying them silently changed behaviour at `maxKeys: 0`, and
+ *     inserting. Unifying them silently changed behaviour at `maxSize: 0`, and
  *     plugins-extra-gaps.test.ts caught it.
  *
  * The second point is now less sharp than it was - the two were aligned, see
@@ -33,8 +33,9 @@
 import { DEV } from './dev';
 import { onSettled } from './settled';
 import { MAX_TIMEOUT_MS, countOption } from './bounds';
-import type { Command, CommandResult, Plugin, AsyncPlugin } from './command-bus';
-import { commandKey, _isBug, _errResult } from './command-bus';
+import type { ActionScope, Command, CommandResult, Plugin, AsyncPlugin } from './command-bus';
+import type { ActionFilter } from './action-filter';
+import { commandKey, _isBug, _errResult, _isLibraryAction } from './command-bus';
 import { freezeCached } from './freeze';
 import { createLanes } from './scheduler';
 
@@ -48,8 +49,10 @@ export type CacheOptions = {
   ttl?: number;
   /** Max entries in the cache. Default: 100. LRU eviction. */
   maxSize?: number;
-  /** Which actions to cache. Glob patterns supported. Default: all. */
-  actions?: string[];
+  /** Which actions to cache. Glob patterns supported. An {@link ActionScope}. */
+  actions?: ActionScope;
+  /** Selects actions by name, ANDed with `actions`: an {@link ActionFilter} (`createActionFilter`). Log s35.152. */
+  actionFilter?: ActionFilter;
   /** Custom cache key. Default: commandKey(action, target). */
   key?: (cmd: Command) => string;
 };
@@ -97,8 +100,10 @@ export function cache(options: CacheOptions = {}): Plugin & {
   // makes it work for any key shape.
   const byAction = new Map<string, Set<string>>();
 
+  // A `$` command takes the default key, which holds its `$` name, so a custom
+  // key never lands it on an app's entry (log s35.182).
   function getKey(cmd: Command): string {
-    return keyFn ? keyFn(cmd) : commandKey(cmd.action, cmd.target);
+    return keyFn && !_isLibraryAction(cmd.action) ? keyFn(cmd) : commandKey(cmd.action, cmd.target);
   }
 
   function remember(key: string, action: string): void {
@@ -159,7 +164,9 @@ export function cache(options: CacheOptions = {}): Plugin & {
     // Through `onSettled`: settle the result, store it if it succeeded, hand
     // it on - synchronously on the sync bus.
     return onSettled(next(), (result) => {
-      if (result.ok) store_(result);
+      // A $ command (a reset, an undo) is a state change: never stored, so
+      // never answered from here (log s35.150).
+      if (result.ok && !_isLibraryAction(cmd.action)) store_(result);
       return result;
     });
   };
@@ -167,6 +174,9 @@ export function cache(options: CacheOptions = {}): Plugin & {
   return Object.assign(plugin, {
     id: 'cache',
     actions,
+    actionFilter: options.actionFilter,
+    // An undone command's answer is stale: its redo runs (log s35.181).
+    forget(cmd: Command): void { dropKey(getKey(cmd)); },
     invalidate(action: string, target?: any): void {
       if (target !== undefined) {
         // Targeted invalidation needs the entry's exact key, and a custom
@@ -206,8 +216,10 @@ export type CircuitBreakerOptions = {
   threshold?: number;
   /** Time in ms the circuit stays open before trying half-open. Default: 30_000. */
   resetTimeout?: number;
-  /** Which actions to protect. Glob patterns. Default: all. */
-  actions?: string[];
+  /** Which actions to protect. Glob patterns. An {@link ActionScope}. */
+  actions?: ActionScope;
+  /** Selects actions by name, ANDed with `actions`: an {@link ActionFilter} (`createActionFilter`). Log s35.152. */
+  actionFilter?: ActionFilter;
   /** Called when circuit opens. */
   onOpen?: (action: string, failCount: number) => void;
   /** Called when circuit resets (half-open succeeds). */
@@ -272,11 +284,16 @@ export function circuitBreaker(options: CircuitBreakerOptions = {}): Plugin & {
       } else {
         c.failCount = 0;
       }
-    } else if (!_isBug(result.error)) {
+    } else if (!_isBug(result.error) && (result.error as Error)?.name !== 'AbortError') {
       // A plugin that threw (converted by the runner) is a pipeline bug, not
       // the server failing - a redeploy fixes it, and letting three of them
-      // lock the action out is the wrong failure mode. It neither counts nor
-      // resets the run of real failures. A backend's failure counts.
+      // lock the action out is the wrong failure mode. A cancel (supersede,
+      // the caller's abort) is not the server failing either: Polly's breaker
+      // skips OperationCanceledException. Every abort is named AbortError, a
+      // raw one and the library's `aborted:` codes (failure.ts), so the name
+      // reads them all without importing the status table. Neither counts
+      // nor resets the run of real failures. A backend's failure counts.
+      // tests/circuit-breaker-cancel.test.ts.
       c.failCount++;
       if (c.failCount >= threshold && c.state === 'closed') {
         c.state = 'open';
@@ -292,6 +309,7 @@ export function circuitBreaker(options: CircuitBreakerOptions = {}): Plugin & {
   return Object.assign(plugin, {
     id: 'circuitBreaker',
     actions,
+    actionFilter: options.actionFilter,
     getState(action: string): CircuitState {
       return getCircuit(action).state;
     },
@@ -310,8 +328,10 @@ export type RateLimitOptions = {
   max?: number;
   /** Window size in milliseconds. Default: 1_000 (1 second). */
   window?: number;
-  /** Which actions to rate limit. Glob patterns. Default: all. */
-  actions?: string[];
+  /** Which actions to rate limit. Glob patterns. An {@link ActionScope}. */
+  actions?: ActionScope;
+  /** Selects actions by name, ANDed with `actions`: an {@link ActionFilter} (`createActionFilter`). Log s35.152. */
+  actionFilter?: ActionFilter;
 };
 
 /**
@@ -324,7 +344,10 @@ export type RateLimitOptions = {
  * bus.use(rateLimit({ max: 5, window: 1000, actions: ['api*'] }));
  */
 export function rateLimit(options: RateLimitOptions = {}): Plugin {
-  const { max = 10, window: windowMs = 1_000, actions } = options;
+  const { actions } = options;
+  // A NaN behaves like a missing option (bounds.ts); 0 keeps its meaning.
+  const max = countOption(options.max, 10);
+  const windowMs = countOption(options.window, 1_000, 0, MAX_TIMEOUT_MS);
 
   // Per-action sliding window: { timestamps[], head } - head index avoids O(n) shift()
   const windows = new Map<string, { ts: number[]; head: number }>();
@@ -355,7 +378,7 @@ export function rateLimit(options: RateLimitOptions = {}): Plugin {
     win.ts.push(now);
     return next();
   };
-  return Object.assign(plugin, { id: 'rateLimit', actions });
+  return Object.assign(plugin, { id: 'rateLimit', actions, actionFilter: options.actionFilter });
 }
 
 // ---------------------------------------------------------------------------
@@ -371,9 +394,11 @@ export type MetricsEntry = {
 
 export type MetricsOptions = {
   /** Max entries to keep. Default: 1000. Oldest evicted first. */
-  maxEntries?: number;
-  /** Which actions to track. Default: all. */
-  actions?: string[];
+  maxSize?: number;
+  /** Which actions to track. An {@link ActionScope}. */
+  actions?: ActionScope;
+  /** Selects actions by name, ANDed with `actions`: an {@link ActionFilter} (`createActionFilter`). Log s35.152. */
+  actionFilter?: ActionFilter;
   /** Called after each dispatch with the metrics entry. */
   onEntry?: (entry: MetricsEntry) => void;
 };
@@ -383,7 +408,7 @@ export type MetricsOptions = {
  * Tracks dispatch count, success rate, and avg duration per action.
  *
  * @example
- * const m = metrics({ maxEntries: 500 });
+ * const m = metrics({ maxSize: 500 });
  * bus.use(m);
  * console.log(m.summary());        // { cartAdd: { count: 42, avgMs: 1.2, errorRate: 0.02 } }
  * console.log(m.entries());         // raw entries
@@ -396,9 +421,9 @@ export function metrics(options: MetricsOptions = {}): Plugin & {
   /** Clear all entries. */
   clear(): void;
 } {
-  const { maxEntries: rawMaxEntries = 1000, actions, onEntry } = options;
+  const { maxSize: rawMaxSize = 1000, actions, onEntry } = options;
   // Measured at 1500 retained against a cap of 1000 with a NaN option.
-  const maxEntries = countOption(rawMaxEntries, 1000);
+  const maxSize = countOption(rawMaxSize, 1000);
   let data: MetricsEntry[] = [];
   let head = 0; // O(1) eviction - head index tracks first live entry
 
@@ -425,7 +450,7 @@ export function metrics(options: MetricsOptions = {}): Plugin & {
 
     data.push(entry);
     // Evict oldest by advancing head - O(1)
-    while ((data.length - head) > maxEntries) head++;
+    while ((data.length - head) > maxSize) head++;
     compactIfNeeded();
     if (onEntry) onEntry(entry);
 
@@ -436,6 +461,7 @@ export function metrics(options: MetricsOptions = {}): Plugin & {
   return Object.assign(plugin, {
     id: 'metrics',
     actions,
+    actionFilter: options.actionFilter,
     entries(): MetricsEntry[] { return data.slice(head); },
     summary(): Record<string, { count: number; avgMs: number; errorRate: number }> {
       const map = new Map<string, { total: number; errors: number; sumMs: number }>();
@@ -473,8 +499,10 @@ export type SerializeOptions = {
    * Default: `cmd.action` (each action serialized against itself).
    */
   key?: (cmd: Command) => string | number | null | undefined;
-  /** Restrict to specific actions (glob patterns). Default: all. */
-  actions?: string[];
+  /** Restrict to specific actions (glob patterns). An {@link ActionScope}. */
+  actions?: ActionScope;
+  /** Selects actions by name, ANDed with `actions`: an {@link ActionFilter} (`createActionFilter`). Log s35.152. */
+  actionFilter?: ActionFilter;
   /**
    * Where the serialization lane lives.
    * - `'instance'` (default): a per-bus in-memory FIFO queue. Same-key commands
@@ -546,7 +574,7 @@ export function serialize(options: SerializeOptions = {}): AsyncPlugin {
     }
     return lanes.run(k, next);
   };
-  return Object.assign(plugin, { id: 'serialize', actions });
+  return Object.assign(plugin, { id: 'serialize', actions, actionFilter: options.actionFilter });
 }
 
 // ---------------------------------------------------------------------------
@@ -557,7 +585,9 @@ export type IdempotentOptions = {
   /**
    * Derive a stable idempotency key from a command. Commands with the same key
    * are the same logical operation. Return `null`/`undefined` to skip a command.
-   * Default: `commandKey(action, target)` (action + stable JSON of target).
+   * Default: `commandKey(action, [target, payload])`, or `commandKey(action,
+   * target)` with no payload, since a key names one request payload
+   * (Idempotency-Key draft-07). tests/idempotency-key-payload.test.ts.
    */
   key?: (cmd: Command) => string | null | undefined;
   /**
@@ -566,8 +596,10 @@ export type IdempotentOptions = {
    * first result instead of hitting the handler/backend again. Default: 60_000.
    */
   ttl?: number;
-  /** Restrict to specific actions (glob patterns). Default: all. */
-  actions?: string[];
+  /** Restrict to specific actions (glob patterns). An {@link ActionScope}. */
+  actions?: ActionScope;
+  /** Selects actions by name, ANDed with `actions`: an {@link ActionFilter} (`createActionFilter`). Log s35.152. */
+  actionFilter?: ActionFilter;
   /**
    * Also stamp the key onto `cmd.meta.idempotencyKey` so transports forward it
    * (the HTTP bridge sends it as an `Idempotency-Key` header). Default: true.
@@ -577,7 +609,7 @@ export type IdempotentOptions = {
    * Max completed keys remembered at once - oldest is evicted first, so memory
    * stays bounded on long-lived buses with many distinct targets. Default: 500.
    */
-  maxKeys?: number;
+  maxSize?: number;
 };
 
 /**
@@ -603,27 +635,34 @@ export type IdempotentOptions = {
  * // two rapid orderCreate dispatches -> one handler run, one backend write
  */
 export function idempotent(options: IdempotentOptions = {}): AsyncPlugin {
-  const { key, ttl: rawTtl = 60_000, actions, stampMeta = true, maxKeys: rawMaxKeys = 500 } = options;
+  const { key, ttl: rawTtl = 60_000, actions, stampMeta = true, maxSize: rawMaxSize = 500 } = options;
   // `now - cached.at < ttl` gates COLLAPSING a repeat, so a NaN window collapses
   // nothing and every duplicate re-executes - the dedupe guarantee silently
   // absent on a plugin whose entire purpose is that guarantee.
   const ttl = countOption(rawTtl, 60_000, 0, MAX_TIMEOUT_MS);
   // Clamped and floored exactly as `cache()` clamps `maxSize`, because the two
   // options disagreed on what the same number means. `cache({ maxSize: 0 })`
-  // stored nothing; `idempotent({ maxKeys: 0 })` stored one entry, because it
+  // stored nothing; `idempotent({ maxSize: 0 })` stored one entry, because it
   // evicted a single oldest key BEFORE inserting - on an empty map that evicted
   // nothing and the insert landed anyway. Same word, same library, opposite
   // behaviour. A negative was likewise a silent 1-entry cache rather than an
   // error. Eviction below now runs down to the bound after the insert, which is
-  // `cache()`'s rule, so `maxKeys: 0` remembers nothing.
+  // `cache()`'s rule, so `maxSize: 0` remembers nothing.
   // Bounded through ../bounds, for the same reason as cache() above.
-  const maxKeys = countOption(rawMaxKeys, 500);
+  const maxSize = countOption(rawMaxSize, 500);
   // key -> completed result (with timestamp); in-flight promises are in `inflight`.
   const done = new Map<string, { at: number; result: CommandResult }>();
   const inflight = new Map<string, Promise<CommandResult>>();
 
+  // A key names one request payload (Idempotency-Key draft-07: never reused
+  // "with a different request payload"); with none, the released key. A `$`
+  // command takes the default key, as in cache() (log s35.182).
+  function getKey(cmd: Command): string | null | undefined {
+    return key && !_isLibraryAction(cmd.action) ? key(cmd) : commandKey(cmd.action, cmd.payload === undefined ? cmd.target : [cmd.target, cmd.payload]);
+  }
+
   const plugin: AsyncPlugin = (cmd, next) => {
-    const raw = key ? key(cmd) : commandKey(cmd.action, cmd.target);
+    const raw = getKey(cmd);
     if (raw == null) return next();
     const k = String(raw);
 
@@ -639,12 +678,16 @@ export function idempotent(options: IdempotentOptions = {}): AsyncPlugin {
       done.delete(k); // expired - drop so the map doesn't retain stale results
     }
 
+    // A $ command (a reset, an undo) is a state change: never recorded, never
+    // joined in flight, so a repeat runs (log s35.150, s35.182). Read once
+    // here, on the miss path.
+    const keep = !_isLibraryAction(cmd.action);
     const run = Promise.resolve(next()).then(
       (result) => {
         inflight.delete(k);
         // Cache only successes. A failed result (resolved errResult, ok:false)
         // is NOT cached so a genuine retry runs again.
-        if (result?.ok) {
+        if (result?.ok && keep) {
           // Frozen for the same reason the `cache()` plugin freezes: every
           // later duplicate within `ttl` gets this exact object back, and the
           // concurrent duplicates sharing `run` already share it. A consumer
@@ -657,7 +700,7 @@ export function idempotent(options: IdempotentOptions = {}): AsyncPlugin {
           // Bounding the ITERATION rather than looping on the size is what
           // makes a zero or negative bound terminate instead of spinning.
           for (const oldest of done.keys()) {
-            if (done.size <= maxKeys) break;
+            if (done.size <= maxSize) break;
             done.delete(oldest);
           }
         }
@@ -668,10 +711,19 @@ export function idempotent(options: IdempotentOptions = {}): AsyncPlugin {
         throw err;
       },
     );
-    inflight.set(k, run);
+    if (keep) inflight.set(k, run);
     return run;
   };
-  return Object.assign(plugin, { id: 'idempotent', actions });
+  return Object.assign(plugin, {
+    id: 'idempotent',
+    actions,
+    actionFilter: options.actionFilter,
+    // An undone command is no longer done: its redo runs (log s35.181).
+    forget(cmd: Command): void {
+      const raw = getKey(cmd);
+      if (raw != null) done.delete(String(raw));
+    },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -690,13 +742,16 @@ export type SupersedeOptions = {
    * Derive the supersede key from a command. Commands resolving to the SAME
    * key auto-cancel their predecessor; different keys race independently.
    * Return `null`/`undefined` to skip superseding for that command.
-   * Default: `commandKey(action, target)` - same default `idempotent` uses,
-   * which already includes the action name, so distinct actions never
+   * Default: `commandKey(action, target)`: a newer dispatch on the same
+   * target cancels the one in flight whatever its payload (a search box's
+   * next keystroke). It includes the action name, so distinct actions never
    * collide and are never silently dropped by this plugin.
    */
   key?: (cmd: Command) => string | null | undefined;
-  /** Restrict to specific actions (glob patterns). Default: all. */
-  actions?: string[];
+  /** Restrict to specific actions (glob patterns). An {@link ActionScope}. */
+  actions?: ActionScope;
+  /** Selects actions by name, ANDed with `actions`: an {@link ActionFilter} (`createActionFilter`). Log s35.152. */
+  actionFilter?: ActionFilter;
 };
 
 /**
@@ -707,9 +762,11 @@ export type SupersedeOptions = {
  * previous fetch lands. Without it, a slow first response can arrive AFTER a
  * faster second one and clobber it with stale data. With it, the first
  * dispatch's AbortSignal fires the instant a second dispatch for the same key
- * starts - `createHttpBridge` / `createBatchingHttpBridge` already forward
- * `cmd.signal` to `fetch()`, so the stale request is genuinely cancelled, not
- * merely ignored once it resolves. A handler that passes `cmd.signal` to
+ * starts - `createHttpBridge` forwards `cmd.signal` to `fetch()`, so the
+ * stale request is genuinely cancelled, not merely ignored once it resolves.
+ * `createBatchingHttpBridge` settles the stale command at once, drops it
+ * from a batch not yet sent, and cancels a sent batch once every command in
+ * it has aborted (tests/batching-abort.test.ts). A handler that passes `cmd.signal` to
  * `createHttpClient().get()` is cancelled the same way, even when its GET
  * joined one already in flight (see the client's `dedupe`).
  *
@@ -752,5 +809,5 @@ export function supersede(options: SupersedeOptions = {}): AsyncPlugin {
     });
     return result;
   };
-  return Object.assign(plugin, { id: 'supersede', actions });
+  return Object.assign(plugin, { id: 'supersede', actions, actionFilter: options.actionFilter });
 }

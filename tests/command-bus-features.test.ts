@@ -2667,8 +2667,8 @@ describe('core dispatch - query, rollback, buffer & error defaults', () => {
     expect(result.rollbacks).toHaveLength(1);
   });
 
-  it("onMissing:'buffer' drops the oldest and warns when bufferLimit is exceeded", () => {
-    const bus = createCommandBus({ onMissing: 'buffer', bufferLimit: 2 });
+  it("onMissing:'buffer' drops the oldest and warns when maxBufferSize is exceeded", () => {
+    const bus = createCommandBus({ onMissing: 'buffer', maxBufferSize: 2 });
     {
       using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
@@ -2743,7 +2743,7 @@ describe('core dispatch - query, rollback, buffer & error defaults', () => {
     const { createCommandBus: freshBus } = await import('../src/command-bus');
 
     using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const bus = freshBus({ onMissing: 'buffer', bufferLimit: 1 });
+    const bus = freshBus({ onMissing: 'buffer', maxBufferSize: 1 });
 
     bus.dispatch('x', { id: 1 });
     bus.dispatch('x', { id: 2 }); // overflow, but DEV === false -> no warn
@@ -2762,7 +2762,7 @@ describe('core dispatch - query, rollback, buffer & error defaults', () => {
     const { createCommandBus: freshBus } = await import('../src/command-bus');
 
     using warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const bus = freshBus({ onMissing: 'buffer', bufferLimit: 1 });
+    const bus = freshBus({ onMissing: 'buffer', maxBufferSize: 1 });
 
     bus.dispatch('x', { id: 1 });
     bus.dispatch('x', { id: 2 }); // overflow, but DEV === false -> no warn

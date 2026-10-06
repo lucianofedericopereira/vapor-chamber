@@ -5,8 +5,8 @@
  *
  * - `isRetryableStatus(status)` - may a request that got this status be sent
  *   again? 408, 429 and every 5xx, the set the AWS SDKs and the .NET standard
- *   resilience handler retry. The HTTP client's loops use it, and honour
- *   `Retry-After` on any status.
+ *   resilience handler retry. The HTTP client's loops use it. A declared
+ *   wait (`Retry-After`) sets when, never whether.
  * - `ProblemDetails` - the failure's shape at the boundary (RFC 9457): what a
  *   backend answers, and what the HTTP client's `safe` helpers return.
  * - `classifyError(error)` - can a retained cache entry stand in for this
@@ -57,8 +57,8 @@ export function problemOf(error: unknown): ProblemDetails | undefined {
 /**
  * May a request answered with this status be sent again? The one retry rule
  * (`retryClass`) read through the status table: 408, 429 and every 5xx. A
- * transient one for any request, an uncertain one (500, 502, ...) only for an
- * idempotent request. Log s35.131.
+ * transient one (408, 429, 503) for any request, an uncertain one (500, 502,
+ * 504, ...) only for an identified request. Log s35.131, s35.162.
  */
 export function isRetryableStatus(status: number): boolean {
   return retryClass(undefined, conditionOfStatus(status)) !== 'final';

@@ -24,7 +24,7 @@ describe('problemOf', () => {
     const error = await router.push('/order');
     expect(error?.code).toBe('router:failed:loader');
     expect(problemOf(error)).toEqual({ status: 404, code: 'order_not_found', detail: 'No such order', id: 7 });
-    router.destroy();
+    router.dispose();
   });
 
   it("reads a bridge's remote failure", async () => {

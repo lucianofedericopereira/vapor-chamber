@@ -42,7 +42,7 @@ describe("a bridge forwarding cart* does not send the library's $ commands", () 
     const bus = createAsyncCommandBus({ retry: false });
     const h = history({ bus });
     bus.use(h);
-    const useCart = defineChamberStore('cart', { state: () => ({ n: 0 }), actions: { set: (_s: { n: number }, n: number) => ({ n }) }, undo: true });
+    const useCart = defineChamberStore('cart', { state: () => ({ n: 0 }), reducers: { set: (_s: { n: number }, n: number) => ({ n }) }, undo: true });
     const cart = useCart(bus);
     bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', actions: ['cartSet'] }));
     bus.use(createHttpBridge({ endpoint: '/api/vc', actions: ['cart*'] }));
@@ -58,7 +58,7 @@ describe("a bridge forwarding cart* does not send the library's $ commands", () 
   it('a batching bridge scoped by prefix still keeps a $ command local', async () => {
     const posted = failingServer();
     const bus = createAsyncCommandBus({ retry: false });
-    const cart = defineChamberStore('cart', { state: () => ({ n: 1 }), actions: { set: (_s: { n: number }, n: number) => ({ n }) } })(bus);
+    const cart = defineChamberStore('cart', { state: () => ({ n: 1 }), reducers: { set: (_s: { n: number }, n: number) => ({ n }) } })(bus);
     bus.use(createBatchingHttpBridge({ endpoint: '/api/vc/batch', actions: ['cart*'] }));
     await cart.$reset();
     expect(posted).toEqual([]);

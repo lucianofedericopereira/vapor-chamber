@@ -8,7 +8,7 @@ import * as storeMod from '__DIST__/store.js';
 
 const keys = Array.from({ length: 10 }, (_, i) => `f${i}`);
 const state = () => Object.fromEntries(keys.map((k) => [k, 0]));
-const useS = (id) => storeMod.defineChamberStore(id, { state, actions: { set: (s, n) => ({ ...s, f0: n }) } });
+const useS = (id) => storeMod.defineChamberStore(id, { state, reducers: { set: (s, n) => ({ ...s, f0: n }) } });
 
 function setup(id, readers) {
   const store = useS(id)(createCommandBus());

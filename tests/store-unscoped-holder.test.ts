@@ -17,7 +17,7 @@ import { it } from '../src/vitest';
 
 const useCart = defineChamberStore('cart', {
   state: () => ({ n: 0 }),
-  actions: { add: (s: { n: number }) => ({ n: s.n + 1 }) },
+  reducers: { add: (s: { n: number }) => ({ n: s.n + 1 }) },
 });
 
 it('a scoped holder leaving does not dispose a store held outside any scope', ({ bus }) => {

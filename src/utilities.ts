@@ -8,6 +8,7 @@
 
 import { _withCausation, disposeAll, matchesPattern, _errResult } from './command-bus';
 import { isThenable } from './settled';
+import { countOption } from './bounds';
 import type { BaseBus, Command, CommandResult, Handler, RegisterOptions, } from './command-bus';
 
 // ---------------------------------------------------------------------------
@@ -182,24 +183,25 @@ export type ReactionOptions = {
   /**
    * Allow `sourcePattern` to match `targetAction` - i.e. the reaction fires on
    * its own dispatch. Refused by default, because the loop it creates is
-   * bounded only on a sync bus:
+   * bounded by `maxHops` and by the dispatch depth:
    *
-   * - **Sync bus:** listeners fire nested inside dispatch, so
-   *   `MAX_DISPATCH_DEPTH` halts each chain - 16 recursive dispatches and a
-   *   logged `core:exceeded:depth` per matching action. Degraded, bounded.
-   * - **Async bus:** listeners fire post-settle, so each cycle is a fresh
-   *   top-level dispatch with the depth counter unwound. Nothing bounds it -
-   *   a self-sustaining infinite loop running handlers, plugins and (with a
-   *   bridge installed) HTTP requests forever.
+   * - A reaction re-dispatches synchronously from its listener, and both
+   *   buses run listeners at the dispatch's depth, so `MAX_DISPATCH_DEPTH`
+   *   halts each chain at 16 dispatches with a logged `core:exceeded:depth`
+   *   (tests/reaction-indirect-cycle.test.ts, D12).
+   * - `maxHops` stops it earlier, and counts across every reaction on the
+   *   bus, so an indirect cycle stops too.
    *
-   * Opt in only alongside a `when` guard that can actually terminate it. The
-   * `maxHops` cap still applies.
+   * Opt in only alongside a `when` guard that can actually terminate it: each
+   * hop up to the bound still runs handlers, plugins and (with a bridge
+   * installed) HTTP requests.
    */
   allowSelfMatch?: boolean;
   /**
    * How many reaction hops a single originating command may trigger before
-   * the chain is refused. Catches INDIRECT cycles (A->B, B->A), which no
-   * install-time check can see. Default: 8.
+   * the chain is refused, counted across every reaction on the bus. Catches
+   * INDIRECT cycles (A->B, B->A), which no install-time check can see.
+   * Default: 8. tests/reaction-indirect-cycle.test.ts.
    */
   maxHops?: number;
 };
@@ -208,6 +210,9 @@ export interface Reaction {
   /** Install the reaction on a bus. Returns unsubscribe function. */
   install(bus: BaseBus): () => void;
 }
+
+// Each bus's reaction hop counts, keyed by the id that caused the next hop.
+const hopsByBus = new WeakMap<BaseBus, Map<string, number>>();
 
 /**
  * createReaction - declarative cross-chamber dispatch rules.
@@ -224,7 +229,8 @@ export function createReaction(
   targetAction: string,
   options: ReactionOptions = {},
 ): Reaction {
-  const { when, map, mapPayload, allowSelfMatch = false, maxHops = 8 } = options;
+  const { when, map, mapPayload, allowSelfMatch = false } = options;
+  const maxHops = countOption(options.maxHops, 8); // a NaN is the default (bounds.ts)
   const selfMatching = matchesPattern(sourcePattern, targetAction);
 
   function install(bus: BaseBus): () => void {
@@ -235,7 +241,7 @@ export function createReaction(
     if (selfMatching && !allowSelfMatch) {
       console.error(
         `[vapor-chamber] Reaction "${sourcePattern}" -> "${targetAction}" matches its own target: ` +
-          'every dispatch would re-trigger the reaction (unbounded on an async bus). ' +
+          'every dispatch would re-trigger the reaction, up to the dispatch depth bound. ' +
           'Narrow the pattern, or pass { allowSelfMatch: true } with a `when` guard that terminates it. ' +
           'Not installed.',
       );
@@ -250,13 +256,18 @@ export function createReaction(
     // Not in the payload: a `__reactionHops` marker cannot ride on a primitive
     // or an array, so `mapPayload: () => 42` would read every hop as hop 1 and
     // the cap would never fire (measured: an indirect cycle runs to
-    // MAX_DISPATCH_DEPTH on a sync bus and unbounded on an async one). The
+    // MAX_DISPATCH_DEPTH on either bus). The
     // payload marker is still written when the payload can hold keys.
     //
     // Capped like `_prefixCache` in command-bus.ts: a long-lived reaction on a
     // busy bus would otherwise grow this without bound. Eviction degrades a
     // pathological chain to "starts counting again", never to a leak.
-    const chainHops = new Map<string, number>();
+    //
+    // One map per bus, shared by every reaction installed on it: reaction
+    // B->A must find the id reaction A->B recorded, or an indirect cycle reads
+    // every hop as 1 (tests/reaction-indirect-cycle.test.ts).
+    let chainHops = hopsByBus.get(bus);
+    if (!chainHops) hopsByBus.set(bus, (chainHops = new Map<string, number>()));
     const CHAIN_MAX = 256;
 
     return bus.on(sourcePattern, (cmd: Command, result: CommandResult) => {

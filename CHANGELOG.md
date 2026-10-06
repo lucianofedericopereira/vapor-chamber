@@ -2,6 +2,68 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.27.0 - 2026-10-06
+
+- Added `createActionFilter(expressions)`, which compiles CloudEvents filter expressions (`exact`, `prefix`, `suffix`, `all`, `any`, `not`) into an action-name predicate. It throws `core:invalid:filter` on what the spec rejects.
+- Added the `actionFilter` option to every plugin that takes `actions` and to `PluginParts`. Given both, both must match, and `actions` is unchanged.
+- Added `ActionScope`, the type of a plugin's `actions` filter, where absent or `[]` is every action, as before. It and `ActionList` are `string[]`, so code typed against 1.26 compiles unchanged.
+- Added `ActionList`, the type of the mandatory list of `debounce`, `throttle` and `optimisticUndo`, where `[]` is none.
+- Changed the store option `actions` to `reducers`, as in `defineChamberStore(id, { state, reducers: { add: (s, id) => ... } })`. Each key names an action, so `add` on store `cart` is `cart.add` and `cartAdd`.
+- Changed `ChamberStoreOptions` to hold the map under `reducers`. Rename the key in typed options.
+- Changed `StoreAction` to `StoreReducer`.
+- Fixed `debounce([])`, `throttle([])` and `optimisticUndo(bus, [])` acting on every action since v1.26.0. An empty list acts on none again, as in 1.25.
+- Fixed `cache`, `idempotent` and `debounce` answering a `$` command, such as `store.$reset()` or an undo, from memory. `throttle`, `rateLimit` and `circuitBreaker` may still refuse one, as before.
+- Updated `RegisterOptions.undo` to state that the original command it receives carries that dispatch's signal, which `supersede` may have aborted.
+- Fixed the Vue todo example giving a todo a new id on redo. The id is now sent with the command.
+- Fixed an abort of a dispatch having three shapes. A handler or plugin that rethrows the signal's reason now gets `core:aborted:dispatch`, not the raw DOMException or `plugin:failed:plugin`, and every abort is a BusError named `AbortError` with the reason as `cause`. Code that checked `instanceof DOMException` after a mid-flight abort reads `e.cause`.
+- Fixed a transactional batch rolling back a copy of each command instead of the command that ran. A store with `undo: true` in the batch now returns to its state before the batch, where before the command object became its state, and the `$undo` command's `causationId` names the command that ran.
+- Fixed an `undo: true` store erasing every later write when an older step is rolled back, as `optimisticUndo` and a failed batch do. The store now re-applies the later steps, writes from other tabs included.
+- Fixed an undo for a step a store does not hold writing a command object into its state. It now changes nothing.
+- Fixed a redo of an `undo: true` store step running the reducer again, so a minted id came back different. The store now writes the state the action produced, the same object.
+- Fixed history undoing locally a command a bridge sent, and sending it again on redo. Such a step now reads `canUndo` false. Reverse a server write with a compensating command.
+- Added a development check to `undo: true` stores: each reducer runs twice, and two different results warn once per action. Mint ids and times in the call.
+- Updated `RegisterOptions.canUndo` to state that a rollback, by `optimisticUndo` or a transactional batch, does not consult it.
+- Fixed the async bus and the HTTP client re-sending a write when nothing identifies it, after no reply, a 502 or 504, or a verdict with `Retry-After`. It now fails once, no reply marked `context.outcome: 'unknown'` with a development warning. Key the command or declare the action idempotent to keep the re-send. The client also waits the `RateLimit` header's `t` when a policy has no quota left.
+- Fixed a request header sent in two spellings, such as an app `idempotency-key` beside the bridge's `Idempotency-Key`, going out once with both values joined. Each name now goes out once, under its first spelling with the last value, and a FormData upload or a 419 refresh deletes a name in every spelling.
+- Fixed a `share` store opened later losing its first writes to a tab that had written before. A tab now asks for the current state when it opens, and its next write builds on it.
+- Security: fixed `authGuard({ protected: ['admin*'] })` protecting nothing. A trailing `*` now reads as the prefix it names, and `'*'` protects every action.
+- Fixed one idempotency key standing for two requests. `idempotent()` now adds the payload to its default key, and the outbox gives each queued record its own key, so a second write is never answered or dropped as the first. Keys without a payload, custom keys and stored records are unchanged.
+- Fixed the async bus's `request()` answering two requests with different payloads with one result, and a joined caller waiting on another caller's timeout and abort. Each caller now keeps its own wait, and the responder receives the command the plugins saw.
+- Fixed the batching bridge sending a dispatch aborted while it waited for its window, and reporting it `ok`. An aborted dispatch now settles `core:aborted:dispatch` at once and is never sent, and a sent batch is cancelled once every command in it has aborted.
+- Fixed a GET made after a write to its URL joining a read already in flight from before the write. A write, or `invalidateCache`, again stops new reads joining it.
+- Fixed `circuitBreaker` opening on the caller's own cancels, such as `supersede` cancelling a search. An abort no longer counts as a backend failure.
+- Fixed `createReaction`'s `maxHops` missing an indirect cycle such as `a -> b` plus `b -> a`. Every reaction on a bus now shares one hop count.
+- Fixed the MCP handler against the 2025-06-18 spec: `initialize` answers only a version it speaks, an unknown or not allowed tool is the JSON-RPC error -32602 instead of an `isError` result, and a request with `id: null` gets -32600. In tests, `mcpClient().call` of an unlisted tool now rejects with `code: -32602`.
+- Fixed `useCommandError` and `useCommandHistory` throwing on a sealed bus. Like `useSharedCommandState`, they now observe it, and the bus stays sealed.
+- Fixed a `NaN` option failing open in `rateLimit` (`max`, `window`), `createReaction` (`maxHops`), `pollWith` (`interval`, `maxWait`), `useCommandError` and `useSharedCommandState` (`maxSize`) and `createSSRPlugin` (`maxSize`). A `NaN` now behaves like the missing option.
+- Fixed a schema key written as `cart_add` typing only that name while the bus validates and lists `cartAdd`. The camelCase name is now a typed name too, the raw one still compiles, and the development warning says to use the camelCase name. It no longer prints in production.
+- Fixed `createTestBus().dispatchBatch` ignoring `transactional` and `continueOnError`. It now runs the bus's own batch rule, rollback included.
+- Changed `optimisticUndo` to accept an async bus in its types, as its example and `history()` do. Fixed the docs of `ErrorCodeEntry.retryable`, the `inspectBus` example and a test-helper example to say what the code does.
+- Added `ActionSchema.annotations`, MCP's `ToolAnnotations` (`readOnlyHint`, `idempotentHint`, `destructiveHint`, `openWorldHint`, `title`). The MCP handler lists them on each tool, and `readOnlyHint` or `idempotentHint` makes the async bus treat the action as idempotent when `retry` is unset.
+- Changed the async bus's `retry: { actions }` to `retry: { actionPolicies }`, and `RetryDeclaration` to `RetryPolicy`. The most specific match now wins (an exact name, then the longest prefix, then `*`), whatever the written order, so `cartAdd: false` is never re-sent because of an earlier `'cart*'`. Rename the key and the type.
+- Changed `createMcpHandler`'s allowlist from `actions` to `actionFilter`, its one selection. Replace `actions: ['cart*']` with `actionFilter: createActionFilter([{ prefix: { action: 'cart' } }])`, and `['*']` with `createActionFilter([])`. To expose nothing, do not mount the handler. A leftover `actions` is ignored, so every schema action is exposed.
+- Fixed a redo doing nothing when `cache` or `idempotent` had kept the command's first answer: the store stayed undone and history read it as redone. Once an undo lands, the bus calls the new `PluginParts.forget(cmd)` on every plugin, and those two drop that answer.
+- Fixed a custom `key` on `cache` or `idempotent` answering a `$` command, such as `store.$reset()`, with an app command's stored answer when the two keys matched. A `$` command now always takes the default key.
+- Fixed `idempotent` joining a second `$reset` or undo to the first one still in flight, so the second never ran. A `$` command now always runs.
+- Added the store option `answer(state, value, cmd)`: a bridged store action writes the server's answer as one step of that command. Without it, nothing changes.
+- Added `RegisterOptions.answer(cmd, value)`, called when a transport answered in place of the handler, before the plugins outside it.
+- Added the store option `version(state)`: an answer older than the held state is not written. An answer with no `state` writes nothing.
+- Added `stores` to the wire answer, store states by store id: `{ state, stores: { cart: {...} } }`. Each store with that id takes its state, over its own `answer`. A state that is not an object is not written. The Laravel example controller returns it.
+- Fixed the HTTP client serving a stale GET after a write named that URL in `Location` or `Content-Location`. A write now drops those URLs too, on its own origin only.
+- Changed `idempotent`'s `maxKeys` to `maxSize`.
+- Changed `metrics`' `maxEntries` to `maxSize`.
+- Changed `createOutbox`'s `maxQueue` to `maxSize`.
+- Changed `createSSRPlugin`'s `maxCommands` to `maxSize`.
+- Changed `errorCap` to `maxSize` on `useCommandError` and `useSharedCommandState`.
+- Changed the bus option `bufferLimit` to `maxBufferSize`.
+- Changed `teardown()` to `dispose()` on `createSseBridge` and `createEchoBridge`.
+- Changed `createChannel()`'s `close()` to `dispose()`.
+- Changed `destroy()` to `dispose()` on the router and its history.
+- Changed `VitestMcpServer.close()` to `disposeAsync()`.
+- Fixed the README's `optimisticUndo` example calling the server from its inverse. The inverse now reverses the local change only.
+- Fixed docs that named what the code lacks: an `onReceive` hook on `createWsBridge`, an LRU in `matchesPattern`, and a `vitest-pure` subpath (it is `vitest/pure`).
+- Improved a sync `dispatch` on a bus with no plugin, hook or listener: 7 to 12 ns faster, it no longer allocates a meta nothing reads. A dispatch through plugins or listeners measures about 3 ns slower.
+
 ## v1.26.0 - 2026-10-04
 
 ### Fixed (the 1.26 evaluation's bug list)

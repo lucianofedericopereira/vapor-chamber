@@ -488,7 +488,7 @@ describe('createSseBridge', () => {
     on.install(bus);
     lastEs.onerror?.();
     expect(lastEs.closed).toBe(false);
-    on.teardown();
+    on.dispose();
   });
 
   it('install opens EventSource and calls onEvent for each message', () => {
@@ -514,7 +514,7 @@ describe('createSseBridge', () => {
     sse.install(bus);
     expect(sse.isConnected()).toBe(true);
 
-    sse.teardown();
+    sse.dispose();
     expect(sse.isConnected()).toBe(false);
     expect(lastEs.closed).toBe(true);
   });

@@ -18,7 +18,7 @@ interface User {
 // declared Retry-After) and never a verdict such as a 422. A plain throw may
 // have landed, so it is re-sent only for an action declared idempotent: a
 // read is, whatever it returns.
-const bus = createAsyncCommandBus({ retry: { baseDelay: 1000, actions: { userFetch: 'idempotent' } } });
+const bus = createAsyncCommandBus({ retry: { baseDelay: 1000, actionPolicies: { userFetch: 'idempotent' } } });
 
 // Async logger plugin
 const asyncLogger: AsyncPlugin = async (cmd, next) => {

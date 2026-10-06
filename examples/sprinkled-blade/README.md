@@ -43,7 +43,7 @@ node mock-server.mjs         # backend still on :3001
 ```
 
 Now the page is cross-origin. The count arrives empty and one `cartState`
-dispatch fills it; that is the flicker server rendering removes. Every dispatch
+dispatch fills it. That is the flicker server rendering removes. Every dispatch
 is also preceded by a CORS preflight, which is why the backend's
 `Access-Control-Allow-Headers` must list `X-Requested-With`, the header the
 bridge always sends.
@@ -59,16 +59,17 @@ Click "Add to cart" - you should see:
 - IIFE bundle works without a bundler - pure `<script>` tag.
 - `VaporChamber.connect()` is a one-line setup that wires HTTP transport +
   CSRF token reading. Its bus re-sends a transient failure (a 429, 503 or
-  timeout, after any `Retry-After`); `connect({ retry: { actions: { cartSet:
-  'idempotent' } } })` declares what is safe to send twice, `retry: false`
-  turns it off.
+  408, after any `Retry-After`). A failure that may have landed (no reply, a
+  502 or 504) is re-sent only for an action declared safe to send twice:
+  `connect({ retry: { actionPolicies: { cartSet: 'idempotent' } } })`.
+  `retry: false` turns retries off.
 - The CSRF token in `<meta name="csrf-token">` flows automatically into
   every dispatched command's `X-CSRF-TOKEN` header.
 - `bus.on('*', ...)` lets you tap every dispatch for telemetry / logging
   without modifying the call sites.
 - The backend contract (`{command, target, payload}` in, `{ state }` out, or
-  an RFC 9457 problem for a failure) is intentionally simple - easy to
-  implement in any language.
+  an RFC 9457 problem for a failure) is intentionally simple, easy to
+  build in any language.
 
 ## Mapping to a real Laravel / Rails / Django app
 
@@ -79,6 +80,6 @@ Click "Add to cart" - you should see:
 | `handlers.cartAdd` mapping                      | `config/vapor-chamber.php` action class registry | Service-object dispatch              | View dispatch                     |
 | Static `<script>` from `dist/`                  | `<script src="{{ asset('vendor/vapor-chamber/iife.min.js') }}">` | `javascript_include_tag` | `{% static 'vapor-chamber/iife.min.js' %}` |
 
-For a complete Laravel implementation, see
+For a complete Laravel backend, see
 [`../laravel-backend/`](../laravel-backend/) - drop-in PHP files for the
 controller, action classes, config, and routes.

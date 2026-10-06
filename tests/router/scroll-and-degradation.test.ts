@@ -47,7 +47,7 @@ describe('scroll on commit', () => {
     // The early `return` after a hit is the point - landing on the anchor and
     // ALSO jumping to the top would put the user somewhere they did not ask for.
     expect(scrollTo).not.toHaveBeenCalled();
-    router.destroy();
+    router.dispose();
   });
 
   it('falls back to the top when the hash matches nothing', async () => {
@@ -57,7 +57,7 @@ describe('scroll on commit', () => {
     await router.push('/list#nothing-here');
 
     expect(scrollTo).toHaveBeenCalled();
-    router.destroy();
+    router.dispose();
   });
 
   it('survives a hash that is not a valid CSS selector', async () => {
@@ -70,7 +70,7 @@ describe('scroll on commit', () => {
 
     await expect(router.push('/list#2024')).resolves.toBeNull();
     expect(scrollTo).toHaveBeenCalled(); // fell through to the top-scroll
-    router.destroy();
+    router.dispose();
   });
 
   it('does nothing at all when scroll is disabled', async () => {
@@ -80,7 +80,7 @@ describe('scroll on commit', () => {
     await router.push('/list');
 
     expect(scrollTo).not.toHaveBeenCalled();
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -102,7 +102,7 @@ describe('inline routes payload', () => {
 
     expect(await router.push('/list')).toBeNull();
     expect(router.currentRoute.value.location.path).toBe('/list');
-    router.destroy();
+    router.dispose();
   });
 
   it('reports a missing DOM rather than crashing on `document`', async () => {
@@ -115,7 +115,7 @@ describe('inline routes payload', () => {
       components: {},
     });
     await expect(router.isReady()).rejects.toThrow(/inline routes need a DOM/);
-    router.destroy();
+    router.dispose();
   });
 
   it('surfaces router:missing:inline at start(), not at construction', async () => {
@@ -129,7 +129,7 @@ describe('inline routes payload', () => {
       components: {},
     });
     await expect(router.isReady()).rejects.toThrow(/no inline routes element/);
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -158,7 +158,7 @@ describe('idle preheat', () => {
     // No assertion on WHEN the idle callback fires - that is the browser's
     // call and racing it would make this flaky. What matters is that arming
     // and tearing down the idle queue is exercised and does not throw.
-    expect(() => router.destroy()).not.toThrow();
+    expect(() => router.dispose()).not.toThrow();
   });
 });
 
@@ -169,14 +169,14 @@ describe('resolve() before the table is ready', () => {
     // broken page.
     const router = makeRouter({ scroll: true });
     expect(router.resolve('/definitely-not-a-route')).toContain('/definitely-not-a-route');
-    router.destroy();
+    router.dispose();
   });
 
   it('degrades to `path` for the object form, and to / when it has none', () => {
     const router = makeRouter({ scroll: true });
     expect(router.resolve({ path: '/raw-object' } as never)).toContain('/raw-object');
     expect(router.resolve({ name: 'nope' } as never)).toContain('/');
-    router.destroy();
+    router.dispose();
   });
 });
 
@@ -211,7 +211,7 @@ describe('scroll restoration on back/forward', () => {
       expect(router.currentRoute.value.location.path).toBe('/');
       expect(scrollTo).not.toHaveBeenCalled(); // back/forward leaves scroll alone
       scrollTo.mockRestore();
-      router.destroy();
+      router.dispose();
     });
   });
 });

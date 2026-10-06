@@ -405,7 +405,7 @@ export function stubEnv<N extends string>(name: N, value: EnvValue<N>): Restore 
 /** A `tools/call` result: text content blocks, and `isError` when the tool failed. */
 export type McpToolResult = { content: { type: string; text: string }[]; isError?: boolean };
 
-/** A JSON-RPC 2.0 message handler, such as `createMcpHandler(bus, { actions })` returns. */
+/** A JSON-RPC 2.0 message handler, such as `createMcpHandler(bus, { actionFilter })` returns. */
 export type McpMessageHandler = (message: unknown) => Promise<object | null>;
 
 /** An MCP client for tests: what an agent does, without writing JSON-RPC envelopes. */
@@ -416,7 +416,7 @@ export interface McpClient {
   tools(): Promise<McpTool[]>;
   /** The names `tools/list` returns, in order. */
   toolNames(): Promise<string[]>;
-  /** `tools/call`. A tool that fails or is refused is a result with `isError`; assert it with `toBeToolError`. */
+  /** `tools/call`. A tool that fails is a result with `isError`; assert it with `toBeToolError`. A tool not listed is a protocol error: the call rejects with code -32602. */
   call(name: string, args?: { target?: unknown; payload?: unknown }): Promise<McpToolResult>;
   /** Any request, answered with the raw JSON-RPC reply, errors included: for testing the envelope itself. */
   request(method: string, params?: unknown): Promise<any>;
@@ -432,10 +432,10 @@ export interface McpClient {
  * still imports nothing and any JSON-RPC MCP handler works.
  *
  * @example
- * const mcp = mcpClient(createMcpHandler(bus, { actions: ['cart*'] }));
+ * const mcp = mcpClient(createMcpHandler(bus, { actionFilter: createActionFilter([{ prefix: { action: 'cart' } }]) }));
  * expect(await mcp.toolNames()).toEqual(['cartAdd']);
  * expect(await mcp.call('cartAdd', { target: { id: 1 }, payload: { qty: 2 } })).toBeToolResult({ count: 2 });
- * expect(await mcp.call('orderDelete')).toBeToolError(/not permitted/);
+ * await expect(mcp.call('orderDelete')).rejects.toMatchObject({ code: -32602 }); // not listed: a protocol error
  */
 export function mcpClient(handler: McpMessageHandler): McpClient {
   let id = 0;
@@ -470,7 +470,7 @@ export function mcpClient(handler: McpMessageHandler): McpClient {
  * import { vc } from 'vapor-chamber/vitest';
  * const bus = vc.tap(createCommandBus());
  * using _env = vc.stubEnv('NODE_ENV', 'production');
- * const mcp = vc.mcp(createMcpHandler(bus, { actions: ['cart*'] }));
+ * const mcp = vc.mcp(createMcpHandler(bus, { actionFilter: createActionFilter([{ prefix: { action: 'cart' } }]) }));
  */
 export const vc = {
   tap,

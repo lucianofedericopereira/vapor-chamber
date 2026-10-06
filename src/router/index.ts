@@ -377,10 +377,10 @@ export function createRouter<TName extends string = string>(options: RouterOptio
 
   let started: Promise<void> | null = null;
   const teardowns: Array<() => void> = [];
-  /** Set by destroy(). start() is async (the table load, the first
-   *  navigation), and anything it installed after destroy() ran its teardowns
-   *  would never be removed. tests/router/destroy-during-start.test.ts. */
-  let destroyed = false;
+  /** Set by dispose(). start() is async (the table load, the first
+   *  navigation), and anything it installed after dispose() ran its teardowns
+   *  would never be removed. tests/router/dispose-during-start.test.ts. */
+  let disposed = false;
 
   async function loadRemoteTable(url: string): Promise<void> {
     try {
@@ -448,7 +448,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
         if ('inline' in (source as { inline?: string })) loadInlineTable((source as { inline: string }).inline);
         else await loadRemoteTable((source as { url: string }).url);
       }
-      if (destroyed) return;
+      if (disposed) return;
 
       teardowns.push(history.listen((fullPath, info) => engine.handlePop(fullPath, { delta: info.delta })));
 
@@ -516,7 +516,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
 
       await engine.navigate(history.location(), { replace: true });
 
-      if (!destroyed) armIdlePreheat();
+      if (!disposed) armIdlePreheat();
     })();
     started.catch((error) => dispatchError(error, engine.snapshot.value.location));
     return started;
@@ -590,11 +590,11 @@ export function createRouter<TName extends string = string>(options: RouterOptio
       // "Why the outlet is a separate subpath".)
       void start();
     },
-    destroy: () => {
-      destroyed = true;
+    dispose: () => {
+      disposed = true;
       engine.cancel();
       for (const teardown of teardowns.splice(0)) teardown();
-      history.destroy();
+      history.dispose();
     },
   };
   return router as Router<TName>;

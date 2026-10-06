@@ -9,7 +9,7 @@ import { ... } from 'vapor-chamber/store/core';
 
 ## Contents
 
-**Type aliases:** [`ChamberStore`](#chamberstore) [`ChamberStoreOptions`](#chamberstoreoptions) [`StoreAction`](#storeaction) [`StoreRouter`](#storerouter)
+**Type aliases:** [`ChamberStore`](#chamberstore) [`ChamberStoreOptions`](#chamberstoreoptions) [`StoreReducer`](#storereducer) [`StoreRouter`](#storerouter)
 
 **Variables:** [`defineChamberStore`](#definechamberstore)
 
@@ -17,10 +17,10 @@ import { ... } from 'vapor-chamber/store/core';
 
 ### ChamberStore
 
-**Type alias** - [src/store-base.ts:61](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store-base.ts#L61)
+**Type alias** - [src/store-base.ts:89](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store-base.ts#L89)
 
 ```ts
-export type ChamberStore<S extends object, A extends Record<string, StoreAction<S>>> = {
+export type ChamberStore<S extends object, R extends Record<string, StoreReducer<S>>> = {
   readonly $id: string;
   /** Read-only by construction: there is no setter, so a direct write throws in
    *  strict mode. The bus is the only mutation channel. */
@@ -36,15 +36,23 @@ export type ChamberStore<S extends object, A extends Record<string, StoreAction<
    *  with no subscriber writes as it would without. docs/store.md. */
   $onField: <K extends keyof S & string>(key: K, fn: (value: S[K]) => void) => () => void;
   $dispose: () => void;
-} & { [K in keyof A]: (target?: any, payload?: any) => CommandResult | Promise<CommandResult> };
+} & { [K in keyof R]: (target?: any, payload?: any) => CommandResult | Promise<CommandResult> };
 ```
 
 ### ChamberStoreOptions
 
-**Type alias** - [src/store-base.ts:25](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store-base.ts#L25)
+**Type alias** - [src/store-base.ts:27](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store-base.ts#L27)
 
 ```ts
-export type ChamberStoreOptions<S extends object, A extends Record<string, StoreAction<S>>> = {
+export type ChamberStoreOptions<S extends object, R extends Record<string, StoreReducer<S>>> = {
+  /**
+   * The store's reducers: each key names an action (`add` on store `cart`
+   * dispatches `cartAdd`, and becomes the method `cart.add`), each value
+   * returns the next state from the current one and the call's target and
+   * payload. `actions` elsewhere in the library is an ActionScope (names),
+   * so the map has its own word. Log s35.147.
+   */
+  reducers: R;
   /**
    * A FACTORY, never a literal. Two stores of the same shape must not share a
    * nested reference, and `$reset` must not hand back the object a previous
@@ -52,7 +60,6 @@ export type ChamberStoreOptions<S extends object, A extends Record<string, Store
    * unrepresentable.
    */
   state: () => S;
-  actions: A;
   /**
    * URL-worthy fields (pattern 4B): `storeField -> query key`. The store does
    * NOT own a signal for these - reads and writes both go through the router,
@@ -68,25 +75,46 @@ export type ChamberStoreOptions<S extends object, A extends Record<string, Store
   /**
    * Share the store across tabs over this event lane, the one an app bridges
    * with `createChannel({ lane, events: ['<id>$state'] })`. Every tab ends on
-   * the same state (docs/store.md, Across tabs). Off by default.
+   * the same state, and a tab opened later asks for it when it opens
+   * (docs/store.md, Across tabs). Off by default.
    */
   share?: { on(event: string, listener: (data: any) => void): () => void; emit(event: string, data: any): void };
+  /**
+   * The next state from a transport's answer to one of the store's actions:
+   * a bridge forwards the action, the reducer does not run, and the store
+   * takes `answer(state, value, cmd)`, the value being the answer's `state`.
+   * `(_, value) => value` when the server answers the store's whole state.
+   * Without it, a bridged action leaves the state as it is (docs/store.md,
+   * A store behind a bridge). tests/store-bridged-answer.test.ts.
+   */
+  answer?: (state: S, value: unknown, cmd: { action: string; target: any; payload?: any }) => S;
+  /**
+   * The server's version of a state, a number that grows with every write it
+   * applies: an answer is written only when its version is higher than the
+   * one the store holds, so an older answer arriving last never replaces a
+   * newer one. A version that is not a finite number falls back to arrival
+   * order. Without it, the last answer to arrive wins.
+   * tests/store-answer-version.test.ts.
+   */
+  version?: (state: S) => number;
 };
 ```
 
-### StoreAction
+What defineChamberStore takes.
 
-**Type alias** - [src/store-base.ts:23](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store-base.ts#L23)
+### StoreReducer
+
+**Type alias** - [src/store-base.ts:24](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store-base.ts#L24)
 
 ```ts
-export type StoreAction<S> = (state: S, target: any, payload?: any) => S;
+export type StoreReducer<S> = (state: S, target: any, payload?: any) => S;
 ```
 
 A reducer: current state plus the dispatched target, returning the NEXT state.
 
 ### StoreRouter
 
-**Type alias** - [src/store-base.ts:56](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store-base.ts#L56)
+**Type alias** - [src/store-base.ts:84](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store-base.ts#L84)
 
 ```ts
 export type StoreRouter = {
@@ -105,5 +133,5 @@ imports nothing from `src/router`.
 **Variable** - [src/store/core.ts:45](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store/core.ts#L45)
 
 ```ts
-defineChamberStore<S extends object, A extends Record<string, import("./core").StoreAction<S>>>(id: string, options: import("./core").ChamberStoreOptions<S, A>) => (bus: import("..").BaseBus, router?: import("./core").StoreRouter) => import("./core").ChamberStore<S, A>
+defineChamberStore<S extends object, R extends Record<string, import("./core").StoreReducer<S>>>(id: string, options: import("./core").ChamberStoreOptions<S, R>) => (bus: import("..").BaseBus, router?: import("./core").StoreRouter) => import("./core").ChamberStore<S, R>
 ```

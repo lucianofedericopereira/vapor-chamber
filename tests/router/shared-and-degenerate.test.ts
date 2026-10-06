@@ -131,7 +131,7 @@ describe('usePagination - a backend number is not a number', () => {
     expect(Number.isFinite(p.lastPage.value)).toBe(true);
     expect(Number.isFinite(p.perPage.value)).toBe(true);
     expect(p.pageRange.value.every((n) => Number.isFinite(n))).toBe(true);
-    router.destroy();
+    router.dispose();
   });
 
   it('survives a per_page of zero and a negative last_page', async () => {
@@ -139,7 +139,7 @@ describe('usePagination - a backend number is not a number', () => {
     const p = withRouter(router, () => usePagination());
     expect(p.perPage.value).toBeGreaterThan(0);
     expect(p.lastPage.value).toBeGreaterThan(0);
-    router.destroy();
+    router.dispose();
   });
 
   it('falls back to the default window rather than collapsing the range', async () => {
@@ -151,7 +151,7 @@ describe('usePagination - a backend number is not a number', () => {
       expect(p.pageRange.value.length, String(window)).toBeGreaterThan(2);
       expect(p.pageRange.value.every((n) => Number.isFinite(n))).toBe(true);
     }
-    router.destroy();
+    router.dispose();
   });
 
   it('clamps a degenerate go() instead of writing NaN to the URL', async () => {
@@ -159,6 +159,6 @@ describe('usePagination - a backend number is not a number', () => {
     const p = withRouter(router, () => usePagination());
     p.go(Number.NaN);
     expect(router.currentRoute.value.location.fullPath).not.toContain('NaN');
-    router.destroy();
+    router.dispose();
   });
 });

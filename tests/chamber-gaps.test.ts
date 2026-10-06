@@ -5,7 +5,7 @@
  *    error attached.
  *  - untracked: the `__VC_IIFE__` const-fold guard - at runtime in tests
  *    the identifier resolves via globalThis, so both arms are drivable.
- *  - useSharedCommandState: errorCap tightening, ring-buffer trim
+ *  - useSharedCommandState: maxSize tightening, ring-buffer trim
  *, rejected dispatch promise recording.
  *  - useCommandGroup: the 256-entry `_nameCache` FIFO eviction.
  *  - useCommandHistory redo payloads: object payload -> `__origin` spread
@@ -105,14 +105,14 @@ describe('untracked IIFE guard', () => {
 // ---------------------------------------------------------------------------
 
 describe('useSharedCommandState', () => {
-  it('tightens errorCap when a later caller asks for a smaller buffer', async () => {
+  it('tightens maxSize when a later caller asks for a smaller buffer', async () => {
     const rejecting = {
       on: () => () => {},
       dispatch: () => Promise.reject(new Error('r')),
     } as any;
 
-    const first = useSharedCommandState({ bus: rejecting, errorCap: 10 });
-    const second = useSharedCommandState({ bus: rejecting, errorCap: 2 });
+    const first = useSharedCommandState({ bus: rejecting, maxSize: 10 });
+    const second = useSharedCommandState({ bus: rejecting, maxSize: 2 });
 
     // Three rejections against a cap of 2 -> ring buffer trims to 2.
     await second.dispatch('a', {});
@@ -135,7 +135,7 @@ describe('useSharedCommandState', () => {
       dispatch: () => Promise.reject(boom),
     } as any;
 
-    const shared = useSharedCommandState({ bus: rejecting, errorCap: 5 });
+    const shared = useSharedCommandState({ bus: rejecting, maxSize: 5 });
     const result = await shared.dispatch('pay', {});
 
     expect(result).toEqual({ ok: false, error: boom, value: undefined });
@@ -248,7 +248,7 @@ describe('KeepAlive wiring through configureVue', () => {
     chamber.setCommandBus(bus as any);
     bus.register('fail', () => { throw new Error('handler down'); });
 
-    const capture = chamber.useCommandError({ errorCap: 2 });
+    const capture = chamber.useCommandError({ maxSize: 2 });
     expect(pause).toBeTypeOf('function');
     expect(resume).toBeTypeOf('function');
 
@@ -260,7 +260,7 @@ describe('KeepAlive wiring through configureVue', () => {
     bus.dispatch('fail', {});
     expect(capture.errors.value).toHaveLength(1);
 
-    // Reactivated - capture resumes; overflow trims to errorCap.
+    // Reactivated - capture resumes; overflow trims to maxSize.
     resume!();
     bus.dispatch('fail', {});
     bus.dispatch('fail', {});

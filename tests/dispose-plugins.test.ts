@@ -58,7 +58,7 @@ describe('dispose() runs plugin dispose()', () => {
     // out inside the first advance below (1 run in about 100; Math.random 0
     // reproduces it). Pinned mid-range.
     vi.spyOn(Math, 'random').mockReturnValue(0.5);
-    const bus = createAsyncCommandBus({ retry: { baseDelay: 100, actions: { t: 'idempotent' } } });
+    const bus = createAsyncCommandBus({ retry: { baseDelay: 100, actionPolicies: { t: 'idempotent' } } });
     const handler = vi.fn(async () => { throw new Error('flaky'); });
     bus.register('t', handler);
     let result: CommandResult | undefined;
@@ -78,7 +78,7 @@ describe('dispose() runs plugin dispose()', () => {
 
   it('the retry runs to its result when nothing disposes it, and a finished wait leaves nothing behind', async () => {
     vi.useFakeTimers();
-    const bus = createAsyncCommandBus({ retry: { baseDelay: 100, actions: { t: 'idempotent' } } });
+    const bus = createAsyncCommandBus({ retry: { baseDelay: 100, actionPolicies: { t: 'idempotent' } } });
     let calls = 0;
     bus.register('t', async () => { if (++calls < 2) throw new Error('flaky'); return 'ok'; });
     let result: CommandResult | undefined;

@@ -58,7 +58,7 @@ describe('router history (real Chromium)', () => {
     await settle();
     expect(router.currentRoute.value.location.path).toBe('/');
     expect(window.location.pathname).toBe(`${base}/`);
-    router.destroy();
+    router.dispose();
   });
 
   it('Forward back to the page during a held Back keeps the page and the address bar together', async () => {
@@ -75,7 +75,7 @@ describe('router history (real Chromium)', () => {
     await settle();
     expect(router.currentRoute.value.location.path).toBe('/list');
     expect(window.location.pathname).toBe(`${base}/list`);
-    router.destroy();
+    router.dispose();
   });
 
   it('control: a guard that refuses a Back walks the address bar back to the page', async () => {
@@ -88,7 +88,7 @@ describe('router history (real Chromium)', () => {
     await settle();
     expect(router.currentRoute.value.location.path).toBe('/list');
     expect(window.location.pathname).toBe(`${base}/list`);
-    router.destroy();
+    router.dispose();
   });
 });
 

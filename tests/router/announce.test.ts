@@ -45,7 +45,7 @@ describe('route announcer', () => {
     expect(r.getAttribute('aria-atomic')).toBe('true');
     // Hidden visually, NOT from the accessibility tree (display:none would silence it).
     expect((r as HTMLElement).style.display).not.toBe('none');
-    router.destroy();
+    router.dispose();
   });
 
   it('falls back to the first h1, then to the path', async () => {
@@ -62,7 +62,7 @@ describe('route announcer', () => {
     await router.push('/');
     await frame();
     expect(region()!.textContent).toBe('/');
-    router.destroy();
+    router.dispose();
   });
 
   it('does not announce a query-only change', async () => {
@@ -75,7 +75,7 @@ describe('route announcer', () => {
     await router.push('/list?page=2');
     await frame();
     expect(region()!.textContent).toBe('');
-    router.destroy();
+    router.dispose();
   });
 
   it('can be turned off, or told what to say', async () => {
@@ -84,14 +84,14 @@ describe('route announcer', () => {
     await off.push('/list');
     await frame();
     expect(region()).toBeNull();
-    off.destroy();
+    off.dispose();
 
     const custom = makeRouter({ announce: (to: { path: string }) => `Now on ${to.path}` });
     await custom.isReady();
     await custom.push('/list');
     await frame();
     expect(region()!.textContent).toBe('Now on /list');
-    custom.destroy();
+    custom.dispose();
   });
 
   it('announcing off still moves focus; an empty announcement and a missing target are skipped', async () => {
@@ -104,7 +104,7 @@ describe('route announcer', () => {
     await frame();
     expect(region()).toBeNull(); // nothing said
     expect(document.activeElement).toBe(heading); // focus still moved
-    silent.destroy();
+    silent.dispose();
 
     const empty = makeRouter({ announce: () => '', focusOnNavigate: '#not-on-this-page' });
     await empty.isReady();
@@ -112,7 +112,7 @@ describe('route announcer', () => {
     await frame();
     expect(region()).toBeNull(); // an empty string is not spoken
     expect(document.activeElement).toBe(heading); // no target: focus left where it was
-    empty.destroy();
+    empty.dispose();
   });
 
   it('moves focus to the element the app names, making it focusable only if it is not', async () => {
@@ -129,7 +129,7 @@ describe('route announcer', () => {
     await frame();
     expect(document.activeElement).toBe(heading);
     expect(heading.getAttribute('tabindex')).toBe('-1');
-    router.destroy();
+    router.dispose();
   });
 
   it('leaves an element that is already focusable as it is', async () => {
@@ -144,10 +144,10 @@ describe('route announcer', () => {
     await frame();
     expect(document.activeElement).toBe(skip);
     expect(skip.hasAttribute('tabindex')).toBe(false);
-    router.destroy();
+    router.dispose();
   });
 
-  it('stops announcing after destroy(); the region is the document\'s, shared, and stays', async () => {
+  it('stops announcing after dispose(); the region is the document\'s, shared, and stays', async () => {
     const router = makeRouter();
     document.title = 'Orders list';
     await router.isReady();
@@ -155,7 +155,7 @@ describe('route announcer', () => {
     await frame();
     await frame();
     expect(region()!.textContent).toBe('Orders list');
-    router.destroy();
+    router.dispose();
     region()!.textContent = '';
     document.title = 'Home';
     await frame();

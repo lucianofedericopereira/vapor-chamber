@@ -15,6 +15,7 @@
  *    parse errors, notification silence, and stop().
  */
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { createActionFilter } from '../src/action-filter';
 import { createMcpHandler, busToMcpTools, serveMcpStdio } from '../src/mcp';
 import type { BusSchema } from '../src/schema';
 import { mcpClient } from '../src/vitest-pure';
@@ -23,11 +24,13 @@ const SCHEMA = {
   cartAdd: { description: 'Add an item', target: { id: 'number' }, payload: { qty: 'number' } },
 } as unknown as BusSchema;
 
-function makeHandler(overrides: { dispatch?: any; schema?: BusSchema; actions?: string[] } = {}) {
+const all = createActionFilter([]);
+
+function makeHandler(overrides: { dispatch?: any; schema?: BusSchema } = {}) {
   const dispatch = overrides.dispatch ?? vi.fn(async () => ({ ok: true, value: 'done' }));
   const handle = createMcpHandler(
     { dispatch, getSchema: () => overrides.schema ?? SCHEMA },
-    { actions: overrides.actions ?? ['*'] },
+    { actionFilter: all },
   );
   return { handle, mcp: mcpClient(handle), dispatch };
 }
@@ -51,7 +54,7 @@ describe('tools/call rejects inherited Object.prototype keys', () => {
     async (name) => {
       const { mcp, dispatch } = makeHandler();
 
-      expect(await mcp.call(name, {})).toBeToolError('unknown or not permitted');
+      await expect(mcp.call(name, {})).rejects.toMatchObject({ code: -32602 });
       expect(dispatch).not.toHaveBeenCalled();
     },
   );
@@ -66,7 +69,7 @@ describe('tools/call rejects inherited Object.prototype keys', () => {
     const { mcp } = makeHandler();
     expect(await mcp.toolNames()).toEqual(['cartAdd']);
 
-    expect(await mcp.call('constructor', {})).toBeToolError();
+    await expect(mcp.call('constructor', {})).rejects.toMatchObject({ code: -32602 });
   });
 });
 
@@ -125,7 +128,7 @@ describe('callTool', () => {
 
   it('rejects a missing tool name', async () => {
     const { mcp, dispatch } = makeHandler();
-    expect(await mcp.call('', {})).toBeToolError();
+    await expect(mcp.call('', {})).rejects.toMatchObject({ code: -32602 });
     expect(dispatch).not.toHaveBeenCalled();
   });
 });
@@ -189,7 +192,7 @@ describe('serveMcpStdio', () => {
   it('answers requests, skips blank lines, and reports parse errors', async () => {
     const written: string[] = [];
     vi.spyOn(process.stdout, 'write').mockImplementation(((s: string) => { written.push(s); return true; }) as any);
-    stops.push(serveMcpStdio({ dispatch: vi.fn(async () => ({ ok: true as const, value: 'ok' })), getSchema: () => SCHEMA }, { actions: ['*'] }));
+    stops.push(serveMcpStdio({ dispatch: vi.fn(async () => ({ ok: true as const, value: 'ok' })), getSchema: () => SCHEMA }, { actionFilter: all }));
 
     // Blank lines between real messages must be skipped, not parse-errored.
     process.stdin.emit('data', '\n\n' + JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'ping' }) + '\n');
@@ -211,7 +214,7 @@ describe('serveMcpStdio', () => {
   it('buffers a message split across chunks', async () => {
     const written: string[] = [];
     vi.spyOn(process.stdout, 'write').mockImplementation(((s: string) => { written.push(s); return true; }) as any);
-    stops.push(serveMcpStdio({ dispatch: vi.fn(), getSchema: () => SCHEMA }, { actions: ['*'] }));
+    stops.push(serveMcpStdio({ dispatch: vi.fn(), getSchema: () => SCHEMA }, { actionFilter: all }));
 
     const msg = JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'ping' });
     process.stdin.emit('data', msg.slice(0, 10));
@@ -224,7 +227,7 @@ describe('serveMcpStdio', () => {
   it('stop() detaches - later input produces no output', async () => {
     const written: string[] = [];
     vi.spyOn(process.stdout, 'write').mockImplementation(((s: string) => { written.push(s); return true; }) as any);
-    const stop = serveMcpStdio({ dispatch: vi.fn(), getSchema: () => SCHEMA }, { actions: ['*'] });
+    const stop = serveMcpStdio({ dispatch: vi.fn(), getSchema: () => SCHEMA }, { actionFilter: all });
     stop();
 
     process.stdin.emit('data', JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'ping' }) + '\n');
@@ -248,7 +251,7 @@ describe('serveMcpStdio limits', () => {
     const written = capture();
     stops.push(serveMcpStdio(
       { dispatch: vi.fn(async () => ({ ok: true as const, value: 'ok' })), getSchema: () => SCHEMA },
-      { actions: ['*'], maxLineLength: 64 },
+      { actionFilter: all, maxLineLength: 64 },
     ));
 
     // A client streaming a huge "line" with no newline in sight.
@@ -271,7 +274,7 @@ describe('serveMcpStdio limits', () => {
     const written = capture();
     stops.push(serveMcpStdio(
       { dispatch: vi.fn(), getSchema: () => SCHEMA },
-      { actions: ['*'], maxLineLength: 64 },
+      { actionFilter: all, maxLineLength: 64 },
     ));
 
     // Total far exceeds the cap, but every individual line is short.
@@ -295,7 +298,7 @@ describe('serveMcpStdio limits', () => {
     const dispatch = vi.fn(() => new Promise<any>((resolve) => {
       releases.push(() => resolve({ ok: true, value: 1 }));
     }));
-    stops.push(serveMcpStdio({ dispatch, getSchema: () => SCHEMA }, { actions: ['*'], maxInFlight: 3 }));
+    stops.push(serveMcpStdio({ dispatch, getSchema: () => SCHEMA }, { actionFilter: all, maxInFlight: 3 }));
 
     const line = (id: number) =>
       JSON.stringify({ jsonrpc: '2.0', id, method: 'tools/call', params: { name: 'cartAdd', arguments: { target: { id } } } }) + '\n';
@@ -322,7 +325,7 @@ describe('serveMcpStdio limits', () => {
     const resume = vi.spyOn(process.stdin, 'resume');
     stops.push(serveMcpStdio(
       { dispatch: vi.fn(async () => ({ ok: true as const, value: 1 })), getSchema: () => SCHEMA },
-      { actions: ['*'], maxInFlight: 0 },
+      { actionFilter: all, maxInFlight: 0 },
     ));
     pause.mockClear();
     resume.mockClear();
@@ -352,7 +355,7 @@ describe('serveMcpStdio limits', () => {
     }));
     stops.push(serveMcpStdio(
       { dispatch, getSchema: () => SCHEMA },
-      { actions: ['*'], maxInFlight: Number('nope') },
+      { actionFilter: all, maxInFlight: Number('nope') },
     ));
     pause.mockClear();
 
@@ -371,7 +374,7 @@ describe('serveMcpStdio limits', () => {
     const written = capture();
     stops.push(serveMcpStdio(
       { dispatch: vi.fn(), getSchema: () => SCHEMA },
-      { actions: ['*'], maxLineLength: -5 },
+      { actionFilter: all, maxLineLength: -5 },
     ));
 
     // A whole line in one chunk is never partial, so it is served normally.
@@ -395,7 +398,7 @@ describe('serveMcpStdio limits', () => {
     const dispatch = vi.fn(() => new Promise<any>((resolve) => {
       release = () => resolve({ ok: true, value: 'late' });
     }));
-    const stop = serveMcpStdio({ dispatch, getSchema: () => SCHEMA }, { actions: ['*'], maxInFlight: 1 });
+    const stop = serveMcpStdio({ dispatch, getSchema: () => SCHEMA }, { actionFilter: all, maxInFlight: 1 });
 
     process.stdin.emit('data', JSON.stringify({
       jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'cartAdd', arguments: { target: { id: 1 } } },
@@ -422,7 +425,7 @@ describe('serveMcpStdio limits', () => {
       if (++calls === 2) throw new Error('schema source died');
       return SCHEMA;
     };
-    stops.push(serveMcpStdio({ dispatch: vi.fn(async () => ({ ok: true as const, value: 1 })), getSchema }, { actions: ['*'] }));
+    stops.push(serveMcpStdio({ dispatch: vi.fn(async () => ({ ok: true as const, value: 1 })), getSchema }, { actionFilter: all }));
 
     process.stdin.emit('data', JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'tools/list' }) + '\n');
     process.stdin.emit('data', JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) + '\n');

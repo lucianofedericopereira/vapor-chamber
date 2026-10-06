@@ -8,8 +8,8 @@ import { DEV } from './dev';
 import { onSettled, isThenable } from './settled';
 import { createLedger } from './ledger';
 import { GLYPH_COMMAND } from './glyphs';
-import type { Command, CommandResult, Plugin, CommandBus, AsyncCommandBus, BaseBus } from './command-bus';
-import { commandKey, disposeAll, _okResult, _errResult, _throttleGate, _undo } from './command-bus';
+import type { ActionList, Command, CommandResult, Plugin, CommandBus, AsyncCommandBus, BaseBus } from './command-bus';
+import { commandKey, disposeAll, _okResult, _errResult, _throttleGate, _undo, _isLibraryAction } from './command-bus';
 
 /**
  * Logger plugin - logs all commands and results
@@ -193,21 +193,31 @@ export function history(options: {
   return api;
 }
 
+// A required list names what the plugin acts on, so an empty one acts on
+// nothing (1.25). The bus reads a declared `[]` as every action (an
+// ActionScope), so an empty list gets a fresh plugin that only hands on.
+// Fresh, because Object.assign writes each plugin's id onto it. Log s35.148,
+// tests/plugin-empty-list.test.ts.
+const forList = (list: ActionList, plugin: Plugin): Plugin => (list.length === 0 ? ((_cmd, next) => next()) as Plugin : plugin);
+
 /**
  * Debounce plugin - debounce specific actions
  *
  * Runs the latest dispatch per action and target once `wait` passes with no
  * newer one. Returns { pending: true, key } synchronously, `key` being the
- * action and target the timer is kept under (`commandKey`).
+ * action and target the timer is kept under (`commandKey`). `list` names what
+ * it debounces; `[]` debounces nothing.
  */
 export function debounce(
-  actions: string[],
+  list: ActionList,
   wait: number
 ): Plugin & { /** Cancel all pending debounce timers. */ dispose(): void } {
   // One entry per key: its timer and the latest next(), replaced together.
   const pending = new Map<string, { timer: ReturnType<typeof setTimeout>; next: () => unknown }>();
 
-  const plugin: Plugin = (cmd, next) => {
+  const plugin: Plugin = forList(list, (cmd, next) => {
+    // A $ command (a reset, an undo) runs now: { pending } would report it done (log s35.150).
+    if (_isLibraryAction(cmd.action)) return next();
     const key = commandKey(cmd.action, cmd.target);
     const existing = pending.get(key);
     if (existing) clearTimeout(existing.timer);
@@ -219,35 +229,36 @@ export function debounce(
     }, wait) });
 
     return _okResult({ pending: true, key });
-  };
+  });
 
   return Object.assign(plugin, {
     id: 'debounce',
-    actions,
+    actions: list,
     dispose(): void { for (const [, e] of pending) clearTimeout(e.timer); pending.clear(); },
   });
 }
 
 /**
- * Throttle plugin - execute immediately, then block for wait period
+ * Throttle plugin - execute immediately, then block for wait period.
+ * `list` names what it throttles; `[]` throttles nothing.
  */
 export function throttle(
-  actions: string[],
+  list: ActionList,
   wait: number
 ): Plugin & { /** Cancel all pending throttle timers. */ dispose(): void } {
   const timers = new Set<ReturnType<typeof setTimeout>>();
   // The gate register({ throttle }) uses; a plugin returns the refusal.
   const lastRun = new Map<string, number>();
   const gate = _throttleGate(wait, timers, lastRun);
-  const plugin: Plugin = (cmd, next, fail) => {
+  const plugin: Plugin = forList(list, (cmd, next, fail) => {
     // The plugin's own `fail`: the refusal is the plugin's, not core's.
     const refused = gate(cmd, fail);
     return refused ? _errResult(refused) : next();
-  };
+  });
 
   return Object.assign(plugin, {
     id: 'throttle',
-    actions,
+    actions: list,
     dispose(): void { for (const t of timers) clearTimeout(t); timers.clear(); lastRun.clear(); },
   });
 }
@@ -257,10 +268,17 @@ export function throttle(
  */
 export function authGuard(options: {
   isAuthenticated: () => boolean;
+  /**
+   * Protected actions, each a prefix: `'admin'` and `'admin*'` cover every
+   * action that starts with admin, `'*'` every action.
+   * tests/auth-guard-pattern.test.ts.
+   */
   protected: string[];
   onUnauthenticated?: (cmd: Command) => void;
 }): Plugin {
-  const { isAuthenticated, protected: protectedPrefixes, onUnauthenticated } = options;
+  const { isAuthenticated, onUnauthenticated } = options;
+  // The library's pattern form reads as the prefix it names, once.
+  const protectedPrefixes = options.protected.map((p) => (p.endsWith('*') ? p.slice(0, -1) : p));
 
   const plugin: Plugin = (cmd, next, fail) => {
     // A prefix match covers the exact name too.
@@ -351,7 +369,8 @@ export type OptimisticUndoOptions = {
  * rolls back via undo handler if it fails.
  *
  * **Requires** undo handlers to be registered for the targeted actions.
- * Actions without undo handlers are passed through unchanged.
+ * Actions without undo handlers are passed through unchanged. `list` names
+ * the targeted actions; `[]` targets none.
  *
  * @example
  * bus.register('cartAdd', addToCart, { undo: removeFromCart });
@@ -364,13 +383,13 @@ export type OptimisticUndoOptions = {
  * // result.ok === true, result.value === { id: 5, qty: 2 }
  */
 export function optimisticUndo(
-  bus: CommandBus,
-  actions: string[],
+  bus: CommandBus | AsyncCommandBus,
+  list: ActionList,
   options: OptimisticUndoOptions = {},
 ): Plugin {
   const { predict, onRollback, onRollbackError } = options;
 
-  const plugin: Plugin = (cmd, next) => {
+  const plugin: Plugin = forList(list, (cmd, next) => {
     const undoHandler = bus.getUndoHandler(cmd.action);
     if (!undoHandler) return next(); // no undo registered - passthrough
 
@@ -408,6 +427,6 @@ export function optimisticUndo(
 
     rollbackIfFailed(result as CommandResult);
     return result;
-  };
-  return Object.assign(plugin, { id: 'optimisticUndo', actions });
+  });
+  return Object.assign(plugin, { id: 'optimisticUndo', actions: list });
 }

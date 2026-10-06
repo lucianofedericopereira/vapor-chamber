@@ -7,7 +7,7 @@ import { createChannel, persist } from '../src/plugins-io';
 import { defineChamberStore } from '../src/store';
 
 type Cart = { items: string[] };
-const actions = {
+const reducers = {
   add: (s: Cart, item: string) => ({ items: [...s.items, item] }),
 };
 
@@ -19,9 +19,9 @@ let n = 0;
 function tab(name: string, opts: { share?: boolean } = {}) {
   const lane = createFastLane();
   const ch = createChannel({ channel: name, lane, events: ['cart$state'] });
-  closers.push(() => ch.close());
+  closers.push(() => ch.dispose());
   const bus = createCommandBus();
-  const useCart = defineChamberStore('cart', { state: (): Cart => ({ items: [] }), actions, share: opts.share === false ? undefined : lane });
+  const useCart = defineChamberStore('cart', { state: (): Cart => ({ items: [] }), reducers, share: opts.share === false ? undefined : lane });
   const cart = useCart(bus);
   closers.push(() => cart.$dispose());
   return { bus, lane, cart };
@@ -88,8 +88,11 @@ describe('a shared store', () => {
     b.lane.on('cart$state', (m: { tab: string }) => sentByB.push(m));
     a.cart.add('milk');
     await settle();
-    // b's lane carries a's fact in once (the channel re-emits it locally) and sends nothing of its own
-    expect(sentByB).toHaveLength(1);
+    // b's lane carries a's fact in (the channel re-emits it locally), and a's
+    // answer to b's open when a had written first; b sends nothing of its own
+    expect(sentByB.length).toBeGreaterThan(0);
+    expect(new Set(sentByB.map((m) => (m as { tab: string }).tab)).size).toBe(1);
+    expect(sentByB.filter((m) => !(m as { to?: string }).to)).toHaveLength(1);
   });
 
   it('$dispose stops sharing; a store without share sends nothing', async () => {

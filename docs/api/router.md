@@ -41,7 +41,7 @@ ancestor, active-stamped against `currentPath`.
 
 ### canUseWebHistory
 
-**Function** - [src/router/history.ts:97](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/history.ts#L97)
+**Function** - [src/router/history.ts:98](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/history.ts#L98)
 
 ```ts
 canUseWebHistory() => boolean
@@ -67,7 +67,7 @@ with no regex of its own matches its type's pattern.
 
 ### createMemoryHistory
 
-**Function** - [src/router/history.ts:171](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/history.ts#L171)
+**Function** - [src/router/history.ts:172](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/history.ts#L172)
 
 ```ts
 createMemoryHistory(rawBase?: string, initialFullPath?: string) => RouterHistory
@@ -93,7 +93,7 @@ createRouteTable(rows: readonly RouteRecord[]) => RouteTable
 
 ### createWebHistory
 
-**Function** - [src/router/history.ts:109](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/history.ts#L109)
+**Function** - [src/router/history.ts:110](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/history.ts#L110)
 
 ```ts
 createWebHistory(rawBase?: string) => RouterHistory
@@ -156,7 +156,7 @@ isRouterError(error: unknown, code?: RouterErrorCode) => error is RouterError
 
 ### normalizeBase
 
-**Function** - [src/router/history.ts:27](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/history.ts#L27)
+**Function** - [src/router/history.ts:28](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/history.ts#L28)
 
 ```ts
 normalizeBase(base?: string) => string
@@ -229,7 +229,7 @@ failure is a non-2xx problem, which the http client throws; an envelope
 
 ### resolveBase
 
-**Function** - [src/router/history.ts:71](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/history.ts#L71)
+**Function** - [src/router/history.ts:72](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/history.ts#L72)
 
 ```ts
 resolveBase(options?: ResolveBaseOptions) => string
@@ -319,7 +319,7 @@ skipped; arrays emit repeated keys.
 
 ### stripBase
 
-**Function** - [src/router/history.ts:34](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/history.ts#L34)
+**Function** - [src/router/history.ts:35](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/history.ts#L35)
 
 ```ts
 stripBase(pathname: string, base: string) => string | null
@@ -744,7 +744,7 @@ arrive here already wrapped as a component).
 
 ### ResolveBaseOptions
 
-**Type alias** - [src/router/history.ts:42](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/history.ts#L42)
+**Type alias** - [src/router/history.ts:43](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/history.ts#L43)
 
 ```ts
 export type ResolveBaseOptions = {
@@ -907,7 +907,9 @@ export type Router<TName extends string = string> = {
    *  consumer's bundle), so `component` is deliberately not required here:
    *  requiring it would have this type contradict the implementation. */
   install: (app: { provide: (key: symbol, value: unknown) => unknown }) => void;
-  destroy: () => void;
+  /** Cancels the navigation in flight, removes what `start()` installed (a
+   *  start still running installs nothing more) and disposes the history. */
+  dispose: () => void;
 };
 ```
 
@@ -985,7 +987,8 @@ export type RouterHistory = {
   listen: (cb: HistoryListener) => () => void;
   /** Absolute href for the DOM: base + fullPath. */
   createHref: (fullPath: string) => string;
-  destroy: () => void;
+  /** Drops every `listen()` callback; the web history also stops reading popstate. */
+  dispose: () => void;
 };
 ```
 

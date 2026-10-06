@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-/** router.destroy() while start() is still running leaves nothing behind. The long note is at the end. */
+/** router.dispose() while start() is still running leaves nothing behind. The long note is at the end. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createMemoryHistory } from '@router/history';
 import { createRouter } from '@router/index';
@@ -20,14 +20,14 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-describe('router.destroy() during start()', () => {
+describe('router.dispose() during start()', () => {
   it('while the remote table loads: no commit, no history listener, no link interception', async () => {
     const history = createMemoryHistory('/');
     const { held, release } = gate();
     const http = { get: vi.fn(async () => { await held; return { data: { routes: ROWS } }; }) };
     const router = createRouter({ history, routes: { url: '/routes' }, components: COMPONENTS, scroll: false, announce: false, http: http as never });
     const starting = router.start();
-    router.destroy();
+    router.dispose();
     release();
     await starting;
 
@@ -66,16 +66,16 @@ describe('router.destroy() during start()', () => {
     const add = vi.spyOn(window, 'addEventListener');
     const starting = router.start();
     await tick();
-    router.destroy();
+    router.dispose();
     add.mockClear();
     release();
     await starting;
     expect(isRouterError(router.lastError.value)).toBe(false);
-    // preheatIdle's first act is its abort listeners; none may appear after destroy().
+    // preheatIdle's first act is its abort listeners; none may appear after dispose().
     expect(add.mock.calls.map((call) => call[0])).not.toContain('pointerdown');
   });
 
-  it('control: without destroy() the same start arms the idle preheat', async () => {
+  it('control: without dispose() the same start arms the idle preheat', async () => {
     const routes: RouteRecord[] = [
       ...ROWS,
       { name: 'later', path: '/later', parent: 'shell', component: 'Later', meta: { preheat: true } },
@@ -90,23 +90,23 @@ describe('router.destroy() during start()', () => {
     const add = vi.spyOn(window, 'addEventListener');
     await router.start();
     expect(add.mock.calls.map((call) => call[0])).toContain('pointerdown');
-    router.destroy();
+    router.dispose();
   });
 });
 
 /*
- * Router re-review, 1.26 (log 35.92). `destroy()` runs the teardowns start()
+ * Router re-review, 1.26 (log 35.92). `dispose()` runs the teardowns start()
  * has registered so far and destroys the history. start() is async: with a
  * `{ url }` table it awaits the load, and it always awaits the first
- * navigation. A destroy() inside either wait left start() to carry on
+ * navigation. A dispose() inside either wait left start() to carry on
  * afterwards. After the table load it registered a history listener, installed
  * the document click / hover listeners and the route announcer, and committed
  * the first navigation, all on a router nobody held: a link click navigated
- * it. After the first navigation (which destroy() does cancel, see
- * tests/router/destroy-cancels-navigation.test.ts) it armed the idle preheat,
+ * it. After the first navigation (which dispose() does cancel, see
+ * tests/router/dispose-cancels-navigation.test.ts) it armed the idle preheat,
  * whose window listeners no teardown would ever remove.
  *
- * start() now checks a `destroyed` flag at both points. The control shows the
- * preheat probe does see the listeners when nothing is destroyed, so the
+ * start() now checks a `disposed` flag at both points. The control shows the
+ * preheat probe does see the listeners when nothing is disposed, so the
  * second test's "none" is evidence.
  */

@@ -1,9 +1,9 @@
 # Timestamps
 
 One rule: a timestamp that stays in the process is **epoch milliseconds**, a
-number (`Date.now()`); one that crosses a boundary (storage, a backend, a
-panel a person reads) is **RFC 3339 text in UTC**, which names its own unit and
-zone (`2026-10-02T17:41:19.250Z`). Every timestamp the library produces:
+number (`Date.now()`). One that crosses a boundary (storage, a backend, a
+panel a person reads) is **RFC 3339 text in UTC**. That text names its own unit
+and zone (`2026-10-02T17:41:19.250Z`). Every timestamp the library produces:
 
 | Where | Field | Form | Crosses a boundary? | Pinned by |
 |---|---|---|---|---|
@@ -20,5 +20,5 @@ move backwards when the system clock does. Time a span with
 
 A **duration** is milliseconds, a number, wherever it appears (`retryIn`,
 `timeout`, `maxDelay`, `bufferTTL`). A backend's `Retry-After` header arrives
-as seconds or an HTTP-date (RFC 9110 5.6.7); the client reads it into
+as seconds or an HTTP-date (RFC 9110 5.6.7). The client reads it into
 `retryIn` (`tests/retry-after-grammar.test.ts`).

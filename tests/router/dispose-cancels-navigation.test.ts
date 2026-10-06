@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-/** router.destroy() during a held navigation cancels it. The long note is at the end. */
+/** router.dispose() during a held navigation cancels it. The long note is at the end. */
 import { describe, expect, it, vi } from 'vitest';
 import { createMemoryHistory } from '@router/history';
 import { createRouter } from '@router/index';
@@ -25,7 +25,7 @@ function build(lazy: () => Promise<unknown>, routes: RouteRecord[] = ROWS, loade
   return { router, history };
 }
 
-describe('router.destroy() cancels the navigation in flight', () => {
+describe('router.dispose() cancels the navigation in flight', () => {
   it('control: a superseding push answers cancelled', async () => {
     const { held, release } = gate();
     const { router, history } = build(async () => { await held; return { name: 'List' }; });
@@ -36,22 +36,22 @@ describe('router.destroy() cancels the navigation in flight', () => {
     expect(isRouterError(await going, 'router:aborted:navigation')).toBe(true);
     await other;
     expect(history.location()).toBe('/other');
-    router.destroy();
+    router.dispose();
   });
 
-  it('push, destroy, release: cancelled, and the history is not written', async () => {
+  it('push, dispose, release: cancelled, and the history is not written', async () => {
     const { held, release } = gate();
     const { router, history } = build(async () => { await held; return { name: 'List' }; });
     await router.isReady();
     const going = router.push('/list');
-    router.destroy();
+    router.dispose();
     release();
     expect(isRouterError(await going, 'router:aborted:navigation')).toBe(true);
     expect(history.location()).toBe('/');
     expect(router.currentRoute.value.location.fullPath).toBe('/');
   });
 
-  it('a loading navigation cancelled by destroy leaves isLoading false', async () => {
+  it('a loading navigation cancelled by dispose leaves isLoading false', async () => {
     const { held, release } = gate();
     const routes: RouteRecord[] = [
       { name: 'shell', path: '/', parent: null },
@@ -63,13 +63,13 @@ describe('router.destroy() cancels the navigation in flight', () => {
     const going = router.push('/list');
     await Promise.resolve();
     expect(router.isLoading.value).toBe(true);
-    router.destroy();
+    router.dispose();
     release();
     expect(isRouterError(await going, 'router:aborted:navigation')).toBe(true);
     expect(router.isLoading.value).toBe(false);
   });
 
-  it('a popstate navigation cancelled by destroy walks no history back', async () => {
+  it('a popstate navigation cancelled by dispose walks no history back', async () => {
     const history = createMemoryHistory('/');
     const router = createRouter({ history, routes: ROWS, components: { Home: { name: 'Home' }, List: { name: 'List' } }, scroll: false });
     await router.isReady();
@@ -82,7 +82,7 @@ describe('router.destroy() cancels the navigation in flight', () => {
     const go = vi.spyOn(history, 'go');
     history.go(-1); // the user presses Back; the guard holds the navigation to '/'
     go.mockClear();
-    router.destroy();
+    router.dispose();
     release();
     await new Promise((r) => setTimeout(r, 0));
     expect(go.mock.calls).toEqual([]);
@@ -91,17 +91,17 @@ describe('router.destroy() cancels the navigation in flight', () => {
 });
 
 /*
- * External item 1 of the 1.26 evaluation (log s35.41). `destroy()` ran the
- * teardowns and `history.destroy()` and nothing else, while the engine checks
+ * External item 1 of the 1.26 evaluation (log s35.41). `dispose()` ran the
+ * teardowns and `history.dispose()` and nothing else, while the engine checks
  * only its own navigation id (`cancelled()`) between the awaits of a
  * navigation. A navigation held on a lazy component therefore carried on after
- * the router was destroyed: it resolved null, wrote the history and replaced
+ * the router was disposed: it resolved null, wrote the history and replaced
  * the snapshot of a router nobody held any more.
  *
  * The fix reuses the path supersession already takes: the engine's `cancel()`
  * bumps the navigation id and aborts both lanes' controllers, so the held
  * navigation answers `cancelled` at its next check, exactly as when a newer
  * push supersedes it (the control). Superseding never had to clear the
- * loading flag, because the successor sets it; a destroy has no successor, so
+ * loading flag, because the successor sets it; a dispose has no successor, so
  * `cancel()` clears it too. The third test pins that.
  */

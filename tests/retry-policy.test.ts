@@ -97,7 +97,7 @@ describe('the class rule', () => {
   });
 
   it('re-sends an uncertain failure of an action declared idempotent', async () => {
-    const bus = createAsyncCommandBus({ retry: { actions: { 'cart*': 'idempotent' } } });
+    const bus = createAsyncCommandBus({ retry: { actionPolicies: { 'cart*': 'idempotent' } } });
     const { handler, calls } = scripted(['lost', 'throw', 'ok']);
     bus.register('cartAdd', handler);
     const result = await settle(bus.dispatch('cartAdd', {}));
@@ -106,7 +106,7 @@ describe('the class rule', () => {
   });
 
   it('stamps an idempotent action with one key for every attempt', async () => {
-    const bus = createAsyncCommandBus({ retry: { actions: { save: 'idempotent' } } });
+    const bus = createAsyncCommandBus({ retry: { actionPolicies: { save: 'idempotent' } } });
     const keys: unknown[] = [];
     let id: string | undefined;
     bus.register('save', async (cmd) => {
@@ -316,7 +316,7 @@ describe('the declarations', () => {
   });
 
   it('an action declared false is sent once', async () => {
-    const bus = createAsyncCommandBus({ retry: { actions: { pay: false } } });
+    const bus = createAsyncCommandBus({ retry: { actionPolicies: { pay: false } } });
     const { handler, calls } = scripted(['limited']);
     bus.register('pay', handler);
     await settle(bus.dispatch('pay', {}));
@@ -324,7 +324,7 @@ describe('the declarations', () => {
   });
 
   it('an action declared n makes up to n attempts', async () => {
-    const bus = createAsyncCommandBus({ retry: { actions: { save: 2 } } });
+    const bus = createAsyncCommandBus({ retry: { actionPolicies: { save: 2 } } });
     const { handler, calls } = scripted(['limited']);
     bus.register('save', handler);
     await settle(bus.dispatch('save', {}));
@@ -357,7 +357,7 @@ describe('the schema bus options', () => {
   });
 
   it("an option's declaration for the same name wins over the schema's", async () => {
-    const bus = createAsyncSchemaCommandBus({ cartAdd: { retry: 'idempotent' } }, { retry: { actions: { cartAdd: false } } });
+    const bus = createAsyncSchemaCommandBus({ cartAdd: { retry: 'idempotent' } }, { retry: { actionPolicies: { cartAdd: false } } });
     const add = scripted(['limited']);
     bus.register('cartAdd', add.handler);
     await settle(bus.dispatch('cartAdd', {}));

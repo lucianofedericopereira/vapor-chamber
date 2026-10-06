@@ -9,7 +9,7 @@ type Counter = { n: number };
 
 const useCounter = defineChamberStore('counter', {
   state: (): Counter => ({ n: 0 }),
-  actions: { set: (_s: Counter, n: number) => ({ n }) },
+  reducers: { set: (_s: Counter, n: number) => ({ n }) },
 });
 
 function memoryStorage(initial: string | null = null) {
@@ -102,7 +102,7 @@ describe('$reset goes back to state(), so state() is the reset target', () => {
     const saved = persist<Counter>({ key: 'vc:f1', storage, getState: () => ({ n: -1 }) });
     const useSaved = defineChamberStore('saved', {
       state: (): Counter => saved.load() ?? { n: 0 },
-      actions: { set: (_s: Counter, n: number) => ({ n }) },
+      reducers: { set: (_s: Counter, n: number) => ({ n }) },
     });
     const store = useSaved(bus);
     bus.use(persist({ key: 'vc:f1', storage, getState: () => store.state.value }));
@@ -119,7 +119,7 @@ describe('$reset goes back to state(), so state() is the reset target', () => {
     const p = persist<Counter>({ key: 'vc:f1b', storage, getState: () => store.state.value });
     const useLoaded = defineChamberStore('loaded', {
       state: (): Counter => ({ n: 0 }),
-      actions: { load: (s: Counter, saved: Counter | null) => saved ?? s },
+      reducers: { load: (s: Counter, saved: Counter | null) => saved ?? s },
     });
     const store = useLoaded(bus);
     bus.use(p);

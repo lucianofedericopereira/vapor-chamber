@@ -8,20 +8,20 @@ import { defineChamberStore } from '../src/store';
 import { it } from '../src/vitest';
 import { stubEnv } from '../src/vitest-pure';
 
-const counter = { state: () => ({ n: 0 }), actions: { inc: (s: { n: number }) => ({ n: s.n + 1 }) } };
+const counter = { state: () => ({ n: 0 }), reducers: { inc: (s: { n: number }) => ({ n: s.n + 1 }) } };
 const fakeRouter = { currentRoute: { value: { location: { query: {} } } }, setQuery: () => {} };
 
 describe('an action key that is a store member', () => {
   for (const key of ['$id', 'state', 'url', '$reset', '$dispose']) {
     it(`"${key}" is refused when the store is defined, by name`, () => {
-      expect(() => defineChamberStore('s', { state: () => ({}), actions: { [key]: (s: object) => s } })).toThrow(
+      expect(() => defineChamberStore('s', { state: () => ({}), reducers: { [key]: (s: object) => s } })).toThrow(
         `Store "s": the action "${key}" would replace the store's own "${key}".`,
       );
     });
   }
 
   it('control: any other key is an action', ({ bus }) => {
-    const store = defineChamberStore('s', { state: () => ({ v: 0 }), actions: { status: () => ({ v: 1 }) } })(bus);
+    const store = defineChamberStore('s', { state: () => ({ v: 0 }), reducers: { status: () => ({ v: 1 }) } })(bus);
     store.status();
     expect(store.state.value.v).toBe(1);
     store.$dispose();
@@ -89,7 +89,7 @@ describe('every store refusal is coded (shape rule 2)', () => {
   };
 
   it('store:already:member, store:missing:bus, store:missing:router, each catalogued', () => {
-    expect(codeOf(() => defineChamberStore('s', { state: () => ({}), actions: { state: (s: object) => s } }))).toBe('store:already:member');
+    expect(codeOf(() => defineChamberStore('s', { state: () => ({}), reducers: { state: (s: object) => s } }))).toBe('store:already:member');
     expect(codeOf(() => (defineChamberStore('s', counter) as unknown as () => unknown)())).toBe('store:missing:bus');
     const bus = createCommandBus();
     expect(codeOf(() => defineChamberStore('f', { ...counter, url: { page: 'page' } })(bus))).toBe('store:missing:router');
@@ -106,7 +106,7 @@ describe('every store refusal has the core failure shape (settled item 5, plan 4
     throw new Error('did not throw');
   };
   const refusals = (store: typeof defineChamberStore, bus: ReturnType<typeof createCommandBus>) => [
-    thrown(() => store('s', { state: () => ({}), actions: { state: (s: object) => s } })),
+    thrown(() => store('s', { state: () => ({}), reducers: { state: (s: object) => s } })),
     thrown(() => (store('s', counter) as unknown as () => unknown)()),
     thrown(() => store('f', { ...counter, url: { page: 'page', sort: 'sort' } })(bus)),
   ];
@@ -145,8 +145,8 @@ describe("a $ in a store's id or action key (log s35.117)", () => {
     vi.resetModules();
     const { defineChamberStore: prodDefine } = await import('../src/store');
     const state = () => ({ n: 0 });
-    expect(() => prodDefine('ca$rt', { state, actions: {} })).toThrow('Store "ca$rt": a name with "$" is the library\'s.');
-    expect(() => prodDefine('cart', { state, actions: { add$x: (x: { n: number }) => x } })).toThrow('Store "cart": the action "add$x" has a "$", which names the library\'s commands.');
+    expect(() => prodDefine('ca$rt', { state, reducers: {} })).toThrow('Store "ca$rt": a name with "$" is the library\'s.');
+    expect(() => prodDefine('cart', { state, reducers: { add$x: (x: { n: number }) => x } })).toThrow('Store "cart": the action "add$x" has a "$", which names the library\'s commands.');
     vi.resetModules();
   });
 });
