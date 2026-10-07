@@ -73,7 +73,7 @@ describe('setupDevtools', () => {
  */
 describe('setupDevtools - the @vue/devtools-api integration', () => {
   /** Capture the api object the plugin registers, plus its callbacks. */
-  async function withDevtools(): Promise<{
+  async function withDevtools(facts?: string[]): Promise<{
     bus: ReturnType<typeof createCommandBus>;
     api: any;
     stop: () => void;
@@ -95,7 +95,7 @@ describe('setupDevtools - the @vue/devtools-api integration', () => {
     vi.resetModules();
     const { setupDevtools: fresh } = await import('../src/devtools');
     const bus = createCommandBus({ onMissing: 'ignore' });
-    const stop = fresh(bus, {});
+    const stop = fresh(bus, {}, facts ? { facts } : undefined);
     // Poll for the actual side effect instead of racing a fixed setTimeout(0)
     // against the dynamic import - a fixed tick is flaky under load (the
     // import + module transform can take longer than one macrotask).
@@ -271,6 +271,51 @@ describe('setupDevtools - the @vue/devtools-api integration', () => {
     const tree: any = { inspectorId: 'vapor-chamber', filter: '' };
     api.handlers.tree(tree);
     expect(tree.rootNodes.length).toBe(100);
+    stop();
+  });
+
+  it('without facts, an emitted fact shows no event; a dispatch shows one', async () => {
+    const { bus, api, stop } = await withDevtools();
+    bus.register('x', () => 1);
+    bus.emit('routerNavigated', { to: '/list' });
+    expect(api.addTimelineEvent).toHaveBeenCalledTimes(0);
+    bus.dispatch('x', {});
+    expect(api.addTimelineEvent).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it('with facts, a named fact is a Facts event and a matching dispatch stays a Commands event', async () => {
+    const { bus, api, stop } = await withDevtools(['router*']);
+    expect(api.addTimelineLayer).toHaveBeenCalledWith(expect.objectContaining({ id: 'vapor-chamber-facts', label: 'Facts' }));
+    bus.register('routerReload', () => 1);
+    bus.emit('routerNavigated', { to: '/list' });
+    bus.emit('cartAdded', { id: 1 });
+    bus.dispatch('routerReload', {});
+    const events = api.addTimelineEvent.mock.calls.map(([e]: any[]) => [e.layerId, e.event.title]);
+    expect(events).toEqual([
+      ['vapor-chamber-facts', 'routerNavigated'],
+      ['vapor-chamber', 'routerReload'],
+    ]);
+    expect(api.addTimelineEvent.mock.calls[0][0].event.data).toEqual({ to: '/list' });
+    stop();
+    bus.emit('routerNavigated', { to: '/' });
+    expect(api.addTimelineEvent).toHaveBeenCalledTimes(2);
+  });
+
+  it('the stop removes every facts listener, and a fact before DevTools loads is dropped', () => {
+    const bus = createCommandBus({ onMissing: 'ignore' });
+    const offs: string[] = [];
+    const lean = { onAfter: bus.onAfter, on: (p: string, l: any) => { const off = bus.on(p, l); return () => { offs.push(p); off(); }; } };
+    const stop = setupDevtools(lean, {}, { facts: ['router*', 'cart*'] });
+    expect(() => bus.emit('routerNavigated', {})).not.toThrow();
+    stop();
+    expect(offs).toEqual(['router*', 'cart*']);
+  });
+
+  it('facts on a bus without on() are ignored', () => {
+    const bus = createCommandBus({ onMissing: 'ignore' });
+    const stop = setupDevtools({ onAfter: bus.onAfter }, {}, { facts: ['router*'] });
+    expect(() => bus.emit('routerNavigated', {})).not.toThrow();
     stop();
   });
 

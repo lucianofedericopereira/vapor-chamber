@@ -60,15 +60,8 @@ class VaporChamberController extends Controller
         if ($result['status'] < 400) {
             return response()->json($result['body'], $result['status'], $result['headers'] ?? []);
         }
-        $headers = ['Content-Type' => 'application/problem+json'];
-        // A key still running: the client's re-send waits a second and comes
-        // back for the finished answer (the cache below), instead of settling
-        // as a conflict while the first attempt succeeds.
-        if (($result['body']['code'] ?? null) === 'in_progress') {
-            $headers['Retry-After'] = '1';
-        }
 
-        return response()->json($result['body'], $result['status'], $headers);
+        return response()->json($result['body'], $result['status'], ['Content-Type' => 'application/problem+json'] + ($result['headers'] ?? []));
     }
 
     /**
@@ -87,7 +80,9 @@ class VaporChamberController extends Controller
      * A failed command's problem is the RESULT, not the response: the batch
      * answers 200 because the request succeeded, and RFC 9457 has no shape for
      * several failures in one response. The problem carries the command's own
-     * `status`, which the client reads the failure's condition from.
+     * `status`, which the client reads the failure's condition from. A result
+     * carries the headers its command's own response would have had, as
+     * `headers` (OData JSON batch): an `in_progress` result's `Retry-After`.
      */
     public function batch(Request $request): JsonResponse
     {
@@ -108,9 +103,13 @@ class VaporChamberController extends Controller
                 $this->idempotencyKey($entry['meta'] ?? null),
                 $request->user(),
             );
-            $results[] = $result['status'] >= 400
+            $item = $result['status'] >= 400
                 ? ['id' => $id, 'problem' => $result['body']]
                 : ['id' => $id, ...(array) $result['body']];
+            if (!empty($result['headers'])) {
+                $item['headers'] = $result['headers'];
+            }
+            $results[] = $item;
         }
 
         return response()->json(['results' => $results]);
@@ -122,7 +121,10 @@ class VaporChamberController extends Controller
      * resolution, same Idempotency-Key replay/caching, same exception ->
      * response-shape mapping.
      *
-     * @return array{body: array<string, mixed>, status: int}
+     * `headers` are the command's own response headers: __invoke() sends them
+     * on the response, batch() on the result.
+     *
+     * @return array{body: array<string, mixed>|object, status: int, headers?: array<string, string>}
      */
     private function dispatchOne(Request $request, string $command, mixed $target, mixed $payload, ?string $idempotencyKey, mixed $user): array
     {
@@ -148,12 +150,12 @@ class VaporChamberController extends Controller
         // attempt is still running (a client timeout on a slow write) misses
         // the cache and runs the action a second time, concurrently. The lock
         // is taken BEFORE the cache read and held for the whole run; a request
-        // that cannot get it is answered 409 with Retry-After (see __invoke), so
-        // the client's re-send returns for the one outcome. 30s bounds a crashed
-        // holder.
+        // that cannot get it is answered 409 with `Retry-After: 1`, so the
+        // client's re-send comes back a second later for the one outcome. 30s
+        // bounds a crashed holder.
         $lock = $cacheKey ? Cache::lock("vc:idem:lock:{$command}:{$idempotencyKey}", 30) : null;
         if ($lock && !$lock->get()) {
-            return $this->problem('A request with this Idempotency-Key is still running', 409, 'in_progress');
+            return $this->problem('A request with this Idempotency-Key is still running', 409, 'in_progress') + ['headers' => ['Retry-After' => '1']];
         }
 
         try {

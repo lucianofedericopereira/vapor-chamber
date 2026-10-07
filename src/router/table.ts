@@ -148,6 +148,8 @@ export function createRouteTable(rows: readonly RouteRecord[]): RouteTable {
     if (DEV && byName.has(row.name)) {
       throw routerError('already:route', `duplicate route name "${row.name}"`);
     }
+    // One value for both reads: a table from JSON or a database carries `null`.
+    const paramTypes = row.params ?? {};
     const record: TableRecord = {
       name: row.name,
       path: row.path,
@@ -156,13 +158,13 @@ export function createRouteTable(rows: readonly RouteRecord[]): RouteTable {
       blade: row.blade === true,
       group: !row.component && row.blade !== true,
       load: row.load ?? null,
-      paramTypes: row.params ?? {},
+      paramTypes,
       meta: row.meta ?? {},
       chain: [],
       renderChain: [],
       loadChain: [],
       queryDefs: {},
-      ...compilePath(row.path, row.params),
+      ...compilePath(row.path, paramTypes),
     };
     // `meta` is the ROW's object, and the table hands the same one to every
     // consumer for the router's whole life: `location.meta` is it, so are

@@ -11,7 +11,7 @@ import { MAX_TIMEOUT_MS, countOption } from './bounds';
 import { DEV } from './dev';
 import { abortedResult, BusError as BusErrorClass, _failures, _okResult, _errResult, _isLibraryAction } from './command-bus';
 import { _appliedRemotely } from './applied-remotely';
-import { _answered, _remoteProblem, postCommand } from './http';
+import { _answered, _parseRetryAfter, _remoteProblem, postCommand } from './http';
 import type { HttpClient } from './http';
 import type { ProblemDetails } from './http-errors';
 import { signal } from './signal';
@@ -113,8 +113,20 @@ const redirected = (url: string, action: string, handled: boolean): BusError =>
 const responseOf = (res: { status: number; headers?: Record<string, string>; url?: string; redirected?: boolean }): MetaResponse =>
   ({ status: res.status, headers: res.headers ?? {}, url: res.url, redirected: res.redirected });
 
-function answerOf(r: BackendResponse, cmd: Command): CommandResult {
-  if (r.problem) return _errResult(_remoteProblem(r.problem));
+/**
+ * A result's `Retry-After`, from its own headers: the response's, or the
+ * `headers` a batched result or a frame carries (OData JSON batch). A name in
+ * any case (RFC 9110 5.1), a string value. tests/batch-retry-after.test.ts.
+ */
+function retryAfterOf(headers: unknown): string | undefined {
+  if (headers === null || typeof headers !== 'object') return undefined;
+  const name = Object.keys(headers).find((k) => k.toLowerCase() === 'retry-after');
+  const value = name === undefined ? undefined : (headers as Record<string, unknown>)[name];
+  return typeof value === 'string' ? value : undefined;
+}
+
+function answerOf(r: BackendResponse, cmd: Command, headers?: unknown): CommandResult {
+  if (r.problem) return _errResult(_remoteProblem(r.problem, undefined, _parseRetryAfter(retryAfterOf(headers))));
   if (typeof r.redirect === 'string') return _errResult(redirected(r.redirect, cmd.action, false));
   // The server applied it: history must not undo or redo it locally (R9).
   // The store states its reply declares travel with it to the bus.
@@ -300,7 +312,7 @@ export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
         onRedirect?.(d.redirect);
         return _errResult(redirected(d.redirect, cmd.action, !!onRedirect));
       }
-      return answerOf(d, cmd);
+      return answerOf(d, cmd, res.headers);
     } catch (e) {
       return unanswered(e, cmd.action, perCallSignal);
     }
@@ -332,9 +344,10 @@ export type BatchingHttpBridgeOptions = HttpBridgeOptions & {
 
 // `{ id } & BackendResponse`, not a restatement of it. Spelled out by hand
 // until now, which is why `code` had to be added in two places instead of one
-// - and how the two shapes would have drifted again at the next field. The WS
-// frame below already composes it this way.
-type BatchedResult = { id: string } & BackendResponse;
+// - and how the two shapes would have drifted again at the next field. A WS
+// frame is one too. `headers`: the result's own response headers, as an OData
+// JSON batch response carries them; it has no HTTP response of its own.
+type BatchedResult = { id: string; headers?: Record<string, string> } & BackendResponse;
 type BatchResponse = { results?: BatchedResult[] };
 
 // `leave`: set at the flush for a command that carries a signal; its abort counts it out of the request.
@@ -354,7 +367,9 @@ type QueuedBatchEntry = { id: string; cmd: Command; resolve: (result: CommandRes
  *
  *   { results: [{ id, state }, { id, redirect }, { id, problem }, ...] }
  *
- * A failed result carries its problem with the command's own `status`.
+ * A failed result carries its problem with the command's own `status`. A
+ * result may carry its own `headers` (OData JSON batch): its `Retry-After`
+ * sets the wait as a single response's does.
  *
  * Each queued command's own dispatch promise resolves independently - a
  * caller dispatches exactly as it would against createHttpBridge; the
@@ -444,7 +459,7 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
           }
           entry.resolve(_errResult(redirected(r.redirect, entry.cmd.action, !!onRedirect)));
         } else {
-          entry.resolve(answerOf(r, entry.cmd));
+          entry.resolve(answerOf(r, entry.cmd, r.headers));
         }
       }
     } catch (e) {
@@ -675,12 +690,12 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
 
     ws.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data as string) as { id: string } & BackendResponse;
+        const data = JSON.parse(event.data as string) as BatchedResult;
         const req = pending.get(data.id);
         if (req) {
           clearTimeout(req.timeoutId);
           pending.delete(data.id);
-          req.resolve(answerOf(data, req.cmd));
+          req.resolve(answerOf(data, req.cmd, data.headers));
         }
       } catch {
         // ignore malformed frames

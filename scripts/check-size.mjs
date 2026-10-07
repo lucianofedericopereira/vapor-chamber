@@ -617,14 +617,34 @@ const BUDGETS = {
   // Then sync dispatch guards, builds, then runs the Command (log s35.204),
   // one piece: raw/brotli full, core, elements +7/-39, +7/-13, +7/-11. Raw
   // raised to measured, brotli kept.
-  'vapor-chamber.iife.min.js':          { rawMax: 47_147, brotliMax: 14_814 },
+  // Then a batched result's or a frame's own `headers`, their Retry-After read
+  // as a response's (log s35.205). Raw/brotli full, core, elements, each piece
+  // left out alone: the reader (a name in any case, a string value) and the
+  // batch and frame passing theirs +199/+70, +188/+53, +189/+53; the single
+  // bridge passing its response's +10/-7, +10/+6, +10/+2. Total +209/+63,
+  // +198/+59, +199/+55 (brotli is not additive). The two-copies hint is DEV
+  // (0 here). Raised to measured.
+  // Then persist's storage lookup moved inside its try (log s35.208): raw
+  // -14, brotli +3. Three other shapes measured: none under +3 brotli.
+  // Then bus hooks removed by the listeners' rule (log s35.209). Raw/brotli
+  // full, core, elements, each piece left out alone: the four loops skipping
+  // an entry marked off +92/+8, +92/+9, +92/+13; addHook's entries +31/+3,
+  // +31/-2, +31/-2; clearState marking and replacing +59/+7, +59/+12,
+  // +59/+11. Total +182/+28, +182/+30, +182/+28. Raised to measured.
+  // Then persist declares `actions` and `actionFilter` (log s35.214), one
+  // piece, full only: +46/+12. Raised to measured.
+  // Then persist reads an async storage (log s35.216), full only: hydrate,
+  // the read load() and hydrate() share, load()'s refusal of a promise, and
+  // the rejection checks in save and clear, together +285/+95. Raised to
+  // measured. The IndexedDB storage itself is in no IIFE.
+  'vapor-chamber.iife.min.js':          { rawMax: 47_855, brotliMax: 14_976 },
   // Then (log s35.107) BusError and its vocabulary moved to src/failure.ts so
   // the router raises the core's failure without importing the bus. A pure
   // move: raw bytes identical in all three IIFEs once the import sits where
   // the code was; brotli moves with the arrangement: full -8 (budget kept),
   // core +5, elements +7. Owner: raised to measured ("size no issue").
-  'vapor-chamber-core.iife.min.js':     { rawMax: 32_822, brotliMax: 10_359 },
-  'vapor-chamber-elements.iife.min.js': { rawMax: 34_435, brotliMax: 10_831 },
+  'vapor-chamber-core.iife.min.js':     { rawMax: 33_202, brotliMax: 10_429 },
+  'vapor-chamber-elements.iife.min.js': { rawMax: 34_816, brotliMax: 10_903 },
 };
 
 const BR_OPTS = { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } };

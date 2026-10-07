@@ -23,5 +23,6 @@ export {
   persist,
   createChannel,
   type PersistOptions,
+  type PersistStorage,
   type ChannelOptions,
 } from './plugins-io';

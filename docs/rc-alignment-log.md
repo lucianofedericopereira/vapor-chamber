@@ -15835,3 +15835,693 @@ Owner: speed, correctness, symmetry, shape, room to grow.
 - CHANGELOG: one bullet under `## v1.27.0 - 2026-10-06` (owner: 1.27, dated
   today), no version change.
 - Gate green.
+
+### 35.205 The 1.27.0 bug report: four fixes (2026-10-07)
+
+- Source: a report run against the published `vapor-chamber` 1.27.0 and Vue
+  3.6.0-rc.10, five items. Owner, 2026-10-07: "lets address then 1 2 3 4",
+  "so minimal changes ci etc". Item 5 (`inspectBus` without plugin ids) was
+  not discussed and is not addressed here.
+- First, the release. Upstream main e95f753 holds 1.27 squashed (0ad08f9),
+  the CI fix a106ebb and the metrics docs. Its tree differed from ded5c67 in
+  seven files only. Taken as they are in 4f47d68, so the tree equals upstream
+  main and the fixes sit on the released code.
+- Each item was checked against the code before any edit. Fails-before: the
+  new tests on 4f47d68's src, 6 red, each a fix target, every control green.
+- 1, a route row with `params: null`. src/router/table.ts read
+  `row.params ?? {}` for the param types and passed the raw value to
+  `compilePath`, whose default catches `undefined` only. One value now serves
+  both reads. tests/router/route-params-null.test.ts: red 2 (the TypeError
+  of the report), control 1 (typed params).
+- 2, the README schema example imported `CommandsOf`, which no entry
+  exports. Now `InferMap`, as src/schema.ts shows. Checked by compiling the
+  snippet out of README.md with `strict` and `nodenext`: it compiles. The
+  old name put back fails with the report's TS2724 (the control).
+- 3, a batched command's `Retry-After`. The report's reading was half
+  right. A wait member on the problem is not overwritten by mistake:
+  `_remoteProblem` takes `retryIn` from a header only, by design (v1.26,
+  contract 4.4: "never from the body"). The gap was 4.4's open item: a
+  batched result has no response of its own.
+  - First build, 6b142de: the proposal recorded in 4.4, a `retryAfter`
+    member on the problem. A drift, caught by the owner on 2026-10-07. No
+    RFC defines the member (RFC 9110 has Retry-After as a header only, RFC
+    9457 merely allows extension members). It read a wait from the body
+    against 4.4's own rule, and 4.4 was left contradicting itself.
+  - Checked then, the standard batch shape: OData JSON Format 4.01 section
+    19 gives each batch response a `headers` object. Microsoft Graph's JSON
+    batching tells clients to read a throttled result's `retry-after` there.
+  - Built: a batched result and a WebSocket frame carry `headers`.
+    `answerOf` reads `Retry-After` from the result's own headers: the
+    response's for a single request, the `headers` a batched result or a
+    frame carries. Read case-insensitively (RFC 9110 5.1), a string value,
+    through `_parseRetryAfter` (the header's grammar and ceiling). 4.4's
+    "never from the body" holds: a `retryAfter` member stays a problem
+    member. The controller's `dispatchOne()` returns `Retry-After: 1` with
+    `in_progress`, as it returns a 202's headers. `__invoke()` sends them on
+    the response, `batch()` on the result.
+  - tests/batch-retry-after.test.ts, against 6b142de's src: red 5 (the wait
+    honoured, any case and the date form, `retryIn` reported when not
+    re-sent, a body member not read, a frame), controls 2 (no headers,
+    values off the grammar). `php -l` is clean.
+- End to end, Laravel 13.35.0 (a fresh scratch app, the example controller
+  and config as published, CSRF off for the two endpoints). A fixture holds
+  the Idempotency-Key lock and releases it 500 ms in. Run on the corrected
+  build, three runs, every row the same each time. On the wire a batched
+  result reads `{ id, problem, headers: { "Retry-After": "1" } }`.
+
+  | client | single, Retry-After | batch | batch, `retry: false` |
+  |---|---|---|---|
+  | this commit | lands, 2 POSTs | lands, 2 POSTs, ran once | `in_progress`, `retryIn` 1000 |
+  | 1.27.0 | lands, 2 POSTs | `in_progress`, 1 POST | `in_progress`, no `retryIn` |
+
+  The 1.27.0 row is the report's bug, the single column the control.
+- Also run: `test:browser` 21 of 21, `check:example`, the seven demos in
+  headless Chromium (.probes/task11/examples-probe.mjs), all ok.
+- Fixed on the way: a type-only `BusError` import that Biome warned about
+  (tests/retry-unidentified.test.ts).
+- 4, two copies of the library. `_isLibraryRegister` is module state, so a
+  store from a second copy is refused by the first copy's bus as an app's
+  `$` name. The refusal stays (two copies share no state: the receivers and
+  the mark are per copy too). Its DEV advice now names the cause, and the
+  README tells a library to mark every `vapor-chamber/*` subpath external.
+  tests/library-names.test.ts mounts a real second copy (`vi.resetModules`):
+  red 1.
+- Bytes against 1.27.0's build, each piece left out alone. Bug 4 is DEV, 0
+  in both bundles. The route table is in neither. Bug 3 is all of it:
+
+  | piece | full IIFE | core IIFE | elements IIFE | Blade (brotli) |
+  |---|---|---|---|---|
+  | the reader, batch and frame passing theirs | +199/+70 | +188/+53 | +189/+53 | +54 |
+  | the single bridge passing its response's | +10/-7 | +10/+6 | +10/+2 | -3 |
+  | total (brotli is not additive) | +209/+63 | +198/+59 | +199/+55 | +51 |
+
+  IIFE figures are raw/brotli. Every budget and the Blade ceiling (8_295 ->
+  8_346) raised to measured. The member version of 6b142de cost +58/+28 on
+  the full IIFE: the standard shape costs more, the reader being
+  case-insensitive and type-checked.
+- No speed run: bug 3 runs on a failure path, bug 4 at a refusal, bug 1 at
+  router creation.
+- Gate green.
+
+### 35.206 inspectBus reports the installed plugins (2026-10-07)
+
+- Source: item 5 of the 1.27.0 report. Discussed with the owner, who asked
+  whether a shared store would serve instead ("the store was just a
+  question") and chose the snapshot ("i prefer your plan ... do it").
+- Before: `inspectBus()` gave `pluginCount` and `pluginPriorities` only, so a
+  tracer patched `bus.use` to learn what was installed. Log 10.3 W2 had called
+  it not cheap while a plugin's scope was a closure, and ext 13 found five of
+  twenty factories with an id. Both are gone: since 1.27 a plugin declares
+  `id`, `actions` and `actionFilter` as properties (s35.141, s35.152), and
+  tests/plugin-ids.test.ts pins an id on every built-in factory.
+- Built: `BusInspection.plugins`, a `PluginInspection` per plugin in
+  execution order: `id` (declared, never `Function.name`), `priority`, a copy
+  of `actions`, `actionFilter` as present or not (a function is not
+  serializable), `transport`. One helper, `_inspectPlugins`, serves the bus
+  and the TestBus. `pluginCount` and `pluginPriorities` stay. The field is
+  required: every built-in producer fills it, and a hand-built
+  `BusInspection` needs it (CHANGELOG).
+- Not chosen: a store holding the list. It would be written on every `use()`
+  and removal in every bus and bundle, for a dev tool, and tie the core bus
+  to the signal layer. The list changes mostly at setup.
+- Cost: no new work on dispatch, `use()` or bus creation; the list is built
+  only when `inspectBus` is called, and is tree-shaken from bundles that do
+  not import it.
+- tests/inspect-plugins.test.ts, on the src before: red 6 of 6, the
+  fallback for a foreign bus included (the field did not exist).
+
+### 35.207 1.28 items 4 to 8: five probes, two bugs (2026-10-07)
+
+- Plan .probes/1.28-plan.md items 4 to 8, probes only, no src edit. Owner,
+  2026-10-07: "any claim should be land by testing". Each verdict is a test
+  file with a positive control. Each seeded fault ran in a scratch worktree
+  and turned its row red alone.
+- 4, router guards against the bus's hooks: a bug in the bus.
+  tests/hook-removal-parity.test.ts, 16 (6 `it.fails`).
+  - A bus hook that removes itself or a later hook skips its neighbour. The
+    loop then calls past the end of its array.
+  - In `onBefore` that throw becomes `core:refused:hook`: the dispatch fails
+    and its handler never runs. In `onAfter`, "Hook error" is logged.
+  - The router moves its cursor by identity and is right. Seeded: dropping
+    its correction turns the self-removal row red, dropping only the
+    identity term the later-removal row.
+  - Also found: both router loops run a hook added during a navigation in
+    that navigation. The bus runs it from the next dispatch.
+- 5, router aborts against `supersede`: duplication only.
+  tests/router/superseded-loaders.test.ts, 5, a real `node:http` server.
+  Older loaders see the abort, older navigations answer
+  `router:aborted:navigation`. A loader or handler that ignores its signal
+  and never returns holds its promise open on both sides. One abort listener
+  added, none left after settle, on both.
+- 6, the router loader cache: no duplicate. The router holds no cache:
+  `fetchLoaders` reads through its HttpClient's. The B6 cases through a
+  navigation answer as the client alone.
+  tests/router-fetch/loader-cache-b6.test.ts, 4, one seeded fault per case.
+- 7, storage in `persist` and the outbox: a bug in `persist`.
+  tests/storage-lookup-parity.test.ts, 7 (1 `it.fails`).
+  - With storage blocked, reading `localStorage` throws. `typeof` does not
+    guard a getter that throws.
+  - The outbox catches it and warns. `persist` looks up before its `try`:
+    every dispatch answers `persist:failed:plugin` though its handler ran,
+    and `load()` throws.
+  - No storage, a quota error, corrupt JSON: the same answer (only the
+    outbox warns on corrupt JSON, console only).
+- 8, `register({ throttle })` against `throttle()`: duplication only.
+  tests/throttle-parity.test.ts, 9. Same runs, `retryIn`, timers after
+  dispose, no retry. The owner (`core:`, `throttle:`) and the plugin's
+  name scope over `$undo` (kept by s35.150) were decided earlier.
+- Fix entries for 4 and 7 are in the plan. Owner on the fixes: "fix is one
+  thing fix and be as or better performant is other how you will test
+  that?", then "go" for the test plan in the plan file.
+
+### 35.208 persist reads storage inside its try (2026-10-07)
+
+- Plan 1.28 item 7, the bug of s35.207. Owner: "go". Fails-before: the
+  `it.fails` row of tests/storage-lookup-parity.test.ts, committed red in
+  970d9cd.
+- Fix: in `save()`, `load()` and `clear()` the `getStorage()` lookup moves
+  inside the `try` each already has. Blocked storage now warns "failed to
+  save", as a quota error does. The row is an `it` now, the "today" row is
+  gone, and a row pins `clear()`.
+- Built arms (`npm run ab:dists`, 970d9cd and the fix): only `plugins-io.js`
+  and the full IIFE differ. The diff is the three moved lookups.
+- A/B, `npm run ab`, K 10, two lengths, scripts/ab/workloads/persist.mjs.
+  Every control passed.
+
+  | row | kind | B/A (n, 4n) | ns, A to B | verdict |
+  |---|---|---|---|---|
+  | no persist | control path | 1.000, 0.994 | 16.8 to 16.8 | no result |
+  | persist, small state | normal | 0.997, 1.009 | 155.5 to 155.0 | no result |
+  | persist, 50 items | normal | 0.998, 0.999 | 1_975 to 1_964 | no result |
+  | blocked storage | failure | 0.448, 0.488 | 9_831 to 4_338 | faster |
+
+  The failure path no longer throws inside the plugin, so it skips the
+  plugin-throw result. No bench run: `npm run bench` stamps no persist
+  ratio, so the A/B is the comparison.
+- Bytes: `plugins-io.js` 3_679 -> 3_624 raw. Full IIFE 47_356 -> 47_342
+  raw, 14_838 -> 14_841 brotli. The core and elements IIFEs and the Blade
+  bundle carry no persist. Owner, 2026-10-07: "try to squeeze size when
+  possible if the prior is ok". Three shapes built and measured (full IIFE
+  raw/brotli): one lookup line in all three functions 47_372/14_843,
+  `?.` in save and clear 47_332/14_841, plus one read of `localStorage`
+  47_291/14_884. None under +3 brotli. The last also adds an unmeasured
+  change to the timed path. The measured shape stays, budget raised to
+  measured (+3 brotli, raw lowered to 47_342).
+
+### 35.209 Bus hooks follow the listeners' removal rule (2026-10-07)
+
+- Plan 1.28 item 4, the bus bug of s35.207. Owner: "go" for E, S the
+  fallback. Fails-before: the new rows of tests/hook-removal-parity.test.ts
+  on 51629a5's src, red 6 (self-removal, later removal, two removals, one
+  subscription removed twice, `clear()` from a hook, a removal during an
+  async hook's await), every control green.
+- Design Q, approved first, was wrong before any edit: it wrote its no-op
+  only into the array it copied from, so a second removal in one dispatch
+  left the hook live in the walk's own older array. Reported, then E.
+- E: a hook is a `{ fn, off }` entry, one literal for both lists of both
+  buses. `addHook` marks `off` and assigns a filtered copy, as `on()` does
+  for listeners. The four loops skip an entry marked off. `clearState`
+  marks and replaces, as `dropAllListeners`. The TestBus follows the same
+  rule (its loop comment said "no self-removal").
+- Found while building E: the router has the bug for two removals in one
+  navigation (its cursor reads index -1, the navigation fails
+  `router:failed:guard`), and one unsubscribe called twice removes another
+  subscription of the same function. Pinned (`it.fails` and two "today"
+  rows), part B of the plan, waits for the owner.
+- V8: tests/v8-shapes.test.ts "hook lists": a removal keeps the bus state on
+  its map on both buses, every hook entry shares one map, control: the sync
+  and async states differ.
+- A/B, `npm run ab`, K 10, two lengths, against 51629a5. New workloads
+  scripts/ab/workloads/hooks.mjs and hooks-async.mjs.
+
+  | row | kind | B/A (n, 4n) | ns, A to B | verdict |
+  |---|---|---|---|---|
+  | bare dispatch | control path | 1.002, 1.004 | 18.2 to 18.3 | no result |
+  | sync, 2 before + 2 after hooks | normal | 1.009, 1.012 | 65.0 to 66.5 | no result |
+  | async bare | control path | 0.998, 0.991 | 269.0 to 266.7 | no result |
+  | async, 2 before + 2 after hooks | normal | 0.997, 1.013 | 362.1 to 363.9 | no result |
+  | add and remove a hook | rare | 0.968, 1.015 | 78.8 to 76.1 | lengths disagree |
+
+  Nothing counted slower. Two 4n rows decided nothing: the sync hooks row's
+  control spread 4.2%, the async hooks row's control centred 0.985. Paired
+  fits, leads only: +1.1 ns per dispatch sync, +7.5 ns async. The decision
+  rule ("E only if not counted slower") holds, and memory's standing rule
+  settles a noisy no-result on a correctness fix: commit, no re-measure.
+- Bytes, raw/brotli, each piece left out alone (full, core, elements IIFE):
+
+  | piece | full | core | elements |
+  |---|---|---|---|
+  | the four loops skip an entry marked off | +92/+8 | +92/+9 | +92/+13 |
+  | addHook builds entries, marks and replaces | +31/+3 | +31/-2 | +31/-2 |
+  | clearState marks and replaces | +59/+7 | +59/+12 | +59/+11 |
+  | total (brotli is not additive) | +182/+28 | +182/+30 | +182/+28 |
+
+  Blade consumer bundle 8_346 -> 8_374 brotli (+28). Two squeezes built and
+  measured on cold paths only, so the loops stay byte-identical: `addHook`
+  without its alias, full 47_520/14_903; a shared `dropHooks` in
+  `clearState`, full 47_527/14_868 but core +9 and elements +16. Neither
+  kept. Budgets and the Blade ceiling raised to measured.
+- Docs follow the code: whitepaper 4.3 states the hooks' rule beside the
+  listeners'.
+
+### 35.210 Router guards and after-hooks survive removals mid-navigation (2026-10-07)
+
+- The router bug found in s35.209. Owner: "any con why fix a bug is a
+  question?", then "i think we should fix the bug first". The add rule (a
+  guard added during a navigation runs in it) is released behaviour and
+  stays; only the bug is fixed.
+- Before: the identity-cursor correction subtracted the shrinkage from the
+  cursor. A guard removing itself and a later guard took it from 0 to -1,
+  and calling `undefined` failed the navigation `router:failed:guard`. In
+  `afterEach` the same throw was logged. One unsubscribe called twice
+  removed a second subscription of the same function (`indexOf`).
+- Fix, src/router/engine.ts: entries `{ fn, off }`. Removal marks `off`
+  and splices nothing while a navigation is in flight, so no index moves
+  under a walk. The list is compacted on removal when nothing is in
+  flight, else at the next guard walk's start. Each loop walks its own
+  reference: an after-hook that navigates starts a walk that may compact.
+  The identity-cursor block is gone from both loops.
+- Tests, tests/hook-removal-parity.test.ts: the two removal rows now cover
+  every subject, red 2 on 3936fbf. New rows: an after-hook that removes
+  itself and navigates (seeded red by walking `afterHooks` directly), a
+  guard removed while an older navigation awaits. The 52 router files
+  pass unchanged.
+- A/B, `npm run ab`, K 10, two lengths, against 3936fbf, new workload
+  scripts/ab/workloads/router-guards.mjs. Every control passed.
+
+  | row | kind | B/A (n, 4n) | ns, A to B | verdict |
+  |---|---|---|---|---|
+  | navigation, no guards | control path | 1.001, 1.003 | 3_984 to 3_986 | no result |
+  | navigation, 2 guards + 2 after-hooks | normal | 0.982, 1.002 | 4_290 to 4_227 | faster at n, no result at 4n |
+
+- Bytes: `router.js` 59_029/13_846 -> 59_007/13_866 raw/brotli. The
+  candidate measured 59_022/13_877. One squeeze kept, on the compaction
+  helper only (a shared `on` predicate in place of a generic `live`):
+  -15/-11. The built loops are byte-identical to the measured candidate.
+  The router is in no IIFE and not in the Blade bundle.
+
+### 35.211 The development double reducer run compares without whole-state strings (2026-10-07)
+
+- Plan 1.28 item 3, shape R1. Owner: "go for all". The double run stays
+  (React StrictMode's rule). Only the compare changes.
+- Before: every action of an `undo: true` store built two `JSON.stringify`
+  strings of the whole state in development, for the page's life.
+- Built: `sameJson(a, b)` in src/store-base.ts. It answers true only when
+  the two give the same JSON. Two identical references are equal with no
+  look inside. Plain arrays compare slot by slot, plain objects key by key
+  in order, by JSON's rules (a slot's `undefined`, function or symbol is
+  `null`, such a property is left out). A `toJSON`, a Map, a class
+  instance or a primitive pair is its own two strings. When it cannot
+  prove equal, the caller compares the two whole states as strings, as
+  before. So the same states warn as today, BigInt and cycles included.
+- Tests, tests/store-reducer-twice.test.ts, 30 (6 kept as they were):
+  - Red on f7ac099: an untouched object's `toJSON` is read 4 times over two
+    actions, 0 after.
+  - Control: an object built anew in each run is still serialized.
+  - A table of 19 state pairs, each warning exactly when
+    `JSON.stringify` gives two strings.
+  - A counter deep in a nested array, a `Date.now` time, a BigInt in a
+    shared part.
+  - Seeded faults, each red alone: no array length check (row "one slot
+    fewer"), no key-name check ("another key with the same value"), a
+    `toJSON` pair read as equal (two rows).
+- Production: a store consumer built the way tests/esm-treeshake.test.ts
+  builds one (Vite, production) is byte-identical on both arms, 22_374 raw,
+  7_329 brotli, same sha. An esbuild bundle that does not fold the `DEV`
+  expression keeps the walk (+880 raw), and keeps main's DEV strings too.
+  That run is the probe's positive control.
+- Bytes: dist/store-base.js 11_329/3_005 -> 12_606/3_311 raw/brotli,
+  unminified with its comment. The store is in no IIFE and not in the Blade
+  bundle. No speed run: development only, and the saving is pinned by the
+  `toJSON` count.
+
+### 35.212 Item 1 closed: the bridged-success mark stays (2026-10-07)
+
+- Plan 1.28 item 1, measurement M1. Owner: "go for all". Arms: A = main
+  d528057, B = A minus the `_appliedRemotely.set` line in `answerOf`
+  (local branch `probe/no-mark`, a63f575, never merged). Built through
+  `npm run ab:dists`. `transports2.js` differs, and B holds no
+  `_appliedRemotely.set(`.
+- Dense, the positive control (scripts/ab/workloads/bridge-burst.mjs,
+  K 10, the tool's 32 MB young generation): B/A 0.899 at n, 1_344 to 1_221
+  ns, -134 ns, counted. At 4n the control spread 31.3%: no result.
+- The app-rate rows of the plan could not resolve the 50 ns line:
+  - A minor gc after every 8 dispatches inside the timed call: 107 us per
+    dispatch, the gc nearly all of it. A K 2 pilot's MDE was 23.7%. A full
+    run was stopped 25 minutes in, still in its control phase (owner: "why
+    make a call to run 55 minutes without intermediate results all the
+    time"). Since then: a pilot first, one row per job.
+  - A 1 MB young generation (`--flags=--max-semi-space-size=1`, checked to
+    override the tool's 32 MB): 5.3 us per dispatch, controls failed (7.3%
+    spread, 0.967 centre). Point estimate -3.7 ns, MDE 2.6% (140 ns).
+- Decided by the standing rule of the 1.28 handoff: "Failure, undo, abort
+  and network paths may pay." A bridged success is a network path, each one
+  waiting on a request of milliseconds. 134 ns is its measured upper bound.
+  Item 1 closes with no src change. The workload keeps the dense row only.
+
+### 35.213 Item 2: the id stays, the bench times the real default (2026-10-07)
+
+- Plan 1.28 item 2. Owner: "go for all", then on item 1: "if speed cannot
+  decide correctness should do", "as there is no cost difference". That
+  settles 35.212's mark too: a mark written on every bridged success gives
+  each reader the fact with no condition on when the reader was installed.
+- Candidate (ac51cbf, never landed): `_uidPrefix` carried its trailing `-`
+  from load, the generator joined one string less. Built shape checked
+  (`_uidPrefix + (++_uidCounter)` in dist/command-bus.js).
+- A/B against c9b5f1b, K 10, two lengths, one workload per job after a K 2
+  pilot each (meta-slot 123 s, plugins-miss 126 s, filter-mixed 85 s,
+  plugins 101 s). Every row no result, nothing counted slower. The row the
+  plan expected to move, `listener_reads_meta`: 113.0 to 112.2 ns, CI
+  0.989..1.012.
+- Bytes: raw identical in the three IIFEs, brotli +3, +4, +6. Speed cannot
+  decide and correctness is the same, so size does: the default keeps
+  joining `-` per id.
+- Landed: the default generator named `DEFAULT_UID`, and `_resetUid()`,
+  underscored and not in the barrel, like `_configureClock`. The bench's uid
+  group swapped the generator and never put the default back, so every
+  later group timed a copy, and its "default" row timed a copy too. Both
+  now call `_resetUid()`. The stamped `vc:benchUidCounterVsUuid` is the
+  bench system's to recompute (`npm run bench:bands`).
+- The three IIFEs are byte-identical to c9b5f1b. tests/uid-default.test.ts
+  pins the id format (passes before and after), seeded red twice: a prefix
+  without its `-`, a radix-10 counter.
+
+### 35.214 CI parity finished, and persist takes an action scope (2026-10-07)
+
+- CI parity, the three jobs the owner stopped earlier, run one at a time:
+  - Node 22.23.3: build, the default suite (313 files, 3474 tests, 1
+    expected fail, 64 s at 4 workers), the vapor suite (11 files, 38).
+  - Browser: 21 of 21 in production and in `VC_MODE=development`. No
+    browser test reads the mode, so a scratch probe (deleted) printed `DEV`:
+    false, then true, in Chrome both times.
+  - Bench: `npx vitest bench --run tests/perf.bench.ts`, exit 0, 83 s, 64
+    rows, no error.
+- Plan 1.28 item 9b. Owner: "Order I'd take agree", "do it", "last feature
+  to build".
+- Before: `persist` declared no scope, so the bus ran it on every dispatch.
+- Built: `PersistOptions.actions` (an ActionScope) and `actionFilter`, which
+  the plugin declares as the outbox does. The bus's per-action chain skips
+  persist for an action outside them. `'cart*'` covers `cart$reset` and
+  `cartAdd$undo`. An unscoped persist declares both undefined, so the bus
+  keeps its plain runner.
+- tests/persist-actions.test.ts, 4. Red 3 on 44ca3ad (`userSet` saved, no
+  scope in `inspectBus`). The unscoped control is green on both.
+- Built arms (`npm run ab:dists`, 44ca3ad and the candidate): only
+  `plugins-io.js` and the full IIFE differ. The built plugin holds
+  `actions: options.actions, actionFilter: options.actionFilter`.
+- A/B, `npm run ab`, K 10, two lengths, scripts/ab/workloads/persist.mjs
+  (unscoped persist), after a K 2 pilot of 9 s. The run took 222 s.
+
+  | row | kind | B/A (n, 4n) | ns, A to B (n) | verdict |
+  |---|---|---|---|---|
+  | no persist | control path | 0.997, 1.000 | 19.3 to 19.2 | no result |
+  | persist, small state | normal | 1.005, 0.993 | 166.1 to 167.9 | no result |
+  | persist, 50 items | normal | 0.998, 1.001 | 2_314 to 2_307 | no result |
+  | blocked storage | failure | 0.997, 0.998 | 5_231 to 5_219 | no result |
+
+  Nothing counted slower.
+- Bytes, raw/brotli, one piece (the two declared fields):
+
+  | file | before | after | change |
+  |---|---|---|---|
+  | plugins-io.js | 3_624/1_106 | 3_694/1_123 | +70/+17 |
+  | full IIFE | 47_524/14_869 | 47_570/14_881 | +46/+12 |
+  | core IIFE | 33_202/10_429 | 33_202/10_429 | 0 |
+  | elements IIFE | 34_816/10_903 | 34_816/10_903 | 0 |
+
+  The Blade bundle carries no persist. An app that never imports persist
+  pays nothing. One that uses it unscoped carries the two property names.
+  Full budget raised to measured.
+- Docs: README's persist block gains one scoped line.
+
+### 35.215 Navigations as facts: routerFacts, and DevTools shows facts (2026-10-07)
+
+- Plan 1.28 item 9c. Owner: "do it", "last feature to build".
+- Found first: `setupDevtools` subscribes `onAfter` only, and `emit` runs no
+  hooks. So DevTools showed no emitted fact. Pinned in tests/devtools.test.ts,
+  a dispatch the control (passes before and after).
+- Built: `routerFacts(router, bus)` in src/router/facts.ts, exported from
+  `vapor-chamber/router` as `revalidateRoutes` is. `bus` is structural
+  (`{ emit }`), so the router imports no bus. It emits `routerNavigated`
+  (`{ to, from }`) from `afterEach` and `routerFailed` (`{ error, to }`) from
+  `onError`. A refusal, a superseded navigation and a query-only change emit
+  nothing. It never dispatches.
+- Built: `setupDevtools(bus, app, { facts })`. Each pattern subscribes
+  `bus.on`, and a call without `meta` (an emit) becomes a Facts event. A
+  dispatch carries `meta` and stays on the Commands layer only.
+- tests/router/router-facts.test.ts, 5, a real bus: red 4 on ba4a1ad
+  (`routerFacts is not a function`), the control green. Four rows added to
+  tests/devtools.test.ts, red 2 on ba4a1ad.
+- Consumer builds, Vite production, both arms as installed packages:
+  a router app that does not call `routerFacts` is byte-identical (24_860/8_543,
+  same sha). A router app that calls it builds on the candidate only (the
+  control). A DevTools app grows 2 raw in production: the unused third
+  parameter survives minification. A separate export would avoid it. Owner:
+  "not fight for 2 bytes", "correctness vs 2 bytes have no sence pick
+  whatever is more correct", "that are not hot paths". The option stays.
+- Bytes, raw/brotli: `router.js` 59_007/13_866 -> 59_332/13_955,
+  `devtools.js` 3_423/1_072 -> 3_966/1_207. Neither is in an IIFE or the
+  Blade bundle.
+- Also fixed: the `setupDevtools` docblock imported it from the barrel. It
+  comes from `vapor-chamber/devtools`, as the module itself states.
+- Docs: docs/router.md "Navigation as a command" gains the facts form.
+  README's DevTools block and table name `facts`.
+
+### 35.216 persist reads IndexedDB, one helper with the outbox (2026-10-07)
+
+- Plan 1.28 item 9a, the last feature of 1.28. Owner: "do it", "last
+  feature to build".
+- Before: persist was synchronous, so it could not use IndexedDB. The outbox
+  had its own IndexedDB code.
+- Built: src/idb.ts. `_idbStore` is the outbox's open and request code,
+  moved: lazy open, version 1, a failed open not cached, one request per
+  transaction, plus `delete`. `indexedDbOutbox` uses it with its names,
+  defaults and warnings unchanged (the outbox IDB tests pass as they were).
+- Built: `indexedDbStorage(dbName = 'vc-persist', storeName = 'state')`, a
+  `PersistStorage`, exported from the root barrel, not from an IIFE.
+- Built: `PersistStorage`, whose three methods may answer promises.
+  `hydrate()` reads any storage with `load()`'s rules. `load()` on a storage
+  that answers a promise throws a TypeError naming `hydrate()`, and drops
+  the read so it cannot reject unhandled. A null would read as "nothing
+  saved", and the next save would overwrite the saved state. A rejected save
+  or clear warns, as a thrown one does.
+- tests/persist-async-storage.test.ts, 9: round trip through a fake
+  IndexedDB, a non-string value, `load()`'s refusal in development and
+  production, a rejected read, no IndexedDB, and `hydrate()` on a sync
+  storage. Red on 24d0deb: no `idb.ts`, no `hydrate`.
+- A/B against 24d0deb, `npm run ab`, K 10, two lengths, persist.mjs, after a
+  K 2 pilot. The sync save path gained one check of `setItem`'s answer.
+
+  | row | kind | B/A (n, 4n) | ns, A to B (n) | verdict |
+  |---|---|---|---|---|
+  | no persist | control path | 0.998, 1.003 | 18.5 to 18.7 | no result |
+  | persist, small state | normal | 0.998, 0.996 | 163.4 to 164.0 | no result |
+  | persist, 50 items | normal | 1.000, 1.002 | 2_262 to 2_257 | no result |
+  | blocked storage | failure | 1.000, 1.002 | 5_104 to 5_055 | no result |
+
+  Nothing counted slower. The run took 212 s.
+- Bytes, raw/brotli: `plugins-io.js` 3_694/1_123 -> 4_493/1_326. Full IIFE
+  47_570/14_881 -> 47_855/14_976 (+285/+95): `hydrate`, the shared `read`,
+  `load()`'s refusal, and the rejection checks in save and clear. Not split
+  per piece: not a hot path (owner, 2026-10-07: "if worth or not cannot be
+  hours testing", "for 1 byte"). Core and elements IIFEs unchanged. Full
+  budget raised to measured.
+- Docs: README's persist block shows `indexedDbStorage()` and `hydrate()`.
+
+### 35.217 Sanity check of tests and examples after item 9 (2026-10-07)
+
+- Owner: "sanity check test examples if need update".
+- Examples that touch the changed APIs: five (persist in four, `afterEach`
+  in the router demo). Only examples/feature-persistence.ts needed a change:
+  - Its commented-out hand-written IndexedDB adapter is now
+    `indexedDbStorage()` with `await hydrate()`, compiled, not a comment.
+  - Its cart persist narrowed with `filter: cmd.action.startsWith('cart')`.
+    It now declares `actions: ['cart*']`, so the bus skips persist for the
+    rest.
+- `npx tsc -p examples/tsconfig.patterns.json` passes. Control: a seeded
+  `indexedDbStorage(1)` fails it (TS2345), so the file is checked.
+- `npm run check:example` passes (5 s). The suite needed no change beyond
+  the item 9 tests.
+
+### 35.218 A mild docs pass: wording, coherence, order (2026-10-07)
+
+- Owner, 2026-10-07: "we only verify stale non marker figures and not the
+  text quality itself that it is very ia and not clear", "a mild improvement
+  on redaction coherence order etc on docs". No code changed.
+- Files, by reader traffic: README.md, docs/store.md, docs/router.md,
+  CONTRIBUTING.md, docs/performance.md, docs/V8-RULES.md, docs/whitepaper.md
+  sections 1 to 17. One commit per file: 5913966, 9ff2b67, 872b948, 8a7c808,
+  b40a44b, ca3d426, 0233736.
+- Method per file: read in full, then a prose scan (scratchpad
+  prose-scan.mjs: banned words, semicolons, sentences over 25 words, outside
+  code fences), then a read for what a scan cannot see (slogans and triads,
+  "not X, but Y", bold-label paragraphs, an intro restating its heading,
+  repetition, order). A claim in doubt was checked against src first.
+- Positive control for the scan: on V8-RULES.md it found 36 semicolons and a
+  114-word sentence. A clean result on the other files is therefore a finding.
+- No `vc:` marker or its figure was touched. Anchors, test citations and
+  code examples were kept. lint:check (doc-claims, line-citations, ascii,
+  stamp check) passed after each commit.
+- Found, beyond wording, each a fact the page had wrong:
+  - router.md: "Five rules, each enforced by the engine" introduced six rules,
+    two of them the handler's job.
+  - CONTRIBUTING.md: three manual-run rules rendered as items of the
+    "Deliberately NOT in that chain" list. Its emoji rule allowed emoji in
+    docs, which check-ascii rejects.
+  - store.md: the refcounted-disposal paragraphs sat under "Loading saved
+    state".
+  - whitepaper.md: the persist row and the file map lacked items 9a to 9c.
+- Out of scope, as the handoff names: generated pages, this log,
+  docs/plan-failures-and-contract.md. Also left: the whitepaper appendix,
+  dated history like this log.
+- Proposals for the owner, not done (a mild pass keeps structure):
+  - V8-RULES.md "Open: not yet settled" holds four entries marked SETTLED or
+    Withdrawn. They could move to the rules or a "Settled" list.
+  - "Never mix two Vue dists" is explained in README, router.md and the
+    whitepaper 9.6. One place and two links would do.
+- Every removed phrase and where it went:
+  - README.md:
+    - "Every user action gets", "replacing ... with one predictable,
+      testable flow": kept shorter as two sentences; "predictable, testable"
+      deleted (filler, no fact).
+    - "**The difference from `emit`:**": the bold label deleted (the
+      sentence names both). "one place to look, debug, and test": kept
+      shorter, "one place to read and to test".
+    - "A small core, and batteries you only pay for if you import them.":
+      deleted. It restated the heading, and the fact stands in the opening
+      line ("each 0 KB until imported") and the list ("Unimported modules
+      tree-shake to zero").
+    - "Not a sampled figure:": deleted, the sentence after it states it.
+    - "**What it needs:**": kept as "It needs".
+    - "two copies do not share state" sentence: split in two, same words.
+    - "and it's a compile error, not a runtime 404": kept as "is a compile
+      error, before any request is sent".
+    - "embraces the same philosophy: minimal abstraction, direct updates,
+      signal-native reactivity": kept as "Vapor Chamber's state is built on
+      the same signals". "minimal abstraction, direct updates" deleted:
+      marketing, and the previous sentence already says Vapor updates the
+      DOM directly.
+    - `failureCondition` list sentence (28 words): split in two, same items.
+    - "framework-agnostic, zero-dependency, and the only part you need": kept
+      as "imports no framework and no dependency, and it is the only part an
+      app needs".
+  - docs/store.md:
+    - The two paragraphs on refcounted disposal moved, unchanged, from under
+      "Loading saved state" to after the Lifecycle block that shows
+      `$dispose()`: they explain that call, not loading.
+    - "Carried forward deliberately rather than answered early:": kept as
+      "Not answered yet:". "deliberately" deleted (a hedge, no fact).
+  - docs/router.md:
+    - "Pull-based derivation beats bridging navigation into events on every
+      axis that matters here.": kept as "For state, a computed over the
+      snapshot is the better shape than an event." "on every axis" deleted
+      (marketing). The four reasons after it are unchanged.
+    - Added one pointer after the `afterEach` paragraph to the facts form
+      (`routerFacts`, item 9c), which now exists.
+    - "Five rules, each enforced by the engine rather than left to
+      convention:": a stale count and a false claim. Six bold rules follow,
+      and two (honour the signal, override `affects`) are the handler's job,
+      not enforced. Kept as "Six rules for a handler. The engine acts on what
+      it returns, throws and reports:".
+    - The blockquote closing "Why the outlet is a separate subpath": deleted,
+      it repeated the section's two bullets. Its one new fact, that
+      `BladeHooks` lives in `vapor-chamber/router/vdom` (checked in
+      src/router/vdom.ts), moved into the second bullet.
+  - CONTRIBUTING.md:
+    - "This document covers setting up a dev environment, running the tests
+      and benches, and submitting a PR that is likely to land quickly.":
+      deleted. It restated the headings below it.
+    - The three bold rules (build before the tests, `npm run docs`,
+      `docs:stamp`) followed the "Deliberately NOT in that chain" list after
+      a blank line only, so Markdown rendered them as items of that list.
+      Added "Three rules when you run the steps by hand:" between them. The
+      rules are unchanged.
+    - "That is the project's rule.": deleted, the bold rule before it says it.
+    - "No emojis in source files. In CHANGELOG and docs, use them sparingly
+      and only when explicitly asked.": stale, since `check-ascii` scans `.md`
+      (scripts/check-ascii.mjs EXTENSIONS) and rejects any non-ASCII
+      character. Kept as "Plain ASCII everywhere, emoji included".
+  - docs/performance.md:
+    - "Practical reference for getting the most out of vapor-chamber.": kept
+      as "What the library does for speed, and how to tune it."
+    - "the lib is V8-aligned out of the box": deleted. A marketing claim the
+      same sentence states as "already done by default", and the page's
+      second line links the rules (V8-RULES.md).
+    - "**The trade, stated plainly.**": kept as "**The trade.**", the filler
+      label removed.
+    - "The throughput is still high enough for any normal workload.": an
+      unbacked claim. Replaced by a pointer to "Measuring your own usage",
+      which gives the measured line (under about 10k dispatches a second per
+      page, the bus is not the bottleneck).
+    - Checked against the code, unchanged: `inspectBus` returns
+      `listenerPatterns` (src/command-bus.ts BusInspection).
+  - docs/V8-RULES.md:
+    - Every semicolon (36) became a full stop or a list break. No word was
+      deleted for it. Sentences over 25 words were split, the longest (rule
+      16, 114 words) into two lists: the method, and when a function counts.
+      Same steps, same figures, same order.
+    - Words added only to carry a split: "One was", "The other was" (rule 4),
+      "The method:", "Count a function only when all of these hold:" (rule
+      16), "It never demotes" (rule 17), "That reading is to verify." (Open,
+      CPU time).
+    - Checked by a script (scratchpad fact-diff.mjs): every number, `log s`
+      citation, code span and link of the old page is in the new one. The
+      only difference: three "1" now end a sentence ("1.").
+    - Not changed, a proposal for the owner: four entries under "Open: not
+      yet settled" say SETTLED or Withdrawn (CPU time, call length, half of
+      D2's gain, and part of `--single-threaded`). Moving them would change
+      the page's structure, which a mild pass does not.
+  - docs/whitepaper.md, sections 1 to 17 (the appendix is dated history,
+    like this log, and was left as it is):
+    - 2: "a command bus that orchestrates actions across any stack, at any
+      scale, without lock-in": kept as "a command bus that works beside any
+      backend and imposes no framework". "at any scale" deleted (a claim
+      nothing here measures).
+    - 2: "One bus. One dispatch surface. Every concern is a plugin.": kept as
+      "With one, every action goes through one dispatch surface, and each
+      concern is a plugin."
+    - 3.5: "camelCase wins universally" was changed, then restored the same
+      day. The cited paper (Pereira 2026, zenodo.org/records/18853783, its
+      abstract read 2026-10-07) states the advantage as universal across
+      tokenizer pairs. Owner: "i am the author". The whitepaper reports the
+      source's finding, so the source's word stays.
+    - 3.6: "This is not a limitation. It is the architecture.": deleted, no
+      fact. The sentence before it states the finding.
+    - 4.8: "a pure function pipeline: zero Promise overhead, predictable,
+      suitable for in-process coordination": kept as "runs as plain function
+      calls with no Promise, for in-process coordination". "predictable"
+      deleted (filler).
+    - 5.3: the `persist` row now names IndexedDB (`indexedDbStorage()`, read
+      with `hydrate()`) and the `actions` scope, which items 9a and 9b added.
+    - 9.6: "Silent, no warning, no error: just reactivity that stops working
+      across the boundary. One page, one Vue build, always.": kept as
+      "Reactivity stops across that boundary with no warning and no error.
+      Load one Vue build per page."
+    - 14.2: the 39-word CI sentence split at its colon, same words.
+    - 16: the file map gains `idb.ts` and `router/facts.ts`, added by items
+      9a and 9c.
+    - Checked by fact-diff.mjs against HEAD: nothing lost.
+    - 3.5's figures checked against the paper's abstract: 1.12-1.20x, p <
+      0.001, $54,499/year, 3.3x, 0.141 vs 0.043, Spearman rho = 1.000, 200
+      identifiers, 500 responses. All match.
+
+### 35.219 The base-check test answers mid-release too (2026-10-07)
+
+- Owner, after the 1.28.0 cut: "can we make test skip if not commited?".
+- Before: tests/ab-ci.test.ts "accepts a commit this checkout has" ran
+  `base-ok.sh` on HEAD. The script compares the base commit's version with
+  the working tree's, so during a cut, with the version bump not yet
+  committed, it refused as designed (s35.203) and the test failed.
+  `coverage:doc` then wrote no COVERAGE.md.
+- Built: the test reads HEAD's and the tree's `package.json` versions. Equal:
+  it expects acceptance, as before. Different: it expects the "across a
+  release" refusal naming both versions. Not a skip: CONTRIBUTING's rule is
+  that a skipped test cannot go red.
+- Checked, each branch with a seeded fault in base-ok.sh, all restored:
+
+  | state | base-ok.sh | test |
+  |---|---|---|
+  | committed | as shipped | pass |
+  | uncommitted bump (1.28.1 in the tree) | as shipped | pass |
+  | uncommitted bump | seeded: always accept | fail |
+  | committed | seeded: always refuse | fail |

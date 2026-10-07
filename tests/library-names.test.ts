@@ -1,5 +1,5 @@
 /** A name with `$` is the library's: an app's is refused, coded (log s35.117). */
-import { describe, expect } from 'vitest';
+import { describe, expect, vi } from 'vitest';
 import { BusError, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { history } from '../src/plugins-core';
 import { defineChamberStore } from '../src/store';
@@ -31,6 +31,17 @@ describe("an app's $ name is refused", () => {
     expect(bus.hasHandler('cart$reset')).toBe(true);
     expect(bus.hasHandler('cartSet$undo')).toBe(true);
     cart.$dispose();
+  });
+
+  it('a store from a second copy of the library: the refusal names the two copies (DEV)', async () => {
+    vi.resetModules();
+    const { defineChamberStore: secondCopy } = await import('../src/store');
+    const bus = createCommandBus();
+    const error = thrown(() => secondCopy('cart', { state: () => ({ n: 0 }), reducers: {} })(bus)) as BusError;
+    expect(error.code).toBe('core:invalid:name');
+    expect(error.message).toContain('Action "cart$reset"');
+    expect(error.message).toContain('two copies of vapor-chamber');
+    vi.resetModules();
   });
 
   it('a naming violation in throw mode is coded too', () => {

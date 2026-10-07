@@ -292,8 +292,8 @@ The backend reads `meta`.
 |---|---|
 | single command, success | 2xx `{ state, stores? }`, or `{ redirect }` |
 | single command, failure | non-2xx, `application/problem+json`: `{ status, code, detail, errors?, ...params }` |
-| batch | 200 `{ results: [{ id, state, stores? } \| { id, redirect } \| { id, problem }] }` |
-| WebSocket frame | `{ id, state, stores? } \| { id, redirect } \| { id, problem }` |
+| batch | 200 `{ results: [{ id, state, stores? } \| { id, redirect } \| { id, problem }] }`, each with `headers?` |
+| WebSocket frame | `{ id, state, stores? } \| { id, redirect } \| { id, problem }`, with `headers?` |
 
 `stores` (added 2026-10-06, log s35.186) holds store states by store id. Each
 store with that id on the client's bus takes its state (docs/store.md).
@@ -314,7 +314,10 @@ through the status table below. A batched result has no HTTP status of its
 own, and the reference controller already puts one in each problem. `detail`
 is the message, and everything else is `context`. `Retry-After` (RFC 9110),
 where a response carries it, goes to `context.retryIn`, never from the body.
-The owner is the transport's fact.
+A batched result or a frame has no response of its own. Its `headers` stand
+for one, as in an OData JSON batch response (OData JSON Format 4.01, section
+19), so its `Retry-After` is read the same way. The owner is the transport's
+fact.
 
 **The status table** says only what RFC 9110 says of a status, plus the
 reference backend's declared 419:
@@ -395,9 +398,14 @@ and guessed `refused` for every 2xx refusal. Measured against a real registry
 (7.2 item 9), the old status derivation was also wrong where it guessed beyond
 RFC 9110. Removed in the same release that renames the codes.
 
-**Open:** `Retry-After` for a batched command has no header to ride. A
-`retryAfter` member on the problem (RFC 9457 extension, RFC 9110's meaning) is
-the proposal, for the owner.
+**A batched command's wait.** A batched result or a WebSocket frame carries
+its own `headers`, and its `Retry-After` sets the wait as a response's does.
+That is the standard batch shape: OData's JSON batch response gives each
+result a `headers` object, and Microsoft Graph's batching reads a throttled
+result's wait there. Decided 2026-10-07 (log s35.205), over the proposal once
+recorded here: a `retryAfter` member on the problem. No RFC defines that
+member, and it would have broken "never from the body" above.
+`tests/batch-retry-after.test.ts`.
 
 ### 4.5 Ownership and the internal shape (rev 19, from research)
 

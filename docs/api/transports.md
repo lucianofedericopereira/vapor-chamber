@@ -17,7 +17,7 @@ import { ... } from 'vapor-chamber/transports';
 
 ### createBatchingHttpBridge
 
-**Function** - [src/transports.ts:370](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L370)
+**Function** - [src/transports.ts:385](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L385)
 
 ```ts
 createBatchingHttpBridge(options: BatchingHttpBridgeOptions) => AsyncPlugin
@@ -36,7 +36,9 @@ matched back against:
 
   { results: [{ id, state }, { id, redirect }, { id, problem }, ...] }
 
-A failed result carries its problem with the command's own `status`.
+A failed result carries its problem with the command's own `status`. A
+result may carry its own `headers` (OData JSON batch): its `Retry-After`
+sets the wait as a single response's does.
 
 Each queued command's own dispatch promise resolves independently - a
 caller dispatches exactly as it would against createHttpBridge; the
@@ -52,7 +54,7 @@ bus.dispatch('cartAdd', product, { quantity: 2 })
 
 ### createEchoBridge
 
-**Function** - [src/transports.ts:946](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L946)
+**Function** - [src/transports.ts:961](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L961)
 
 ```ts
 createEchoBridge(options: EchoBridgeOptions) => { install(bus: BaseBus): void; dispose(): void; }
@@ -84,7 +86,7 @@ realtime.dispose();
 
 ### createHttpBridge
 
-**Function** - [src/transports.ts:237](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L237)
+**Function** - [src/transports.ts:249](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L249)
 
 ```ts
 createHttpBridge(options: HttpBridgeOptions) => AsyncPlugin
@@ -114,7 +116,7 @@ await bus.dispatch('cartAdd', product, { quantity: 2 })
 
 ### createSseBridge
 
-**Function** - [src/transports.ts:841](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L841)
+**Function** - [src/transports.ts:856](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L856)
 
 ```ts
 createSseBridge(options: SseBridgeOptions) => { install(bus: BaseBus): void; dispose(): void; isConnected(): boolean; }
@@ -141,7 +143,7 @@ sse.dispose()
 
 ### createWsBridge
 
-**Function** - [src/transports.ts:536](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L536)
+**Function** - [src/transports.ts:551](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L551)
 
 ```ts
 createWsBridge(options: WsBridgeOptions) => AsyncPlugin & { connect(): void; disconnect(): void; isConnected(): boolean; connected: Signal<boolean>; }
@@ -187,7 +189,7 @@ it; a single command's failure is its non-2xx response's body.
 
 ### BatchingHttpBridgeOptions
 
-**Type alias** - [src/transports.ts:319](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L319)
+**Type alias** - [src/transports.ts:331](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L331)
 
 ```ts
 export type BatchingHttpBridgeOptions = HttpBridgeOptions & {
@@ -225,7 +227,7 @@ only with a fact a backend can use. Log s35.138.
 
 ### EchoBridgeOptions
 
-**Type alias** - [src/transports.ts:899](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L899)
+**Type alias** - [src/transports.ts:914](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L914)
 
 ```ts
 export type EchoBridgeOptions = {
@@ -254,7 +256,7 @@ export type EchoBridgeOptions = {
 
 ### EchoChannelType
 
-**Type alias** - [src/transports.ts:888](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L888)
+**Type alias** - [src/transports.ts:903](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L903)
 
 ```ts
 export type EchoChannelType = 'public' | 'private' | 'presence';
@@ -262,7 +264,7 @@ export type EchoChannelType = 'public' | 'private' | 'presence';
 
 ### EchoSubscription
 
-**Type alias** - [src/transports.ts:890](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L890)
+**Type alias** - [src/transports.ts:905](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L905)
 
 ```ts
 export type EchoSubscription = {
@@ -287,7 +289,7 @@ The part of a command's meta that crosses the wire.
 
 ### HttpBridgeOptions
 
-**Type alias** - [src/transports.ts:129](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L129)
+**Type alias** - [src/transports.ts:141](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L141)
 
 ```ts
 export type HttpBridgeOptions = {
@@ -378,7 +380,7 @@ export type HttpBridgeOptions = {
 
 ### SseBridgeOptions
 
-**Type alias** - [src/transports.ts:799](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L799)
+**Type alias** - [src/transports.ts:814](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L814)
 
 ```ts
 export type SseBridgeOptions = {
@@ -407,7 +409,7 @@ export type SseBridgeOptions = {
 
 ### WsBridgeOptions
 
-**Type alias** - [src/transports.ts:485](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L485)
+**Type alias** - [src/transports.ts:500](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L500)
 
 ```ts
 export type WsBridgeOptions = {

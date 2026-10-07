@@ -5,13 +5,25 @@
  * `retry` option).
  */
 
-import type { Command, Plugin } from './command-bus';
-import { onSettled } from './settled';
+import type { ActionFilter } from './action-filter';
+import type { ActionScope, Command, Plugin } from './command-bus';
+import { isThenable, onSettled } from './settled';
 import { DEV } from './dev';
 
 // ---------------------------------------------------------------------------
 // Persistence plugin
 // ---------------------------------------------------------------------------
+
+/**
+ * What persist reads and writes: `localStorage`'s three methods. Each may
+ * answer a promise, as `indexedDbStorage()` does: then read with `hydrate()`,
+ * and a rejection warns as a throw does.
+ */
+export type PersistStorage = {
+  getItem(key: string): string | null | Promise<string | null>;
+  setItem(key: string, value: string): void | Promise<void>;
+  removeItem(key: string): void | Promise<void>;
+};
 
 export type PersistOptions<T = any> = {
   /**
@@ -44,11 +56,16 @@ export type PersistOptions<T = any> = {
   validate?: (state: T) => boolean;
   /** Which actions trigger a save. Default: all successful dispatches. */
   filter?: (cmd: Command) => boolean;
+  /** The only actions the bus runs persist on: an {@link ActionScope}, `'cart*'` covers `cart$reset` and `cartAdd$undo`. Default: every action. tests/persist-actions.test.ts. */
+  actions?: ActionScope;
+  /** Selects actions by name, ANDed with `actions`: an {@link ActionFilter} (`createActionFilter`). */
+  actionFilter?: ActionFilter;
   /**
    * Storage backend. Default: globalThis.localStorage
-   * Pass `sessionStorage` for session-scoped persistence.
+   * Pass `sessionStorage` for session-scoped persistence, or
+   * `indexedDbStorage()` for IndexedDB (read it with `hydrate()`).
    */
-  storage?: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+  storage?: PersistStorage;
   /**
    * When true, collapse back-to-back saves within the same microtask into one.
    * Trades 1 microtask of latency for one `getState()` + `JSON.stringify()` +
@@ -67,13 +84,20 @@ export type PersistOptions<T = any> = {
 /**
  * persist - auto-save state to localStorage (or custom storage) after each command.
  *
+ * `load()` reads a synchronous storage. `hydrate()` reads either kind, and
+ * is the one for an async storage such as `indexedDbStorage()`: call it
+ * before the first dispatch, or a save may land before the read.
+ *
  * @example
  * const cartPersist = persist({ key: 'vc:cart', getState: () => cartState.value })
  * bus.use(cartPersist)
  * const saved = cartPersist.load()
  */
 export function persist<T>(options: PersistOptions<T>): Plugin & {
+  /** The saved state, or null. Throws a TypeError on a storage that answers a promise: use `hydrate()`. */
   load(): T | null;
+  /** The saved state, or null, from a sync or an async storage. Never rejects. */
+  hydrate(): Promise<T | null>;
   save(): void;
   clear(): void;
 } {
@@ -94,7 +118,7 @@ export function persist<T>(options: PersistOptions<T>): Plugin & {
     );
   }
 
-  function getStorage(): Pick<Storage, 'getItem' | 'setItem' | 'removeItem'> | null {
+  function getStorage(): PersistStorage | null {
     if (options.storage) return options.storage;
     if (typeof (globalThis as any).localStorage !== 'undefined') {
       return (globalThis as any).localStorage as Storage;
@@ -102,37 +126,66 @@ export function persist<T>(options: PersistOptions<T>): Plugin & {
     return null;
   }
 
+  const saveFailed = (e: unknown): void => { console.warn(`[vapor-chamber] persist: failed to save key "${key}":`, e); };
+  const loadFailed = (e: unknown): null => { console.warn(`[vapor-chamber] persist: failed to load key "${key}":`, e); return null; };
+  const clearFailed = (e: unknown): void => { console.warn(`[vapor-chamber] persist: failed to clear key "${key}":`, e); };
+
+  // The lookup sits inside each `try`: with site data blocked, reading
+  // `localStorage` throws, and `typeof` does not guard a getter that throws
+  // (tests/storage-lookup-parity.test.ts). A sync storage answers undefined,
+  // an async one a promise, whose rejection warns as a throw does.
   function save(): void {
-    const store = getStorage();
-    if (!store) return;
-    try { store.setItem(key, serialize(getState())); }
-    catch (e) { console.warn(`[vapor-chamber] persist: failed to save key "${key}":`, e); }
+    try {
+      const done = getStorage()?.setItem(key, serialize(getState()));
+      if (done) done.then(undefined, saveFailed);
+    } catch (e) { saveFailed(e); }
+  }
+
+  /** What load() and hydrate() share once the raw value is in hand. */
+  function read(raw: string | null): T | null {
+    if (raw === null) return null;
+    const state = deserialize(raw);
+    if (state == null) return null;
+    if (validate && !validate(state)) {
+      console.warn(`[vapor-chamber] persist: validation failed for key "${key}" - returning null.${DEV ? ' Persisted state may be stale after a deploy.' : ''}`);
+      return null;
+    }
+    return state;
   }
 
   function load(): T | null {
-    const store = getStorage();
-    if (!store) return null;
+    let pending: PromiseLike<unknown>;
     try {
+      const store = getStorage();
+      if (!store) return null;
       const raw = store.getItem(key);
-      if (raw === null) return null;
-      const state = deserialize(raw);
-      if (state == null) return null;
-      if (validate && !validate(state)) {
-        console.warn(`[vapor-chamber] persist: validation failed for key "${key}" - returning null.${DEV ? ' Persisted state may be stale after a deploy.' : ''}`);
-        return null;
-      }
-      return state;
+      if (!isThenable(raw)) return read(raw);
+      pending = raw;
     } catch (e) {
-      console.warn(`[vapor-chamber] persist: failed to load key "${key}":`, e);
-      return null;
+      return loadFailed(e);
+    }
+    // A null here would read as "nothing saved", and the next save would
+    // overwrite what was saved. The read itself is dropped, not left to reject.
+    pending.then(undefined, () => {});
+    throw new TypeError(
+      DEV ? `[vapor-chamber] persist({ key: "${key}" }): this storage answers a promise, so load() cannot return the state. Use \`await hydrate()\`.` : 'persist: hydrate',
+    );
+  }
+
+  async function hydrate(): Promise<T | null> {
+    try {
+      const store = getStorage();
+      return store ? read(await store.getItem(key)) : null;
+    } catch (e) {
+      return loadFailed(e);
     }
   }
 
   function clear(): void {
-    const store = getStorage();
-    if (!store) return;
-    try { store.removeItem(key); }
-    catch (e) { console.warn(`[vapor-chamber] persist: failed to clear key "${key}":`, e); }
+    try {
+      const done = getStorage()?.removeItem(key);
+      if (done) done.then(undefined, clearFailed);
+    } catch (e) { clearFailed(e); }
   }
 
   // Coalesced save scheduling - flushes one save per microtask burst.
@@ -153,7 +206,7 @@ export function persist<T>(options: PersistOptions<T>): Plugin & {
         return result;
       });
 
-  return Object.assign(plugin, { id: 'persist', load, save, clear });
+  return Object.assign(plugin, { id: 'persist', actions: options.actions, actionFilter: options.actionFilter, load, hydrate, save, clear });
 }
 
 // ---------------------------------------------------------------------------

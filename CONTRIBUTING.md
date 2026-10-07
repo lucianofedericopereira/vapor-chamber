@@ -1,6 +1,6 @@
 # Contributing to vapor-chamber
 
-Thanks for considering a contribution. This document covers setting up a dev environment, running the tests and benches, and submitting a PR that is likely to land quickly.
+Thanks for considering a contribution.
 
 ---
 
@@ -130,6 +130,8 @@ that chain:
   alignment cycle, not to every commit.
 - `ab:vue`: it needs a second Vue installed.
 
+Three rules when you run the steps by hand:
+
 - **Build before the test runs.** The size, boundary and Vite-plugin guards read
   `dist/` and fail at load when it is absent (`tests/require-dist.ts`). They used
   to skip, and a skipped test cannot go red: CI's `test` job ran without a build
@@ -186,8 +188,7 @@ evidence.
    the code, and capture the baseline numbers.
 2. Make your change.
 3. Re-run the bench and report the win or regression in the PR description.
-4. **Keep a "performance" change only if a bench confirms it.** That is the
-   project's rule.
+4. **Keep a "performance" change only if a bench confirms it.**
 
 If your change might shift bundle size:
 
@@ -201,7 +202,7 @@ If your change might shift bundle size:
 - Biome handles linting. Run `npm run lint` to auto-fix. CI runs `lint:check`.
 - TypeScript strict mode is on. No `any` leaks at the public API boundary. Internal `any` is fine where the alternative is verbose generics.
 - Comments are sparse by design - write them when the *why* is non-obvious (a hidden constraint, an invariant, a workaround for a specific bug). Don't paraphrase the code.
-- No emojis in source files. In CHANGELOG and docs, use them sparingly and only when explicitly asked.
+- Plain ASCII everywhere, emoji included: `check-ascii` rejects any other character in source, tests, scripts and docs.
 - Tests live next to the module they exercise (`src/foo.ts` <-> `tests/foo.test.ts`). Cross-cutting concerns get their own file.
 
 ### Module discipline

@@ -213,3 +213,44 @@ describe('CommandResult hidden class', () => {
     expect(offenders).toEqual([]);
   });
 });
+
+// The bus state and its hook entries (log s35.209): a removal assigns a new
+// array to the state, and every hook entry is built by one literal.
+describe('hook lists', () => {
+  const stateOf = (bus: object): Record<string, unknown> => {
+    const key = Object.getOwnPropertySymbols(bus).find((s) => s.description === 'vapor-chamber:inspect')!;
+    return (bus as Record<symbol, Record<string, unknown>>)[key];
+  };
+
+  it('a removal keeps the bus state on its map, on both buses', () => {
+    for (const make of [createCommandBus, createAsyncCommandBus]) {
+      const fresh = make();
+      fresh.onBefore(() => {});
+      fresh.onAfter(() => {});
+      const removed = make();
+      const offB = removed.onBefore(() => {});
+      const offA = removed.onAfter(() => {});
+      offB();
+      offA();
+      expect(sameMap(stateOf(fresh), stateOf(removed))).toBe(true);
+    }
+  });
+
+  it('control: the check tells two state shapes apart', () => {
+    expect(sameMap(stateOf(createCommandBus()), stateOf(createAsyncCommandBus()))).toBe(false);
+  });
+
+  it('every hook entry shares one map: before and after, sync and async', () => {
+    const sync = createCommandBus();
+    const async = createAsyncCommandBus();
+    sync.onBefore(() => {});
+    sync.onAfter(() => {});
+    async.onBefore(async () => {});
+    async.onAfter(async () => {});
+    const entries = [sync, async].flatMap((b) => {
+      const s = stateOf(b) as { beforeHooks: object[]; afterHooks: object[] };
+      return [s.beforeHooks[0], s.afterHooks[0]];
+    });
+    for (const e of entries) expect(sameMap(entries[0], e)).toBe(true);
+  });
+});

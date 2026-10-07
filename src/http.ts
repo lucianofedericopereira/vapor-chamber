@@ -420,7 +420,9 @@ const transportFail = _failures('transport');
  * condition from the problem's own `status` (else the response's), `detail` the
  * message, the rest `context`. `retryIn` is the response's `Retry-After` (RFC
  * 9110), never a body member: it is set after the spread, so a body cannot
- * supply it. One reader for the client and every bridge (log s35.131).
+ * supply it. A batched result or a frame has no response of its own: the
+ * `headers` it carries stand for one (OData JSON batch; transports.ts,
+ * answerOf). One reader for the client and every bridge (log s35.131).
  */
 export function _remoteProblem(p: ProblemDetails, status?: number, retryIn?: number): BusError {
   const s = typeof p.status === 'number' ? p.status : status;

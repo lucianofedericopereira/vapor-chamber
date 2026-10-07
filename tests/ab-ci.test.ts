@@ -52,10 +52,17 @@ describe('ab:ci base check (scripts/ab/base-ok.sh)', () => {
     return { status: r.status, out: r.stdout.trim() };
   };
 
-  it('accepts a commit this checkout has', async () => {
+  it('accepts a commit this checkout has, or refuses it across an uncommitted version bump', async () => {
     const { execSync } = await import('node:child_process');
+    const { readFileSync } = await import('node:fs');
     const head = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim();
-    expect(await run([head])).toEqual({ status: 0, out: '' });
+    const was = JSON.parse(execSync('git show HEAD:package.json', { encoding: 'utf8' })).version;
+    const now = JSON.parse(readFileSync('package.json', 'utf8')).version;
+    if (was === now) expect(await run([head])).toEqual({ status: 0, out: '' });
+    else {
+      const esc = (v: string) => v.replaceAll('.', '\\.');
+      expect(await run([head])).toEqual({ status: 1, out: expect.stringMatching(new RegExp(`${esc(was)} release, head is ${esc(now)}`)) });
+    }
   });
 
   it('refuses, with a reason, an all-zero base, an absent one and none', async () => {

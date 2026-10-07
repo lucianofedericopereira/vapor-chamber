@@ -347,6 +347,15 @@ cart.$reset()     // dispatches cart$reset: back to state(), as a fresh object
 cart.$dispose()   // unregister handlers, drop from the registry
 ```
 
+A store is shared, so disposal is refcounted: **the last holder out disposes,
+not the first one in.** Every `useCart(bus)` call from inside an `effectScope`
+joins that scope to the store's holder count and leaves when the scope ends.
+The store is disposed when the count reaches zero. Two components can hold the
+same store and the first to unmount does not take it away from the second.
+
+Called outside a scope there is no lifetime to hook and nothing is counted.
+The caller owns `$dispose()`, the same contract as every other composable here.
+
 One id is one store per bus for one definition. A second `defineChamberStore`
 with the same id takes over, the rule `register()` follows for a handler. That
 second one may be an edited store module re-run by hot reload, or a module that
@@ -416,15 +425,6 @@ action. It arrives as `cmd.meta.origin`, so a listener can tell a load from
 what the user did. `persist` saves what was loaded, and `$reset()` still goes
 back to `state()`. Pinned in `tests/store-load-saved.test.ts`.
 
-A store is shared, so disposal is refcounted: **the last holder out disposes,
-not the first one in.** Every `useCart(bus)` call from inside an `effectScope`
-joins that scope to the store's holder count and leaves when the scope ends.
-The store is disposed when the count reaches zero. Two components can hold the
-same store and the first to unmount does not take it away from the second.
-
-Called outside a scope there is no lifetime to hook and nothing is counted.
-The caller owns `$dispose()`, the same contract as every other composable here.
-
 ## Without Vue
 
 `vapor-chamber/store/core` is the same store with no Vue in its graph, for an
@@ -456,7 +456,7 @@ it is marked stable.
 
 ### Open questions
 
-Carried forward deliberately rather than answered early:
+Not answered yet:
 
 - **The SSR shape.** Stores are already keyed per bus, so a per-request bus
   gets per-request state and the isolation exists. Hydration has its one story

@@ -670,8 +670,8 @@ type SyncState = {
   /** `RegisterOptions.answer` per action: what a transport's answer is handed to. */
   answers: Map<string, (cmd: Command, value: unknown) => void>;
   pluginEntries: Array<{ plugin: SyncPlugin; priority: number }>;
-  beforeHooks: BeforeHook[];
-  afterHooks: Hook[];
+  beforeHooks: HookEntry<BeforeHook>[];
+  afterHooks: HookEntry<Hook>[];
   /** Exact-match listeners - O(1) lookup on the hot path. Action-keyed. */
   exactListeners: Map<string, ListenerEntry[]>;
   /** Wildcard listeners ('*' or 'foo*') - walked per dispatch with a precomputed prefix (WildcardEntry). */
@@ -702,8 +702,8 @@ type AsyncState = {
   /** `RegisterOptions.answer` per action: what a transport's answer is handed to. */
   answers: Map<string, (cmd: Command, value: unknown) => void>;
   pluginEntries: Array<{ plugin: AsyncPlugin; priority: number }>;
-  beforeHooks: AsyncBeforeHook[];
-  afterHooks: AsyncHook[];
+  beforeHooks: HookEntry<AsyncBeforeHook>[];
+  afterHooks: HookEntry<AsyncHook>[];
   /** Exact-match listeners - O(1) lookup on the hot path. Action-keyed. */
   exactListeners: Map<string, ListenerEntry[]>;
   /** Wildcard listeners ('*' or 'foo*') - walked per dispatch with a precomputed prefix (WildcardEntry). */
@@ -759,7 +759,10 @@ const _uidPrefix = (
   ((Math.random() * 0xffffffff) >>> 0).toString(36)
 );
 let _uidCounter = 0;
-let _uidFn: () => string = () => _uidPrefix + '-' + (++_uidCounter).toString(36);
+// Named, so `_resetUid` can put it back. Joining the `-` once at load was
+// measured: no difference on four workloads, +3 to +6 brotli (log s35.213).
+const DEFAULT_UID = (): string => _uidPrefix + '-' + (++_uidCounter).toString(36);
+let _uidFn: () => string = DEFAULT_UID;
 
 // Held as a binding, not called literally, so `configureClock` can swap it.
 //
@@ -827,6 +830,15 @@ function uid(): string { return _uidFn(); }
  * configureUid(() => crypto.randomUUID());
  */
 export function configureUid(fn: () => string): void { _uidFn = fn; }
+
+/**
+ * Put the default id generator back after `configureUid`.
+ *
+ * @internal - NOT public API, not exported from the barrel, like
+ * `_configureClock`. It exists so tests/perf.bench.ts times the library's
+ * default after a group that swapped it, not a copy of it.
+ */
+export function _resetUid(): void { _uidFn = DEFAULT_UID; }
 
 /**
  * Swap the clock `stampMeta` reads. `_configureClock()` with no argument
@@ -1062,10 +1074,15 @@ export { stampMeta as _stampMeta };
  */
 export { okResult as _okResult, errResult as _errResult, tryCatchHandler as _tryCatchHandler };
 
-/** register(): a `$` name is the library's, so an app's is refused whatever its naming rule (log s35.117). */
+/**
+ * register(): a `$` name is the library's, so an app's is refused whatever its
+ * naming rule (log s35.117). Whether the library is registering is this
+ * copy's module state: a store or history from a second copy of the package
+ * lands here too, hence the second hint. tests/library-names.test.ts.
+ */
 function refuseLibraryName(action: string): void {
   if (_isLibraryAction(action) && !_isLibraryRegister()) {
-    throw fail('invalid:name', `Action "${action}": a name with "$" is the library's.${DEV ? ' Rename the action.' : ''}`, { context: { action } });
+    throw fail('invalid:name', `Action "${action}": a name with "$" is the library's.${DEV ? ' Rename the action. If the app did not name it, two copies of vapor-chamber are loaded: a bundle that marks `vapor-chamber` external must mark `vapor-chamber/*` too.' : ''}`, { context: { action } });
   }
 }
 
@@ -1121,6 +1138,12 @@ type WildcardEntry = { pattern: string; prefix: string; listener: Listener; off:
  * unsubscribed, so a dispatch already walking it skips it.
  */
 type ListenerEntry = WildcardEntry;
+
+/**
+ * A before- or after-hook: one shape for both lists. `off` is set when it is
+ * unsubscribed, so a dispatch already walking it skips it, as a listener's.
+ */
+type HookEntry<H> = { fn: H; off: boolean };
 
 /**
  * Walk listener buckets for an action. Exact-match bucket is O(1) lookup;
@@ -1550,8 +1573,12 @@ function clearState(s: SyncState | AsyncState): void {
   s.undoHandlers.clear();
   s.answers.clear();
   s.pluginEntries.length = 0;
-  s.beforeHooks.length = 0;
-  s.afterHooks.length = 0;
+  // Marked off and replaced, as dropAllListeners does: a dispatch walking them
+  // from a hook that called clear() stops calling them.
+  for (const h of s.beforeHooks) h.off = true;
+  for (const h of s.afterHooks) h.off = true;
+  s.beforeHooks = [];
+  s.afterHooks = [];
   dropAllListeners(s);
   s.responders.clear();
   s.deferred?.clear();
@@ -1565,6 +1592,7 @@ function inspect(s: SyncState | AsyncState): BusInspection {
     responderActions: Array.from(s.responders.keys()),
     pluginCount:      s.pluginEntries.length,
     pluginPriorities: s.pluginEntries.slice().sort(byPriority).map(e => e.priority),
+    plugins:          _inspectPlugins(s.pluginEntries),
     beforeHookCount:  s.beforeHooks.length,
     afterHookCount:   s.afterHooks.length,
     listenerPatterns: [...Array.from(s.exactListeners.keys()), ...s.wildcardListeners.map(e => e.pattern)],
@@ -1712,7 +1740,9 @@ function syncRunHooks(s: SyncState, cmd: Command, result: CommandResult): void {
   // V8 opt: index-based loops with length snapshot - avoids .slice() allocation
   const ah = s.afterHooks;
   for (let i = 0, len = ah.length; i < len; i++) {
-    try { ah[i](cmd, result); } catch (e) { console.error('[vapor-chamber] Hook error:', e); }
+    const h = ah[i];
+    if (h.off) continue;
+    try { h.fn(cmd, result); } catch (e) { console.error('[vapor-chamber] Hook error:', e); }
   }
   fanOutListeners(s.exactListeners, s.wildcardListeners, cmd.action, cmd, result);
 }
@@ -1804,7 +1834,9 @@ function _syncRun(s: SyncState, cmd: Command, executeOverride?: () => CommandRes
   // V8 opt: index-based loop, no .slice()
   const bh = s.beforeHooks;
   for (let i = 0, len = bh.length; i < len; i++) {
-    try { bh[i](cmd); }
+    const h = bh[i];
+    if (h.off) continue;
+    try { h.fn(cmd); }
     catch (e) {
       const result = errResult(beforeCancel(e, action));
       syncRunHooks(s, cmd, result);
@@ -2103,10 +2135,25 @@ function offAll(s: ListenerBucket, pattern?: string): void {
   }
 }
 
-function addHook<H>(s: { sealed: boolean }, hooks: H[], hook: H, method: string): () => void {
+/**
+ * Add a hook by the listeners' rule (see on() and fanOutListeners): adding
+ * pushes onto the live array, removing marks the entry `off` and replaces
+ * the array, never splicing the one a dispatch may be walking. So a dispatch
+ * runs the hooks that existed when it started, skips one removed during it,
+ * and runs one added during it from the next dispatch
+ * (tests/hook-removal-parity.test.ts). Cold path: per subscription.
+ */
+function addHook(s: SyncState | AsyncState, key: 'beforeHooks' | 'afterHooks', fn: unknown, method: string): () => void {
   assertNotSealed(s, method);
-  hooks.push(hook);
-  return () => { const i = hooks.indexOf(hook); if (i !== -1) hooks.splice(i, 1); };
+  // One reader for both lists of both buses; the hook's own type is the caller's.
+  const lists = s as unknown as Record<typeof key, HookEntry<unknown>[]>;
+  const entry: HookEntry<unknown> = { fn, off: false };
+  lists[key].push(entry);
+  return () => {
+    if (entry.off) return;
+    entry.off = true;
+    lists[key] = lists[key].filter((e) => e !== entry);
+  };
 }
 
 function syncRequest(s: SyncState, action: string, target: any, payload?: any, reqOpts: { timeout?: number; signal?: AbortSignal } = {}): Promise<CommandResult> {
@@ -2196,8 +2243,8 @@ function disposeBus<S extends SyncState | AsyncState>(s: S, clear: (s: S) => voi
  */
 function busParts<S extends SyncState | AsyncState>(s: S, clear: (s: S) => void) {
   return {
-    onBefore:          (h: S['beforeHooks'][number])     => addHook(s, s.beforeHooks as Array<typeof h>, h, 'onBefore'),
-    onAfter:           (h: S['afterHooks'][number])      => addHook(s, s.afterHooks as Array<typeof h>, h, 'onAfter'),
+    onBefore:          (h: S['beforeHooks'][number]['fn']) => addHook(s, 'beforeHooks', h, 'onBefore'),
+    onAfter:           (h: S['afterHooks'][number]['fn'])  => addHook(s, 'afterHooks', h, 'onAfter'),
     on:                (pat: string, l: Listener, o?: ListenerOptions) => on(s, pat, l, o),
     once:              (pat: string, l: Listener, o?: ListenerOptions) => once(s, pat, l, o),
     offAll:            (pat?: string)                    => offAll(s, pat),
@@ -2503,11 +2550,13 @@ async function asyncRunAfterHooks(s: AsyncState, cmd: Command, result: CommandRe
   // the common case - the thenable check saves a microtask hop per hook.
   const ah = s.afterHooks;
   for (let i = 0, len = ah.length; i < len; i++) {
+    const h = ah[i];
+    if (h.off) continue;
     try {
       const at = s.dispatchDepth;
       s.dispatchDepth = depth;
       let r: unknown;
-      try { r = ah[i](cmd, result); }
+      try { r = h.fn(cmd, result); }
       finally { s.dispatchDepth = at; }
       if (r && typeof (r as PromiseLike<void>).then === 'function') await r;
     } catch (e) { console.error('[vapor-chamber] Hook error:', e); }
@@ -2605,11 +2654,13 @@ async function _asyncRun(s: AsyncState, depth: number, cmd: Command, executeOver
   // an await, `dispatchDepth` holds whatever was running when it resumed.
   const bh = s.beforeHooks;
   for (let i = 0, len = bh.length; i < len; i++) {
+    const h = bh[i];
+    if (h.off) continue;
     try {
       const at = s.dispatchDepth;
       s.dispatchDepth = depth;
       let r: unknown;
-      try { r = bh[i](cmd); }
+      try { r = h.fn(cmd); }
       finally { s.dispatchDepth = at; }
       if (r && typeof (r as PromiseLike<void>).then === 'function') await r;
     }
@@ -2930,6 +2981,8 @@ export type BusInspection = {
   pluginCount: number;
   /** Plugin priorities in execution order (highest first). */
   pluginPriorities: number[];
+  /** The installed plugins in execution order, each as it declares itself. */
+  plugins: PluginInspection[];
   /** Number of beforeHooks. */
   beforeHookCount: number;
   /** Number of afterHooks. */
@@ -2943,6 +2996,36 @@ export type BusInspection = {
   /** Number of active throttle timers on this bus instance. */
   activeTimers: number;
 };
+
+/**
+ * One installed plugin in `BusInspection.plugins`: what it declares, never its
+ * function. `id` is its declared id (`undefined` when it declares none, never
+ * `Function.name`, which a minifier renames). `actions` is a copy of its
+ * `actions` scope. `actionFilter` says whether it has one: a function is not
+ * serializable. `transport`: it answers commands over a wire (the bridges).
+ */
+export type PluginInspection = {
+  id: string | undefined;
+  priority: number;
+  actions: string[] | undefined;
+  actionFilter: boolean;
+  transport: boolean;
+};
+
+/**
+ * @internal The installed plugins in execution order, as `inspectBus` reports
+ * them; the TestBus reports through it too, so the two cannot differ.
+ * tests/inspect-plugins.test.ts.
+ */
+export function _inspectPlugins(entries: ReadonlyArray<{ plugin: PluginParts; priority: number }>): PluginInspection[] {
+  return entries.slice().sort(byPriority).map(({ plugin, priority }) => ({
+    id: plugin.id,
+    priority,
+    actions: plugin.actions?.slice(),
+    actionFilter: plugin.actionFilter !== undefined,
+    transport: plugin.transport === true,
+  }));
+}
 
 /**
  * Inspect a bus's full topology. **Dev/debug only** - if your production code
@@ -2969,6 +3052,7 @@ export function inspectBus(bus: BaseBus): BusInspection {
     responderActions: [],
     pluginCount: 0,
     pluginPriorities: [],
+    plugins: [],
     beforeHookCount: 0,
     afterHookCount: 0,
     listenerPatterns: [],

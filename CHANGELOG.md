@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.28.0 - 2026-10-07
+
+- Fixed `createRouter()` throwing a TypeError on a route row whose `params` is `null`. The row now compiles as one without param types.
+- Added `headers` to a batched result and a WebSocket frame, as OData's JSON batch response has them. Their `Retry-After` sets the wait as a response's does, so an idempotent batched command now waits and is sent again.
+- Changed the reference Laravel controller's `batch()` to send each result the headers its own response would have had, such as `Retry-After: 1` on `in_progress`.
+- Improved the development message when a store or history from a second copy of vapor-chamber registers on a bus. It now names the two copies instead of asking the app to rename the action.
+- Fixed the README schema example, which imported `CommandsOf`. The type is `InferMap`.
+- Added `plugins` to `inspectBus()`: each installed plugin's declared `id`, `priority`, `actions`, whether it has an `actionFilter`, and whether it is a `transport`, in execution order. A hand-built `BusInspection` now needs the field.
+- Fixed `persist` failing every dispatch with `persist:failed:plugin` when the browser blocks site data, so reading `localStorage` throws. It now warns and the dispatch succeeds, and `load()` returns null instead of throwing.
+- Fixed a before- or after-hook that unsubscribes itself, or another hook, during a dispatch skipping the next hook. In `onBefore` the dispatch also failed with `core:refused:hook` and its handler never ran. Hooks now follow the listeners' rule: a dispatch runs the hooks that existed when it started and skips one removed during it, on both buses and in `createTestBus()`. Calling one unsubscribe twice now removes only its own subscription.
+- Fixed a navigation failing with `router:failed:guard` when one guard removed itself and a later guard, and the same case in `afterEach` logging a TypeError. Calling one unsubscribe twice now removes only its own guard or hook. A guard added during a navigation still runs in it.
+- Changed the development check of `undo: true` stores to compare the two reducer runs without serializing the whole state. A part the reducer left unchanged is not read, and the same states warn as before. Production builds are unchanged.
+- Added `actions` and `actionFilter` to `persist`, as on other plugins. The bus then runs it only for those actions: `actions: ['cart*']` saves on `cartAdd`, `cart$reset` and an undo of `cartAdd`. Without them it saves after every successful dispatch, as before.
+- Added `indexedDbStorage()` and `persist().hydrate()`. `persist({ storage: indexedDbStorage() })` saves to IndexedDB, and `await hydrate()` reads the saved state from any storage. `load()` still reads a synchronous storage, and throws a TypeError naming `hydrate()` on one that answers promises. The outbox's `indexedDbOutbox` uses the same code, with unchanged behaviour.
+- Changed `PersistOptions.storage` to `PersistStorage`, whose three methods may answer promises. `localStorage`, `sessionStorage` and any storage typed against 1.27 still fit.
+- Added `routerFacts(router, bus)` to `vapor-chamber/router`. It emits `routerNavigated` after a committed navigation and `routerFailed` after a failed one, so bus listeners see navigations. It never dispatches.
+- Added the `facts` option to `setupDevtools`, which shows the named emitted facts on a Facts timeline layer, such as `{ facts: ['router*'] }`.
+- Improved the wording and order of the README, CONTRIBUTING and the store, router, performance, V8 rules and whitepaper docs, with no fact removed. The router guide now counts six loader rules, not five, and CONTRIBUTING no longer allows emoji in docs, which the ASCII check rejects.
+
 ## v1.27.0 - 2026-10-06
 
 - Added `createActionFilter(expressions)`, which compiles CloudEvents filter expressions (`exact`, `prefix`, `suffix`, `all`, `any`, `not`) into an action-name predicate. It throws `core:invalid:filter` on what the spec rejects.

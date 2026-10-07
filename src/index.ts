@@ -62,6 +62,7 @@ export {
   ownerOf,
   type CommandPool,
   type BusInspection,
+  type PluginInspection,
   type BusErrorCode,
   type Condition,
   type FailCode,
@@ -174,8 +175,10 @@ export {
   type HistoryState,
   type OptimisticUndoOptions,
   type PersistOptions,
+  type PersistStorage,
   type ChannelOptions,
 } from './plugins';
+export { indexedDbStorage } from './idb';
 
 // Vue composables - optional, requires Vue >= 3.5
 export {

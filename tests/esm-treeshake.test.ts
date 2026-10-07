@@ -406,7 +406,9 @@ describe.skipIf(!esbuild)('ESM tree-shake regression', () => {
       // Raised to measured for a landed undo making every plugin forget the command (s35.181): the `{ ok: false }` check +8, onSettled +7 (logger already brings it in), each left out alone; total +41. Then the plugin walk as the index loop the hook runners use (s35.183): +6.
       // Raised to measured for a transport's answer handed to a handler's `answer` (s35.184): the `answers` map in register and the bus state +28, the async runner's settle +6 (shaken out, brotli context), each left out alone; total +32.
       // Raised to measured for sync dispatch building its Command before the depth's try (s35.204): one piece, +5.
-      expect(viteBr.length, `vite production brotli grew unexpectedly (${viteBr.length} bytes)`).toBeLessThan(8_296);
+      // Raised to measured for a batched result's or a frame's own `headers`, their Retry-After read as a response's (s35.205): the reader +54, the single bridge passing its response's -3, each left out alone; total +51. The two-copies hint 0 (DEV), the route table not in this bundle.
+      // Raised to measured for hooks removed during a dispatch by the listeners' rule (s35.209): 8_346 -> 8_374, +28.
+      expect(viteBr.length, `vite production brotli grew unexpectedly (${viteBr.length} bytes)`).toBeLessThan(8_375);
 
       // Symbol budget. These are all chamber.ts-only - should NOT appear in a
       // consumer bundle that doesn't import Vue composables.

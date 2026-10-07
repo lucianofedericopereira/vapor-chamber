@@ -41,7 +41,9 @@ panels, Reverb realtime, queued commands).
     (and `report()`s the original)
 
   On the batch endpoint the same problem rides on the command's own result,
-  `{ id, problem }`, inside a 200; a success is `{ id, state }`.
+  `{ id, problem }`, inside a 200; a success is `{ id, state }`. Headers the
+  command's own response would have had ride beside it, `headers` (OData JSON
+  batch): `{ id, problem, headers: { "Retry-After": "1" } }`.
 
 ## Idempotency (double-submit protection)
 

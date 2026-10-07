@@ -107,16 +107,16 @@ const productId = computed(() => router.currentRoute.value.location.params.id);
 const products  = computed(() => router.currentRoute.value.data.get('shop.products'));
 ```
 
-Pull-based derivation beats bridging navigation into events on every axis that
-matters here. It is always consistent with the committed snapshot. An event
-handler can observe the world mid-navigation, and a computed over a frozen
-commit cannot. It has no subscription to dispose, no ordering contract, and no
-listener list to fan out per navigation. It costs nothing while nothing reads
-it.
+For state, a computed over the snapshot is the better shape than an event. It
+is always consistent with the committed snapshot. An event handler can observe
+the world mid-navigation, and a computed over a frozen commit cannot. It has no
+subscription to dispose, no ordering contract, and no listener list to fan out
+per navigation. It costs nothing while nothing reads it.
 
 `afterEach` remains the right tool for *effects*: analytics beacons, imperative
 scroll restoration, anything that should happen because a navigation happened.
-It is not the mechanism for getting route state into a component.
+It is not the mechanism for getting route state into a component. To hear the
+same effects on the bus, emit them as facts ("Navigation as a command" below).
 
 ### Refreshing data after a mutation
 
@@ -192,7 +192,8 @@ export function myLoaders(): LoaderHandlers {
 }
 ```
 
-Five rules, each enforced by the engine rather than left to convention:
+Six rules for a handler. The engine acts on what it returns, throws and
+reports:
 
 **Return the data, and the router keys it.** Whatever a handler returns is
 committed into `snapshot.data` under `record.name`, which is what
@@ -256,7 +257,8 @@ consequences, both deliberate:
 - **`app.use(router)` does not register `<RouterOutlet>` globally.** Import it
   and register it locally where you use it.
 - **It is not re-exported from `vapor-chamber/router`.** A static re-export is
-  a static reference and would defeat the split.
+  a static reference and would defeat the split. `RouterOutlet`,
+  `makeBladeComponent` and `BladeHooks` all live in `vapor-chamber/router/vdom`.
 
 The bindings each entry retains from `vue`, measured on the built `dist/` by
 the harness of `tests/router/vdom-boundary.test.ts` and
@@ -270,12 +272,6 @@ the harness of `tests/router/vdom-boundary.test.ts` and
 
 Blade rows need no import from you: the router pulls `makeBladeComponent` in
 on demand, as a separate chunk, the first time it renders one.
-
-> `RouterOutlet`, `makeBladeComponent` and `BladeHooks` live in
-> `vapor-chamber/router/vdom`, and `app.use(router)` does not register
-> `<RouterOutlet>` globally: register it locally where you render it. A global
-> registration or a re-export from the router entry would be the static
-> reference that pins Vue's vDOM runtime into every bundle.
 
 ## Pagination, productized
 
@@ -438,7 +434,7 @@ What it costs, and what it needs:
   limits. The saving stays >= <!-- vc:outletFloor -->15.0<!-- /vc:outletFloor --> KB.
   The Vapor outlet's own machinery over a router-without-outlet floor stays
   <= <!-- vc:outletOwnArmCeiling -->5.0<!-- /vc:outletOwnArmCeiling --> KB
-  (measured <!-- vc:outletOwnArm -->4.71<!-- /vc:outletOwnArm --> KB). The
+  (measured <!-- vc:outletOwnArm -->4.75<!-- /vc:outletOwnArm --> KB). The
   subpath's own cost is <!-- vc:sizeRouterVapor -->0.7<!-- /vc:sizeRouterVapor --> KB brotli.
 - **Route components must be `defineVaporComponent` output** (Vapor-compiled
   SFCs are). This is a real constraint, not a convention. With no interop
@@ -564,6 +560,21 @@ The payoff is uniformity, not capability. The navigation now appears in the
 devtools timeline, `onBefore` can cancel it alongside everything else, and
 `history` treats it like any other command. Nothing in the router or the store
 depends on this. It is sugar, and skipping it costs nothing.
+
+To observe navigations without making them commands, emit facts:
+
+```ts
+import { routerFacts } from 'vapor-chamber/router';
+
+const stop = routerFacts(router, bus);
+bus.on('routerNavigated', (cmd) => track(cmd.target.to.fullPath));
+```
+
+`routerNavigated` (`{ to, from }`) follows each committed path navigation, as
+`afterEach` does. `routerFailed` (`{ error, to }`) follows each failure the
+router reports to `onError`. A refusal or a superseded navigation emits
+nothing. No plugin runs, so the router's guards stay the only gate. DevTools
+shows them with `setupDevtools(bus, app, { facts: ['router*'] })`.
 
 ## Status
 

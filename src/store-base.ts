@@ -157,6 +157,43 @@ const UNDO_RING = 256;
 /** Marks an undone step in the ring: no command equals it, and a replay skips it. */
 const UNDONE = {};
 
+/**
+ * DEV, the double reducer run: true only when `a` and `b` give the same JSON,
+ * without building either string where it can. Two identical references are
+ * equal with no look inside, so a reducer in the immutable style is walked
+ * only where it rebuilt. Plain arrays compare slot by slot, plain objects key
+ * by key in order, by JSON's rules (a slot's `undefined`, function or symbol
+ * is `null`, a property holding one is left out). Any other pair is its two
+ * strings. False is not proof of a difference: the caller then compares the
+ * two whole states as strings. tests/store-reducer-twice.test.ts.
+ */
+const dropped = (v: unknown): boolean => v === undefined || typeof v === 'function' || typeof v === 'symbol';
+function sameJson(a: any, b: any): boolean {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (typeof a.toJSON === 'function' || typeof b.toJSON === 'function') return JSON.stringify(a) === JSON.stringify(b);
+  const arr = Array.isArray(a);
+  if (arr !== Array.isArray(b)) return false;
+  if (arr) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (!sameJson(dropped(a[i]) ? null : a[i], dropped(b[i]) ? null : b[i])) return false;
+    }
+    return true;
+  }
+  const pa = Object.getPrototypeOf(a);
+  const pb = Object.getPrototypeOf(b);
+  if ((pa !== Object.prototype && pa !== null) || (pb !== Object.prototype && pb !== null)) return JSON.stringify(a) === JSON.stringify(b);
+  const ka = Object.keys(a);
+  const kb = Object.keys(b);
+  for (let i = 0, j = 0; ; i++, j++) {
+    while (i < ka.length && dropped(a[ka[i]])) i++;
+    while (j < kb.length && dropped(b[kb[j]])) j++;
+    if (i === ka.length || j === kb.length) return i === ka.length && j === kb.length;
+    if (ka[i] !== kb[j] || !sameJson(a[ka[i]], b[kb[j]])) return false;
+  }
+}
+
 /** `cart` + `add` -> `cartAdd`, the house convention `useCommandGroup` uses. */
 function actionName(id: string, key: string): string {
   return id + key.charAt(0).toUpperCase() + key.slice(1);
@@ -308,15 +345,19 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
       for (const key of Object.keys(reducers)) replay.set(actionName(id, key), reducers[key] as StoreReducer<S>);
       // DEV: a rollback replays reducers, so one that mints a value (an id, a
       // time) rebases to a different state. Run it twice, as React's
-      // StrictMode does, and warn once per action when the two differ. A state
-      // JSON cannot hold is not compared. `$reset` and `$sync` are not
-      // replayed by a rollback, so they are not checked.
+      // StrictMode does, and warn once per action when the two differ as JSON
+      // (`sameJson`, then the two strings). A state JSON cannot hold is not
+      // compared. `$reset` and `$sync` are not replayed by a rollback, so they
+      // are not checked.
       const noticed = new Set<string>();
       const twice = (f: StoreReducer<S>, prev: S, cmd: { action: string; target: any; payload?: any }): S => {
         const s = f(prev, cmd.target, cmd.payload);
         if (replay.get(cmd.action) === f && !noticed.has(cmd.action)) {
           let same = true;
-          try { same = JSON.stringify(f(prev, cmd.target, cmd.payload)) === JSON.stringify(s); } catch { /* not JSON: not compared */ }
+          try {
+            const again = f(prev, cmd.target, cmd.payload);
+            same = sameJson(again, s) || JSON.stringify(again) === JSON.stringify(s);
+          } catch { /* not JSON: not compared */ }
           if (!same) {
             noticed.add(cmd.action);
             console.warn(`[vapor-chamber] Store "${id}": the reducer for "${cmd.action}" gave two different states for the same input. A rollback of an earlier step replays it and gets a different state. Mint ids and times in the call, not in the reducer.`);

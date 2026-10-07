@@ -89,6 +89,10 @@ export { defaultAffects, interpolateLoad, runLoaders } from './loaders';
 // function export and tree-shakes away for consumers that never call it.
 export { revalidateRoutes } from './revalidate';
 export type { RevalidateMap, RevalidateOptions, RevalidatePlugin } from './revalidate';
+// Navigation facts on a bus. From this entry, as `revalidateRoutes`: it
+// imports only router types, and tree-shakes away when not called.
+export { routerFacts } from './facts';
+export type { FactSink, RouterFailedFact, RouterNavigatedFact } from './facts';
 export type { LoaderContext, LoaderHandlers, PrefixHandler, UrlHandler } from './loaders';
 export type { Router } from './router-type';
 export { compilePath, createRouteTable } from './table';

@@ -113,8 +113,32 @@ export function createEngine(ctx: EngineContext) {
   /** True while at least one stale-while-revalidate refresh is in flight. */
   const isRevalidating = shallowRef(false);
 
-  const beforeGuards: NavigationGuard[] = [];
-  const afterHooks: AfterEachHook[] = [];
+  // Removal marks an entry `off` and splices nothing while a navigation walks
+  // the list, so no index moves under a walk; a hook added during one is
+  // appended and runs in it. The list is compacted when no navigation is in
+  // flight, else at the next walk's start: the walk it would shift belongs to
+  // a superseded navigation, which returns at its `cancelled()` check first.
+  // tests/hook-removal-parity.test.ts.
+  type Entry<F> = { fn: F; off: boolean };
+  let beforeGuards: Entry<NavigationGuard>[] = [];
+  let afterHooks: Entry<AfterEachHook>[] = [];
+  let stale = false;
+  const on = (e: { off: boolean }): boolean => !e.off;
+  function compact(): void {
+    beforeGuards = beforeGuards.filter(on);
+    afterHooks = afterHooks.filter(on);
+    stale = false;
+  }
+  function add<F>(list: Entry<F>[], fn: F): () => void {
+    const entry = { fn, off: false };
+    list.push(entry);
+    return () => {
+      if (entry.off) return;
+      entry.off = true;
+      stale = true;
+      if (!inFlight) compact();
+    };
+  }
   let pendingId = 0;
   /** The id of the path navigation in flight; 0 when none. */
   let inFlight = 0;
@@ -313,30 +337,21 @@ export function createEngine(ctx: EngineContext) {
     let committed = false;
 
     try {
-      // Indexed, not for...of: a guard's unsubscribe closure splices this same
-      // array, so a self-removing guard - `const off = router.beforeEach(() =>
-      // { off(); ... })`, the one-shot pattern - shifts it under a live iterator
-      // and the next guard is silently skipped for this navigation. Same lesson
-      // the bus learned in `fanOutListeners`, INCLUDING its correction: the
-      // cursor moves by IDENTITY, not by length. A guard that removes a LATER
-      // peer shrinks the array without moving anything at or before `i`, so a
-      // bare `i -= shrinkage` walked the cursor back onto the guard that had
-      // just run and re-awaited it. `beforeGuards[i] !== guard` is the exact
-      // test for "the cursor moved". Here the loop is async, so both are
-      // compared after each await.
-      for (let i = 0; i < beforeGuards.length; i++) {
-        const lenBefore = beforeGuards.length;
-        const guard = beforeGuards[i];
+      // Indexed, and the length read each time: a guard added during this
+      // navigation runs in it. A removed one is marked, never spliced here
+      // (see `add`), so nothing a guard does moves the cursor.
+      if (stale) compact();
+      const guards = beforeGuards;
+      for (let i = 0; i < guards.length; i++) {
+        const entry = guards[i];
+        if (entry.off) continue;
         let verdict;
         try {
-          verdict = await guard(to, from);
+          verdict = await entry.fn(to, from);
         } catch (cause) {
           // A guard's throw is a bug in app code: its own code, not a hard
           // navigation (the server cannot fix it), the throw as its cause.
           throw routerError('failed:guard', `guard threw navigating to "${to.fullPath}"`, { to, cause });
-        }
-        if (beforeGuards.length < lenBefore && beforeGuards[i] !== guard) {
-          i -= lenBefore - beforeGuards.length;
         }
         if (cancelled()) return routerError('aborted:navigation', `navigation to "${to.fullPath}" superseded`, { to });
         if (verdict === false) return revert(routerError('refused:guard', `navigation to "${to.fullPath}" refused by guard`, { to }), opts);
@@ -454,26 +469,23 @@ export function createEngine(ctx: EngineContext) {
    *   committed navigation as `failed:component`, fire `ctx.onError`, and
    *   `revert()` the URL out from under a live snapshot. The bus's
    *   `fanOutListeners` does it the same way (logs "Listener error", not fatal).
-   * - **Self-removal doesn't skip a neighbour, and doesn't re-run one either.**
-   *   The unsubscribe closure splices this array, so the one-shot pattern
-   *   (`const off = router.afterEach(() => { off(); ... })` - "scroll to top on
-   *   this next navigation") would shift it under a `for...of` iterator. As in
-   *   `fanOutListeners`, the cursor moves by IDENTITY, not by length: a hook
-   *   that tears down a LATER sibling shrinks the array without moving anything
-   *   at or before `i`, and a bare `i -= shrinkage` would re-run the hook that
-   *   had just fired.
+   * - **A removal during the run skips the removed hook, never a neighbour.**
+   *   The one-shot pattern (`const off = router.afterEach(() => { off(); ...
+   *   })`, "scroll to top on this next navigation") marks its entry; nothing
+   *   is spliced while the run walks (see `add`). A hook added during the run
+   *   runs in it, as a guard does.
    */
   function runAfterHooks(to: RouteLocation, from: RouteLocation): void {
-    for (let i = 0; i < afterHooks.length; i++) {
-      const lenBefore = afterHooks.length;
-      const hook = afterHooks[i];
+    // Its own reference: a hook that navigates starts a walk that may compact
+    // the list, and this run keeps walking the one it started on.
+    const hooks = afterHooks;
+    for (let i = 0; i < hooks.length; i++) {
+      const entry = hooks[i];
+      if (entry.off) continue;
       try {
-        hook(to, from);
+        entry.fn(to, from);
       } catch (error) {
         console.error('[vapor-chamber-router] afterEach hook threw (logged, not fatal)', error);
-      }
-      if (afterHooks.length < lenBefore && afterHooks[i] !== hook) {
-        i -= lenBefore - afterHooks.length;
       }
     }
   }
@@ -641,19 +653,7 @@ export function createEngine(ctx: EngineContext) {
       supersede();
       refetchController?.abort();
     },
-    beforeEach: (guard: NavigationGuard) => {
-      beforeGuards.push(guard);
-      return () => {
-        const i = beforeGuards.indexOf(guard);
-        if (i >= 0) beforeGuards.splice(i, 1);
-      };
-    },
-    afterEach: (hook: AfterEachHook) => {
-      afterHooks.push(hook);
-      return () => {
-        const i = afterHooks.indexOf(hook);
-        if (i >= 0) afterHooks.splice(i, 1);
-      };
-    },
+    beforeEach: (guard: NavigationGuard) => add(beforeGuards, guard),
+    afterEach: (hook: AfterEachHook) => add(afterHooks, hook),
   };
 }

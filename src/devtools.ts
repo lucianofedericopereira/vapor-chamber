@@ -5,17 +5,30 @@
  * Requires @vue/devtools-api to be installed - silently no-ops if not present.
  */
 
-import type { Command, CommandResult, Hook } from './command-bus';
+import type { ActionScope, Command, CommandResult, Hook, Listener } from './command-bus';
 import { GLYPH_FAIL, GLYPH_OK } from './glyphs';
 
 const INSPECTOR_ID = 'vapor-chamber';
 const LAYER_ID = 'vapor-chamber';
+const FACTS_LAYER_ID = 'vapor-chamber-facts';
 
 // Minimal interface - only what setupDevtools actually uses.
 // Accepts both CommandBus and AsyncCommandBus without requiring the full type.
+// `on` is read only for `facts`.
 interface Observable {
   onAfter: (hook: Hook) => () => void;
+  on?: (pattern: string, listener: Listener) => () => void;
 }
+
+/** Options of {@link setupDevtools}. */
+export type DevtoolsOptions = {
+  /**
+   * Emitted facts to show on a "Facts" timeline layer: an {@link ActionScope}
+   * of event names, such as `['router*']` for `routerFacts`. Default: none.
+   * `emit` runs no hooks, so the Commands layer never shows a fact.
+   */
+  facts?: ActionScope;
+};
 
 interface CommandEntry {
   id: number;
@@ -32,19 +45,24 @@ interface CommandEntry {
  * - Adds a **Vapor Chamber** inspector panel: browse recent commands,
  *   inspect target/payload/result of each one.
  *
- * @param bus  A CommandBus or AsyncCommandBus instance to observe.
- * @param app  The Vue app instance (passed to setupDevtoolsPlugin).
- * @returns    Unsubscribe function - call it to detach from the bus.
+ * - With `facts`, adds a **Facts** timeline layer: every emitted fact whose
+ *   name matches appears as an event.
+ *
+ * @param bus      A CommandBus or AsyncCommandBus instance to observe.
+ * @param app      The Vue app instance (passed to setupDevtoolsPlugin).
+ * @param options  {@link DevtoolsOptions}.
+ * @returns        Unsubscribe function - call it to detach from the bus.
  *
  * @example
  * import { createApp } from 'vue';
- * import { getCommandBus, setupDevtools } from 'vapor-chamber';
+ * import { getCommandBus } from 'vapor-chamber';
+ * import { setupDevtools } from 'vapor-chamber/devtools';
  *
  * const app = createApp(App);
- * setupDevtools(getCommandBus(), app);
+ * setupDevtools(getCommandBus(), app, { facts: ['router*'] });
  * app.mount('#app');
  */
-export function setupDevtools(bus: Observable, app: unknown): () => void {
+export function setupDevtools(bus: Observable, app: unknown, options?: DevtoolsOptions): () => void {
   // Guard: no-op in production. Bundlers (Vite, webpack, Rollup) replace the
   // bare process.env.NODE_ENV literal in prod builds, making this entire
   // function body dead code that tree-shakers eliminate for a true 0KB footprint.
@@ -93,6 +111,20 @@ export function setupDevtools(bus: Observable, app: unknown): () => void {
     }
   });
 
+  // A listener hears a matching dispatch too. Its command carries `meta`
+  // (stampMeta), an emit's never does (syncEmit, asyncEmit), and the
+  // Commands layer already shows the dispatch.
+  const offs = [unsubscribe];
+  const facts = options?.facts;
+  if (facts && bus.on) {
+    for (const pattern of facts) {
+      offs.push(bus.on(pattern, (cmd) => {
+        if (cmd.meta || !devApi) return;
+        devApi.addTimelineEvent({ layerId: FACTS_LAYER_ID, event: { time: Date.now(), title: cmd.action, data: cmd.target } });
+      }));
+    }
+  }
+
   // Dynamic import - zero cost if @vue/devtools-api is not installed.
   // Using a variable prevents TypeScript from attempting module resolution
   // on an optional peer dependency that may not be installed.
@@ -129,6 +161,7 @@ export function setupDevtools(bus: Observable, app: unknown): () => void {
             color: 0x41b883, // Vue green
             label: 'Commands',
           });
+          if (facts) api.addTimelineLayer({ id: FACTS_LAYER_ID, color: 0x35495e, label: 'Facts' });
 
           // Inspector panel: browse and inspect recent commands
           api.addInspector({
@@ -193,5 +226,5 @@ export function setupDevtools(bus: Observable, app: unknown): () => void {
       // @vue/devtools-api not installed - silently no-op in production
     });
 
-  return unsubscribe;
+  return () => { for (const off of offs) off(); };
 }

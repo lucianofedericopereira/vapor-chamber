@@ -17,7 +17,7 @@ import { ... } from 'vapor-chamber/outbox';
 
 ### createOutbox
 
-**Function** - [src/outbox.ts:360](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L360)
+**Function** - [src/outbox.ts:334](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L334)
 
 ```ts
 createOutbox(options?: OutboxOptions) => Outbox
@@ -65,7 +65,7 @@ if (result.ok && result.value?.queued) {
 
 ### indexedDbOutbox
 
-**Function** - [src/outbox.ts:141](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L141)
+**Function** - [src/outbox.ts:143](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L143)
 
 ```ts
 indexedDbOutbox(dbName?: string, storeName?: string) => OutboxStorage
@@ -76,8 +76,9 @@ as one value under a fixed key, so reads and writes are single-transaction
 and atomic. Prefer this over `localStorageOutbox` when queued payloads are
 large (localStorage has a ~5 MB origin quota and synchronous I/O).
 
-SSR-safe: the database is opened lazily on first use; when `indexedDB` is
-unavailable, `load()` resolves to null and `save()`/`clear()` warn and no-op.
+SSR-safe: the database is opened lazily on first use (src/idb.ts, shared
+with persist's `indexedDbStorage`); when `indexedDB` is unavailable,
+`load()` resolves to null and `save()`/`clear()` warn and no-op.
 
 | parameter | description |
 |---|---|
@@ -91,7 +92,7 @@ await outbox.hydrate();
 
 ### localStorageOutbox
 
-**Function** - [src/outbox.ts:88](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L88)
+**Function** - [src/outbox.ts:89](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L89)
 
 ```ts
 localStorageOutbox(storageKey?: string) => OutboxStorage
@@ -114,7 +115,7 @@ const outbox = createOutbox({ storage: localStorageOutbox('vc:cart-outbox') });
 
 ### Outbox
 
-**Type alias** - [src/outbox.ts:292](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L292)
+**Type alias** - [src/outbox.ts:266](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L266)
 
 ```ts
 export type Outbox = {
@@ -150,7 +151,7 @@ The object returned by {@link createOutbox}.
 
 ### OutboxFlushSummary
 
-**Type alias** - [src/outbox.ts:289](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L289)
+**Type alias** - [src/outbox.ts:263](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L263)
 
 ```ts
 export type OutboxFlushSummary = { replayed: number; failed: number; rejected: number };
@@ -161,7 +162,7 @@ flush. `rejected` counts records dropped as final (see `isRetryable`).
 
 ### OutboxOptions
 
-**Type alias** - [src/outbox.ts:198](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L198)
+**Type alias** - [src/outbox.ts:172](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L172)
 
 ```ts
 export type OutboxOptions = {
@@ -230,7 +231,7 @@ export type OutboxOptions = {
 
 ### OutboxRecord
 
-**Type alias** - [src/outbox.ts:41](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L41)
+**Type alias** - [src/outbox.ts:42](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L42)
 
 ```ts
 export type OutboxRecord = {
@@ -265,7 +266,7 @@ A queued command awaiting replay. JSON-serializable by design - `target` and
 
 ### OutboxStorage
 
-**Type alias** - [src/outbox.ts:71](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L71)
+**Type alias** - [src/outbox.ts:72](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/outbox.ts#L72)
 
 ```ts
 export type OutboxStorage = {

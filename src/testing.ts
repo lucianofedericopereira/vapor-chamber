@@ -32,7 +32,7 @@ import type {
 // The double stands in for the bus, so its failures are core's: a test must
 // read the same code it will meet in production.
 const testFail = _failures('core');
-import { buildRunner, matchesPattern, abortedResult, _failures, _beforeCancel, _errResult, _okResult, _stampMeta, _syncBatch, _UNSEAL, _tryCatchHandler } from './command-bus';
+import { buildRunner, matchesPattern, abortedResult, _failures, _beforeCancel, _errResult, _inspectPlugins, _okResult, _stampMeta, _syncBatch, _UNSEAL, _tryCatchHandler } from './command-bus';
 import { isThenable } from './settled';
 import { _isLibraryAction, _isLibraryRegister } from './library-names';
 
@@ -88,8 +88,11 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
   const undoChecks = new Map<string, (cmd: Command) => boolean>();
   const responders = new Map<string, (cmd: Command) => any>();
   const plugins: Array<{ plugin: Plugin; priority: number }> = [];
-  const beforeHooks: BeforeHook[] = [];
-  const afterHooks: Hook[] = [];
+  // Hooks by the real buses' rule (addHook in command-bus.ts): marked off and
+  // replaced on removal, never spliced, so a dispatch walking them keeps its array.
+  let beforeHooks: Array<{ fn: BeforeHook; off: boolean }> = [];
+  let afterHooks: Array<{ fn: Hook; off: boolean }> = [];
+  const dropHooks = (list: Array<{ off: boolean }>): never[] => { for (const h of list) h.off = true; return []; };
   // Replaced, never spliced, so a fan-out walking it keeps its array (see fanOut).
   let patternListeners: Array<{ pattern: string; listener: Listener; off: boolean }> = [];
   const recorded: RecordedDispatch[] = [];
@@ -105,10 +108,11 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
   }
 
   function runAfterHooksAndListeners(cmd: Command, result: CommandResult): void {
-    // V8-aligned: index-based loop with length snapshot for hooks (no self-removal)
     const ah = afterHooks;
     for (let i = 0, len = ah.length; i < len; i++) {
-      try { ah[i](cmd, result); } catch (e) {
+      const h = ah[i];
+      if (h.off) continue;
+      try { h.fn(cmd, result); } catch (e) {
         console.error('[vapor-chamber/test] Hook error:', e);
       }
     }
@@ -163,7 +167,9 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
     // Run beforeHooks - throw cancels dispatch
     const bh = beforeHooks;
     for (let i = 0, len = bh.length; i < len; i++) {
-      try { bh[i](cmd); }
+      const h = bh[i];
+      if (h.off) continue;
+      try { h.fn(cmd); }
       catch (e) {
         // The same core:refused:hook result a real bus builds.
         const result: CommandResult = _errResult(_beforeCancel(e, action));
@@ -247,16 +253,23 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
 
   function onBefore(hook: BeforeHook): () => void {
     if (sealed) throw testFail('refused:bus', `Cannot call onBefore() on a sealed bus.`);
-    beforeHooks.push(hook);
-    return () => { const i = beforeHooks.indexOf(hook); if (i !== -1) beforeHooks.splice(i, 1); };
+    const entry = { fn: hook, off: false };
+    beforeHooks.push(entry);
+    return () => {
+      if (entry.off) return;
+      entry.off = true;
+      beforeHooks = beforeHooks.filter((e) => e !== entry);
+    };
   }
 
   function onAfter(hook: Hook): () => void {
     if (sealed) throw testFail('refused:bus', `Cannot call onAfter() on a sealed bus.`);
-    afterHooks.push(hook);
+    const entry = { fn: hook, off: false };
+    afterHooks.push(entry);
     return () => {
-      const i = afterHooks.indexOf(hook);
-      if (i !== -1) afterHooks.splice(i, 1);
+      if (entry.off) return;
+      entry.off = true;
+      afterHooks = afterHooks.filter((e) => e !== entry);
     };
   }
 
@@ -361,12 +374,12 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
     // that reset `sealed` would pass a test the real bus fails.
     clear: () => {
       if (sealed) throw testFail('refused:bus', `Cannot call clear() on a sealed bus.`);
-      recorded.splice(0); offAll(); beforeHooks.length = 0;
+      recorded.splice(0); offAll(); beforeHooks = dropHooks(beforeHooks);
     },
     dispose: () => {
       // Plugin dispose() first, as a real bus's dispose() does.
       for (let i = plugins.length - 1; i >= 0; i--) plugins[i].plugin.dispose?.();
-      recorded.splice(0); offAll(); beforeHooks.length = 0; afterHooks.length = 0; handlers.clear(); undoHandlers.clear(); undoChecks.clear(); responders.clear(); plugins.length = 0;
+      recorded.splice(0); offAll(); beforeHooks = dropHooks(beforeHooks); afterHooks = dropHooks(afterHooks); handlers.clear(); undoHandlers.clear(); undoChecks.clear(); responders.clear(); plugins.length = 0;
     },
     seal: () => { sealed = true; },
     isSealed: () => sealed,
@@ -377,6 +390,7 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
       responderActions: [],
       pluginCount: plugins.length,
       pluginPriorities: plugins.slice().sort((a, b) => b.priority - a.priority).map(e => e.priority),
+      plugins: _inspectPlugins(plugins),
       beforeHookCount: beforeHooks.length,
       afterHookCount: afterHooks.length,
       listenerPatterns: patternListeners.map(e => e.pattern),

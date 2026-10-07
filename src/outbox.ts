@@ -19,6 +19,7 @@ import type { ActionScope, AsyncCommandBus, AsyncPlugin, BusError, Command, Comm
 import type { ActionFilter } from './action-filter';
 import { countOption } from './bounds';
 import { commandKey, failureCondition, _okResult, _errResult, ownerOf, _isLibraryAction } from './command-bus';
+import { _idbStore } from './idb';
 import { createSleeper } from './scheduler';
 import { signal } from './signal';
 import type { Signal } from './signal';
@@ -128,8 +129,9 @@ export function localStorageOutbox(storageKey: string = 'vc:outbox'): OutboxStor
  * and atomic. Prefer this over `localStorageOutbox` when queued payloads are
  * large (localStorage has a ~5 MB origin quota and synchronous I/O).
  *
- * SSR-safe: the database is opened lazily on first use; when `indexedDB` is
- * unavailable, `load()` resolves to null and `save()`/`clear()` warn and no-op.
+ * SSR-safe: the database is opened lazily on first use (src/idb.ts, shared
+ * with persist's `indexedDbStorage`); when `indexedDB` is unavailable,
+ * `load()` resolves to null and `save()`/`clear()` warn and no-op.
  *
  * @param dbName    Database name. Default: `'vc-outbox'`.
  * @param storeName Object store name. Default: `'records'`.
@@ -140,40 +142,12 @@ export function localStorageOutbox(storageKey: string = 'vc:outbox'): OutboxStor
  */
 export function indexedDbOutbox(dbName: string = 'vc-outbox', storeName: string = 'records'): OutboxStorage {
   const QUEUE_KEY = 'queue';
-  let dbPromise: Promise<IDBDatabase> | null = null;
-
-  function open(): Promise<IDBDatabase> {
-    if (dbPromise === null) {
-      dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
-        const idb: IDBFactory | undefined = (globalThis as any).indexedDB;
-        if (!idb) {
-          dbPromise = null; // don't cache the failure - a later call may run where IDB exists
-          reject(new Error('indexedDB is not available in this environment'));
-          return;
-        }
-        const req = idb.open(dbName, 1);
-        req.onupgradeneeded = () => { req.result.createObjectStore(storeName); };
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => { dbPromise = null; reject(req.error ?? new Error('indexedDB open failed')); };
-      });
-    }
-    return dbPromise;
-  }
-
-  /** Run one request in its own transaction; resolve with `request.result`. */
-  function run<T>(mode: IDBTransactionMode, op: (store: IDBObjectStore) => IDBRequest): Promise<T> {
-    return open().then(db => new Promise<T>((resolve, reject) => {
-      const store = db.transaction(storeName, mode).objectStore(storeName);
-      const req = op(store);
-      req.onsuccess = () => resolve(req.result as T);
-      req.onerror = () => reject(req.error ?? new Error('indexedDB request failed'));
-    }));
-  }
+  const db = _idbStore(dbName, storeName);
 
   return {
     async load(): Promise<OutboxRecord[] | null> {
       try {
-        const result = await run<unknown>('readonly', s => s.get(QUEUE_KEY));
+        const result = await db.get(QUEUE_KEY);
         return Array.isArray(result) ? (result as OutboxRecord[]) : null;
       } catch (e) {
         console.warn(`[vapor-chamber] outbox: failed to load from indexedDB "${dbName}":`, e);
@@ -181,11 +155,11 @@ export function indexedDbOutbox(dbName: string = 'vc-outbox', storeName: string 
       }
     },
     async save(records: OutboxRecord[]): Promise<void> {
-      try { await run('readwrite', s => s.put(records, QUEUE_KEY)); }
+      try { await db.put(QUEUE_KEY, records); }
       catch (e) { console.warn(`[vapor-chamber] outbox: failed to save to indexedDB "${dbName}":`, e); }
     },
     async clear(): Promise<void> {
-      try { await run('readwrite', s => s.clear()); }
+      try { await db.clear(); }
       catch (e) { console.warn(`[vapor-chamber] outbox: failed to clear indexedDB "${dbName}":`, e); }
     },
   };

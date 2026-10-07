@@ -12,7 +12,7 @@ and does not repeat it.
 
 ## Abstract
 
-Vapor Chamber is a command bus built for Vue Vapor, with a <!-- vc:sizeCore -->4.6<!-- /vc:sizeCore --> KB brotli dispatch core.
+Vapor Chamber is a command bus built for Vue Vapor, with a <!-- vc:sizeCore -->4.7<!-- /vc:sizeCore --> KB brotli dispatch core.
 Every user action gets a name and one handler, runs through a plugin pipeline,
 and returns a structured result. The bus owns no state and imposes no
 framework, build system or backend. The same core runs in a Vue app (vDOM or
@@ -82,12 +82,12 @@ Alpine.js proved a third path exists. Its runtime is small enough to drop into a
 from a CDN and expressive enough to handle real interactivity. It is agnostic enough to work
 alongside any backend. It doesn't try to replace Laravel. It doesn't try to replace Vue.
 
-Vapor Chamber takes the same position for Vue Vapor: a command bus that orchestrates actions
-across any stack, at any scale, without lock-in.
+Vapor Chamber takes the same position for Vue Vapor: a command bus that works beside any backend
+and imposes no framework.
 
 Without a coordination layer, logic scatters across component `setup()` functions, Pinia store
-actions, ad-hoc fetch wrappers and event-bus hacks. One bus. One dispatch surface. Every concern
-is a plugin.
+actions, ad-hoc fetch wrappers and event-bus hacks. With one, every action goes through one
+dispatch surface, and each concern is a plugin.
 
 ### 2.1 Target stack
 
@@ -141,7 +141,7 @@ Two honesty rules keep this from drifting into not-invented-here.
 Bundle sizes are left out of this table. The three peers' sizes were never
 measured here, and a size is a fact of a version and a build. This library's
 own are generated in [BUNDLE-SIZES.md](./BUNDLE-SIZES.md): the dispatch core is
-<!-- vc:sizeCore -->4.6<!-- /vc:sizeCore --> KB brotli.
+<!-- vc:sizeCore -->4.7<!-- /vc:sizeCore --> KB brotli.
 
 ---
 
@@ -239,8 +239,7 @@ the Vue + Laravel stack. The bus coordinates state transitions. It does not stor
 
 The comparative analysis that shaped the design ran several rounds (appendix
 A.4). Every round found the same thing: borrowing state-centric patterns hit a
-wall, and working with the stateless design added value. This is not a
-limitation. It is the architecture.
+wall, and working with the stateless design added value.
 
 `vapor-chamber/store` is consistent with it rather than an exception. A store
 owns its own `shallowRef`. The bus stores nothing, and its only role is that
@@ -329,6 +328,10 @@ It is the same for `dispatch`, `emit`, the fast lane's default `'live'` mode and
 array instead of splicing the one a dispatch may be walking. So nothing a
 listener does moves the loop's cursor.
 (`tests/command-bus.test.ts`, `tests/fast-lane.test.ts`, log s35.67.)
+
+**Before- and after-hooks follow the same rule**, on both buses and in
+`createTestBus()`, `clear()` from a hook included.
+(`tests/hook-removal-parity.test.ts`, log s35.209.)
 
 ### 4.4 Core surface (stable API)
 
@@ -445,8 +448,8 @@ turns it off.
 
 **Why two factories instead of one?**
 `createCommandBus` (sync) and `createAsyncCommandBus` (async) are different execution models,
-not different feature sets. The sync bus is a pure function pipeline: zero Promise overhead,
-predictable, suitable for in-process coordination. The async bus enables `await` in handlers
+not different feature sets. The sync bus runs as plain function calls with no Promise, for
+in-process coordination. The async bus enables `await` in handlers
 and plugins, necessary for HTTP and I/O. Collapsing them into one factory with an option would
 reduce clarity without reducing complexity.
 
@@ -538,7 +541,7 @@ the pipeline it sits in.
 | `serialize` | Concurrency | Per-key sequential processing of async commands - prevents same-key read-modify-write races |
 | `idempotent` | Exactly-once | Collapses duplicate commands (double-submit/retry/reconnect). Stamps an `Idempotency-Key` the HTTP bridge forwards to the backend |
 | `schemaValidator` | Guards | Auto-validates field types against schema (auto-installed in schema bus) |
-| `persist` | Storage | Auto-save state to localStorage/sessionStorage/custom, validate on load. It needs `getState`: without it `persist()` throws a `TypeError` at setup |
+| `persist` | Storage | Auto-save state to localStorage/sessionStorage, IndexedDB (`indexedDbStorage()`, read with `hydrate()`) or custom, validate on load. `actions` scopes it like other plugins. It needs `getState`: without it `persist()` throws a `TypeError` at setup |
 | `createChannel` | Multi-context | Mirror emitted facts to every other same-origin context through BroadcastChannel. Not a bus plugin: it takes a fast lane, not the bus |
 | `supersede` | Concurrency | Aborts the in-flight dispatch of the same key when a newer one arrives. Async bus only: it mutates `cmd.signal` |
 | `schemaLogger` | DX | `logger` plus the schema's descriptions and a per-field validation mark |
@@ -1207,9 +1210,9 @@ Three IIFE variants ship under `dist/`, split by **audience / deployment shape**
 
 | Variant   | Audience                                                  | Brotli |
 |-----------|-----------------------------------------------------------|--------|
-| core      | Sprinkled JS on server-rendered pages - Blade / Rails / Django | <!-- vc:sizeIifeCore -->10.1<!-- /vc:sizeIifeCore --> KB |
+| core      | Sprinkled JS on server-rendered pages - Blade / Rails / Django | <!-- vc:sizeIifeCore -->10.2<!-- /vc:sizeIifeCore --> KB |
 | elements  | Embeddable widgets through custom elements                | <!-- vc:sizeIifeElements -->10.6<!-- /vc:sizeIifeElements --> KB |
-| full      | SPAs that grew big (realtime + undo/redo + persistence)   | <!-- vc:sizeIifeFull -->14.4<!-- /vc:sizeIifeFull --> KB |
+| full      | SPAs that grew big (realtime + undo/redo + persistence)   | <!-- vc:sizeIifeFull -->14.6<!-- /vc:sizeIifeFull --> KB |
 
 _(Generated, always-current per-export sizes: [BUNDLE-SIZES.md](./BUNDLE-SIZES.md).)_
 
@@ -1279,9 +1282,8 @@ page. Each Vue dist file bundles its own independent copy of the reactivity
 engine. Two different files, even both genuinely "Vue," are two disconnected
 module instances with no shared effect-tracking state. Verified directly: a
 `ref()` created through one build is invisible to a `watchEffect` created
-through the other (a plain assignment never re-triggers it). Silent, no
-warning, no error: just reactivity that stops working across the boundary. One
-page, one Vue build, always.
+through the other (a plain assignment never re-triggers it). Reactivity stops
+across that boundary with no warning and no error. Load one Vue build per page.
 
 **Backend (Laravel - no Livewire dependency):**
 ```php
@@ -1705,7 +1707,7 @@ base against head (`perf-ab`, `npm run ab:ci`). A counted "slower" fails the
 build. So does a run in which no control passed, or a workload that measured
 nothing. With no base to build, the job skips and says why
 (`scripts/ab/base-ok.sh`). That is the push that creates the branch, a base
-a force-push dropped, or a base on another release: across a release the pair
+a force-push dropped, or a base on another release. Across a release the pair
 measures the work the fixes do, and the new release is the baseline (log
 s35.203). A missing base is not a regression.
 
@@ -1762,7 +1764,7 @@ so it does not measure the async bus's dispatch path (log s35.67).
 The core (`command-bus.ts` + `testing.ts`) will remain:
 - **Zero runtime dependencies** - always
 - **Framework-agnostic** - always
-- **<!-- vc:sizeCore -->4.6<!-- /vc:sizeCore --> KB brotli dispatch core** - measured ([BUNDLE-SIZES.md](./BUNDLE-SIZES.md))
+- **<!-- vc:sizeCore -->4.7<!-- /vc:sizeCore --> KB brotli dispatch core** - measured ([BUNDLE-SIZES.md](./BUNDLE-SIZES.md))
 - **`command-bus.ts` at 100% statement, branch, function and line coverage** - measured, the [vitest.config](../vitest.config.ts) gate. No line of `src/` is excluded by a pragma. *(`testing.ts` is the test harness, excluded from coverage by design.)*
 
 Optional layers may add dependencies. The core never will.
@@ -1813,6 +1815,7 @@ src/
   store/
     core.ts         - vapor-chamber/store/core, the same store with no Vue
   outbox.ts         - durable offline queue, replayed in order on reconnect
+  idb.ts            - one IndexedDB key-value store: indexedDbStorage (persist) and the outbox's adapter
   mcp.ts            - MCP server layer: a schema action becomes an MCP tool
   stream-parser.ts  - dependency-free incremental JSON parser
   vue.ts            - the entry for apps that have Vue (wires Vue at build time)
@@ -1839,6 +1842,7 @@ src/
     url.ts          - the URL and query layer (query params are state)
     loaders.ts      - loader SPI; presets resolve a row's `load` string
     revalidate.ts   - revalidateRoutes: refetch loaders after matching commands
+    facts.ts        - routerFacts: committed and failed navigations as facts on a bus
     composables.ts  - useRoute / useQueryParam / usePagination / useMenu / ...
     menu.ts         - menu and breadcrumb projections of the route table
     dom.ts          - link interception, data-active stamping, idle preheat
@@ -1857,7 +1861,7 @@ src/
   iife-elements.ts  - CDN entry, elements variant
   index.ts          - public ESM barrel
 
-tests/                           (<!-- vc:testFiles -->304<!-- /vc:testFiles --> files, <!-- vc:tests -->3391<!-- /vc:tests --> tests)
+tests/                           (<!-- vc:testFiles -->316<!-- /vc:testFiles --> files, <!-- vc:tests -->3498<!-- /vc:tests --> tests)
 ```
 
 Where the current numbers live, both generated and CI-verified fresh:
@@ -1916,7 +1920,7 @@ was reread.
 
 #### A.2 The v1.0 abstract
 
-Vapor Chamber is a command bus built for Vue Vapor, with a <!-- vc:sizeCore -->4.6<!-- /vc:sizeCore --> KB brotli dispatch core. It gives a semantic,
+Vapor Chamber is a command bus built for Vue Vapor, with a <!-- vc:sizeCore -->4.7<!-- /vc:sizeCore --> KB brotli dispatch core. It gives a semantic,
 middleware-aware dispatch layer that connects any frontend pattern to any backend. It imposes
 no framework, no build system and no opinion about your stack. v1.0 adds
 e-commerce-grade features: transactional batch dispatch with undo rollback, automatic
@@ -2939,7 +2943,7 @@ cycle:
   (today <!-- vc:outletSaving -->22.06<!-- /vc:outletSaving -->)
 - the Vapor outlet's own machinery over the router-without-outlet floor stays <=
   <!-- vc:outletOwnArmCeiling -->5.0<!-- /vc:outletOwnArmCeiling --> KB (today
-  <!-- vc:outletOwnArm -->4.71<!-- /vc:outletOwnArm -->)
+  <!-- vc:outletOwnArm -->4.75<!-- /vc:outletOwnArm -->)
 
 It is deliberately written to fail when a later RC erodes either. Growth in
 `DynamicFragment` or `SlotFragment` lands in the second, and that failure is a
@@ -4150,7 +4154,7 @@ namespace could not be reached", and names `configureVue()`.
 
 #### From 19 Core Guarantee
 
-- **<!-- vc:sizeCore -->4.6<!-- /vc:sizeCore --> KB brotli dispatch core** - measured ([BUNDLE-SIZES.md](./BUNDLE-SIZES.md)); this line read "~4 KB gzipped" while every other size in this document is brotli, which is a different number for the same artifact
+- **<!-- vc:sizeCore -->4.7<!-- /vc:sizeCore --> KB brotli dispatch core** - measured ([BUNDLE-SIZES.md](./BUNDLE-SIZES.md)); this line read "~4 KB gzipped" while every other size in this document is brotli, which is a different number for the same artifact
 
 #### From 21 File Map
 
@@ -4169,7 +4173,7 @@ third copy is a third thing to keep true.
 | Build required | no | no | no | no (IIFE available) |
 | Reactivity model | server-driven | x-data | hypermedia | Vue Vapor signals |
 | Transport | AJAX/WS (built-in) | none | AJAX (built-in) | plugin |
-| Bundle size | ~50KB | ~15KB | ~14KB | <!-- vc:sizeCore -->4.6<!-- /vc:sizeCore --> KB brotli core |
+| Bundle size | ~50KB | ~15KB | ~14KB | <!-- vc:sizeCore -->4.7<!-- /vc:sizeCore --> KB brotli core |
 | TypeScript | partial | no | no | full |
 | Vue DevTools | no | no | no | yes |
 | Undo/redo | no | no | no | built-in |
@@ -4386,7 +4390,7 @@ src/
   iife-elements.ts  - CDN entry, elements variant
   index.ts          - public ESM barrel
 
-tests/                           (<!-- vc:testFiles -->304<!-- /vc:testFiles --> files, <!-- vc:tests -->3391<!-- /vc:tests --> tests)
+tests/                           (<!-- vc:testFiles -->316<!-- /vc:testFiles --> files, <!-- vc:tests -->3498<!-- /vc:tests --> tests)
 ```
 
 The per-file test inventory that used to sit here was removed rather than

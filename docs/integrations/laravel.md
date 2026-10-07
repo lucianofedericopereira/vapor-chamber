@@ -974,12 +974,12 @@ abridged:
         // attempt is still running (a client timeout on a slow write) misses
         // the cache and runs the action a second time, concurrently. The lock
         // is taken BEFORE the cache read and held for the whole run; a request
-        // that cannot get it is answered 409 with Retry-After (see __invoke), so
-        // the client's re-send returns for the one outcome. 30s bounds a crashed
-        // holder.
+        // that cannot get it is answered 409 with `Retry-After: 1`, so the
+        // client's re-send comes back a second later for the one outcome. 30s
+        // bounds a crashed holder.
         $lock = $cacheKey ? Cache::lock("vc:idem:lock:{$command}:{$idempotencyKey}", 30) : null;
         if ($lock && !$lock->get()) {
-            return $this->problem('A request with this Idempotency-Key is still running', 409, 'in_progress');
+            return $this->problem('A request with this Idempotency-Key is still running', 409, 'in_progress') + ['headers' => ['Retry-After' => '1']];
         }
 
         try {
@@ -1001,10 +1001,13 @@ abridged:
         }
 ```
 
-`__invoke()` adds `Retry-After: 1` to an `in_progress` problem. `Cache::lock`
-needs a cache store that supports atomic locks (redis, memcached, database,
-dynamodb, file, array). The batch endpoint runs every command through the same
-`dispatchOne()`, so it gets the same guard.
+`Cache::lock` needs a cache store that supports atomic locks (redis,
+memcached, database, dynamodb, file, array). The batch endpoint runs every
+command through the same `dispatchOne()`, so it gets the same guard. Its
+`headers` go on the response from `__invoke()`, and on the command's result
+from `batch()`, as an OData JSON batch response carries them:
+`{ id, problem, headers: { "Retry-After": "1" } }`. The client reads the
+result's `Retry-After` as it reads a response's.
 
 ---
 

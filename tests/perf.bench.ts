@@ -9,7 +9,7 @@
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { effectScope, version as VUE_VERSION } from 'vue';
-import { createCommandBus, createAsyncCommandBus, configureUid, _withOrigin } from '../src/command-bus';
+import { createCommandBus, createAsyncCommandBus, configureUid, _resetUid, _withOrigin } from '../src/command-bus';
 import { rehydrate, type DehydratedCommand } from '../src/ssr';
 import { persist } from '../src/plugins-io';
 import { createFastLane } from '../src/fast-lane';
@@ -170,12 +170,8 @@ describe('meta overhead - uid generator comparison', () => {
   bench('dispatch - default counter-based uid', () => {
     const bus = createCommandBus();
     bus.register('test', () => {});
-    // Reset to the default fast path in case a prior bench swapped it.
-    configureUid(((): () => string => {
-      const prefix = ((Math.random() * 0xffffffff) >>> 0).toString(36);
-      let n = 0;
-      return () => prefix + '-' + (++n).toString(36);
-    })());
+    // The library's own default, in case a prior bench swapped it.
+    _resetUid();
     for (let i = 0; i < 10_000; i++) {
       bus.dispatch('test', i);
     }
@@ -189,12 +185,8 @@ describe('meta overhead - uid generator comparison', () => {
     for (let i = 0; i < 10_000; i++) {
       bus.dispatch('test', i);
     }
-    // Restore counter-based uid so later benches are not contaminated.
-    configureUid(((): () => string => {
-      const prefix = ((Math.random() * 0xffffffff) >>> 0).toString(36);
-      let n = 0;
-      return () => prefix + '-' + (++n).toString(36);
-    })());
+    // Restore the library's default so later groups time it, not a copy.
+    _resetUid();
   });
 });
 

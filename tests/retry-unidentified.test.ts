@@ -1,6 +1,6 @@
 /** An unidentified request that got no reply is not re-sent, and is reported; a declared wait decides when, never whether (plan 1.27 item 3). Rationale at the end. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { BusError, createAsyncCommandBus, type AsyncCommandBusOptions, type CommandResult } from '../src/command-bus';
+import { type BusError, createAsyncCommandBus, type AsyncCommandBusOptions, type CommandResult } from '../src/command-bus';
 import { createHttpClient, invalidateCsrfCache, postCommand } from '../src/http';
 import { optimisticUndo } from '../src/plugins-core';
 import { createHttpBridge } from '../src/transports';
