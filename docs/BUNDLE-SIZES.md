@@ -27,7 +27,7 @@ A `-` means nothing is deferred, which is every export except `./vitest` and `./
 
 | export | min KB | gzip KB | brotli KB | first load KB | on demand KB |
 |---|--:|--:|--:|--:|--:|
-| `.` | 110.6 | 36.3 | 32.2 | 32.2 | - |
+| `.` | 110.6 | 36.2 | 32.2 | 32.2 | - |
 | `./vue` | 26.5 | 9.4 | 8.6 | 8.6 | - |
 | `./vapor` | 27.8 | 9.8 | 8.9 | 8.9 | - |
 | `./transports` | 16.5 | 6.4 | 5.8 | 5.8 | - |
@@ -35,14 +35,14 @@ A `-` means nothing is deferred, which is every export except `./vitest` and `./
 | `./vite` | 5.8 | 2.7 | 2.4 | 2.4 | - |
 | `./vitest` | 120.4 | 39.7 | 35.0 | 3.9 | 31.7 |
 | `./vitest/pure` | 9.0 | 3.4 | 3.1 | 3.1 | - |
-| `./vitest/mcp` | 32.9 | 12.1 | 10.9 | 10.9 | - |
-| `./transitions` | 19.8 | 7.1 | 6.4 | 6.4 | - |
-| `./transitions/vapor` | 16.1 | 5.8 | 5.2 | 5.2 | - |
-| `./ssr` | 2.1 | 1.1 | 0.9 | 0.9 | - |
+| `./vitest/mcp` | 32.9 | 12.0 | 10.9 | 10.9 | - |
+| `./transitions` | 19.8 | 7.0 | 6.4 | 6.4 | - |
+| `./transitions/vapor` | 16.1 | 5.7 | 5.2 | 5.2 | - |
+| `./ssr` | 2.1 | 1.0 | 0.9 | 0.9 | - |
 | `./fast-lane` | 1.0 | 0.5 | 0.4 | 0.4 | - |
 | `./observable` | 0.5 | 0.3 | 0.3 | 0.3 | - |
 | `./standard-schema` | 2.2 | 1.0 | 0.9 | 0.9 | - |
-| `./alien-signals` | 0.2 | 0.2 | 0.1 | 0.1 | - |
+| `./alien-signals` | 0.2 | 0.1 | 0.1 | 0.1 | - |
 | `./reactive` | 18.9 | 6.7 | 6.1 | 6.1 | - |
 | `./outbox` | 7.2 | 3.0 | 2.7 | 2.7 | - |
 | `./mcp` | 4.3 | 2.0 | 1.8 | 1.8 | - |
@@ -50,13 +50,13 @@ A `-` means nothing is deferred, which is every export except `./vitest` and `./
 | `./stream-parser` | 6.7 | 2.0 | 1.9 | 1.9 | - |
 | `./store` | 5.1 | 2.4 | 2.2 | 2.2 | - |
 | `./store/core` | 5.1 | 2.4 | 2.2 | 2.2 | - |
-| `./router` | 31.3 | 11.7 | 10.6 | 10.4 | 0.3 |
+| `./router` | 31.3 | 11.6 | 10.6 | 10.4 | 0.3 |
 | `./router/vdom` | 1.5 | 0.8 | 0.7 | 0.7 | - |
 | `./router/vapor` | 1.4 | 0.8 | 0.7 | 0.7 | - |
 | `./router/remote` | 13.6 | 5.7 | 5.3 | 5.3 | - |
 | `./router-fetch` | 14.7 | 6.2 | 5.6 | 5.6 | - |
 | `./iife` | 48.7 | 16.9 | 15.3 | 15.3 | - |
-| `./iife-core` | 32.4 | 11.2 | 10.2 | 10.2 | - |
+| `./iife-core` | 32.4 | 11.1 | 10.2 | 10.2 | - |
 | `./iife-elements` | 35.7 | 12.4 | 11.2 | 11.2 | - |
 | `core: createCommandBus alone` | 14.7 | 5.1 | 4.7 | 4.7 | - |
 | `consumer: createCommandBus + logger + createHttpBridge` | 24.9 | 9.0 | 8.2 | 8.2 | - |
@@ -73,10 +73,10 @@ The split was decided on the same measurement taken on the vapor-sfc example at 
 
 | step (rows after the first are deltas) | min KB | gzip KB | brotli KB |
 |---|--:|--:|--:|
-| `Vapor wiring: hand-wired createVaporApp` | 47.1 | 17.5 | 16.0 |
+| `Vapor wiring: hand-wired createVaporApp` | 47.1 | 17.6 | 16.0 |
 | `vapor-chamber/vapor over that` | 4.5 | 1.6 | 1.5 |
 | `+ defineVaporCustomElement` | 6.8 | 2.1 | 1.9 |
-| `+ vaporInteropPlugin` | 89.4 | 31.9 | 27.9 |
+| `+ vaporInteropPlugin` | 89.4 | 31.8 | 27.9 |
 
 ## For comparison
 

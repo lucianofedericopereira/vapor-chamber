@@ -1861,7 +1861,7 @@ src/
   iife-elements.ts  - CDN entry, elements variant
   index.ts          - public ESM barrel
 
-tests/                           (<!-- vc:testFiles -->316<!-- /vc:testFiles --> files, <!-- vc:tests -->3498<!-- /vc:tests --> tests)
+tests/                           (<!-- vc:testFiles -->316<!-- /vc:testFiles --> files, <!-- vc:tests -->3497<!-- /vc:tests --> tests)
 ```
 
 Where the current numbers live, both generated and CI-verified fresh:
@@ -4390,7 +4390,7 @@ src/
   iife-elements.ts  - CDN entry, elements variant
   index.ts          - public ESM barrel
 
-tests/                           (<!-- vc:testFiles -->316<!-- /vc:testFiles --> files, <!-- vc:tests -->3498<!-- /vc:tests --> tests)
+tests/                           (<!-- vc:testFiles -->316<!-- /vc:testFiles --> files, <!-- vc:tests -->3497<!-- /vc:tests --> tests)
 ```
 
 The per-file test inventory that used to sit here was removed rather than
