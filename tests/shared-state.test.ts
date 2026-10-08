@@ -14,6 +14,7 @@ import {
   createCommandBus,
   setCommandBus,
   resetCommandBus,
+  useCommand,
   useSharedCommandState,
 } from '../src/index';
 import { it } from '../src/vitest';
@@ -69,6 +70,39 @@ describe('useSharedCommandState - inFlight counter', () => {
     expect(a.inFlight.value).toBe(0);
     expect(a.isAnyLoading.value).toBe(false);
     a.dispose(); b.dispose();
+  });
+
+  // examples/vapor-sfc's StatusBar relies on this: its CartPanel dispatches
+  // through useCommand, which isAnyLoading does not count.
+  it('isAnyLoading counts its own dispatch only, isLoading(key) counts every dispatch', async ({ asyncBus: bus }) => {
+    let release: () => void = () => {};
+    bus.register('slow', () => new Promise<string>((r) => { release = () => r('ok'); }));
+    setCommandBus(bus as any);
+    const shared = useSharedCommandState();
+    const key = shared.isLoading('slow', 1);
+    const cmd = useCommand();
+    const paths = {
+      shared: () => shared.dispatch('slow', 1),
+      useCommand: () => cmd.dispatch('slow', 1),
+      raw: () => bus.dispatch('slow', 1),
+    };
+    const seen: Record<string, { any: boolean; key: boolean }> = {};
+    for (const [name, go] of Object.entries(paths)) {
+      const p = go();
+      await new Promise((r) => setTimeout(r, 0));
+      seen[name] = { any: shared.isAnyLoading.value, key: key.value };
+      release();
+      await p;
+    }
+
+    expect(seen).toEqual({
+      shared: { any: true, key: true },
+      useCommand: { any: false, key: true },
+      raw: { any: false, key: true },
+    });
+    expect({ any: shared.isAnyLoading.value, key: key.value }).toEqual({ any: false, key: false });
+    cmd.dispose();
+    shared.dispose();
   });
 
   it('counter never goes below zero on edge cases', async ({ bus }) => {

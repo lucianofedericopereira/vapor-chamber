@@ -27,22 +27,19 @@ describe('runDispatch (via useCommand)', () => {
   });
 
   it('async success clears loading and leaves no error', async () => {
-    setCommandBus(createAsyncCommandBus());
     const bus = createAsyncCommandBus();
-    setCommandBus(bus);
     bus.register('ok', async () => 'done');
-    const { dispatch, loading, lastError } = useCommand();
-    const r = await (dispatch('ok', {}) as Promise<any>);
+    const { dispatch, loading, lastError } = useCommand({ bus });
+    const r = await dispatch('ok', {});
     expect(r.ok).toBe(true);
     expect(loading.value).toBe(false);
     expect(lastError.value).toBeNull();
   });
 
   it('async failed result is recorded in lastError', async ({ asyncBus: bus }) => {
-    setCommandBus(bus);
     bus.register('boom', async () => { throw new Error('handler failed'); });
-    const { dispatch, loading, lastError } = useCommand();
-    const r = await (dispatch('boom', {}) as Promise<any>);
+    const { dispatch, loading, lastError } = useCommand({ bus });
+    const r = await dispatch('boom', {});
     expect(r.ok).toBe(false);
     expect(loading.value).toBe(false);
     expect(lastError.value).toBeInstanceOf(Error);
@@ -63,10 +60,9 @@ describe('useSharedCommandState - error recording', () => {
   });
 
   it('async failed result is recorded', async ({ asyncBus: bus }) => {
-    setCommandBus(bus);
     bus.register('boom', async () => { throw new Error('x'); });
-    const shared = useSharedCommandState();
-    const r = await (shared.dispatch('boom', {}) as Promise<any>);
+    const shared = useSharedCommandState({ bus });
+    const r = await shared.dispatch('boom', {});
     expect(r.ok).toBe(false);
     expect(shared.errorCount.value).toBe(1);
     expect(shared.inFlight.value).toBe(0);

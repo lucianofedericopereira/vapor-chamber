@@ -60,10 +60,10 @@ const { state, dispose } = useDeepCommandState(
 
 ### UseCommandStateOptions
 
-**Type alias** - [src/chamber.ts:1306](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1306)
+**Type alias** - [src/chamber.ts:1320](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1320)
 
 ```ts
-export type UseCommandStateOptions = {
+export type UseCommandStateOptions = BusOption & {
   /**
    * When true, multiple synchronous dispatches within the same microtask are
    * accumulated and the signal is written once via `queueMicrotask`. Pairs with

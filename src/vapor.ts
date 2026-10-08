@@ -1,5 +1,8 @@
 /**
- * vapor-chamber/vapor - the entry for Vue 3.6 Vapor apps.
+ * vapor-chamber/vapor - the entry for Vue 3.6 apps that call the library's
+ * Vapor API (`createVaporChamberApp`, the `defineVapor*` component wrappers,
+ * `getVaporInteropPlugin`). Any other Vue app, Vapor included, takes
+ * `vapor-chamber/vue`.
  *
  * Import from HERE and Vapor wiring stops being something you can forget or get
  * subtly wrong. No `configureVue()` call, no probe to lose a race with, no list
@@ -48,24 +51,18 @@
  * bundler to retain every Vue export (measured at 3x bundle size on the
  * vapor-sfc example).
  *
- * SUPERSET: re-exports everything `vapor-chamber/vue` does, so a Vapor app needs
- * one import specifier rather than two. Importing this module runs that one's
- * wiring too - the 3.5-safe primitives and the `@vue/reactivity` tracking pair
- * that keeps `untracked()` from degrading to a pass-through once built.
- *
- * WHAT IT DOES NOT RE-EXPORT, and why that is not an oversight: the
- * framework-agnostic surface - `createCommandBus`, `getCommandBus` /
- * `setCommandBus`, plugins, transports. This entry mirrors `vapor-chamber/vue`'s
- * scope exactly: the **Vue-dependent** surface, because that is the surface
- * whose import has to double as the wiring. The bus and its plugins work with no
- * Vue in the tree at all, the root entry carries them on that basis, and
- * duplicating them here would widen this entry's surface without wiring
- * anything. So a Vapor app importing both is the intended shape:
+ * SUPERSET: re-exports everything `vapor-chamber/vue` does. Importing this
+ * module runs that one's wiring too - the 3.5-safe primitives and the
+ * `@vue/reactivity` tracking pair that keeps `untracked()` from degrading to a
+ * pass-through once built. That includes the root's framework-agnostic surface
+ * (`createCommandBus`, `getCommandBus` / `setCommandBus`, plugins, transports),
+ * which `/vue` re-exports, so such an app imports this one entry:
  *
  * ```ts
- * import { createCommandBus, setCommandBus } from 'vapor-chamber';
- * import { createVaporChamberApp, useCommand } from 'vapor-chamber/vapor';
+ * import { createCommandBus, setCommandBus, createVaporChamberApp, useCommand } from 'vapor-chamber/vapor';
  * ```
+ *
+ * The root still carries that surface for apps with no Vue in the tree.
  */
 
 import {

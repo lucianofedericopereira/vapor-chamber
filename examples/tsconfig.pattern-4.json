@@ -1,0 +1,15 @@
+{
+  // Type-checks pattern-4-nextjs.tsx, the one TSX example, against the real
+  // library types. Apart from tsconfig.patterns.json because it needs JSX and
+  // React's types: @types/react alone (19.3.0, "types": ["react"]), react-dom
+  // not needed (measured 2026-10-08). Run by `npm run typecheck`.
+  "extends": "./tsconfig.patterns.json",
+  "compilerOptions": {
+    "jsx": "preserve",
+    "types": ["node", "react"]
+  },
+  // Both set here: an extending config inherits whichever of the two it
+  // leaves out, and the base's include is every snippet, its exclude this one.
+  "include": ["pattern-4-nextjs.tsx"],
+  "exclude": []
+}

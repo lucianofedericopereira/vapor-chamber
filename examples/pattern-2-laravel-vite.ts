@@ -7,9 +7,9 @@
  * resources/js/app.ts
  */
 
-import { createAsyncCommandBus, setCommandBus } from 'vapor-chamber'
-import { createHttpBridge, createSseBridge } from 'vapor-chamber/transports'
-import { createDirectivePlugin } from 'vapor-chamber/directives'
+// One entry for a Vue app: `vapor-chamber/vue` carries the bus, transports
+// and directive plugin too, and ProductCard.vue below imports from it.
+import { createAsyncCommandBus, setCommandBus, createHttpBridge, createSseBridge, createDirectivePlugin } from 'vapor-chamber/vue'
 import { createApp } from 'vue'
 import App from './App.vue'
 
@@ -27,10 +27,11 @@ bus.onAfter((cmd, result) => {
 })
 
 // 3. Install HTTP transport - all unhandled commands go to the server.
-//    The bus re-sends through it what re-sending can change (a 429, 503 or
-//    408; any Retry-After, after its wait) and never a verdict (422, 404, 403,
-//    409) or a redirect; a lost request or a 500 only for an action declared
-//    idempotent (createAsyncCommandBus({ retry: { actionPolicies } })). The plugins
+//    The bus re-sends through it a transient failure for any action (a 429,
+//    503 or 408, after any Retry-After wait). A declared wait sets when, never
+//    whether. A verdict (422, 404, 403, 409) or a redirect is never re-sent. A
+//    lost request or a 500 is re-sent only for an action declared idempotent
+//    (createAsyncCommandBus({ retry: { actionPolicies } })). The plugins
 //    outside see one dispatch.
 bus.use(createHttpBridge({
   endpoint: '/api/vc',

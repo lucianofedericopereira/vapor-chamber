@@ -5,10 +5,10 @@
  * Each group operates on the same shared bus but with a namespace prefix.
  */
 
-import { createCommandBus, setCommandBus } from 'vapor-chamber'
-// Composables from the Vue entry: it wires Vue, so their cleanup and
-// reactivity hold in a production build (the root would not).
-import { useCommandGroup } from 'vapor-chamber/vue'
+// One entry for a Vue app: `vapor-chamber/vue` carries the bus too, and it
+// wires Vue, so the composables' cleanup and reactivity hold in a production
+// build (the root would not).
+import { createCommandBus, setCommandBus, useCommandGroup } from 'vapor-chamber/vue'
 
 const bus = createCommandBus()
 setCommandBus(bus)

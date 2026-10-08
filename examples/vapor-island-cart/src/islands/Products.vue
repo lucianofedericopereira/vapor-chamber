@@ -1,5 +1,5 @@
 <script setup vapor lang="ts">
-import { announce } from 'vapor-chamber';
+import { announce } from 'vapor-chamber/vue';
 import { bus, products } from '../store';
 
 // The emitter island. Each button dispatches a typed product straight onto the

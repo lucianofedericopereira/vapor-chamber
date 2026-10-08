@@ -1,6 +1,6 @@
 {
   "name": "vapor-chamber",
-  "version": "1.28.0",
+  "version": "1.29.0",
   "description": "Lightweight command bus for Vue Vapor - plugins, hooks, undo/redo, Vue 3.6 Vapor aligned",
   "type": "module",
   "main": "./dist/index.js",
@@ -195,7 +195,7 @@
     "build:types": "tsc",
     "build:js": "node scripts/build.mjs",
     "dev": "tsc --watch",
-    "typecheck": "tsc --noEmit && tsc -p tsconfig.typecheck.json && tsc -p tsconfig.tests.json && tsc -p examples/tsconfig.patterns.json",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.typecheck.json && tsc -p tsconfig.tests.json && tsc -p examples/tsconfig.patterns.json && tsc -p examples/tsconfig.pattern-4.json",
     "lint": "biome check --write src tests scripts bin",
     "lint:check": "biome check src tests scripts bin && node scripts/check-env-guards.mjs && node scripts/check-console-shape.mjs && node scripts/check-line-citations.mjs && node scripts/check-doc-claims.mjs && node scripts/stamp-docs.mjs --check && node scripts/check-ascii.mjs",
     "docs:stamp": "node scripts/stamp-docs.mjs",
@@ -291,6 +291,7 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.8",
     "@types/node": "^26.2.0",
+    "@types/react": "^19.3.0",
     "@vitejs/plugin-vue": "^6.0.8",
     "@vitest/browser-playwright": "^5.0.1",
     "@vitest/coverage-v8": "^5.0.1",
@@ -308,7 +309,8 @@
     "typescript": "^6.0.3",
     "vite": "^8.2.2",
     "vitest": "^5.0.1",
-    "vue": "^3.6.0-rc.10"
+    "vue": "^3.6.0-rc.10",
+    "vue35": "npm:vue@^3.5.43"
   },
   "engines": {
     "node": ">=22.12.0"

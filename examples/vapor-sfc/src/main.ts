@@ -6,8 +6,8 @@
 // bundle; tests/vapor-sfc-prod-detection.test.ts pins that this page works
 // built. configureVue() remains the channel on a no-build page.)
 //
-// The bus itself is framework-agnostic, so it comes from the root - see
-// src/vapor.ts, "WHAT IT DOES NOT RE-EXPORT".
+// The same entry carries the bus, plugins and transports, so a component
+// imports everything it needs from `vapor-chamber/vapor`.
 //
 // Directives are imported per component (CartPanel.vue), not registered
 // app-wide: the selector is in the directive's name, so vue-tsc checks the

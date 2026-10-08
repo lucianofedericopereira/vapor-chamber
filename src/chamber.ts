@@ -12,11 +12,11 @@
  */
 
 import { DEV } from './dev';
-import { disposeAll, _targetKey, unsealBus, _isSyncBus, _errResult, type CommandBus, type Command, type CommandResult, type CommandMap, type TargetOf, type PayloadOf, type ResultOf, type Handler, type Plugin, type RegisterOptions, type Listener } from './command-bus';
+import { disposeAll, _targetKey, unsealBus, _isAsyncBus, _isSyncBus, _errResult,type BaseBus, type CommandBus,type Command, type CommandResult, type CommandMap, type TargetOf, type PayloadOf, type ResultOf, type Handler, type Plugin, type RegisterOptions, type Listener } from './command-bus';
 import { configureSignal, signal } from './signal';
 import { createLedger } from './ledger';
 import { countOption } from './bounds';
-import { getCommandBus, resetCommandBus, setCommandBus } from './shared-bus';
+import { getCommandBus, resetCommandBus, resolveBus, setCommandBus, type BusOption, type ResultOn } from './shared-bus';
 
 /**
  * Build-time flag injected by `scripts/build.mjs` via Vite `define`: `true` in
@@ -459,7 +459,11 @@ function probeVue(): void {
     const vuePkg = 'vue';
     _probePromise = import(/* @vite-ignore */ vuePkg)
       .then((vue: any) => {
-        applyVueModule(vue);
+        // Only into an empty registry, or from the Vue already wired: one Vue
+        // is one `ref`. A Vite server build that inlines Vue finds Node's own
+        // copy here, and it replaced what /vue had wired at build time
+        // (tests/lookup-same-vue.test.ts).
+        if (_vueDeepRefFn === null || vue.ref === _vueDeepRefFn) applyVueModule(vue);
       })
       .catch(() => {
         // Vue not available - use plain signals, no auto-cleanup
@@ -504,6 +508,11 @@ function probeVue(): void {
       // specifier string are dropped from those bundles.
       if (typeof __VC_IIFE__ !== 'undefined' && __VC_IIFE__) return;
       if (_vueDeepRefFn === null) return; // no Vue - nothing to suspend
+      // /vue already wired the pair its bundler resolved. In a bundle run in
+      // Node, the import below finds Node's own copy, a second reactivity
+      // instance, and replacing the pair with it broke untracked()
+      // (tests/untracked-build-time-wins.test.ts).
+      if (_vueSubpathLoaded) return;
       try {
         // Assembled, not written. A plain `const pkg = '@vue/reactivity'` is folded
         // straight back into a literal `import()` of that specifier by Rollup now that the
@@ -515,7 +524,8 @@ function probeVue(): void {
         // prevent it - the pre-bundled dep is re-analysed.
         const pkg = ['@vue', 'reactivity'].join('/');
         const r: any = await import(/* @vite-ignore */ pkg);
-        if (typeof r?.pauseTracking === 'function' && typeof r?.resetTracking === 'function') {
+        // The registry's Vue only: `vue` re-exports this package's own `ref`.
+        if (r.ref === _vueDeepRefFn && typeof r.pauseTracking === 'function' && typeof r.resetTracking === 'function') {
           _wireUntrack(r.pauseTracking, r.resetTracking);
         }
       } catch {
@@ -545,7 +555,8 @@ export async function waitForVueDetection(): Promise<void> {
   if (_probePromise) await _probePromise;
 }
 
-// Composables below use signal() and call probeVue() explicitly via tryAutoCleanup.
+// Composables below use signal(). They do not start the lookup: the call above
+// did, when this module loaded (tests/lookup-starts-at-load.test.ts).
 
 // ---------------------------------------------------------------------------
 // Vue 3.6+ Vapor detection
@@ -639,6 +650,7 @@ export type SharedCommandMap = [keyof GlobalCommands] extends [never]
 
 // The shared bus lives in a probe-free module (see its header).
 export { getCommandBus, setCommandBus, resetCommandBus };
+export type { BusOption, ResultOn };
 
 // ---------------------------------------------------------------------------
 // Vue lifecycle detection (optional - works without Vue too)
@@ -666,7 +678,6 @@ export { getCommandBus, setCommandBus, resetCommandBus };
  * those cases.
  */
 export function tryAutoCleanup(disposeFn: () => void): void {
-  probeVue();
   // Every composable passes through here, so this is where "Vue is on the
   // page but not wired" can be seen before anything silently degrades.
   warnUnwired();
@@ -732,7 +743,6 @@ export function tryAutoCleanup(disposeFn: () => void): void {
  * @internal - used by composables that manage bus subscriptions.
  */
 export function tryKeepAliveHooks(onPause: () => void, onResume: () => void): void {
-  probeVue();
   const inSetup = _vueHasInjectionContext
     ? _vueHasInjectionContext()
     : !!_vueGetCurrentInstance?.();
@@ -800,7 +810,11 @@ export function runDispatch(
     loading.value = false;
     const error = e as Error;
     lastError.value = error;
-    return _errResult(error);
+    // An async bus never throws here, a subscriber does. Its caller is typed
+    // for a promise (ResultOn), so the failure settles as one
+    // (tests/composables-result-types.test.ts).
+    const failed = _errResult(error);
+    return _isAsyncBus(bus) ? Promise.resolve(failed) : failed;
   }
   if (result && typeof result.then === 'function') {
     return (result as Promise<CommandResult>).then(
@@ -840,10 +854,10 @@ export function runDispatch(
  * register('cartAdd', (cmd) => addToCart(cmd.target));
  * dispatch('cartAdd', { id: product.id });
  */
-export function useCommand() {
+export function useCommand<B extends BaseBus = CommandBus>(options?: BusOption<B>) {
   // Untyped internally; the public dispatch/register signatures below carry
   // the SharedCommandMap typing (GlobalCommands augmentation).
-  const bus = getCommandBus<CommandMap>();
+  const bus = resolveBus(options?.bus);
   const loading = signal(false);
   const lastError = signal<Error | null>(null);
   const listeners: Array<() => void> = [];
@@ -853,8 +867,8 @@ export function useCommand() {
     action: A,
     target: TargetOf<SharedCommandMap, A>,
     payload?: PayloadOf<SharedCommandMap, A>,
-  ): CommandResult<ResultOf<SharedCommandMap, A>> | Promise<CommandResult<ResultOf<SharedCommandMap, A>>> {
-    return runDispatch(bus, false, action, target, payload, loading, lastError);
+  ): ResultOn<B, CommandResult<ResultOf<SharedCommandMap, A>>> {
+    return runDispatch(bus, false, action, target, payload, loading, lastError) as ResultOn<B, CommandResult<ResultOf<SharedCommandMap, A>>>;
   }
 
   function register<A extends keyof SharedCommandMap & string>(
@@ -1056,18 +1070,12 @@ function trackLoading(entry: SharedCommandStateEntry, bus: CommandBus): Map<stri
   return entry.slots;
 }
 
-export type UseSharedCommandStateOptions = {
+export type UseSharedCommandStateOptions<B extends BaseBus = BaseBus> = BusOption<B> & {
   /**
    * How many recent errors to retain in `errors`. The list is kept
    * newest-last; older entries drop off. Default: 10.
    */
   maxSize?: number;
-  /**
-   * Bus to attach to. Defaults to the shared instance from `getCommandBus()`,
-   * which matches the single-bus pattern most apps use. Pass an explicit bus
-   * to scope shared state to a feature group / island.
-   */
-  bus?: CommandBus;
 };
 
 /**
@@ -1094,8 +1102,8 @@ export type UseSharedCommandStateOptions = {
  *
  * Auto-cleanup on Vue scope/component disposal via tryAutoCleanup.
  */
-export function useSharedCommandState(options: UseSharedCommandStateOptions = {}) {
-  const bus = options.bus ?? getCommandBus<CommandMap>();
+export function useSharedCommandState<B extends BaseBus = CommandBus>(options: UseSharedCommandStateOptions<B> = {}) {
+  const bus = resolveBus(options.bus);
   const maxSize = countOption(options.maxSize, 10); // a NaN is the default (bounds.ts)
 
   let state = _sharedStates.get(bus);
@@ -1209,16 +1217,21 @@ export function useSharedCommandState(options: UseSharedCommandStateOptions = {}
     target: any,
     payload?: any,
     opts?: { signal?: AbortSignal },
-  ): CommandResult | Promise<CommandResult> {
-    increment();
+  ): ResultOn<B> {
     let result: any;
     try {
+      // The opening writes are inside the try, as runDispatch's are: a sync
+      // subscriber that throws on one fails the dispatch, and the count
+      // returns to 0 (tests/shared-state-throwing-subscriber.test.ts).
+      increment();
       result = untracked(() => bus.dispatch(action, target, payload, opts));
     } catch (e) {
       const error = e as Error;
       recordError(error);
       decrement();
-      return _errResult(error);
+      // A subscriber can throw on an async bus too, typed for a promise.
+      const failed = _errResult(error);
+      return (_isAsyncBus(bus) ? Promise.resolve(failed) : failed) as ResultOn<B>;
     }
 
     if (result && typeof result.then === 'function') {
@@ -1229,7 +1242,7 @@ export function useSharedCommandState(options: UseSharedCommandStateOptions = {}
         // A rejected dispatch promise bypassed the bus's errResult fan-out,
         // so no listener fired - record it here.
         (e: Error) => { recordError(e); decrement(); return _errResult(e); },
-      );
+      ) as ResultOn<B>;
     }
 
     // Settled sync results already hit the bus-wide on('*') observer.
@@ -1252,10 +1265,11 @@ export function useSharedCommandState(options: UseSharedCommandStateOptions = {}
    *
    * Atomic: each key has its own signal, written only when its count crosses
    * 0 <-> 1, so a reader re-runs on ITS key's transitions and no other's.
-   * Tracking starts on the first call for this bus; a dispatch already in
-   * flight then is not counted. It works on a sealed bus (see trackLoading),
-   * and a key still in flight when the last holder leaves reads lit for the
-   * next one (see `pending`).
+   * Counting starts at the bus's first call, for every key, and stops when
+   * the last holder leaves with nothing in flight. A dispatch already in
+   * flight when it starts is not counted (tests/command-loading-fixture.test.ts).
+   * It works on a sealed bus (see trackLoading), and a key still in flight
+   * when the last holder leaves reads lit for the next one (see `pending`).
    */
   function isLoading(action: string, target?: unknown): Readonly<Signal<boolean>> {
     const slot = loadingSlot(trackLoading(state!, bus), action, _targetKey(target));
@@ -1303,7 +1317,7 @@ export function useSharedCommandState(options: UseSharedCommandStateOptions = {}
 // useCommandState
 // ---------------------------------------------------------------------------
 
-export type UseCommandStateOptions = {
+export type UseCommandStateOptions = BusOption & {
   /**
    * When true, multiple synchronous dispatches within the same microtask are
    * accumulated and the signal is written once via `queueMicrotask`. Pairs with
@@ -1363,7 +1377,7 @@ export function _createCommandState<T>(
   createSignal: <V>(v: V) => Signal<V>,
 ): { state: Signal<T>; dispose: () => void } {
   const { coalesce = false } = options;
-  const bus = getCommandBus<CommandMap>();
+  const bus = resolveBus(options.bus);
   const state = createSignal(initial);
   const unregisters: Array<() => void> = [];
 
@@ -1415,9 +1429,9 @@ export function _createCommandState<T>(
 export function useCommandHistory(options: {
   maxSize?: number;
   filter?: (cmd: Command) => boolean;
-} = {}) {
+} & BusOption = {}) {
   const { maxSize, filter } = options;
-  const bus = getCommandBus<CommandMap>();
+  const bus = resolveBus(options.bus);
 
   const past = signal<Command[]>([]);
   const future = signal<Command[]>([]);
@@ -1493,8 +1507,8 @@ export function useCommandHistory(options: {
  * const result = query('getUser', { id: 42 });
  * // data.value = result.value after query completes
  */
-export function useCommandQuery() {
-  const bus = getCommandBus<CommandMap>();
+export function useCommandQuery<B extends BaseBus = CommandBus>(options?: BusOption<B>) {
+  const bus = resolveBus(options?.bus);
   // The one composable that arms no cleanup and so never reaches
   // tryAutoCleanup - its signals degrade the same way, so it warns the same way.
   warnUnwired();
@@ -1503,8 +1517,8 @@ export function useCommandQuery() {
   const lastError = signal<Error | null>(null);
   const onData = (value: any): void => { data.value = value; };
 
-  function query(action: string, target: any, payload?: any): CommandResult | Promise<CommandResult> {
-    return runDispatch(bus, true, action, target, payload, loading, lastError, onData);
+  function query(action: string, target: any, payload?: any): ResultOn<B> {
+    return runDispatch(bus, true, action, target, payload, loading, lastError, onData) as ResultOn<B>;
   }
 
   return { query, data, loading, lastError };
@@ -1532,8 +1546,8 @@ export function useCommandQuery() {
  * const orders = useCommandGroup('orders')
  * orders.dispatch('cancel', { id }) // dispatches 'ordersCancel'
  */
-export function useCommandGroup(namespace: string) {
-  const bus = getCommandBus<CommandMap>();
+export function useCommandGroup<B extends BaseBus = CommandBus>(namespace: string, options?: BusOption<B>) {
+  const bus = resolveBus(options?.bus);
   const cleanups: Array<() => void> = [];
 
   // camelCase namespace join ('cart' + 'add' -> 'cartAdd'), memoised per group.
@@ -1567,13 +1581,13 @@ export function useCommandGroup(namespace: string) {
     return v;
   }
 
-  function dispatch(action: string, target: any, payload?: any): CommandResult {
-    return untracked(() => bus.dispatch(prefixed(action), target, payload));
+  function dispatch(action: string, target: any, payload?: any): ResultOn<B> {
+    return untracked(() => bus.dispatch(prefixed(action), target, payload)) as ResultOn<B>;
   }
 
   /** Read-only dispatch - skips onBefore hooks, runs handler + plugins, fires afterHooks. */
-  function query(action: string, target: any, payload?: any): CommandResult {
-    return untracked(() => bus.query(prefixed(action), target, payload));
+  function query(action: string, target: any, payload?: any): ResultOn<B> {
+    return untracked(() => bus.query(prefixed(action), target, payload)) as ResultOn<B>;
   }
 
   /** Fire a namespaced domain event - notifies on() listeners, no handler required. */
@@ -1630,10 +1644,10 @@ export function useCommandError(options: {
   filter?: (cmd: Command) => boolean;
   /** Max errors retained - oldest are dropped first (ring buffer). Default: 50. */
   maxSize?: number;
-} = {}) {
+} & BusOption = {}) {
   const { filter } = options;
   const maxSize = countOption(options.maxSize, 50); // a NaN is the default (bounds.ts)
-  const bus = getCommandBus<CommandMap>();
+  const bus = resolveBus(options.bus);
 
   type ErrorEntry = { cmd: Command; error: Error; timestamp: number };
   const errors = signal<ErrorEntry[]>([]);

@@ -16525,3 +16525,824 @@ Owner: speed, correctness, symmetry, shape, room to grow.
   | uncommitted bump (1.28.1 in the tree) | as shipped | pass |
   | uncommitted bump | seeded: always accept | fail |
   | committed | seeded: always refuse | fail |
+
+### 35.220 Two pages that disagreed with the code (2026-10-08)
+
+- `examples/feature-retry.ts` said `timeout` and any declared wait are
+  re-sent for any action. The rule (`retryClass`, failure.ts) re-sends only
+  `limited` and a 408 for any action. No reply and a 504 are uncertain, and a
+  declared wait sets when, never whether. tests/retry-policy.test.ts and
+  tests/retry-unidentified.test.ts pin it. The comment now states the rule.
+- `README.md` said `isLoading()` answers "is THIS one in flight?" with no
+  start point. The docblock, docs/performance.md and the 2026-09-14 decision
+  all say counting starts at the first `isLoading()` call on the bus. A bus
+  nobody asks pays nothing. Docs follow code: the README cell now says so.
+  Counting from bus creation would put a before-hook on every dispatch of
+  every bus, the common path the decision kept free.
+- No source change. lint:check green.
+
+### 35.221 Every bus composable takes a bus (2026-10-08)
+
+- Found here, reading `shared-bus.ts` against chamber.ts. `shared-bus.ts`
+  told concurrent SSR servers to pass a bus per request, "every composable
+  and plugin accepts a `bus` option". Only `useSharedCommandState`,
+  `useVaporAsyncCommand` and `useTransitionCommand` took one. The other six
+  composables and `defineVaporCommand` always used the shared bus.
+- Built, shape A1 (owner): `bus` in each composable's options, typed by one
+  named type, `BusOption = { bus?: BaseBus }`. `BaseBus` is the existing
+  type for "sync or async", already the transitions' `bus`. One reader,
+  `resolveBus(bus)` in shared-bus.ts, picks the bus for every composable, the
+  two transitions included, so the rule lives in one place.
+- Why code, not docs: following the code would delete the per-request advice.
+  Composables would stay unsafe under concurrent SSR, which whitepaper
+  section 12 documents. The option closes that gap.
+- `defineVaporCommand` takes `VaporCommandOptions = RegisterOptions &
+  BusOption`, passed to `register()` as it is. An undo's stored copy keeps
+  `bus`; its readers take only `.undo` and `.canUndo`. Tested: an undo
+  registered with the bus in its options runs.
+- `transitions/vapor.ts` imported chamber.ts only for `getCommandBus`. It now
+  imports shared-bus.ts. No bundle changes from that: the bundler already
+  resolved the re-export to shared-bus.ts, so the probe was never in it.
+- Fails before: 16 of 22 cases (the eight entry points on both bus kinds)
+  and the coverage guard. After: 24 of 24. The guard lists every `use*` and
+  `define*Command` export of the root and of vapor-chamber/reactive; a
+  seeded missing case failed it. Every composable passes on an async bus,
+  so setCommandBus's claim now has a test.
+- Size, full IIFE only: raw/brotli +39/-14. resolveBus +30, useCommand +7,
+  defineVaporCommand +6, the two that took a bus -2 each, a minified name +1.
+  Core and elements byte-identical. Owner: pay the bytes for one reader. Raw
+  raised to measured, brotli kept.
+- Size, ESM exports through the consumer bundler (measure-size --json, HEAD
+  src vs this), min/brotli: root +69/-3, ./vue +65/+17, ./vapor +69/+18,
+  ./reactive +35/+14, ./transitions +28/+6, ./transitions/vapor +28/+11,
+  ./iife +39/+4, ./vitest +69/+119 (test tooling). The root carries
+  resolveBus and its eight call sites.
+- Speed: one call at composable creation, none on dispatch. Not measured: no
+  bench covers creation, and `npm run ab` waits for a go.
+- Docs: bench-harness and perf.bench comments said `useCommandHistory` takes
+  no bus, now false. README rows show the options. Whitepaper 12.2 names the
+  composables among what takes the per-request bus.
+
+### 35.222 A dispatch result is typed by its bus (2026-10-08)
+
+- Found reviewing 35.221. `useCommandGroup`'s `dispatch` and `query`, and
+  `defineVaporCommand`'s `dispatch`, were typed `CommandResult` on any bus.
+  On an async bus they return a promise, so `result.ok` type-checked with no
+  `await` and read undefined. `useCommand`, `useCommandQuery` and
+  `useSharedCommandState` returned the union, which made a sync caller narrow
+  a promise it never gets.
+- Built: one type, `ResultOn<B, R>` beside `BusOption` in shared-bus.ts. A
+  sync bus gives `R`, an async one `Promise<R>`, a bus typed only as `BaseBus`
+  either. Each composable is generic over its bus, default `CommandBus`, the
+  shared bus's documented static type.
+- Runtime half. `runDispatch` caught a throwing subscriber on its opening
+  writes and returned a plain failed result, also on an async bus. The type
+  now promises a promise there, so on a library async bus (`_isAsyncBus`,
+  beside `_isSyncBus`) the failure settles as one. An async bus itself never
+  throws there: `_asyncRun` is an async function.
+- Fails before: 14 of the 21 type checks in
+  tests/composables-result-types.test.ts, and its runtime test (a plain
+  object, not a promise). After: typecheck clean, both tests pass.
+- Moved with it: tests/typed-contract.typecheck.ts pinned the union for
+  `useCommand()` with no bus; it now pins `CommandResult<Cart>`, as its
+  `getCommandBus()` check does. Three tests in chamber-error-paths cast an
+  async shared bus's result to a promise; they pass `{ bus }` instead.
+- Size, full IIFE only: raw/brotli +100/+40, both on the failure path:
+  `_isAsyncBus` +66, the catch +30, names +4. Raised to measured. ESM, min/br:
+  root +100/+17, ./vue +101/+17, ./vapor +101/+19, ./iife +100/+13.
+
+### 35.223 When isLoading counts, and three wording fixes (2026-10-08)
+
+- Found reviewing 35.220. Its README clause said counting starts at the first
+  `isLoading()` call. It also stops: the last holder leaving with nothing in
+  flight releases the bus's shared state, and the next holder starts
+  uncounted. The docblock had the same gap. Both now say it, and
+  docs/performance.md too. Already pinned: tests/command-loading-fixture.test.ts
+  ("the last dispose unhooks the before-hook") and
+  tests/isloading-first-read-in-flight.test.ts (one key's call arms all keys).
+- CHANGELOG v1.29.0: two sentences over 25 words, split. README: the note that
+  every composable takes `bus` sat in the `useCommand` row. It is now a
+  sentence under the table.
+- Log 35.220 and 35.221: two sentences over 25 words, split.
+- No code change: the isLoading docblock is a comment.
+
+### 35.224 The SSR examples follow their own advice (2026-10-08)
+
+- src/ssr.ts and whitepaper 12.2 showed a server entry that sets the shared
+  bus per request and resets it after. Their own warning called that unsafe
+  under concurrent renders.
+- Measured, tests/ssr-per-request-bus.test.ts: two `renderToString` calls
+  interleaved across an `await` in setup. The old example (control): the
+  slower request's dispatch is lost, `{ a: [], b: ['b'] }`. A bus per
+  request, provided to its app and passed to the composable as `{ bus }`: no
+  dispatch crosses. That shape needs 35.221's `bus` option.
+- Both examples now show it. The set-and-reset pattern stays, named as safe
+  only one request at a time. The HTTP client example in 12.2 moved with it.
+- No code change: a docblock and the whitepaper.
+
+### 35.225 signal.ts says what its __VUE__ read finds (2026-10-08)
+
+- src/signal.ts said its sync read of `globalThis.__VUE__` catches the page
+  where Vue is a `<script>` global. Vue writes `true` to that key when an app
+  is created, in every rc.10 build, and a script-tag Vue is `window.Vue`.
+  tests/vue-detection-global-clobber.test.ts measured it, and chamber.ts moved
+  to its own key for that reason. The read finds a namespace only if one was
+  parked there before any app was created (tests/signal-syncprobe-ref-only.test.ts).
+- The docblock now says so and names `configureVue(Vue)`. No code change.
+- Whitepaper, appendix "From 11.6 Blade + CDN": it said `__VUE__` "remains
+  supported as a legacy fallback" in chamber.ts. chamber.ts does not read it
+  (tests/vue-global-detection.test.ts). The sentence now says so.
+
+### 35.226 History undoes and redoes on an async bus it is given (2026-10-08)
+
+- Found reviewing 35.221: its test checked each composable's first use on an
+  async bus, not history's undo and redo through the composable.
+- Added to tests/composables-bus-option.test.ts: on an async bus, `undo()` and
+  `redo()` return the command, the undo and the redone handler run once each,
+  and `canUndo` / `canRedo` follow. It passed at once. Seeded: history reading
+  the shared bus instead of its `bus` turns it red.
+- No code change.
+
+### 35.227 useSharedCommandState: a throwing subscriber fails the dispatch (2026-10-08)
+
+- Found reading its catch for 35.222. `dispatch` wrote `inFlight` and
+  `isAnyLoading` before its try. runDispatch was fixed for this shape earlier
+  (tests/rundispatch-throwing-subscriber.test.ts); this one was not.
+- Measured before, tests/shared-state-throwing-subscriber.test.ts: a sync
+  subscriber that throws on either signal escaped the dispatch as a throw,
+  and `inFlight` stayed 1, so `isAnyLoading` stayed lit for every reader.
+- Built: both writes inside the try. The throw is a failed result, the
+  handler does not run, the count returns to 0. On a library async bus the
+  failure is a promise, as its type (35.222) says.
+- After: 3 of 3 pass, the sync bus on each signal and the async bus.
+- Size, full IIFE: raw/brotli +33/+3, the catch's promise on an async bus.
+  Raised to measured. ESM min: root, ./vue, ./vapor +33 each.
+
+### 35.228 Measured: Vue 3.5, creation speed, the __VUE__ lead (2026-10-08)
+
+- Vue 3.5.43, in a scratch worktree of 97a377f with `vue` and
+  `@vue/reactivity` pinned (the 3.5 `@vue/*` compilers installed at the top
+  level, npm had nested them). Loading every package entry from the dist
+  built on 3.6: all load except the three documented 3.6-only, `/vapor`,
+  `/transitions/vapor` and `/router/vapor`. `./vitest` needs a running Vitest.
+  The main suite: 3384 passed, 114 failed in 27 files. Every failure needs a
+  3.6 file or API: the with-vapor browser build, which the bundling harnesses
+  load (keepalive-pause and plugin-throw fixtures included), Vapor helpers, or
+  Vue's own Vapor exports. Rerun with the compilers in place, vite-hmr,
+  example-vue-vapor-component and ssr-per-request-bus pass on 3.5. The peer
+  range holds for what it promises. Gap: the KeepAlive pause and plugin-throw
+  fixtures never run on 3.5, since their harness hardcodes the with-vapor build.
+- Composable creation, `npm run ab` on workloads/create.mjs, 1.28.0 (39247b5)
+  against 97a377f, K 10, two lengths, 128 s. useCommand 94.8 -> 96.8 and
+  122.4 -> 123.1 ns, the component mix 261.1 -> 260.8 and 329.6 -> 325.1 ns.
+  NO RESULT on both: no slower counted. The 35.221 extra call costs nothing
+  measurable.
+- The __VUE__ lead. Entries that load signal.ts without chamber.ts:
+  ./transports, ./outbox, ./store/core, ./alien-signals, ./iife-core. The
+  core IIFE ships no signal code at all (no `shallowRef`, no global key in
+  the bundle). The full and elements IIFEs read `__VAPOR_CHAMBER_VUE__`. So
+  the two keys differ only for an ESM page that loads one of those entries
+  alone and parks Vue by hand, which the docs do not show. No change.
+- Found on the way: whitepaper 9.6 parked Vue on `__VAPOR_CHAMBER_VUE__` and
+  then loaded the CORE IIFE, which has no `createVaporChamberApp` and never
+  reads the key. The recipe now loads the full IIFE.
+
+### 35.229 untracked(): the build-time pair wins over the runtime lookup (2026-10-08)
+
+- Found by the Vue 3.5 test (35.230), then measured on 3.6.0-rc.10 too. A
+  bundle that inlines Vue, run in Node: `untracked()` suspends tracking at
+  first, and stops once the root's runtime lookup settles (an effect re-runs
+  on its handler's read, `wrapped: 2`).
+- Cause: the lookup imports `@vue/reactivity` by a specifier assembled at
+  runtime, so no bundler resolves it. In Node it finds Node's own copy, a
+  second reactivity instance, and `_wireUntrack` replaced the pair /vue had
+  wired at build time. vue.ts promises "no probe to lose a race with". The
+  signal factory is not hit: the lookup's `import("vue")` is a literal, so
+  the bundler inlines the same Vue.
+- Built: the lookup's `wireUntracked` returns when /vue already wired the pair
+  (`_vueSubpathLoaded`). One condition, on a path that runs once.
+- Fails before, tests/untracked-build-time-wins.test.ts: the bundle case
+  (`wrapped: 2` after the lookup settles) and a src case (a recording pair
+  wired as /vue wires it, replaced once the lookup settles). Both pass after.
+  The src case passed against an unfixed tree in its first shape, where /vue
+  was imported first and the lookup settled before the pair was wired; it
+  now wires the pair before the lookup settles, and a seeded run fails it.
+- Size: IIFEs unchanged (the lookup is not in them). ESM min: root, ./vue,
+  ./vapor +22.
+
+### 35.230 Vue 3.5 on every run (2026-10-08)
+
+- Owner: the 3.5 promise is a working level, not 1:1 parity, and fading as
+  3.6 matures. The test checks that level and no more.
+- `vue35`, a devDependency alias `npm:vue@^3.5.43`; its own @vue/* nest under
+  it, apart from the suite's 3.6.
+- tests/vue35-entries.test.ts bundles each package entry whose built graph
+  reaches `vue` or `@vue/reactivity` (found by walking the graph, so a new
+  entry is checked without an edit) the way a consumer ships it, with both
+  resolved to 3.5. 12 build and load. The three documented 3.6-only entries
+  must fail to build on a missing export, which with a version control
+  proves the build used 3.5. /vue on 3.5: composable state is a 3.5 ref, and
+  `untracked()` suspends tracking (raw dispatch as the control).
+
+### 35.231 How each kind of app reaches Vue, measured (2026-10-08)
+
+- Task 1 of `.probes/prompt-1.30-wiring-and-tracking.md`. No code change.
+- Harness: `.probes/reach/run.mjs` (gitignored). It builds twenty-seven
+  fixtures the way each app ships, on dist built from 5fa3e5a. Browser rows
+  run in headless Chromium 1243, Node rows in a child process with a resolve
+  hook. Results: `.probes/reach/results.json`, one line per run in
+  `summary.txt`.
+- Observed from outside only: the getters `dist/chamber.js` exports
+  (`getVueDeepRefFn`, `getVaporAppFn`), identity against the app's own Vue,
+  the warnings printed, the shipped bundle text and the hook's log.
+- Reactive means an effect of the app's own Vue re-runs on the composable's
+  state. `isRef` is not enough: it reads a flag and says true for a second
+  Vue copy (measured, `ssr-vite-inline`).
+- T0 is the app's module scope, T1 after `waitForVueDetection()` and 50 ms.
+- Each row also ran its positive controls on the same bundle. `?park=5` puts
+  a namespace on `__VAPOR_CHAMBER_VUE__` before the library loads. `?park=6`
+  puts one on `__VUE__` before the first signal. A page with an import map
+  makes a bare `vue` resolvable. At the end of each run, way 7
+  (`configureSignal`) and way 1 (`configureVue`) wire by hand.
+
+Ways: 1 `configureVue` by hand, 2 `/vue`, 3 `/vapor`, 4 the runtime lookup,
+5 the global key, 6 `__VUE__` for the signal factory, 7 `configureSignal`,
+8 `vaporChamberWire` and its flags.
+
+Cells: `W` wired Vue. `W1` wired only once the lookup settled. `x` ran and
+reached nothing. `=` reached the Vue the app already had. `R!` reached a
+second Vue and replaced the wiring. `f` folded out of the build. `-` absent,
+or nothing writes it. `flag` the build flag is defined and wires nothing itself. Behaviours: `yes`, `no`, `T1` (yes only after the
+lookup settled), `armed` (a server: the deactivated hook is registered).
+Mount is a module-scope `createVaporChamberApp()`.
+
+| App | Fixture | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | Reactive | Cleanup | KeepAlive | untracked | Mount |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| Vapor, Vite | vapor-vite | - | W | W | x | - | - | - | - | yes | yes | yes | yes | yes |
+| Vapor, Vite, wire | vapor-vite-wire | - | W | W | f | - | - | - | W | yes | yes | yes | yes | yes |
+| Vapor, Vite, define | vapor-vite-define | - | W | W | f | - | - | - | flag | yes | yes | yes | yes | yes |
+| Vapor, esbuild, define | vapor-esbuild | - | W | W | f | - | - | - | flag | yes | yes | yes | yes | yes |
+| vDOM, Vite | vdom-vite | - | W | - | x | - | - | - | - | yes | yes | yes | yes | n/a |
+| vDOM, Vite, define | vdom-vite-define | - | W | - | f | - | - | - | flag | yes | yes | yes | yes | n/a |
+| vDOM, esbuild, define | vdom-esbuild | - | W | - | f | - | - | - | flag | yes | yes | yes | yes | n/a |
+| Root only, Vite | root-vite | - | - | - | x | - | - | - | - | no | no | no | no | throws |
+| Root only, Vite, wire | root-vite-wire | - | W | W | f | - | - | - | W | yes | yes | yes | yes | yes |
+| Root only, esbuild | root-esbuild | - | - | - | W1 | - | - | - | - | T1 | T1 | T1 | no | T1 |
+| Root only, esbuild, define | root-esbuild-define | - | - | - | f | - | - | - | flag | no | no | no | no | throws |
+| SSR, esbuild, Vue inlined | ssr-inline | - | W | - | = | - | - | - | - | yes | yes | armed | yes | n/a |
+| SSR, esbuild, Vue external | ssr-external | - | W | - | = | - | - | - | - | yes | yes | armed | yes | n/a |
+| SSR, Vite, Vue inlined | ssr-vite-inline | - | W | - | R! | - | - | - | - | **no** | **no** | armed | yes | n/a |
+| SSR, Vite, Vue inlined, define | ssr-vite-inline-define | - | W | - | f | - | - | - | flag | yes | yes | armed | yes | n/a |
+| SSR, Vite, Vue external | ssr-vite-external | - | W | - | = | - | - | - | - | yes | yes | armed | yes | n/a |
+| Script tag, full IIFE | iife-full | W | - | - | x | - | - | - | - | yes | yes | yes | no | yes |
+| Same, no configureVue | iife-full-nocfg | - | - | - | x | - | - | - | - | no | no | no | no | throws |
+| Script tag, elements IIFE | iife-elements | W | - | - | x | - | - | - | - | n/a | n/a | n/a | n/a | widget yes |
+| Same, no configureVue | iife-elements-nocfg | - | - | - | x | - | - | - | - | n/a | n/a | n/a | n/a | widget no |
+| Script tag, core IIFE | iife-core | - | - | - | - | - | - | - | - | n/a | n/a | n/a | n/a | n/a |
+| Import map, root | im-root | - | - | - | W1 | - | - | - | - | T1 | T1 | T1 | no | T1 |
+| Import map, root, configureVue | im-root-cfg | W | - | - | = | - | - | - | - | yes | yes | yes | no | yes |
+| Import map, /vue | im-vue | - | W | - | = | - | - | - | - | yes | yes | yes | no | n/a |
+| Dev server, root | dev-root | - | - | - | W1 | - | - | - | - | T1 | T1 | T1 | no | T1 |
+| Dev server, root, vaporChamberHMR | dev-root-hmr | - | - | - | = | W | - | - | - | yes | yes | yes | no | yes |
+| Dev server, /vapor | dev-vapor | - | W | W | = | - | - | - | - | yes | yes | yes | yes | yes |
+
+Notes on the rows:
+
+- Bus from the root and composables from the named entry, except the root
+  rows. Every Vapor row is a Vapor app, including the root rows. Wire rows use
+  `vaporChamberWire({ entry: 'vapor' })`. Define rows define
+  `__VC_WIRED_BUILD__: 'true'`, as README advises esbuild and webpack apps.
+- `x` on Vite rows: Vite leaves `import("vue")` bare, and a browser cannot
+  resolve it. On esbuild rows esbuild rewrites it to the bundled Vue, so the
+  lookup reaches (`root-esbuild`), and it ships all of Vue: 287,153 B raw,
+  93,740 B brotli.
+- `ssr-external`: the hook logged `vue <- dist/chamber.js ->
+  node_modules/vue/index.mjs`, the app's own copy. `ssr-inline`: no runtime
+  import, esbuild inlined the same Vue. No row logged the lookup's
+  `@vue/reactivity` import (the 1.29 guard). Control: the hook logged
+  `/vue`'s static `@vue/reactivity` import in `ssr-external`.
+- `ssr-vite-inline`: the hook logged `vue <- out/main.js ->
+  node_modules/vue/index.mjs`. The bundle inlines one Vue (one
+  `hasInjectionContext`, one `renderToString`). Its lookup stays a bare
+  `import("vue")`, so Node loads a second Vue, and `applyVueModule` replaces
+  what `/vue` wired. KeepAlive still arms: Vue shares the current instance
+  across copies on a server (`__VUE_INSTANCE_SETTERS__`). Effect scopes and
+  reactivity are not shared.
+- IIFE rows: `untracked()` is not on the global, and the IIFE builds fold the
+  bracket out of composable dispatch. Core: no Vue surface. Its file has no
+  `__VAPOR_CHAMBER_VUE__`, and the full IIFE's file has it (the control).
+- Import-map rows: `untracked()` never suspends. Vue's browser builds do not
+  export the tracking primitives, and `@vue/reactivity`'s browser file is a
+  second copy. `im-vue` wires that copy's pair at build time, `im-root` at
+  runtime.
+- Dev rows: the package installed as npm leaves it, so Vite pre-bundles it.
+  The optimizer bundles `import("vue")` to the same Vue (`dev-root`: W1). The
+  getters are not read there: reading `dist/chamber.js` would load a second
+  copy. `dev-vapor`'s `=` is inferred from `dev-root`'s resolution.
+
+Controls:
+
+- `?park=5` reached wherever the lookup ships and nothing else wired at load:
+  `root-vite` (everything but `untracked()`), `root-esbuild` and `im-root`
+  from T0, `iife-full-nocfg`, `iife-elements-nocfg`, `dev-root`. It reached
+  nothing where the define folded the lookup (`root-esbuild-define`).
+- `?park=6` moved only the signal factory, in rows where nothing else set it:
+  `root-vite`, `root-esbuild-define` and `iife-full-nocfg` got reactive state,
+  no cleanup, no KeepAlive guard, and a throwing mount.
+- An import map on a bundled page: the lookup reached a second Vue in every
+  Vite row whose lookup ships (`vapor-vite`, `vdom-vite`, `root-vite`). It
+  replaced the wiring there. Reactive no, cleanup no, KeepAlive no, and the
+  Vapor mount rendered nothing. Folded rows and esbuild rows did not move. On
+  the IIFE pages the map reached the same file the page loaded, so
+  `iife-full-nocfg` and `iife-elements-nocfg` worked.
+- Way 7 made a new composable's state reactive, and way 1 made the registry
+  hold the app's ref, in every row that has them.
+
+Warnings printed. Production: `root-vite` and `iife-full-nocfg` print the
+one-line "Composables run without reactivity" warning. `root-esbuild-define`
+prints nothing: the define folds the warning with the lookup. DEV: `dev-root`
+and `dev-root-hmr` print the probe-path hint. `dev-root` also prints that two
+signals were created before Vue arrived.
+
+Sizes, min / brotli, each bundle whole. The lookup in a Vite app without the
+plugin or the define: `vdom-vite` 89,235 / 30,147 B against `vdom-vite-define`
+86,646 / 29,215 B, so +2,589 / +932 B. `vapor-vite` 82,891 / 27,342 B against
+`vapor-vite-define` 80,539 / 26,630 B, so +2,352 / +712 B.
+
+Harness faults found and fixed before any row counted:
+
+- The fixture folders sat inside this repo, so its `package.json`
+  `sideEffects` list applied to them, and esbuild dropped `park.js`. Each
+  fixture now has its own `package.json`, as an app has.
+- `park.js` named `__VAPOR_CHAMBER_VUE__`, which made the bundle-text check
+  find the lookup in folded builds. The key is now assembled at runtime.
+- Vite production builds earlier in the same Node process set
+  `process.env.NODE_ENV`, so a later dev server pre-bundled with DEV false
+  and printed no hint. The dev rows run in a process of their own. The first
+  dev run lost its console lines for an unknown cause. Three later runs
+  recorded them every time.
+
+Ways no kind of app needs:
+
+- 6 (`__VUE__` for the signal factory) reached in no row. Vue writes `true`
+  there when an app is created, and every entry with composables sets the
+  factory first. Only a namespace parked by hand reaches it (the control).
+- 7 (`configureSignal`, `configureAlienSignals`) is used by no Vue row. It is
+  the non-Vue reactivity path.
+- 5 (the global key) wires no shipped app. Only `vaporChamberHMR` writes it,
+  and only a root-only dev page gains: Vue at T0 instead of T1, so a
+  module-scope `createVaporChamberApp()` does not throw.
+- 4 (the lookup) is the only way for root-only esbuild apps, import-map pages
+  without `configureVue` and root-only dev pages. Every other row has it
+  absent, unused, or harmful.
+
+Ways that collide:
+
+- 4 against 1, 2 and 3: when the lookup resolves a second Vue it replaces the
+  wiring. Shipped case: a Vite SSR build that inlines Vue (`ssr-vite-inline`).
+  Control case: a bundled page with an import map for `vue`. The define folds
+  the lookup and avoids it (`ssr-vite-inline-define`).
+- 2 against an import-map page: `/vue`'s pair belongs to a second copy, so
+  `untracked()` does nothing (`im-vue`). 4's `@vue/reactivity` half does the
+  same on `im-root`.
+- 8's define against a root-only app: the define folds 4 and the warning, so
+  nothing wires and nothing warns (`root-esbuild-define`). README tells such
+  apps to leave the define out.
+- 2 or 3 against 4 on esbuild without the define: 4 bundles all of Vue
+  (`root-probe-builds.test.ts` pins it).
+
+The one way each kind should use:
+
+- Vapor app: 3 (`/vapor`), with 8 on Vite or the define elsewhere.
+- vDOM app: 2 (`/vue`), with 8 on Vite or the define elsewhere.
+- Root-only app: 8 on Vite. On esbuild no way gives `untracked()` or
+  module-scope state, so the app moves to 2 or 3 with the define.
+- SSR server: 2 (`/vue`) with the define in the server build. Without it a
+  Vite build that inlines Vue breaks.
+- Script-tag page: 1 (`configureVue(Vue)`), elements and full IIFE alike.
+  `untracked()` is not available there. The core IIFE has no Vue surface.
+- Import-map page: 1 (`configureVue(Vue)`), as README advises. `untracked()`
+  is not available there.
+
+### 35.232 untracked() through setActiveSub: arm B and its A/B (2026-10-08)
+
+- Task 2 of the same prompt. Arm B is `0b2d32f` on branch
+  `untracked-setactivesub`, from 5fa3e5a. Not merged: it goes to the owner
+  with the 1.30 proposal (`.probes/1.30-plan.md`).
+- Fact, read 2026-10-08 in `@vue/reactivity` 3.6.0-rc.10: `pauseTracking` is
+  a push of the active subscriber and `setActiveSub()`. `resetTracking` is a
+  length check, a pop and `setActiveSub()`. runtime-core calls
+  `setActiveSub` 19 times and runtime-vapor 23 times, `pauseTracking` never.
+  Vue 3.5.43 has no `setActiveSub`. In rc.10 it is still absent from
+  `reactivity.d.ts`, as in rc.3 and rc.4 (whitepaper rc.4 row).
+- Built: one slot, `_swap(sub)`, returns the subscriber it replaced. Both
+  bracket sites read it: `const prev = _swap(undefined)`, then
+  `_swap(prev)`. One reader wires it, `_wireUntrack(primitives,
+  viaSubpath)`: `setActiveSub` when it is a function, else an adapter over
+  the 3.5 pair whose pause returns a token, else nothing. The runtime lookup
+  hands its module to the same reader.
+- `/vue` imports `@vue/reactivity` as a namespace and reads its members.
+  A named import of `setActiveSub` fails a 3.5 build. Measured, static member
+  reads keep the package tree-shaken: +7 B on 3.5, +2 B on 3.6. esbuild is
+  silent. Vite on 3.5 prints `IMPORT_IS_UNDEFINED` in the app's build, once.
+- One behaviour changes, pinned: a handler that calls `enableTracking()`
+  inside the bracket stays untracked. With the pair it found the caller's
+  effect on Vue's stack and tracked into it (`.probes/untrack/
+  enable-tracking-pair.mjs`: pair 2 runs, swap 1).
+- Correct before timing: full suite 3553 passed, Vapor suite 38 passed,
+  `vue35-entries` passed (3.5 keeps the pair through the adapter),
+  `untracked-build-time-wins` and `untracked-production` passed, coverage
+  100 x4. New: `tests/untracked-setactivesub.test.ts` (the untyped export,
+  the bracket's calls, the 3.5 adapter, half a pair, the edge).
+- Arms: `npm run ab:dists` built A 5fa3e5a and B 0b2d32f. Only `chamber.js`
+  and `vue.js` differ, `cmp` confirmed, and B's chunk has `_swap(void 0)` at
+  both sites. Every IIFE is byte-identical.
+- `npm run ab`, `workloads/composable.mjs`. Pilot K 2, one length: 6 s, about
+  1.5 s a process. Full K 10, two lengths, one row per job, 52, 65 and 62 s,
+  one core.
+
+| Row | Path | n | B/A | A -> B ns | Verdict |
+|---|---|---|---|---|---|
+| raw_dispatch | control | 292,227 | 1.000 | 18.1 -> 18.1 | no result |
+| raw_dispatch | control | 1,168,908 | 0.997 | 17.7 -> 17.7 | no result |
+| composable_dispatch | normal | 145,730 | 0.824 | 40.5 -> 33.4 | no result (control spread 3.2% > 3.0%) |
+| composable_dispatch | normal | 582,920 | 0.790 | 46.2 -> 36.6 | **faster** |
+| composable_create | normal | 50,806 | 1.002 | 78.3 -> 78.5 | no result |
+| composable_create | normal | 203,224 | 0.995 | 106.4 -> 106.7 | no result |
+
+- Verdict: nothing counted slower. `composable_dispatch` NO RESULT by the
+  tool's rule, since its two lengths disagree: faster at 4n (-9.6 ns), and at
+  n refused by its control. Paired fit -10.4 ns per dispatch. Creation did
+  not move, so `create.mjs` was not run.
+- Size, ESM through the consumer bundler (`measure-size --json`), min /
+  brotli: root +69 / +43, `./vue` +129 / +39, `./vapor` +126 / +46, `./iife`
+  +67 / +53, `./vitest` +66 / +19. `./transitions`, `./reactive` and
+  `./iife-elements` -60 min each (one slot for two).
+- Not measured: the 3.5 adapter's cost, one more call and one comparison on
+  each side of the bracket. `npm run ab` bundles the suite's Vue 3.6 only.
+
+### 35.233 C1: the lookup wires only the Vue the app already has (2026-10-08)
+
+- Owner's go on `.probes/1.30-plan.md`, order C1, C4, C5, C3, the two C2
+  checks, then C2. Found in 35.231 (`ssr-vite-inline`).
+- The defect. Vite leaves the lookup's `import("vue")` bare. A server build
+  that inlines Vue then loads a second Vue from `node_modules` in Node, and
+  `applyVueModule` replaced what `/vue` had wired. The 1.29.0 fix (35.229)
+  covered the tracking pair only.
+- The rule: one Vue is one `ref` function (`vue` re-exports
+  `@vue/reactivity`'s own, measured in Node CJS, Node ESM and an esbuild
+  bundle, and two browser copies differ). The lookup applies its namespace
+  only to an empty registry or from the same Vue. Its `@vue/reactivity`
+  half wires only a module whose `ref` is the registry's.
+- Two deviations from the plan, nothing an app sees. The 1.29 early return
+  on `_vueSubpathLoaded` stays, since it skips a pointless import. `/vue`'s
+  static pair gets no check: on an import-map page `untracked()` does
+  nothing with or without one.
+- Fails before, `tests/lookup-same-vue.test.ts`: three of five. A second Vue
+  through the lookup replaced a hand wiring. The tracking half wired a
+  second copy. A Vite SSR build with `ssr.noExternal`, run in Node, read
+  `{ runs: 1, own: 2, heardAfterStop: 1 }` (expected 2, 2, 0). The two
+  controls pass before and after: the lookup fills an empty registry, and
+  the same Vue still merges what a partial hand wiring left out. The first
+  case passed against the unfixed code in its first shape, where an `await`
+  let the lookup settle before the wiring. It now takes the real Vue first.
+- `tests/chamber-gaps.test.ts` "lacks pauseTracking" now mocks the
+  registry's own `ref`, so only the missing pair stops the wiring.
+- App level, the 35.231 fixtures rerun on this dist: `ssr-vite-inline` reads
+  yes on every behaviour. The import-map controls of `vapor-vite` and
+  `vdom-vite` keep the build's Vue. `root-vite` with an import map still
+  takes the second Vue: its registry is empty, and the library cannot know
+  which Vue the app bundled. `ssr-inline`, `ssr-external` and `im-root`
+  unchanged.
+- Full suite 3553 passed, Vapor suite 38, coverage 100 x4.
+- Size. IIFEs, raw/brotli: full +24/+7, elements +38/+18, core identical.
+  Raised to measured. ESM through the consumer bundler, min/brotli: root
+  +35/+81, `./vue` +32/+7, `./vapor` +32/+12, other entries reaching
+  `chamber.js` +32 or +33. A path that runs once per page, so no speed
+  measurement.
+
+### 35.234 C4: composables no longer call probeVue() on creation (2026-10-08)
+
+- `tryAutoCleanup` and `tryKeepAliveHooks` called `probeVue()` on every
+  composable created. It always returned at once: chamber.ts calls it when
+  it loads, and that call sets `_vueProbed`. Both calls are gone.
+  `waitForVueDetection` keeps its own, since its contract names the lookup.
+- `tests/lookup-starts-at-load.test.ts` pins the load-time call: Vue is wired
+  with no composable and no wait, and a later composable arms its cleanup.
+  Seeded: with the load-time call removed, both cases fail.
+- Full suite 3555 passed, Vapor suite 38, coverage 100 x4.
+- Size. Full IIFE raw -10, brotli +57. Each call removed alone is -5/-1 and
+  -5/-2. With both removed the minifier renames `_vueDeepRefFn` from `Un`
+  to `$`, and the lookup's minified code is otherwise identical. The
+  renaming moves brotli, not code. Brotli budget raised to measured.
+  Elements and core unchanged. ESM min: root -10, `./vue` and `./vapor` -9.
+- Speed, `npm run ab` on `workloads/create.mjs`, A 26b23df, B 311738d, K 10,
+  two lengths, about a minute a row. `create_useCommand` 83.6 -> 83.5 and
+  112.8 -> 112.6 ns, `create_component_mix` 249.2 -> 241.2 and 324.4 ->
+  319.9 ns. No result on all four, both controls over their spread. Nothing
+  counted slower. No speed claim.
+
+### 35.235 C5: one entry per kind of app, in the README (2026-10-08)
+
+- README "Which entry to import from" opens with one row per kind of app,
+  from 35.231's last list, updated for C1: a server build no longer needs
+  the define to stay correct, only to drop the lookup.
+- README, beside the define: a Vite app importing a subpath with neither
+  `vaporChamberWire()` nor the define ships the lookup as dead code, +2,589 B
+  raw and +932 B brotli on a vDOM app (35.231). Dated in the text, since no
+  stamped run computes it.
+- README `untracked()` section and whitepaper 9.6: on a page with no build
+  step `untracked()` cannot suspend tracking (35.231, every import-map and
+  IIFE row).
+- Found doing it. README's elements IIFE example called `defineWidget` with
+  no `configureVue`, which returns false on that page (35.231,
+  `iife-elements-nocfg`: no widget, and with the handover: the widget
+  renders). It now loads the Vapor build and hands it over first, as
+  `src/iife-elements.ts`'s own docblock does.
+- Whitepaper 9.6 said only the full IIFE reads `__VAPOR_CHAMBER_VUE__`. The
+  elements one does too (`iife-elements-nocfg` with `?park=5`: the widget
+  registers). Corrected.
+- No code change.
+
+### 35.236 C3: one entry per kind of app (2026-10-08)
+
+- `src/vue.ts` ends with `export * from './index'`, so `/vue` and `/vapor`
+  (which re-exports `/vue`) carry the root's surface. The explicit exports
+  win over the star, so `/vapor`'s own `defineVaporAsyncComponent` stays its
+  own. `src/vapor.ts`'s header rule "does not re-export the bus" is
+  reversed, with the reason: of four builds of an app that took its
+  composables from the root, three lost some wiring (35.231).
+- `tests/one-entry.test.ts`: every runtime export of the root is on `/vue`
+  and `/vapor` as the same value, `/vapor`'s async wrapper excepted, and
+  `/vue` adds only `enableVueReactivity`. Seeded: without the star, both
+  identity cases fail.
+- Bytes, an app importing one entry against two:
+  - `examples/vapor-sfc` built by Vite, `App.vue` taking the bus from the
+    root or from `/vapor`: 98,379 B raw, 32,108 B brotli both ways.
+  - The same app on the 1.29 entries: 98,379 B raw, 32,024 B brotli. Equal
+    length, and the same code in another order: the library's modules sit
+    ahead of some of Vue's shared code. Brotli +84 B, no code.
+  - esbuild, the bus, a plugin and `useCommand`, from two entries or one:
+    277,637 B both ways, 38,915 B both ways with the define.
+- What else moves. Importing `/vue` now evaluates the root's whole module
+  graph, which matters only unbundled (an import-map page, Node with the
+  package external). Those apps imported the root for the bus already.
+- The size table's `./vue` and `./vapor` rows measure everything an entry
+  exports, so they now include the root. README says so beside them.
+- README Gotcha, the raw-bus example and the "Which entry" section show one
+  import. The vapor-sfc example's `App.vue` takes the bus from `/vapor`, as
+  its `main.ts` now says. `vaporChamberWire()`'s docblock lost a sentence
+  that C3 made false (a redirect to `/vue` would lose the bus).
+- Full suite 3559 passed, Vapor suite 38, `vue35-entries` passed (the root
+  surface through `/vue` builds on 3.5), `check:example` passed, coverage
+  100 x4.
+- The API reference. `export * from` another published entry made
+  `docs/api/vue.md` repeat the root reference, about 4,800 lines. The
+  generator now documents a name on the page of the entry that declares or
+  names it. A page that re-exports another entry whole gets one line linking
+  there. Cut, each now behind that link: `vapor.md` no longer repeats
+  `/vue`'s names, and `vitest.md` no longer repeats `vitest/pure`'s, 353
+  lines. The index column reads "exports on the page". Pinned by a new case
+  in `tests/generate-api-docs.test.ts`, with the root page as its control.
+
+### 35.237 C2: untracked() stays on the pair (2026-10-08)
+
+- The owner's go set two checks before C2: one build per bundler on Vue 3.5,
+  then a mixed workload and the bench.
+- Check 2, an app on Vue 3.5 importing arm B's `/vue` (`0b2d32f`,
+  `.probes/untrack/bundlers-35.mjs`; webpack 5.111.1 and Rollup 4.64.2 in a
+  scratch folder, not the repo):
+
+  | Bundler | Arm B `/vue` | Main `/vue` (control) |
+  |---|---|---|
+  | esbuild | clean | clean |
+  | Vite (rolldown) | warning `IMPORT_IS_UNDEFINED` | clean |
+  | webpack 5 | **build fails**: "export 'setActiveSub' (imported as 'reactivity') was not found" | clean |
+  | Rollup 4 | warning `MISSING_EXPORT` | clean |
+
+  A failed build makes B' the answer, as agreed.
+- Arm B' (`b0fffb1`, branch `untracked-swap-vapor`): `/vapor`, 3.6 only,
+  imports `setActiveSub` by name, and `/vue` keeps the pair. One `_swap` slot,
+  one reader, and a pair never replaces a wired `setActiveSub`. All four
+  bundlers build `/vue` clean on 3.5. Full suite 3567, Vapor 38, coverage
+  100 x4. The entry cases run as real bundles in Node: in vitest the lookup
+  can hand over `setActiveSub` before `/vue`'s body runs, because vitest
+  evaluates a module's imports asynchronously.
+- Check 1, `npm run ab`, A daa5120 against B' b0fffb1, K 10, two lengths,
+  one row per job, about a minute each. The new
+  `workloads/composable-mixed.mjs` interleaves five composable paths through
+  `/vapor` on one bus over four actions:
+
+  | Workload | Row | Path | A -> B' ns | Verdict |
+  |---|---|---|---|---|
+  | composable-mixed | mixed_raw | control | 51.0 -> 51.2, 60.4 -> 59.8 | no result |
+  | composable-mixed | mixed_vapor | normal, swap | 64.6 -> 64.4, 72.2 -> 73.0 | no result |
+  | composable | raw_dispatch | control | 22.4 -> 22.7, 20.6 -> 20.5 | no result |
+  | composable | composable_dispatch | normal, `/vue` pair | 47.1 -> 50.5 (**slower**, 1.067), 59.0 -> 59.5 (refused) | slower at n |
+  | composable | composable_create | normal | 85.2 -> 84.8, 116.4 -> 116.6 | no result |
+
+- Verdict: not landed. The isolated gain (35.232: -9.6 ns at one length)
+  does not show on the mixed workload. B' costs `/vue` a counted +3.2 ns
+  (paired fit +2.4): the pair now goes through an adapter. A few ns is under
+  the noise floor's veto, but there is no counted gain for it to buy. With it
+  would come bytes and a dependency on an export Vue leaves untyped. The
+  bench was not run: it confirms a win, and the mixed workload found none.
+- Kept on main: `workloads/composable-mixed.mjs`, the bracket's mixed check.
+  Both arms stay on their branches, unmerged.
+- Owner, 2026-10-08: there is no 1.30. The 5fa3e5a cut was local and is
+  void, so this work ships in 1.29.0. The CHANGELOG lines written under
+  `## v1.30.0` moved, unchanged, into `## v1.29.0`, which lost its date
+  until the owner re-cuts it. `package.json` and `MCP_SERVER_VERSION` stay
+  1.29.0.
+
+### 35.238 C3b: a store's server commands in one lane (2026-10-08)
+
+- The owner's plan item, found reading `docs/store.md` against the code. The
+  guide said `serialize` on a store's actions sends one write at a time.
+  `serialize`'s default key is the action, so two different actions of one
+  store were both in flight, and no test paired the two.
+- Found while building the test, then ruled by the owner: `createLanes`
+  (`src/scheduler.ts`) has no re-entry, and a same-key run always chains
+  behind the tail. So a lane over every store action (`actions: ['cart*']`)
+  also catches the reducer a read writes through (`cartLanded`). Awaited,
+  the read waits for ever. Not awaited, there is no deadlock but the order
+  flips: the reducer joins the lane after a write already queued behind the
+  read, and the old answer lands last. The plan's own example was the broad
+  one.
+- The rule: the lane holds only commands that reach the server, the reads
+  that fetch and the store's bridged writes. The local reducers are keyed to
+  `null` and run at once inside the read's slot:
+  `key: (cmd) => (toServer.has(cmd.action) ? 'cart' : null)`, installed
+  before the bridge (equal `priority`: the first installed runs outermost,
+  `byPriority` is a stable sort).
+- `tests/store-serialize-order.test.ts`, eight cases, each hazard beside its
+  fix: the default key (both writes in flight, the older answer wins); the
+  store lane (one at a time, in order); a read across a write with no lane
+  (the stale read wins) and with the store lane (the write's state); case d,
+  awaited reducer in the broad lane (the read still waiting at 50 ms) and in
+  the store lane (settles); case e, the reducer not awaited, broad (old
+  state last) and store lane (the write's state).
+- `docs/store.md`: the ordering paragraph names the per-store key, says it
+  orders reads too, and why the key is a function. The capability table row
+  follows. `serialize`'s docblock gains the no-re-entry rule and the store
+  example. A comment only: the built `.js` does not move.
+- Cost: none in code. A write can wait for its store's read in flight, one
+  round trip at most.
+
+### 35.239 A command waiting in a serialize lane reads as loading (2026-10-08)
+
+- Plan C3b step 3, missing from 35.238. A fact the library relies on and no
+  doc stated: `isLoading()` counts a start in a before-hook (`trackLoading`),
+  and the async runner walks the before-hooks before the plugin chain
+  (`_asyncRun`: the `beforeHooks` loop, then `s.runner(cmd, execute)`). So a
+  command waiting in a `serialize` lane lights its key from its dispatch.
+- Pinned in tests/store-serialize-order.test.ts: a write queued behind its
+  store's read reads loading while not yet sent (`sent: []`), and goes dark
+  after its answer. Control, no lane: the write is sent at once and reads the
+  same. So `isLoading` cannot tell a queued command from a sent one. Not a
+  bug: "dispatched and not settled".
+- docs/store.md and the `serialize` docblock say it, one sentence each, and
+  the v1.29.0 CHANGELOG line for the store guide names it.
+- No code change: a docblock and the guide. Built `.js` identical.
+
+### 35.240 The 1.29.0 CHANGELOG, then the re-cut (2026-10-08)
+
+- Owner's answers, 2026-10-08, to three questions before the re-cut.
+- One new line for three docs fixes the entry left out: the SSR examples now
+  give each request its own bus (35.224), `src/signal.ts` and the whitepaper
+  say what a `__VUE__` read finds (35.225), and the whitepaper's script-tag
+  recipe loads the full IIFE (35.228). A reader who copied the old SSR
+  example or the core IIFE recipe needs to know. No code change in any.
+- One line for one cause. 35.229 (`untracked()`) and 35.233 (composables)
+  are the same defect: in a bundle that inlines Vue and runs in Node, the
+  runtime lookup replaced what `/vue` wired at build time. The merged line
+  keeps every symptom (reactivity, cleanup, `untracked()`) and both places.
+  The import-map page stays on the composables only: there `untracked()`
+  suspends nothing with or without the fix (35.233).
+- Both C2 branches stay, unmerged, as the record:
+  - `untracked-setactivesub` (`0b2d32f`, arm B, 35.232) is the measured,
+    tested arm. It was refused only because webpack 5 fails to build it on
+    Vue 3.5 (35.237). Reopen when 1.x drops Vue 3.5, then re-run the A/B
+    against the release of that day.
+  - `untracked-swap-vapor` (`b0fffb1`, arm B', 35.237) measured slower on
+    `/vue`. It stays beside B: the pair is what the 35.237 numbers came from.
+  - The repo allows no tag, and a deleted branch's commits last only until
+    `git gc` prunes them.
+- Then the re-cut, as 5fa3e5a did: the heading gets its date, the generated
+  pages are rebuilt on the tree. `package.json`, `MCP_SERVER_VERSION` and
+  the `vc:version` stamps already read 1.29.0.
+
+### 35.241 Every example checked against 1.29.0 (2026-10-08)
+
+- Owner's check, asked before the re-cut. It arrived after `release: v1.29.0`
+  (284477a) had landed, so that cut is void, like 5fa3e5a, and the re-cut
+  follows these fixes.
+- Run on 2026-10-08, dist built from 284477a:
+
+  | Example | Run | Result |
+  |---|---|---|
+  | vapor-sfc, vapor-island-cart, exo-astro | `npm run check:example` | builds pass, directive check 5 controls |
+  | browser project | `npx vitest run -c vitest.browser.config.ts` | 6 files, 21 tests pass |
+  | laravel-app, laravel-backend | `php -l`, 12 files, PHP 8.5.11 | no syntax errors |
+  | laravel-app | `setup.sh` into a scratch folder, `php artisan serve`, Laravel 13 | /cart: add, reload keeps it, clear. /widget: 2 events reach Alpine and the DOM listener. No console output |
+  | feature-directives.html | static server, Chromium | 1, 3, 10, 2 added: 16. Failure shown, optimistic 17 back to 16. Two console errors, both `logger()` printing the page's own deliberate failure |
+  | pattern-1-blade-cdn.html | static server | add twice: 2, reload restores 2, clear: 0. No console output |
+  | sprinkled-blade | mock server, and the static server cross-origin | add, clear, startup `cartState`. No console output |
+  | router-demo | static server | paging, Back, deep link /products/7, 404 row. No console output |
+  | pattern-4-nextjs.tsx | `tsc`, scratch config | needs only `@types/react` and `"types": ["react"]`. With them, the file and its commented CheckoutButton type-check |
+
+- Fixed, each a doc of this release that the example disagreed with:
+  - One entry for a Vue app (README "Which entry to import from"):
+    feature-command-group, feature-cross-tab-sync, feature-error-boundary,
+    feature-persistence, feature-vite-hmr, vue-vapor-component.vue,
+    pattern-2-laravel-vite and pattern-3-inertia took the bus from the root
+    and the composables from `/vue`. All now import from `/vue`, the
+    transports and directive plugin included where the root carries them.
+  - vue-vapor-component.vue checked `result instanceof Promise` before
+    `result.ok`. `useCommand()` on the shared bus is typed `CommandResult`,
+    so the check goes. Seeded: `void result.then` there fails vue-tsc with
+    TS2339 on `CommandResult<any>`, so vapor-sfc's vue-tsc reads the file.
+  - The retry rule (35.220): async-api.ts and pattern-2 said a declared
+    `Retry-After` makes any failure re-sent. Now: a 429, 503 or 408 for any
+    action, a declared wait sets when, never whether.
+  - feature-vite-wire.ts said a root-only app works without the plugin. The
+    README table (35.235) says it is needed on Vite: the runtime lookup fails
+    in a production bundle.
+- No change: exo-astro, pattern-5 and the IIFE pages import only the root
+  and no composable. feature-store, shopping-cart and feature-transitions
+  pair the root with `/store` or `/transitions`, not `/vue`. No example has
+  SSR code or `setCommandBus` per request.
+- typecheck, check:example, lint:check and the suite pass. No source change.
+
+### 35.242 The entry follows what the app calls (2026-10-08)
+
+- Owner's ruling, 2026-10-08, on a question from 35.241. The README row said
+  a Vapor app imports from `/vapor`. vapor-island-cart and pattern-6 are
+  Vapor apps that call none of the library's Vapor API.
+- The rule: `/vapor` when the app calls the library's Vapor API, the
+  wrappers that read the Vapor registry (`createVaporChamberApp`,
+  `defineVaporComponent`, `defineVaporAsyncComponent`,
+  `defineVaporCustomElement`, `getVaporInteropPlugin`, chamber-vapor.ts).
+  `/vue` for every other Vue app, a Vapor app that uses only Vue's own Vapor
+  APIs or `router/vapor` included. `defineVaporCommand` and
+  `useVaporAsyncCommand` read no Vapor registry entry.
+- vapor-island-cart built three ways on 2026-10-08, all its JS, raw / brotli
+  (q 11) bytes:
+
+  | Imports | Raw | Brotli |
+  |---|---|---|
+  | as shipped, root and `/vue` | 91,258 | 30,788 |
+  | all `/vue` | 91,347 | 30,754 |
+  | all `/vapor` | 93,607 | 31,512 |
+
+  `/vapor` costs this app +2,349 raw and +724 brotli for wiring it never
+  calls. It now imports from `/vue`, and so does pattern-6.
+- The same criterion, one wording, where the old one stood: README (the
+  gotcha's first line, the table, the `/vapor` paragraph, the
+  `vaporChamberWire` comment and the note under it), whitepaper 7.2 entry
+  list, `VaporChamberWireOptions.entry` in src/vite-hmr.ts, src/vapor.ts's
+  header, and feature-vite-wire.ts. Comments only: the 62 built `.js` are
+  byte-identical.
+
+### 35.243 StatusBar's loading indicator, and the directives page console (2026-10-08)
+
+- Found while checking the examples (35.241), not from this release.
+  examples/vapor-sfc/README.md said StatusBar's "loading..." shows for any
+  dispatch on the bus. `isAnyLoading` counts only
+  `useSharedCommandState().dispatch` (src/chamber.ts, the pairing note), and
+  CartPanel dispatches through `useCommand`, so it never lit there.
+  StatusBar.vue gave a stale reason: "pairing is not guaranteed on all error
+  paths". chamber.ts says that exit is closed (pluginThrew).
+- Pinned first, since no test held it: tests/shared-state.test.ts holds a
+  dispatch in flight on each path. `isAnyLoading` lights for the shared
+  dispatch (the control) and stays dark for `useCommand`'s and a raw
+  `bus.dispatch`. `isLoading('slow', 1)` lights for all three.
+- Owner's ruling, docs follow code. The README says which dispatches light
+  the indicator and how to light it for the others: route them through that
+  `dispatch`, or bind `isLoading(action, target)` per key. StatusBar.vue
+  keeps the scope statement and cites the test.
+- feature-directives.html: owner, 2026-10-08, corrected the bar to "no
+  unexpected console errors". This page expects exactly two, `logger()`
+  printing its "server says no" failures (src/plugins-core.ts). Rerun in
+  Chromium: two, nothing else. One line on the page now says so.
+
+### 35.244 pattern-4 joins the typecheck (2026-10-08)
+
+- Owner's ruling, 2026-10-08, on a finding of 35.241.
+  examples/pattern-4-nextjs.tsx was never type-checked:
+  tsconfig.patterns.json excluded it, saying it needed @types/react and
+  @types/react-dom. Measured in a scratch folder: @types/react alone (19.3.0,
+  `"types": ["react"]`). react-dom is not needed.
+- Built: `@types/react` ^19.3.0 as a devDependency (one package, its
+  `csstype` was already installed). examples/tsconfig.pattern-4.json extends
+  the patterns config with JSX and React's types, and `npm run typecheck`
+  runs it, so the gate covers it. Every root tsconfig pins `types`, so the
+  new package reaches no other program.
+- Found building it: an extending config inherits the base's `include` and
+  `exclude` unless it sets both. The first version set `files` only and
+  compiled every snippet without `vite/client` (TS2339 on
+  `import.meta.glob` in pattern-3). It now sets `include` and `exclude`, and
+  `--listFilesOnly` shows the library source and pattern-4 alone.
+- Seeded: `const seeded: number = bus` in pattern-4 fails `npm run
+  typecheck` with TS2322 on that line. Removed, it passes.
+- tsconfig.patterns.json's comment now states the measured fact.

@@ -14,10 +14,11 @@ interface User {
 }
 
 // Create async bus
-// The bus re-sends what re-sending can change (a timeout, a 429 or 503, a
-// declared Retry-After) and never a verdict such as a 422. A plain throw may
-// have landed, so it is re-sent only for an action declared idempotent: a
-// read is, whatever it returns.
+// The bus re-sends a transient failure for any action: a 429 or 503 (held
+// back) and a 408. A declared wait (Retry-After) sets when, never whether,
+// and a verdict such as a 422 is never re-sent. A plain throw may have landed,
+// so it is re-sent only for an action declared idempotent: a read is, whatever
+// it returns.
 const bus = createAsyncCommandBus({ retry: { baseDelay: 1000, actionPolicies: { userFetch: 'idempotent' } } });
 
 // Async logger plugin

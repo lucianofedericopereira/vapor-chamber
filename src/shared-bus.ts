@@ -9,7 +9,7 @@
  * every import path is unchanged.
  */
 
-import { createCommandBus, type AsyncCommandBus, type CommandBus, type CommandMap } from './command-bus';
+import { createCommandBus, type AsyncCommandBus, type BaseBus, type CommandBus, type CommandMap, type CommandResult } from './command-bus';
 import type { SharedCommandMap } from './chamber';
 import { DEV } from './dev';
 
@@ -58,6 +58,32 @@ export function setCommandBus(bus: CommandBus | AsyncCommandBus): void {
     fallbackBus = null;
   }
   sharedBus = bus as CommandBus;
+}
+
+/** The option every bus composable takes. */
+export type BusOption<B extends BaseBus = BaseBus> = {
+  /**
+   * Bus to use, sync or async. Default: the shared bus from `getCommandBus()`.
+   * Pass one to scope a composable to a feature, an island or an SSR request.
+   */
+  bus?: B;
+};
+
+/**
+ * What a composable's dispatch returns on bus `B`: the result on a sync bus,
+ * a promise of it on an async one, either on a bus typed only as `BaseBus`.
+ * tests/composables-result-types.test.ts.
+ */
+export type ResultOn<B, R = CommandResult> =
+  B extends AsyncCommandBus<any> ? Promise<R> : B extends CommandBus<any> ? R : R | Promise<R>;
+
+/**
+ * The bus a composable uses: the one it was given, else the shared one. Every
+ * composable reads its bus here, so the rule lives in one place.
+ * tests/composables-bus-option.test.ts.
+ */
+export function resolveBus(bus: BaseBus | null | undefined): CommandBus {
+  return (bus ?? getCommandBus()) as CommandBus;
 }
 
 /**

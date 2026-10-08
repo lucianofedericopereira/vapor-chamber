@@ -13,7 +13,7 @@
 import { createIf, defineVaporComponent, nextTick, onScopeDispose, shallowRef, watch } from 'vue';
 import type { PropType } from 'vue';
 import { MAX_TIMEOUT_MS, countOption } from '../bounds';
-import { getCommandBus } from '../chamber';
+import { resolveBus } from '../shared-bus';
 import type { BaseBus } from '../command-bus';
 import { DEV } from '../dev';
 
@@ -105,7 +105,7 @@ export const VcTransition = defineVaporComponent({
     timeout: Number,
   },
   setup(props, { slots }) {
-    const bus = props.bus || getCommandBus();
+    const bus = resolveBus(props.bus);
     const ns = props.namespace;
     const timeout = countOption(props.timeout, 30_000, 1, MAX_TIMEOUT_MS);
     const name = (hook: string) => (ns ? ns + hook : hook[0].toLowerCase() + hook.slice(1));

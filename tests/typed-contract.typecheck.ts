@@ -32,7 +32,8 @@ export function _typedComposable() {
   const { dispatch, register } = useCommand();
 
   const r = dispatch('cartAdd', { id: 1, name: 'Widget' }, { qty: 2 });
-  type _r = Assert<Eq<typeof r, CommandResult<Cart> | Promise<CommandResult<Cart>>>>;
+  // No bus: the shared bus's static type, so the result, as getCommandBus() below.
+  type _r = Assert<Eq<typeof r, CommandResult<Cart>>>;
 
   // @ts-expect-error - action not declared in GlobalCommands
   dispatch('notACommand', {});

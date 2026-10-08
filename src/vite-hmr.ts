@@ -319,15 +319,17 @@ export type VaporChamberWireOptions = {
    * same as importing `vapor-chamber/vue`. `'vapor'` wires that plus
    * `createVaporApp`, `defineVaporComponent` and `defineVaporAsyncComponent`,
    * the same as importing `vapor-chamber/vapor` - pick it when the app
-   * compiles `<script setup vapor>` SFCs. Under it the root's
+   * calls the library's Vapor API (`createVaporChamberApp`, a
+   * `defineVapor*` component wrapper). Under it the root's
    * `defineVaporAsyncComponent` is /vapor's, which calls Vue's directly, so
    * Vue's async code is bundled only when the app defines an async component
    * (`__VC_WIRED_VAPOR__`, vapor.ts).
    *
    * The choice is yours on purpose. The plugin does not inspect
-   * @vitejs/plugin-vue to guess it: `'vapor'` puts the Vapor runtime in the
-   * bundle, which a vDOM-only Vue 3.6 app should not pay for, and a guess
-   * would decide that cost for you.
+   * @vitejs/plugin-vue to guess it: `'vapor'` puts Vue's Vapor app and
+   * component helpers in the bundle, which an app that does not call the
+   * library's Vapor API should not pay for, and a guess would decide that
+   * cost for you.
    */
   entry?: 'vue' | 'vapor';
   /**
@@ -373,10 +375,6 @@ const WIRED_ROOT_PREFIX = '\0vapor-chamber:wired-root:';
  * real root is reached by its resolved id (`this.resolve(..., { skipSelf })`),
  * which is what keeps the redirect from resolving to itself.
  *
- * A redirect of `vapor-chamber` straight to `vapor-chamber/vue` would not
- * work: the root also exports the bus, plugins, transports and the HTTP
- * client, and the Vue entries deliberately do not.
- *
  * THE REDIRECT IS BUILD ONLY, on a measurement. Under the dev server the
  * runtime lookup resolves by itself, so there is nothing to fix - and a
  * redirect there splits the library. With the package installed (so Vite's
@@ -385,7 +383,7 @@ const WIRED_ROOT_PREFIX = '\0vapor-chamber:wired-root:';
  * unbundled: the optimizer never pre-bundles an import made from a module
  * filed under node_modules, which a virtual module carrying the real root's
  * path is. Two chamber modules, and the wiring lands on the one the app does
- * not use. The documented pattern (bus from the root, composables from /vue)
+ * not use. The two-entry pattern (bus from the root, composables from /vue)
  * stays at one. tests/vite-wire-plugin.test.ts pins both counts on a real dev
  * server.
  *

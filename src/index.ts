@@ -189,6 +189,8 @@ export {
   getCommandBus,
   setCommandBus,
   resetCommandBus,
+  type BusOption,
+  type ResultOn,
   useCommand,
   // typed command contract - augment GlobalCommands for typed dispatch
   type GlobalCommands,
@@ -219,6 +221,7 @@ export {
   createVaporChamberApp,
   getVaporInteropPlugin,
   defineVaporCommand,
+  type VaporCommandOptions,
   // Vue 3.6+ Vapor APIs
   defineVaporCustomElement,
   defineVaporComponent,

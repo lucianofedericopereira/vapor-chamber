@@ -757,7 +757,9 @@ static entry that hands Vue to the library at build time:
   plain `{ value }` state (no reactivity), arm no automatic cleanup and skip
   the KeepAlive guard (`tests/root-only-prod-fixture.test.ts`). The library
   warns once, in production too, when it sees Vue running with nothing wired.
-- **`vapor-chamber/vapor`** on Vue 3.6 with Vapor. It is a superset of `/vue`
+- **`vapor-chamber/vapor`** on Vue 3.6, when the app calls the library's Vapor
+  API (`createVaporChamberApp` or a `defineVapor*` component wrapper). A Vapor
+  app that uses only Vue's own Vapor APIs takes `/vue`. It is a superset of `/vue`
   that also wires `createVaporApp`, `defineVaporComponent` and
   `defineVaporAsyncComponent` statically. That costs +<!-- vc:sizeVaporEntryRaw -->4.5<!-- /vc:sizeVaporEntryRaw --> KB raw over hand-wiring
   `createVaporApp` (BUNDLE-SIZES' Vapor wiring table). It leaves out
@@ -1211,8 +1213,8 @@ Three IIFE variants ship under `dist/`, split by **audience / deployment shape**
 | Variant   | Audience                                                  | Brotli |
 |-----------|-----------------------------------------------------------|--------|
 | core      | Sprinkled JS on server-rendered pages - Blade / Rails / Django | <!-- vc:sizeIifeCore -->10.2<!-- /vc:sizeIifeCore --> KB |
-| elements  | Embeddable widgets through custom elements                | <!-- vc:sizeIifeElements -->10.6<!-- /vc:sizeIifeElements --> KB |
-| full      | SPAs that grew big (realtime + undo/redo + persistence)   | <!-- vc:sizeIifeFull -->14.6<!-- /vc:sizeIifeFull --> KB |
+| elements  | Embeddable widgets through custom elements                | <!-- vc:sizeIifeElements -->10.7<!-- /vc:sizeIifeElements --> KB |
+| full      | SPAs that grew big (realtime + undo/redo + persistence)   | <!-- vc:sizeIifeFull -->14.7<!-- /vc:sizeIifeFull --> KB |
 
 _(Generated, always-current per-export sizes: [BUNDLE-SIZES.md](./BUNDLE-SIZES.md).)_
 
@@ -1268,8 +1270,18 @@ For the `<script>`-tag/IIFE shape, assign the namespace to
   import * as Vue from 'https://cdn.jsdelivr.net/npm/vue@3.6/dist/vue.runtime-with-vapor.esm-browser.prod.js';
   window.__VAPOR_CHAMBER_VUE__ = Vue;
 </script>
-<script src="https://cdn.jsdelivr.net/npm/vapor-chamber@<version>/dist/vapor-chamber-core.iife.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/vapor-chamber@<version>/dist/vapor-chamber.iife.min.js"></script>
 ```
+
+The full or the elements variant: the core one has no Vue surface and never
+reads that key (log s35.231).
+
+**`untracked()` does not work on a page with no build step.** Vue's browser
+builds do not export the tracking primitives. `@vue/reactivity`'s browser
+file is a second copy of the engine, the case the paragraph below describes.
+So the IIFEs leave `untracked()` out, and a composable's dispatch there does
+not suspend tracking. Measured on the full IIFE and on import-map pages, with
+`configureVue()` and without (log s35.231).
 
 `window.__VUE__` is not read: it is Vue's key, and Vue writes `true` to it when
 the first app is created (`tests/vue-global-detection.test.ts`). A failed
@@ -1475,25 +1487,32 @@ reflect the same values from the start.
 
 ### 12.2 Per-request isolation: the bus **and** the HTTP client
 
-For production SSR with concurrent requests, always create a fresh bus per request:
+For production SSR with concurrent requests, create a bus per request. Provide
+it to that request's app. A component reads it and passes it to each
+composable, and every composable takes `bus`:
 
 ```ts
-import { createCommandBus, setCommandBus, resetCommandBus } from 'vapor-chamber'
+import { createSSRApp, inject } from 'vue'
+import { renderToString } from 'vue/server-renderer'
+import { createCommandBus, useCommand } from 'vapor-chamber'
 
 export async function handleRequest(req, res) {
   const bus = createCommandBus()
-  setCommandBus(bus)
-  try {
-    // ... render app, dispatch commands ...
-  } finally {
-    resetCommandBus()  // prevent cross-request contamination
-  }
+  const app = createSSRApp(App)
+  app.provide('bus', bus)
+  res.end(await renderToString(app))
 }
+
+// in a component's setup
+const { dispatch } = useCommand({ bus: inject('bus') })
 ```
 
-The shared-bus globals are safe only when the server renders one request at a
-time. Under concurrent renders, create the bus per request. Pass it explicitly
-to your handlers and to the SSR helpers (`src/ssr.ts`).
+Pass the same bus to your handlers and to the SSR helpers (`src/ssr.ts`).
+Setting the shared bus per request, `setCommandBus(bus)` then
+`resetCommandBus()`, is safe only when the server renders one request at a
+time. Interleaved renders lose or swap each other's dispatches. In
+`tests/ssr-per-request-bus.test.ts` the slower of two renders loses its
+dispatch.
 
 **The same rule applies to `createHttpClient()`, and it is the sharper edge of
 the two.** Its response cache and in-flight dedupe map live in the client's own
@@ -1513,12 +1532,10 @@ Create the client where you create the bus:
 export async function handleRequest(req, res) {
   const bus = createCommandBus()
   const http = createHttpClient({ headers: { cookie: req.headers.cookie } })
-  setCommandBus(bus)
-  try {
-    // pass `http` explicitly - e.g. fetchLoaders({ http })
-  } finally {
-    resetCommandBus()
-  }
+  const app = createSSRApp(App)
+  app.provide('bus', bus)
+  // pass `http` explicitly - e.g. fetchLoaders({ http })
+  res.end(await renderToString(app))
 }
 ```
 
@@ -1861,7 +1878,7 @@ src/
   iife-elements.ts  - CDN entry, elements variant
   index.ts          - public ESM barrel
 
-tests/                           (<!-- vc:testFiles -->316<!-- /vc:testFiles --> files, <!-- vc:tests -->3497<!-- /vc:tests --> tests)
+tests/                           (<!-- vc:testFiles -->326<!-- /vc:testFiles --> files, <!-- vc:tests -->3572<!-- /vc:tests --> tests)
 ```
 
 Where the current numbers live, both generated and CI-verified fresh:
@@ -4111,9 +4128,10 @@ that demonstrably has Vapor.
 
 `tests/vue-detection-real-ordering.test.ts` (real build, real
 `createVaporApp().mount()`, real freshly-evaluated `chamber.ts`, nothing
-mocked) and `tests/vue-detection-global-clobber.test.ts` measure this end to end. `__VUE__` remains
-supported as a legacy fallback - it is read after the owned slot - so existing
-pages keep working.
+mocked) and `tests/vue-detection-global-clobber.test.ts` measure this end to end.
+`chamber.ts` no longer reads `__VUE__` (`tests/vue-global-detection.test.ts`).
+A page that parked Vue there moves it to `__VAPOR_CHAMBER_VUE__`, or calls
+`configureVue(Vue)`.
 
 #### From 11.6 Blade + CDN
 
@@ -4390,7 +4408,7 @@ src/
   iife-elements.ts  - CDN entry, elements variant
   index.ts          - public ESM barrel
 
-tests/                           (<!-- vc:testFiles -->316<!-- /vc:testFiles --> files, <!-- vc:tests -->3497<!-- /vc:tests --> tests)
+tests/                           (<!-- vc:testFiles -->326<!-- /vc:testFiles --> files, <!-- vc:tests -->3572<!-- /vc:tests --> tests)
 ```
 
 The per-file test inventory that used to sit here was removed rather than

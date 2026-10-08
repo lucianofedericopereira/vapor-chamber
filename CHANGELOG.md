@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## v1.29.0 - 2026-10-08
+
+- Added the root's whole surface to `vapor-chamber/vue` and `vapor-chamber/vapor`: the bus, plugins, transports and the HTTP client. A Vue app now imports from one entry, `import { createCommandBus, useCommand } from 'vapor-chamber/vue'`. They are the root's own functions, so code that imports the bus from the root is unchanged and shares the same bus.
+- Fixed a bundle that inlines Vue and runs in Node, such as a Vite SSR build with `ssr.noExternal`. The root's runtime lookup loaded a second Vue and replaced what `vapor-chamber/vue` wired at build time. Composables lost reactivity and cleanup, and `untracked()` went back to tracking. Composables on a bundled page with an import map for `vue` hit the same. The lookup now wires only the Vue the app already has, and keeps what `vapor-chamber/vue` wired.
+- Fixed the README's elements IIFE example, which registered no widget: it now hands Vue over with `configureVue` first. The README names one entry per kind of app, and says that `untracked()` cannot suspend tracking on a page with no build step.
+- Fixed the store guide on ordering a store's answers with `serialize`. Its default key is the action, so two different actions of one store were both in flight. One lane per store, keyed to the commands that reach the server, now orders the store's writes and its reads. The guide and `serialize`'s docblock say to key the store's local reducers to `null`: in the lane, a read that awaits one waits for ever. They also say that a command waiting in the lane already reads as loading in `isLoading()`.
+- Vue 3.5 is now tested on every run. Every entry that uses Vue loads and works on it, except `vapor-chamber/vapor`, `vapor-chamber/transitions/vapor` and `vapor-chamber/router/vapor`, which need Vue 3.6.
+- Fixed `useSharedCommandState().dispatch` throwing when a subscriber of `inFlight` or `isAnyLoading` throws. `isAnyLoading` then stayed true for every reader. The dispatch now fails with that error and the count returns to 0, as `useCommand`'s does.
+- Changed `dispatch` and `query` of `useCommand`, `useCommandQuery`, `useCommandGroup`, `useSharedCommandState` and `defineVaporCommand` to be typed by the bus they run on. A sync bus gives a `CommandResult`, an async one a promise of it, and the shared bus a `CommandResult`. A cast or a narrowing written for the old types can go. On an async bus, `useCommand`'s `dispatch` now returns a promise even when a subscriber throws.
+- Added `bus` to the options of `useCommand`, `useCommandState`, `useCommandHistory`, `useCommandQuery`, `useCommandGroup`, `useCommandError`, `defineVaporCommand` and `useDeepCommandState`. Each runs on the bus it is given, sync or async. A concurrent SSR server can now pass a bus per request, as `setCommandBus` advises. Without it they use the shared bus, as before. `useSharedCommandState` now accepts an async bus too.
+- Fixed the retry example, which stated the rule from before 1.27. Fixed the README row for `isLoading()`, which left out when counting starts and stops.
+- Fixed three docs. The SSR examples set the shared bus per request, which their own warning calls unsafe: they now give each request its own bus. `src/signal.ts` and the whitepaper now say what a read of `__VUE__` finds. The whitepaper's script-tag recipe loaded the core IIFE, which never reads the parked Vue: it now loads the full IIFE.
+- Fixed the examples to match this release. The Vue examples import from `vapor-chamber/vue` alone, and drop an `instanceof Promise` check on a dispatch result. Two retry comments now state the current rule. `feature-vite-wire.ts` says a root-only app needs the plugin on Vite.
+
 ## v1.28.0 - 2026-10-07
 
 - Fixed `createRouter()` throwing a TypeError on a route row whose `params` is `null`. The row now compiles as one without param types.

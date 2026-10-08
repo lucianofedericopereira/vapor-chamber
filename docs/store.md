@@ -42,7 +42,7 @@ with no store-specific code. Undo is the exception, and it takes one option
 | undo / redo | `history` plugin, and `undo: true` on the store | the inverse: the state each action replaced |
 | optimistic rollback | `optimistic` plugin | nothing |
 | double-submit collapse | `idempotent` plugin | nothing |
-| ordered same-key writes | `serialize` plugin | nothing |
+| a store's server commands in order, reads included | `serialize`, one lane per store (below) | nothing |
 | a devtools timeline | `vapor-chamber/devtools` | nothing |
 | the same state in every tab | `createChannel`, and `share` on the store | the state it reached, with a version (below) |
 
@@ -196,11 +196,34 @@ The store writes an answer only when its version is higher than the one it
 holds, the rule `share` uses between tabs. An ETag cannot do this: RFC 9110
 defines it for equality, not order. A version that is not a number is written
 in arrival order, and development warns once. Without `version` the last
-answer to arrive wins. The `serialize` plugin on the store's actions makes
-that safe too. It sends one write at a time, so the server applies and
-answers them in the order they were sent. An answer with no `state` (the
-server's handler returned nothing) writes nothing.
-`tests/store-answer-version.test.ts`.
+answer to arrive wins. One `serialize` lane per store makes that safe too. It
+sends the store's server commands one at a time, so the server applies and
+answers them in the order they were sent. It orders the store's reads as
+well as its writes: a read in flight cannot land after a write's answer and
+put the older state back.
+
+```ts
+const writes = ['cartAdd', 'cartClear'];             // what the bridge sends
+const toServer = new Set([...writes, 'cartLoad']);  // and the read, which fetches in its own handler
+// The lane first: at equal `priority` the first plugin installed runs outermost.
+bus.use(serialize({ key: (cmd) => (toServer.has(cmd.action) ? 'cart' : null) }));
+bus.use(createHttpBridge({ endpoint: '/vc', actions: writes }));
+```
+
+Lane only the commands that reach the server: the reads that fetch, and the
+store's bridged writes. A lane has no re-entry: a command that waits for
+another in its own lane queues it behind itself. So the reducer a read
+writes through, such as `cartLanded`, is keyed to `null` and runs at once
+inside the read's slot. In the lane, an awaited one waits for ever, and one
+not awaited lands its old answer after a write already queued behind the
+read. That is why the key is a function, not `actions: ['cart*']`, which
+catches those reducers. The default key is the action, which orders an
+action only against itself. A write can wait for its store's read in
+flight, one round trip at most. While it waits, it already reads as loading
+in `isLoading()`, from its dispatch: a spinner bound to it lights through
+the wait. An answer with no `state` (the server's
+handler returned nothing) writes nothing.
+`tests/store-answer-version.test.ts`, `tests/store-serialize-order.test.ts`.
 
 The store's `answer` is `register`'s `answer` option, which any handler can
 take: the bus calls it when a transport answered in place of the handler.

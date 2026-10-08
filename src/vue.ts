@@ -1,14 +1,15 @@
 /**
  * vapor-chamber/vue - the entry for apps that have Vue.
  *
- * Import the composables from HERE instead of the package root and Vue wiring
- * stops being something you can forget. There is no `configure...()` to call and
- * no probe to lose a race with: this module imports Vue's primitives
- * statically, so the consumer's bundler resolves them at build time and they
- * reach the core the moment the module is evaluated.
+ * Import from HERE instead of the package root and Vue wiring stops being
+ * something you can forget. There is no `configure...()` to call and no probe
+ * to lose a race with: this module imports Vue's primitives statically, so the
+ * consumer's bundler resolves them at build time and they reach the core the
+ * moment the module is evaluated. It also carries the root's whole surface, so
+ * a Vue app needs this one entry (see the re-export at the end).
  *
  * @example
- * import { useCommand, untracked } from 'vapor-chamber/vue';
+ * import { createCommandBus, setCommandBus, useCommand, untracked } from 'vapor-chamber/vue';
  *
  * WHY THIS EXISTS. The package root has to survive with no Vue in the tree -
  * Blade sprinkles, vanilla pages, the bus on its own - so it reaches Vue
@@ -121,3 +122,11 @@ export {
 } from './chamber';
 
 export type { Signal, CreateSignal } from './signal';
+
+// The root's surface too - the bus, plugins, transports, the HTTP client - so a
+// Vue app imports one entry. Of four builds of an app that took its composables
+// from the root, three lost some wiring (log s35.231), and a second entry to
+// remember is how an app ends up there. The same modules, so the same functions and
+// the same shared bus as the root's; an app's bundler keeps only what it
+// imports. The explicit exports above win over the star.
+export * from './index';

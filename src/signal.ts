@@ -11,8 +11,11 @@
  *      `shallowRef()` here once its async dynamic import resolves (shallow because
  *      the library replaces signal values wholesale and never mutates nested
  *      fields - skipping ref()'s deep-Proxy wrap on object/array values).
- *   2. Lazy sync probe of `globalThis.__VUE__` - catches the MPA /
- *      server-rendered-page case where Vue is a `<script>` global.
+ *   2. Lazy sync probe of `globalThis.__VUE__`. It finds a Vue namespace only
+ *      if one was parked there before any app was created: Vue writes `true`
+ *      to that key when an app is created, and a `<script>`-tag Vue is
+ *      `window.Vue` (tests/vue-detection-global-clobber.test.ts). On such a
+ *      page, hand Vue over with `configureVue(Vue)`.
  *   3. Plain `{ value }` object - zero-overhead fallback for non-Vue, non-reactive
  *      contexts. For push-pull reactivity without Vue, call
  *      `configureAlienSignals` from `vapor-chamber/alien-signals` once at boot.

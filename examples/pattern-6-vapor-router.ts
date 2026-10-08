@@ -21,7 +21,7 @@
  *   <div id="admin"></div>
  */
 
-import { createAsyncCommandBus, createHttpBridge, setCommandBus } from 'vapor-chamber';
+import { createAsyncCommandBus, createHttpBridge, setCommandBus } from 'vapor-chamber/vue';
 import { createRouter, useQueryParam, useRouter } from 'vapor-chamber/router';
 // Loader preset for plain JSON backends: 'vapor-chamber/router-fetch'.
 

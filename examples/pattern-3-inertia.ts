@@ -8,9 +8,9 @@
  * resources/js/app.ts
  */
 
-import { createAsyncCommandBus, setCommandBus } from 'vapor-chamber'
-import { createHttpBridge } from 'vapor-chamber/transports'
-import { createDirectivePlugin } from 'vapor-chamber/directives'
+// One entry for a Vue app: `vapor-chamber/vue` carries the bus, transports
+// and directive plugin too, and Orders.vue below imports from it.
+import { createAsyncCommandBus, setCommandBus, createHttpBridge, createDirectivePlugin } from 'vapor-chamber/vue'
 import { createApp, h } from 'vue'
 import { createInertiaApp, router } from '@inertiajs/vue3'
 

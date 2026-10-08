@@ -294,17 +294,52 @@ function renderSymbol(symbol) {
   return out.join('\n');
 }
 
+/**
+ * The published entries this file re-exports whole (`export * from` one of
+ * them), and the names it exports itself: declared here, or re-exported by
+ * name. A name that arrives only through such a star is documented on its own
+ * entry's page, and this page links there, so one reference is written once.
+ */
+function starredEntries(entry, sourceFile) {
+  const stars = [];
+  const own = new Set();
+  for (const statement of sourceFile.statements) {
+    if (ts.isExportDeclaration(statement)) {
+      if (statement.exportClause && ts.isNamedExports(statement.exportClause)) {
+        for (const element of statement.exportClause.elements) own.add(element.name.text);
+      } else if (!statement.exportClause && statement.moduleSpecifier) {
+        const target = join(dirname(entry.file), `${statement.moduleSpecifier.text}.ts`);
+        const other = entryPoints.find((e) => e.file === target);
+        if (other) stars.push(other);
+      }
+    } else if (ts.canHaveModifiers(statement) && ts.getModifiers(statement)?.some((m) => m.kind === ts.SyntaxKind.ExportKeyword)) {
+      if (statement.name) own.add(statement.name.text);
+      if (ts.isVariableStatement(statement)) for (const d of statement.declarationList.declarations) own.add(d.name.getText(sourceFile));
+    }
+  }
+  const starred = new Set();
+  for (const other of stars) {
+    const symbol = checker.getSymbolAtLocation(program.getSourceFile(other.file));
+    for (const exported of checker.getExportsOfModule(symbol)) if (!own.has(exported.name)) starred.add(exported.name);
+  }
+  return { stars, starred };
+}
+
+const pageOf = (entry) => `${entry.subpath === '.' ? 'index' : entry.subpath.slice(2).replace(/\//g, '-')}.md`;
+
 function renderEntry(entry) {
   const sourceFile = program.getSourceFile(entry.file);
   if (!sourceFile) throw new Error(`[generate-api-docs] no source file for ${entry.file}`);
   const moduleSymbol = checker.getSymbolAtLocation(sourceFile);
   if (!moduleSymbol) throw new Error(`[generate-api-docs] ${entry.file} exports nothing`);
+  const { stars, starred } = starredEntries(entry, sourceFile);
 
   // `@internal` is honoured on the RESOLVED symbol: the barrel re-export never
   // carries the tag, only the declaration does.
   publicNames.clear();
   const symbols = checker
     .getExportsOfModule(moduleSymbol)
+    .filter((exported) => !starred.has(exported.name))
     .map((exported) => {
       const resolved = resolve(exported);
       if (resolved.name !== exported.name) publicNames.set(resolved, exported.name);
@@ -326,13 +361,16 @@ function renderEntry(entry) {
     `# \`${entry.specifier}\``,
     '',
     `Source: ${sourceLink(entry.file)}. ` +
-      `${symbols.length} public export${symbols.length === 1 ? '' : 's'}.`,
+      `${symbols.length} public export${symbols.length === 1 ? '' : 's'}${stars.length ? ' on this page' : ''}.`,
     '',
     '```ts',
     `import { ... } from '${entry.specifier}';`,
     '```',
     '',
   ];
+  for (const other of stars) {
+    body.push(`Also exports everything from [\`${other.specifier}\`](${pageOf(other)}), documented there.`, '');
+  }
 
   // One "Contents" heading rather than a per-kind list mirroring the body
   // headings: repeating `## Functions` twice in a file gives the two sections
@@ -363,7 +401,7 @@ const index = [];
 let total = 0;
 for (const entry of entryPoints) {
   const { markdown, count } = renderEntry(entry);
-  const name = `${entry.subpath === '.' ? 'index' : entry.subpath.slice(2).replace(/\//g, '-')}.md`;
+  const name = pageOf(entry);
   const path = join(OUT_DIR, name);
   mkdirSync(dirname(path), { recursive: true });
   writeFileSync(path, markdown);
@@ -384,9 +422,10 @@ The \`iife\` builds are deliberately absent. They install a \`VaporChamber\`
 global instead of exporting a module, and their surface is a variant contract -
 see [\`docs/BUNDLE-SIZES.md\`](../BUNDLE-SIZES.md).
 
-**${total} public exports across ${index.length} entry points.**
+**${total} public exports across ${index.length} entry points**, each on the page of the entry
+that declares or names it.
 
-| entry point | source | exports |
+| entry point | source | exports on the page |
 |---|---|--:|
 ${index
   .map(

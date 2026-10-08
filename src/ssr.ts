@@ -10,33 +10,34 @@
  * state need to replay on the client so reactive signals reflect the same values.
  * This plugin automates the dehydrate/rehydrate pattern as a first-class plugin.
  *
- * CONCURRENCY WARNING: the setCommandBus/resetCommandBus pattern below relies on
- * a module-global shared bus - safe only when the server renders one request at
- * a time. Under concurrent SSR renders, interleaved requests overwrite each
- * other's bus (handler/state leakage across requests). For concurrent servers,
- * create the bus per request and pass it explicitly to your handlers and to
- * rehydrate()/dehydrate() - skip the shared-bus globals on the server entirely.
+ * CONCURRENCY. The shared bus is a module global, one per Node process. A
+ * server that renders requests concurrently creates a bus per request: it
+ * provides it to that request's app, and a component passes it to each
+ * composable as `{ bus }`. Setting the shared bus per request is safe only
+ * when requests render one at a time. Interleaved renders lose or swap each
+ * other's dispatches (tests/ssr-per-request-bus.test.ts).
  *
  * The HTTP client has the same rule: its cache and in-flight dedupe map live
  * in `createHttpClient()`'s closure, and the cache key has no auth dimension,
  * so **create it per request** too. A client created once at module scope and
  * shared across renders lets user A's authenticated GET answer user B's.
  *
- * @example Server entry
- * import { createCommandBus, setCommandBus, resetCommandBus } from 'vapor-chamber';
+ * @example Server entry, per request
+ * import { createSSRApp } from 'vue';
+ * import { renderToString } from 'vue/server-renderer';
+ * import { createCommandBus } from 'vapor-chamber';
  * import { createSSRPlugin } from 'vapor-chamber/ssr';
  *
- * const bus = createCommandBus();
- * setCommandBus(bus);
- * const ssr = createSSRPlugin();
- * bus.use(ssr.plugin);
- *
- * // ... render app, dispatch commands ...
- *
- * const html = renderToString(app);
- * const serialized = ssr.dehydrate();
- * // Embed: <script>window.__VAPOR_COMMANDS__ = ${JSON.stringify(serialized)}</script>
- * resetCommandBus();
+ * export async function render(App) {
+ *   const bus = createCommandBus();
+ *   const ssr = createSSRPlugin();
+ *   bus.use(ssr.plugin);
+ *   const app = createSSRApp(App);
+ *   app.provide('bus', bus); // in a component: useCommand({ bus: inject('bus') })
+ *   const html = await renderToString(app);
+ *   return { html, commands: ssr.dehydrate() };
+ * }
+ * // Embed: <script>window.__VAPOR_COMMANDS__ = ${JSON.stringify(commands)}</script>
  *
  * @example Client entry
  * import { getCommandBus } from 'vapor-chamber';

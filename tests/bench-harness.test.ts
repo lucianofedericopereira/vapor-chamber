@@ -11,10 +11,10 @@
  *     const history = useCommandHistory({}, bus);   // <- second argument
  *     for (...) bus.dispatch('act', i, { qty: i });
  *
- * `useCommandHistory(options)` takes ONE parameter and always observes the
- * SHARED bus from `getCommandBus()`. The second argument is silently dropped -
- * `tsconfig.typecheck.json` includes only `src/**` plus two named test files,
- * so `tests/` is never type-checked and no compiler objected. The history
+ * `useCommandHistory(options)` takes ONE parameter. Without a `bus` option
+ * (added in 1.29.0) it observes the SHARED bus from `getCommandBus()`. The
+ * second argument was silently dropped, and no compiler objected: `tests/` was
+ * not type-checked then (tsconfig.tests.json does it now). The history
  * subscribed to one bus while the loop dispatched on another, so the `onAfter`
  * hook the first bench is named for never fired, and the `past` stack the
  * second bench undoes/redoes was always empty - `undo()`/`redo()` returned
@@ -70,9 +70,9 @@ describe('useCommandHistory bus selection', () => {
 
     // The shape the benches used. `useCommandHistory` has one parameter, so
     // this attaches to the shared bus and observes nothing dispatched on
-    // `local`. Pinned because nothing else can catch it: tests are not
-    // type-checked, and the composable takes no bus option the way
-    // `useSharedCommandState({ bus })` does.
+    // `local`. The bus goes in the options, `useCommandHistory({ bus })`
+    // (tests/composables-bus-option.test.ts). The type checker now rejects a
+    // second argument, hence the cast that reproduces the old call.
     const history = (
       useCommandHistory as (o: object, bus?: unknown) => ReturnType<typeof useCommandHistory>
     )({}, local);

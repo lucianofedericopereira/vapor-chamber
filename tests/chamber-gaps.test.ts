@@ -305,7 +305,8 @@ describe('IIFE flag at module load', () => {
 
 describe('wireUntracked peer-shape guard', () => {
   it('skips wiring when @vue/reactivity lacks pauseTracking', async () => {
-    vi.doMock('@vue/reactivity', () => ({ pauseTracking: undefined, resetTracking: undefined }));
+    // The registry's own `ref`, so only the missing pair stops the wiring.
+    vi.doMock('@vue/reactivity', async () => ({ ref: (await vi.importActual<{ ref: unknown }>('@vue/reactivity')).ref, pauseTracking: undefined, resetTracking: undefined }));
     vi.resetModules();
     try {
       const chamber = await import('../src/chamber');

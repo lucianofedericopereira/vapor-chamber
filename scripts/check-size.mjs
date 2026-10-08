@@ -637,14 +637,34 @@ const BUDGETS = {
   // the read load() and hydrate() share, load()'s refusal of a promise, and
   // the rejection checks in save and clear, together +285/+95. Raised to
   // measured. The IndexedDB storage itself is in no IIFE.
-  'vapor-chamber.iife.min.js':          { rawMax: 47_855, brotliMax: 14_976 },
+  // Then every bus composable takes a `bus`, read by one function,
+  // resolveBus (log s35.221), full only: raw/brotli +39/-14. Raw, piece by
+  // piece: resolveBus +30, useCommand's option +7, defineVaporCommand's +6,
+  // the two composables that already took a bus -2 each, a longer minified
+  // name +1. Core and elements byte-identical. Raw raised to measured,
+  // brotli kept.
+  // Then a dispatch's result type follows its bus (log s35.222), full only:
+  // raw/brotli +100/+40. Two pieces, both on a failed dispatch only:
+  // _isAsyncBus +66, and runDispatch's catch returning a promise on an async
+  // bus +30; +4 is minified names. Raised to measured.
+  // Then useSharedCommandState's opening writes moved inside its try (log
+  // s35.227), one piece on the failure path: the catch returning a promise on
+  // an async bus, raw/brotli +33/+3. Raised to measured.
+  // Then the runtime lookup wires only the Vue the app already has (log
+  // s35.233), one piece, once per page: raw/brotli full +24/+7, elements
+  // +38/+18, core byte-identical. Raised to measured.
+  // Then composables stopped calling probeVue() on creation (log s35.234),
+  // full only: raw -10, brotli +57. Each call removed alone is -5/-1 and
+  // -5/-2. Both together, the minifier renames `_vueDeepRefFn` to `$`, and
+  // the renaming, not code, moves brotli. Brotli raised to measured.
+  'vapor-chamber.iife.min.js':          { rawMax: 48_051, brotliMax: 15_069 },
   // Then (log s35.107) BusError and its vocabulary moved to src/failure.ts so
   // the router raises the core's failure without importing the bus. A pure
   // move: raw bytes identical in all three IIFEs once the import sits where
   // the code was; brotli moves with the arrangement: full -8 (budget kept),
   // core +5, elements +7. Owner: raised to measured ("size no issue").
   'vapor-chamber-core.iife.min.js':     { rawMax: 33_202, brotliMax: 10_429 },
-  'vapor-chamber-elements.iife.min.js': { rawMax: 34_816, brotliMax: 10_903 },
+  'vapor-chamber-elements.iife.min.js': { rawMax: 34_854, brotliMax: 10_921 },
 };
 
 const BR_OPTS = { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } };

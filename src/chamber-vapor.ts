@@ -12,7 +12,6 @@
  */
 
 import {
-  getCommandBus,
   signal,
   tryAutoCleanup,
   untracked,
@@ -23,9 +22,10 @@ import {
   getDefineVaporAsyncComponentFn,
   vueDetectionHint,
 } from './chamber';
-import type { Handler, RegisterOptions, CommandResult, CommandMap } from './command-bus';
+import type { BaseBus, CommandBus, Handler, RegisterOptions, CommandResult } from './command-bus';
 import { _errResult } from './command-bus';
 import { DEV } from './dev';
+import { resolveBus, type BusOption, type ResultOn } from './shared-bus';
 
 /**
  * Why the `defineVapor*` wrappers warn instead of just returning null.
@@ -210,6 +210,9 @@ export function defineVaporAsyncComponent<T = any>(
 // defineVaporCommand
 // ---------------------------------------------------------------------------
 
+/** `defineVaporCommand`'s options: how the handler registers, and on which bus. */
+export type VaporCommandOptions<B extends BaseBus = BaseBus> = RegisterOptions & BusOption<B>;
+
 /**
  * defineVaporCommand - zero-overhead command for hot paths in Vapor mode.
  *
@@ -225,12 +228,14 @@ export function defineVaporAsyncComponent<T = any>(
  * });
  * dispatch({ name: 'page_view', params: { page: '/landing' } });
  */
-export function defineVaporCommand(
+export function defineVaporCommand<B extends BaseBus = CommandBus>(
   action: string,
   handler: Handler,
-  options?: RegisterOptions
+  options?: VaporCommandOptions<B>
 ) {
-  const bus = getCommandBus<CommandMap>();
+  const bus = resolveBus(options?.bus);
+  // The options go to register() as they are: it reads the register fields,
+  // and an undo's stored copy keeps `bus`, which nothing reads.
   const unregister = bus.register(action, handler, options);
 
   // `untracked`, like every other composable's dispatch. This one was the gap,
@@ -240,8 +245,8 @@ export function defineVaporCommand(
   // become that effect's dependencies and the component re-renders on state it
   // never mentions. Pass-through when Vue is absent, so the "zero reactive
   // overhead" claim above is unaffected for non-Vue consumers.
-  function dispatch(target: any, payload?: any): CommandResult {
-    return untracked(() => bus.dispatch(action, target, payload));
+  function dispatch(target: any, payload?: any): ResultOn<B> {
+    return untracked(() => bus.dispatch(action, target, payload)) as ResultOn<B>;
   }
 
   function dispose() { unregister(); }
@@ -284,7 +289,7 @@ export function defineVaporCommand(
  * const result = await dispatch('orderCreate', { items: cart });
  */
 export function useVaporAsyncCommand(asyncBus?: { dispatch: (action: string, target: any, payload?: any) => Promise<CommandResult> }) {
-  const bus = asyncBus ?? (getCommandBus() as any);
+  const bus: any = resolveBus(asyncBus as BaseBus | undefined);
   const loading = signal(false);
   const lastError = signal<Error | null>(null);
 

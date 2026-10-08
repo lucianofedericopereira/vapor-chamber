@@ -40,10 +40,13 @@ CI installs the root project alone (`npm ci --workspaces=false
   Each `useCommand` instance has its own `loading` signal.
 - **SearchPanel** - type at least 2 characters; watch the browser console for
   `[searchExecute]` lines. No reactive overhead per keystroke.
-- **StatusBar** - observes both. The "loading..." indicator shows whenever any
-  dispatch is in flight on the bus, regardless of which component triggered
-  it. A failed dispatch (click "Add invalid product") populates the shared
-  error list.
+- **StatusBar** - its error list observes every failed dispatch on the bus:
+  click "Add invalid product" and it fills. Its "loading..." indicator lights
+  only for dispatches made through `useSharedCommandState().dispatch`.
+  CartPanel dispatches through its own `useCommand`, so the indicator stays
+  dark for it. To light it for the app's other dispatches, route them through
+  that `dispatch`, or bind `isLoading(action, target)` for each key, which
+  counts every dispatch of that key on the bus.
 
 ## Files
 
@@ -75,7 +78,7 @@ npm run preview    # serve the production build locally
 
 - This example uses the **local checkout** of vapor-chamber via
   `"file:../.."` in `package.json`. To run against a published version,
-  swap to `"vapor-chamber": "^<!-- vc:version -->1.28.0<!-- /vc:version -->"`.
+  swap to `"vapor-chamber": "^<!-- vc:version -->1.29.0<!-- /vc:version -->"`.
 - Vue 3.6 is in **release candidate**. The example pins the RC the library is
   aligned to, `^<!-- vc:vueAligned -->3.6.0-rc.10<!-- /vc:vueAligned -->`, and
   that pin is owned by the root `devDependencies.vue` - `npm run docs:stamp`

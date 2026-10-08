@@ -114,7 +114,8 @@ export const counter = 0;
   );
 
   writeFileSync(join(dir, 'src', 'index.ts'), `export { makeWidget, secretHelper, counter } from './core';\nexport type { Widget } from './core';\n`);
-  writeFileSync(join(dir, 'src', 'extra.ts'), `/** Extra thing. */\nexport function extraThing(): void {}\n`);
+  // extra re-exports the root whole, and one of its names by name as well.
+  writeFileSync(join(dir, 'src', 'extra.ts'), `/** Extra thing. */\nexport function extraThing(): void {}\nexport { counter } from './core';\nexport * from './index';\n`);
   writeFileSync(join(dir, 'src', 'iife.ts'), `export const globalNamespace = {};\n`);
 });
 
@@ -157,6 +158,17 @@ describe('generate-api-docs', () => {
     expect(page).toContain('Creates a widget.');
     expect(page).toContain('what to call it');
     expect(page).toContain("const w = makeWidget('a');");
+  });
+
+  it('links to an entry it re-exports whole instead of repeating it, and keeps what it names', () => {
+    expect(run().status).toBe(0);
+    const page = read('extra.md');
+    expect(page).toContain('Also exports everything from [`fixture-lib`](index.md), documented there.');
+    expect(page).not.toContain('Creates a widget.');
+    expect(page).toContain('Extra thing.');
+    expect(page).toContain('A plain counter.');
+    // The control: the root's own page still documents it.
+    expect(read('index.md')).toContain('Creates a widget.');
   });
 
   it('excludes @internal declarations', () => {

@@ -2954,6 +2954,12 @@ export function _isSyncBus(bus: BaseBus): boolean {
   return s !== undefined && !('pendingRequests' in s);
 }
 
+/** @internal True for a bus `createAsyncCommandBus` made. */
+export function _isAsyncBus(bus: BaseBus): boolean {
+  const s = (bus as any)[_INSPECT];
+  return s !== undefined && 'pendingRequests' in s;
+}
+
 // ---------------------------------------------------------------------------
 // inspectBus - dev/debug only, tree-shakeable in production
 // ---------------------------------------------------------------------------

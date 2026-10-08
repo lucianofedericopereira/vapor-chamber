@@ -50,10 +50,11 @@ function benchGroup(): (name: string, fn: () => unknown) => void {
 //     marked dispatch (every cross-tab receive, MCP call, and redo).
 // ---------------------------------------------------------------------------
 
-// `useCommandHistory` observes the SHARED bus and takes no bus argument, so
-// these two benches must install their bus there: a bus passed as an argument
-// is dropped, the history then watches the shared bus while the loop dispatches
-// on another, and the bench measures an empty history. Pinned by
+// These two benches install their bus as the shared one, which
+// `useCommandHistory` observes when given no `bus` option. A bus passed as a
+// second argument is dropped: the history then watches the shared bus while
+// the loop dispatches on another, and the bench measures an empty history.
+// Kept as the shared bus so the workload matches the stamped ratios. Pinned by
 // `tests/bench-harness.test.ts`.
 describe('origin-marker paths', () => {
   const bench = benchGroup();

@@ -550,6 +550,20 @@ export type SerializeOptions = {
  * @example
  * // serialize across every tab of the same origin:
  * bus.use(serialize({ scope: 'cross-tab', key: (cmd) => cmd.target.accountId }));
+ *
+ * A lane has no re-entry: a command that waits for another in its own lane
+ * queues it behind itself and waits for ever. So a store's lane holds only
+ * the commands that reach the server, and keys the local reducers a read
+ * writes through to `null` (docs/store.md, tests/store-serialize-order.test.ts).
+ *
+ * A command waiting in a lane already reads as loading: `isLoading()` counts
+ * it from its dispatch, before this plugin holds it, so a spinner bound to it
+ * lights through the wait (tests/store-serialize-order.test.ts).
+ *
+ * @example
+ * // one lane per store, its server commands only, installed before the bridge:
+ * const toServer = new Set(['cartLoad', 'cartAdd', 'cartClear']);
+ * bus.use(serialize({ key: (cmd) => (toServer.has(cmd.action) ? 'cart' : null) }));
  */
 export function serialize(options: SerializeOptions = {}): AsyncPlugin {
   const { key, actions, scope = 'instance', lockPrefix = 'vapor-chamber:serialize' } = options;

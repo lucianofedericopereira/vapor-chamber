@@ -24,9 +24,9 @@ export default defineConfig({
 
 // ─── main.ts - unchanged; HMR is transparent ────────────────────────────────
 
-import { createCommandBus, setCommandBus } from 'vapor-chamber'
-// Composables from the Vue entry, which wires Vue (the root would not).
-import { useCommandState } from 'vapor-chamber/vue'
+// One entry for a Vue app: `vapor-chamber/vue` carries the bus too, and
+// wires Vue (the root would not).
+import { createCommandBus, setCommandBus, useCommandState } from 'vapor-chamber/vue'
 
 const bus = createCommandBus()
 setCommandBus(bus)

@@ -1,5 +1,5 @@
 import { reactive } from 'vue';
-import { createCommandBus, logger, persist, history as mkHistory, createChannel } from 'vapor-chamber';
+import { createCommandBus, logger, persist, history as mkHistory, createChannel } from 'vapor-chamber/vue';
 import { createFastLane } from 'vapor-chamber/fast-lane';
 
 export interface Product {

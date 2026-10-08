@@ -3,9 +3,9 @@
 
   Errors are observed BUS-WIDE: even though CartPanel dispatches via
   its own per-component `useCommand`, every failed command on the shared
-  bus lands in this panel's error list. `isAnyLoading` tracks dispatches made
-  through `useSharedCommandState().dispatch` (bus-wide in-flight pairing is
-  not guaranteed on all error paths).
+  bus lands in this panel's error list. `isAnyLoading` tracks only dispatches
+  made through `useSharedCommandState().dispatch`
+  (tests/shared-state.test.ts).
 
   Memory math: this approach allocates ~5 signal nodes total. If we instead
   gave every panel a private `useCommand`, we'd allocate 2 signals per

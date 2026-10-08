@@ -5,9 +5,9 @@
  * Replaces ad-hoc try/catch blocks scattered across components.
  */
 
-import { createCommandBus, setCommandBus } from 'vapor-chamber'
-// Composables from the Vue entry, which wires Vue (the root would not).
-import { useCommandError } from 'vapor-chamber/vue'
+// One entry for a Vue app: `vapor-chamber/vue` carries the bus too, and
+// wires Vue (the root would not).
+import { createCommandBus, setCommandBus, useCommandError } from 'vapor-chamber/vue'
 
 const bus = createCommandBus()
 setCommandBus(bus)

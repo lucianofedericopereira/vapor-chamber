@@ -28,9 +28,9 @@
   //                             vapor-sfc example's vue-tsc checks it
   "include": ["*.ts", "patterns-ambient.d.ts"],
   "exclude": [
-    // Needs @types/react and @types/react-dom just to PARSE its JSX - a real
-    // devDependency for one snippet that exercises the same
-    // getCommandBus()/dispatch surface every other pattern here already does.
+    // Checked by tsconfig.pattern-4.json: it needs JSX and @types/react alone
+    // (19.3.0, "types": ["react"]). react-dom is not needed (measured
+    // 2026-10-08).
     "pattern-4-nextjs.tsx",
     // Not a snippet: the shared Vite config factory, and each example's own
     // `vue-tsc` already type-checks it during that example's build.

@@ -8,7 +8,7 @@
     3. StatusBar - uses useSharedCommandState for cross-component aggregate state
 -->
 <script setup vapor lang="ts">
-import { createAsyncCommandBus, setCommandBus } from 'vapor-chamber';
+import { createAsyncCommandBus, setCommandBus } from 'vapor-chamber/vapor';
 import CartPanel from './CartPanel.vue';
 import SearchPanel from './SearchPanel.vue';
 import StatusBar from './StatusBar.vue';

@@ -14,10 +14,9 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue';
-// The bus and its plugins need no Vue, so they come from the package root.
-import { getCommandBus, validator } from 'vapor-chamber';
-// The composables come from the Vue entry, which wires Vue at build time.
-import { useCommand, useCommandHistory } from 'vapor-chamber/vue';
+// One entry for a Vue app: `vapor-chamber/vue` carries the bus and its
+// plugins too, and wires Vue at build time.
+import { getCommandBus, validator, useCommand, useCommandHistory } from 'vapor-chamber/vue';
 import { defineChamberStore } from 'vapor-chamber/store';
 
 interface Todo {
@@ -72,7 +71,7 @@ const stats = computed(() => {
 function addTodo() {
   // Dispatched through useCommand, so its loading and lastError track it.
   const result = cmd.dispatch('todoAdd', newTodoText.value.trim(), { id: Date.now() });
-  if (!(result instanceof Promise) && result.ok) newTodoText.value = '';
+  if (result.ok) newTodoText.value = '';
 }
 </script>
 

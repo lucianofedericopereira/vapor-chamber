@@ -12,10 +12,10 @@ import { createHttpBridge } from 'vapor-chamber/transports'
 // ─── The default ──────────────────────────────────────────────────────────────
 //
 // A transient failure is re-sent for any action: `limited` (a 429 or 503, a
-// rate limit), `timeout`, and any failure declaring when to come back
-// (`Retry-After`, `context.retryIn`), after that wait. 3 attempts in total;
-// otherwise a jittered wait under 200ms, 400ms. A verdict (422, 404, 403, 409),
-// an abort and a redirect are never re-sent.
+// rate limit) and a 408 (the server never got the whole request). 3 attempts
+// in total, after a jittered wait under 200ms, then 400ms. A declared wait
+// (`Retry-After`, `context.retryIn`) sets when, never whether. A verdict
+// (422, 404, 403, 409), an abort and a redirect are never re-sent.
 
 const bus = createAsyncCommandBus()
 bus.use(createHttpBridge({ endpoint: '/api/vc', csrf: true }))

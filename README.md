@@ -43,7 +43,7 @@ so each action has one place to read and to test.
 - **Vue <!-- vc:vueAligned -->3.6.0-rc.10<!-- /vc:vueAligned --> aligned**: signals, `onScopeDispose`, `getCurrentScope`, alien-signals internals. Tracked per release in the [CHANGELOG](CHANGELOG.md)
 - **No runtime dependency**. `alien-signals` is an optional peer, installed only by apps that use the `vapor-chamber/alien-signals` connector. Unimported modules tree-shake to zero
 - **ESM-only**, plus three IIFE `<script>` drop-ins for no-bundler pages
-- **<!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% coverage on all four axes** - statements, branches, functions and lines, across **<!-- vc:tests -->3497<!-- /vc:tests --> tests** in <!-- vc:testFiles -->316<!-- /vc:testFiles --> files ([full table](docs/COVERAGE.md)). Every branch in the measured surface is taken by a test
+- **<!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% coverage on all four axes** - statements, branches, functions and lines, across **<!-- vc:tests -->3572<!-- /vc:tests --> tests** in <!-- vc:testFiles -->326<!-- /vc:testFiles --> files ([full table](docs/COVERAGE.md)). Every branch in the measured surface is taken by a test
 
 ## Contents
 
@@ -156,19 +156,22 @@ A misspelled action or field in a component is a compile error, before any reque
 </details>
 
 <details>
-<summary><b>Gotcha:</b> in a Vue app, import the composables from <code>vapor-chamber/vue</code>, not the root</summary>
+<summary><b>Gotcha:</b> in a Vue app, import from <code>vapor-chamber/vue</code>, not the root</summary>
 
-Import the composables (`useCommand`, `useCommandState`, `signal`, ...) from the static entry,
-`vapor-chamber/vue` (or `vapor-chamber/vapor` in a Vapor app). Import the bus (`createCommandBus`,
-`getCommandBus`, plugins, transports) from the root. The static entry hands Vue to the library at
-build time, the moment it is imported, so even module-scope state is reactive:
+Import from the static entry, `vapor-chamber/vue` (or `vapor-chamber/vapor` when the app calls the
+library's Vapor API, such as `createVaporChamberApp`). It
+carries the composables (`useCommand`, `useCommandState`, `signal`, ...) and the root's whole
+surface: the bus, plugins, transports. The static entry hands Vue to the library at build time, the
+moment it is imported, so even module-scope state is reactive:
 
 ```ts
-import { createCommandBus, setCommandBus } from 'vapor-chamber';   // the bus: no Vue needed
-import { useCommand, signal } from 'vapor-chamber/vue';           // composables: Vue wired
+import { createCommandBus, setCommandBus, useCommand, signal } from 'vapor-chamber/vue';
 
 export const count = signal(0);   // reactive, no waiting
 ```
+
+They are the root's own functions, so code that still takes the bus from the root shares the same
+bus.
 
 The root has to work with no Vue in the tree, so it can only look for Vue at runtime. It does so
 through a bare `import('vue')` that resolves under a dev server and **fails in a production
@@ -1101,8 +1104,7 @@ re-run. Every composable here suspends reactive tracking around its bus call. If
 **raw bus** inside an effect, wrap it:
 
 ```ts
-import { getCommandBus } from 'vapor-chamber';     // the bus comes from the root
-import { untracked } from 'vapor-chamber/vue';      // untracked() from the Vue entry
+import { getCommandBus, untracked } from 'vapor-chamber/vue';
 
 watchEffect(() => {
   // without untracked(), anything the HANDLER reads becomes a dependency of
@@ -1111,10 +1113,26 @@ watchEffect(() => {
 });
 ```
 
+On a page with no build step (a `<script>` tag or an import map), `untracked()` cannot suspend
+tracking: Vue's browser builds do not export what it needs. See
+[whitepaper 9.6](docs/whitepaper.md#96-blade--cdn-zero-build).
+
 </details>
 
 <details>
 <summary><b>Which entry to import from</b> - <code>/vapor</code>, <code>/vue</code>, or the package root, and what each one wires</summary>
+
+One entry per kind of app, measured on built apps of each kind (log s35.231). `/vue` and `/vapor`
+carry the bus too.
+
+| App | Import from | Build step |
+|---|---|---|
+| App that calls the library's Vapor API (`createVaporChamberApp`, `defineVaporComponent`, `defineVaporAsyncComponent`, `defineVaporCustomElement`, `getVaporInteropPlugin`) | `vapor-chamber/vapor` | Optional, drops the runtime lookup: `vaporChamberWire({ entry: 'vapor' })` on Vite, the define below elsewhere |
+| Any other Vue app, vDOM or Vapor, including one that uses only Vue's own Vapor APIs or `vapor-chamber/router/vapor` | `vapor-chamber/vue` | Optional, the same: `vaporChamberWire()` on Vite, the define elsewhere |
+| Server build (SSR) | `vapor-chamber/vue` | Optional: the define drops the runtime lookup from the server bundle |
+| App that imports only the root | the root | Needed on Vite: `vaporChamberWire()`. Other bundlers have none, so import from a subpath |
+| `<script>`-tag page | `VaporChamber.configureVue(Vue)` | None. `untracked()` is not available |
+| ESM page with an import map | `configureVue(Vue)` | None. `untracked()` cannot suspend tracking |
 
 **Import from `vapor-chamber/vue` in a Vue app.** The Gotcha above says why. The root can only
 look for Vue at runtime, and that lookup fails in a production bundle. So `untracked()` silently
@@ -1128,7 +1146,8 @@ in a page where DEV is on. That is a page served by Vite's dev server (measured 
 on Vite 8), or a test runner with a DOM. A production build drops it, from every chunk. A server never
 shows it: Node resolves that lookup in production too (measured), so the advice would be wrong there.
 
-**On Vue 3.6 with Vapor, import from `vapor-chamber/vapor` instead.** It is a superset of
+**When the app calls the library's Vapor API, import from `vapor-chamber/vapor` instead.** It needs
+Vue 3.6. It is a superset of
 `vapor-chamber/vue`, with the same composables and the same tracking fix. It also wires Vue's
 Vapor APIs statically. So there is no `configureVue()` call to write and no runtime probe to
 depend on:
@@ -1173,12 +1192,12 @@ import vue from '@vitejs/plugin-vue';
 import { vaporChamberWire } from 'vapor-chamber/vite';
 
 export default defineConfig({
-  plugins: [vue(), vaporChamberWire()], // { entry: 'vapor' } when the app compiles <script setup vapor>
+  plugins: [vue(), vaporChamberWire()], // { entry: 'vapor' } when the app calls the library's Vapor API
 });
 ```
 
-`'vapor'` is your call, not a guess. It wires the Vapor runtime into the bundle, which a vDOM-only
-3.6 app should not pay for.
+`'vapor'` is your call, not a guess. It wires Vue's Vapor app and component helpers into the bundle,
+which an app that does not call the library's Vapor API should not pay for.
 
 The redirect runs in builds only. The dev server resolves the runtime lookup by itself. A
 redirect there, over a pre-bundled install, would put two copies of the library in the page
@@ -1204,8 +1223,13 @@ new webpack.DefinePlugin({ __VC_WIRED_BUILD__: 'true' })
 Leave it out only for an app that imports the composables from the root and wires nothing: there
 the lookup is what finds Vue (`tests/root-probe-builds.test.ts`).
 
-The bus itself (`createCommandBus`, `getCommandBus`, plugins, transports) still comes from the
-package root. It works with no Vue in the tree, so it is not part of a Vue-wiring entry.
+A Vite app that imports from the subpath, with neither `vaporChamberWire()` nor the define, still
+ships the lookup as dead code: +2,589 B raw, +932 B brotli on a vDOM app (measured 2026-10-08, log
+s35.231). Either one removes it.
+
+Both entries also carry the bus itself (`createCommandBus`, `getCommandBus`, plugins, transports),
+so a Vue app imports one entry. An app with no Vue imports the bus from the package root, which
+works with no Vue in the tree.
 
 </details>
 
@@ -1333,7 +1357,7 @@ Minified, comment-free, brotli q=11. Always-current per-export table:
 on any regression past budget.
 
 The two that matter: the dispatch core is **<!-- vc:sizeCore -->4.7<!-- /vc:sizeCore --> KB** and the import-everything barrel is
-<!-- vc:sizeBarrel -->32.2<!-- /vc:sizeBarrel --> KB. The main entries, and why the numbers are
+<!-- vc:sizeBarrel -->32.3<!-- /vc:sizeBarrel --> KB. The main entries, and why the numbers are
 machine-stamped rather than retyped:
 
 <details>
@@ -1342,14 +1366,14 @@ machine-stamped rather than retyped:
 | Entry | brotli |
 |---|--:|
 | dispatch core (`createCommandBus`, tree-shaken) | **<!-- vc:sizeCore -->4.7<!-- /vc:sizeCore --> KB** |
-| `vapor-chamber` (main barrel, import-*everything*) | <!-- vc:sizeBarrel -->32.2<!-- /vc:sizeBarrel --> KB |
+| `vapor-chamber` (main barrel, import-*everything*) | <!-- vc:sizeBarrel -->32.3<!-- /vc:sizeBarrel --> KB |
 | `vapor-chamber/router` | <!-- vc:sizeRouter -->10.6<!-- /vc:sizeRouter --> KB |
 | `vapor-chamber/router/vdom` | <!-- vc:sizeRouterVdom -->0.7<!-- /vc:sizeRouterVdom --> KB |
 | `vapor-chamber/router/vapor` | <!-- vc:sizeRouterVapor -->0.7<!-- /vc:sizeRouterVapor --> KB |
 | `vapor-chamber/router/remote` | <!-- vc:sizeRouterRemote -->5.3<!-- /vc:sizeRouterRemote --> KB |
 | `vapor-chamber/router-fetch` | <!-- vc:sizeRouterFetch -->5.6<!-- /vc:sizeRouterFetch --> KB |
-| `vapor-chamber/vue` | <!-- vc:sizeVue -->8.6<!-- /vc:sizeVue --> KB |
-| `vapor-chamber/vapor` | <!-- vc:sizeVapor -->8.9<!-- /vc:sizeVapor --> KB |
+| `vapor-chamber/vue` (with the root's surface, import-*everything*) | <!-- vc:sizeVue -->32.3<!-- /vc:sizeVue --> KB |
+| `vapor-chamber/vapor` (the same) | <!-- vc:sizeVapor -->32.5<!-- /vc:sizeVapor --> KB |
 | `vapor-chamber/reactive` | <!-- vc:sizeReactive -->6.1<!-- /vc:sizeReactive --> KB |
 | `vapor-chamber/transports` | <!-- vc:sizeTransports -->5.8<!-- /vc:sizeTransports --> KB |
 | `vapor-chamber/outbox` | <!-- vc:sizeOutbox -->2.7<!-- /vc:sizeOutbox --> KB |
@@ -1358,6 +1382,9 @@ machine-stamped rather than retyped:
 | `vapor-chamber/store` | <!-- vc:sizeStore -->2.2<!-- /vc:sizeStore --> KB |
 
 **Rows are not additive** - every row includes the shared core, which your bundle carries once.
+The `/vue` and `/vapor` rows include the whole root they carry. An app pays only for what it
+imports: one import from `/vapor` builds `examples/vapor-sfc` to the same bytes as two (log
+s35.236).
 `vapor-chamber` is the barrel measured import-everything. Your bundler drops what you don't use.
 
 These figures are **machine-stamped** from [docs/BUNDLE-SIZES.md](./docs/BUNDLE-SIZES.md). The
@@ -1374,8 +1401,8 @@ Three `<script>`-tag drop-ins. Pick by audience, not feature checklist.
 | Variant | Audience | Min | Brotli | Gzip |
 |---|---|--:|--:|--:|
 | **core** | Sprinkled JS on server-rendered pages (Blade, Rails, Django, WordPress). You dispatch user actions to a backend over HTTP. | <!-- vc:sizeIifeCoreRaw -->32.4<!-- /vc:sizeIifeCoreRaw --> KB | <!-- vc:sizeIifeCore -->10.2<!-- /vc:sizeIifeCore --> KB | <!-- vc:sizeIifeCoreGzip -->11.2<!-- /vc:sizeIifeCoreGzip --> KB |
-| **elements** | Embeddable widgets (chat bubbles, checkout buttons, third-party drop-ins). You ship a `<vc-widget>` custom element. | <!-- vc:sizeIifeElementsRaw -->34.0<!-- /vc:sizeIifeElementsRaw --> KB | <!-- vc:sizeIifeElements -->10.6<!-- /vc:sizeIifeElements --> KB | <!-- vc:sizeIifeElementsGzip -->11.7<!-- /vc:sizeIifeElementsGzip --> KB |
-| **full** | SPAs that grew big enough to want everything (realtime, undo/redo, persistence, full Vapor surface). | <!-- vc:sizeIifeFullRaw -->46.7<!-- /vc:sizeIifeFullRaw --> KB | <!-- vc:sizeIifeFull -->14.6<!-- /vc:sizeIifeFull --> KB | <!-- vc:sizeIifeFullGzip -->16.1<!-- /vc:sizeIifeFullGzip --> KB |
+| **elements** | Embeddable widgets (chat bubbles, checkout buttons, third-party drop-ins). You ship a `<vc-widget>` custom element. | <!-- vc:sizeIifeElementsRaw -->34.0<!-- /vc:sizeIifeElementsRaw --> KB | <!-- vc:sizeIifeElements -->10.7<!-- /vc:sizeIifeElements --> KB | <!-- vc:sizeIifeElementsGzip -->11.7<!-- /vc:sizeIifeElementsGzip --> KB |
+| **full** | SPAs that grew big enough to want everything (realtime, undo/redo, persistence, full Vapor surface). | <!-- vc:sizeIifeFullRaw -->46.9<!-- /vc:sizeIifeFullRaw --> KB | <!-- vc:sizeIifeFull -->14.7<!-- /vc:sizeIifeFull --> KB | <!-- vc:sizeIifeFullGzip -->16.2<!-- /vc:sizeIifeFullGzip --> KB |
 
 <details>
 <summary><b>What's in each variant</b>, plus drop-in examples</summary>
@@ -1405,7 +1432,10 @@ Three `<script>`-tag drop-ins. Pick by audience, not feature checklist.
 ```html
 <!-- elements: register a custom-element widget in one call -->
 <script src=".../vapor-chamber-elements.iife.min.js"></script>
-<script>
+<script type="module">
+  // Needed: without Vue's Vapor build handed over, defineWidget returns false.
+  const Vue = await import('.../vue.runtime-with-vapor.esm-browser.prod.js');
+  VaporChamber.configureVue(Vue);
   VaporChamber.defineWidget('vc-cart', {
     props: { sku: String },
     // A Vapor setup() returns a BLOCK - real DOM nodes. There is no compiler
@@ -1491,8 +1521,8 @@ Everything else is optional and tree-shaken when unimported.
    form.ts, schema.ts, devtools.ts, directives.ts, vite-hmr.ts
 ```
 
-**Coverage:** <!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% statements, <!-- vc:covBranches -->100.0<!-- /vc:covBranches -->% branches, <!-- vc:covFunctions -->100.0<!-- /vc:covFunctions -->% functions, <!-- vc:covLines -->100.0<!-- /vc:covLines -->% lines across **<!-- vc:tests -->3497<!-- /vc:tests --> tests**
-(<!-- vc:testFiles -->316<!-- /vc:testFiles --> files). Per-file table:
+**Coverage:** <!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% statements, <!-- vc:covBranches -->100.0<!-- /vc:covBranches -->% branches, <!-- vc:covFunctions -->100.0<!-- /vc:covFunctions -->% functions, <!-- vc:covLines -->100.0<!-- /vc:covLines -->% lines across **<!-- vc:tests -->3572<!-- /vc:tests --> tests**
+(<!-- vc:testFiles -->326<!-- /vc:testFiles --> files). Per-file table:
 [docs/COVERAGE.md](docs/COVERAGE.md). Run `npm run test:coverage` for live numbers.
 
 ## Testing
@@ -1625,12 +1655,12 @@ on a Facts layer: `setupDevtools(bus, app, { facts: ['router*'] })`.
 
 | Composable | Description |
 |------------|-------------|
-| `useCommand()` | Vapor-safe: dispatch + register/on/emit + reactive loading/error, auto-cleanup |
-| `useSharedCommandState(options?)` | Aggregate `isAnyLoading` + `errors` ring buffer, **shared** across subscribers on the same bus. For toolbars, status bars, global spinners. `isLoading(action, target?)` answers "is THIS one in flight?" per `commandKey(action, target)`, bus-wide, as its own reactive flag - a reader re-runs only on its key |
+| `useCommand(options?)` | Vapor-safe: dispatch + register/on/emit + reactive loading/error, auto-cleanup |
+| `useSharedCommandState(options?)` | Aggregate `isAnyLoading` + `errors` ring buffer, **shared** across subscribers on the same bus. For toolbars, status bars, global spinners. `isLoading(action, target?)` answers "is THIS one in flight?" per `commandKey(action, target)`, bus-wide, as its own reactive flag - a reader re-runs only on its key. Counting starts at the bus's first `isLoading()` call and stops when its last holder leaves with nothing in flight. A dispatch already in flight when counting starts reads `false` |
 | `defineVaporCommand(action, handler, options?)` | Zero-overhead dispatch for hot paths |
-| `useCommandState(initial, handlers)` | State managed by commands |
+| `useCommandState(initial, handlers, options?)` | State managed by commands |
 | `useCommandHistory(options?)` | Reactive undo/redo |
-| `useCommandGroup(namespace)` | Namespace isolation - prefixes all calls in camelCase |
+| `useCommandGroup(namespace, options?)` | Namespace isolation - prefixes all calls in camelCase |
 | `useCommandError(options?)` | Reactive error boundary for failed dispatches |
 | `getCommandBus()` | Get the shared bus |
 | `untracked(fn)` | Run a **raw-bus** dispatch without its handler's reads becoming dependencies of the surrounding effect. The composables above already do this - you only need it when calling `getCommandBus()` directly from inside a `watchEffect` / `computed`. No-op without Vue. **Import from `vapor-chamber/vue`** in a Vue app: from the package root it degrades to a pass-through in a production build |
@@ -1640,6 +1670,8 @@ on a Facts layer: `setupDevtools(bus, app, { facts: ['router*'] })`.
 | `createVaporChamberApp(component, props?)` | Create a Vapor app instance (needs Vue 3.6+) |
 | `getVaporInteropPlugin()` | `vaporInteropPlugin` for mixed trees |
 | `setupDevtools(bus, app, { facts? })` | Connect bus to Vue DevTools (`vapor-chamber/devtools`) |
+
+Every composable above takes `bus` in its options, sync or async. Without it, it uses the shared bus.
 
 **Router** - see [docs/router.md](docs/router.md) for the full surface:
 `createRouter`, `useRouter`, `useRoute`, `useQueryParam`, `useRouteData`, `useRouteError`,
