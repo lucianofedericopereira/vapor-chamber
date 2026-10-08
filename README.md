@@ -43,7 +43,7 @@ so each action has one place to read and to test.
 - **Vue <!-- vc:vueAligned -->3.6.0-rc.10<!-- /vc:vueAligned --> aligned**: signals, `onScopeDispose`, `getCurrentScope`, alien-signals internals. Tracked per release in the [CHANGELOG](CHANGELOG.md)
 - **No runtime dependency**. `alien-signals` is an optional peer, installed only by apps that use the `vapor-chamber/alien-signals` connector. Unimported modules tree-shake to zero
 - **ESM-only**, plus three IIFE `<script>` drop-ins for no-bundler pages
-- **<!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% coverage on all four axes** - statements, branches, functions and lines, across **<!-- vc:tests -->3572<!-- /vc:tests --> tests** in <!-- vc:testFiles -->326<!-- /vc:testFiles --> files ([full table](docs/COVERAGE.md)). Every branch in the measured surface is taken by a test
+- **<!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% coverage on all four axes** - statements, branches, functions and lines, across **<!-- vc:tests -->3571<!-- /vc:tests --> tests** in <!-- vc:testFiles -->326<!-- /vc:testFiles --> files ([full table](docs/COVERAGE.md)). Every branch in the measured surface is taken by a test
 
 ## Contents
 
@@ -1402,7 +1402,7 @@ Three `<script>`-tag drop-ins. Pick by audience, not feature checklist.
 |---|---|--:|--:|--:|
 | **core** | Sprinkled JS on server-rendered pages (Blade, Rails, Django, WordPress). You dispatch user actions to a backend over HTTP. | <!-- vc:sizeIifeCoreRaw -->32.4<!-- /vc:sizeIifeCoreRaw --> KB | <!-- vc:sizeIifeCore -->10.2<!-- /vc:sizeIifeCore --> KB | <!-- vc:sizeIifeCoreGzip -->11.2<!-- /vc:sizeIifeCoreGzip --> KB |
 | **elements** | Embeddable widgets (chat bubbles, checkout buttons, third-party drop-ins). You ship a `<vc-widget>` custom element. | <!-- vc:sizeIifeElementsRaw -->34.0<!-- /vc:sizeIifeElementsRaw --> KB | <!-- vc:sizeIifeElements -->10.7<!-- /vc:sizeIifeElements --> KB | <!-- vc:sizeIifeElementsGzip -->11.7<!-- /vc:sizeIifeElementsGzip --> KB |
-| **full** | SPAs that grew big enough to want everything (realtime, undo/redo, persistence, full Vapor surface). | <!-- vc:sizeIifeFullRaw -->46.9<!-- /vc:sizeIifeFullRaw --> KB | <!-- vc:sizeIifeFull -->14.7<!-- /vc:sizeIifeFull --> KB | <!-- vc:sizeIifeFullGzip -->16.2<!-- /vc:sizeIifeFullGzip --> KB |
+| **full** | SPAs that grew big enough to want everything (realtime, undo/redo, persistence, full Vapor surface). | <!-- vc:sizeIifeFullRaw -->46.9<!-- /vc:sizeIifeFullRaw --> KB | <!-- vc:sizeIifeFull -->14.7<!-- /vc:sizeIifeFull --> KB | <!-- vc:sizeIifeFullGzip -->16.1<!-- /vc:sizeIifeFullGzip --> KB |
 
 <details>
 <summary><b>What's in each variant</b>, plus drop-in examples</summary>
@@ -1521,7 +1521,7 @@ Everything else is optional and tree-shaken when unimported.
    form.ts, schema.ts, devtools.ts, directives.ts, vite-hmr.ts
 ```
 
-**Coverage:** <!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% statements, <!-- vc:covBranches -->100.0<!-- /vc:covBranches -->% branches, <!-- vc:covFunctions -->100.0<!-- /vc:covFunctions -->% functions, <!-- vc:covLines -->100.0<!-- /vc:covLines -->% lines across **<!-- vc:tests -->3572<!-- /vc:tests --> tests**
+**Coverage:** <!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% statements, <!-- vc:covBranches -->100.0<!-- /vc:covBranches -->% branches, <!-- vc:covFunctions -->100.0<!-- /vc:covFunctions -->% functions, <!-- vc:covLines -->100.0<!-- /vc:covLines -->% lines across **<!-- vc:tests -->3571<!-- /vc:tests --> tests**
 (<!-- vc:testFiles -->326<!-- /vc:testFiles --> files). Per-file table:
 [docs/COVERAGE.md](docs/COVERAGE.md). Run `npm run test:coverage` for live numbers.
 
