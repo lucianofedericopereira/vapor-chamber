@@ -414,6 +414,11 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
             ring[(w[k] as number) + 2] = w[k + 2];
           }
           undone.push(cmd, ring[i + 1], ring[i + 2]);
+          // Bounded like the ring: a redo reads the newest undone steps, and
+          // no more than UNDO_RING of them can be undone in a row, so older
+          // ones can never be redone. Kept, they held two states per undo for
+          // the store's lifetime. On the undo path only.
+          if (undone.length > UNDO_RING * 3) undone.splice(0, 3);
           ring[i] = UNDONE;
           return (state.value = s);
         },

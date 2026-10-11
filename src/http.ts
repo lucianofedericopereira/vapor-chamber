@@ -1048,8 +1048,13 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
     // answer resolves for one and throws for the other.
     // tests/http-not-modified.test.ts. (`config.headers` is always the merged
     // object, the instance's defaults included.)
-    const dedupeKey = `${method}:${responseType}:${config.resolveNotModified ? '304:' : ''}${JSON.stringify(config.headers)}:${fullUrl}`;
-    const cacheKey = `${responseType}:${fullUrl}`;
+    // Encoded once for both keys below: two encodings per request was 1.30's.
+    const headersKey = JSON.stringify(config.headers);
+    const dedupeKey = `${method}:${responseType}:${config.resolveNotModified ? '304:' : ''}${headersKey}:${fullUrl}`;
+    // The cache holds the same answer the dedupe would share, so it keys by the
+    // same headers: one client whose Authorization or Accept-Language changed
+    // must not be served the earlier answer (tests/http-cache-headers.test.ts).
+    const cacheKey = `${responseType}:${headersKey}:${fullUrl}`;
 
     // Request deduplication for GET. A caller joins the read in flight, but its
     // signal stays its own: it cancels its promise, never another caller's.
@@ -1119,7 +1124,7 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
       // Cache successful GET responses, unless an invalidation of this URL
       // happened while it was on the wire: it is returned, not stored.
       if (ticket && cache.done(ticket) && response.ok) {
-        cache.set(cacheKey, response, cacheCfg.ttl ?? CACHE_DEFAULT_TTL, cacheCfg.staleTtl ?? 0);
+        cache.set(cacheKey, response, cacheCfg.ttl ?? CACHE_DEFAULT_TTL, cacheCfg.staleTtl ?? 0, fullUrl);
       }
       // A write that resolved invalidates its URL and the URIs its answer
       // names (invalidatedBy). Only a non-error answer gets here: the retry

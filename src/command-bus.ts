@@ -20,7 +20,7 @@
  */
 import { DEV } from './dev';
 import { dict } from './dict';
-import { MAX_TIMEOUT_MS, countOption } from './bounds';
+import { MAX_TIMEOUT_MS, countOption, isDelay } from './bounds';
 import { createSleeper } from './scheduler';
 import { onSettled } from './settled';
 import { _asLibrary, _isLibraryAction, _isLibraryRegister } from './library-names';
@@ -1223,15 +1223,41 @@ function isAsyncFn(fn: Function): boolean {
   return (fn as any)[Symbol.toStringTag] === 'AsyncFunction';
 }
 
+/** Per-object ids for targets JSON cannot serialize (a cycle). */
+const _identityKeys = new WeakMap<object, string>();
+let _identitySeq = 0;
+
+/** The action names already warned about (development only). */
+let _colonActions: Set<string> | undefined;
+function warnColonAction(action: string): void {
+  if (_isLibraryAction(action)) return;
+  _colonActions ??= new Set();
+  if (_colonActions.has(action)) return;
+  _colonActions.add(action);
+  console.warn(`[vapor-chamber] Action "${action}" holds ':', the separator of commandKey: ("a:b", "c") and ("a", "b:c") share a key, so idempotent, cache, serialize and supersede can collapse two different commands. Name actions without ':' (cartAdd, not cart:add).`);
+}
+
 /**
  * Stable string key for a (action, target) pair. Handles circular refs safely.
  * Useful for cache invalidation integration (e.g. TanStack Query).
+ *
+ * A target keys by its value: a primitive by its String() (so `1` and `'1'`
+ * share a key, by design - tests/isloading-keys.test.ts), an object by its
+ * canonical JSON. A target JSON cannot serialize no longer shares one fallback
+ * string with every other: a BigInt inside it is tagged, and a circular target
+ * keys by its identity (tests/commandkey-collisions.test.ts).
+ *
+ * An action name holding `:` can share a key with another action -
+ * ('a:b', 'c') and ('a', 'b:c') are both `a:b:c`. Escaping the name on every
+ * call measured 25-30% of a primitive key (docs/V8-RULES.md rule 3), so it is
+ * a naming rule instead, warned in development and folded out of production.
  */
 export function commandKey(action: string, target: any): string {
+  if (DEV && action.indexOf(':') !== -1) warnColonAction(action);
   // Fast path: primitives and null don't need serialization or key sorting
   if (target === null || target === undefined) return `${action}:${target}`;
   const t = typeof target;
-  if (t === 'string' || t === 'number' || t === 'boolean') return `${action}:${target}`;
+  if (t === 'string' || t === 'number' || t === 'boolean' || t === 'bigint') return `${action}:${target}`;
   // Object path: canonical, order-independent serialization. A function replacer
   // rebuilds every object with its keys in sorted order - at EVERY level - so
   // { b:2, a:1 } and { a:1, b:2 } produce the same key, while nested fields are
@@ -1240,6 +1266,7 @@ export function commandKey(action: string, target: any): string {
   let tkey: string;
   try {
     tkey = JSON.stringify(target, (_k, v) => {
+      if (typeof v === 'bigint') return { '\u0000bigint': String(v) };
       if (v && typeof v === 'object' && !Array.isArray(v)) {
         // Prototype-free, and this one is load-bearing rather than defensive.
         // On a `{}`, `sorted['__proto__'] = value` goes through the inherited
@@ -1256,7 +1283,14 @@ export function commandKey(action: string, target: any): string {
       }
       return v;
     });
-  } catch { tkey = String(target); }
+  } catch {
+    // A cycle: JSON.stringify throws on it. String(target) was
+    // '[object Object]' for every such target, so two different ones shared a
+    // key; each now keys by its own identity.
+    let id = _identityKeys.get(target);
+    if (id === undefined) _identityKeys.set(target, (id = `\u0000ref#${++_identitySeq}`));
+    tkey = id;
+  }
   return `${action}:${tkey}`;
 }
 
@@ -1271,7 +1305,7 @@ export function _targetKey(target: any): string {
   if (target === null || target === undefined) return String(target);
   const t = typeof target;
   if (t === 'string') return target;
-  if (t === 'number' || t === 'boolean') return String(target);
+  if (t === 'number' || t === 'boolean' || t === 'bigint') return String(target);
   return commandKey('', target).slice(1);
 }
 
@@ -2498,7 +2532,8 @@ function createRetrier(options: RetryOptions): Retrier {
         if (!eligible && open && attempt < bound) _heldBack(error, retryIn, cmd.action);
         return result;
       }
-      const wait = typeof retryIn === 'number' ? retryIn : Math.random() * baseDelay * 2 ** (attempt - 1);
+      // A NaN wait is no wait: it re-sent at once instead of backing off.
+      const wait = isDelay(retryIn) ? retryIn : Math.random() * baseDelay * 2 ** (attempt - 1);
       if (!(await waits.sleep(Math.min(Math.max(0, wait), maxDelay), cmd.signal))) return abortedResult(cmd.action, cmd.signal);
       result = await call();
     }

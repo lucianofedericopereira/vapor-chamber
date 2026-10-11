@@ -301,6 +301,9 @@ export function createFormBus<T extends Record<string, any>>(
 
   /** True from the synchronous entry of submit() until it settles - see submit(). */
   let submitInFlight = false;
+  /** Bumped by every reset: a submit still validating when it changes was
+   *  cancelled by it, so its results are dropped and onSubmit never runs. */
+  let resets = 0;
 
   /** Update isBusy whenever isSubmitting or isValidating changes */
   function updateBusy(): void {
@@ -340,6 +343,7 @@ export function createFormBus<T extends Record<string, any>>(
 
   // ---- formReset ---------------------------------------------------------
   offs.push(bus.register(ACTION_RESET, () => {
+    resets++;
     outside = {};
     values.value   = { ...initial };
     errors.value   = {};
@@ -428,6 +432,7 @@ export function createFormBus<T extends Record<string, any>>(
     // passed values that were never submitted, and values were submitted that
     // were never validated.
     const snapshot = { ...values.value } as T;
+    const generation = resets;
 
     // Run all rules - awaits async validators too
     // Set isValidating so the UI can show loading state during async validation.
@@ -438,6 +443,10 @@ export function createFormBus<T extends Record<string, any>>(
       isValidating.value = true;
       updateBusy();
       const errs = await runRulesAsync(rules, snapshot);
+      // A reset while the rules ran discarded the snapshot they judged:
+      // writing their verdict would show errors for values the form no longer
+      // holds, and submitting would send them. The reset cancels this submit.
+      if (generation !== resets) return false;
       errors.value = errs;
       isValid.value = Object.keys(errs).length === 0;
     } finally {

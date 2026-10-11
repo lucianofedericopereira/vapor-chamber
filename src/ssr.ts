@@ -18,15 +18,15 @@
  * other's dispatches (tests/ssr-per-request-bus.test.ts).
  *
  * The HTTP client has the same rule: its cache and in-flight dedupe map live
- * in `createHttpClient()`'s closure, and the cache key has no auth dimension,
- * so **create it per request** too. A client created once at module scope and
+ * in `createHttpClient()`'s closure, and while the cache key holds the
+ * request's headers it has no cookie dimension, so **create it per request** too. A client created once at module scope and
  * shared across renders lets user A's authenticated GET answer user B's.
  *
  * @example Server entry, per request
  * import { createSSRApp } from 'vue';
  * import { renderToString } from 'vue/server-renderer';
  * import { createCommandBus } from 'vapor-chamber';
- * import { createSSRPlugin } from 'vapor-chamber/ssr';
+ * import { createSSRPlugin, serializeForScript } from 'vapor-chamber/ssr';
  *
  * export async function render(App) {
  *   const bus = createCommandBus();
@@ -37,7 +37,8 @@
  *   const html = await renderToString(app);
  *   return { html, commands: ssr.dehydrate() };
  * }
- * // Embed: <script>window.__VAPOR_COMMANDS__ = ${JSON.stringify(commands)}</script>
+ * // Embed: <script>window.__VAPOR_COMMANDS__ = ${serializeForScript(commands)}</script>
+ * // (never JSON.stringify here: it leaves `</script>` in user text intact)
  *
  * @example Client entry
  * import { getCommandBus } from 'vapor-chamber';
@@ -53,6 +54,24 @@ import type { Command, CommandResult, Plugin, BaseBus } from './command-bus';
 import { _errResult, _failures } from './command-bus';
 import { onSettled } from './settled';
 import { countOption } from './bounds';
+
+/** What a <script> element, or an engine older than ES2019, would read in JSON text. */
+const SCRIPT_UNSAFE = /[<>&\u2028\u2029]/g;
+const SCRIPT_ESCAPES: Record<string, string> = { '<': '\\u003c', '>': '\\u003e', '&': '\\u0026', '\u2028': '\\u2028', '\u2029': '\\u2029' };
+
+/**
+ * JSON for a `<script>` element: `JSON.stringify` with `<`, `>`, `&`, U+2028
+ * and U+2029 written as `\u` escapes. Still JSON, and it parses to the same
+ * value, but a string holding `</script>` cannot close the element it is
+ * embedded in. Use it wherever dehydrated commands - which carry targets and
+ * payloads, and so user text - go into the page.
+ *
+ * @example
+ * `<script>window.__VAPOR_COMMANDS__ = ${serializeForScript(ssr.dehydrate())}</script>`
+ */
+export function serializeForScript(value: unknown): string {
+  return JSON.stringify(value).replace(SCRIPT_UNSAFE, (c) => SCRIPT_ESCAPES[c] as string);
+}
 
 /** rehydrate()'s own refusals; the plugin's are `ssr` too (its id). */
 const ssrFail = _failures('ssr');

@@ -72,3 +72,15 @@ export function countOption(value: unknown, fallback: number, min = 0, max = Num
   const n = Number(value);
   return Number.isNaN(n) ? fallback : Math.min(max, Math.max(min, Math.trunc(n)));
 }
+
+/**
+ * True for a wait a timer can keep: a number from 0 to MAX_TIMEOUT_MS. The
+ * rule every reader of a declared `retryIn` applies (the async bus's retry,
+ * the outbox, pollWith), so the wait is checked where it is read, whoever
+ * declared it. `typeof === 'number'` let NaN and Infinity through: a timer
+ * fires at once on both, and the outbox re-flushed in a loop on either
+ * (tests/retry-in-unusable.test.ts).
+ */
+export function isDelay(value: unknown): value is number {
+  return typeof value === 'number' && value >= 0 && value <= MAX_TIMEOUT_MS;
+}

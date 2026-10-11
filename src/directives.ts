@@ -391,15 +391,18 @@ function buildHandler(el: Element, state: DirectiveState): (event: Event) => voi
     const payload = state.payload ?? parseJson((el as HTMLElement).dataset?.vcPayload);
     const target = state.target ?? parseJson((el as HTMLElement).dataset?.vcTarget) ?? {};
 
-    // Apply optimistic update if provided
     let rollback: (() => void) | null = null;
-    if (state.optimisticFn) {
-      const cmd: Command = { action: state.action, target, payload };
-      rollback = state.optimisticFn(cmd) ?? null;
-    }
-
     let resolved: { ok: boolean; error?: Error; value?: any };
     try {
+      // Apply optimistic update if provided. Inside the `try`: one that throws
+      // is this press's failure, and the `finally` below still releases the
+      // control. Thrown before it, the control stayed busy for good
+      // (`vc-loading`, `aria-disabled`, every later press swallowed).
+      if (state.optimisticFn) {
+        const cmd: Command = { action: state.action, target, payload };
+        rollback = state.optimisticFn(cmd) ?? null;
+      }
+
       let result;
       try {
         result = bus.dispatch(state.action, target, payload);

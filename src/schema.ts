@@ -12,6 +12,7 @@ import { createCommandBus, createAsyncCommandBus, _errResult, _failures } from '
 import { GLYPH_COMMAND, GLYPH_OK, GLYPH_WARN } from './glyphs';
 import { onSettled } from './settled';
 import { DEV } from './dev';
+import { toolInputSchema, type ToolInputSchema } from './tool-schema';
 import type { CommandBus, AsyncCommandBus, Plugin, CommandResult, CommandBusOptions, AsyncCommandBusOptions, RetryPolicy, CommandMap, BusSeverity, Fail } from './command-bus';
 
 /** Failures of this module's functions that are not a plugin (synthesize). */
@@ -162,13 +163,7 @@ export function defineSchema<const S extends BusSchema>(schema: S): S {
 export type AnthropicTool = {
   name: string;
   description?: string;
-  input_schema: {
-    type: 'object';
-    properties: {
-      target?:  { type: 'object'; properties: Record<string, { type: string }> };
-      payload?: { type: 'object'; properties: Record<string, { type: string }> };
-    };
-  };
+  input_schema: ToolInputSchema;
 };
 
 export type OpenAITool = {
@@ -176,13 +171,7 @@ export type OpenAITool = {
   function: {
     name: string;
     description?: string;
-    parameters: {
-      type: 'object';
-      properties: {
-        target?:  { type: 'object'; properties: Record<string, { type: string }> };
-        payload?: { type: 'object'; properties: Record<string, { type: string }> };
-      };
-    };
+    parameters: ToolInputSchema;
   };
 };
 
@@ -213,21 +202,6 @@ function normalizeSchema(schema: BusSchema): BusSchema {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-// Required, not optional: both call sites below are inside `if (def.target)` /
-// `if (def.payload)`, so an optional `fields?` would need a `!fields` guard
-// nothing could reach. Typechecked, not assumed - an unguarded caller fails to
-// compile rather than silently returning {}.
-function toProps(fields: FieldMap): Record<string, { type: string }> {
-  return Object.fromEntries(Object.entries(fields).map(([k, v]) => [k, { type: v }]));
-}
-
-function buildInputProperties(def: ActionSchema) {
-  const props: AnthropicTool['input_schema']['properties'] = {};
-  if (def.target)  props.target  = { type: 'object', properties: toProps(def.target) };
-  if (def.payload) props.payload = { type: 'object', properties: toProps(def.payload) };
-  return props;
-}
 
 // Pre-extracted [field, expectedType] pairs ('any' filtered out at compile).
 type CompiledChecks = Array<readonly [string, string]>;
@@ -285,7 +259,7 @@ export function toAnthropicTools(schema: BusSchema): AnthropicTool[] {
   return Object.entries(schema).map(([name, def]) => ({
     name,
     description: def.description,
-    input_schema: { type: 'object', properties: buildInputProperties(def) },
+    input_schema: toolInputSchema(def),
   }));
 }
 
@@ -295,7 +269,7 @@ export function toOpenAITools(schema: BusSchema): OpenAITool[] {
     function: {
       name,
       description: def.description,
-      parameters: { type: 'object', properties: buildInputProperties(def) },
+      parameters: toolInputSchema(def),
     },
   }));
 }
@@ -492,10 +466,16 @@ export type ToolCallInput = {
   input?: { target?: Record<string, any>; payload?: Record<string, any> } & Record<string, any>;
 };
 
-function dispatchToolCall(bus: CommandBus | AsyncCommandBus, toolUse: ToolCallInput): any {
+function dispatchToolCall(bus: CommandBus | AsyncCommandBus, schema: BusSchema, toolUse: ToolCallInput): any {
   const { name, input = {} } = toolUse;
   const { target = {}, payload } = input;
-  return (bus as CommandBus).dispatch(name, target, payload);
+  // A tool call that leaves out the payload its action declares is checked as
+  // an empty one, so the validator names the missing fields, as it does for
+  // a left-out target. Undefined, it skipped validation (an absent payload is
+  // app code's choice on dispatch()) and reached the handler as undefined;
+  // a model's input is not app code. tests/tool-call-payload.test.ts.
+  const declared = Object.hasOwn(schema, name) ? schema[name]!.payload : undefined;
+  return (bus as CommandBus).dispatch(name, target, payload === undefined && declared ? {} : payload);
 }
 
 // ---------------------------------------------------------------------------
@@ -567,7 +547,7 @@ export function createAsyncSchemaCommandBus<S extends BusSchema>(
     synthesize:   (text: string, opts?: SynthesizeOptions) => synthesize(normalized, bus as unknown as AsyncCommandBus, text, opts),
     getSchema:    () => normalized,
     describe:     () => describeSchema(normalized),
-    fromToolCall: (toolUse: ToolCallInput) => dispatchToolCall(bus as unknown as AsyncCommandBus, toolUse),
+    fromToolCall: (toolUse: ToolCallInput) => dispatchToolCall(bus as unknown as AsyncCommandBus, normalized, toolUse),
   }) as AsyncSchemaCommandBus<InferMap<S>>;
 }
 
@@ -606,7 +586,7 @@ export function createSchemaCommandBus<S extends BusSchema>(
     synthesize:   (text: string, opts?: SynthesizeOptions) => synthesize(normalized, bus as CommandBus, text, opts),
     getSchema:    () => normalized,
     describe:     () => describeSchema(normalized),
-    fromToolCall: (toolUse: ToolCallInput) => dispatchToolCall(bus as CommandBus, toolUse),
+    fromToolCall: (toolUse: ToolCallInput) => dispatchToolCall(bus as CommandBus, normalized, toolUse),
   }) as SchemaCommandBus<InferMap<S>>;
 }
 

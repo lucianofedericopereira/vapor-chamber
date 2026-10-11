@@ -768,7 +768,32 @@ export function tryKeepAliveHooks(onPause: () => void, onResume: () => void): vo
 // NOT used by chamber-vapor.ts: `useVaporAsyncCommand` hand-rolls its own
 // wrapper and says why at its own site (~1.2x leaner than this .then-chain,
 // measured, on a path whose entire point is to allocate nothing).
+//
+// Overlapping dispatches through one composable: `loading` is true while ANY
+// is in flight, written on 0 <-> 1 of `n` (the first to settle cleared it while
+// another still ran), and `onSuccess` (useCommandQuery's `data`) takes only
+// the LATEST dispatch's answer, by `seq` (an older one landing last overwrote
+// it). `lastError` stays the last failure to arrive: keeping only the latest
+// dispatch's would hide an older one's failure. tests/composable-overlap.test.ts.
+//
+// The counts are one record per composable, both fields set at creation
+// (docs/V8-RULES.md 1-2), made at its FIRST dispatch, not when it is created.
+// Measured (`npm run ab`, base 1.29 vs these builds, K 10, n and 4n):
+// - the record made with the composable: useCommand creation +5.7 ns, a
+//   component's mix +13.6 ns, counted slower;
+// - made lazily from `let counts = null`: creation still +2.8 / +3.3 ns at both
+//   lengths, counted slower. The initializer is 6 bytes of useCommand's
+//   bytecode (184 -> 190), the only change on that path;
+// - from `var counts;` with no initializer: a context slot starts undefined,
+//   so useCommand's bytecode is the 184 bytes it was, and creation reads no
+//   difference (+0.6 / +0.7%, CI includes 1). Dispatch reads -4.5 / -6.2 ns.
+// So the slot is a `var` on purpose: an initializer here is measured cost.
+// A WeakMap keyed by `loading` instead kept creation at base but cost every
+// dispatch +4.7 / +5.9 ns.
 // ---------------------------------------------------------------------------
+
+/** @internal A composable's in-flight count and its latest dispatch. */
+export type DispatchCounts = { n: number; seq: number };
 
 /** @internal */
 export function runDispatch(
@@ -779,16 +804,18 @@ export function runDispatch(
   payload: unknown,
   loading: Signal<boolean>,
   lastError: Signal<Error | null>,
+  st: DispatchCounts,
   onSuccess?: (value: any) => void,
 ): CommandResult | Promise<CommandResult> {
   let result: any;
+  const mine = ++st.seq;
   try {
     // Both opening writes are INSIDE the try. A synchronous subscriber can
     // throw out of a signal write; outside the try that left `loading` true
     // with the error escaping `dispatch`. Here it is a failed result like any
     // other, and the handler does not run
     // (tests/rundispatch-throwing-subscriber.test.ts).
-    loading.value = true;
+    if (st.n++ === 0) loading.value = true;
     lastError.value = null;
     // A dispatch is an action, not a read. Without this, every reactive value
     // the HANDLER touches becomes a dependency of whatever effect called the
@@ -807,7 +834,7 @@ export function runDispatch(
       }
     }
   } catch (e) {
-    loading.value = false;
+    if (--st.n === 0) loading.value = false;
     const error = e as Error;
     lastError.value = error;
     // An async bus never throws here, a subscriber does. Its caller is typed
@@ -819,17 +846,17 @@ export function runDispatch(
   if (result && typeof result.then === 'function') {
     return (result as Promise<CommandResult>).then(
       (r) => {
-        loading.value = false;
-        if (r.ok) onSuccess?.(r.value);
-        else lastError.value = r.error ?? null;
+        if (--st.n === 0) loading.value = false;
+        if (!r.ok) lastError.value = r.error ?? null;
+        else if (mine === st.seq) onSuccess?.(r.value);
         return r;
       },
-      (e: Error) => { loading.value = false; lastError.value = e; return _errResult(e); },
+      (e: Error) => { if (--st.n === 0) loading.value = false; lastError.value = e; return _errResult(e); },
     );
   }
-  loading.value = false;
-  if (result.ok) onSuccess?.(result.value);
-  else lastError.value = result.error ?? null;
+  if (--st.n === 0) loading.value = false;
+  if (!result.ok) lastError.value = result.error ?? null;
+  else if (mine === st.seq) onSuccess?.(result.value);
   return result;
 }
 
@@ -860,6 +887,8 @@ export function useCommand<B extends BaseBus = CommandBus>(options?: BusOption<B
   const bus = resolveBus(options?.bus);
   const loading = signal(false);
   const lastError = signal<Error | null>(null);
+  // A `var` with no initializer: see runDispatch (no bytecode on creation).
+  var counts: DispatchCounts | undefined;
   const listeners: Array<() => void> = [];
   const registered: Array<{ action: string; handler: Handler; opts?: RegisterOptions; off: (() => void) | null }> = [];
 
@@ -868,7 +897,7 @@ export function useCommand<B extends BaseBus = CommandBus>(options?: BusOption<B
     target: TargetOf<SharedCommandMap, A>,
     payload?: PayloadOf<SharedCommandMap, A>,
   ): ResultOn<B, CommandResult<ResultOf<SharedCommandMap, A>>> {
-    return runDispatch(bus, false, action, target, payload, loading, lastError) as ResultOn<B, CommandResult<ResultOf<SharedCommandMap, A>>>;
+    return runDispatch(bus, false, action, target, payload, loading, lastError, (counts ??= { n: 0, seq: 0 })) as ResultOn<B, CommandResult<ResultOf<SharedCommandMap, A>>>;
   }
 
   function register<A extends keyof SharedCommandMap & string>(
@@ -1515,10 +1544,12 @@ export function useCommandQuery<B extends BaseBus = CommandBus>(options?: BusOpt
   const data = signal<any>(null);
   const loading = signal(false);
   const lastError = signal<Error | null>(null);
+  // A `var` with no initializer: see runDispatch (no bytecode on creation).
+  var counts: DispatchCounts | undefined;
   const onData = (value: any): void => { data.value = value; };
 
   function query(action: string, target: any, payload?: any): ResultOn<B> {
-    return runDispatch(bus, true, action, target, payload, loading, lastError, onData) as ResultOn<B>;
+    return runDispatch(bus, true, action, target, payload, loading, lastError, (counts ??= { n: 0, seq: 0 }), onData) as ResultOn<B>;
   }
 
   return { query, data, loading, lastError };

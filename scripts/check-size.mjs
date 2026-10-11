@@ -657,14 +657,30 @@ const BUDGETS = {
   // full only: raw -10, brotli +57. Each call removed alone is -5/-1 and
   // -5/-2. Both together, the minifier renames `_vueDeepRefFn` to `$`, and
   // the renaming, not code, moves brotli. Brotli raised to measured.
-  'vapor-chamber.iife.min.js':          { rawMax: 48_051, brotliMax: 15_069 },
+  // Then (1.30) commandKey keeps a BigInt or a circular target apart: the
+  // BigInt tag in the key's replacer and the identity fallback for a cycle,
+  // one piece. raw/brotli full +155/+5, core +141/+65, elements +141/+68. The
+  // ':' naming warning is DEV and folds out. Raised to measured.
+  // Then (1.30) a failed half-open probe reopens circuitBreaker, and
+  // rateLimit({ max: 0 }) declares no NaN retryIn: full only, +34/+10 (core
+  // and elements do not carry either plugin). Raised to measured.
+  // Then (1.30) the ws bridge encodes an envelope before queueing it,
+  // and a second SSE install() closes the first stream: full only, +14/+7.
+  // Raised to measured.
+  // Then (1.30) one rule for a declared retryIn (isDelay) in the bus's
+  // retry: +50 raw in all three; brotli full +77, core +14, elements +8.
+  // Raised to measured.
+  // Then (1.30) composables count overlapping dispatches (the counts made at
+  // the first dispatch) and keep the latest query's data; toTools builds its
+  // schemas with the MCP generator: full only, +151/+1. Set to measured.
+  'vapor-chamber.iife.min.js':          { rawMax: 48_445, brotliMax: 15_169 },
   // Then (log s35.107) BusError and its vocabulary moved to src/failure.ts so
   // the router raises the core's failure without importing the bus. A pure
   // move: raw bytes identical in all three IIFEs once the import sits where
   // the code was; brotli moves with the arrangement: full -8 (budget kept),
   // core +5, elements +7. Owner: raised to measured ("size no issue").
-  'vapor-chamber-core.iife.min.js':     { rawMax: 33_202, brotliMax: 10_429 },
-  'vapor-chamber-elements.iife.min.js': { rawMax: 34_854, brotliMax: 10_921 },
+  'vapor-chamber-core.iife.min.js':     { rawMax: 33_393, brotliMax: 10_508 },
+  'vapor-chamber-elements.iife.min.js': { rawMax: 35_045, brotliMax: 10_997 },
 };
 
 const BR_OPTS = { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } };

@@ -1040,7 +1040,7 @@ guards and no remount, refetching only the loaders whose keys changed.
 The core subpath binds no vDOM API, and each outlet is a subpath of its own. A
 pure-Vapor app renders routes through `vapor-chamber/router/vapor`, built from
 Vapor's own helpers, and needs no `vaporInteropPlugin`. Its startup chunk is
-<!-- vc:outletSaving -->22.06<!-- /vc:outletSaving --> KB brotli smaller than the same app through the vDOM outlet
+<!-- vc:outletSaving -->22.08<!-- /vc:outletSaving --> KB brotli smaller than the same app through the vDOM outlet
 plus interop (`tests/vapor/vapor-outlet-size.test.ts`). A non-Vapor route
 component throws a coded `router:invalid:component` there rather than silently
 re-installing interop, and blade rows still need the vDOM outlet. The full
@@ -1878,7 +1878,7 @@ src/
   iife-elements.ts  - CDN entry, elements variant
   index.ts          - public ESM barrel
 
-tests/                           (<!-- vc:testFiles -->326<!-- /vc:testFiles --> files, <!-- vc:tests -->3571<!-- /vc:tests --> tests)
+tests/                           (<!-- vc:testFiles -->349<!-- /vc:testFiles --> files, <!-- vc:tests -->3658<!-- /vc:tests --> tests)
 ```
 
 Where the current numbers live, both generated and CI-verified fresh:
@@ -2957,10 +2957,10 @@ unchanged.
 cycle:
 
 - the saving stays >= <!-- vc:outletFloor -->15.0<!-- /vc:outletFloor --> KB
-  (today <!-- vc:outletSaving -->22.06<!-- /vc:outletSaving -->)
+  (today <!-- vc:outletSaving -->22.08<!-- /vc:outletSaving -->)
 - the Vapor outlet's own machinery over the router-without-outlet floor stays <=
   <!-- vc:outletOwnArmCeiling -->5.0<!-- /vc:outletOwnArmCeiling --> KB (today
-  <!-- vc:outletOwnArm -->4.75<!-- /vc:outletOwnArm -->)
+  <!-- vc:outletOwnArm -->4.71<!-- /vc:outletOwnArm -->)
 
 It is deliberately written to fail when a later RC erodes either. Growth in
 `DynamicFragment` or `SlotFragment` lands in the second, and that failure is a
@@ -4408,7 +4408,7 @@ src/
   iife-elements.ts  - CDN entry, elements variant
   index.ts          - public ESM barrel
 
-tests/                           (<!-- vc:testFiles -->326<!-- /vc:testFiles --> files, <!-- vc:tests -->3571<!-- /vc:tests --> tests)
+tests/                           (<!-- vc:testFiles -->349<!-- /vc:testFiles --> files, <!-- vc:tests -->3658<!-- /vc:tests --> tests)
 ```
 
 The per-file test inventory that used to sit here was removed rather than

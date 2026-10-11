@@ -47,12 +47,14 @@ describe('toAnthropicTools', () => {
     expect(tools[0].name).toBe('cartAdd');
     expect(tools[0].description).toBe('Add item to cart');
     expect(tools[0].input_schema.type).toBe('object');
+    // Typed fields are required, as busToMcpTools says them (tool-schema.ts).
     expect(tools[0].input_schema.properties.target).toEqual({
-      type: 'object', properties: { id: { type: 'number' } },
+      type: 'object', properties: { id: { type: 'number' } }, required: ['id'],
     });
     expect(tools[0].input_schema.properties.payload).toEqual({
-      type: 'object', properties: { qty: { type: 'number' } },
+      type: 'object', properties: { qty: { type: 'number' } }, required: ['qty'],
     });
+    expect(tools[0].input_schema.required).toEqual(['target', 'payload']);
   });
 
   it('keeps target and payload as separate nested objects', () => {

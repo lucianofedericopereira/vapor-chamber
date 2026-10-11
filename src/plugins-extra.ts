@@ -35,7 +35,7 @@ import { onSettled } from './settled';
 import { MAX_TIMEOUT_MS, countOption } from './bounds';
 import type { ActionScope, Command, CommandResult, Plugin, AsyncPlugin } from './command-bus';
 import type { ActionFilter } from './action-filter';
-import { commandKey, _isBug, _errResult, _isLibraryAction } from './command-bus';
+import { abortedResult, commandKey, _isBug, _errResult, _isLibraryAction } from './command-bus';
 import { freezeCached } from './freeze';
 import { createLanes } from './scheduler';
 
@@ -100,6 +100,16 @@ export function cache(options: CacheOptions = {}): Plugin & {
   // makes it work for any key shape.
   const byAction = new Map<string, Set<string>>();
 
+  // The reads in flight. An invalidation that lands while one runs marks its
+  // ticket stale, and a stale read answers its own caller but is not stored:
+  // its answer is from before the write the invalidation stands for. Held only
+  // while a read runs, so the set is bounded by the reads in flight. The HTTP
+  // client's cache closes the same window the same way (http-cache.ts, `read`).
+  const tickets = new Set<{ key: string; action: string; stale: boolean }>();
+  function markStale(match: (t: { key: string; action: string }) => boolean): void {
+    for (const t of tickets) if (match(t)) t.stale = true;
+  }
+
   // A `$` command takes the default key, which holds its `$` name, so a custom
   // key never lands it on an app's entry (log s35.182).
   function getKey(cmd: Command): string {
@@ -153,6 +163,8 @@ export function cache(options: CacheOptions = {}): Plugin & {
     }
 
     dropKey(k);
+    const ticket = { key: k, action: cmd.action, stale: false };
+    tickets.add(ticket);
 
     function store_(r: CommandResult): void {
       // Every later hit gets this exact object back - see freeze.ts.
@@ -163,10 +175,14 @@ export function cache(options: CacheOptions = {}): Plugin & {
 
     // Through `onSettled`: settle the result, store it if it succeeded, hand
     // it on - synchronously on the sync bus.
+    // next() does not throw: the runner turns a plugin's or a handler's throw
+    // into a result, so the ticket always leaves the set here.
     return onSettled(next(), (result) => {
+      tickets.delete(ticket);
       // A $ command (a reset, an undo) is a state change: never stored, so
-      // never answered from here (log s35.150).
-      if (result.ok && !_isLibraryAction(cmd.action)) store_(result);
+      // never answered from here (log s35.150). An overtaken read is not
+      // stored either (see `tickets`).
+      if (result.ok && !ticket.stale && !_isLibraryAction(cmd.action)) store_(result);
       return result;
     });
   };
@@ -176,7 +192,7 @@ export function cache(options: CacheOptions = {}): Plugin & {
     actions,
     actionFilter: options.actionFilter,
     // An undone command's answer is stale: its redo runs (log s35.181).
-    forget(cmd: Command): void { dropKey(getKey(cmd)); },
+    forget(cmd: Command): void { const k = getKey(cmd); dropKey(k); markStale((t) => t.key === k); },
     invalidate(action: string, target?: any): void {
       if (target !== undefined) {
         // Targeted invalidation needs the entry's exact key, and a custom
@@ -193,16 +209,19 @@ export function cache(options: CacheOptions = {}): Plugin & {
           }
           return;
         }
-        dropKey(commandKey(action, target));
+        const k = commandKey(action, target);
+        dropKey(k);
+        markStale((t) => t.key === k);
         return;
       }
+      markStale((t) => t.action === action);
       // Invalidate all entries for this action - index-driven, so it holds for
       // any key shape.
       const keys = byAction.get(action);
       if (!keys) return;
       for (const k of [...keys]) dropKey(k);
     },
-    clear(): void { store.clear(); byAction.clear(); },
+    clear(): void { store.clear(); byAction.clear(); markStale(() => true); },
     size(): number { return store.size; },
   });
 }
@@ -294,8 +313,10 @@ export function circuitBreaker(options: CircuitBreakerOptions = {}): Plugin & {
       // reads them all without importing the status table. Neither counts
       // nor resets the run of real failures. A backend's failure counts.
       // tests/circuit-breaker-cancel.test.ts.
+      // A failed half-open probe opens it again at once: left half-open,
+      // every later dispatch went through (tests/circuit-breaker-half-open-fail.test.ts).
       c.failCount++;
-      if (c.failCount >= threshold && c.state === 'closed') {
+      if (c.state === 'half-open' || (c.failCount >= threshold && c.state === 'closed')) {
         c.state = 'open';
         c.openedAt = Date.now();
         if (onOpen) onOpen(cmd.action, c.failCount);
@@ -370,6 +391,12 @@ export function rateLimit(options: RateLimitOptions = {}): Plugin {
 
     const activeCount = win.ts.length - win.head;
     if (activeCount >= max) {
+      // `max: 0` has no slot to free, so no wait to declare: a NaN `retryIn`
+      // read as one, and the outbox re-flushed with no wait, forever
+      // (tests/rate-limit-zero-retryin.test.ts).
+      if (activeCount === 0) {
+        return _errResult(fail('limited:action', `Rate limit for "${cmd.action}" is 0 per ${windowMs}ms.`, { action: cmd.action, context: { max, windowMs, currentCount: 0 } }));
+      }
       // The oldest dispatch in the window frees a slot when it leaves it.
       const retryIn = win.ts[win.head] + windowMs - now;
       return _errResult(fail('limited:action', `Rate limit exceeded for "${cmd.action}": ${max} per ${windowMs}ms. Retry in ${retryIn}ms.`, { action: cmd.action, context: { retryIn, max, windowMs, currentCount: activeCount } }));
@@ -666,7 +693,29 @@ export function idempotent(options: IdempotentOptions = {}): AsyncPlugin {
   const maxSize = countOption(rawMaxSize, 500);
   // key -> completed result (with timestamp); in-flight promises are in `inflight`.
   const done = new Map<string, { at: number; result: CommandResult }>();
-  const inflight = new Map<string, Promise<CommandResult>>();
+  // A key's run, shared by every caller holding it: `live` counts the holders
+  // with a signal still unaborted; one with no signal holds it until it lands.
+  type Share = { run: Promise<CommandResult>; ctrl: AbortController | null; live: number; held: boolean };
+  const inflight = new Map<string, Share>();
+
+  // The caller's own view of a shared run: its own abort settles it at once,
+  // and the run is cancelled only when no holder is left (the HTTP client's
+  // joined-GET rule, 1.29). tests/idempotent-own-abort.test.ts.
+  function hold(share: Share, cmd: Command): Promise<CommandResult> {
+    const signal = cmd.signal;
+    if (!signal) { share.held = true; return share.run; }
+    share.live++;
+    return new Promise<CommandResult>((resolve, reject) => {
+      const onAbort = (): void => {
+        resolve(abortedResult(cmd.action, signal));
+        if (--share.live === 0 && !share.held) share.ctrl?.abort(signal.reason);
+      };
+      if (signal.aborted) { onAbort(); return; }
+      signal.addEventListener('abort', onAbort, { once: true });
+      // After this caller's abort, resolve and reject are no-ops.
+      share.run.then(resolve, reject).finally(() => signal.removeEventListener('abort', onAbort));
+    });
+  }
 
   // A key names one request payload (Idempotency-Key draft-07: never reused
   // "with a different request payload"); with none, the released key. A `$`
@@ -683,7 +732,7 @@ export function idempotent(options: IdempotentOptions = {}): AsyncPlugin {
     if (stampMeta && cmd.meta) cmd.meta.idempotencyKey = k;
 
     const pending = inflight.get(k);
-    if (pending) return pending; // collapse concurrent duplicates
+    if (pending) return hold(pending, cmd); // collapse concurrent duplicates
 
     const cached = done.get(k);
     const now = Date.now();
@@ -696,6 +745,13 @@ export function idempotent(options: IdempotentOptions = {}): AsyncPlugin {
     // joined in flight, so a repeat runs (log s35.150, s35.182). Read once
     // here, on the miss path.
     const keep = !_isLibraryAction(cmd.action);
+    // The run gets a signal of its own, aborted only once every holder has
+    // aborted (see `hold`), so one caller cancelling never cancels another's.
+    // Only a caller with a signal needs one: a run started without a signal
+    // is held until it lands and never aborted, so it allocates none.
+    const own = cmd.signal;
+    const ctrl = keep && own ? new AbortController() : null;
+    if (ctrl !== null) cmd.signal = ctrl.signal;
     const run = Promise.resolve(next()).then(
       (result) => {
         inflight.delete(k);
@@ -725,8 +781,13 @@ export function idempotent(options: IdempotentOptions = {}): AsyncPlugin {
         throw err;
       },
     );
-    if (keep) inflight.set(k, run);
-    return run;
+    if (!keep || !own) {
+      if (keep) inflight.set(k, { run, ctrl, live: 0, held: true });
+      return run;
+    }
+    const share: Share = { run, ctrl, live: 0, held: false };
+    inflight.set(k, share);
+    return hold(share, { ...cmd, signal: own });
   };
   return Object.assign(plugin, {
     id: 'idempotent',

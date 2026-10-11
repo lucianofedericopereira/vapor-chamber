@@ -128,8 +128,14 @@ function escapeRegExp(value: string): string {
  *  match, as with the type's default pattern. */
 function castParam(value: string, type: ParamType | undefined): string | number | boolean | undefined {
   switch (type) {
-    case 'int':
-      return /^-?\d+$/.test(value) ? Number(value) : undefined;
+    case 'int': {
+      // An integer Number cannot hold exactly does not fit either: past 2^53
+      // it rounds to another id, and the loader would read another record
+      // (tests/router/int-param-safe.test.ts). Declare such a param `string`.
+      if (!/^-?\d+$/.test(value)) return undefined;
+      const n = Number(value);
+      return Number.isSafeInteger(n) ? n : undefined;
+    }
     case 'bool': {
       const flag = value.toLowerCase();
       return flag === '1' || flag === 'true' ? true : flag === '0' || flag === 'false' ? false : undefined;

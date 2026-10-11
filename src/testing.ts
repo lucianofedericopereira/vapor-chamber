@@ -387,7 +387,8 @@ export function createTestBus(opts: { passthroughHandlers?: boolean } = {}): Tes
     inspect: (): BusInspection => ({
       actions: Array.from(handlers.keys()),
       undoActions: Array.from(undoHandlers.keys()),
-      responderActions: [],
+      // Its own responders, as the real bus's inspect() lists them.
+      responderActions: Array.from(responders.keys()),
       pluginCount: plugins.length,
       pluginPriorities: plugins.slice().sort((a, b) => b.priority - a.priority).map(e => e.priority),
       plugins: _inspectPlugins(plugins),

@@ -85,7 +85,7 @@ createRouter<TName extends string = string>(options: RouterOptions) => Router<TN
 
 ### createRouteTable
 
-**Function** - [src/router/table.ts:142](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/table.ts#L142)
+**Function** - [src/router/table.ts:148](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/table.ts#L148)
 
 ```ts
 createRouteTable(rows: readonly RouteRecord[]) => RouteTable
@@ -126,7 +126,7 @@ URL templates depend only on the placeholders they mention. Override via
 
 ### encodeQueryParam
 
-**Function** - [src/router/url.ts:102](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/url.ts#L102)
+**Function** - [src/router/url.ts:103](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/url.ts#L103)
 
 ```ts
 encodeQueryParam(value: unknown, def: QueryParamDef) => string | string[] | null
@@ -190,7 +190,7 @@ Repeated keys collect into arrays. '+' decodes to space.
 
 ### pathActivity
 
-**Function** - [src/router/url.ts:126](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/url.ts#L126)
+**Function** - [src/router/url.ts:127](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/url.ts#L127)
 
 ```ts
 pathActivity(targetPath: string, currentPath: string) => { active: boolean; exact: boolean; }
@@ -251,7 +251,7 @@ payloads can localize titles per request.
 
 ### resolveQueryHistory
 
-**Function** - [src/router/url.ts:140](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/url.ts#L140)
+**Function** - [src/router/url.ts:141](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/url.ts#L141)
 
 ```ts
 resolveQueryHistory(key: string, def: QueryParamDef | undefined, override?: "push" | "replace") => "push" | "replace"

@@ -9,8 +9,10 @@
  * RFC 9457 problem ({ status, code, detail, errors? }), answered as
  * `application/problem+json`. A success is { state } (or { redirect }). The
  * wire contract is docs/plan-failures-and-contract.md 4.4. Laravel's own
- * ValidationException/AuthorizationException/ModelNotFoundException are
- * recognized by type; anything else that declares its own render() (any
+ * ValidationException/AuthorizationException/AuthenticationException/
+ * ModelNotFoundException and HTTP exceptions (`abort()`) are recognized by
+ * type, with the status Laravel's own handler would answer; anything else
+ * that declares its own render() (any
  * RFC 9457-shaped exception from a package or the host app) has its
  * status/detail read from there instead of collapsing onto a generic
  * 500 - the controller never needs to know a package-specific exception
@@ -35,8 +37,12 @@ use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Validation\ValidationException;
+use Illuminate\Auth\AuthenticationException;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
+use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 class VaporChamberController extends Controller
 {
@@ -143,7 +149,17 @@ class VaporChamberController extends Controller
         // every bridge sends it in the envelope's `meta`.
         // Replay the cached response for a key we've already processed so a
         // network retry can't double-write (e.g. duplicate orders).
-        $cacheKey = $idempotencyKey ? "vc:idem:{$command}:{$idempotencyKey}" : null;
+        //
+        // A key is unique per client, not across clients: the `idempotent()`
+        // plugin's default key is the command itself (action, target and
+        // payload), the same for two users adding the same product. So the
+        // key is scoped to who sent it - the user, else the session - or the
+        // second user's write never runs and is answered the first user's
+        // state. Hashed, so a key carrying a payload fits the cache and lock
+        // tables' 255-character key column (the `database` store, Laravel's
+        // default) and the payload is not stored as a key.
+        $slot = $idempotencyKey ? hash('sha256', $this->idempotencyScope($request, $user)."\0{$command}\0{$idempotencyKey}") : null;
+        $cacheKey = $slot ? "vc:idem:{$slot}" : null;
 
         // The cache alone does not make a key land once: nothing is stored
         // until the action SUCCEEDS, so a retry arriving while the first
@@ -153,7 +169,7 @@ class VaporChamberController extends Controller
         // that cannot get it is answered 409 with `Retry-After: 1`, so the
         // client's re-send comes back a second later for the one outcome. 30s
         // bounds a crashed holder.
-        $lock = $cacheKey ? Cache::lock("vc:idem:lock:{$command}:{$idempotencyKey}", 30) : null;
+        $lock = $slot ? Cache::lock("vc:idem:lock:{$slot}", 30) : null;
         if ($lock && !$lock->get()) {
             return $this->problem('A request with this Idempotency-Key is still running', 409, 'in_progress') + ['headers' => ['Retry-After' => '1']];
         }
@@ -182,11 +198,27 @@ class VaporChamberController extends Controller
             }
             return $result;
         } catch (ValidationException $e) {
-            return $this->problem($e->getMessage(), 422, 'validation_failed', $this->pointers($e->errors()));
+            // Its own status: 422 unless the action set one (`->status(409)`).
+            return $this->problem($e->getMessage(), $e->status, 'validation_failed', $this->pointers($e->errors()));
         } catch (AuthorizationException $e) {
-            return $this->problem($e->getMessage(), 403, 'forbidden');
+            // A policy's own status (`denyAsNotFound()`, `denyWithStatus()`),
+            // as Laravel's handler answers it: a 404 hides that the resource
+            // exists, so it says no more than a missing one does.
+            $status = $e->hasStatus() ? $e->status() : 403;
+            return $status === 404
+                ? $this->problem('Resource not found', 404, 'not_found')
+                : $this->problem($e->getMessage(), $status, $status === 403 ? 'forbidden' : $this->statusCode($status));
+        } catch (AuthenticationException $e) {
+            return $this->problem($e->getMessage(), 401, 'unauthenticated');
         } catch (ModelNotFoundException $e) {
             return $this->problem('Resource not found', 404, 'not_found');
+        } catch (HttpExceptionInterface $e) {
+            // `abort(404)`, `abort(429, ..., ['Retry-After' => 30])`: its
+            // status and headers, as Laravel's handler answers it, not a 500.
+            $status = $e->getStatusCode();
+            $headers = array_map(static fn (mixed $v): string => is_array($v) ? implode(', ', $v) : (string) $v, $e->getHeaders());
+            $result = $this->problem($e->getMessage() !== '' ? $e->getMessage() : (Response::$statusTexts[$status] ?? 'Error'), $status, $this->statusCode($status));
+            return $headers === [] ? $result : $result + ['headers' => $headers];
         } catch (\Throwable $e) {
             // Any exception that declares its own render() (a package's own
             // domain exception, or the host app's) gets its status/detail
@@ -251,6 +283,32 @@ class VaporChamberController extends Controller
         $key = is_array($meta) ? ($meta['idempotencyKey'] ?? null) : null;
 
         return is_string($key) && $key !== '' ? $key : null;
+    }
+
+    /**
+     * Who a key belongs to: the user, else the session, else the address a
+     * request with neither came from. Keys are unique per client
+     * (Idempotency-Key draft-07 2.2), so two clients sending the same key are
+     * two requests.
+     */
+    private function idempotencyScope(Request $request, mixed $user): string
+    {
+        if ($user instanceof Authenticatable) {
+            return 'user:'.$user::class.':'.$user->getAuthIdentifier();
+        }
+
+        return $request->hasSession() ? 'session:'.$request->session()->getId() : 'ip:'.$request->ip();
+    }
+
+    /**
+     * A problem `code` for an HTTP status with no domain code of its own: the
+     * status's reason phrase, snake_cased ('not_found', 'too_many_requests').
+     */
+    private function statusCode(int $status): string
+    {
+        $text = Response::$statusTexts[$status] ?? null;
+
+        return $text === null ? 'http_error' : trim(strtolower((string) preg_replace('/\W+/', '_', $text)), '_');
     }
 
     /**

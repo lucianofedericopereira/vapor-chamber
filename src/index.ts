@@ -291,6 +291,7 @@ export {
   createSSRPlugin,
   rehydrate,
   rehydrateAsync,
+  serializeForScript,
   type DehydratedCommand,
   type SSRPluginOptions,
   type SSRPlugin,

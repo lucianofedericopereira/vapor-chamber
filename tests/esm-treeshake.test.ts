@@ -408,7 +408,8 @@ describe.skipIf(!esbuild)('ESM tree-shake regression', () => {
       // Raised to measured for sync dispatch building its Command before the depth's try (s35.204): one piece, +5.
       // Raised to measured for a batched result's or a frame's own `headers`, their Retry-After read as a response's (s35.205): the reader +54, the single bridge passing its response's -3, each left out alone; total +51. The two-copies hint 0 (DEV), the route table not in this bundle.
       // Raised to measured for hooks removed during a dispatch by the listeners' rule (s35.209): 8_346 -> 8_374, +28.
-      expect(viteBr.length, `vite production brotli grew unexpectedly (${viteBr.length} bytes)`).toBeLessThan(8_375);
+      // Raised to measured for commandKey keeping a BigInt or a circular target apart (1.30): the BigInt tag and the identity fallback 8_374 -> 8_434, +60. The ':' naming warning 0 (DEV).
+      expect(viteBr.length, `vite production brotli grew unexpectedly (${viteBr.length} bytes)`).toBeLessThan(8_435);
 
       // Symbol budget. These are all chamber.ts-only - should NOT appear in a
       // consumer bundle that doesn't import Vue composables.

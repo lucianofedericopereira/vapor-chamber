@@ -17,7 +17,7 @@
 
 import type { ActionScope, AsyncCommandBus, AsyncPlugin, BusError, Command, CommandResult } from './command-bus';
 import type { ActionFilter } from './action-filter';
-import { countOption } from './bounds';
+import { countOption, isDelay } from './bounds';
 import { commandKey, failureCondition, _okResult, _errResult, ownerOf, _isLibraryAction } from './command-bus';
 import { _idbStore } from './idb';
 import { createSleeper } from './scheduler';
@@ -248,7 +248,7 @@ export type OutboxOptions = {
  * not a verdict (a 409 for a request still in progress).
  */
 function outboxIsRetryable(error: Error): boolean {
-  if (typeof (error as BusError).context?.retryIn === 'number') return true;
+  if (isDelay((error as BusError).context?.retryIn)) return true;
   const owner = ownerOf(error);
   const condition = failureCondition(error);
   if (owner !== undefined && owner !== 'remote') return condition !== 'invalid';
@@ -507,7 +507,7 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
       failed++;
       await saveQueue();
       const retryIn = (error as BusError).context?.retryIn;
-      if (autoFlush && typeof retryIn === 'number') {
+      if (autoFlush && isDelay(retryIn)) {
         backoff = Math.max(retryIn, Math.min(30_000, Math.max(backoff * 2, 1000)));
         waits.wakeAll();
         void waits.sleep(backoff).then((due) => { if (due) void flush(bus); });

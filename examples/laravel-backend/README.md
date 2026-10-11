@@ -32,10 +32,15 @@ panels, Reverb realtime, queued commands).
 - **Throw framework exceptions** for failure paths. The controller answers
   each as an RFC 9457 problem (`application/problem+json`, `{ status, code,
   detail, errors? }`):
-  - `ValidationException` -> 422, `code: 'validation_failed'`, the field
-    errors as `errors: [{ pointer: '/payload/<field>', detail }]`
-  - `AuthorizationException` -> 403, `code: 'forbidden'`
+  - `ValidationException` -> 422 (or the status it was given),
+    `code: 'validation_failed'`, the field errors as
+    `errors: [{ pointer: '/payload/<field>', detail }]`
+  - `AuthorizationException` -> 403, `code: 'forbidden'`; a policy's own
+    status instead (`denyAsNotFound()` -> 404, `code: 'not_found'`)
+  - `AuthenticationException` -> 401, `code: 'unauthenticated'`
   - `ModelNotFoundException` -> 404, `code: 'not_found'`
+  - `abort()` (an HTTP exception) -> its status and headers, the code its
+    reason phrase snake_cased (`abort(429)` -> `code: 'too_many_requests'`)
   - An exception with its own `render()` -> its status, `detail`, and `code`
   - Anything else -> 500, `code: 'internal_error'`, `detail: 'Internal error'`
     (and `report()`s the original)
@@ -55,8 +60,10 @@ the outbox replays with its record's key. The controller honors it with a
 short-lived cache (TTL 60s): a second POST with the same key replays the cached
 response instead of running the action again, so a re-send can't create a
 duplicate order. A re-send that arrives while the first is still running gets
-409 with `Retry-After: 1`, and the bus comes back for the finished answer. No
-setup is needed beyond a working Laravel cache store.
+409 with `Retry-After: 1`, and the bus comes back for the finished answer. A
+key belongs to whoever sent it - the user, else the session - so two users
+sending the same key (the plugin's default key is the command itself) each run
+their own. No setup is needed beyond a working Laravel cache store.
 
 ## Smoke test
 

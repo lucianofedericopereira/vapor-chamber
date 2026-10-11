@@ -15,7 +15,8 @@
  */
 import { type ActionScope, type AsyncPlugin, type BaseBus, type Command, type CommandResult, _errResult, _failures, _okResult } from './command-bus';
 import type { ActionFilter } from './action-filter';
-import { MAX_TIMEOUT_MS, countOption } from './bounds';
+import { MAX_TIMEOUT_MS, countOption, isDelay } from './bounds';
+import { retryClass } from './failure';
 import { type HttpClient, _parseRetryAfter, _remoteProblem, createHttpClient } from './http';
 
 export type PollWithOptions = {
@@ -66,7 +67,21 @@ export function pollWith(options: PollWithOptions): AsyncPlugin & { dispose(): v
         }
         await sleep(wait, ctrl.signal);
         if (ctrl.signal.aborted) return;
-        const r = await http.get<{ state?: unknown; problem?: Record<string, unknown> }>(url, { signal: ctrl.signal, dedupe: false });
+        let r: Awaited<ReturnType<typeof http.get<{ state?: unknown; problem?: Record<string, unknown> }>>>;
+        try {
+          r = await http.get<{ state?: unknown; problem?: Record<string, unknown> }>(url, { signal: ctrl.signal, dedupe: false });
+        } catch (e) {
+          // A passing failure of the monitor says nothing about the job,
+          // which is still running: a transient one by the one retry rule
+          // (failure.ts retryClass - a 429, a 503, a timeout the server
+          // answered) or any answer declaring a wait (Retry-After). Wait and
+          // poll again, within maxWait. Anything else ends the job as before,
+          // a lost reply included.
+          const declared = (e as { context?: { retryIn?: unknown } }).context?.retryIn;
+          if (ctrl.signal.aborted || (retryClass(e) !== 'transient' && !isDelay(declared))) throw e;
+          wait = isDelay(declared) ? declared : interval;
+          continue;
+        }
         if (r.status !== 202) {
           result = r.data?.problem ? _errResult(_remoteProblem(r.data.problem as never)) : _okResult(r.data?.state);
           break;

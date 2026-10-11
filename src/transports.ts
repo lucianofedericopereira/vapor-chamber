@@ -588,15 +588,15 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
   const connected = signal(false);
 
   const pending = new Map<string, PendingRequest>();
-  const queue: Array<{ id: string; envelope: CommandEnvelope; timeout: number; queuedAt: number }> = [];
+  const queue: Array<{ id: string; envelope: CommandEnvelope; data: string; timeout: number; queuedAt: number }> = [];
 
   function genId(): string {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   }
 
-  function send(id: string, envelope: CommandEnvelope, timeout: number): void {
+  function send(id: string, envelope: CommandEnvelope, data: string, timeout: number): void {
     if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify(envelope));
+      ws.send(data);
     } else {
       if (queue.length >= maxQueueSize) {
         const dropped = queue.shift()!;
@@ -610,7 +610,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
         pending.delete(dropped.id);
         req.resolve(_errResult(transportError('lost:command', `WS queue overflow: "${dropped.envelope.command}" dropped`, dropped.envelope.command, { dropped: dropped.envelope })));
       }
-      queue.push({ id, envelope, timeout, queuedAt: Date.now() });
+      queue.push({ id, envelope, data, timeout, queuedAt: Date.now() });
     }
   }
 
@@ -618,7 +618,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
     const items = queue.splice(0);
     const now = Date.now();
     for (let i = 0; i < items.length; i++) {
-      const { id, envelope, timeout, queuedAt } = items[i];
+      const { id, envelope, data, timeout, queuedAt } = items[i];
       const elapsed = now - queuedAt;
       if (elapsed >= timeout) {
         // Message expired while queued - reject it instead of sending stale
@@ -631,7 +631,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
         continue;
       }
       if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify(envelope));
+        ws.send(data);
       } else {
         // Socket closed mid-flush - re-queue the remainder so they either go
         // out on reconnect or settle via failAllPending/expiry, instead of
@@ -703,6 +703,13 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
     };
 
     ws.onclose = (event) => {
+      // A socket already replaced (`disconnect()` then `connect()`) closing
+      // late is not the bridge's close: the bridge's state is the new
+      // socket's. tests/ws-bridge-stale-close.test.ts.
+      if (ws !== null && ws !== socket) {
+        onDisconnect?.(event);
+        return;
+      }
       try {
         connected.value = false;
       } finally {
@@ -756,6 +763,13 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
 
     return new Promise<CommandResult>((resolve) => {
       const id = genId();
+      const envelope = envelopeOf(cmd, id);
+      // Encoded before anything is armed or queued: an envelope JSON cannot
+      // hold (a BigInt in the payload) fails this dispatch alone, as it did on
+      // an open socket. Encoded at flush time, its throw left the commands
+      // queued behind it unsent and skipped onConnect
+      // (tests/ws-bridge-unencodable-queued.test.ts).
+      const data = JSON.stringify(envelope);
       let abortHandler: (() => void) | null = null;
 
       // Naturally idempotent - no `settled` flag needed: the first call
@@ -800,7 +814,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
         cmd.signal.addEventListener('abort', abortHandler);
       }
 
-      send(id, envelopeOf(cmd, id), wsTimeout);
+      send(id, envelope, data, wsTimeout);
     });
   };
 
@@ -864,6 +878,9 @@ export function createSseBridge(options: SseBridgeOptions): {
 
   function install(bus: BaseBus): void {
     if (typeof EventSource === 'undefined') return;
+    // A second install replaces the stream: the first one, left open, was
+    // out of dispose()'s reach and kept delivering to its bus.
+    dispose();
     source = new EventSource(url, { withCredentials });
 
     source.onmessage = (event) => {

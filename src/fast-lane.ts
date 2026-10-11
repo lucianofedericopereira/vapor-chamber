@@ -109,6 +109,13 @@ export function createFastLane(options: FastLaneOptions = {}): FastLane {
   // Snapshot mode keeps the listeners themselves; live mode keeps LiveEntry
   // records, whose `off` an emit already walking them reads.
   const listeners = new Map<string, Array<FastListener<any> | LiveEntry>>();
+  // Snapshot mode: an unsubscribe reaches only the registration it came from.
+  // It finds its listener by function, so one kept from before remove()/clear()
+  // removed a later registration of the same function, and one call removed
+  // every copy. `epochs` counts remove()s per action and `clears` the clear()s
+  // since; an unsubscribe from an earlier one does nothing.
+  const epochs = new Map<string, number>();
+  let clears = 0;
 
   function compile<T, R>(action: string, handler: (data: T) => R): FastDispatcher<T, R> {
     handlers.set(action, handler as any);
@@ -128,6 +135,7 @@ export function createFastLane(options: FastLaneOptions = {}): FastLane {
   }
 
   function remove(action: string): void {
+    if (snapshot) epochs.set(action, (epochs.get(action) ?? 0) + 1);
     handlers.delete(action);
     markOff(listeners.get(action));
     listeners.delete(action);
@@ -143,12 +151,21 @@ export function createFastLane(options: FastLaneOptions = {}): FastLane {
     // that emit does not call it.
     if (snapshot) {
       bucket.push(listener);
+      const epoch = epochs.get(action) ?? 0;
+      const cleared = clears;
+      let done = false;
       return () => {
-        const b = listeners.get(action);
-        if (b === undefined) return;
-        const next = b.filter((l) => l !== listener);
-        if (next.length === 0) listeners.delete(action);
-        else if (next.length !== b.length) listeners.set(action, next);
+        if (done) return;
+        done = true;
+        if (cleared !== clears || (epochs.get(action) ?? 0) !== epoch) return;
+        // Present: in the same epoch every live unsubscribe still has its
+        // registration in the bucket (each removes one), as in live mode.
+        const b = listeners.get(action)!;
+        if (b.length === 1) { listeners.delete(action); return; }
+        const at = b.indexOf(listener);
+        const next = b.slice();
+        next.splice(at, 1);
+        listeners.set(action, next);
       };
     }
     const entry: LiveEntry = { fn: listener, off: false };
@@ -201,6 +218,8 @@ export function createFastLane(options: FastLaneOptions = {}): FastLane {
   }
 
   function clear(): void {
+    clears++;
+    epochs.clear();
     handlers.clear();
     for (const b of listeners.values()) markOff(b);
     listeners.clear();

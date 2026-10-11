@@ -280,6 +280,7 @@ export class StreamParser {
   /** Reset to initial state. */
   reset(): void {
     this.state = S_VALUE;
+    this.arrayOpened = false;
     this.isKey = false;
     this.hexIndex = 0;
     this.parents.length = 1;
@@ -310,6 +311,13 @@ export class StreamParser {
   }
 
   private handleValue(cp: number): void {
+    // `]` closes an array only directly after its `[`: an empty array. Once a
+    // member has started (or after a comma, `[1,]`) it is malformed JSON, as
+    // before. S_KEY's `}` is the same rule for an empty object.
+    if (this.arrayOpened) {
+      if (cp === CLOSE_BRACKET) { this.arrayOpened = false; this.closeArray(); return; }
+      if (!isWhitespace(cp)) this.arrayOpened = false;
+    }
     if (cp === OPEN_BRACE) { this.openObject(); return; }
     if (cp === OPEN_BRACKET) { this.openArray(); return; }
     if (cp === QUOTE) { this.state = S_STRING; this.isKey = false; return; }
@@ -406,6 +414,9 @@ export class StreamParser {
 
   private pendingKeywordValue: boolean | null = null;
 
+  /** True from an array's `[` until its first non-whitespace character. */
+  private arrayOpened = false;
+
   private handleKeyword(cp: number): void {
     if (cp !== this.keywordTarget.charCodeAt(this.keywordIndex)) {
       this.err(`Expected "${this.pendingKeywordValue === null ? 'null' : this.pendingKeywordValue}"`);
@@ -477,6 +488,7 @@ export class StreamParser {
     if (this.parents.length >= this.maxDepth) { this.err('Max depth exceeded'); return; }
     this.parents.push(PARENT_ARRAY);
     this.state = S_VALUE;
+    this.arrayOpened = true;
     this.arrayIndices.push(0);
     this.path.push(0);
     this.callbacks.onArrayStart?.(this.path);

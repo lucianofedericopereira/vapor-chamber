@@ -49,7 +49,7 @@ describe('runDispatch error arms', () => {
     const lastError = signal<Error | null>(null);
     const boom = new Error('rejected');
 
-    const result = await runDispatch(answering(Promise.reject(boom)), false, 'x', undefined, undefined, loading, lastError);
+    const result = await runDispatch(answering(Promise.reject(boom)), false, 'x', undefined, undefined, loading, lastError, { n: 0, seq: 0 });
 
     expect(result).toEqual({ ok: false, error: boom });
     expect(loading.value).toBe(false);
@@ -60,7 +60,7 @@ describe('runDispatch error arms', () => {
     const loading = signal(false);
     const lastError = signal<Error | null>(new Error('stale'));
 
-    await runDispatch(answering(Promise.resolve({ ok: false })), false, 'x', undefined, undefined, loading, lastError);
+    await runDispatch(answering(Promise.resolve({ ok: false })), false, 'x', undefined, undefined, loading, lastError, { n: 0, seq: 0 });
     expect(lastError.value).toBeNull();
   });
 
@@ -68,7 +68,7 @@ describe('runDispatch error arms', () => {
     const loading = signal(false);
     const lastError = signal<Error | null>(new Error('stale'));
 
-    const result = runDispatch(answering({ ok: false }), false, 'x', undefined, undefined, loading, lastError);
+    const result = runDispatch(answering({ ok: false }), false, 'x', undefined, undefined, loading, lastError, { n: 0, seq: 0 });
     expect((result as { ok: boolean }).ok).toBe(false);
     expect(lastError.value).toBeNull();
   });
@@ -94,8 +94,8 @@ describe('untracked IIFE guard', () => {
     const seen: unknown[] = [];
     const loading = signal(false);
     const lastError = signal<Error | null>(null);
-    runDispatch(bus, false, 'x', undefined, undefined, loading, lastError, (v) => seen.push(v));
-    runDispatch(bus, true, 'x', undefined, undefined, loading, lastError, (v) => seen.push(v));
+    runDispatch(bus, false, 'x', undefined, undefined, loading, lastError, { n: 0, seq: 0 }, (v) => seen.push(v));
+    runDispatch(bus, true, 'x', undefined, undefined, loading, lastError, { n: 0, seq: 0 }, (v) => seen.push(v));
     expect(seen).toEqual(['d', 'q']);
   });
 });

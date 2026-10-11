@@ -193,8 +193,11 @@ class VaporChamberController extends Controller
 
 Keep the controller a dispatcher with no logic of its own. Per-command
 behavior belongs in action classes. The example controller adds what this
-minimal one leaves out: the batch endpoint, `Idempotency-Key` replay, and the
-redirect, stores and 202 shapes below.
+minimal one leaves out: the batch endpoint, `Idempotency-Key` replay, the
+redirect, stores and 202 shapes below, and the status Laravel's own handler
+gives its other exceptions: `abort()` (with its headers, such as a 429's
+`Retry-After`), `AuthenticationException` (401), and a policy's own status
+(`denyAsNotFound()` answers 404).
 
 ### 3. Action classes
 
@@ -955,7 +958,10 @@ action against itself. Together they give exactly-once semantics on the client.
 
 The only backend contract has two parts. Honor `meta.idempotencyKey`: persist
 the key with its result, and return the stored result on a repeat. And never
-run the same key twice at once.
+run the same key twice at once. A key belongs to the client that sent it: the
+plugin's default key is the command itself, the same for two users adding the
+same product, so the example scopes it to the user (else the session) before
+it reads the cache.
 
 A cache alone cannot guarantee the second part. It stores the result only after
 the action succeeds. A retry can arrive while the first attempt is still
@@ -967,7 +973,10 @@ on the key before the cache read and holds it for the whole run. From
 abridged:
 
 ```php
-        $cacheKey = $idempotencyKey ? "vc:idem:{$command}:{$idempotencyKey}" : null;
+        // Scoped to who sent it (the user, else the session) and hashed, so
+        // it fits the cache table's 255-character key column.
+        $slot = $idempotencyKey ? hash('sha256', $this->idempotencyScope($request, $user)."\0{$command}\0{$idempotencyKey}") : null;
+        $cacheKey = $slot ? "vc:idem:{$slot}" : null;
 
         // The cache alone does not make a key land once: nothing is stored
         // until the action SUCCEEDS, so a retry arriving while the first
@@ -977,7 +986,7 @@ abridged:
         // that cannot get it is answered 409 with `Retry-After: 1`, so the
         // client's re-send comes back a second later for the one outcome. 30s
         // bounds a crashed holder.
-        $lock = $cacheKey ? Cache::lock("vc:idem:lock:{$command}:{$idempotencyKey}", 30) : null;
+        $lock = $slot ? Cache::lock("vc:idem:lock:{$slot}", 30) : null;
         if ($lock && !$lock->get()) {
             return $this->problem('A request with this Idempotency-Key is still running', 409, 'in_progress') + ['headers' => ['Retry-After' => '1']];
         }

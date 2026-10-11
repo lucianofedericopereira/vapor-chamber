@@ -56,7 +56,9 @@ describe('tool mapping with a partial action', () => {
     expect(tool!.input_schema.properties.payload).toEqual({
       type: 'object',
       properties: { qty: { type: 'number' } },
+      required: ['qty'],
     });
+    expect(tool!.input_schema.required).toEqual(['payload']);
   });
 
   it('gives an empty properties object for an action with no payload', () => {

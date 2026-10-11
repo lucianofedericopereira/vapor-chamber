@@ -33,7 +33,8 @@ import { countOption } from './bounds';
 import { BusError, _withOrigin, _errResult } from './command-bus';
 import type { CommandResult } from './command-bus';
 import type { ActionFilter } from './action-filter';
-import type { ActionAnnotations, ActionSchema, BusSchema, FieldMap } from './schema';
+import type { ActionAnnotations, ActionSchema, BusSchema } from './schema';
+import { toolInputSchema } from './tool-schema';
 
 // ---------------------------------------------------------------------------
 // MCP tool mapping
@@ -52,41 +53,10 @@ export type McpTool = {
   };
 };
 
-/** JSON Schema property map for a FieldMap ('any' -> no type constraint). */
-function fieldsToJsonProps(fields: FieldMap): Record<string, { type?: string }> {
-  return Object.fromEntries(
-    Object.entries(fields).map(([k, v]) => [k, v === 'any' ? {} : { type: v }]),
-  );
-}
-
-/** Field names that carry a concrete type - 'any' fields are optional/untyped. */
-function requiredFieldNames(fields: FieldMap): string[] {
-  return Object.entries(fields)
-    .filter(([, v]) => v !== 'any')
-    .map(([k]) => k);
-}
-
-function fieldsToObjectSchema(fields: FieldMap): Record<string, any> {
-  const schema: Record<string, any> = { type: 'object', properties: fieldsToJsonProps(fields) };
-  const required = requiredFieldNames(fields);
-  if (required.length) schema.required = required;
-  return schema;
-}
-
 function actionToMcpTool(name: string, def: ActionSchema): McpTool {
-  const properties: Record<string, any> = {};
-  const required: string[] = [];
-  if (def.target) {
-    properties.target = fieldsToObjectSchema(def.target);
-    required.push('target');
-  }
-  if (def.payload) {
-    properties.payload = fieldsToObjectSchema(def.payload);
-    required.push('payload');
-  }
-  const tool: McpTool = { name, inputSchema: { type: 'object', properties } };
+  // One generator for every tool output (tool-schema.ts).
+  const tool: McpTool = { name, inputSchema: toolInputSchema(def) };
   if (def.description !== undefined) tool.description = def.description;
-  if (required.length) tool.inputSchema.required = required;
   if (def.annotations) tool.annotations = { ...def.annotations };
   return tool;
 }
@@ -156,7 +126,7 @@ export type McpHandlerOptions = {
  * advertised a version that had not existed for months. A failing test at
  * release time is the cheapest possible checklist.
  */
-export const MCP_SERVER_VERSION = '1.29.0';
+export const MCP_SERVER_VERSION = '1.30.0';
 
 /** Latest MCP protocol revision this handler speaks. */
 const MCP_PROTOCOL_VERSION = '2025-06-18';
@@ -300,7 +270,18 @@ export function createMcpHandler(
     } catch (e) {
       result = _errResult(e as Error);
     }
-    if (result.ok) return rpcResult(id, toolResult(JSON.stringify(result.value ?? null)));
+    if (result.ok) {
+      // A value JSON cannot hold (a BigInt, a cycle) is this call's failure,
+      // answered with its id. Thrown here, it rejected the whole reply, and
+      // over stdio the client's request was never answered.
+      let text: string;
+      try {
+        text = JSON.stringify(result.value ?? null);
+      } catch (e) {
+        return rpcResult(id, toolResult(`Tool "${name}": its value is not JSON (${(e as Error).message})`, true));
+      }
+      return rpcResult(id, toolResult(text));
+    }
     const code = result.error instanceof BusError ? ` (${result.error.code})` : '';
     return rpcResult(id, toolResult(`${result.error.message}${code}`, true));
   }

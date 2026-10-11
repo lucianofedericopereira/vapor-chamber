@@ -11,8 +11,9 @@
  * `getAny` still finds it as a last resort for `cache.serveStaleOnError`.
  * Only LRU size pressure or an explicit `invalidate` removes it.
  *
- * PER-CLIENT, NOT MODULE-GLOBAL. The cache key is `responseType:fullUrl` with
- * no auth/header/cookie dimension, so under concurrent SSR a shared map lets
+ * PER-CLIENT, NOT MODULE-GLOBAL. The cache key holds the request's headers
+ * (Authorization, Accept-Language) but not cookies, so under concurrent SSR a
+ * shared map lets
  * user A's authenticated payload answer user B's identical URL, and collapses
  * two users' concurrent requests into one in-flight promise. A fresh client
  * per request (whitepaper section 12.2) is a fresh cache - the same
@@ -29,7 +30,7 @@ import { freezeCached } from './freeze';
 const CACHE_MAX_SIZE = 50;
 const CACHE_DEFAULT_TTL = 30_000; // 30 seconds
 
-type CacheEntry = { data: any; freshUntil: number; staleUntil: number };
+type CacheEntry = { data: any; freshUntil: number; staleUntil: number; url: string };
 
 export type CacheHit = { data: any; stale: boolean };
 
@@ -44,7 +45,8 @@ export type ResponseCache = {
   get(key: string): CacheHit | null;
   /** Last-resort lookup for `cache.serveStaleOnError` - ignores freshness, never evicts. */
   getAny(key: string): CacheEntry | null;
-  set(key: string, data: any, ttl?: number, staleTtl?: number): void;
+  /** `url` is what an invalidation matches: the key also holds the request's headers. */
+  set(key: string, data: any, ttl?: number, staleTtl?: number, url?: string): void;
   clear(): void;
   /** Drop the entries and in-flight reads whose URL matches, and mark the
    *  matching `read` tickets stale. A function is the client's own match for
@@ -97,14 +99,16 @@ export function createResponseCache(): ResponseCache {
       return entries.get(key) ?? null;
     },
 
-    set(key, data, ttl = CACHE_DEFAULT_TTL, staleTtl = 0) {
+    // No `url`: a `responseType:url` key, its URL the part after the first ':'
+    // (the reading invalidate() used before the key held headers).
+    set(key, data, ttl = CACHE_DEFAULT_TTL, staleTtl = 0, url = key.slice(key.indexOf(':') + 1)) {
       // Evict the oldest (first) entry at max size; there is one, since the
       // size is at least CACHE_MAX_SIZE.
       if (entries.size >= CACHE_MAX_SIZE) entries.delete(entries.keys().next().value as string);
       // Shared by every later hit - see freeze.ts.
       freezeCached(data);
       const now = Date.now();
-      entries.set(key, { data, freshUntil: now + ttl, staleUntil: now + ttl + staleTtl });
+      entries.set(key, { data, freshUntil: now + ttl, staleUntil: now + ttl + staleTtl, url });
     },
 
     clear() {
@@ -146,12 +150,10 @@ export function createResponseCache(): ResponseCache {
       }
       for (const r of reads) if (matches(r.url)) r.stale = true;
       const keysToDelete: string[] = [];
-      for (const key of entries.keys()) {
-        // Keys are `responseType:fullUrl` - match user patterns against the URL
-        // part so anchored patterns like /^\/api/ keep working.
-        const url = key.slice(key.indexOf(':') + 1);
-        if (matches(url)) keysToDelete.push(key);
-      }
+      // Matched on the entry's URL, never a parse of its key: the key also
+      // holds the request's headers, so anchored patterns like /^\/api/ keep
+      // working (tests/http-cache-headers.test.ts).
+      for (const [key, entry] of entries) if (matches(entry.url)) keysToDelete.push(key);
       for (const key of keysToDelete) entries.delete(key);
       // A read made after this must not join one already on the wire, which
       // may answer from before. Its callers keep their promise; only the

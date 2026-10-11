@@ -43,7 +43,7 @@ so each action has one place to read and to test.
 - **Vue <!-- vc:vueAligned -->3.6.0-rc.10<!-- /vc:vueAligned --> aligned**: signals, `onScopeDispose`, `getCurrentScope`, alien-signals internals. Tracked per release in the [CHANGELOG](CHANGELOG.md)
 - **No runtime dependency**. `alien-signals` is an optional peer, installed only by apps that use the `vapor-chamber/alien-signals` connector. Unimported modules tree-shake to zero
 - **ESM-only**, plus three IIFE `<script>` drop-ins for no-bundler pages
-- **<!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% coverage on all four axes** - statements, branches, functions and lines, across **<!-- vc:tests -->3571<!-- /vc:tests --> tests** in <!-- vc:testFiles -->326<!-- /vc:testFiles --> files ([full table](docs/COVERAGE.md)). Every branch in the measured surface is taken by a test
+- **<!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% coverage on all four axes** - statements, branches, functions and lines, across **<!-- vc:tests -->3658<!-- /vc:tests --> tests** in <!-- vc:testFiles -->349<!-- /vc:testFiles --> files ([full table](docs/COVERAGE.md)). Every branch in the measured surface is taken by a test
 
 ## Contents
 
@@ -250,7 +250,7 @@ as its own chunk, the first time it renders one.
 **A pure-Vapor app can skip the vDOM renderer entirely** (experimental, v1.x).
 `vapor-chamber/router/vapor` exports the same `RouterOutlet` name built from Vapor's own helpers,
 so rendering a route needs no `vaporInteropPlugin`. Take the startup chunk of a Vite production
-build. It comes out **<!-- vc:outletSaving -->22.06<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->70.4<!-- /vc:outletSavingRaw --> KB raw** smaller than the same
+build. It comes out **<!-- vc:outletSaving -->22.08<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->70.4<!-- /vc:outletSavingRaw --> KB raw** smaller than the same
 app rendering through the vDOM outlet plus interop. The same harness derives that baseline
 (`tests/vapor/vapor-outlet-size.test.ts`).
 
@@ -1521,8 +1521,8 @@ Everything else is optional and tree-shaken when unimported.
    form.ts, schema.ts, devtools.ts, directives.ts, vite-hmr.ts
 ```
 
-**Coverage:** <!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% statements, <!-- vc:covBranches -->100.0<!-- /vc:covBranches -->% branches, <!-- vc:covFunctions -->100.0<!-- /vc:covFunctions -->% functions, <!-- vc:covLines -->100.0<!-- /vc:covLines -->% lines across **<!-- vc:tests -->3571<!-- /vc:tests --> tests**
-(<!-- vc:testFiles -->326<!-- /vc:testFiles --> files). Per-file table:
+**Coverage:** <!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% statements, <!-- vc:covBranches -->100.0<!-- /vc:covBranches -->% branches, <!-- vc:covFunctions -->100.0<!-- /vc:covFunctions -->% functions, <!-- vc:covLines -->100.0<!-- /vc:covLines -->% lines across **<!-- vc:tests -->3658<!-- /vc:tests --> tests**
+(<!-- vc:testFiles -->349<!-- /vc:testFiles --> files). Per-file table:
 [docs/COVERAGE.md](docs/COVERAGE.md). Run `npm run test:coverage` for live numbers.
 
 ## Testing

@@ -292,6 +292,9 @@ export function useVaporAsyncCommand(asyncBus?: { dispatch: (action: string, tar
   const bus: any = resolveBus(asyncBus as BaseBus | undefined);
   const loading = signal(false);
   const lastError = signal<Error | null>(null);
+  // In flight: `loading` is true while any dispatch is, as runDispatch's
+  // (tests/composable-overlap.test.ts).
+  let n = 0;
 
   // Intentionally hand-rolled, NOT routed through the shared runDispatch() that
   // useCommand / useCommandQuery use. A single async/await is
@@ -303,7 +306,7 @@ export function useVaporAsyncCommand(asyncBus?: { dispatch: (action: string, tar
       // Both opening writes are inside the try: a sync subscriber that throws
       // on either becomes a failed result and `loading` ends false (pinned by
       // tests/vapor-async-throwing-subscriber.test.ts).
-      loading.value = true;
+      if (n++ === 0) loading.value = true;
       lastError.value = null;
       // Untracked around the SYNCHRONOUS entry only - once the dispatch
       // suspends, the caller's effect has finished and there is no subscriber
@@ -318,7 +321,7 @@ export function useVaporAsyncCommand(asyncBus?: { dispatch: (action: string, tar
       lastError.value = error;
       return _errResult(error);
     } finally {
-      loading.value = false;
+      if (--n === 0) loading.value = false;
     }
   }
 

@@ -85,7 +85,8 @@ export function decodeQueryParam(raw: string | string[] | undefined, def: QueryP
   switch (type) {
     case 'int': {
       const n = Number.parseInt(scalar, 10);
-      return Number.isNaN(n) ? def.default : n;
+      // Past 2^53 parseInt rounds to another number: no fit, as junk is not.
+      return Number.isSafeInteger(n) ? n : def.default;
     }
     case 'bool': {
       if (scalar === '1' || scalar === 'true') return true;
