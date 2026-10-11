@@ -1212,9 +1212,9 @@ Three IIFE variants ship under `dist/`, split by **audience / deployment shape**
 
 | Variant   | Audience                                                  | Brotli |
 |-----------|-----------------------------------------------------------|--------|
-| core      | Sprinkled JS on server-rendered pages - Blade / Rails / Django | <!-- vc:sizeIifeCore -->10.2<!-- /vc:sizeIifeCore --> KB |
+| core      | Sprinkled JS on server-rendered pages - Blade / Rails / Django | <!-- vc:sizeIifeCore -->10.3<!-- /vc:sizeIifeCore --> KB |
 | elements  | Embeddable widgets through custom elements                | <!-- vc:sizeIifeElements -->10.7<!-- /vc:sizeIifeElements --> KB |
-| full      | SPAs that grew big (realtime + undo/redo + persistence)   | <!-- vc:sizeIifeFull -->14.7<!-- /vc:sizeIifeFull --> KB |
+| full      | SPAs that grew big (realtime + undo/redo + persistence)   | <!-- vc:sizeIifeFull -->14.8<!-- /vc:sizeIifeFull --> KB |
 
 _(Generated, always-current per-export sizes: [BUNDLE-SIZES.md](./BUNDLE-SIZES.md).)_
 
@@ -1878,7 +1878,7 @@ src/
   iife-elements.ts  - CDN entry, elements variant
   index.ts          - public ESM barrel
 
-tests/                           (<!-- vc:testFiles -->349<!-- /vc:testFiles --> files, <!-- vc:tests -->3658<!-- /vc:tests --> tests)
+tests/                           (<!-- vc:testFiles -->349<!-- /vc:testFiles --> files, <!-- vc:tests -->3657<!-- /vc:tests --> tests)
 ```
 
 Where the current numbers live, both generated and CI-verified fresh:
@@ -4408,7 +4408,7 @@ src/
   iife-elements.ts  - CDN entry, elements variant
   index.ts          - public ESM barrel
 
-tests/                           (<!-- vc:testFiles -->349<!-- /vc:testFiles --> files, <!-- vc:tests -->3658<!-- /vc:tests --> tests)
+tests/                           (<!-- vc:testFiles -->349<!-- /vc:testFiles --> files, <!-- vc:tests -->3657<!-- /vc:tests --> tests)
 ```
 
 The per-file test inventory that used to sit here was removed rather than

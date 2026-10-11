@@ -43,7 +43,7 @@ so each action has one place to read and to test.
 - **Vue <!-- vc:vueAligned -->3.6.0-rc.10<!-- /vc:vueAligned --> aligned**: signals, `onScopeDispose`, `getCurrentScope`, alien-signals internals. Tracked per release in the [CHANGELOG](CHANGELOG.md)
 - **No runtime dependency**. `alien-signals` is an optional peer, installed only by apps that use the `vapor-chamber/alien-signals` connector. Unimported modules tree-shake to zero
 - **ESM-only**, plus three IIFE `<script>` drop-ins for no-bundler pages
-- **<!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% coverage on all four axes** - statements, branches, functions and lines, across **<!-- vc:tests -->3658<!-- /vc:tests --> tests** in <!-- vc:testFiles -->349<!-- /vc:testFiles --> files ([full table](docs/COVERAGE.md)). Every branch in the measured surface is taken by a test
+- **<!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% coverage on all four axes** - statements, branches, functions and lines, across **<!-- vc:tests -->3657<!-- /vc:tests --> tests** in <!-- vc:testFiles -->349<!-- /vc:testFiles --> files ([full table](docs/COVERAGE.md)). Every branch in the measured surface is taken by a test
 
 ## Contents
 
@@ -1357,7 +1357,7 @@ Minified, comment-free, brotli q=11. Always-current per-export table:
 on any regression past budget.
 
 The two that matter: the dispatch core is **<!-- vc:sizeCore -->4.7<!-- /vc:sizeCore --> KB** and the import-everything barrel is
-<!-- vc:sizeBarrel -->32.3<!-- /vc:sizeBarrel --> KB. The main entries, and why the numbers are
+<!-- vc:sizeBarrel -->32.9<!-- /vc:sizeBarrel --> KB. The main entries, and why the numbers are
 machine-stamped rather than retyped:
 
 <details>
@@ -1366,19 +1366,19 @@ machine-stamped rather than retyped:
 | Entry | brotli |
 |---|--:|
 | dispatch core (`createCommandBus`, tree-shaken) | **<!-- vc:sizeCore -->4.7<!-- /vc:sizeCore --> KB** |
-| `vapor-chamber` (main barrel, import-*everything*) | <!-- vc:sizeBarrel -->32.3<!-- /vc:sizeBarrel --> KB |
+| `vapor-chamber` (main barrel, import-*everything*) | <!-- vc:sizeBarrel -->32.9<!-- /vc:sizeBarrel --> KB |
 | `vapor-chamber/router` | <!-- vc:sizeRouter -->10.6<!-- /vc:sizeRouter --> KB |
 | `vapor-chamber/router/vdom` | <!-- vc:sizeRouterVdom -->0.7<!-- /vc:sizeRouterVdom --> KB |
 | `vapor-chamber/router/vapor` | <!-- vc:sizeRouterVapor -->0.7<!-- /vc:sizeRouterVapor --> KB |
 | `vapor-chamber/router/remote` | <!-- vc:sizeRouterRemote -->5.3<!-- /vc:sizeRouterRemote --> KB |
-| `vapor-chamber/router-fetch` | <!-- vc:sizeRouterFetch -->5.6<!-- /vc:sizeRouterFetch --> KB |
-| `vapor-chamber/vue` (with the root's surface, import-*everything*) | <!-- vc:sizeVue -->32.3<!-- /vc:sizeVue --> KB |
-| `vapor-chamber/vapor` (the same) | <!-- vc:sizeVapor -->32.5<!-- /vc:sizeVapor --> KB |
-| `vapor-chamber/reactive` | <!-- vc:sizeReactive -->6.1<!-- /vc:sizeReactive --> KB |
+| `vapor-chamber/router-fetch` | <!-- vc:sizeRouterFetch -->5.7<!-- /vc:sizeRouterFetch --> KB |
+| `vapor-chamber/vue` (with the root's surface, import-*everything*) | <!-- vc:sizeVue -->33.1<!-- /vc:sizeVue --> KB |
+| `vapor-chamber/vapor` (the same) | <!-- vc:sizeVapor -->33.0<!-- /vc:sizeVapor --> KB |
+| `vapor-chamber/reactive` | <!-- vc:sizeReactive -->6.3<!-- /vc:sizeReactive --> KB |
 | `vapor-chamber/transports` | <!-- vc:sizeTransports -->5.8<!-- /vc:sizeTransports --> KB |
-| `vapor-chamber/outbox` | <!-- vc:sizeOutbox -->2.7<!-- /vc:sizeOutbox --> KB |
+| `vapor-chamber/outbox` | <!-- vc:sizeOutbox -->2.8<!-- /vc:sizeOutbox --> KB |
 | `vapor-chamber/mcp` | <!-- vc:sizeMcp -->1.8<!-- /vc:sizeMcp --> KB |
-| `vapor-chamber/ssr` | <!-- vc:sizeSsr -->0.9<!-- /vc:sizeSsr --> KB |
+| `vapor-chamber/ssr` | <!-- vc:sizeSsr -->1.0<!-- /vc:sizeSsr --> KB |
 | `vapor-chamber/store` | <!-- vc:sizeStore -->2.2<!-- /vc:sizeStore --> KB |
 
 **Rows are not additive** - every row includes the shared core, which your bundle carries once.
@@ -1400,9 +1400,9 @@ Three `<script>`-tag drop-ins. Pick by audience, not feature checklist.
 
 | Variant | Audience | Min | Brotli | Gzip |
 |---|---|--:|--:|--:|
-| **core** | Sprinkled JS on server-rendered pages (Blade, Rails, Django, WordPress). You dispatch user actions to a backend over HTTP. | <!-- vc:sizeIifeCoreRaw -->32.4<!-- /vc:sizeIifeCoreRaw --> KB | <!-- vc:sizeIifeCore -->10.2<!-- /vc:sizeIifeCore --> KB | <!-- vc:sizeIifeCoreGzip -->11.2<!-- /vc:sizeIifeCoreGzip --> KB |
-| **elements** | Embeddable widgets (chat bubbles, checkout buttons, third-party drop-ins). You ship a `<vc-widget>` custom element. | <!-- vc:sizeIifeElementsRaw -->34.0<!-- /vc:sizeIifeElementsRaw --> KB | <!-- vc:sizeIifeElements -->10.7<!-- /vc:sizeIifeElements --> KB | <!-- vc:sizeIifeElementsGzip -->11.7<!-- /vc:sizeIifeElementsGzip --> KB |
-| **full** | SPAs that grew big enough to want everything (realtime, undo/redo, persistence, full Vapor surface). | <!-- vc:sizeIifeFullRaw -->46.9<!-- /vc:sizeIifeFullRaw --> KB | <!-- vc:sizeIifeFull -->14.7<!-- /vc:sizeIifeFull --> KB | <!-- vc:sizeIifeFullGzip -->16.1<!-- /vc:sizeIifeFullGzip --> KB |
+| **core** | Sprinkled JS on server-rendered pages (Blade, Rails, Django, WordPress). You dispatch user actions to a backend over HTTP. | <!-- vc:sizeIifeCoreRaw -->32.6<!-- /vc:sizeIifeCoreRaw --> KB | <!-- vc:sizeIifeCore -->10.3<!-- /vc:sizeIifeCore --> KB | <!-- vc:sizeIifeCoreGzip -->11.3<!-- /vc:sizeIifeCoreGzip --> KB |
+| **elements** | Embeddable widgets (chat bubbles, checkout buttons, third-party drop-ins). You ship a `<vc-widget>` custom element. | <!-- vc:sizeIifeElementsRaw -->34.2<!-- /vc:sizeIifeElementsRaw --> KB | <!-- vc:sizeIifeElements -->10.7<!-- /vc:sizeIifeElements --> KB | <!-- vc:sizeIifeElementsGzip -->11.8<!-- /vc:sizeIifeElementsGzip --> KB |
+| **full** | SPAs that grew big enough to want everything (realtime, undo/redo, persistence, full Vapor surface). | <!-- vc:sizeIifeFullRaw -->47.3<!-- /vc:sizeIifeFullRaw --> KB | <!-- vc:sizeIifeFull -->14.8<!-- /vc:sizeIifeFull --> KB | <!-- vc:sizeIifeFullGzip -->16.3<!-- /vc:sizeIifeFullGzip --> KB |
 
 <details>
 <summary><b>What's in each variant</b>, plus drop-in examples</summary>
@@ -1521,7 +1521,7 @@ Everything else is optional and tree-shaken when unimported.
    form.ts, schema.ts, devtools.ts, directives.ts, vite-hmr.ts
 ```
 
-**Coverage:** <!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% statements, <!-- vc:covBranches -->100.0<!-- /vc:covBranches -->% branches, <!-- vc:covFunctions -->100.0<!-- /vc:covFunctions -->% functions, <!-- vc:covLines -->100.0<!-- /vc:covLines -->% lines across **<!-- vc:tests -->3658<!-- /vc:tests --> tests**
+**Coverage:** <!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% statements, <!-- vc:covBranches -->100.0<!-- /vc:covBranches -->% branches, <!-- vc:covFunctions -->100.0<!-- /vc:covFunctions -->% functions, <!-- vc:covLines -->100.0<!-- /vc:covLines -->% lines across **<!-- vc:tests -->3657<!-- /vc:tests --> tests**
 (<!-- vc:testFiles -->349<!-- /vc:testFiles --> files). Per-file table:
 [docs/COVERAGE.md](docs/COVERAGE.md). Run `npm run test:coverage` for live numbers.
 
