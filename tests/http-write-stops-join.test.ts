@@ -1,4 +1,4 @@
-/** A write's invalidation stops new reads joining an older read still on the wire (plan 1.27 section 10.7). Rationale at the end. */
+/** A write's invalidation stops new reads joining an older read still on the wire (log s35.169). Rationale at the end. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHttpClient } from '../src/http';
 

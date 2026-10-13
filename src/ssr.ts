@@ -1,9 +1,10 @@
 /**
  * vapor-chamber - SSR hydration plugin
  *
- * rehydrate() replays bus commands ABOVE Vue's DOM hydration, after it
- * completes: it holds no DOM references, hydration anchors or interop state,
- * so Vue's hydration fixes land below it and only hand it a more-correct DOM.
+ * rehydrate() replays bus commands ABOVE Vue's DOM hydration: it holds no
+ * DOM references, hydration anchors or interop state, so Vue's hydration
+ * fixes land below it and only hand it a more-correct DOM. It replays when
+ * called; the client entry below calls it before mount.
  * The history is in CHANGELOG.md and the whitepaper's appendix B.
  *
  * Per the whitepaper (section 12): commands that ran on the server to populate initial

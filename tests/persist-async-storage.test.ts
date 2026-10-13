@@ -4,24 +4,26 @@ import { createCommandBus } from '../src/command-bus';
 import { indexedDbStorage } from '../src/idb';
 import { persist, type PersistStorage } from '../src/plugins-io';
 
-/** Minimal fake IDB, the outbox test's plus `delete`. */
+/** Minimal fake IDB, the outbox test's plus `delete`: the request succeeds, then its transaction completes. */
 function fakeIndexedDb() {
   const data = new Map<string, any>();
-  function request(result?: any) {
-    const req: any = { onsuccess: null, onerror: null, result };
-    queueMicrotask(() => req.onsuccess?.());
-    return req;
-  }
   const db = {
     createObjectStore: () => ({}),
-    transaction: () => ({
-      objectStore: () => ({
+    transaction: () => {
+      const tx: any = { oncomplete: null, onabort: null };
+      function request(result?: any) {
+        const req: any = { onsuccess: null, onerror: null, result };
+        queueMicrotask(() => { req.onsuccess?.(); queueMicrotask(() => tx.oncomplete?.()); });
+        return req;
+      }
+      tx.objectStore = () => ({
         get: (k: string) => request(data.get(k)),
         put: (v: any, k: string) => { data.set(k, v); return request(); },
         delete: (k: string) => { data.delete(k); return request(); },
         clear: () => { data.clear(); return request(); },
-      }),
-    }),
+      });
+      return tx;
+    },
   };
   return {
     data,
@@ -141,7 +143,7 @@ describe('persist.hydrate() on any storage', () => {
 });
 
 /*
- * Plan .probes/1.28-plan.md item 9a. persist was synchronous: an IndexedDB
+ * Log s35.216. persist was synchronous: an IndexedDB
  * storage could not be used, though the outbox had one. The open and request
  * code is now one helper (src/idb.ts) for both. A storage whose methods answer
  * promises is read with hydrate(). load() refuses it with a TypeError rather

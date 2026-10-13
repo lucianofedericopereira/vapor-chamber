@@ -19,7 +19,7 @@
  * decides a swap), rendered through Vapor's own helpers instead of
  * `defineComponent` + `h()`. A pure-Vapor app therefore mounts no vnode and
  * needs no `vaporInteropPlugin`, which is the whole cost this module exists to
- * drop: roughly 20 KB brotli - not a fixed number, so it is not written here.
+ * drop. That cost is not a fixed number, so it is not written here.
  * `tests/vapor/vapor-outlet-size.test.ts` re-measures it every run with Vite's
  * build API, the bundler consumers ship with, against a baseline derived by
  * the same harness; the stamped values live in docs/router.md

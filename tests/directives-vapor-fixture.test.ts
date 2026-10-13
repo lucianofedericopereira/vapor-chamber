@@ -644,7 +644,7 @@ describe('v-vc-command on a real vDOM app (createDirectivePlugin)', () => {
   });
 
   // ---------------------------------------------------------------------------
-  // THE CASE THAT WOULD HAVE CAUGHT THE DRIFT (plan section 4b).
+  // THE CASE THAT WOULD HAVE CAUGHT THE DRIFT (log s34.26).
   //
   // Every other vDOM case in this file builds its bindings with `withDirs`,
   // which calls `resolveDirective(name)`. That takes the NAME as given, so it

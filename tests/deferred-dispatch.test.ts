@@ -139,7 +139,7 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
   // Math.trunc and Math.max both propagate NaN, and every comparison against
   // NaN is false - so `q.length > limit` never fired and the bound silently
   // vanished. A `maxBufferSize: Number(badConfigValue)` is all it takes.
-  it('a NaN maxBufferSize buffers nothing instead of unbounding the queue', () => {
+  it('a NaN maxBufferSize takes the default bound instead of unbounding the queue', () => {
     using _warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const bus = createCommandBus({ onMissing: 'buffer', maxBufferSize: Number('not-a-number') });
 
@@ -148,11 +148,10 @@ describe("onMissing: 'buffer' - deferred dispatch", () => {
     let replayed = 0;
     bus.register('q', () => { replayed++; return { ok: true }; });
 
-    // Measured at 300 buffered before the guard - unbounded growth. `| 0` maps
-    // NaN to 0, so a bad bound now buffers nothing: still bounded, and loud,
-    // because a misconfigured buffer that replays NOTHING is noticed at once
-    // where one silently running on the default is not.
-    expect(replayed).toBe(0);
+    // Measured at 300 buffered before any guard - unbounded growth. The bound
+    // is read by countOption, as every count in the library is: NaN takes
+    // the default 256, so the queue stays bounded (audit D7, owner ruling).
+    expect(replayed).toBe(256);
   });
 
   it('a negative maxBufferSize is clamped rather than draining into a crash', () => {

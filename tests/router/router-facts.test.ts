@@ -1,5 +1,6 @@
 /** routerFacts emits a fact after a navigation commits or fails, never a command. The long note is at the end. */
 import { describe, expect, it } from 'vitest';
+import { effectScope } from 'vue';
 import { createCommandBus } from '../../src/command-bus';
 import { routerFacts } from '@router/index';
 import type { RouteRecord } from '@router/types';
@@ -61,6 +62,21 @@ describe('routerFacts', () => {
     expect(heard).toEqual([]);
   });
 
+  it('made inside a Vue scope, both subscriptions stop with it', async () => {
+    const router = makeRouter({ routes: [...ROWS, BROKEN], links: false, onError: () => {} });
+    const bus = createCommandBus();
+    const heard: string[] = [];
+    bus.on('router*', (cmd) => heard.push(cmd.action));
+    const scope = effectScope();
+    scope.run(() => routerFacts(router, bus));
+    await router.isReady();
+    await router.push('/list');
+    scope.stop();
+    await router.push('/');
+    await router.push('/broken');
+    expect(heard).toEqual(['routerNavigated', 'routerNavigated']);
+  });
+
   it('control: without routerFacts the same navigations emit nothing', async () => {
     const { router, heard } = setup(false);
     await router.isReady();
@@ -71,7 +87,7 @@ describe('routerFacts', () => {
 });
 
 /*
- * Plan .probes/1.28-plan.md item 9c. A navigation is not a command, so the
+ * Log s35.215. A navigation is not a command, so the
  * bus's plugins, listeners and DevTools never saw one. routerFacts emits a fact
  * (bus.emit) from the router's own commit hook (afterEach) and failure hook
  * (onError). It never dispatches: the router's guards stay the gate, and a

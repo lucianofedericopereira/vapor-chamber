@@ -65,21 +65,21 @@
             <td>Coffee</td>
             <td class="right">$4.00</td>
             <td class="action">
-              <button v-command="cart.add" v-target='{"name":"Coffee","price":4}'>Add</button>
+              <button type="button" v-command="cart.add" v-target='{"name":"Coffee","price":4}'>Add</button>
             </td>
           </tr>
           <tr>
             <td>Tea</td>
             <td class="right">$3.00</td>
             <td class="action">
-              <button v-command="cart.add" v-target='{"name":"Tea","price":3}'>Add</button>
+              <button type="button" v-command="cart.add" v-target='{"name":"Tea","price":3}'>Add</button>
             </td>
           </tr>
           <tr>
             <td>Espresso</td>
             <td class="right">$5.00</td>
             <td class="action">
-              <button v-command="cart.add" v-target='{"name":"Espresso","price":5}'>Add</button>
+              <button type="button" v-command="cart.add" v-target='{"name":"Espresso","price":5}'>Add</button>
             </td>
           </tr>
         </tbody>
@@ -128,8 +128,8 @@
              Even this toggle goes through the bus: the handler writes the
              scope via scopeOf(), the click site never mutates anything. -->
         <div id="details" v-scope='{"open":false}'>
-          <button v-command="ui.toggleDetails">Details</button>
-          <button v-command="cart.clear">Clear</button>
+          <button type="button" v-command="ui.toggleDetails">Details</button>
+          <button type="button" v-command="cart.clear">Clear</button>
           <p class="muted" v-show="open" style="display:none">
             Local <code>open</code> = true. Last added:
             <span v-bind-text="lastAdded"></span> (read from the bus, not the scope).

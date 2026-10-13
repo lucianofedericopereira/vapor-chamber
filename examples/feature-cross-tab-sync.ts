@@ -1,5 +1,5 @@
 /**
- * Feature example: sync bridge - cross-tab coordination via BroadcastChannel
+ * Feature example: createChannel - cross-tab coordination via BroadcastChannel
  * ===========================================================================
  * A handler computes a FACT and emits it on an event channel; the bridge puts
  * that fact on a BroadcastChannel, and every other open tab applies it.
@@ -62,7 +62,7 @@ const tabSync = createChannel({
 
 // Tab A dispatches -> Tab A computes and emits -> Tab B and Tab C apply:
 bus.dispatch('cartAdd', { id: 1, qty: 1 })
-// cartState.state.value is the same object in every tab.
+// cartState.state.value holds the same value in every tab.
 
 // ─── Auth sync: logout everywhere ────────────────────────────────────────────
 

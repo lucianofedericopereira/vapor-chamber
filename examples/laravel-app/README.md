@@ -3,8 +3,9 @@
 A **real, verified Laravel app** wiring the full vapor-chamber dispatch loop:
 Blade page -> IIFE bundle -> `POST /api/vc` (real Laravel CSRF) -> one thin
 controller -> action classes -> session-backed cart -> `{ state }` back into
-the page (a failure is an RFC 9457 problem). No build step, no Vue, no database - it runs on a fresh skeleton
-with zero migrations.
+the page (a failure is an RFC 9457 problem). No build step and no database - it
+runs on a fresh skeleton with zero migrations. The `/cart` page loads no Vue;
+`/widget` loads it as a module (below).
 
 This folder complements [`../laravel-backend/`](../laravel-backend) (drop-in
 companion files for *your* app, with your models) by being **runnable as-is**:
@@ -23,13 +24,15 @@ cd demo-app && php artisan serve
 
 `setup.sh` is idempotent and **updates** an existing `demo-app`: it replaces its
 own route block rather than skipping when one is already present, so a scaffold
-made before a page was added still picks it up.
+made before a page was added still picks it up. It also writes, the same way,
+the lines in `bootstrap/app.php` that leave the command routes' input as the
+client sent it (docs/integrations/laravel.md, "Input as the client sent it").
 
 Needs PHP ≥ 8.3 (Laravel 13) and Composer. `setup.sh` also builds the vapor-chamber `dist/`
 on demand for the IIFE copy.
 
 `composer create-project` always pulls the **current** Laravel skeleton - last
-verified end-to-end on **Laravel 13.21** with PHP 8.5. Nothing here pins a
+verified end-to-end on **Laravel 13.35** with PHP 8.5 (2026-10-13). Nothing here pins a
 major: the wiring is one route, one controller and two action classes, which
 has not changed shape since Laravel 11.
 

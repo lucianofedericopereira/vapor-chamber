@@ -1,4 +1,4 @@
-/** problemOf(error): the backend's RFC 9457 problem, read through the cause chain once (plan 8d.2, log s35.121). */
+/** problemOf(error): the backend's RFC 9457 problem, read through the cause chain once (docs/contract.md 6, log s35.121). */
 import { afterEach, describe, expect, vi } from 'vitest';
 import { createAsyncCommandBus, problemOf } from '../src/index';
 import { createHttpClient } from '../src/http';
@@ -41,6 +41,16 @@ describe('problemOf', () => {
     const error = await http.get('/x').then(() => null, (e: unknown) => e);
     expect(problemOf(error)).toEqual({ status: 502, detail: 'HTTP 502' });
     expect(problemOf((await http.safe.get('/x')).error)).toEqual(problemOf(error));
+  });
+
+  it("a bridge's 2xx reply that is not the envelope gives its detail, and does not throw", async () => {
+    // remote:unexpected:json carries no context (transports.ts); the reader destructured it.
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ...problemResponse(200, [1]), ok: true, headers: new Headers({ 'content-type': 'application/json' }) })));
+    const bus = createAsyncCommandBus({ retry: false });
+    bus.use(createHttpBridge({ endpoint: '/api/vc' }));
+    const result = await bus.dispatch('orderSave', {});
+    expect(result.error).toMatchObject({ code: 'remote:unexpected:json' });
+    expect(problemOf(result.error)).toEqual({ detail: 'The reply for "orderSave" is not the JSON envelope.' });
   });
 
   it('undefined when no backend answered, and for anything else; a cyclic cause chain ends', () => {

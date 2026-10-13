@@ -87,7 +87,7 @@ const result = await asyncBus.dispatch('orderCreate', cart);
 // AbortController
 const ac = new AbortController();
 asyncBus.dispatch('searchExecute', q, undefined, { signal: ac.signal });
-ac.abort();   // resolves with core:aborted:dispatch, handler observes cmd.signal
+ac.abort();   // a handler that stops on cmd.signal resolves core:aborted:dispatch
 
 // Batch with rollback
 bus.dispatchBatch([
@@ -100,7 +100,7 @@ bus.dispatchBatch([
 ## Bundle size
 
 mitt is <!-- vc:sizeMitt -->0.2<!-- /vc:sizeMitt --> KB brotli. vapor-chamber's `core` IIFE variant is
-**<!-- vc:sizeIifeCore -->10.3<!-- /vc:sizeIifeCore --> KB brotli**, a couple
+**<!-- vc:sizeIifeCore -->10.4<!-- /vc:sizeIifeCore --> KB brotli**, a couple
 of orders of magnitude more. That difference pays for the extras above. For
 always-current per-export numbers, see [BUNDLE-SIZES.md](../BUNDLE-SIZES.md)
 (generated, CI-verified fresh) and prefer it over any figure quoted in prose.
@@ -118,11 +118,11 @@ lane.emit('cartAdd', { id: 42 });
 ```
 
 On the three-listener fan-out both libraries are built for, the fast lane
-measures **<!-- vc:benchFastLaneVsMitt -->1.84-1.95<!-- /vc:benchFastLaneVsMitt -->x
+measures **<!-- vc:benchFastLaneVsMitt -->1.88-2.32<!-- /vc:benchFastLaneVsMitt -->x
 mitt**, and the general bus's `emit`
-**<!-- vc:benchEmitVsMittFanout -->1.44-1.54<!-- /vc:benchEmitVsMittFanout -->x**.
+**<!-- vc:benchEmitVsMittFanout -->1.53-1.63<!-- /vc:benchEmitVsMittFanout -->x**.
 Each is the range over several runs on one host
-(<!-- vc:benchProvenance -->Node 24.21.0, vitest 5.0.1, mitt 3.0.1, eventemitter3 5.0.4, 5 runs<!-- /vc:benchProvenance -->). A ratio between two
+(<!-- vc:benchProvenance -->Intel Core i7-8650U, Linux, Node 24.21.0, vitest 5.0.3, mitt 3.0.1, eventemitter3 5.0.4, 5 runs<!-- /vc:benchProvenance -->). A ratio between two
 libraries moves with the host, Node and mitt's version (docs/V8-RULES.md rule
 15). `npm run bench:bands` generates them and `npm run docs:stamp` publishes
 them. Nobody types them here. See [from-event-emitter.md](./from-event-emitter.md)

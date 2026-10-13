@@ -1,14 +1,12 @@
 /**
  * vapor-chamber - HTTP client
  *
- * Adapted and improved from useFetch (2026-02-05A).
- * TypeScript rewrite aligned with vapor-chamber conventions and CDCC thresholds.
+ * Written to the CDCC guideline of small, single-purpose functions
+ * (docs/whitepaper.md 3.5). It is a guideline: no lint rule checks it.
  *
- * Improvements over the original:
- *  - Full TypeScript types
- *  - CDCC-compliant function sizes
+ * What it does beyond a bare `fetch`:
  *  - `AbortSignal.any` with manual fallback for older environments
- *  - Jitter on exponential backoff (avoids thundering herd)
+ *  - The async bus's retry schedule (full jitter, docs/retry.md) for a re-send it decides itself
  *  - A declared wait sets when to re-send, never whether: `Retry-After` (RFC 9110), else `RateLimit` `t`, else `X-RateLimit-Reset`
  *  - 419 CSRF refresh coalesces concurrent requests (no duplicate refreshes)
  *  - `session-expired` CustomEvent + configurable callback
@@ -40,9 +38,12 @@ export type HttpConfig = {
    * Max re-sends of a failure the bus's rule allows (`retryClass`): a
    * transient one (408, 429, 503) for any method; an uncertain one, or an
    * answer with a declared wait, only for an idempotent method or an
-   * `Idempotency-Key`. An unidentified request with no reply, a 502 or a 504
-   * fails with `context.outcome: 'unknown'`. **0 through `postCommand`**, and
-   * through a client **2 for reads (GET), 0 for other methods**.
+   * `Idempotency-Key`. With `retry` above 0, an unidentified request (no
+   * idempotent method, no key) that got no reply, a 502 or a 504 is not
+   * re-sent and fails with `context.outcome: 'unknown'`. **0 through
+   * `postCommand`**, and through a client **2 for reads (GET), 0 for other
+   * methods**. A re-send waits the declared wait, else the async bus's
+   * schedule: random under 200 ms x 2^n, capped at 20 s (docs/retry.md).
    */
   retry?: number;
   /** External abort signal (e.g. from component unmount) */
@@ -63,7 +64,7 @@ export type HttpConfig = {
   /** Called when a 401 session-expired response is received */
   onSessionExpired?: (status: number) => void;
   /**
-   * Stamps a thrown error's `.silent` so a caller-provided global error
+   * Stamps `context.silent` on a thrown error so a caller-provided global error
    * handler can skip it - for fire-and-forget requests (best-effort
    * telemetry, background prefetch) that shouldn't surface UI noise.
    * Default: false.
@@ -207,8 +208,10 @@ function readCsrfFromCookie(): CsrfResult | null {
   const cookieName = cookieNameMeta?.content || 'XSRF-TOKEN';
   const escaped = cookieName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const cookieMatch = document.cookie?.match(new RegExp(`(?:^|;\\s*)${escaped}=([^;]+)`));
-  if (cookieMatch) return { token: decodeURIComponent(cookieMatch[1]), headerName: 'X-XSRF-TOKEN' };
-  return null;
+  if (!cookieMatch) return null;
+  // A value that is not percent-encoding is no token we can send: it reads as
+  // no cookie (tests/csrf-malformed-cookie.test.ts).
+  try { return { token: decodeURIComponent(cookieMatch[1]), headerName: 'X-XSRF-TOKEN' }; } catch { return null; }
 }
 
 function readCsrfFromDom(): CsrfResult | null {
@@ -266,17 +269,19 @@ export function invalidateCsrfCache(): void {
   _csrfCache = null;
 }
 
-let _csrfRefreshPromise: Promise<CsrfResult> | null = null;
+let _csrfRefreshPromise: Promise<CsrfResult | null> | null = null;
 
-function refreshCsrfOnce(cookieUrl: string): Promise<CsrfResult> {
+function refreshCsrfOnce(cookieUrl: string): Promise<CsrfResult | null> {
   // Coalesce: concurrent 419s share the single in-flight refresh promise -
-  // waiters resolve/reject the instant it settles, no polling.
+  // waiters resolve the instant it settles, no polling.
   //
   // RETURNS the token rather than leaving callers to re-read it: a re-read
   // after the await sits across a microtask boundary that several coalesced
   // waiters resume across, and a waiter that ran first could invalidate the
   // cache or clear the DOM, so a later one would retry with no CSRF header.
-  // Every waiter gets the SAME token; this throws when none is found.
+  // Every waiter gets the SAME token, or null when none is found: never a
+  // shared failure, since each request marks its own (`silent`), and a mark
+  // on one shared error reached every waiter (tests/silent-csrf-refresh.test.ts).
   if (_csrfRefreshPromise) return _csrfRefreshPromise;
   _csrfRefreshPromise = (async () => {
     try {
@@ -291,11 +296,7 @@ function refreshCsrfOnce(cookieUrl: string): Promise<CsrfResult> {
       // Cookie FIRST here: the fetch above just made the backend set a fresh
       // XSRF-TOKEN cookie, while the meta tag is still the stale one the page
       // was rendered with. See readCsrfAfterRefresh.
-      const freshToken = readCsrfAfterRefresh();
-      if (!freshToken) {
-        throw transportFail('missing:csrf', `No CSRF token after refreshing it from "${cookieUrl}".`, { context: { url: cookieUrl } });
-      }
-      return freshToken;
+      return readCsrfAfterRefresh();
     } finally {
       _csrfRefreshPromise = null;
     }
@@ -355,36 +356,41 @@ export function _parseRetryAfter(header: string | null | undefined): number | un
   return ms > 0 && ms <= MAX_TIMEOUT_MS ? ms : undefined;
 }
 
-/** Exponential backoff plus 0-200ms of jitter to avoid thundering herd. */
-function backoffMs(attempt: number): number {
-  return Math.min(1000 * 2 ** attempt, 30_000) + Math.random() * 200;
-}
-
 // ---------------------------------------------------------------------------
 // AbortSignal utilities
 // ---------------------------------------------------------------------------
 
-type CombinedSignal = { signal: AbortSignal; detach: () => void };
+export type CombinedSignal = { signal: AbortSignal; detach: () => void };
 
-function combineSignals(a: AbortSignal, b: AbortSignal): CombinedSignal {
-  // AbortSignal.any listeners are platform-managed (GC-safe) - nothing to detach.
-  if (typeof AbortSignal.any === 'function') {
-    return { signal: AbortSignal.any([a, b]), detach: () => {} };
-  }
-  // Fallback for environments without AbortSignal.any. Callers MUST detach()
-  // when the request settles - the user signal is typically component-lifetime,
-  // so listeners left behind accrete once per request until unmount.
+/**
+ * @internal - `AbortSignal.any([a, b])`, and the same result where a platform
+ * lacks it (Chrome before 116, Firefox before 124, Safari before 17.4): an
+ * input already aborted gives a result already aborted, else the first input
+ * to abort aborts it, each with that input's `reason`. The client, both
+ * bridges and supersede combine through it (tests/combine-signals.test.ts).
+ *
+ * The native result's listeners are the platform's: nothing to detach. The
+ * fallback's sit on both inputs until one aborts; a caller whose result
+ * outlives its use (one request on a bridge's signal) calls `detach` when it
+ * settles, or they accrete once per request.
+ */
+export function _combineSignals(a: AbortSignal, b: AbortSignal): CombinedSignal {
+  if (typeof AbortSignal.any === 'function') return { signal: AbortSignal.any([a, b]), detach: () => {} };
   const ctrl = new AbortController();
-  const abort = () => ctrl.abort();
-  a.addEventListener('abort', abort, { once: true });
-  b.addEventListener('abort', abort, { once: true });
-  return {
-    signal: ctrl.signal,
-    detach: () => {
-      a.removeEventListener('abort', abort);
-      b.removeEventListener('abort', abort);
-    },
+  const detach = (): void => {
+    a.removeEventListener('abort', abort);
+    b.removeEventListener('abort', abort);
   };
+  const abort = (e: Event): void => {
+    detach();
+    ctrl.abort((e.target as AbortSignal).reason);
+  };
+  if (a.aborted || b.aborted) ctrl.abort((a.aborted ? a : b).reason);
+  else {
+    a.addEventListener('abort', abort);
+    b.addEventListener('abort', abort);
+  }
+  return { signal: ctrl.signal, detach };
 }
 
 // The caller's own abort, wherever it lands: a code, never a raw DOMException.
@@ -392,7 +398,7 @@ function abortedRequest(url: string): BusError {
   return transportFail('aborted:request', `"${url}" was aborted.`, { context: { url } });
 }
 
-function sleepMs(ms: number, signal?: AbortSignal): Promise<void> {
+function sleepMs(ms: Delay, signal?: AbortSignal): Promise<void> {
   return new Promise<void>((resolve, reject) => {
     const onAbort = () => {
       clearTimeout(id);
@@ -414,6 +420,21 @@ function sleepMs(ms: number, signal?: AbortSignal): Promise<void> {
 
 const remoteFail = _failures('remote');
 const transportFail = _failures('transport');
+
+/**
+ * @internal - a request body as JSON, or the failure that says it cannot be
+ * one: `transport:invalid:json` (a BigInt, a cycle; the platform's TypeError
+ * is its cause). Nothing was sent, and `invalid` is never re-sent. Returned,
+ * not thrown, so each caller settles it its own way. The client, postCommand
+ * and every bridge encode through it (tests/invalid-json.test.ts).
+ */
+export function _encodeJson(value: unknown, url: string, action?: string): string | BusError {
+  try {
+    return JSON.stringify(value);
+  } catch (e) {
+    return transportFail('invalid:json', `The request to "${url}" cannot be encoded as JSON.`, { action, context: { url }, cause: e });
+  }
+}
 
 /**
  * @internal - the failure a backend declared: `remote:<condition>:<code>`, the
@@ -530,7 +551,7 @@ function resendable(failure: BusError, method: string, headers: Record<string, s
 /**
  * The wait an answer declares: Retry-After (RFC 9110 10.2.3), else the
  * RateLimit field's `t` seconds for a policy with no quota left (`r=0`),
- * else `X-RateLimit-Reset` (docs/plan-shape.md 4). draft-ietf-httpapi-
+ * else `X-RateLimit-Reset` (docs/retry.md). draft-ietf-httpapi-
  * ratelimit-headers-11: a List of items, each `"policy";r=<n>;t=<s>`.
  * Retry-After "MUST take precedence". tests/retry-unidentified.test.ts.
  */
@@ -569,7 +590,7 @@ async function runWithRetry<T>(
   headers: Record<string, string>,
   opts: {
     retry: number;
-    timeout: number;
+    timeout: Delay;
     userSignal?: AbortSignal;
     csrfCookieUrl: string;
     onSessionExpired?: (status: number) => void;
@@ -582,97 +603,110 @@ async function runWithRetry<T>(
   const { retry, timeout, userSignal, csrfCookieUrl, onSessionExpired, url, silent = false, notModified = false } = opts;
   let csrfRetried = false;
 
-  for (let attempt = 0; attempt <= retry; attempt++) {
+  // Every attempt ends in a return, a throw, or a re-send while `attempt <
+  // retry` (a count by countOption): the loop needs no test of its own.
+  for (let attempt = 0; ; attempt++) {
     if (userSignal?.aborted) throw asSilent(abortedRequest(url), silent);
 
-    const timeoutCtrl = new AbortController();
-    const timeoutId = setTimeout(() => timeoutCtrl.abort(), timeout);
-    const combined = userSignal ? combineSignals(userSignal, timeoutCtrl.signal) : null;
-    const signal = combined ? combined.signal : timeoutCtrl.signal;
-
+    // Each attempt ends in a response, or in one failure for the rule below.
+    let failure: BusError;
+    let declared: number | undefined;
     try {
-      const res = await doRequest(signal);
-      clearTimeout(timeoutId);
-      combined?.detach();
+      const res = await send(doRequest, timeout, userSignal);
+      // Opted in: a 304 is the answer to the app's conditional request.
+      if (res.ok || (notModified && res.status === 304)) return res;
+      if (SESSION_EXPIRED_STATUS.includes(res.status)) handleSessionExpiry(res.status, url, onSessionExpired);
 
-      if (!res.ok) {
-        // Opted in: a 304 is the answer to the app's conditional request.
-        if (notModified && res.status === 304) return res;
-        if (SESSION_EXPIRED_STATUS.includes(res.status)) handleSessionExpiry(res.status, url, onSessionExpired);
-
-        // 419 = CSRF expiry: refresh once (off the retry budget), then retry.
-        // It NEVER fires onSessionExpired - that is 401's job (whitepaper 6.2).
-        if (res.status === 419 && !csrfRetried) {
-          csrfRetried = true;
-          setCsrfHeader(headers, await refreshCsrfOnce(csrfCookieUrl));
-          attempt--;
-          continue;
-        }
-
-        // A declared wait sets when, never whether: the rule decides. Waiting
-        // what it says, never less; a declared wait over 30 s is not slept
-        // inside the request, it ends it.
-        const failure = _answered(res.status, res.data, res.headers);
-        const declared = declaredWait(res.headers);
-        if (attempt < retry && !((declared ?? 0) > MAX_RETRY_AFTER_MS)) {
-          if (resendable(failure, opts.method, headers, declared)) {
-            await sleepMs(declared ?? backoffMs(attempt), userSignal);
-            continue;
-          }
-          _heldBack(failure, declared, opts.method, url);
-        }
-        throw asSilent(failure, silent);
+      // 419 = CSRF expiry: refresh once (off the retry budget), then retry.
+      // It NEVER fires onSessionExpired - that is 401's job (whitepaper 6.2).
+      if (res.status === 419 && !csrfRetried) {
+        csrfRetried = true;
+        const fresh = await refreshCsrfOnce(csrfCookieUrl);
+        if (!fresh) throw asSilent(transportFail('missing:csrf', `No CSRF token after refreshing it from "${csrfCookieUrl}".`, { context: { url: csrfCookieUrl } }), silent);
+        setCsrfHeader(headers, fresh);
+        attempt--;
+        continue;
       }
-
-      return res;
+      failure = _answered(res.status, res.data, res.headers);
+      declared = declaredWait(res.headers);
     } catch (e) {
-      clearTimeout(timeoutId);
-      combined?.detach();
-      // An answer thrown above was already judged by the rule there; it
-      // re-enters here only to leave.
+      // A failure thrown above was already judged; it leaves as it is.
       if (e instanceof BusError) throw e;
       if (userSignal?.aborted) throw asSilent(abortedRequest(url), silent);
       // A timeout-triggered abort is no reply in time; a body that is not the
       // JSON it declared is an off-protocol answer; anything else is no
       // response. The first and the last may have landed.
-      const failure = (e as Error)?.name === 'AbortError'
+      failure = (e as Error)?.name === 'AbortError'
         ? transportFail('timeout:reply', `"${url}" timed out after ${timeout}ms.`, { context: { url, timeout } })
         : e instanceof SyntaxError
           ? remoteFail('unexpected:json', `"${url}" answered a body that is not valid JSON.`, { context: { url }, cause: e })
           : transportFail('lost:reply', `No response from "${url}".`, { context: { url }, cause: e });
-      if (attempt >= retry) throw asSilent(failure, silent);
-      if (!resendable(failure, opts.method, headers)) {
-        _heldBack(failure, undefined, opts.method, url);
-        throw asSilent(failure, silent);
-      }
-      try {
-        await sleepMs(backoffMs(attempt), userSignal);
-      } catch {
-        throw asSilent(abortedRequest(url), silent);
-      }
     }
-  }
 
-  throw new Error('unreachable');
+    // Re-send after a wait, or leave marked. A declared wait sets when, never
+    // whether: the rule decides. Waiting what it says, never less; a declared
+    // wait over 30 s is not slept inside the request, it ends it.
+    if (attempt < retry && !((declared ?? 0) > MAX_RETRY_AFTER_MS)) {
+      if (resendable(failure, opts.method, headers, declared)) {
+        try {
+          await sleepMs(delayOption(declared ?? _backoff(attempt), 0), userSignal);
+        } catch {
+          throw asSilent(abortedRequest(url), silent);
+        }
+        continue;
+      }
+      _heldBack(failure, declared, opts.method, url);
+    }
+    throw asSilent(failure, silent);
+  }
 }
 
-export async function postCommand<T = unknown>(
+// One request under the timeout and the caller's signal. The timer and the
+// combined signal are released however it ends.
+async function send<T>(
+  doRequest: (signal: AbortSignal) => Promise<HttpResponse<T>>,
+  timeout: Delay,
+  userSignal: AbortSignal | undefined,
+): Promise<HttpResponse<T>> {
+  const timeoutCtrl = new AbortController();
+  const timeoutId = setTimeout(() => timeoutCtrl.abort(), timeout);
+  const combined = userSignal ? _combineSignals(userSignal, timeoutCtrl.signal) : null;
+  try {
+    return await doRequest(combined ? combined.signal : timeoutCtrl.signal);
+  } finally {
+    clearTimeout(timeoutId);
+    combined?.detach();
+  }
+}
+
+export function postCommand<T = unknown>(
   url: string,
   body: unknown,
   config: HttpConfig = {},
 ): Promise<HttpResponse<T>> {
-  const { timeout: rawTimeout = 10_000, retry = 0, signal: userSignal, csrf = false, csrfCookieUrl = DEFAULT_CSRF_COOKIE_URL, headers: extra = {}, onSessionExpired, silent = false } = config;
+  const serialized = _encodeJson(body, url);
+  return typeof serialized === 'string' ? _postJson<T>(url, serialized, config) : Promise.reject(asSilent(serialized, config.silent));
+}
+
+/** @internal - postCommand with its body already JSON: the batching bridge joins its commands' parts. */
+export async function _postJson<T = unknown>(
+  url: string,
+  serialized: string,
+  config: HttpConfig = {},
+): Promise<HttpResponse<T>> {
+  const { timeout: rawTimeout = 10_000, retry: rawRetry, signal: userSignal, csrf = false, csrfCookieUrl = DEFAULT_CSRF_COOKIE_URL, headers: extra = {}, onSessionExpired, silent = false } = config;
+  // A count by the count rule: NaN is the default, a negative 0, a fraction
+  // truncated. Unchecked, a NaN or negative `retry` sent nothing
+  // (tests/http-retry-count.test.ts).
+  const retry = countOption(rawRetry, 0);
   // setTimeout fires a delay it cannot hold AT ONCE: NaN reads as 0, and past
   // MAX_TIMEOUT_MS Node clamps to 1ms and browsers wrap. So `timeout: NaN`
   // (a failed `Number(config.x)`) and `timeout: Infinity` ("no timeout")
-  // aborted every request as it started. Two comparisons: NaN (or anything
-  // that does not compare as a number) fails both and takes the default,
-  // Infinity fails the first and is capped at the ceiling, and 0 and
-  // negatives pass through as an explicit "fire now". Chosen over an inline
-  // typeof check and over countOption() by measurement - smallest in the
-  // Blade bundle (tests/esm-treeshake.test.ts). Pinned by
+  // aborted every request as it started. NaN takes the default, a larger
+  // value the ceiling, 0 and negatives fire now (delayOption, the rule every
+  // timer takes: tests/timer-delays.test.ts). Pinned by
   // tests/http-timeout-bounds.test.ts.
-  const timeout = rawTimeout < MAX_TIMEOUT_MS ? rawTimeout : rawTimeout > 0 ? MAX_TIMEOUT_MS : 10_000;
+  const timeout = delayOption(rawTimeout, 10_000);
 
   const merged: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -682,7 +716,6 @@ export async function postCommand<T = unknown>(
   if (csrf) attachCsrf(merged);
   const headers = oneSpelling(merged);
 
-  const serialized = JSON.stringify(body);
   return runWithRetry<T>(
     (signal) => doFetch<T>(url, serialized, headers, signal),
     headers,
@@ -727,7 +760,10 @@ export type HttpRequestConfig = HttpConfig & {
    * keeps its own `signal`: aborting it rejects that caller's promise only.
    * The fetch is cancelled once every caller holding it has aborted; a
    * caller without a signal holds it until it lands.
-   * (`tests/http-dedupe-signal.test.ts`)
+   * (`tests/http-dedupe-signal.test.ts`) A `silent` read and one without
+   * `silent` are two requests, even at the same moment: joined, they would
+   * share one failure, and one caller's `silent` mark would reach the other
+   * (`tests/silent-dedupe.test.ts`).
    */
   dedupe?: boolean;
   /** @internal marks a CSRF-retried request */
@@ -737,8 +773,10 @@ export type HttpRequestConfig = HttpConfig & {
 /**
  * A `safe` helper's outcome: it never throws. `error` is the failure the call
  * would have thrown, the core's `BusError` (`conditionOf(error)`, and
- * `problemOf(error)` for the backend's RFC 9457 problem). `status` is 0 when
- * there was no response.
+ * `problemOf(error)` for the backend's RFC 9457 problem). One exception: an
+ * app's interceptor that throws reaches it as it was thrown, as an app's own
+ * throw does everywhere (docs/contract.md rule 8). `status` is 0 when there
+ * was no response.
  */
 export type SafeResult<T = unknown> = {
   data: T | null;
@@ -812,10 +850,10 @@ function createInterceptorManager<T>(): InterceptorManager<T> & { forEach(fn: (h
 // Imports from internal helpers
 // ---------------------------------------------------------------------------
 
-import { MAX_TIMEOUT_MS } from './bounds';
+import { type Delay, MAX_TIMEOUT_MS, countOption, delayOption } from './bounds';
 import { createResponseCache, CACHE_DEFAULT_TTL } from './http-cache';
 import { classifyError, type ProblemDetails } from './http-errors';
-import { BusError, _failures, _heldBack, conditionOfStatus, retryClass, type FailCode } from './failure';
+import { BusError, _backoff, _failures, _heldBack, conditionOfStatus, retryClass, type FailCode } from './failure';
 import { buildFullUrl } from './http-query';
 
 // ---------------------------------------------------------------------------
@@ -883,7 +921,7 @@ async function clientRequest<T>(
   body: string | FormData | undefined,
   responseType: ResponseType,
   maxRetries: number,
-  timeout: number,
+  timeout: Delay,
   userSignal: AbortSignal | undefined,
   csrf: boolean,
   csrfCookieUrl: string,
@@ -946,7 +984,7 @@ function absolute(url: string | undefined, base?: string): URL | undefined {
  * createHttpClient - multi-method HTTP client with interceptors, caching,
  * deduplication, safe mode, and file download.
  *
- * Aligned with useFetch (2026-02-05A) patterns. Framework-agnostic - no Vue imports.
+ * Framework-agnostic - no Vue imports.
  *
  * @example
  * const http = createHttpClient({ baseURL: '/api', csrf: true });
@@ -986,10 +1024,10 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
   // it. The last holder to abort cancels the fetch and removes the in-flight
   // entry at once, so a caller arriving after that starts a fresh request
   // instead of joining one that is already aborted.
-  function hold<T>(key: string, url: string, shared: Promise<T>, signal: AbortSignal): Promise<T> {
+  function hold<T>(key: string, url: string, shared: Promise<T>, signal: AbortSignal, silent: boolean | undefined): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       const onAbort = () => {
-        reject(abortedRequest(url));
+        reject(asSilent(abortedRequest(url), silent));
         const share = shares.get(shared);
         if (share && --share.live === 0) {
           shares.delete(shared);
@@ -1026,11 +1064,11 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
     });
 
     const method: HttpMethod = (config.method ?? 'GET') as HttpMethod;
-    // Same bounds as postCommand's, normalized once before clientRequest's loop.
-    const rawTimeout = config.timeout as number;
-    const timeout = rawTimeout < MAX_TIMEOUT_MS ? rawTimeout : rawTimeout > 0 ? MAX_TIMEOUT_MS : DEFAULT_CLIENT_TIMEOUT;
+    // Same bounds as postCommand's (timeout and retry), normalized once before clientRequest's loop.
+    const timeout = delayOption(config.timeout, DEFAULT_CLIENT_TIMEOUT);
     const isRead = READ_METHODS.includes(method);
-    const maxRetries = config.retry ?? (isRead ? DEFAULT_GET_RETRY : DEFAULT_MUTATION_RETRY);
+    const defaultRetries = isRead ? DEFAULT_GET_RETRY : DEFAULT_MUTATION_RETRY;
+    const maxRetries = countOption(config.retry ?? defaultRetries, defaultRetries);
     const responseType: ResponseType = config.responseType ?? 'json';
     const csrf = config.csrf ?? false;
     const csrfCookieUrl = config.csrfCookieUrl ?? DEFAULT_CSRF_COOKIE_URL;
@@ -1046,11 +1084,13 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
     // read joining a conditional one received its 304. A read opted in to
     // resolve a 304 never shares with one that is not, either: the same
     // answer resolves for one and throws for the other.
-    // tests/http-not-modified.test.ts. (`config.headers` is always the merged
-    // object, the instance's defaults included.)
+    // tests/http-not-modified.test.ts. Nor does a `silent` read with one that
+    // is not: they share one failure, marked in place, and a loud caller was
+    // handed a silent failure (tests/silent-dedupe.test.ts). (`config.headers`
+    // is always the merged object, the instance's defaults included.)
     // Encoded once for both keys below: two encodings per request was 1.30's.
     const headersKey = JSON.stringify(config.headers);
-    const dedupeKey = `${method}:${responseType}:${config.resolveNotModified ? '304:' : ''}${headersKey}:${fullUrl}`;
+    const dedupeKey = `${method}:${responseType}:${config.resolveNotModified ? '304:' : ''}${config.silent ? 'silent:' : ''}${headersKey}:${fullUrl}`;
     // The cache holds the same answer the dedupe would share, so it keys by the
     // same headers: one client whose Authorization or Accept-Language changed
     // must not be served the earlier answer (tests/http-cache-headers.test.ts).
@@ -1067,10 +1107,10 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
           shares.delete(inflight);
           return inflight;
         }
-        if (userSignal.aborted) throw abortedRequest(fullUrl);
+        if (userSignal.aborted) throw asSilent(abortedRequest(fullUrl), config.silent);
         const share = shares.get(inflight);
         if (share) share.live++;
-        return hold(dedupeKey, fullUrl, inflight, userSignal);
+        return hold(dedupeKey, fullUrl, inflight, userSignal, config.silent);
       }
     }
 
@@ -1097,7 +1137,9 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
         body = rawData;
         dropHeaders(headersObj, ['content-type']); // let browser set boundary, in any spelling
       } else if (typeof rawData === 'object') {
-        body = JSON.stringify(rawData);
+        const encoded = _encodeJson(rawData, fullUrl);
+        if (typeof encoded !== 'string') throw asSilent(encoded, config.silent);
+        body = encoded;
         headersObj['Content-Type'] = 'application/json';
       } else {
         body = String(rawData);
@@ -1172,7 +1214,7 @@ export function createHttpClient(instanceDefaults: Partial<HttpRequestConfig> = 
       if (share) shares.set(sharedPromise, share);
     }
     // This caller holds its own read like any joiner (see hold).
-    const own = share ? hold(dedupeKey, fullUrl, sharedPromise, userSignal!) : sharedPromise;
+    const own = share ? hold(dedupeKey, fullUrl, sharedPromise, userSignal!, config.silent) : sharedPromise;
 
     // Stale-while-revalidate: serve the stale response now; the fetch above
     // finishes in the background and is cached (cache.set) on success. `revalidation`

@@ -26,7 +26,8 @@ bus.onAfter((cmd, result) => {
   }
 })
 
-// 3. Install HTTP transport - all unhandled commands go to the server.
+// 3. Install HTTP transport - with no `actions`, every command goes to the
+//    server, and a handler registered on this bus never runs.
 //    The bus re-sends through it a transient failure for any action (a 429,
 //    503 or 408, after any Retry-After wait). A declared wait sets when, never
 //    whether. A verdict (422, 404, 403, 409) or a redirect is never re-sent. A
@@ -83,12 +84,12 @@ window.addEventListener('beforeunload', () => sse.dispose())
  *   <!-- With composable -->
  *   <!-- aria-disabled, not :disabled - disabling the focused button would
  *        send a keyboard user's focus to <body>. -->
- *   <button @click="!cmd.loading.value && cmd.dispatch('productFavorite', { id: product.id })" :aria-disabled="cmd.loading.value">
+ *   <button type="button" @click="!cmd.loading.value && cmd.dispatch('productFavorite', { id: product.id })" :aria-disabled="cmd.loading.value">
  *     {{ cmd.loading.value ? '...' : '♥ Save' }}
  *   </button>
  *
  *   <!-- Or declaratively with directive -->
- *   <button v-vc-command="'productFavorite'"
+ *   <button type="button" v-vc-command="'productFavorite'"
  *           v-vc-payload="{ id: product.id }">
  *     ♥ Save
  *   </button>

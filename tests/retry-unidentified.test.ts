@@ -1,4 +1,4 @@
-/** An unidentified request that got no reply is not re-sent, and is reported; a declared wait decides when, never whether (plan 1.27 item 3). Rationale at the end. */
+/** An unidentified request that got no reply is not re-sent, and is reported; a declared wait decides when, never whether (log s35.162). Rationale at the end. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { type BusError, createAsyncCommandBus, type AsyncCommandBusOptions, type CommandResult } from '../src/command-bus';
 import { createHttpClient, invalidateCsrfCache, postCommand } from '../src/http';
@@ -270,5 +270,5 @@ describe('production', () => {
  * wait only. So a declared wait sets when, and identity decides whether.
  * The RateLimit field (draft-ietf-httpapi-ratelimit-headers-11) declares a
  * wait of `t` seconds when a policy's `r` is 0, and Retry-After "MUST take
- * precedence". Plan .probes/1.27-plan.md item 3, log s35.162.
+ * precedence". Log s35.162.
  */

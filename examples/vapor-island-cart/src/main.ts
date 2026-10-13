@@ -18,7 +18,8 @@ for (const path in glob) {
 
 async function hydrate(el: Element): Promise<void> {
   const tag = el.tagName.toLowerCase();
-  if (customElements.get(tag) || !loaders[tag]) return;
+  // Own keys only: `<constructor>` would otherwise find Object.prototype's.
+  if (customElements.get(tag) || !Object.hasOwn(loaders, tag)) return;
   const mod = await loaders[tag]();
   if (!customElements.get(tag)) {
     customElements.define(tag, defineVaporCustomElement(mod.default, { shadowRoot: false }));

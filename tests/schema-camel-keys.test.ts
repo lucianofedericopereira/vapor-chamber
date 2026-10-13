@@ -1,6 +1,6 @@
-/** Schema keys: the camelCase name the bus validates is a typed name too; a raw one still compiles and warns in development (plan 1.27 section 10.8). Rationale at the end. */
+/** Schema keys: the camelCase name the bus validates is a typed name too; a raw one still compiles and warns in development (log s35.175). Two keys with one camel name throw at creation (D13 G8). Rationale at the end. */
 import { afterEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
-import { createSchemaCommandBus, type InferMap } from '../src/schema';
+import { createAsyncSchemaCommandBus, createSchemaCommandBus, ERROR_CODE_REGISTRY, type InferMap } from '../src/schema';
 import { stubEnv } from '../src/vitest-pure';
 
 afterEach(() => vi.restoreAllMocks());
@@ -52,6 +52,46 @@ describe('runtime', () => {
     make(schema);
     expect(seen()).toEqual([]);
     vi.resetModules();
+  });
+});
+
+describe('two keys, one camel name', () => {
+  const colliding = { 'cart.add': { target: { id: 'number' } }, cart_add: { target: { id: 'string' } } } as const;
+  const thrown = (f: () => unknown): { code?: string; message?: string } | 'no throw' => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    try { f(); } catch (e) { return e as { code?: string; message?: string }; }
+    return 'no throw';
+  };
+
+  it('the sync schema bus throws at creation, naming both keys and the name', () => {
+    const e = thrown(() => createSchemaCommandBus(colliding));
+    expect(e).toMatchObject({ code: 'schema:already:action' });
+    expect((e as { message: string }).message).toContain('"cart.add" and "cart_add"');
+    expect((e as { message: string }).message).toContain('"cartAdd"');
+  });
+
+  it('the async schema bus throws the same', () => {
+    expect(thrown(() => createAsyncSchemaCommandBus(colliding))).toMatchObject({ code: 'schema:already:action' });
+  });
+
+  it('a raw key and its camel name collide too', () => {
+    expect(thrown(() => createSchemaCommandBus({ cartAdd: { target: {} }, cart_add: { target: {} } }))).toMatchObject({ code: 'schema:already:action' });
+  });
+
+  it('control: keys with distinct camel names do not throw', () => {
+    expect(thrown(() => createSchemaCommandBus(schema))).toBe('no throw');
+  });
+
+  it('production throws too: a lost definition is not a development hint', async () => {
+    using _NODE_ENV = stubEnv('NODE_ENV', 'production');
+    vi.resetModules();
+    const { createSchemaCommandBus: make } = await import('../src/schema');
+    expect(thrown(() => make(colliding))).toMatchObject({ code: 'schema:already:action' });
+    vi.resetModules();
+  });
+
+  it('the code is catalogued', () => {
+    expect(ERROR_CODE_REGISTRY.some((e) => e.code === 'schema:already:action')).toBe(true);
   });
 });
 

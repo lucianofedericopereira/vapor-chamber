@@ -1,4 +1,4 @@
-/** authGuard's `protected` takes the library's pattern form too: `'admin*'` and `'*'` protect what they say (plan 1.27 section 10.2). Rationale at the end. */
+/** authGuard's `protected` takes the library's pattern form too: `'admin*'` and `'*'` protect what they say (log s35.165). Rationale at the end. */
 import { describe, expect, it } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
 import { authGuard } from '../src/plugins-core';

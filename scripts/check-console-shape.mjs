@@ -50,9 +50,9 @@
  * NO ALLOWLIST, AND TWO SITES THAT EARN IT. Both of the calls that look like
  * exceptions pass on SHAPE, with nothing written down about them:
  *
- *   - `command-bus.ts` `console.warn(msg)` - `validateNaming` builds one string
- *     and either throws it or logs it. The call interpolates nothing, so there
- *     is nothing here to classify.
+ *   - `command-bus.ts` `` console.warn(`[vapor-chamber] ${msg}`) `` -
+ *     `validateNaming` builds one string and either throws it or logs it. The
+ *     call interpolates only `msg`, typed `string`, so it passes on type.
  *   - `router/index.ts` `console.error(error)` - the error IS the argument.
  *     That is the convention, in its purest form.
  *
@@ -113,6 +113,8 @@ function isIdentifyingText(type) {
   // A union is fine when every member is - `typeof x` is a union of eight
   // string literals, and `RouterErrorCode` is a union of string literals too.
   if (type.isUnion()) return type.types.every(isIdentifyingText);
+  // A branded primitive (`Delay`, `number & { brand }`) prints as the primitive.
+  if (type.isIntersection()) return type.types.some((t) => (t.flags & IDENTIFYING) !== 0);
   return (type.flags & IDENTIFYING) !== 0;
 }
 
@@ -306,11 +308,11 @@ const MUTATIONS = [
   },
   {
     file: 'src/command-bus.ts',
-    what: 'the exempt console.warn(msg) site, made to interpolate',
+    what: "validateNaming's console.warn site, made to interpolate the pattern",
     expect: /interpolates `naming\.pattern` \(type RegExp\)/,
     ...mutate(
-      "  if (mode === 'warn') console.warn(msg);",
-      `  if (mode === 'warn') console.warn(\`\${naming.pattern}\`);`,
+      `  if (mode === 'warn') console.warn(\`[vapor-chamber] \${msg}\`);`,
+      `  if (mode === 'warn') console.warn(\`[vapor-chamber] \${naming.pattern}\`);`,
     ),
   },
   {

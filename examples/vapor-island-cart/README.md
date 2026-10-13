@@ -50,11 +50,9 @@ script, and this example's `predev`/`prebuild` hooks build it on demand if
 > **Note** - `@vitejs/plugin-vue` declares its peer as `vue@^3.2.25`, and npm
 > refuses to match a prerelease (`3.6.0-rc.x`) against a non-prerelease range.
 > The root `package.json` carries an `overrides` entry pinning that one peer to
-> the root's own `vue`, which is why a root `npm install` resolves. This folder
-> also keeps an `.npmrc` with `legacy-peer-deps=true`, which is what makes a
-> STANDALONE `npm install` in this directory work - npm does not read it for a
-> workspace install from the root. Either way the warning is cosmetic:
-> plugin-vue 6 fully supports Vue 3.6.
+> the root's own `vue`, which is why a root `npm install` resolves. Install from
+> the root: this folder has no `.npmrc` of its own. Either way the warning is
+> cosmetic: plugin-vue 6 fully supports Vue 3.6.
 
 ## What to look for
 
@@ -73,6 +71,6 @@ script, and this example's `predev`/`prebuild` hooks build it on demand if
 ## Notes on the Vite config
 
 `vite.config.ts` has no `vue` alias: `vue.runtime.esm-bundler.js` re-exports `@vue/runtime-vapor`
-itself (the export list is pinned by `tests/vue-bundler-vapor-exports.test.ts`). `vaporChamberHMR()` keeps bus state across HMR.
+itself (the export list is pinned by `tests/vue-bundler-vapor-exports.test.ts`). `vaporChamberHMR()` keeps the bus, with its handlers and plugins, across HMR.
 
-Aligned with Vue <!-- vc:vueAligned -->3.6.0-rc.10<!-- /vc:vueAligned --> and the working-tree vapor-chamber (`vapor-chamber: file:../..`).
+Aligned with Vue <!-- vc:vueAligned -->3.6.0-rc.11<!-- /vc:vueAligned --> and the working-tree vapor-chamber (`vapor-chamber: file:../..`).

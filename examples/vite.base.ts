@@ -9,10 +9,8 @@
  * WHAT IS SHARED is only what was already byte-identical in both configs, plus
  * one thing that should have been and was not:
  *
- *   define        The three Vue feature flags, so the two configs agree (about
- *                 40 bytes: Vapor components do not pull the Options-API
- *                 runtime in the first place). Safe: no Options API appears in
- *                 either example's src.
+ *   define        The three Vue feature flags, so the two configs agree. Safe:
+ *                 no Options API appears in either example's src.
  *   build.target  es2022, as `vapor-sfc` already pinned.
  *   plugins       `vue()` and `vaporChamberHMR({ verbose: false })`, which keeps
  *                 bus state across HMR.

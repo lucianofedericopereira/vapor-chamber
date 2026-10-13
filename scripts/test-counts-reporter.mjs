@@ -17,13 +17,14 @@
  *
  *     build + coverage   1748 passed / 113 files   <- canonical, see below
  *     build, no coverage 1750 / 114                (2 more tests run)
- *     no build           1720 / 107                (8 files skip without dist/)
+ *     no build           not a valid run: files that read dist/ fail (requireDist)
  *
- * `prepublishOnly` runs `test:run` BEFORE `build`, so a committed file would
- * flip to the no-build numbers on every release and fail the next `lint:check`
- * for a reason that has nothing to do with the suite. Since stamp-docs SKIPS
- * markers whose source is missing, leaving this file out of the repo means CI
- * passes untouched while local stamping still derives real numbers.
+ * Every whole-suite run writes its own numbers, and they differ by run (the
+ * table above). A release's `prepublishOnly` builds, then runs `test:run` and
+ * later `test:coverage`. A committed file would change with each such run, for a reason that has
+ * nothing to do with the suite. Since stamp-docs SKIPS markers whose source is
+ * missing, leaving this file out of the repo means CI passes untouched while
+ * local stamping still derives real numbers.
  *
  * CANONICAL: stamp from a built tree WITH coverage, so the test counts and the
  * coverage percentages in the same sentence come from the same run - which is
@@ -102,8 +103,8 @@ function countTasks(fileTasks) {
 
 /**
  * PROVENANCE, recorded rather than assumed. The counts are only comparable to
- * what the docs claim when the run was complete: `dist/` present (8 files skip
- * without it) and coverage on (the run docs/COVERAGE.md describes; the tests
+ * what the docs claim when the run was complete: `dist/` present (a file that
+ * reads it fails without it, requireDist) and coverage on (the run docs/COVERAGE.md describes; the tests
  * that only measure time skip in it, as in any run without VC_TIMING,
  * tests/under-coverage.ts). stamp-docs ignores data that says otherwise, so
  * an ordinary `npm run test:run` can write this file freely without making the

@@ -1,4 +1,4 @@
-/** MCP: version negotiation and protocol errors as the 2025-06-18 spec states them (plan 1.27 section 10.9). Rationale at the end. */
+/** MCP: version negotiation and protocol errors as the 2025-06-18 spec states them (log s35.172). Rationale at the end. */
 import { describe, expect, it } from 'vitest';
 import { createSchemaCommandBus } from '../src/schema';
 import { createActionFilter } from '../src/action-filter';

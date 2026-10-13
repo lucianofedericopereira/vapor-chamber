@@ -64,7 +64,7 @@ describe('persist action scope', () => {
 });
 
 /*
- * Plan .probes/1.28-plan.md item 9b. Before it, persist declared no scope, so
+ * Log s35.214. Before it, persist declared no scope, so
  * the bus ran it on every dispatch and an app narrowed it with `filter(cmd)`,
  * which runs after the handler on every success. The scope is the bus's own
  * per-action chain (perAction in src/command-bus.ts), as for the outbox and

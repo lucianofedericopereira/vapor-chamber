@@ -50,6 +50,21 @@ fi
 # strip the <?php opener before appending into the existing file
 tail -n +2 "$HERE/routes/append-to-web.php" >> "$WEB"
 
+# 5. Command input as the client sent it. Laravel's global TrimStrings and
+#    ConvertEmptyStringsToNull turn " a " into "a" and "" into null, values the
+#    client's schema accepts as they are. One closure skips both for the
+#    command routes (api/vc and everything under it). Like the routes block,
+#    our lines are dropped and written again on a re-run.
+APP="$TARGET/bootstrap/app.php"
+VC_BEGIN='// vapor-chamber: command input as sent (begin)'
+VC_END='// vapor-chamber: command input as sent (end)'
+export VC_BEGIN VC_END
+perl -i -ne 'if (index($_, $ENV{VC_BEGIN}) >= 0) { $d = 1 } print unless $d; $d = 0 if index($_, $ENV{VC_END}) >= 0' "$APP"
+perl -i -pe 'if (/->withMiddleware\(function \(Middleware \$middleware\): void \{/) { $_ .= join "", map { "        $_\n" } $ENV{VC_BEGIN}, q{$vc = fn (\Illuminate\Http\Request $request) => $request->is('"'"'api/vc'"'"', '"'"'api/vc/*'"'"');}, q{$middleware->convertEmptyStringsToNull(except: [$vc]);}, q{$middleware->trimStrings(except: [$vc]);}, $ENV{VC_END} }' "$APP"
+if ! grep -q "$VC_BEGIN" "$APP"; then
+  echo "[setup] bootstrap/app.php has no withMiddleware block: add the lines in docs/integrations/laravel.md by hand." >&2
+fi
+
 echo
 echo "[setup] done. Run it:"
 echo "  cd $TARGET && php artisan serve"

@@ -4,7 +4,7 @@
  * shared pair of live regions per document - the pattern of Angular CDK's
  * LiveAnnouncer and React Aria's announce(), so no feature creates a region of
  * its own. The app can take the announcing over (its own status bar, its own
- * words): setAnnouncer. docs/plan-failures-and-contract.md, section 8e.
+ * words): setAnnouncer. docs/accessibility.md.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { announce, setAnnouncer } from '../src/a11y';

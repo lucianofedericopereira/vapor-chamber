@@ -15,7 +15,7 @@ import { ... } from 'vapor-chamber/directives';
 
 ### createDirectivePlugin
 
-**Function** - [src/directives.ts:840](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L840)
+**Function** - [src/directives.ts:880](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L880)
 
 ```ts
 createDirectivePlugin() => { install(app: any): void; }
@@ -37,7 +37,7 @@ the whole branch folds out of a production build.
 
 ### vcCommandVapor
 
-**Function** - [src/directives.ts:687](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L687)
+**Function** - [src/directives.ts:724](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L724)
 
 ```ts
 vcCommandVapor(el: Element, value?: () => unknown, _argument?: () => unknown, modifiers?: Record<string, boolean | undefined>) => (() => void) | undefined
@@ -68,10 +68,11 @@ Vapor has no `updated` hook and hands the binding over as a GETTER, so the
 action is read from it at dispatch time: a changed binding re-targets the
 next click without the directive re-running
 (tests/vapor-directives-fixture.test.ts pins that it does not). The getter is
-read rather than tracked with an effect on purpose: tracking needs
-`renderEffect`, which exists only in Vue's Vapor build, and a static import
-of it would break this subpath for every Vue 3.5 consumer of the vDOM
-plugin.
+read rather than tracked, on purpose. Tracking is possible - Vue's own Vapor
+directive tests use the public `watchEffect` - but it costs one effect per
+mounted control, literal actions included, and this subpath imports no Vue.
+Reading at press time needs none: an action set after mount is picked up,
+and a press with no action does nothing (see buildHandler).
 
 `v-vc-payload` and `v-vc-optimistic` WORK ON BOTH RENDERERS - see
 {@link vcPayloadVapor} and {@link vcOptimisticVapor}.
@@ -108,7 +109,7 @@ import { vcCommandVapor as vVcCommand } from 'vapor-chamber/directives';
 
 ### vcOptimisticVapor
 
-**Function** - [src/directives.ts:817](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L817)
+**Function** - [src/directives.ts:857](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L857)
 
 ```ts
 vcOptimisticVapor(el: Element, value?: () => unknown) => () => void
@@ -118,7 +119,10 @@ vcOptimisticVapor - `v-vc-optimistic` for Vapor components.
 
 The Vapor port of the vDOM `vc-optimistic` registration. The bound function
 receives the `Command` and returns a rollback function (or null); the
-rollback runs if the dispatch fails.
+rollback runs if the dispatch fails. A dispatch still running when the
+timeout modifier gives up is reported as `directive:timeout:dispatch` and
+the button released, and its late result decides: a failure rolls back, a
+success keeps.
 
 Without it a Vapor template has no optimistic update with rollback: the
 alternative is to abandon `v-vc-command` for that button and hand-roll the
@@ -143,7 +147,7 @@ const bump = (cmd) => { count.value++; return () => { count.value--; }; };
 
 ### vcPayloadVapor
 
-**Function** - [src/directives.ts:786](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L786)
+**Function** - [src/directives.ts:823](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/directives.ts#L823)
 
 ```ts
 vcPayloadVapor(el: Element, value?: () => unknown) => () => void

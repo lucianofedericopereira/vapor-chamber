@@ -40,4 +40,24 @@ describe('route announcer (real Chromium)', () => {
     expect(document.activeElement).toBe(heading);
     router.dispose();
   });
+
+  it('leaves an editable focus target in the tab order: Chromium reports its tabIndex -1 (audit RA-4)', async () => {
+    const editor = document.createElement('div');
+    editor.id = 'editor';
+    editor.contentEditable = 'true';
+    const heading = document.createElement('h1');
+    heading.id = 'page-title';
+    document.body.append(editor, heading);
+    expect(editor.tabIndex).toBe(-1); // the engine's own reading, which the old check trusted
+
+    for (const [target, attr] of [['#editor', null], ['#page-title', '-1']] as const) {
+      const router = makeRouter({ focusOnNavigate: target });
+      await router.isReady();
+      await router.push('/list');
+      await frame();
+      expect(document.querySelector(target)!.getAttribute('tabindex')).toBe(attr);
+      expect(document.activeElement).toBe(document.querySelector(target));
+      router.dispose();
+    }
+  });
 });

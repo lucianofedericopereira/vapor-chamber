@@ -41,7 +41,7 @@ export type CreateAppOptions = {
   transport?: AsyncPlugin;
   plugins?: AsyncPlugin[];
   onMissing?: CommandBusOptions['onMissing'];
-  /** The bus's retry (on by default); `{ actions: { cartAdd: 'idempotent' } }` declares, `false` turns it off. */
+  /** The bus's retry, on by default. `{ actionPolicies: { cartAdd: 'idempotent' } }` declares a policy, `false` turns it off. */
   retry?: AsyncCommandBusOptions['retry'];
 };
 

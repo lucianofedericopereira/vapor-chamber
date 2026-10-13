@@ -1,4 +1,4 @@
-/** A store applies a bridged action's answer, opt-in, through `RegisterOptions.answer` (plan 1.27 D3). Rationale at the end. */
+/** A store applies a bridged action's answer, opt-in, through `RegisterOptions.answer` (log s35.184). Rationale at the end. */
 import { describe, expect, it, vi } from 'vitest';
 import { type Command, createAsyncCommandBus } from '../src/command-bus';
 import { history } from '../src/plugins-core';

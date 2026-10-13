@@ -1,9 +1,11 @@
 <!--
   Fire-and-forget hot path via `defineVaporCommand`.
 
-  Search-as-you-type and telemetry events are high-frequency. Allocating two
-  reactive signals (loading, lastError) per keystroke is wasted overhead.
-  `defineVaporCommand` skips that - handler runs, fire-and-forget.
+  Search-as-you-type and telemetry events are high-frequency. `useCommand`
+  allocates two reactive signals (loading, lastError) once, then writes them
+  on every dispatch, so each keystroke would pay those writes for state this
+  panel never shows. `defineVaporCommand` has no such state - handler runs,
+  fire-and-forget.
 
   The local `query` signal is a plain Vue ref for the input value.
 -->
@@ -13,7 +15,7 @@ import { defineVaporCommand, signal } from 'vapor-chamber/vapor';
 
 const query = signal('');
 
-// Zero-overhead - no reactive loading/error allocation per call.
+// No loading/error signals: a dispatch writes no loading or error state.
 const { dispatch: search } = defineVaporCommand('searchExecute', async (cmd) => {
   // In a real app, forward to your search backend. Here we just log the term.
   console.log('[searchExecute]', cmd.target);

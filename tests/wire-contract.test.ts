@@ -1,5 +1,5 @@
 /**
- * The wire contract (docs/plan-failures-and-contract.md 4.4), end to end, with
+ * The wire contract (docs/contract.md 4), end to end, with
  * only `fetch` and the socket stubbed: each rule stated once and run on every
  * path it covers.
  *

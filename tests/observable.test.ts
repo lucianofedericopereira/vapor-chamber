@@ -9,6 +9,7 @@ import { describe, expect, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
 import { observe, dispatchFrom } from '../src/observable';
 import { it } from '../src/vitest';
+import { from as rxFrom, filter as rxFilter } from 'rxjs';
 
 describe('observe(bus, pattern)', () => {
   it('subscribe receives { cmd, result } for each matching dispatch', ({ bus }) => {
@@ -70,6 +71,16 @@ describe('observe(bus, pattern)', () => {
     const symObs = (obs as any)[(Symbol as any).observable ?? Symbol.for('@@observable')];
     expect(typeof symObs).toBe('function');
     expect(symObs()).toBe(obs);
+  });
+
+  it("RxJS's from() reads it on a runtime with no Symbol.observable (Node, every browser)", ({ bus }) => {
+    // RxJS keys the interop on the string '@@observable' then (rxjs internal/symbol/observable).
+    expect((Symbol as any).observable).toBeUndefined();
+    bus.register('cartAdd', () => 1);
+    const seen: string[] = [];
+    rxFrom(observe(bus, 'cart*')).pipe(rxFilter(({ result }) => result.ok)).subscribe(({ cmd }) => seen.push(cmd.action));
+    bus.dispatch('cartAdd', {});
+    expect(seen).toEqual(['cartAdd']);
   });
 
   it('observer-object form (next callback)', ({ bus }) => {

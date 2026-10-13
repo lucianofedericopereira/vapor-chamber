@@ -7,19 +7,19 @@
 
 import type { ActionScope, Command, CommandResult, AsyncPlugin, BaseBus, BusError, FailCode, MetaResponse } from './command-bus';
 import type { ActionFilter } from './action-filter';
-import { MAX_TIMEOUT_MS, countOption } from './bounds';
+import { countOption, delayOption } from './bounds';
 import { DEV } from './dev';
 import { abortedResult, BusError as BusErrorClass, _failures, _okResult, _errResult, _isLibraryAction } from './command-bus';
 import { _appliedRemotely } from './applied-remotely';
-import { _answered, _parseRetryAfter, _remoteProblem, postCommand } from './http';
-import type { HttpClient } from './http';
+import { _answered, _combineSignals, _encodeJson, _parseRetryAfter, _postJson, _remoteProblem } from './http';
+import type { CombinedSignal, HttpClient, HttpResponse } from './http';
 import type { ProblemDetails } from './http-errors';
 import { signal } from './signal';
 import type { Signal } from './signal';
 
 /**
  * What each bridge declares: it answers a command itself, over a wire, so the
- * async bus's retry re-sends through it (docs/plan-shape.md 4) and the plugins
+ * async bus's retry re-sends through it (docs/retry.md) and the plugins
  * outside see one dispatch. Its id is the owner every bridge failure already
  * carries (`transport:lost:reply`, ...), so a bridge has one owner name.
  */
@@ -30,7 +30,7 @@ const TRANSPORT = { transport: true, id: 'transport' } as const;
 // ---------------------------------------------------------------------------
 
 /**
- * A command on every wire (docs/plan-failures-and-contract.md 4.4): `id` where
+ * A command on every wire (docs/contract.md 4): `id` where
  * answers are multiplexed (a batch, a WebSocket), as on the answer side; `meta`
  * only with a fact a backend can use. Log s35.138.
  */
@@ -55,8 +55,8 @@ function envelopeOf(cmd: Command, id?: string): CommandEnvelope {
 }
 
 /**
- * A command's answer, the same on every wire (docs/plan-failures-and-contract.md
- * 4.4): `state` on success, `redirect` for a navigation, `problem` on failure,
+ * A command's answer, the same on every wire (docs/contract.md 4):
+ * `state` on success, `redirect` for a navigation, `problem` on failure,
  * one of the three. A batched result and a WebSocket frame carry `id` beside
  * it; a single command's failure is its non-2xx response's body.
  */
@@ -76,7 +76,7 @@ export type BackendResponse = {
 
 
 // The transport's own failures, and a backend's: each through its own `fail`,
-// so neither can speak as the other (plan 4.5).
+// so neither can speak as the other (docs/contract.md 5).
 const transportFail = _failures('transport');
 const remoteFail = _failures('remote');
 const transportError = (code: FailCode, message: string, action?: string, context?: Record<string, unknown>): BusError =>
@@ -132,6 +132,39 @@ function answerOf(r: BackendResponse, cmd: Command, headers?: unknown): CommandR
   // The store states its reply declares travel with it to the bus.
   _appliedRemotely.set(cmd, r.stores);
   return _okResult(r.state);
+}
+
+/**
+ * One answer of an HTTP bridge's request. A redirect is a body member (a
+ * browser's fetch cannot read a 3xx's Location): it goes to `navigate`
+ * (typically Inertia's `router.visit`), and the command fails, carrying the
+ * url. Anything else by contract (answerOf).
+ */
+function readAnswer(r: BackendResponse, cmd: Command, headers: unknown, navigate: ((url: string) => void) | undefined): CommandResult {
+  if (typeof r.redirect === 'string' && r.redirect) {
+    navigate?.(r.redirect);
+    return _errResult(redirected(r.redirect, cmd.action, !!navigate));
+  }
+  return answerOf(r, cmd, headers);
+}
+
+/**
+ * What both HTTP bridges send through. `signal`: the bridge's own and its
+ * scope's, either one cancels, combined once (its listeners live as long as
+ * the bridge, never detached). `post`: one request, through the app's
+ * `httpClient` with the body as an object, else postCommand's path with it
+ * already JSON. Each command is sent once (`retry: 0`): the async bus
+ * re-sends (docs/retry.md).
+ */
+function httpSender(options: HttpBridgeOptions) {
+  const { endpoint, csrf = false, csrfCookieUrl, timeout = 10_000, signal, onSessionExpired, scopeController, httpClient } = options;
+  return {
+    signal: scopeController && signal ? _combineSignals(signal, scopeController.signal).signal : scopeController?.signal ?? signal,
+    post<R>(json: string, body: () => unknown, headers: Record<string, string>, requestSignal: AbortSignal | undefined): Promise<HttpResponse<R>> {
+      const config = { csrf, csrfCookieUrl, headers, timeout, retry: 0, signal: requestSignal, onSessionExpired };
+      return httpClient ? httpClient.post<R>(endpoint, body(), config) : _postJson<R>(endpoint, json, config);
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -228,17 +261,17 @@ export type HttpBridgeOptions = {
  * createHttpBridge - fetch-based transport plugin.
  *
  * Intercepts matching commands and forwards them to the backend as JSON.
- * The backend receives `{ command, target, payload }` and answers `{ state }`
- * (or `{ redirect }`) on success, and a non-2xx RFC 9457 problem on failure,
- * read as `remote:<condition of its status>:<code>` (docs/plan-failures-and-
- * contract.md 4.4).
+ * The backend receives `{ command, target, payload, meta? }` and answers
+ * `{ state, stores? }`, `{ stores }` or `{ redirect }` on success, and a
+ * non-2xx RFC 9457 problem on failure,
+ * read as `remote:<condition of its status>:<code>` (docs/contract.md 4).
  *
  * Features: multi-source CSRF token reading (meta tag / cookie / hidden input),
  * automatic CSRF-expiry refresh on HTTP 419 (Laravel Sanctum convention by
  * default, configurable for other frameworks), session-expiry detection on
  * 401, request timeout, per-call AbortSignal. It sends each command once and
  * declares `transport: true`: the async bus re-sends through it by the
- * failure's condition, after a declared Retry-After (docs/plan-shape.md 4).
+ * failure's condition, after a declared Retry-After (docs/retry.md).
  *
  * @example
  * const bus = createAsyncCommandBus({ retry: { actionPolicies: { 'cart*': 'idempotent' } } })
@@ -247,18 +280,18 @@ export type HttpBridgeOptions = {
  * await bus.dispatch('cartAdd', product, { quantity: 2 })
  */
 export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
-  const { endpoint, actions, csrf = false, csrfCookieUrl, headers = {}, timeout = 10_000, signal, onSessionExpired, onRedirect, scopeController, httpClient } = options;
-  // Merge external signal + scope controller signal for automatic cancellation
-  const effectiveSignal = scopeController && signal
-    ? (typeof AbortSignal.any === 'function'
-        ? AbortSignal.any([signal, scopeController.signal])
-        : signal) // fallback: prefer user signal if AbortSignal.any unavailable
-    : scopeController?.signal ?? signal;
+  const { endpoint, actions, headers = {}, onRedirect } = options;
+  const http = httpSender(options);
+  const effectiveSignal = http.signal;
 
   return Object.assign(async (cmd: Command, next: () => CommandResult | Promise<CommandResult>) => {
     if (_isLibraryAction(cmd.action)) return next();
 
     const envelope = envelopeOf(cmd);
+    // Encoded here, so a command JSON cannot hold fails as transport:invalid:json
+    // with nothing sent, never as a lost reply (tests/invalid-json.test.ts).
+    const data = _encodeJson(envelope, endpoint, cmd.action);
+    if (typeof data !== 'string') return _errResult(data);
 
     // Forward the idempotency key stamped by the `idempotent` plugin as an
     // `Idempotency-Key` header so the backend can reject duplicate writes - the
@@ -282,21 +315,12 @@ export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
     // Merge bridge-level effectiveSignal with per-dispatch cmd.signal. The
     // dispatch-time signal (from `bus.dispatch(..., { signal })`) is
     // auto-propagated to the HTTP request - consumers don't need to wire it
-    // through the bridge options.
-    const perCallSignal = cmd.signal && effectiveSignal
-      ? (typeof AbortSignal.any === 'function'
-          ? AbortSignal.any([effectiveSignal, cmd.signal])
-          : cmd.signal) // fallback: prefer the per-dispatch signal
-      : (cmd.signal ?? effectiveSignal);
+    // through the bridge options. Detached when the request settles.
+    const combined = cmd.signal && effectiveSignal ? _combineSignals(effectiveSignal, cmd.signal) : undefined;
+    const perCallSignal = combined?.signal ?? cmd.signal ?? effectiveSignal;
 
     try {
-      const res = httpClient
-        ? await httpClient.post<BackendResponse>(endpoint, envelope, {
-            csrf, csrfCookieUrl, headers: reqHeaders, timeout, retry: 0, signal: perCallSignal, onSessionExpired,
-          })
-        : await postCommand<BackendResponse>(endpoint, envelope, {
-            csrf, csrfCookieUrl, headers: reqHeaders, timeout, retry: 0, signal: perCallSignal, onSessionExpired,
-          });
+      const res = await http.post<BackendResponse>(data, () => envelope, reqHeaders, perCallSignal);
 
       if (!res.ok) return _errResult(_answered(res.status, res.data, res.headers));
       if (cmd.meta) cmd.meta.response = responseOf(res);
@@ -304,17 +328,11 @@ export function createHttpBridge(options: HttpBridgeOptions): AsyncPlugin {
       if (res.data !== null && res.data !== undefined && (typeof res.data !== 'object' || Array.isArray(res.data))) {
         return _errResult(remoteFail('unexpected:json', `The reply for "${cmd.action}" is not the JSON envelope.`, { action: cmd.action }));
       }
-      const d = (res.data ?? {}) as BackendResponse;
-      // A redirect is a body member (a browser's fetch cannot read a 3xx's
-      // Location): handed to onRedirect (typically Inertia's `router.visit`),
-      // and the command fails, carrying the url.
-      if (typeof d.redirect === 'string' && d.redirect) {
-        onRedirect?.(d.redirect);
-        return _errResult(redirected(d.redirect, cmd.action, !!onRedirect));
-      }
-      return answerOf(d, cmd, res.headers);
+      return readAnswer((res.data ?? {}) as BackendResponse, cmd, res.headers, onRedirect);
     } catch (e) {
       return unanswered(e, cmd.action, perCallSignal);
+    } finally {
+      combined?.detach();
     }
   }, TRANSPORT, { actions, actionFilter: options.actionFilter });
 }
@@ -350,22 +368,23 @@ export type BatchingHttpBridgeOptions = HttpBridgeOptions & {
 type BatchedResult = { id: string; headers?: Record<string, string> } & BackendResponse;
 type BatchResponse = { results?: BatchedResult[] };
 
-// `leave`: set at the flush for a command that carries a signal; its abort counts it out of the request.
-type QueuedBatchEntry = { id: string; cmd: Command; resolve: (result: CommandResult) => void; leave?: () => void };
+// `data`: the command's envelope as JSON, encoded at dispatch. `leave`: set at
+// the flush for a command that carries a signal; its abort counts it out of the request.
+type QueuedBatchEntry = { id: string; cmd: Command; data: string; resolve: (result: CommandResult) => void; leave?: () => void };
 
 /**
  * createBatchingHttpBridge - coalescing fetch-based transport plugin.
  *
  * Same per-dispatch call shape and backend options as {@link createHttpBridge}
- * (CSRF, retry, timeout, session-expiry are all reused via the same
- * `postCommand`/`httpClient` path), but every command dispatched within the
- * batching window is queued and sent as ONE POST:
+ * (CSRF, timeout and session expiry through the same `postCommand` /
+ * `httpClient` path, each command sent once), but every command dispatched
+ * within the batching window is queued and sent as ONE POST:
  *
- *   { commands: [{ id, command, target, payload }, ...] }
+ *   { commands: [{ id, command, target, payload, meta? }, ...] }
  *
  * matched back against:
  *
- *   { results: [{ id, state }, { id, redirect }, { id, problem }, ...] }
+ *   { results: [{ id, state, stores? }, { id, redirect }, { id, problem, headers? }, ...] }
  *
  * A failed result carries its problem with the command's own `status`. A
  * result may carry its own `headers` (OData JSON batch): its `Retry-After`
@@ -383,10 +402,12 @@ type QueuedBatchEntry = { id: string; cmd: Command; resolve: (result: CommandRes
  * bus.dispatch('cartAdd', product, { quantity: 2 })
  */
 export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): AsyncPlugin {
-  const { endpoint, actions, csrf = false, csrfCookieUrl, headers = {}, timeout = 10_000, signal, onSessionExpired, onRedirect, scopeController, httpClient, window: flushWindow = 'microtask' } = options;
-  const effectiveSignal = scopeController && signal
-    ? (typeof AbortSignal.any === 'function' ? AbortSignal.any([signal, scopeController.signal]) : signal)
-    : scopeController?.signal ?? signal;
+  const { endpoint, actions, headers = {}, onRedirect, window: flushWindow = 'microtask' } = options;
+  const http = httpSender(options);
+  const effectiveSignal = http.signal;
+  // A number window by the timer rule; 'microtask', a missing or a NaN window
+  // is the default, the microtask (tests/timer-delays.test.ts).
+  const flushMs = delayOption(flushWindow, undefined);
 
   let queue: QueuedBatchEntry[] = [];
   let scheduled = false;
@@ -395,8 +416,8 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
   function scheduleFlush(): void {
     if (scheduled) return;
     scheduled = true;
-    if (flushWindow === 'microtask') queueMicrotask(flush);
-    else setTimeout(flush, flushWindow);
+    if (flushMs === undefined) queueMicrotask(flush);
+    else setTimeout(flush, flushMs);
   }
 
   async function flush(): Promise<void> {
@@ -408,17 +429,17 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
 
     // A command that carries a signal settles on its abort; the request is
     // cancelled once every command in it has aborted (the HTTP client's rule).
+    // With the bridge's signal too, either one cancels; detached when it settles.
     let requestSignal = effectiveSignal;
+    let combined: CombinedSignal | undefined;
     if (batch.some((entry) => entry.cmd.signal)) {
       const ctrl = new AbortController();
       let live = batch.length;
       for (const entry of batch) if (entry.cmd.signal) entry.leave = () => { if (--live === 0) ctrl.abort(); };
-      requestSignal = effectiveSignal
-        ? (typeof AbortSignal.any === 'function' ? AbortSignal.any([effectiveSignal, ctrl.signal]) : effectiveSignal) // fallback: the bridge's signal, as released
-        : ctrl.signal;
+      if (effectiveSignal) combined = _combineSignals(effectiveSignal, ctrl.signal);
+      requestSignal = combined ? combined.signal : ctrl.signal;
     }
 
-    const commands = batch.map(({ id, cmd }) => envelopeOf(cmd, id));
     // One request: its commands' `meta.request` headers merged in queue order.
     let batchHeaders = headers;
     for (const { cmd } of batch) {
@@ -427,13 +448,12 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
     }
 
     try {
-      const res = httpClient
-        ? await httpClient.post<BatchResponse>(endpoint, { commands }, {
-            csrf, csrfCookieUrl, headers: batchHeaders, timeout, retry: 0, signal: requestSignal, onSessionExpired,
-          })
-        : await postCommand<BatchResponse>(endpoint, { commands }, {
-            csrf, csrfCookieUrl, headers: batchHeaders, timeout, retry: 0, signal: requestSignal, onSessionExpired,
-          });
+      const res = await http.post<BatchResponse>(
+        `{"commands":[${batch.map((entry) => entry.data).join(',')}]}`,
+        () => ({ commands: batch.map(({ id, cmd }) => envelopeOf(cmd, id)) }),
+        batchHeaders,
+        requestSignal,
+      );
 
       if (!res.ok) {
         const err = _answered(res.status, res.data, res.headers);
@@ -448,22 +468,22 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
       // in one tick race. Every redirected command still fails on its own,
       // carrying its own url.
       let navigated = false;
+      const navigate = onRedirect && ((url: string) => {
+        if (!navigated) {
+          navigated = true;
+          onRedirect(url);
+        }
+      });
       for (const entry of batch) {
         const r = byId.get(entry.id);
-        if (!r) {
-          entry.resolve(_errResult(transportError('lost:result', `The batch answer is missing a result for "${entry.cmd.action}".`, entry.cmd.action, { id: entry.id })));
-        } else if (typeof r.redirect === 'string' && r.redirect) {
-          if (onRedirect && !navigated) {
-            navigated = true;
-            onRedirect(r.redirect);
-          }
-          entry.resolve(_errResult(redirected(r.redirect, entry.cmd.action, !!onRedirect)));
-        } else {
-          entry.resolve(answerOf(r, entry.cmd, r.headers));
-        }
+        entry.resolve(r
+          ? readAnswer(r, entry.cmd, r.headers, navigate)
+          : _errResult(transportError('lost:result', `The batch answer is missing a result for "${entry.cmd.action}".`, entry.cmd.action, { id: entry.id })));
       }
     } catch (e) {
       for (const entry of batch) entry.resolve(unanswered(e, entry.cmd.action, effectiveSignal));
+    } finally {
+      combined?.detach();
     }
   }
 
@@ -471,9 +491,14 @@ export function createBatchingHttpBridge(options: BatchingHttpBridgeOptions): As
     if (_isLibraryAction(cmd.action)) return next();
     if (cmd.signal?.aborted) return Promise.resolve(abortedResult(cmd.action, cmd.signal));
 
+    const id = `${Date.now()}-${++seq}`;
+    // Encoded now, so a command JSON cannot hold fails alone, before it is
+    // queued, and never fails the batch it would have joined.
+    const data = _encodeJson(envelopeOf(cmd, id), endpoint, cmd.action);
+    if (typeof data !== 'string') return Promise.resolve(_errResult(data));
+
     return new Promise<CommandResult>((resolve) => {
-      const id = `${Date.now()}-${++seq}`;
-      const entry: QueuedBatchEntry = { id, cmd, resolve };
+      const entry: QueuedBatchEntry = { id, cmd, data, resolve };
       const signal = cmd.signal;
       if (signal) {
         // Before the flush the command leaves the queue, never sent; after,
@@ -564,7 +589,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
     onConnect,
     onDisconnect,
     onError,
-    timeout: wsTimeout = 10_000,
+    timeout: rawWsTimeout = 10_000,
     maxQueueSize: rawMaxQueueSize = 100,
   } = options;
 
@@ -574,10 +599,13 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
   // treats as 0, so "forever" is also "as fast as the event loop allows" -
   // a hot loop against the server it is meant to be backing off from. And
   // `queue.length >= maxQueueSize` never drops, so the offline queue grows
-  // without bound the whole time.
+  // without bound the whole time. The reply timeout is a delay too: a timer
+  // fires at once on NaN or past MAX_TIMEOUT_MS, which failed every command
+  // after 1 ms (tests/nan-options.test.ts).
   const maxReconnects = countOption(rawMaxReconnects, 10);
-  const reconnectDelay = countOption(rawReconnectDelay, 1000, 0, MAX_TIMEOUT_MS);
+  const reconnectDelay = delayOption(rawReconnectDelay, 1000);
   const maxQueueSize = countOption(rawMaxQueueSize, 100);
+  const wsTimeout = delayOption(rawWsTimeout, 10_000);
 
   let ws: WebSocket | null = null;
   let reconnectCount = 0;
@@ -720,7 +748,7 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
         // Reconnect if we still can; otherwise this close is terminal - fail any
         // in-flight requests now rather than leaving them to hang until timeout.
         if (!intentionalClose && reconnect && reconnectCount < maxReconnects) {
-          reconnectTimer = setTimeout(connect, reconnectDelay * ++reconnectCount);
+          reconnectTimer = setTimeout(connect, delayOption(reconnectDelay * ++reconnectCount, 0));
         } else {
           failAllPending('WebSocket connection closed before response');
         }
@@ -765,11 +793,15 @@ export function createWsBridge(options: WsBridgeOptions): AsyncPlugin & {
       const id = genId();
       const envelope = envelopeOf(cmd, id);
       // Encoded before anything is armed or queued: an envelope JSON cannot
-      // hold (a BigInt in the payload) fails this dispatch alone, as it did on
-      // an open socket. Encoded at flush time, its throw left the commands
-      // queued behind it unsent and skipped onConnect
-      // (tests/ws-bridge-unencodable-queued.test.ts).
-      const data = JSON.stringify(envelope);
+      // hold (a BigInt in the payload) fails this dispatch alone, as
+      // transport:invalid:json. Encoded at flush time, its throw left the
+      // commands queued behind it unsent and skipped onConnect
+      // (tests/ws-bridge-unencodable-queued.test.ts, tests/invalid-json.test.ts).
+      const data = _encodeJson(envelope, url, cmd.action);
+      if (typeof data !== 'string') {
+        resolve(_errResult(data));
+        return;
+      }
       let abortHandler: (() => void) | null = null;
 
       // Naturally idempotent - no `settled` flag needed: the first call

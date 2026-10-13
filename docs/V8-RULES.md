@@ -37,7 +37,7 @@ becomes a rule when it is measured. The full record, with the numbers, is
    build time and keep the branch off the hot path. The fast lane picks its
    `removal` mode at factory time. Unifying the sync and async commands was
    declined because it puts a `signal` store on the sync dispatch path.
-   ([performance.md, "Copy-on-write listener buckets"](./performance.md#copy-on-write-listener-buckets-fast-lane-emit-shipped-as-an-opt-in))
+   ([performance.md, "Two doorways"](./performance.md#two-doorways-general-bus-vs-fast-lane))
 4. **No closure per call on a hot path.** A closure that captures a call's
    arguments is an allocation. V8 did not remove it in either case measured.
    One was the composable dispatch thunk (removed: 0.915-0.934x, 2.7-3.9 ns).
@@ -61,7 +61,7 @@ becomes a rule when it is measured. The full record, with the numbers, is
    build (+609 B brotli on the vapor-sfc demo). (log s35.44)
 7. **Shape rules are for read-many paths.** A write-once, serialize-once
    object (the HTTP envelope) stays idiomatic: making it shape-stable was
-   measured and gained nothing. ([performance.md, "HTTP envelope shape"](./performance.md#http-envelope-shape))
+   measured and gained nothing. ([decisions.md, 2026-10-13](./decisions.md))
 8. **No loop-syntax micro-optimizations.** Cached `length`, index loops
    against `for...of`: TurboFan handles these, and the few index loops kept
    are documented where they are. Rule 4 is not this: a callback that
@@ -73,7 +73,7 @@ becomes a rule when it is measured. The full record, with the numbers, is
 9. **Measure the real path.** An isolated, deterministic loop is
    constant-folded: V8 removes work with no observable effect and the ratio is
    garbage. Run the change through the real dispatch path.
-   (`tests/signal-shallow-ab.test.ts`. [performance.md, finding 5](./performance.md#reactive-runtime-notes-vue-36))
+   (`tests/signal-shallow-ab.test.ts`. [performance.md, "Reactive runtime notes"](./performance.md#reactive-runtime-notes-vue-36))
 10. **Interleave, and control the harness.** Alternate the two arms round by
     round in one process and compare medians. Run the same build against
     itself, in both load orders, and count only a difference beyond that
@@ -151,8 +151,9 @@ becomes a rule when it is measured. The full record, with the numbers, is
     says "no result". The tool is `npm run ab -- <distA> <distB> <workload>`
     (`scripts/ab/`, its gates pinned by `tests/ab-tool.test.ts`, each seeded
     red). The arms come from `npm run ab:dists`, and the workloads live in
-    `scripts/ab/workloads/`. CI runs it on every push and pull request, base
-    against head (`perf-ab`, `npm run ab:ci`). A counted "slower" fails the
+    `scripts/ab/workloads/`. CI runs it on every push to main and every pull
+    request against it, base against head (`perf-ab`, `npm run ab:ci`). With
+    no base commit to build, it skips with a notice. A counted "slower" fails the
     build, and so does a run in which no control passed. (log s35.44, s35.48,
     s35.50, s35.59)
 17. **Measure a session, not a moment, on a shared Mac.** `npm run ab:session`

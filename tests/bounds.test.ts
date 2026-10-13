@@ -30,6 +30,10 @@ describe('countOption', () => {
     expect(countOption({}, 50)).toBe(50);
     // A numeric STRING is a number - a config read that worked.
     expect(countOption('12', 50)).toBe(12);
+    // `Number(null)` and `Number(false)` are 0, so they take the floor, not
+    // the default.
+    expect(countOption(null, 50)).toBe(0);
+    expect(countOption(false, 50, 1)).toBe(1);
   });
 
   it('preserves Infinity, which the `| 0` idiom mapped to zero', () => {

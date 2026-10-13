@@ -20,20 +20,20 @@
  */
 import { DEV } from './dev';
 import { dict } from './dict';
-import { MAX_TIMEOUT_MS, countOption, isDelay } from './bounds';
+import { MAX_TIMEOUT_MS, countOption, delayOption, isDelay } from './bounds';
 import { createSleeper } from './scheduler';
 import { onSettled } from './settled';
 import { _asLibrary, _isLibraryAction, _isLibraryRegister } from './library-names';
 import { _appliedRemotely, _storeReceivers } from './applied-remotely';
 import type { ActionFilter } from './action-filter';
-import { BusError, _failures, _heldBack, _isBug, conditionOf, conditionOfStatus, ownerOf, retryClass, type BusErrorCode, type Condition, type Fail, type FailCode, type FailOptions } from './failure';
+import { BusError, _RETRY_BASE_MS, _RETRY_MAX_MS, _backoff, _failures, _heldBack, _isBug, _isCancel, conditionOf, conditionOfStatus, ownerOf, retryClass, type BusErrorCode, type Condition, type Fail, type FailCode, type FailOptions } from './failure';
 export { BusError, _failures, _isBug, conditionOf, conditionOfStatus, ownerOf, type BusErrorCode, type Condition, type Fail, type FailCode, type FailOptions };
 export type BusSeverity = 'error' | 'warn' | 'info';
 
 
 /**
  * Each plugin's own `fail`, bound once per runner rebuild: its failures carry
- * its declared name as their owner (plan 4.5), at no cost per dispatch.
+ * its declared name as their owner (docs/contract.md 5), at no cost per dispatch.
  */
 const failsFor = (plugins: Array<{ readonly id?: string }>): Fail[] => plugins.map((p) => _failures(p.id ?? 'plugin'));
 
@@ -41,20 +41,23 @@ const fail = _failures('core');
 
 
 /**
- * Any failure's condition, read by contract (plan 4.4, rule 10): a library
+ * Any failure's condition, read by contract (docs/contract.md 4, reading by contract): a library
  * failure's own code; an HTTP status (another client's `response.status`) through the
- * status table; a timeout or an abort by its name; the Fetch standard's
- * `TypeError` for no response at all, `lost`. Anything else - a handler's own
- * throw, a test diagnostic - is `failed` (plan settled item 10).
+ * status table; a timeout by its name; a cancel, named `AbortError` or the
+ * `signal`'s own reason (`_isCancel`); the Fetch standard's `TypeError` for no
+ * response at all, `lost`. Anything else - a handler's own throw, a test
+ * diagnostic - is `failed` (docs/contract.md rule 8). Pass the command's
+ * `signal` to read an abort with the caller's own Error as `aborted`
+ * (tests/abort-custom-reason.test.ts).
  */
-export function failureCondition(error: unknown): Condition {
+export function failureCondition(error: unknown, signal?: AbortSignal): Condition {
   const own = conditionOf(error);
   if (own !== undefined) return own;
   const e = error as { name?: unknown; response?: { status?: unknown } } | null;
   const status = e?.response?.status;
   if (typeof status === 'number') return conditionOfStatus(status);
   if (e?.name === 'TimeoutError') return 'timeout';
-  if (e?.name === 'AbortError') return 'aborted';
+  if (_isCancel(error, signal)) return 'aborted';
   return error instanceof TypeError ? 'lost' : 'failed';
 }
 
@@ -64,8 +67,8 @@ export function failureCondition(error: unknown): Condition {
  * No reply (a transport's own `timeout`, a 504) and the uncertain ones
  * (`lost`, `failed`, `unexpected`, `unknown`: the first attempt may have
  * landed) it re-sends only for an idempotent action or a keyed command. The
- * other side's verdict, an abort and a depth bound never (docs/plan-shape.md
- * 4, log s35.162).
+ * other side's verdict, an abort and a depth bound never (docs/retry.md,
+ * log s35.162).
  */
 export const RETRYABLE_CONDITIONS: ReadonlySet<string> = new Set(['limited', 'timeout']);
 
@@ -86,7 +89,7 @@ export type CommandMeta = {
    * number anyway - what is actually given up is intra-burst resolution in
    * bursts long enough to cross a millisecond (a thousand-command `rehydrate`
    * reads as instantaneous). Bought ~15-25ns per dispatch; measured in
-   * `tests/clock-source-ab.test.ts`.
+   * `tests/clock-source-ab.test.ts` (v1.6.0, 2026-08-24).
    *
    * **Ordering does not depend on this field.** `meta.id` is a monotonic
    * counter and stays unique and ordered - use it, not `ts`, to sequence
@@ -105,9 +108,7 @@ export type CommandMeta = {
    *
    * Default generator: a per-process random prefix plus an incrementing
    * counter (`configureUid` swaps it; `crypto.randomUUID` is the documented
-   * opt-in for cross-process auditing, and is NOT the default - this line used
-   * to say it was, contradicting the `ts` field above, which correctly calls
-   * `id` a monotonic counter).
+   * opt-in for cross-process auditing, not the default).
    */
   id: string;
   /** ID of the command that caused this one (set manually via payload.__causationId). */
@@ -206,7 +207,7 @@ export type AsyncHandler<T = any, P = any, R = any> = (cmd: Command<string, T, P
  * runs it), `id` (the owner of its failures), `actions` (the only actions the
  * bus runs it on, an {@link ActionScope}; log s35.141), and `transport` - it
  * answers the command itself, over a wire, so the async bus re-sends through it
- * as it does a handler (docs/plan-shape.md 4). The bridges declare it.
+ * as it does a handler (docs/retry.md). The bridges declare it.
  * `actionFilter`: a predicate on the action name (src/action-filter.ts), ANDed
  * with `actions` when both are given, asked once per action (log s35.152).
  * `forget(cmd)`: the bus calls it on every installed plugin once an undo of
@@ -366,7 +367,7 @@ export type CommandBusOptions = {
   /**
    * Max commands buffered per action when `onMissing: 'buffer'`. When exceeded,
    * the oldest queued command for that action is dropped (with a dev warning).
-   * Default: 256.
+   * Default: 256, also for NaN. `Infinity` means no bound, 0 buffers nothing.
    */
   maxBufferSize?: number;
   /**
@@ -395,7 +396,7 @@ export type CommandBusOptions = {
  */
 export type RetryPolicy = 'idempotent' | false | number;
 
-/** The async bus's retry (docs/plan-shape.md 4). Every field has a default. */
+/** The async bus's retry (docs/retry.md). Every field has a default. */
 export type RetryOptions = {
   /** Attempts in total, the first included. Default 3, at least 1. */
   maxAttempts?: number;
@@ -552,8 +553,7 @@ export interface CommandBus<M extends CommandMap = CommandMap> extends BaseBus {
   registeredActions(): string[];
   /**
    * @internal Used by the history plugin to retrieve an undo handler registered alongside
-   * a command handler. Do not call this from application code - it will be moved to a
-   * plugin-private channel in a future release.
+   * a command handler. Do not call this from application code.
    */
   getUndoHandler(action: string): Handler | undefined;
   /** @internal The `canUndo` registered with an action's undo, for undo history. */
@@ -578,9 +578,10 @@ export interface AsyncCommandBus<M extends CommandMap = CommandMap> extends Base
    * without invoking the handler. If aborted mid-flight, the handler observes
    * `cmd.signal.aborted === true`; HTTP transport plugins propagate the signal
    * to the underlying fetch automatically. A handler or plugin that rethrows
-   * the signal's reason gets the same `core:aborted:dispatch`. Every abort is
-   * a BusError named `AbortError` with the reason as `cause`; a custom Error
-   * reason (`ac.abort(myError)`) passes through as itself.
+   * the signal's reason gets the same `core:aborted:dispatch`. Every abort the
+   * bus builds is a BusError named `AbortError`, with the reason as `cause`. A
+   * custom Error reason (`ac.abort(myError)`) is never wrapped, at call time or
+   * mid-flight: it passes through as itself.
    */
   dispatch<A extends keyof M & string>(
     action: A,
@@ -619,8 +620,7 @@ export interface AsyncCommandBus<M extends CommandMap = CommandMap> extends Base
   registeredActions(): string[];
   /**
    * @internal Used by the history plugin to retrieve an undo handler registered alongside
-   * a command handler. Do not call this from application code - it will be moved to a
-   * plugin-private channel in a future release.
+   * a command handler. Do not call this from application code.
    */
   getUndoHandler(action: string): Handler | undefined;
   /** @internal The `canUndo` registered with an action's undo, for undo history. */
@@ -688,9 +688,12 @@ type SyncState = {
    *  register(). Lazily null unless onMissing:'buffer' is configured, so non-buffer
    *  buses don't allocate it. */
   deferred: Map<string, Array<{ target: any; payload: any; at: number }>> | null;
+  /** `maxBufferSize`, read once by countOption when the bus is made. */
+  readonly bufferLimit: number;
   /** One cancel per request() still waiting on its responder. dispose() runs them, so
    *  each settles at once as core:aborted:dispatch with its timer cleared, and polices nothing
-   *  afterwards - no disposed state, as Vue 3.6 rc.8's EffectScope.stop() has none.
+   *  afterwards - no disposed state. Vue's EffectScope.stop() records one (active false)
+   *  but polices nothing either: run() still runs (rc.11 reactivity).
    *  Lazily null until the first such request, like `deferred`. */
   waiting: Set<() => void> | null;
 };
@@ -722,9 +725,12 @@ type AsyncState = {
    *  register(). Lazily null unless onMissing:'buffer' is configured, so non-buffer
    *  buses don't allocate it. */
   deferred: Map<string, Array<{ target: any; payload: any; at: number }>> | null;
+  /** `maxBufferSize`, read once by countOption when the bus is made. */
+  readonly bufferLimit: number;
   /** One cancel per request() still waiting on its responder. dispose() runs them, so
    *  each settles at once as core:aborted:dispatch with its timer cleared, and polices nothing
-   *  afterwards - no disposed state, as Vue 3.6 rc.8's EffectScope.stop() has none.
+   *  afterwards - no disposed state. Vue's EffectScope.stop() records one (active false)
+   *  but polices nothing either: run() still runs (rc.11 reactivity).
    *  Lazily null until the first such request, like `deferred`. */
   waiting: Set<() => void> | null;
   /** The retry policy (budget, waits), or null when `retry: false`. */
@@ -744,7 +750,7 @@ type StoreReceivers = NonNullable<ReturnType<typeof _storeReceivers.get>>;
  *
  * V8-aligned: monotonic counter + module-load random + module-load timestamp.
  * No `crypto.randomUUID()` syscall, no per-call `Date.now()`, no per-call
- * `Math.random()`. Measured on Node 24 (`hrtime` medians over 21x200k reps):
+ * `Math.random()`. Measured on Node 24, 2026-08-17 (`hrtime` medians over 21x200k reps):
  * ~12ns per call vs ~104ns for `crypto.randomUUID()`, ~8x. Quote the runtime
  * with the number: modern V8/Node batch UUID entropy, so the margin moves.
  *
@@ -867,9 +873,17 @@ function errResult(error: Error): CommandResult { return { ok: false, value: und
 function maxDepthResult(action: string): CommandResult {
   return errResult(fail('exceeded:depth', `Maximum dispatch depth (${MAX_DISPATCH_DEPTH}) exceeded for "${action}".${DEV ? ' This usually means a listener or reaction is re-dispatching in an infinite loop.' : ''}`, { action, context: { depth: MAX_DISPATCH_DEPTH } }));
 }
+
 function requestTimeoutResult(action: string, timeout: number): CommandResult {
   return errResult(fail('timeout:request', `Request "${action}" timed out after ${timeout}ms.${DEV ? ' Increase timeout or check if a respond() handler is registered.' : ''}`, { action, context: { timeout } }));
 }
+
+/**
+ * request()'s timeout, on both buses: a NaN is the default 5000 ms and one past
+ * MAX_TIMEOUT_MS the maximum, since a timer fires at once on either. `null`
+ * is the default too. tests/nan-options.test.ts.
+ */
+const requestTimeout = (t: number | undefined) => delayOption(t ?? 5000, 5000);
 
 /**
  * Singleton "successful empty" result used by `bus.emit()`. emit is fire-and-
@@ -1022,7 +1036,7 @@ export function _withCausation<T>(causationId: string | undefined, fn: () => T):
  */
 function stampMeta(payload: any): CommandMeta {
   // Read __causationId once - it is both `causationId` and `correlationId`'s fallback.
-  // V8 does not CSE the repeated optional-chain read (measured ~5-9% on an isolated A/B with
+  // V8 does not CSE the repeated optional-chain read (measured ~5-9% for v1.18.0 on an isolated A/B with
   // the common no-ids payload; end-to-end it's within noise, dwarfed by uid()/Date.now()).
   // Behavior-identical; reading once also avoids a double getter invocation on exotic payloads.
   // `origin` is always present (undefined when unset) rather than conditionally
@@ -1036,7 +1050,7 @@ function stampMeta(payload: any): CommandMeta {
   //
   // The two clears are deliberately NOT folded into one chained assignment
   // (`_nextOrigin = _nextCausation = undefined`). That reads as the cheaper
-  // shape and measured one byte WORSE on the tree-shake bundle - 6564 vs 6563 -
+  // shape and measured one byte WORSE on the tree-shake bundle - 6564 vs 6563 in v1.19.0 -
   // because brotli is not linear in source length. Measured, then reverted;
   // recorded so nobody re-derives it hoping for a saving.
   const cause = _nextCausation;
@@ -1249,8 +1263,9 @@ function warnColonAction(action: string): void {
  *
  * An action name holding `:` can share a key with another action -
  * ('a:b', 'c') and ('a', 'b:c') are both `a:b:c`. Escaping the name on every
- * call measured 25-30% of a primitive key (docs/V8-RULES.md rule 3), so it is
- * a naming rule instead, warned in development and folded out of production.
+ * call measured 25-30% of a primitive key (v1.30.0), so it is a naming rule
+ * instead, decided once (docs/V8-RULES.md rule 3): warned in development and
+ * folded out of production.
  */
 export function commandKey(action: string, target: any): string {
   if (DEV && action.indexOf(':') !== -1) warnColonAction(action);
@@ -1392,12 +1407,15 @@ export function createCommandPool(size: number = 64): CommandPool {
  * The caller passes its own `fail` (core's, or a plugin's) and decides how it
  * fails: a handler throws the refusal, a plugin returns it.
  * A caller that must forget its windows (the plugin's dispose) passes `lastRun`.
+ * The wait is read once: NaN is the default, no throttle, and one past
+ * MAX_TIMEOUT_MS the maximum (tests/nan-options.test.ts, audit D9).
  */
 export function _throttleGate(
-  wait: number,
+  rawWait: number,
   timers: Set<ReturnType<typeof setTimeout>>,
   lastRun = new Map<string, number>(),
 ): (cmd: Command, refuse: Fail) => BusError | undefined {
+  const wait = delayOption(rawWait, 0);
   return (cmd, refuse) => {
     const key = commandKey(cmd.action, cmd.target);
     const now = Date.now();
@@ -1429,8 +1447,8 @@ export function _throttleGate(
 //
 // PERF NOTE, and the reason this is not the cheaper shape: one closure per
 // plugin level per dispatch costs ~13.5% on the documented hot-path row
-// ("syncDispatch - 3 plugins + 1 listener", interleaved same-machine A/B:
-// ~1261 -> ~1090 ops/s). A save/restore cursor (`level = idx` in a `finally`)
+// ("syncDispatch - 3 plugins + 1 listener", interleaved same-machine A/B,
+// v1.12.0: ~1261 -> ~1090 ops/s). A save/restore cursor (`level = idx` in a `finally`)
 // measures identical to a shared cursor and is re-entrant - but it is
 // WRONG, and the suite says so: `debounce`/`throttle` call `next()` from a
 // timer, long after `plugin(cmd, next)` returned and the `finally` restored
@@ -1533,7 +1551,7 @@ function pluginThrew(e: unknown, cmd: Command, plugin: Function, index: number, 
 function beforeCancel(e: unknown, action: string): BusError {
   if (e instanceof BusError) return e;
   // No stack: `refused` is expected control flow, and the cause carries the
-  // hook's own (tests/before-cancel-ab.test.ts measured the capture at 2.2x).
+  // hook's own (tests/before-cancel-ab.test.ts measured the capture at 2.2x, v1.25.0).
   return fail('refused:hook', e instanceof Error ? e.message : String(e), { action, cause: e });
 }
 export { beforeCancel as _beforeCancel };
@@ -1650,7 +1668,7 @@ function handleMissing(s: SyncState | AsyncState, cmd: Command, canDefer: boolea
   if (mode === 'buffer' && canDefer) {
     // Lazy init: the queue map is born on the first buffered command. Cheaper
     // than eager allocation (a bus that never buffers allocates nothing), and a
-    // measured A/B showed gating the hot path on `deferred !== null` instead of
+    // measured A/B (v1.7.0) showed gating the hot path on `deferred !== null` instead of
     // this `onMissing` check is only faster when monomorphic - it regresses in
     // mixed buffer/non-buffer apps - so the hot-path gate stays on onMissing.
     const d = s.deferred ?? (s.deferred = new Map());
@@ -1680,19 +1698,10 @@ function handleMissing(s: SyncState | AsyncState, cmd: Command, canDefer: boolea
     // from before: the queue ends at `limit` entries and the oldest is the one
     // reported. At 0 it now means what it says - nothing is buffered, and the
     // arriving command is reported as dropped rather than crashing.
-    // `q.length > limit` gates EVICTION, so a NaN bound made the drop test
-    // permanently false and the queue grew without bound - measured at 500
-    // commands buffered.
-    //
-    // THE ONE SITE THAT DOES NOT USE ../bounds, and it was measured rather than
-    // assumed. Importing `countOption` here costs 50 B brotli in the minimal
-    // Blade consumer bundle that `esm-treeshake.test.ts` gates - enough to
-    // breach that ceiling on its own, because this module is the one thing
-    // every consumer pulls. `| 0` is already correct for the NaN case, which is
-    // the case that bites; what it does not do is preserve `Infinity`, which it
-    // maps to 0 - so `maxBufferSize: Infinity` buffers NOTHING rather than never
-    // dropping. That is the price of the exception, stated here so it is a
-    // known trade and not a discovery. Write a large finite number instead.
+    // The bound is read once, when the bus is made, by the library's one rule,
+    // `countOption` (bufferLimit), so no dispatch pays for it. NaN takes
+    // the default 256, Infinity means no bound, a large bound is kept
+    // (tests/buffer-bound.test.ts).
     //
     // A negative bound needs no clamp here, because the push happens FIRST and
     // exactly one item is pushed: the queue therefore always holds at least one
@@ -1700,7 +1709,7 @@ function handleMissing(s: SyncState | AsyncState, cmd: Command, canDefer: boolea
     // the bound is. That is also why this is an `if` rather than a `while` -
     // one push can put the queue at most one over - and why it is cheaper than
     // the clamp-plus-loop form it replaces.
-    const limit = (s.opts.maxBufferSize ?? 256) | 0;
+    const limit = s.bufferLimit;
     q.push({ target: cmd.target, payload: cmd.payload, at: now });
     if (q.length > limit) {
       const dropped = q.shift()!; // push-first guarantees a non-empty queue here
@@ -1822,7 +1831,7 @@ function _syncDispatchInner(s: SyncState, cmd: Command, executeOverride?: () => 
   // (A cached `isBare` boolean was tested and showed a 25% regression vs
   // these direct reads - V8's tight ICs on Map.size / Array.length already
   // optimize the inline check; adding a state field changed the hidden
-  // class for no benefit. See CHANGELOG performance section.)
+  // class for no benefit. CHANGELOG v1.2.0, the performance table.)
   if (
     executeOverride === undefined &&
     s.pluginEntries.length === 0 &&
@@ -1906,7 +1915,7 @@ function _syncRun(s: SyncState, cmd: Command, executeOverride?: () => CommandRes
 //
 // Keeping the check off the per-dispatch path still matters: `process.env`
 // reads go through a slow C++ interceptor, and an inline read measured ~150 ns
-// here (3 plugins + 1 listener bench dropped 1,240 -> 350 ops/s). `DEV` is a
+// here in v1.13.0 (3 plugins + 1 listener bench dropped 1,240 -> 350 ops/s). `DEV` is a
 // module-level const for that reason, and so the build can fold it - see
 // src/dev.ts: the ESM build emits the expression from the `__VC_DEV__` define,
 // and the IIFE builds fold it to `false`, which drops the warning STRINGS from
@@ -2191,7 +2200,6 @@ function addHook(s: SyncState | AsyncState, key: 'beforeHooks' | 'afterHooks', f
 }
 
 function syncRequest(s: SyncState, action: string, target: any, payload?: any, reqOpts: { timeout?: number; signal?: AbortSignal } = {}): Promise<CommandResult> {
-  const timeout = reqOpts.timeout ?? 5000;
   const signal = reqOpts.signal;
   const responder = s.responders.get(action);
   // Pre-flight abort, as on the async bus.
@@ -2225,6 +2233,7 @@ function syncRequest(s: SyncState, action: string, target: any, payload?: any, r
   // dispose(), which runs it (see SyncState.waiting), and the caller's abort:
   // abortedResult reads a reason only off an aborted signal, so from
   // dispose() it is the plain core:aborted:dispatch either way.
+  const timeout = requestTimeout(reqOpts.timeout);
   const pending = (s.waiting ||= new Set());
   return new Promise((resolve) => {
     const done = (r: CommandResult): void => {
@@ -2272,7 +2281,7 @@ function disposeBus<S extends SyncState | AsyncState>(s: S, clear: (s: S) => voi
  * interface. _INSPECT carries the STATE, not `() => inspect(s)`: a closure
  * would hold inspect() from every bus ever constructed, so its body shipped to
  * consumers that never import inspectBus (measured at 128 brotli on a minimal
- * consumer). Handing over the state keeps inspect() reachable only from
+ * consumer, v1.22.0). Handing over the state keeps inspect() reachable only from
  * inspectBus.
  */
 function busParts<S extends SyncState | AsyncState>(s: S, clear: (s: S) => void) {
@@ -2340,6 +2349,7 @@ export function createCommandBus<M extends CommandMap = CommandMap>(options: Com
     // Lazily allocated on the first buffered command (handleMissing), not here -
     // a buffer-mode bus whose handlers always beat its dispatches allocates nothing.
     deferred: null,
+    bufferLimit: countOption(options.maxBufferSize, 256),
     waiting: null,
   };
   const bus: CommandBus<M> = {
@@ -2432,7 +2442,7 @@ function buildAsyncRunner(plugins: AsyncPlugin[], retry: Retrier | null, answers
 }
 
 // ---------------------------------------------------------------------------
-// Retry policy (docs/plan-shape.md 4)
+// Retry policy (docs/retry.md)
 // ---------------------------------------------------------------------------
 
 type Retrier = {
@@ -2478,8 +2488,8 @@ const RETRY_TOKENS = 10;
  */
 function createRetrier(options: RetryOptions): Retrier {
   const maxAttempts = countOption(options.maxAttempts, 3, 1);
-  const baseDelay = countOption(options.baseDelay, 200);
-  const maxDelay = countOption(options.maxDelay, 20_000, 0, MAX_TIMEOUT_MS);
+  const baseDelay = countOption(options.baseDelay, _RETRY_BASE_MS);
+  const maxDelay = countOption(options.maxDelay, _RETRY_MAX_MS, 0, MAX_TIMEOUT_MS);
   const policies = options.actionPolicies ?? {};
   // Most specific first, ranked once: an exact name, then the longest prefix,
   // then `*`. Two different patterns of one rank never match the same action.
@@ -2515,7 +2525,7 @@ function createRetrier(options: RetryOptions): Retrier {
       if (result.ok) return settled(result, cmd, call, passedOn, declaration);
       const error = result.error as BusError;
       const retryIn = error?.context?.retryIn;
-      const condition = failureCondition(error);
+      const condition = failureCondition(error, cmd.signal);
       // A declared wait longer than maxDelay is returned, never re-sent early:
       // Retry-After is a minimum (RFC 9110). tests/retry-after-long.test.ts.
       // The one rule (retryClass, shared with the http client): transient for
@@ -2532,9 +2542,10 @@ function createRetrier(options: RetryOptions): Retrier {
         if (!eligible && open && attempt < bound) _heldBack(error, retryIn, cmd.action);
         return result;
       }
-      // A NaN wait is no wait: it re-sent at once instead of backing off.
-      const wait = isDelay(retryIn) ? retryIn : Math.random() * baseDelay * 2 ** (attempt - 1);
-      if (!(await waits.sleep(Math.min(Math.max(0, wait), maxDelay), cmd.signal))) return abortedResult(cmd.action, cmd.signal);
+      // A NaN wait is no wait: it re-sent at once instead of backing off. A
+      // declared one is at most maxDelay here (`open` above).
+      const wait = isDelay(retryIn) ? retryIn : _backoff(attempt - 1, baseDelay, maxDelay);
+      if (!(await waits.sleep(delayOption(wait, 0), cmd.signal))) return abortedResult(cmd.action, cmd.signal);
       result = await call();
     }
   }
@@ -2671,7 +2682,7 @@ async function _asyncRun(s: AsyncState, depth: number, cmd: Command, executeOver
   }
 
   // Note: a bare-bus fast path was tested for async dispatch and showed no
-  // measurable win (3,586 -> 3,360 ops/sec across 3 runs - within noise, may
+  // measurable win (v1.2.0: 3,586 -> 3,360 ops/sec across 3 runs - within noise, may
   // be a slight regression). The async path's await + Promise machinery is
   // a larger fraction of the per-call cost than the runner indirection, so
   // skipping the runner doesn't move the needle. Sync dispatch DID win
@@ -2838,7 +2849,6 @@ async function asyncRollback(s: AsyncState, ran: Command[], failedAt: number): P
 type SharedRequest = { done: Promise<CommandResult>; ctrl: AbortController | undefined; live: number };
 
 async function asyncRequest(s: AsyncState, action: string, target: any, payload?: any, reqOpts: { timeout?: number; signal?: AbortSignal } = {}): Promise<CommandResult> {
-  const timeout = reqOpts.timeout ?? 5000;
   const signal = reqOpts.signal;
 
   // Pre-flight abort - return immediately, don't dedup or dispatch.
@@ -2875,6 +2885,7 @@ async function asyncRequest(s: AsyncState, action: string, target: any, payload?
   // its abort and dispose() (see AsyncState.waiting) all call done(), and the
   // first one wins. Its signal cancels its promise, never another caller's
   // (the HTTP client's dedupe rule).
+  const timeout = requestTimeout(reqOpts.timeout);
   const pending = (s.waiting ||= new Set());
   return new Promise<CommandResult>((resolve) => {
     const done = (r: CommandResult): void => {
@@ -2939,6 +2950,7 @@ export function createAsyncCommandBus<M extends CommandMap = CommandMap>(options
     // Lazily allocated on the first buffered command (handleMissing), not here -
     // a buffer-mode bus whose handlers always beat its dispatches allocates nothing.
     deferred: null,
+    bufferLimit: countOption(options.maxBufferSize, 256),
     waiting: null,
   };
   const bus: AsyncCommandBus<M> = {

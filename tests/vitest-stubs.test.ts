@@ -1,11 +1,11 @@
 // @vitest-environment happy-dom
 /**
  * `stubGlobal` and `stubEnv` from `vapor-chamber/vitest/pure`: stubs that
- * `using` restores at the end of the block (plan 11.4, C0).
+ * `using` restores at the end of the block (CHANGELOG v1.21.0).
  *
  * Vitest's own `vi.stubGlobal` / `vi.stubEnv` return nothing disposable, and
  * its `unstubGlobals` / `unstubEnvs` restore at the START of the next test,
- * after the current test's after-hooks (plan 9.5). A stub an `afterEach`
+ * after the current test's after-hooks. A stub an `afterEach`
  * depends on has to be gone before that hook runs, and `using` is the moment.
  */
 import { afterEach, describe, expect, it } from 'vitest';

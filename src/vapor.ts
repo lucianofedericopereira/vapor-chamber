@@ -49,7 +49,7 @@
  * to the copy already in the consumer's graph - never a second reactivity
  * instance. Named imports, not `import * as Vue`: a namespace object forces the
  * bundler to retain every Vue export (measured at 3x bundle size on the
- * vapor-sfc example).
+ * vapor-sfc example, v1.18.0).
  *
  * SUPERSET: re-exports everything `vapor-chamber/vue` does. Importing this
  * module runs that one's wiring too - the 3.5-safe primitives and the
@@ -96,7 +96,7 @@ declare const __VC_WIRED_VAPOR__: boolean | undefined;
 // omissions are measured rather than accidental. A static import is retained by
 // the consumer's bundler whether or not their app ever calls it, so "wire
 // everything" is not free: it is paid by every consumer, including the ones who
-// use none of it. Measured on the vapor-sfc example (raw / gzip kB of the app
+// use none of it. Measured on the vapor-sfc example for v1.18.0 (raw / gzip kB of the app
 // bundle), each row adding one name to the row above:
 //
 //   createVaporApp                      80.23 / 29.01   <- hand-wired minimum

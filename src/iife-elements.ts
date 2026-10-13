@@ -43,7 +43,7 @@ export type CreateAppOptions = {
   transport?: AsyncPlugin;
   plugins?: AsyncPlugin[];
   onMissing?: CommandBusOptions['onMissing'];
-  /** The bus's retry (on by default); `{ actions: { cartAdd: 'idempotent' } }` declares, `false` turns it off. */
+  /** The bus's retry, on by default. `{ actionPolicies: { cartAdd: 'idempotent' } }` declares a policy, `false` turns it off. */
   retry?: AsyncCommandBusOptions['retry'];
 };
 
@@ -141,15 +141,17 @@ function defineWidget(tagName: string, options: any, extraOptions?: any): boolea
  * Emit a real DOM `CustomEvent` from inside a widget so host pages can
  * subscribe with `addEventListener`.
  *
- * Vue's component `emit(...)` goes through Vue's event system - it does
- * NOT bubble out as a DOM event. For widgets that need to communicate with
- * the surrounding page (a `<vc-cart>` notifying its container that
- * a product was added), use this to dispatch an actual `CustomEvent`.
+ * A custom element's own `emit(...)` reaches its host as a `CustomEvent`
+ * that neither bubbles nor crosses a shadow root (rc.11, VueElementBase), so
+ * a listener on the host hears it while `document`, `window` and the
+ * containers around it do not. An `emit` from a component nested inside the
+ * widget stays in Vue's event system. For widgets that need to reach the
+ * surrounding page (a `<vc-cart>` notifying its container that a product was
+ * added), use this to dispatch a bubbling, composed `CustomEvent`.
  *
  * Pattern adapted from
  * [vue-custom-element](https://github.com/karol-f/vue-custom-element)'s
- * `customEmit` helper (Karol-F, MIT) - original predates Vue 3.6's Vapor
- * but the underlying gap (Vue emit != DOM event) still exists today.
+ * `customEmit` helper (Karol-F, MIT), which predates Vue 3.6's Vapor.
  *
  * @example Widget side
  * VaporChamber.defineWidget('vc-cart', {

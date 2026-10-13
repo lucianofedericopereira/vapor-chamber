@@ -1,4 +1,4 @@
-/** A write's answer also invalidates the Location and Content-Location it names, on its own origin (plan 1.27 D4.S5). Rationale at the end. */
+/** A write's answer also invalidates the Location and Content-Location it names, on its own origin (log s35.187). Rationale at the end. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createHttpClient } from '../src/http';
 

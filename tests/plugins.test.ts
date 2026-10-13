@@ -551,7 +551,7 @@ describe('authGuard plugin', () => {
     // A refusal owned by the plugin, as every library refusal is: retry() does
     // not re-send it and a circuit breaker does not count it.
     const blocked = bus.dispatch('shopCartAdd', {});
-    // No session is `unauthenticated` (plan 4.2: sign in, then the same request), not `refused`.
+    // No session is `unauthenticated` (docs/contract.md 3: sign in, then the same request), not `refused`.
     expect(blocked).toFailWith('authGuard:unauthenticated:action');
     expect(conditionOf(blocked.error)).toBe('unauthenticated');
     expect(blocked.error?.message).toContain('Unauthorized');

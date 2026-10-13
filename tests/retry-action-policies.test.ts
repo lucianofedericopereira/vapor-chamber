@@ -1,4 +1,4 @@
-/** retry.actionPolicies: the most specific match wins, whatever the written order (plan 1.27 item 9, B4). Rationale at the end. */
+/** retry.actionPolicies: the most specific match wins, whatever the written order (log s35.179). Rationale at the end. */
 import { describe, expect, it, vi } from 'vitest';
 import { BusError, createAsyncCommandBus, type RetryPolicy } from '../src/command-bus';
 import { createAsyncSchemaCommandBus } from '../src/schema';

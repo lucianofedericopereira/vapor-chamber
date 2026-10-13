@@ -12,7 +12,7 @@ import { browserChannel } from './scripts/browser-channel.mjs';
  * focus behaviour (HTML's focus fixup rule), the HTTP cache (RFC 9111
  * revalidation through `fetch`), form-associated custom elements. happy-dom
  * implements none of them, so a green happy-dom test is not evidence about any
- * of them. docs/plan-failures-and-contract.md, section 7.2, lists the questions.
+ * of them. ROADMAP.md, "Open work, to discuss", lists the open questions.
  *
  * PRODUCTION BY DEFAULT. A browser test measures what users ship: `__VC_DEV__`
  * is defined false and `NODE_ENV` is 'production', so every `if (DEV)` branch

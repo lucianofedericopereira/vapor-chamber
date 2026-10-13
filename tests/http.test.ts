@@ -265,7 +265,7 @@ describe('postCommand - user abort', () => {
 // ---------------------------------------------------------------------------
 
 describe('postCommand - silent flag', () => {
-  it('stamps error.silent when config.silent is true', async () => {
+  it('stamps error.context.silent when config.silent is true', async () => {
     (globalThis.fetch as any).mockResolvedValue(mockResponse(500, { message: 'boom' }));
 
     const err = await postCommand('/api/cmd', {}, { silent: true }).catch((e: any) => e);

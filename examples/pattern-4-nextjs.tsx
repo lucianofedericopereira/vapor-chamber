@@ -13,8 +13,8 @@ import { createHttpBridge } from 'vapor-chamber/transports'
 
 // Singleton bus - shared across all 'use client' components. Its retry is on
 // by default: the bridge's transient failures are re-sent.
-// Log via onAfter: it observes settled results on the async bus (the sync
-// logger() plugin would see an unresolved Promise here).
+// Log via onAfter: it observes settled results on the async bus. The logger()
+// plugin would print the settled result here too.
 const bus = createAsyncCommandBus()
 bus.onAfter((cmd, result) => {
   console.log(`⚡ ${cmd.action}`, result.ok ? result.value : result.error)
@@ -59,7 +59,7 @@ export { bus }
  *   return (
  *     <>
  *       {/* aria-disabled, not disabled: keyboard focus stays on the button *\/}
- *       <button onClick={checkout} aria-disabled={busy}>
+ *       <button type="button" onClick={checkout} aria-disabled={busy}>
  *         {busy ? 'Processing...' : 'Complete purchase'}
  *       </button>
  *       <p role="status" className="error">{error}</p>

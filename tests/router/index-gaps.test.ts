@@ -223,8 +223,8 @@ describe('preheat racing a table swap', () => {
     });
     await router.isReady();
 
-    // canHandle passes at hover time; the table is replaced before the
-    // hoverDelayMs timer fires, so preheatPath finds nothing to resolve.
+    // The hover arms without reading the table, which is swapped before the
+    // intentDelayMs timer fires, so preheatPath finds nothing to resolve.
     document.getElementById('to-list')!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
     router.setRoutes([
       { name: 'shell', path: '/', parent: null },
@@ -234,6 +234,27 @@ describe('preheat racing a table swap', () => {
     await new Promise(r => setTimeout(r, 250));
     expect(lazy).not.toHaveBeenCalled();
     router.dispose();
+  });
+
+  // The opposite swap: no row matches at hover time, one does when the timer
+  // fires. The route is read then, against the table of that moment (log 36.19
+  // item 2b). Before, the hover asked the table first and armed nothing.
+  it('warms a route added during the hover delay', async () => {
+    document.body.innerHTML = '<a id="to-late" href="/late">late</a>';
+    const late = vi.fn(async () => ({ name: 'Late' }));
+    const router = makeRouter({
+      components: { Home: { name: 'Home' }, List: { name: 'List' }, Late: late },
+    });
+    try {
+      await router.isReady();
+      document.getElementById('to-late')!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      router.setRoutes([...ROWS, { name: 'late', path: '/late', parent: 'shell', component: 'Late' }]);
+
+      await new Promise(r => setTimeout(r, 250));
+      expect(late).toHaveBeenCalledTimes(1);
+    } finally {
+      router.dispose();
+    }
   });
 });
 

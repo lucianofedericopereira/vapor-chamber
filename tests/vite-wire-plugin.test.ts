@@ -166,7 +166,7 @@ describe('vaporChamberWire in a real Vite production build', () => {
 });
 
 describe('vaporChamberWire - the plugin object', () => {
-  it('redirects in builds only; under the dev server it only defines __VC_WIRED__', async () => {
+  it('redirects in builds only; under the dev server it defines __VC_WIRED__, never __VC_WIRED_BUILD__', async () => {
     const ctx = { resolve: async () => ({ id: '/x/dist/index.js' }) };
     const plugin = vaporChamberWire();
     expect(plugin.name).toBe('vapor-chamber-wire');

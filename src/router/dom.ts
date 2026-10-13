@@ -1,14 +1,17 @@
 /**
  * vapor-chamber-router - the single DOM integration point.
  *
- * One delegated listener pair owns everything link-shaped inside the base:
+ * Delegated listeners on the document (and on each open shadow root an event
+ * comes from) own everything link-shaped inside the base:
  *   . click interception (page.js checklist: shadow DOM via composedPath,
  *     download, rel=external, explicit target, cross-origin - which also
  *     excludes mailto:/tel: - modifier keys, `data-native` opt-out,
  *     `data-replace` for replaceState)
  *   . `data-active` / `data-exact-active` stamping on in-base anchors after
  *     each commit - Blade-rendered menus light up with zero Vue
- *   . hover preheat (100ms intent delay, cancelled on leave)
+ *   . hover and focus preheat (100ms intent delay, cancelled on leave or
+ *     blur), the link found by the same composed-path scan as a click,
+ *     between the links of a shadow root too
  *
  * Plus the idle preheater:
  * load event + requestIdleCallback, saveData/2g skip, abort on first user
@@ -16,7 +19,7 @@
  */
 
 import { stripBase } from './history';
-import { MAX_TIMEOUT_MS, countOption } from '../bounds';
+import { delayOption } from '../bounds';
 import { pathActivity } from './url';
 
 export type DomIntegrationOptions = {
@@ -25,9 +28,9 @@ export type DomIntegrationOptions = {
    *  normal full-page navigation when false. */
   canHandle: (path: string) => boolean;
   navigate: (fullPath: string, replace: boolean) => void;
-  /** Warm the lazy component(s) behind a base-relative path (hover intent). */
+  /** Warm the lazy component(s) behind a base-relative path (hover or focus intent). */
   preheat?: (path: string) => void;
-  hoverDelayMs?: number;
+  intentDelayMs?: number;
   /**
    * Called when the page is restored from the back/forward cache (`pageshow`
    * with `event.persisted`) - the JS heap and DOM were frozen, not torn down,
@@ -40,7 +43,8 @@ export type DomIntegrationOptions = {
   onRestore?: () => void;
 };
 
-export type RoutableTarget = { path: string; fullPath: string };
+/** `pathname`, `search` and `hash` are the parsed href's, for the same-page hash test. */
+export type RoutableTarget = { path: string; fullPath: string; pathname: string; search: string; hash: string };
 
 /**
  * routableMemo - one parse per anchor per href, not per commit.
@@ -61,7 +65,7 @@ export type RoutableTarget = { path: string; fullPath: string };
  * A `WeakMap` rather than an expando on the node: entries die with the anchor,
  * and this module never mutates DOM it does not own except through the
  * documented `data-active` attributes. That choice is measured, not assumed -
- * head-to-head against an expando (`a.__vcR`) the two are **0.98-1.02x**, i.e.
+ * head-to-head against an expando (`a.__vcR`, v1.18.0) the two are **0.98-1.02x**, i.e.
  * inside noise at every size tested, so the non-invasive one wins on no
  * measurable cost.
  *
@@ -69,7 +73,7 @@ export type RoutableTarget = { path: string; fullPath: string };
  * base) are re-tested on every commit otherwise, and on a typical menu they are
  * a large share of the anchors.
  *
- * **Measured 1.77-1.86x per commit** (42 us saved at 50 anchors, 172 us at 200,
+ * **Measured 1.77-1.86x per commit** in v1.18.0 (42 us saved at 50 anchors, 172 us at 200,
  * 828 us at 1000), `tests/router-stamp-ab.test.ts`, with the baseline arm
  * DERIVED from the shipped source: a variant written inside a test file is
  * optimised differently by V8 and inflates the ratio. Prefer the harness's
@@ -81,7 +85,7 @@ const routableMemo = new WeakMap<HTMLAnchorElement, { href: string; target: Rout
  *  link is not ours (cross-origin, outside base, not a plain string href). */
 function routableTarget(anchor: HTMLAnchorElement, base: string): RoutableTarget | null {
   const href = anchor.href;
-  if (typeof href !== 'string' || href === '') return null;
+  if (typeof href !== 'string') return null;
 
   const memo = routableMemo.get(anchor);
   // `base` is fixed per router instance, so href alone settles validity.
@@ -103,14 +107,43 @@ function parseRoutable(href: string, base: string): RoutableTarget | null {
   if (url.origin !== window.location.origin) return null;
   const path = stripBase(url.pathname, base);
   if (path === null) return null;
-  return { path, fullPath: path + url.search + url.hash };
+  return { path, fullPath: path + url.search + url.hash, pathname: url.pathname, search: url.search, hash: url.hash };
+}
+
+/** The user asked to save data (Save-Data), or the connection is 2G. False
+ *  where the browser has no `navigator.connection` (Firefox, Safari). */
+function savingData(): boolean {
+  const connection = (navigator as { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
+  const type = connection?.effectiveType;
+  return !!connection?.saveData || type === '2g' || type === 'slow-2g';
+}
+
+/**
+ * The link an event is on: the first `<a>` with an href on its composed path
+ * (`event.composedPath()`). The path crosses an open shadow root (page.js
+ * scans it for this reason). A walk up from `event.target` cannot: at the
+ * document, an event from inside a shadow root has the host as its target.
+ * Every build target has composedPath (scripts/build.mjs: chrome100,
+ * firefox100, safari16). Click, hover and focus read it
+ * (tests/browser/router-shadow-hover.browser.test.ts).
+ */
+function anchorOf(path: EventTarget[]): HTMLAnchorElement | null {
+  for (const node of path) {
+    if ((node as Element).nodeName?.toUpperCase() === 'A' && (node as HTMLAnchorElement).href) return node as HTMLAnchorElement;
+  }
+  return null;
 }
 
 export function installDomIntegration(options: DomIntegrationOptions): () => void {
-  const { base, canHandle, navigate, preheat, hoverDelayMs: rawHoverDelayMs = 100, onRestore } = options;
+  const { base, canHandle, navigate, preheat, intentDelayMs: rawIntentDelayMs = 100, onRestore } = options;
   // setTimeout reads NaN as 0, so a bad delay fires the preheat immediately on
-  // every hover - the intent delay this option exists for, silently gone.
-  const hoverDelayMs = countOption(rawHoverDelayMs, 100, 0, MAX_TIMEOUT_MS);
+  // every hover or focus - the intent delay this option exists for, silently gone.
+  const intentDelayMs = delayOption(rawIntentDelayMs, 100);
+  // Every listener below, a shadow root's included, is added with this signal,
+  // and teardown aborts it. So they come off, as `router.dispose()` promises,
+  // and no list of roots is kept (tests/router/dom-shadow.test.ts).
+  const controller = new AbortController();
+  const listening = { signal: controller.signal };
 
   function onClick(event: MouseEvent): void {
     if (event.defaultPrevented) return;
@@ -119,24 +152,7 @@ export function installDomIntegration(options: DomIntegrationOptions): () => voi
     if (typeof event.button === 'number' && event.button !== 0) return;
     if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
 
-    // Find the anchor by scanning the composed path (crosses shadow
-    // boundaries - a parentElement walk would stop at the shadow root; the
-    // page.js source iterates the full path for exactly this reason), then
-    // fall back to an ancestor walk for browsers without composedPath.
-    let anchor: HTMLAnchorElement | null = null;
-    const path = event.composedPath?.();
-    if (path) {
-      for (const node of path) {
-        if ((node as Element).nodeName?.toUpperCase() === 'A' && (node as HTMLAnchorElement).href) {
-          anchor = node as HTMLAnchorElement;
-          break;
-        }
-      }
-    } else {
-      let element = event.target as Element | null;
-      while (element && element.nodeName.toUpperCase() !== 'A') element = element.parentElement;
-      anchor = element as HTMLAnchorElement | null;
-    }
+    const anchor = anchorOf(event.composedPath());
     if (!anchor) return;
 
     if (anchor.hasAttribute('download') || anchor.hasAttribute('data-native')) return;
@@ -149,52 +165,112 @@ export function installDomIntegration(options: DomIntegrationOptions): () => voi
     if (!routable) return;
 
     // In-page hash link on the same path -> browser default.
-    const url = new URL(anchor.href, window.location.href);
-    if (url.hash && url.pathname === window.location.pathname && url.search === window.location.search) return;
+    if (routable.hash && routable.pathname === window.location.pathname && routable.search === window.location.search) return;
     if (!canHandle(routable.path)) return;
 
     event.preventDefault();
     navigate(routable.fullPath, anchor.hasAttribute('data-replace'));
   }
 
-  let hoverTimer: ReturnType<typeof setTimeout> | null = null;
-  // Made only when `preheat` was given, inside the branch that attaches it, so
-  // it needs no "no preheat" check (tests/router/dom.test.ts, hover preheat).
-  const onMouseover = preheat
-    ? (event: MouseEvent): void => {
-        const anchor = (event.target as Element | null)?.closest?.('a[href]') as HTMLAnchorElement | null;
-        if (!anchor || anchor.hasAttribute('data-native')) return;
-        const routable = routableTarget(anchor, base);
-        if (!routable || !canHandle(routable.path)) return;
-        if (hoverTimer) clearTimeout(hoverTimer);
-        hoverTimer = setTimeout(() => preheat(routable.path), hoverDelayMs);
+  // Built only when `preheat` was given, inside this branch, so the warm-up
+  // needs no "no preheat" check (tests/router/dom.test.ts, hover preheat).
+  let stopWarming: (() => void) | undefined;
+  if (preheat) {
+    const roots = new WeakSet<Node>();
+
+    // A move between two nodes of one shadow root never reaches the document:
+    // the dispatch stops at the host when the target and the related target
+    // retarget to it (DOM Standard, dispatch steps 6.9.3 and 6.9.7). So every
+    // open shadow root an event comes from gets these listeners too, each
+    // unseen one out to the document, innermost first
+    // (tests/browser/router-shadow-hover.browser.test.ts). The walk asks each
+    // root's type: an app listener may remove the hovered node before this one
+    // runs, and its root is then an element or a fragment. A shadow root's host
+    // is never null (DOM Standard), and nothing else of type 11 has one
+    // (tests/router/dom-shadow.test.ts). A root that already holds the pointer
+    // or focus when the router starts is attached once it leaves and comes back.
+    const warmable = (event: Event): HTMLAnchorElement | null => {
+      const path = event.composedPath();
+      for (
+        let root = (path[0] as Node).getRootNode();
+        root.nodeType === 11 && (root as ShadowRoot).host && !roots.has(root);
+        root = (root as ShadowRoot).host.getRootNode()
+      ) {
+        roots.add(root);
+        listen(root);
       }
-    : null;
-  function onMouseout(): void {
-    if (hoverTimer) {
-      clearTimeout(hoverTimer);
-      hoverTimer = null;
-    }
+      // The click asks whether the router handles a link in place. The warm-up
+      // asks whether a page of the app will use this code. So a `_blank` or
+      // `rel="external"` link warms, and a `download` link, which opens no
+      // page, does not (tests/router/preheat-gate.test.ts).
+      const anchor = anchorOf(path);
+      return anchor && !anchor.hasAttribute('data-native') && !anchor.hasAttribute('download') ? anchor : null;
+    };
+
+    // One timer per intent, built once: an arm resets it, a leave clears it.
+    // Pointer and focus each get their own: with one, the mouse leaving a link
+    // would cancel the warm-up a focused link armed
+    // (tests/router/preheat-gate.test.ts). The pointer's timer keeps the link
+    // that armed it until it fires or is cleared. A move onto an icon inside
+    // that link fires `mouseout` and `mouseover` with a `relatedTarget` inside
+    // the link, and neither restarts the delay
+    // (tests/router/preheat-inside-link.test.ts). The focus timer ignores it.
+    const intent = (pointer: boolean): [arm: (event: Event) => void, cancel: (event?: Event) => void] => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let link: Node | null = null;
+      // Teardown cancels with no event.
+      const inside = (event?: Event): boolean =>
+        pointer && link !== null && event !== undefined && link.contains((event as MouseEvent).relatedTarget as Node | null);
+      return [
+        (event) => {
+          if (inside(event)) return;
+          const anchor = warmable(event);
+          // Which link only. Whether the user saves data and whether a route
+          // matches are read when the timer fires, the route against the table
+          // of that moment (`preheat` resolves it). So most arms, swept past and
+          // cancelled, never match a route (tests/router/index-gaps.test.ts,
+          // preheat racing a table swap, and tests/router/preheat-gate.test.ts).
+          const routable = anchor && routableTarget(anchor, base);
+          if (!routable) return;
+          clearTimeout(timer);
+          link = anchor;
+          timer = setTimeout(() => {
+            link = null;
+            savingData() || preheat(routable.path);
+          }, intentDelayMs);
+        },
+        (event) => {
+          if (inside(event)) return;
+          clearTimeout(timer);
+          link = null;
+        },
+      ];
+    };
+    const [pointerArm, pointerCancel] = intent(true);
+    const [focusArm, focusCancel] = intent(false);
+
+    const listen = (target: EventTarget): void => {
+      target.addEventListener('mouseover', pointerArm, listening);
+      target.addEventListener('mouseout', pointerCancel, listening);
+      target.addEventListener('focusin', focusArm, listening);
+      target.addEventListener('focusout', focusCancel, listening);
+    };
+    listen(document);
+    stopWarming = () => {
+      pointerCancel();
+      focusCancel();
+    };
   }
 
   function onPageshow(event: PageTransitionEvent): void {
     if (event.persisted) onRestore?.();
   }
 
-  document.addEventListener('click', onClick);
-  if (onMouseover) {
-    document.addEventListener('mouseover', onMouseover);
-    document.addEventListener('mouseout', onMouseout);
-  }
-  if (onRestore) window.addEventListener('pageshow', onPageshow);
+  document.addEventListener('click', onClick, listening);
+  if (onRestore) window.addEventListener('pageshow', onPageshow, listening);
   return () => {
-    document.removeEventListener('click', onClick);
-    if (onMouseover) {
-      document.removeEventListener('mouseover', onMouseover);
-      document.removeEventListener('mouseout', onMouseout);
-    }
-    if (onRestore) window.removeEventListener('pageshow', onPageshow);
-    if (hoverTimer) clearTimeout(hoverTimer);
+    controller.abort();
+    stopWarming?.();
   };
 }
 
@@ -247,13 +323,10 @@ export type IdlePreheatOptions = {
  */
 export function preheatIdle(factories: ReadonlyArray<() => Promise<unknown>>, options: IdlePreheatOptions = {}): () => void {
   const { gap: rawGap = 200, idleTimeout: rawIdleTimeout = 4000 } = options;
-  const gap = countOption(rawGap, 200, 0, MAX_TIMEOUT_MS);
-  const idleTimeout = countOption(rawIdleTimeout, 4000, 0, MAX_TIMEOUT_MS);
+  const gap = delayOption(rawGap, 200);
+  const idleTimeout = delayOption(rawIdleTimeout, 4000);
   if (typeof window === 'undefined' || factories.length === 0) return () => {};
-
-  const connection = (navigator as { connection?: { saveData?: boolean; effectiveType?: string } }).connection;
-  if (connection?.saveData) return () => {};
-  if (connection?.effectiveType && /2g/.test(connection.effectiveType)) return () => {};
+  if (savingData()) return () => {};
 
   let aborted = false;
   const abortEvents = ['scroll', 'click', 'keydown', 'pointerdown'] as const;

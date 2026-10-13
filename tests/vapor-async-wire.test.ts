@@ -108,8 +108,8 @@ describe("vaporChamberWire({ entry: 'vapor' }) and the async wrapper", () => {
 });
 
 /*
- * Decision 6 (owner, 2026-10-02; .probes/1.26-remaining.md row 6, plan list
- * row 9). `vapor-chamber/vapor` seeded Vue's `defineVaporAsyncComponent` into
+ * Decision 6 (owner, 2026-10-02; log s35.109).
+ * `vapor-chamber/vapor` seeded Vue's `defineVaporAsyncComponent` into
  * the registry for the root's wrapper, a static import every `/vapor` app kept
  * whether it defined an async component or not (1.84 KB raw / 0.74 KB gzip on
  * the vapor-sfc example, vapor.ts's table). D1, the seed dropped and /vapor's

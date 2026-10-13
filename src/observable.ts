@@ -4,7 +4,8 @@
  * Bridges `bus.on(pattern)` and `bus.dispatch()` into the Observable
  * protocol so RxJS / consumers using `Symbol.observable` can pipe bus
  * events through their own operator chains. Zero RxJS dependency - uses
- * `Symbol.observable` interop, which RxJS reads natively via `from()`.
+ * the interop RxJS's `from()` reads: `Symbol.observable`, or the
+ * `'@@observable'` key on a runtime without it.
  *
  * @example RxJS interop
  * import { from } from 'rxjs';
@@ -16,7 +17,7 @@
  * from(observe(bus, 'cart*'))
  *   .pipe(
  *     filter(({ cmd, result }) => result.ok),
- *     debounceTime,
+ *     debounceTime(200),
  *   )
  *   .subscribe(({ cmd }) => console.log('debounced cart event:', cmd.action));
  */
@@ -49,7 +50,21 @@ export interface Observable<T> {
   subscribe(observer: Observer<T> | ((value: T) => void)): Subscription;
   /** Symbol.observable interop - RxJS's `from()` calls this if present. */
   [Symbol.observable]?: () => Observable<T>;
+  /** The same, under the key RxJS and Redux read when the runtime has no `Symbol.observable`. */
+  '@@observable'?: () => Observable<T>;
 }
+
+/**
+ * What `observe()` returns: both interop members present, so
+ * `from(observe(...))` type-checks against RxJS (tests/observable.test.ts
+ * runs under tsconfig.tests.json). `Observable` keeps them optional: RxJS's
+ * own Observable has the method at runtime but not in its d.ts, and
+ * `dispatchFrom()` takes it.
+ */
+type InteropObservable<T> = Observable<T> & {
+  [Symbol.observable](): Observable<T>;
+  '@@observable'(): Observable<T>;
+};
 
 // `Symbol.observable` is in stage-1; not on every runtime's lib.dom.d.ts.
 // Use the well-known polyfill pattern.
@@ -58,7 +73,9 @@ declare global {
     readonly observable: symbol;
   }
 }
-const observableSymbol: symbol =
+// Typed as the symbol it stands in for, so a literal keyed on it has
+// `[Symbol.observable]` (InteropObservable).
+const observableSymbol: typeof Symbol.observable =
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (typeof Symbol === 'function' && (Symbol as any).observable) ||
   Symbol.for('@@observable');
@@ -75,8 +92,8 @@ const observableSymbol: symbol =
  * // later
  * sub.unsubscribe();
  */
-export function observe(bus: BaseBus, pattern: string): Observable<BusObservation> {
-  const obs: Observable<BusObservation> = {
+export function observe(bus: BaseBus, pattern: string): InteropObservable<BusObservation> {
+  const obs: InteropObservable<BusObservation> = {
     subscribe(observer): Subscription {
       const next = typeof observer === 'function' ? observer : observer.next?.bind(observer);
       const off = bus.on(pattern, (cmd, result) => {
@@ -93,6 +110,10 @@ export function observe(bus: BaseBus, pattern: string): Observable<BusObservatio
       };
     },
     [observableSymbol](): Observable<BusObservation> { return obs; },
+    // No runtime ships `Symbol.observable` (Node, browsers), and RxJS then
+    // reads the string key, not the registered symbol above
+    // (tests/observable.test.ts, real RxJS).
+    '@@observable'(): Observable<BusObservation> { return obs; },
   };
   return obs;
 }
@@ -121,7 +142,7 @@ export function observe(bus: BaseBus, pattern: string): Observable<BusObservatio
  * import { interval } from 'rxjs';
  * import { dispatchFrom } from 'vapor-chamber/observable';
  *
- * dispatchFrom(bus, 'tick', interval);   // tick every 1s
+ * dispatchFrom(bus, 'tick', interval(1000)); // tick every 1s
  * bus.on('tick:error', (cmd) => console.error('tick failed', cmd.target));
  */
 export function dispatchFrom<T>(

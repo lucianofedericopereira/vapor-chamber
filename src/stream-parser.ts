@@ -8,8 +8,8 @@
  * with `http.ts`'s `HttpClient` or a bare `fetch()`.
  *
  * Reorganized from the source's one large dispatch switch into small
- * per-state-group handlers (CDCC: functions stay near cyclomatic complexity
- * 10) - notably, the keyword states (`true`/`false`/`null`) collapse from
+ * per-state-group handlers (the CDCC guideline, docs/whitepaper.md 3.5) -
+ * notably, the keyword states (`true`/`false`/`null`) collapse from
  * ten near-duplicate `S_TRUE_1`/`S_FALSE_2`/... cases into one target-string
  * index walk.
  *
@@ -232,10 +232,16 @@ export class StreamParser {
     }
   }
 
-  /** Signal end of input. Flushes any pending number. */
+  /**
+   * Signal end of input. Flushes a pending number that is complete, one that
+   * ends in a digit. An unfinished one (`-`, `1.`, `1e`, `1e+`) is an error,
+   * as JSON.parse and the next character mid-stream say, never a value
+   * (tests/stream-parser-malformed.test.ts).
+   */
   end(): void {
-    if (this.state >= S_NUM_ZERO && this.state <= S_NUM_EXP_DIGIT && this.numStr) {
-      this.closeNumber();
+    if (this.state >= S_NUM_MINUS && this.state <= S_NUM_EXP_DIGIT) {
+      if (isDigit(this.numStr.charCodeAt(this.numStr.length - 1))) this.closeNumber();
+      else this.err('Unexpected end: incomplete number');
     }
     if (this.parents.length > 1) {
       this.err('Unexpected end: unclosed structure');

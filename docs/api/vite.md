@@ -17,13 +17,13 @@ import { ... } from 'vapor-chamber/vite';
 
 ### vaporChamberHMR
 
-**Function** - [src/vite-hmr.ts:116](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L116)
+**Function** - [src/vite-hmr.ts:118](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L118)
 
 ```ts
 vaporChamberHMR(options?: VaporChamberHMROptions) => any
 ```
 
-vaporChamberHMR - Vite plugin for state-preserving hot reload.
+vaporChamberHMR - Vite plugin that keeps the shared bus across hot reload.
 
 Injects a small runtime shim that:
 1. Stores the command bus on `globalThis[HMR_GLOBAL_KEY]` after creation.
@@ -32,7 +32,7 @@ Injects a small runtime shim that:
 
 ### vaporChamberTest
 
-**Function** - [src/vite-hmr.ts:578](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L578)
+**Function** - [src/vite-hmr.ts:579](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L579)
 
 ```ts
 vaporChamberTest(options?: VaporChamberTestOptions) => any
@@ -69,7 +69,7 @@ export default defineConfig({
 
 ### vaporChamberWire
 
-**Function** - [src/vite-hmr.ts:423](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L423)
+**Function** - [src/vite-hmr.ts:424](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L424)
 
 ```ts
 vaporChamberWire(options?: VaporChamberWireOptions) => any
@@ -145,7 +145,7 @@ export default defineConfig({
 
 ### VaporChamberHMROptions
 
-**Type alias** - [src/vite-hmr.ts:75](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L75)
+**Type alias** - [src/vite-hmr.ts:77](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L77)
 
 ```ts
 export type VaporChamberHMROptions = {
@@ -197,12 +197,12 @@ plugins: [vue(), vaporChamberHMR()]
 import { createCommandBus } from 'vapor-chamber'
 const bus = createCommandBus()
 bus.register('cartAdd', handler)
-// After HMR: handler is still registered, state is preserved
+// After HMR: the handler is still registered on the same bus
 ```
 
 ### VaporChamberTestOptions
 
-**Type alias** - [src/vite-hmr.ts:470](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L470)
+**Type alias** - [src/vite-hmr.ts:471](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L471)
 
 ```ts
 export type VaporChamberTestOptions = {
@@ -228,7 +228,7 @@ export type VaporChamberTestOptions = {
 
 ### VaporChamberWireOptions
 
-**Type alias** - [src/vite-hmr.ts:315](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L315)
+**Type alias** - [src/vite-hmr.ts:316](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/vite-hmr.ts#L316)
 
 ```ts
 export type VaporChamberWireOptions = {

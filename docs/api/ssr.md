@@ -17,7 +17,7 @@ import { ... } from 'vapor-chamber/ssr';
 
 ### createSSRPlugin
 
-**Function** - [src/ssr.ts:152](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L152)
+**Function** - [src/ssr.ts:153](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L153)
 
 ```ts
 createSSRPlugin(options?: SSRPluginOptions) => SSRPlugin
@@ -30,7 +30,7 @@ to get a serializable command list for embedding in the HTML payload.
 
 ### rehydrate
 
-**Function** - [src/ssr.ts:222](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L222)
+**Function** - [src/ssr.ts:223](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L223)
 
 ```ts
 rehydrate(bus: BaseBus, commands: DehydratedCommand[], options?: RehydrateOptions) => CommandResult[]
@@ -47,7 +47,7 @@ early client bootstrap).
 
 ### rehydrateAsync
 
-**Function** - [src/ssr.ts:287](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L287)
+**Function** - [src/ssr.ts:288](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L288)
 
 ```ts
 rehydrateAsync(bus: BaseBus, commands: DehydratedCommand[], options?: RehydrateOptions) => Promise<CommandResult[]>
@@ -63,7 +63,7 @@ on the sync path - never an unhandled rejection.
 
 ### serializeForScript
 
-**Function** - [src/ssr.ts:72](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L72)
+**Function** - [src/ssr.ts:73](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L73)
 
 ```ts
 serializeForScript(value: unknown) => string
@@ -83,7 +83,7 @@ payloads, and so user text - go into the page.
 
 ### DehydratedCommand
 
-**Type alias** - [src/ssr.ts:84](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L84)
+**Type alias** - [src/ssr.ts:85](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L85)
 
 ```ts
 export type DehydratedCommand = {
@@ -97,7 +97,7 @@ Serializable command entry for transport between server and client.
 
 ### RehydrateOptions
 
-**Type alias** - [src/ssr.ts:128](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L128)
+**Type alias** - [src/ssr.ts:129](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L129)
 
 ```ts
 export type RehydrateOptions = {
@@ -117,7 +117,7 @@ export type RehydrateOptions = {
 
 ### SSRPlugin
 
-**Type alias** - [src/ssr.ts:106](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L106)
+**Type alias** - [src/ssr.ts:107](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L107)
 
 ```ts
 export type SSRPlugin = {
@@ -145,7 +145,7 @@ export type SSRPlugin = {
 
 ### SSRPluginOptions
 
-**Type alias** - [src/ssr.ts:90](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L90)
+**Type alias** - [src/ssr.ts:91](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/ssr.ts#L91)
 
 ```ts
 export type SSRPluginOptions = {

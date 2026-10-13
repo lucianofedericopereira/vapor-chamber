@@ -43,7 +43,7 @@ const { clear } = shared;
          clear): removing it while it has focus would drop keyboard focus. -->
     <p>
       <strong>Recent errors ({{ errorCount }}):</strong>
-      <button :aria-disabled="errorCount === 0" @click="errorCount > 0 && clear()" style="margin-left: 0.5rem;">
+      <button type="button" :aria-disabled="errorCount === 0" @click="errorCount > 0 && clear()" style="margin-left: 0.5rem;">
         Clear
       </button>
     </p>

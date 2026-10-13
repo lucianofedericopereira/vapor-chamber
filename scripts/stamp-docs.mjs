@@ -25,6 +25,13 @@
  * The pair is HTML-comment shaped, so it works unchanged in Markdown and in
  * the plain-HTML examples, and renders as nothing on GitHub.
  *
+ * PINS. A marker may carry an npm range after `@`, repeated on the closing tag,
+ * and is stamped only while package.json's version satisfies it, prereleases
+ * included. Outside the range its value is frozen as written, and a range no
+ * version satisfies, or one that starts above the current version, fails the run.
+ *
+ *     <!-- vc:sizeCore@1.30 -->4.8<!-- /vc:sizeCore@1.30 -->
+ *
  * USAGE
  *   node scripts/stamp-docs.mjs            # rewrite stale markers in place
  *   node scripts/stamp-docs.mjs --check    # exit 1 if any marker is stale
@@ -43,8 +50,9 @@
  */
 
 import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
+import { join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import semver from 'semver';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
@@ -129,12 +137,13 @@ if (metrics?.outlet) {
  * Bench ratios from `npm run bench:bands` (`scripts/bench-bands.mjs`, over N
  * runs of `scripts/bench-ratios-reporter.mjs`): a ratio of this library's own
  * rows is the median, a ratio against a peer library the band "min-max", and
- * `benchProvenance` says on what Node, peer versions and how many runs.
+ * `benchProvenance` says on what machine, Node, peer versions and how many runs.
  *
  * The migration guides quote these, and until this existed they were the one
  * class of number in the docs with no generator - which the guide itself said
- * out loud, and which had already drifted. Ratios only, never absolutes: a hz
- * figure is host state, a same-run ratio is not.
+ * out loud, and which had already drifted. The `bench*Ns` / `bench*PerFrame`
+ * costs are host state, so a doc quotes them only beside `benchProvenance`,
+ * which names the machine.
  *
  * Absent unless someone ran the bands locally, and absent means SKIP, so CI and
  * a fresh checkout leave whatever the doc says untouched. A single
@@ -304,59 +313,93 @@ function examplePinFiles() {
     });
 }
 
-const check = process.argv.includes('--check');
-const stale = [];
-let rewritten = 0;
+// A prerelease of 1.31 satisfies `@1.31`, so a pin stamps during its RC.
+const PIN = { includePrerelease: true };
 
-if (VUE_RANGE) {
-  for (const file of examplePinFiles()) {
-    const before = readFileSync(file, 'utf8');
-    // Targeted replace rather than parse/serialize: rewriting the JSON would
-    // reformat files a human maintains.
-    const after = before.replace(/("vue"\s*:\s*")([^"]+)(")/, (whole, open, body, close) => {
-      if (body === VUE_RANGE) return whole;
-      stale.push(`${relative(root, file)}: "vue" is "${body}", root devDependency says "${VUE_RANGE}"`);
-      return `${open}${VUE_RANGE}${close}`;
-    });
-    if (after !== before && !check) {
-      writeFileSync(file, after);
-      rewritten++;
-    }
+/**
+ * One file's text with every marker named in `values` stamped. Returns the new
+ * text, the stale lines (`<file>: vc:<name> is ...`, the shape gate.mjs reads)
+ * and the errors. Pure, so tests/stamp-docs-pin.test.ts drives it on strings.
+ */
+export function stampMarkers(text, values, version, file) {
+  const stale = [];
+  const errors = [];
+  // Every pin is checked, not only the ones whose value this run has: on a fresh
+  // checkout the test counts have no source, and a typo must still fail there.
+  for (const [, name, range] of text.matchAll(/<!--\s*vc:(\w+)@((?:(?!-->)[^\n])+?)\s*-->/g)) {
+    const min = semver.validRange(range) && semver.minVersion(range, PIN);
+    if (!min) errors.push(`${file}: vc:${name}@${range} is not an npm range any version satisfies`);
+    else if (semver.gt(min, version)) errors.push(`${file}: vc:${name}@${range} starts above package.json version ${version}`);
   }
-}
-
-for (const file of files) {
-  const before = readFileSync(file, 'utf8');
-  let after = before;
-
-  for (const [name, value] of Object.entries(VALUES)) {
+  let after = text;
+  for (const [name, value] of Object.entries(values)) {
     // Non-greedy body, so several markers of the same name in one file each
-    // keep their own boundaries.
-    const re = new RegExp(`(<!--\\s*vc:${name}\\s*-->)([\\s\\S]*?)(<!--\\s*/vc:${name}\\s*-->)`, 'g');
-    after = after.replace(re, (whole, open, body, close) => {
+    // keep their own boundaries. Group 2 is the optional `@range`, and the
+    // closing tag must repeat it (`\2`), so two pins of one name never cross.
+    const re = new RegExp(
+      `(<!--\\s*vc:${name}(@(?:(?!-->)[^\\n])+?)?\\s*-->)([\\s\\S]*?)(<!--\\s*/vc:${name}\\2\\s*-->)`,
+      'g',
+    );
+    after = after.replace(re, (whole, open, pin, body, close) => {
+      if (pin && !semver.satisfies(version, pin.slice(1), PIN)) return whole;
       if (body === value) return whole;
-      stale.push(`${relative(root, file)}: vc:${name} is "${body}", source says "${value}"`);
+      stale.push(`${file}: vc:${name} is "${body}", source says "${value}"`);
       return `${open}${value}${close}`;
     });
   }
-
-  if (after !== before && !check) {
-    writeFileSync(file, after);
-    rewritten++;
-  }
+  return { text: after, stale, errors };
 }
 
-if (check) {
-  if (stale.length) {
-    console.error('stamp-docs: stale markers found\n  ' + stale.join('\n  '));
-    console.error('\nRun `npm run docs:stamp` to update them.');
-    process.exit(1);
+// Run only as a CLI. Importing this module must not write the docs and must not
+// call process.exit() - tests/stamp-docs-pin.test.ts imports stampMarkers().
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const check = process.argv.includes('--check');
+  const stale = [];
+  const errors = [];
+  let rewritten = 0;
+
+  if (VUE_RANGE) {
+    for (const file of examplePinFiles()) {
+      const before = readFileSync(file, 'utf8');
+      // Targeted replace rather than parse/serialize: rewriting the JSON would
+      // reformat files a human maintains.
+      const after = before.replace(/("vue"\s*:\s*")([^"]+)(")/, (whole, open, body, close) => {
+        if (body === VUE_RANGE) return whole;
+        stale.push(`${relative(root, file)}: "vue" is "${body}", root devDependency says "${VUE_RANGE}"`);
+        return `${open}${VUE_RANGE}${close}`;
+      });
+      if (after !== before && !check) {
+        writeFileSync(file, after);
+        rewritten++;
+      }
+    }
   }
-  console.log(`stamp-docs: OK (${files.length} files scanned, all markers current)`);
-} else {
-  console.log(
-    stale.length
-      ? `stamp-docs: updated ${stale.length} marker(s) across ${rewritten} file(s)`
-      : `stamp-docs: OK (${files.length} files scanned, nothing to update)`,
-  );
+
+  for (const file of files) {
+    const before = readFileSync(file, 'utf8');
+    const result = stampMarkers(before, VALUES, pkg.version, relative(root, file));
+    stale.push(...result.stale);
+    errors.push(...result.errors);
+
+    if (result.text !== before && !check) {
+      writeFileSync(file, result.text);
+      rewritten++;
+    }
+  }
+
+  if (check) {
+    if (stale.length) {
+      console.error('stamp-docs: stale markers found\n  ' + stale.join('\n  '));
+      console.error('\nRun `npm run docs:stamp` to update them.');
+    } else if (!errors.length) {
+      console.log(`stamp-docs: OK (${files.length} files scanned, all markers current)`);
+    }
+  } else if (stale.length) {
+    console.log(`stamp-docs: updated ${stale.length} marker(s) across ${rewritten} file(s)`);
+  } else if (!errors.length) {
+    console.log(`stamp-docs: OK (${files.length} files scanned, nothing to update)`);
+  }
+  // A bad pin is a doc error stamping cannot fix, so it fails both modes.
+  if (errors.length) console.error('stamp-docs: bad pinned markers\n  ' + errors.join('\n  '));
+  if (errors.length || (check && stale.length)) process.exit(1);
 }

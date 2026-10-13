@@ -5,7 +5,9 @@
  * plugin on Vite. The root can only look for Vue at runtime, and that lookup
  * fails in a production bundle. With the plugin, a build wires the root to Vue
  * statically, so the runtime lookup and its dynamic `import('vue')` fold out
- * of the bundle. Under the dev server it changes nothing.
+ * of the bundle. Under the dev server it does not redirect. It defines
+ * `__VC_WIRED__`, which quiets the root's DEV hint to import from
+ * `vapor-chamber/vue`, and `__VC_LEAN__` from its `profile` option.
  */
 
 import { defineConfig } from 'vite'

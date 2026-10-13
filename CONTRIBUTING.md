@@ -68,7 +68,7 @@ scripts/
   check-size.mjs       Bundle-size budget guard (IIFE variants only)
   check-doc-claims.mjs Orphaned docblocks, absent documented defaults, release
                        status in comments
-  check-ascii.mjs      Plain ASCII, invisible characters included
+  check-ascii.mjs      Plain ASCII in src/, typographic characters elsewhere
   stamp-docs.mjs       Republishes generated numbers into prose, --check gates
   gate.mjs             The whole chain in one command, in the house order
 docs/
@@ -158,8 +158,10 @@ rather than what it does, which a test cannot:
 - `check-doc-claims`: no docblock attached to nothing, and no documented
   default whose value is absent from the file. No release status in a comment
   either: that belongs in CHANGELOG.md.
-- `check-ascii`: plain ASCII, including invisible characters.
-- `stamp-docs --check`: fails on a stale generated number.
+- `check-ascii`: plain ASCII in `src/`. Elsewhere it rejects typographic and
+  invisible characters.
+- `stamp-docs --check`: fails on a stale generated number, or on a pinned range
+  no version satisfies or that starts above the current version.
 
 CI runs these guards and the typecheck on Node 22, on Linux. It runs the build,
 both test projects and the size check on Node 22 and 24, on Linux and macOS
@@ -184,11 +186,15 @@ read [docs/V8-RULES.md](./docs/V8-RULES.md) first. It holds the shape,
 allocation and measuring rules this project has already settled, each with its
 evidence.
 
-1. Add a bench to [tests/perf.bench.ts](./tests/perf.bench.ts) **before** changing
-   the code, and capture the baseline numbers.
-2. Make your change.
-3. Re-run the bench and report the win or regression in the PR description.
-4. **Keep a "performance" change only if a bench confirms it.**
+1. Build the base and your change (`npm run ab:dists`), then run `npm run ab`
+   on a workload in `scripts/ab/workloads/` that runs the changed path
+   (V8-RULES rule 16). CI's `perf-ab` job runs the same comparison on every
+   pull request and fails on a counted "slower".
+2. Report each row's verdict and its ns in the PR description.
+3. **Keep a "performance" change only if a path that runs it reads faster and
+   none reads slower.**
+4. For a new hot path, add a bench to [tests/perf.bench.ts](./tests/perf.bench.ts)
+   too, so `npm run bench:bands` stamps its ratio.
 
 If your change might shift bundle size:
 
@@ -202,8 +208,41 @@ If your change might shift bundle size:
 - Biome handles linting. Run `npm run lint` to auto-fix. CI runs `lint:check`.
 - TypeScript strict mode is on. No `any` leaks at the public API boundary. Internal `any` is fine where the alternative is verbose generics.
 - Comments are sparse by design - write them when the *why* is non-obvious (a hidden constraint, an invariant, a workaround for a specific bug). Don't paraphrase the code.
-- Plain ASCII everywhere, emoji included: `check-ascii` rejects any other character in source, tests, scripts and docs.
+- Plain ASCII in `src/`, emoji included: `check-ascii` rejects anything above U+007F there, outside `src/glyphs.ts`. Everywhere else (tests, scripts, docs, examples, root files) it rejects dashes, curly quotes, the ellipsis, the times sign, arrows and invisible characters. Emoji and box drawing pass there.
 - Tests live next to the module they exercise (`src/foo.ts` <-> `tests/foo.test.ts`). Cross-cutting concerns get their own file.
+
+### How a change is judged
+
+The owner's rules, in the order they decide:
+
+0. **Correctness and performance decide. Results talk.** A claim becomes a
+   decision when it is measured or tested, not when it is argued.
+1. **A decision stands on its reason, not its outcome.** A shape can be
+   rejected for a borrowed reason ("the standard says so") and accepted for
+   one that belongs to this codebase (size, speed, one shape, less drift).
+   `docs/decisions.md` records the reason that belongs here.
+2. **Core changes are blocked first.** A change to the core passes when the
+   core is plainly wrong, a plugin cannot do it, or the plugin version is
+   measurably slower. A better shape that keeps performance is always open to
+   discussion.
+3. **Size is a discipline, not a number to argue away.** It forces a rethink:
+   one helper instead of N call sites. Never push work out to call sites to
+   keep a module small. The core may grow when it takes over work plugins and
+   apps each repeat by hand. Report deltas on the core ESM and on a tree-shaken
+   ESM consumer. The IIFE builds never decide a design.
+4. **The library's own pieces before hand-rolled code**, in the library, in
+   plugins and in consumers.
+5. **Standards at the boundary.** Where a standard defines a shape between two
+   parties, use it. A standard governs a boundary, not the internals.
+6. **An integrated list is an outcome, never something to maintain.**
+7. **Allow both paths** where two resolutions can share one contract, held
+   together by a test that proves they agree.
+8. **Pick the better option** and say why. "Not worth it" needs its own
+   evidence.
+9. **Accessibility is designed in, not audited after**
+   ([docs/accessibility.md](docs/accessibility.md)).
+10. **The front reads by contract, never guesses**
+    ([docs/contract.md](docs/contract.md)).
 
 ### Module discipline
 
@@ -217,7 +256,9 @@ the expensive way:
   code and has moved an unrelated size guard.
 - **Cleanup is `onScopeDispose` only**, gated on `hasInjectionContext()` where a
   gate is needed. `getCurrentInstance()` returns null in Vapor by design, and
-  upstream has confirmed that is permanent, so never branch on it.
+  upstream has confirmed that is permanent, so never branch on it. The one
+  exception is `tryKeepAliveHooks`: it falls back to `getCurrentInstance()`
+  only for a partially-supplied Vue namespace without `hasInjectionContext()`.
 - **Errors are coded taxonomies per module**, and tests switch on `code`, never
   on message text.
 - **Performance claims are interleaved A/B on the real path**, with derived
@@ -230,7 +271,10 @@ the expensive way:
 - **A number a human retypes is a number that drifts.** Anything a run can
   compute belongs to a `vc:` marker fed by `scripts/stamp-docs.mjs`, not to
   prose. `CHANGELOG.md` is the deliberate exception: it is history, and its
-  numbers must stay frozen at what was true for that release.
+  numbers must stay frozen at what was true for that release. A doc that
+  quotes an earlier release pins its marker to an npm range, as
+  `vc:sizeCore@1.30`: it is stamped only while package.json's version satisfies
+  the range, then frozen.
 
 ---
 

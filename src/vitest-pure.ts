@@ -9,7 +9,7 @@
  * measured requirement, not tidiness: a setup file that imported the root
  * barrel at load ran chamber.ts's one-shot Vue detection and consumed a
  * warn-once before any test had set its preconditions, and 4 tests of this
- * repository's suite failed for it (vitest5-plugin-study.md A.15.3).
+ * repository's suite failed for it (v1.21.0).
  *
  * @example
  * import { expect } from 'vitest';

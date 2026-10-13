@@ -16,6 +16,7 @@
 
 import { isRouterError, routerError } from './errors';
 import type { QueryParamDef, RouteLocation, TableRecord } from './types';
+import { encodeSplat } from './table';
 import { decodeQueryParam } from './url';
 
 /**
@@ -84,7 +85,7 @@ export function interpolateLoad(
 ): string {
   return template.replace(/\{(\w+)\}/g, (_, key: string) => {
     const param = location.params[key];
-    if (param !== undefined) return encodeURIComponent(String(param));
+    if (param !== undefined) return key === 'pathMatch' ? encodeSplat(String(param)) : encodeURIComponent(String(param));
     const typed = decodeQueryParam(location.query[key], queryDefs[key] ?? {});
     if (typed === undefined || typed === null) return '';
     return Array.isArray(typed)

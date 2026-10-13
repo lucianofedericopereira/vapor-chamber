@@ -1,6 +1,6 @@
 /**
  * FIXTURE - the wire contract's failure, an RFC 9457 problem with the members
- * it uses (docs/plan-failures-and-contract.md 4.4), through the real client
+ * it uses (docs/contract.md 4), through the real client
  * and every bridge, only `fetch` and the socket stubbed.
  *
  * The HTTP client parses `application/problem+json` (any `+json` suffix) and

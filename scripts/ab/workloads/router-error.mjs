@@ -1,4 +1,4 @@
-// Workload for scripts/ab/ab.mjs: building a router failure (plan 8d.1, log s35.108).
+// Workload for scripts/ab/ab.mjs: building a router failure (docs/contract.md 6, log s35.108).
 // A superseded navigation (no stack since 8b) against a failed one (stack kept: the control row).
 import { routerError } from '__DIST__/router/index.js';
 

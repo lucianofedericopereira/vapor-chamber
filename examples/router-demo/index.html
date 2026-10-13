@@ -39,8 +39,9 @@
                ignored, because query is state, not navigation: "Products" and
                "Products p3" are the same destination.
      EXACT   = same path as the current page.
-     On /products/7 you should see three actives (both Products links are
-     ancestors, Product #7 is exact) and exactly one exact. */
+     On /products/7 the tab bar shows two actives (Products is an ancestor,
+     Product #7 is exact) and exactly one exact. The deep links below the
+     bar are active too: same destination as Products. */
   /* `!important` on color is defensive, not normally needed. "Force readable
      text" / dark-mode browser extensions inject `a { color: ... !important }`,
      which overrides the tab text while leaving our background - producing a
@@ -198,9 +199,9 @@
   const Home = {
     setup() {
       // NOTE for readers: refs returned from setup() are AUTO-UNWRAPPED in the
-      // template, so templates below never write `.value`. The one exception
-      // is a `useQueryParam()` handle, which is a plain writable object rather
-      // than a ref - hence `page.value = n` in script, never in a template.
+      // template, so templates below never write `.value`. A `useQueryParam()`
+      // handle is a real ref too (a customRef backed by the URL): `page.value = n`
+      // in script, plain `page` in a template.
       const menu = useMenu();
       return { menu };
     },
@@ -263,10 +264,10 @@
           <!-- Sorting is an action, so a button, not a link; the header states
                its sort order through aria-sort. -->
           <thead><tr>
-            <th :aria-sort="ariaSort('id')"><button class="sort" @click="sortBy('id')">#{{ sortArrow('id') }}</button></th>
-            <th :aria-sort="ariaSort('name')"><button class="sort" @click="sortBy('name')">Item{{ sortArrow('name') }}</button></th>
-            <th class="right" :aria-sort="ariaSort('price')"><button class="sort" @click="sortBy('price')">Price{{ sortArrow('price') }}</button></th>
-            <th class="right" :aria-sort="ariaSort('stock')"><button class="sort" @click="sortBy('stock')">Stock{{ sortArrow('stock') }}</button></th>
+            <th :aria-sort="ariaSort('id')"><button type="button" class="sort" @click="sortBy('id')">#{{ sortArrow('id') }}</button></th>
+            <th :aria-sort="ariaSort('name')"><button type="button" class="sort" @click="sortBy('name')">Item{{ sortArrow('name') }}</button></th>
+            <th class="right" :aria-sort="ariaSort('price')"><button type="button" class="sort" @click="sortBy('price')">Price{{ sortArrow('price') }}</button></th>
+            <th class="right" :aria-sort="ariaSort('stock')"><button type="button" class="sort" @click="sortBy('stock')">Stock{{ sortArrow('stock') }}</button></th>
           </tr></thead>
           <tbody>
             <tr v-for="item in rows" :key="item.id">
@@ -278,14 +279,14 @@
           </tbody>
         </table>
         <div class="bar">
-          <button :aria-disabled="!hasPrev" @click="hasPrev && prev()">Prev</button>
+          <button type="button" :aria-disabled="!hasPrev" @click="hasPrev && prev()">Prev</button>
           <!-- pageRange is windowed: first + last always shown, 0 = elision.
                The current page is aria-current, not disabled. -->
           <template v-for="(n, i) in pageRange" :key="i">
             <span v-if="n === 0" class="muted" aria-hidden="true">...</span>
-            <button v-else :aria-current="n === page ? 'page' : undefined" @click="go(n)">{{ n }}</button>
+            <button type="button" v-else :aria-current="n === page ? 'page' : undefined" @click="go(n)">{{ n }}</button>
           </template>
-          <button :aria-disabled="!hasNext" @click="hasNext && next()">Next</button>
+          <button type="button" :aria-disabled="!hasNext" @click="hasNext && next()">Next</button>
           <span class="muted">
             page {{ page }} / {{ lastPage }} · {{ total }} items
             <span v-if="loading">· loading...</span>
@@ -345,7 +346,7 @@
         <p v-if="error" class="err" role="alert">
           Navigation error: <code>{{ error.code }}</code>
           - {{ error.message }}
-          <button @click="clear()">dismiss</button>
+          <button type="button" @click="clear()">dismiss</button>
         </p>
         <RouterOutlet />
       </div>`,

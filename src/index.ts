@@ -18,15 +18,15 @@
  *     devtools     - @vue/devtools-api integration (requires @vue/devtools-api)
  *     transitions   - <Transition> hook -> bus dispatch bridge
  *     ssr          - SSR dehydrate/rehydrate plugin
- *     directives   - v-command Vue directive (requires Vue)
+ *     directives   - v-vc-command Vue directive (requires Vue)
  *     vite         - HMR plugin (requires Vite, see 'vapor-chamber/vite')
- *     iife         - UMD/IIFE bundle (see 'vapor-chamber/iife')
+ *     iife         - IIFE bundles (see 'vapor-chamber/iife')
  *
  * Sub-path exports that avoid pulling in optional code:
  *   'vapor-chamber/transports'      - HTTP + WS + SSE bridges
  *   'vapor-chamber/transitions'     - <Transition> hook -> bus dispatch
  *   'vapor-chamber/ssr'             - SSR dehydrate/rehydrate
- *   'vapor-chamber/directives'      - v-command directive
+ *   'vapor-chamber/directives'      - v-vc-command directive
  *   'vapor-chamber/vite'            - Vite HMR plugin
  *   'vapor-chamber/fast-lane'       - minimal-allocation dispatcher for hot loops
  *   'vapor-chamber/observable'      - Symbol.observable interop (RxJS / xstream / callbag)

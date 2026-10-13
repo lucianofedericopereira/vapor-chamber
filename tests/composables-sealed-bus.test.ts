@@ -1,4 +1,4 @@
-/** Composables observe a sealed bus: seal protects the topology, not the observation layer (plan 1.27 section 10.10). Rationale at the end. */
+/** Composables observe a sealed bus: seal protects the topology, not the observation layer (log s35.173). Rationale at the end. */
 import { afterEach, describe, expect, it } from 'vitest';
 import { resetCommandBus, setCommandBus, useCommandError, useCommandHistory, useSharedCommandState } from '../src/chamber';
 import { createCommandBus } from '../src/command-bus';

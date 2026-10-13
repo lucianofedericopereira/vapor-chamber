@@ -65,6 +65,23 @@ describe('route announcer', () => {
     router.dispose();
   });
 
+  it('announces the first navigation after an initial load that did not commit (audit RA-3)', async () => {
+    const router = makeRouter();
+    let refuseFirst = true;
+    router.beforeEach(() => {
+      if (refuseFirst) { refuseFirst = false; return false; }
+      return true;
+    });
+    document.title = 'Orders list';
+    await router.isReady().catch(() => {});
+    await frame();
+    expect(region()?.textContent ?? '').toBe(''); // the refused initial load says nothing
+    expect(await router.push('/list')).toBeNull(); // committed
+    await frame();
+    expect(region()?.textContent).toBe('Orders list');
+    router.dispose();
+  });
+
   it('does not announce a query-only change', async () => {
     const router = makeRouter();
     document.title = 'Orders list';
@@ -147,6 +164,19 @@ describe('route announcer', () => {
     router.dispose();
   });
 
+  it('leaves editable content as it is too (tests/browser/route-announce.browser.test.ts in Chromium)', async () => {
+    const editor = document.createElement('div');
+    editor.id = 'editor';
+    editor.contentEditable = 'true';
+    document.body.append(editor);
+    const router = makeRouter({ focusOnNavigate: '#editor' });
+    await router.isReady();
+    await router.push('/list');
+    await frame();
+    expect([editor.isContentEditable, editor.hasAttribute('tabindex')]).toEqual([true, false]);
+    router.dispose();
+  });
+
   it('stops announcing after dispose(); the region is the document\'s, shared, and stays', async () => {
     const router = makeRouter();
     document.title = 'Orders list';
@@ -162,3 +192,11 @@ describe('route announcer', () => {
     expect(region()!.textContent).toBe('');
   });
 });
+
+/*
+ * RA-3 (audit, 2026-10-12). The announcer skipped the first commit it saw,
+ * taking it for the initial load. When the initial navigation did not commit
+ * (a guard refused it), the user's first real navigation was that commit, and
+ * it was not announced. The router now installs the announcer once the
+ * initial navigation has settled, so the skip is the initial load itself.
+ */

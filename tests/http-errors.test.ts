@@ -12,7 +12,7 @@ const answered = (status: number) => _answered(status, null, {});
 const transport = _failures('transport');
 import * as root from '../src/index';
 
-describe('the status table (docs/plan-failures-and-contract.md 4.4)', () => {
+describe('the status table (docs/contract.md 4)', () => {
   it('each status declares the condition RFC 9110 gives it', () => {
     const table: Array<[number, string]> = [
       [404, 'missing'], [410, 'missing'], [409, 'conflict'], [412, 'conflict'],

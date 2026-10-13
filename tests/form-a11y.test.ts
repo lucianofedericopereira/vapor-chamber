@@ -4,13 +4,13 @@
  * Most real form errors come from the server, not from client rules. A 422
  * problem carries them as `errors: [{ pointer, detail }]`, the pointer into the
  * envelope the client sent (`/payload/<field>`, RFC 6901): the wire contract's
- * one shape (docs/plan-failures-and-contract.md 4.4); the backend localizes the
+ * one shape (docs/contract.md 4); the backend localizes the
  * messages and converts its own field map to pointers. So what to say and which field it is
  * about are DATA: the form shows them, and exposes what an element needs to
  * make them accessible (WCAG 3.3.1 errors identify the field, 4.1.2 state is
  * exposed): `aria-invalid`, `aria-describedby` pointing at the message, and the
  * first invalid field to focus after a failed submit.
- * docs/plan-failures-and-contract.md, section 8e.
+ * docs/accessibility.md.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';

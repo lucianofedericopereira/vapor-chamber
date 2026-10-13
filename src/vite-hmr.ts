@@ -21,7 +21,8 @@
  *     a shim prepended to an SFC is never delivered. The shim goes on the SAME
  *     line as the first import, so no line moves and Vite's identity source
  *     map stays correct (see transform()).
- *   - It primes `globalThis.__VUE__` from the consumer's 'vue' through a
+ *   - It primes the library's Vue slot (`globalThis.__VAPOR_CHAMBER_VUE__`,
+ *     never Vue's own `__VUE__`) from the consumer's 'vue' through a
  *     companion virtual module that evaluates before 'vapor-chamber': the
  *     async probe's bare-specifier import cannot resolve in a browser, so
  *     without it `createVaporChamberApp()` throws on every dev page load. The
@@ -39,7 +40,8 @@
  *     rendered (tests/hmr-render-scope-fixture.test.ts).
  *
  * Preserves the shared command bus (handlers, plugins, hooks) across Vite HMR
- * updates so that application state survives component hot-reloads.
+ * updates. State a re-run module creates, such as a `useCommandState` signal,
+ * is built again from its initial value.
  *
  * Without this plugin, each HMR update re-creates the bus from scratch,
  * clearing all registered handlers and registered state.
@@ -69,7 +71,7 @@
  * import { createCommandBus } from 'vapor-chamber'
  * const bus = createCommandBus()
  * bus.register('cartAdd', handler)
- * // After HMR: handler is still registered, state is preserved
+ * // After HMR: the handler is still registered on the same bus
  */
 
 export type VaporChamberHMROptions = {
@@ -106,7 +108,7 @@ const IMPORTS_VAPOR_CHAMBER =
   /(?:\bfrom\s*|\bimport\s*\(\s*|\brequire\s*\(\s*|\bimport\s+)['"]vapor-chamber(?:\/[^'"]*)?['"]/;
 
 /**
- * vaporChamberHMR - Vite plugin for state-preserving hot reload.
+ * vaporChamberHMR - Vite plugin that keeps the shared bus across hot reload.
  *
  * Injects a small runtime shim that:
  * 1. Stores the command bus on `globalThis[HMR_GLOBAL_KEY]` after creation.
@@ -169,13 +171,12 @@ export function vaporChamberHMR(options: VaporChamberHMROptions = {}): any {
     async load(id: string) {
       // -- Vue-priming module ----------------------------------------------
       // The HMR shim import is injected at the TOP of every transformed
-      // module, so vapor-chamber evaluates before ANY user code - including
-      // any user attempt to set globalThis.__VUE__. And in the browser the
+      // module, so vapor-chamber evaluates before ANY user code. And in the browser the
       // lib's async probe (a `@vite-ignore`-annotated `import('vue')`) is a bare
       // specifier import that always fails without an import map, so without
       // this module Vue/Vapor detection could never succeed in Vite dev and
-      // createVaporChamberApp() would throw on every page load. It sets
-      // globalThis.__VUE__ from the consumer's own 'vue' BEFORE the shim
+      // createVaporChamberApp() would throw on every page load. It sets the
+      // library's Vue slot from the consumer's own 'vue' BEFORE the shim
       // imports 'vapor-chamber' (its module body runs first in DFS order),
       // so the lib's synchronous probe finds the real Vue module - alias
       // and all. Emitted only when 'vue' resolves, so non-Vue Vite apps
@@ -259,10 +260,10 @@ export { getCommandBus, setCommandBus, resetCommandBus };
       `.trim();
     },
 
-    // Transform: inject the HMR shim into every module that IMPORTS
+    // Transform: inject the HMR shim into every script module that IMPORTS
     // vapor-chamber (an import match, not a substring one, so a mention in a
-    // comment or a string literal does not pull the shim in). The module graph
-    // dedupes the virtual import.
+    // comment or a string literal does not pull the shim in). A `.vue` file is
+    // skipped below. The module graph dedupes the virtual import.
     transform(code: string, id: string) {
       // `apply: 'serve'` above is the real production guard; this stays as a
       // belt-and-braces check for anyone invoking the transform directly.
@@ -290,7 +291,7 @@ export { getCommandBus, setCommandBus, resetCommandBus };
       // by one. What that fix cost went unmeasured: a line-shift map can only
       // say "output line N came from source line N-1, column 0", and Vite
       // CHAINS maps, so every downstream map's column detail collapsed onto
-      // column 0. Measured on examples/vapor-sfc, mappings length:
+      // column 0. Measured on examples/vapor-sfc for v1.19.0, mappings length:
       //
       //                          src/main.ts     src/CartPanel.vue
       //   vue() alone               92                816
@@ -597,7 +598,7 @@ export function vaporChamberTest(options: VaporChamberTestOptions = {}): any {
       // replaces the include there.
       // Benchmark files have their own include, inherited the same way, and
       // `vitest bench` ran each one again in this project: measured on this
-      // repository, tests/perf.bench.ts twice and the CI bench job 89s -> 179s.
+      // repository for v1.21.0, tests/perf.bench.ts twice and the CI bench job 89s -> 179s.
       // The island project runs no benchmarks; emptying the include is how.
       if (test.name === ISLAND_PROJECT) {
         test.include = [...ISLAND_INCLUDE];

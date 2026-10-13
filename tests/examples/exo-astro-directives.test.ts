@@ -218,6 +218,31 @@ describe('v-scope', () => {
     expect($(root, '#far').textContent).toBe('outer'); // inner never declared `only`
   });
 
+  it('a name a scope only inherits from Object.prototype falls through to busState (EA-1)', () => {
+    // Own keys on busState that shadow Object.prototype's (typed as its methods).
+    Object.assign(busState, { valueOf: 'BUS', toString: 'BUS-TS' });
+    busState.items = [{ name: 'Tea' }];
+    const root = mount(`
+      <div v-scope='{"open":true}'>
+        <span id="local" v-bind-text="open"></span>
+        <span id="inherited" v-bind-text="valueOf"></span>
+      </div>
+      <ul v-each="items"><li><b v-bind-text="name"></b><i v-bind-text="toString"></i></li></ul>
+    `);
+    scan(createCommandBus(), root);
+
+    // A scan()-made scope and a v-each item are both Proxies: own keys must answer through them.
+    expect({
+      local: $(root, '#local').textContent,
+      inherited: $(root, '#inherited').textContent,
+      rowName: $(root, 'b').textContent,
+      rowInherited: $(root, 'i').textContent,
+    }).toEqual({ local: 'true', inherited: 'BUS', rowName: 'Tea', rowInherited: 'BUS-TS' });
+    // Positive control: a declared key stays local and live.
+    scopeOf($(root, 'div')).open = false;
+    expect($(root, '#local').textContent).toBe('false');
+  });
+
   it('treats malformed v-scope JSON as an empty scope', () => {
     busState.n = 9;
     const root = mount(`<div v-scope="{nope"><span v-bind-text="n"></span></div>`);
@@ -353,6 +378,65 @@ describe('v-each', () => {
 
     busState.items[0].price = '$6.00';
     expect(rows(root)).toEqual([['Tea', '$6.00']]);
+  });
+
+  it('a rebuild removes the effects its previous rows added, so detached rows are not written (EA-2)', () => {
+    busState.title = 't0';
+    busState.items = [{ name: 'Tea' }];
+    const root = mount(`<ul v-each="items"><li><b v-bind-text="title"></b><i v-bind-text="name"></i></li></ul>`);
+    scan(createCommandBus(), root);
+    const built = new Set<Element>(root.querySelectorAll('b'));
+    for (let i = 1; i <= 5; i++) {
+      busState.items = [{ name: `Tea ${i}` }];
+      for (const b of root.querySelectorAll('b')) built.add(b);
+    }
+    // Any busState write re-runs the flat set, so this also rebuilds the list:
+    // every row built so far is detached, and none may still be written.
+    busState.title = 't1';
+    const stale = [...built].filter((b) => b.textContent === 't1');
+    expect({ built: built.size, stale: stale.length }).toEqual({ built: 6, stale: 0 });
+    // Positive control: the row on the page reads the new title and its own item.
+    expect([$(root, 'b').textContent, $(root, 'i').textContent]).toEqual(['t1', 'Tea 5']);
+  });
+
+  it('an outer rebuild also removes a nested v-each and the effects of its rows (EA-2)', () => {
+    busState.title = 't0';
+    busState.shared = [{ id: 1 }];
+    busState.groups = [{ g: 1 }];
+    const root = mount(`
+      <ul v-each="groups"><template><li><span v-each="shared"><u v-bind-text="title"></u></span></li></template></ul>
+    `);
+    scan(createCommandBus(), root);
+    expect(root.querySelectorAll('li span u')).toHaveLength(1);
+    const built = new Set<Element>(root.querySelectorAll('u'));
+    for (let i = 1; i <= 3; i++) {
+      busState.groups = [{ g: i }];
+      for (const u of root.querySelectorAll('u')) built.add(u);
+    }
+    busState.title = 't1';
+    const stale = [...built].filter((u) => u.textContent === 't1');
+    expect({ built: built.size, stale: stale.length }).toEqual({ built: 4, stale: 0 });
+    // Positive controls: the row on the page reads the new title, and the
+    // nested list still follows its own source.
+    expect(Array.from(root.querySelectorAll('u')).map((u) => u.textContent)).toEqual(['t1']);
+    busState.shared = [{ id: 1 }, { id: 2 }];
+    expect(Array.from(root.querySelectorAll('u')).map((u) => u.textContent)).toEqual(['t1', 't1']);
+  });
+
+  it('takes its row from its own <template> child, not one inside a nested list (EA-6)', () => {
+    busState.shared = [{ name: 'a' }];
+    busState.groups = [{ g: 1 }];
+    const root = mount(`
+      <ul v-each="groups"><li><span v-each="shared"><template><u v-bind-text="name"></u></template></span></li></ul>
+    `);
+    scan(createCommandBus(), root);
+
+    expect(Array.from(root.querySelectorAll('ul > *')).map((n) => n.tagName)).toEqual(['LI']);
+    expect(Array.from(root.querySelectorAll('li span u')).map((u) => u.textContent)).toEqual(['a']);
+    // Positive control: each list still follows its own source.
+    busState.shared = [{ name: 'a' }, { name: 'b' }];
+    busState.groups = [{ g: 1 }, { g: 2 }];
+    expect(Array.from(root.querySelectorAll('li span u')).map((u) => u.textContent)).toEqual(['a', 'b', 'a', 'b']);
   });
 
   it('re-scanning does not duplicate the list', () => {

@@ -6,11 +6,15 @@
  * for a failure.
  *
  * Run:
- *   node mock-server.mjs     # serves the page and the API on :3001
+ *   node mock-server.mjs [port]     # serves the page and the API, default 3001
  */
 
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
+import { fileURLToPath } from 'node:url';
+
+/** The repo's dist/ directory, with its trailing separator. */
+const DIST = fileURLToPath(new URL('../../dist/', import.meta.url));
 
 /** The one place the cart is turned into text - server and client agree on it
  *  because the client re-renders with the same shape after each dispatch. */
@@ -43,7 +47,7 @@ const handlers = {
 // Per-instance "session" - in a real backend this is the user's cart row.
 const state = { count: 0, total: 0 };
 
-const PORT = 3001;
+const PORT = Number(process.argv[2]) || 3001;
 
 const server = createServer((req, res) => {
   // CORS for local-dev: allow the static HTML server (default :3000) to POST.
@@ -83,16 +87,36 @@ const server = createServer((req, res) => {
   // origin). A real app serves this from public/vendor or a CDN; here the
   // backend hands out the freshly built file so the demo is one process.
   if (req.method === 'GET' && req.url?.startsWith('/dist/')) {
-    const file = new URL(`../..${req.url.split('?')[0]}`, import.meta.url);
+    // A raw client keeps `..` in the path. Refuse anything that resolves
+    // outside dist/. An encoded `/` makes fileURLToPath throw: outside too.
+    let file = '';
+    try { file = fileURLToPath(new URL(`../..${req.url.split('?')[0]}`, import.meta.url)); } catch {}
+    if (!file.startsWith(DIST)) {
+      res.writeHead(403, { 'Cache-Control': 'no-store' }).end('Forbidden');
+      return;
+    }
+    // Read before the head goes out: a 404 after a sent 200 throws
+    // ERR_HTTP_HEADERS_SENT and stops the process.
+    let js;
     try {
-      res.writeHead(200, {
-        'Content-Type': 'text/javascript; charset=utf-8',
-        'Cache-Control': 'no-store',
-      });
-      res.end(readFileSync(file));
+      js = readFileSync(file);
     } catch {
       res.writeHead(404, { 'Cache-Control': 'no-store' }).end('Not built - run `npm run build` at the repo root');
+      return;
     }
+    res.writeHead(200, {
+      'Content-Type': 'text/javascript; charset=utf-8',
+      'Cache-Control': 'no-store',
+    });
+    res.end(js);
+    return;
+  }
+
+  // A browser asks for /favicon.ico at the root. The project icon lives in assets/favicon/.
+  if (req.method === 'GET' && req.url === '/favicon.ico') {
+    const ico = readFileSync(new URL('../../assets/favicon/favicon.ico', import.meta.url));
+    res.writeHead(200, { 'Content-Type': 'image/x-icon', 'Cache-Control': 'no-store' });
+    res.end(ico);
     return;
   }
 
@@ -109,9 +133,19 @@ const server = createServer((req, res) => {
   let body = '';
   req.on('data', (chunk) => { body += chunk; });
   req.on('end', () => {
+    // A body that does not parse carries no command. The reference controller
+    // answers a missing command with 400 `missing_command`: the request is at
+    // fault, not the server.
+    let parsed;
+    try { parsed = JSON.parse(body); } catch {}
+    const { command, target, payload } = parsed ?? {};
+    if (command == null || command === '') {
+      problem(400, 'missing_command', 'Missing "command" field');
+      return;
+    }
     try {
-      const { command, target, payload } = JSON.parse(body);
-      const fn = handlers[command];
+      // Own keys only: `handlers[command]` would find `toString`, `constructor`.
+      const fn = Object.hasOwn(handlers, command) ? handlers[command] : undefined;
       if (!fn) {
         problem(404, 'unknown_command', `Unknown command: ${command}`);
         return;

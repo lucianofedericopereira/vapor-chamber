@@ -222,7 +222,7 @@ An MCP tool definition, as returned by the `tools/list` method.
 **Variable** - [src/mcp.ts:129](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/mcp.ts#L129)
 
 ```ts
-MCP_SERVER_VERSION: "1.30.0"
+MCP_SERVER_VERSION: "1.31.0"
 ```
 
 Version reported by the MCP `initialize` handshake.

@@ -1,4 +1,4 @@
-/** Async request(): identical means identical, each caller keeps its own wait, the responder sees the chain's command (plan 1.27 section 10.4). Rationale at the end. */
+/** Async request(): identical means identical, each caller keeps its own wait, the responder sees the chain's command (log s35.167). Rationale at the end. */
 import { describe, expect, it } from 'vitest';
 import { createAsyncCommandBus, type Command } from '../src/command-bus';
 

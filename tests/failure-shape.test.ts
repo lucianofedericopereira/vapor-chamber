@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 /**
- * The failure shape of docs/plan-failures-and-contract.md 4.5, from the outside.
+ * The failure shape of docs/contract.md 5, from the outside.
  *
  * - `toJSON()` is the failure as an RFC 9457 problem with the members it needs:
  *   `detail`, `code`, `action`, the context as extensions, `type` implicit.
@@ -8,7 +8,7 @@
  *   raiser's, so no holder can rewrite either.
  * - Production messages state the fact; the fix sentence is DEV's, and the
  *   catalogue (`ERROR_CODE_REGISTRY` `fix`) is where a production reader finds
- *   it (plan settled item 5). Each gated site is read here in production.
+ *   it (docs/contract.md rule 5). Each gated site is read here in production.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BusError, createCommandBus, conditionOf, ownerOf } from '../src/command-bus';

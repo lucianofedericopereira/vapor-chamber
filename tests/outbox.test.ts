@@ -758,23 +758,33 @@ describe('localStorageOutbox', () => {
 // indexedDbOutbox - smoke test with a minimal in-memory fake (no deps)
 // ---------------------------------------------------------------------------
 
-/** Minimal fake IDB: enough surface for open/upgrade + get/put/clear requests. */
-function fakeIndexedDb() {
+/**
+ * Minimal fake IDB: enough surface for open/upgrade + get/put/clear requests.
+ * The real order: the request succeeds, then its transaction completes. With
+ * `abort`, a write's transaction aborts after its request succeeded instead.
+ */
+function fakeIndexedDb(abort?: { error: DOMException | null }) {
   const data = new Map<string, any>();
-  function request(result?: any) {
-    const req: any = { onsuccess: null, onerror: null, result };
-    queueMicrotask(() => req.onsuccess?.());
-    return req;
-  }
   const db = {
     createObjectStore: () => ({}),
-    transaction: () => ({
-      objectStore: () => ({
+    transaction: (_name: string, mode: IDBTransactionMode) => {
+      const tx: any = { oncomplete: null, onabort: null, error: null };
+      function request(result?: any) {
+        const req: any = { onsuccess: null, onerror: null, result };
+        queueMicrotask(() => {
+          req.onsuccess?.();
+          if (abort && mode === 'readwrite') queueMicrotask(() => { tx.error = abort.error; tx.onabort?.(); });
+          else queueMicrotask(() => tx.oncomplete?.());
+        });
+        return req;
+      }
+      tx.objectStore = () => ({
         get: (k: string) => request(data.get(k)),
-        put: (v: any, k: string) => { data.set(k, v); return request(); },
-        clear: () => { data.clear(); return request(); },
-      }),
-    }),
+        put: (v: any, k: string) => { if (!abort) data.set(k, v); return request(); },
+        clear: () => { if (!abort) data.clear(); return request(); },
+      });
+      return tx;
+    },
   };
   return {
     data,
@@ -947,6 +957,22 @@ describe("indexedDbOutbox - failure paths", () => {
     await expect(s.save([record])).resolves.not.toThrow();
     await expect(s.clear()).resolves.not.toThrow();
     expect(warn).toHaveBeenCalled();
+  });
+
+  it.each([
+    ['the browser\'s error', new DOMException('quota', 'QuotaExceededError'), 'QuotaExceededError'],
+    ['an Error naming the store, when the abort carries none', null, 'Error'],
+  ])("a write that does not commit warns with %s, and nothing is stored", async (_name, error, name) => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    vi.stubGlobal("indexedDB", fakeIndexedDb({ error }));
+
+    const s = indexedDbOutbox();
+    await s.save([record]);
+    await s.clear();
+    const reported = warn.mock.calls.map((c) => c[1] as Error);
+    expect(reported.map((e) => e.name)).toEqual([name, name]);
+    if (!error) expect(reported[0].message).toBe('indexedDB write to "records" did not commit');
+    expect(await s.load()).toBeNull();
   });
 });
 

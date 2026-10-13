@@ -223,8 +223,8 @@ describe('signal() factory - shallow reactivity', () => {
   // Regression guard: the library auto-wires Vue's shallowRef (not ref) because
   // it only ever replaces signal values wholesale. Reverting to ref() would
   // reintroduce the per-write deep-Proxy (toReactive) cost on object/array state
-  // (~3.4x slower on the useCommandState array path). These assertions fail if
-  // signal() goes back to a deep ref.
+  // (measurably slower on the useCommandState array path, docs/performance.md).
+  // These assertions fail if signal() goes back to a deep ref.
   it('returns a SHALLOW Vue ref once Vue is detected', async () => {
     await waitForVueDetection();
     const s = signal({ nested: { n: 1 } });

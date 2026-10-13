@@ -11,11 +11,14 @@
  * reach: it can only own a value some file the repo produces already states,
  * and bench output went to stdout and a CI artifact.
  *
- * RATIOS, NEVER ABSOLUTES. A hz figure is host state - this repo's own bench
- * header records rows swinging 20-30% run to run on a shared machine, and
- * `scripts/ab-vue.mjs` exists because cross-run absolutes are not a
- * measurement. A ratio between two rows of the SAME run cancels the host out,
- * which is why only ratios are written here and why the docs quote them.
+ * RATIOS, AND COSTS ONLY WITH THE MACHINE NAMED. A hz figure is host state - this
+ * repo's own bench header records rows swinging 20-30% run to run on a shared
+ * machine, and `scripts/ab-vue.mjs` exists because cross-run absolutes are not
+ * a measurement. A ratio between two rows of the SAME run cancels the host out,
+ * which is why the docs compare by ratio. A ratio against the bare-call floor
+ * did not: 13.96 on an Apple M3, 30.63 on an Intel i7-8650U. Those ratios were retired
+ * (owner, 2026-10-13) for COSTS below: a time per call, published only beside
+ * the machine it ran on (`benchProvenance`).
  *
  * Even a same-run ratio moves between runs, and one between two libraries
  * moves with the host, Node and the peer's version (docs/V8-RULES.md rule
@@ -101,24 +104,6 @@ export const RATIOS = {
     slow: 'vapor-chamber bus.dispatch (general-purpose, for comparison)',
     kind: 'own',
   },
-  benchFloorVsCompile: {
-    group: 'fast lane - single-handler hot dispatch (10k)',
-    fast: 'direct function call (theoretical floor)',
-    slow: 'vapor-chamber fast-lane compile + dispatch',
-    kind: 'own',
-  },
-  benchFloorVsMitt: {
-    group: 'fast lane - single-handler hot dispatch (10k)',
-    fast: 'direct function call (theoretical floor)',
-    slow: 'mitt (closest peer - emit fires listeners, no return)',
-    kind: 'peer',
-  },
-  benchFloorVsDispatch: {
-    group: 'fast lane - single-handler hot dispatch (10k)',
-    fast: 'direct function call (theoretical floor)',
-    slow: 'vapor-chamber bus.dispatch (general-purpose, for comparison)',
-    kind: 'own',
-  },
   benchEmitNoListenersVsMitt: {
     group: 'emit fast path - no listeners',
     fast: 'vapor-chamber bus.emit with NO listeners (10k)',
@@ -145,6 +130,19 @@ export const RATIOS = {
   },
 };
 
+/**
+ * marker name -> { group, row, ops, kind: 'cost' }: one row's time per call in
+ * ns, `1e9 / (hz * ops)`, where `ops` is the calls one bench iteration makes.
+ * `scripts/bench-bands.mjs` publishes the median and the calls that fit in one
+ * 60 fps frame.
+ */
+const HOT = 'fast lane - single-handler hot dispatch (10k)';
+export const COSTS = {
+  benchCompileNs: { group: HOT, row: 'vapor-chamber fast-lane compile + dispatch', ops: 10_000, kind: 'cost' },
+  benchMittNs: { group: HOT, row: 'mitt (closest peer - emit fires listeners, no return)', ops: 10_000, kind: 'cost' },
+  benchDispatchNs: { group: HOT, row: 'vapor-chamber bus.dispatch (general-purpose, for comparison)', ops: 10_000, kind: 'cost' },
+};
+
 /** This run's ratios from a bench title -> hz map; a ratio with a row missing is left out. */
 export function ratiosOf(hz) {
   const out = {};
@@ -152,6 +150,16 @@ export function ratiosOf(hz) {
     const a = hz.get(fast);
     const b = hz.get(slow);
     if (typeof a === 'number' && typeof b === 'number' && b > 0) out[name] = (a / b).toFixed(2);
+  }
+  return out;
+}
+
+/** This run's costs in ns per call; a cost with its row missing is left out. */
+export function costsOf(hz) {
+  const out = {};
+  for (const [name, { row, ops }] of Object.entries(COSTS)) {
+    const h = hz.get(row);
+    if (typeof h === 'number' && h > 0) out[name] = (1e9 / (h * ops)).toFixed(2);
   }
   return out;
 }
@@ -232,7 +240,10 @@ function label(name) {
 const hzFmt = (n) => (typeof n === 'number' ? n.toLocaleString('en-US', { maximumFractionDigits: 0 }) : '');
 
 function report(bench, hz) {
-  const rows = Object.entries(bench).map(([name, ratio]) => {
+  const rows = Object.entries(bench).map(([name, value]) => {
+    if (COSTS[name]) {
+      return { Comparison: label(name.replace(/Ns$/, ''))[0], Kind: 'cost', 'hz (fast)': hzFmt(hz.get(COSTS[name].row)), 'hz (slow)': '', Ratio: `${value} ns` };
+    }
     const [fast, slow] = label(name);
     const { fast: fastRow, slow: slowRow, kind } = RATIOS[name];
     return {
@@ -240,13 +251,14 @@ function report(bench, hz) {
       Kind: kind,
       'hz (fast)': hzFmt(hz.get(fastRow)),
       'hz (slow)': hzFmt(hz.get(slowRow)),
-      Ratio: `${ratio}x`,
+      Ratio: `${value}x`,
     };
   });
-  const missing = Object.keys(RATIOS).length - rows.length;
+  const want = Object.keys(RATIOS).length + Object.keys(COSTS).length;
+  const missing = want - rows.length;
   const footer = missing > 0
-    ? `${rows.length} of ${Object.keys(RATIOS).length} recorded - ${missing} bench row(s) not found`
-    : `${rows.length} ratios recorded to ${OUT} (benchRun); npm run bench:bands publishes`;
+    ? `${rows.length} of ${want} recorded - ${missing} bench row(s) not found`
+    : `${rows.length} values recorded to ${OUT} (benchRun); npm run bench:bands publishes`;
   console.log(`\n${asciiTable(rows, 'Bench ratios', { footer })}\n`);
 }
 
@@ -257,7 +269,7 @@ export default class BenchRatiosReporter {
 
     // A missing row means the bench was renamed or filtered out: that ratio is
     // left out of the run, so it gains no wrong value.
-    const bench = ratiosOf(hz);
+    const bench = { ...ratiosOf(hz), ...costsOf(hz) };
     if (Object.keys(bench).length === 0) return;
     write(bench);
     report(bench, hz);

@@ -19,7 +19,7 @@ import { ... } from 'vapor-chamber/store';
 
 ### fieldRef
 
-**Function** - [src/store.ts:97](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store.ts#L97)
+**Function** - [src/store.ts:104](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store.ts#L104)
 
 ```ts
 fieldRef<S extends object, K extends keyof S & string>(store: { readonly state: { readonly value: S; }; $onField: (key: K, fn: (value: S[K]) => void) => () => void; }, key: K) => { readonly value: S[K]; }
@@ -39,7 +39,7 @@ const count = fieldRef(cart, 'count'); // count.value
 
 ### ChamberStore
 
-**Type alias** - [src/store-base.ts:89](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store-base.ts#L89)
+**Type alias** - [src/store-base.ts:90](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store-base.ts#L90)
 
 ```ts
 export type ChamberStore<S extends object, R extends Record<string, StoreReducer<S>>> = {
@@ -63,7 +63,7 @@ export type ChamberStore<S extends object, R extends Record<string, StoreReducer
 
 ### ChamberStoreOptions
 
-**Type alias** - [src/store-base.ts:27](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store-base.ts#L27)
+**Type alias** - [src/store-base.ts:28](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store-base.ts#L28)
 
 ```ts
 export type ChamberStoreOptions<S extends object, R extends Record<string, StoreReducer<S>>> = {
@@ -126,7 +126,7 @@ What defineChamberStore takes.
 
 ### StoreReducer
 
-**Type alias** - [src/store-base.ts:24](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store-base.ts#L24)
+**Type alias** - [src/store-base.ts:25](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store-base.ts#L25)
 
 ```ts
 export type StoreReducer<S> = (state: S, target: any, payload?: any) => S;
@@ -136,7 +136,7 @@ A reducer: current state plus the dispatched target, returning the NEXT state.
 
 ### StoreRouter
 
-**Type alias** - [src/store-base.ts:84](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store-base.ts#L84)
+**Type alias** - [src/store-base.ts:85](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store-base.ts#L85)
 
 ```ts
 export type StoreRouter = {
@@ -152,7 +152,7 @@ imports nothing from `src/router`.
 
 ### defineChamberStore
 
-**Variable** - [src/store.ts:83](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store.ts#L83)
+**Variable** - [src/store.ts:90](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/store.ts#L90)
 
 ```ts
 defineChamberStore<S extends object, R extends Record<string, import("./store-base").StoreReducer<S>>>(id: string, options: import("./store-base").ChamberStoreOptions<S, R>) => (bus: import("./command-bus").BaseBus, router?: import("./store-base").StoreRouter) => import("./store-base").ChamberStore<S, R>

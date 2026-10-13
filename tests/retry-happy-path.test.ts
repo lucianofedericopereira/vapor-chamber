@@ -6,7 +6,7 @@
  * (`countOption(..., 3, 1)` guarantees at least one attempt). Measured: retry
  * alone 48,857 ns per successful dispatch against 5,635 bare, 6,031 without
  * it. The rule: the happy path builds no failure machinery (the fuse,
- * docs/plan-failures-and-contract.md 7.1 item 14).
+ * ROADMAP.md, the fuse).
  */
 import { expect } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';

@@ -9,7 +9,7 @@
  * it guards is an ASSUMPTION this library rests on, which can change under us
  * without anyone changing a line here.
  *
- * MEASURED against the mutation matrix in .probes/mutate.sh, which is the only
+ * MEASURED against a mutation matrix of src/directives.ts, which is the only
  * way to know rather than assert:
  *
  *   - the vDOM test is a PURE upstream contract: no mutation of

@@ -19,7 +19,7 @@ import { ... } from 'vapor-chamber/observable';
 
 ### dispatchFrom
 
-**Function** - [src/observable.ts:127](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/observable.ts#L127)
+**Function** - [src/observable.ts:148](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/observable.ts#L148)
 
 ```ts
 dispatchFrom<T>(bus: BaseBus, action: string, source: Observable<T>) => Subscription
@@ -48,16 +48,16 @@ own errors use, so it is observable rather than either fatal or silent.
 import { interval } from 'rxjs';
 import { dispatchFrom } from 'vapor-chamber/observable';
 
-dispatchFrom(bus, 'tick', interval);   // tick every 1s
+dispatchFrom(bus, 'tick', interval(1000)); // tick every 1s
 bus.on('tick:error', (cmd) => console.error('tick failed', cmd.target));
 ```
 
 ### observe
 
-**Function** - [src/observable.ts:78](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/observable.ts#L78)
+**Function** - [src/observable.ts:95](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/observable.ts#L95)
 
 ```ts
-observe(bus: BaseBus, pattern: string) => Observable<BusObservation>
+observe(bus: BaseBus, pattern: string) => InteropObservable<BusObservation>
 ```
 
 Observe bus events matching a pattern. Returns an Observable of
@@ -76,19 +76,21 @@ sub.unsubscribe();
 
 ### Observable
 
-**Interface** - [src/observable.ts:48](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/observable.ts#L48)
+**Interface** - [src/observable.ts:49](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/observable.ts#L49)
 
 ```ts
 export interface Observable<T> {
   subscribe(observer: Observer<T> | ((value: T) => void)): Subscription;
   /** Symbol.observable interop - RxJS's `from()` calls this if present. */
   [Symbol.observable]?: () => Observable<T>;
+  /** The same, under the key RxJS and Redux read when the runtime has no `Symbol.observable`. */
+  '@@observable'?: () => Observable<T>;
 }
 ```
 
 ### Observer
 
-**Interface** - [src/observable.ts:37](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/observable.ts#L37)
+**Interface** - [src/observable.ts:38](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/observable.ts#L38)
 
 ```ts
 export interface Observer<T> {
@@ -103,7 +105,7 @@ Minimal observer / observable protocol - matches TC39 Observable proposal
 
 ### Subscription
 
-**Interface** - [src/observable.ts:43](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/observable.ts#L43)
+**Interface** - [src/observable.ts:44](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/observable.ts#L44)
 
 ```ts
 export interface Subscription {
@@ -116,7 +118,7 @@ export interface Subscription {
 
 ### BusObservation
 
-**Type alias** - [src/observable.ts:31](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/observable.ts#L31)
+**Type alias** - [src/observable.ts:32](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/observable.ts#L32)
 
 ```ts
 export type BusObservation = { cmd: Command; result: CommandResult };

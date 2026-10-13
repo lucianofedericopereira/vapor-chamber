@@ -33,17 +33,22 @@ reaches, when its diff (read *with* context) mentions a symbol we use, or when i
 changes an API `src/vapor.ts` re-exports. A grep can order the queue; it cannot
 close a row. Closing a TV row on a grep needs the owner's sign-off.
 
+A cycle cannot see a claim about something Vue never had. Each release cut
+re-checks every claim this repo makes about Vue against Vue's shipped dist
+(log 36.8).
+
 **2. Bump.** `vue` and every direct `@vue/*` devDependency, the peer range, and
 the pins in each example. Rebuild all three examples and run `npm run check:example`,
 which clicks a real button in a built page.
 
 **3. Run the suites.** `npm run build`, then `npm run test:run` and
-`npm run test:vapor`. Build first: several guards read `dist/` and skip
-themselves without it.
+`npm run test:vapor`. Build first: several guards read `dist/`, and without
+it they fail through `requireDist` (tests/require-dist.ts).
 
 **4. Run the gates.** `npm run typecheck`, `npm run lint:check`,
-`npm run size:check`, `npm run test:coverage` (100% on all four). Read their
-full output; do not pipe a gate through `| tail`, which hides its exit code.
+`npm run size:check`, `npm run test:coverage`, and read 100% on all four:
+the floor in vitest.config.ts is 98, and `npm run gate` fails below 100.
+Read their full output; do not pipe a gate through `| tail`, which hides its exit code.
 
 **5. Measure against the previous Vue.** Diff the two dists first; if the
 reactivity sources are byte-identical there is nothing to measure. Otherwise

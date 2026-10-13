@@ -12,13 +12,19 @@ const counter = { state: () => ({ n: 0 }), reducers: { inc: (s: { n: number }) =
 const fakeRouter = { currentRoute: { value: { location: { query: {} } } }, setQuery: () => {} };
 
 describe('an action key that is a store member', () => {
-  for (const key of ['$id', 'state', 'url', '$reset', '$dispose']) {
+  const members = ['$id', 'state', 'url', '$reset', '$dispose', '$onField'];
+  for (const key of members) {
     it(`"${key}" is refused when the store is defined, by name`, () => {
       expect(() => defineChamberStore('s', { state: () => ({}), reducers: { [key]: (s: object) => s } })).toThrow(
         `Store "s": the action "${key}" would replace the store's own "${key}".`,
       );
     });
   }
+
+  it('the catalogue fix for store:already:member names every member refused above', () => {
+    const fix = ERROR_CODE_REGISTRY.find((e) => e.code === 'store:already:member')!.fix;
+    expect(members.filter((key) => !fix.includes(key))).toEqual([]);
+  });
 
   it('control: any other key is an action', ({ bus }) => {
     const store = defineChamberStore('s', { state: () => ({ v: 0 }), reducers: { status: () => ({ v: 1 }) } })(bus);
@@ -100,7 +106,7 @@ describe('every store refusal is coded (shape rule 2)', () => {
   });
 });
 
-describe('every store refusal has the core failure shape (settled item 5, plan 4.5)', () => {
+describe('every store refusal has the core failure shape (docs/contract.md rule 5 and section 5)', () => {
   const thrown = (fn: () => unknown): BusError => {
     try { fn(); } catch (e) { return e as BusError; }
     throw new Error('did not throw');

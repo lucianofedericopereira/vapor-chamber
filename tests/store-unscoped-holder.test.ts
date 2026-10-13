@@ -8,7 +8,7 @@
  * left: its actions answered ok: false, and the next useStore built a fresh
  * store with its state reset. Measured on 1.24. The tests covered two scoped
  * holders, never an unscoped owner plus a scoped one.
- * docs/plan-failures-and-contract.md, 2.1.
+ * CHANGELOG v1.25.0.
  */
 import { expect } from 'vitest';
 import { effectScope } from 'vue';

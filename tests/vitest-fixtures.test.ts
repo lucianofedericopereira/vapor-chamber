@@ -115,7 +115,7 @@ describe('a reusable snippet built with Vitest\'s own .extend', () => {
 
 /**
  * The fixtures `vapor-chamber/vitest` adds to Vitest's own `it` / `test`
- * (plan 11.8 step 1): `bus`, a tapped `createCommandBus()`, and `asyncBus`, a
+ * (CHANGELOG v1.21.0): `bus`, a tapped `createCommandBus()`, and `asyncBus`, a
  * tapped `createAsyncCommandBus()`, built with Vitest 5's `test.extend`.
  *
  * This file imports `it`, `test` and `expect` from the entry the way a

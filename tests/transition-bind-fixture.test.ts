@@ -10,8 +10,8 @@
  * defect living exactly there survived 1750 passing tests.
  *
  * The defect: `v-bind="obj"` spreads an object's own ENUMERABLE keys as props.
- * The nine `on*` hooks match `<Transition>`'s declared props; `phase` and
- * `dispose` match nothing, so they fell through as ATTRIBUTES and were
+ * The eight spread `on*` hooks match `<Transition>`'s declared props; `phase`
+ * and `dispose` match nothing, so they fell through as ATTRIBUTES and were
  * stringified into the DOM -
  *
  *     <div class="panel" phase="[object Object]" dispose="() => {}">hi</div>
@@ -24,7 +24,7 @@
  * can only ever check the half you already understood. So this one mounts.
  */
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createApp, h, ref, Transition } from 'vue';
 import { createCommandBus } from '../src/command-bus';
 import { createTransitionBridge, useTransitionCommand } from '../src/transitions';
@@ -99,8 +99,29 @@ describe('transition bridge bound to a real <Transition>', () => {
     expect(Object.keys({ ...bridge })).not.toContain('phase');
     expect(Object.keys(bridge)).toEqual([
       'onBeforeEnter', 'onEnter', 'onAfterEnter', 'onEnterCancelled',
-      'onBeforeLeave', 'onLeave', 'onAfterLeave', 'onLeaveCancelled', 'onMove',
+      'onBeforeLeave', 'onLeave', 'onAfterLeave', 'onLeaveCancelled',
     ]);
+  });
+
+  // No Vue hook is named onMove, so a spread onMove only falls through as a
+  // `move` DOM listener that nothing fires. See the note on `onMove` in src.
+  it('spreads no onMove: the child gets no `move` listener, and t.onMove still dispatches', () => {
+    const bus = createCommandBus({ onMissing: 'ignore' });
+    const dispatched: string[] = [];
+    bus.onAfter((cmd) => dispatched.push(cmd.action));
+    const bridge = createTransitionBridge({ bus, namespace: 'list' });
+
+    const add = vi.spyOn(Element.prototype, 'addEventListener');
+    const { host, app } = mountWithBridge(bridge, ref(true));
+    const moves = add.mock.calls.filter((c) => c[0] === 'move').length;
+    // Positive control for the spy: a `move` listener added here is counted.
+    (host.querySelector('.panel') as HTMLElement).addEventListener('move', () => {});
+    expect([moves, add.mock.calls.filter((c) => c[0] === 'move').length]).toEqual([0, 1]);
+    add.mockRestore();
+
+    bridge.onMove(host.querySelector('.panel') as Element);
+    expect(dispatched).toEqual(['listMove']);
+    app.unmount();
   });
 
   it('applies to useTransitionCommand too, not just the factory', () => {

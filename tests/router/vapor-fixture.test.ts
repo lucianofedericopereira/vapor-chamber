@@ -13,8 +13,8 @@
  * box never meant missing, and a checked one does not mean working.
  *
  * Everything is imported from the single with-vapor browser build on purpose.
- * Vapor ships as a physically separate dist file (see chamber.ts §probeVue and
- * whitepaper §9.6), and two separately-imported Vue dists are two disconnected
+ * In Node, Vapor ships as a separate dist file (see chamber.ts §probeVue: the
+ * bare `vue` has none here), and two separately-imported Vue dists are two disconnected
  * reactivity instances - mixing `vue` and the with-vapor build in one test would
  * silently measure nothing.
  */

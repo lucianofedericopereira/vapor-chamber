@@ -9,8 +9,9 @@
  * class from the container, so constructor-injected dependencies work as
  * normal.
  *
- * Naming convention: camelCase commands match the lib's default; switch to
- * dot.notation or snake_case if you set a `naming` option on the bus.
+ * Naming convention: camelCase commands match the names the lib composes
+ * (`useCommandGroup('cart')` and a `cart` store both give `cartAdd`). The bus
+ * enforces a convention only when given a `naming` option.
  */
 
 return [

@@ -2,19 +2,15 @@
 /**
  * Supplemental coverage for src/router/dom.ts.
  *
- *  - routableTarget: empty/invalid hrefs - reached through the
- *    non-composedPath ancestor walk, which requires an event without
- *    composedPath (older browsers; simulated by shadowing the method).
- *  - onMouseout with no pending hover timer.
+ *  - links the click handler does not take: no href, an href that does
+ *    not parse, no link at all (real clicks, through composedPath), and
+ *    an SVG link left unstamped.
+ *  - a hover cancel with nothing armed.
  *  - preheatIdle's early-return arms: no factories, Save-Data,
  *    and 2g connections.
- *
- * onMouseover's `!preheat` guard is NOT tested here: the mouseover
- * listener is only attached when `preheat` is set, so the guard is
- * unreachable through installDomIntegration - defensive only.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { installDomIntegration, preheatIdle } from '@router/dom';
+import { installDomIntegration, preheatIdle, stampActiveLinks } from '@router/dom';
 
 const cleanups: Array<() => void> = [];
 
@@ -40,67 +36,78 @@ function install(overrides: Partial<Parameters<typeof installDomIntegration>[0]>
 }
 
 /**
- * Click without composedPath - forces the ancestor walk. happy-dom's
- * own dispatcher requires composedPath, so the captured listener is invoked
- * directly with a synthetic event, the way a legacy browser would deliver it.
+ * A real click dispatched on `target`, through the listener installed on the
+ * document: true when the router took it. Read on the window, after the
+ * document, which then cancels happy-dom's own link navigation: a navigation
+ * left running moves `location` for the tests after it.
  */
-function legacyClick(listeners: Map<string, EventListener>, target: Element) {
-  const event = {
-    defaultPrevented: false,
-    button: 0,
-    metaKey: false, ctrlKey: false, shiftKey: false, altKey: false,
-    composedPath: undefined,
-    target,
-    preventDefault() { this.defaultPrevented = true; },
+function click(target: Element): boolean {
+  let taken = false;
+  const read = (e: Event) => {
+    taken = e.defaultPrevented;
+    e.preventDefault();
   };
-  listeners.get('click')!(event as unknown as Event);
-  return event;
+  window.addEventListener('click', read, { once: true });
+  target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, button: 0 }));
+  return taken;
 }
 
-describe('ancestor-walk fallback + routableTarget rejects', () => {
-  it('walks up to the anchor when composedPath is unavailable', () => {
-    const { navigate, listeners } = install();
-    document.body.innerHTML = '<a href="/shop"><span id="inner">shop</span></a>';
+/** The integration on the real document, so a click carries its composed path. */
+function installLive() {
+  const navigate = vi.fn();
+  cleanups.push(installDomIntegration({ base: '', canHandle: () => true, navigate }));
+  return navigate;
+}
 
-    const event = legacyClick(listeners, document.getElementById('inner')!);
-    expect(event.defaultPrevented).toBe(true);
-    expect(navigate).toHaveBeenCalledWith('/shop', false);
-  });
-
-  it('ignores an anchor with an empty href', () => {
-    const { navigate, listeners } = install();
+describe('links the click handler does not take', () => {
+  it('an anchor with no href', () => {
+    const navigate = installLive();
     document.body.innerHTML = '<a id="bare"><span id="inner">no href</span></a>';
 
-    const event = legacyClick(listeners, document.getElementById('inner')!);
-    expect(event.defaultPrevented).toBe(false);
+    expect(click(document.getElementById('inner')!)).toBe(false);
     expect(navigate).not.toHaveBeenCalled();
   });
 
-  it('ignores an anchor whose href cannot parse as a URL', () => {
-    const { navigate, listeners } = install();
+  it('an anchor whose href cannot parse as a URL', () => {
+    const navigate = installLive();
     document.body.innerHTML = '<a id="bad">broken</a>';
     const anchor = document.getElementById('bad') as HTMLAnchorElement;
-    // `http://[` is an unparsable URL; shadow the resolved-href accessor to
-    // hand routableTarget the raw string the way a broken resolver would.
+    // `http://[` is an unparsable URL; a browser's `href` getter returns the
+    // raw attribute when it cannot parse it, which this shadow hands over.
     Object.defineProperty(anchor, 'href', { value: 'http://[', configurable: true });
 
-    const event = legacyClick(listeners, anchor);
-    expect(event.defaultPrevented).toBe(false);
+    expect(click(anchor)).toBe(false);
     expect(navigate).not.toHaveBeenCalled();
   });
 
-  it('gives up when the walk reaches the root without an anchor', () => {
-    const { navigate, listeners } = install();
+  it('a click on no link at all', () => {
+    const navigate = installLive();
     document.body.innerHTML = '<div id="plain">not a link</div>';
 
-    const event = legacyClick(listeners, document.getElementById('plain')!);
-    expect(event.defaultPrevented).toBe(false);
+    expect(click(document.getElementById('plain')!)).toBe(false);
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  // `a[href]` matches an SVG <a> too, whose `href` is an SVGAnimatedString in
+  // a browser (undefined in happy-dom): not a URL, so not the router's.
+  it('an SVG link is never stamped active', () => {
+    document.body.innerHTML = '<a id="html" href="/shop">shop</a><svg><a id="svg" href="/shop"><text>shop</text></a></svg>';
+    stampActiveLinks('', '/shop');
+    const marks = (id: string) => ['data-active', 'data-exact-active', 'aria-current'].map((n) => document.getElementById(id)!.hasAttribute(n));
+    expect([marks('html'), marks('svg')]).toEqual([[true, true, true], [false, false, false]]);
+  });
+
+  it('control: a link around the clicked element is taken', () => {
+    const navigate = installLive();
+    document.body.innerHTML = '<a href="/shop"><span id="inner">shop</span></a>';
+
+    expect(click(document.getElementById('inner')!)).toBe(true);
+    expect(navigate).toHaveBeenCalledWith('/shop', false);
   });
 });
 
-describe('hover preheat teardown', () => {
-  it('onMouseout without a pending hover timer is a no-op', () => {
+describe('hover preheat cancel', () => {
+  it('a cancel with nothing armed is a no-op', () => {
     const preheat = vi.fn();
     const { listeners } = install({ preheat });
 

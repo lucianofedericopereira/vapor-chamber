@@ -1,4 +1,4 @@
-// A transactional batch undoes the command that ran, not a copy (plan item 2).
+// A transactional batch undoes the command that ran, not a copy (log s35.155).
 import { describe, expect, it } from 'vitest';
 import { createAsyncCommandBus, createCommandBus, type Command } from '../src/command-bus';
 import { defineChamberStore } from '../src/store';

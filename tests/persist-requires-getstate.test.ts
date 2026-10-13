@@ -53,7 +53,7 @@ describe('persist() requires getState', () => {
  * `save()` called `undefined` after every successful dispatch, caught the
  * TypeError and warned "failed to save key", and the record never moved. The
  * owner's decision (2026-10-01): a configuration mistake throws at setup
- * (docs/plan-failures-and-contract.md, rule 10), so `persist()` now throws a
+ * (docs/contract.md, reading by contract), so `persist()` now throws a
  * TypeError when `getState` is not a function. The error is unconditional;
  * the explanation is dev-only, as elsewhere, and production keeps the two
  * words that name the option. An optional `getState` (item 19) would remove

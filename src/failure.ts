@@ -1,26 +1,26 @@
 /**
  * vapor-chamber - the failure every part of the library raises.
  *
- * `BusError`, its code vocabulary (`owner:condition:subject`, plan 4.1-4.2),
+ * `BusError`, its code vocabulary (`owner:condition:subject`, docs/contract.md 2-3),
  * the owner-bound factory and the two readers. Its own module, free of the
  * bus, so a part that keeps the bus out of its graph on purpose (the router,
- * plan 8d) raises the same failure the core does: one shape for every failure
- * (plan settled item 2), one reader for all of them.
+ * docs/contract.md 6) raises the same failure the core does: one shape for every failure
+ * (docs/contract.md rule 2), one reader for all of them.
  */
 import { DEV } from './dev';
 
 /**
- * What went wrong, from a closed vocabulary the library owns (plan 4.2). The
+ * What went wrong, from a closed vocabulary the library owns (docs/contract.md 3). The
  * retry policy and a logger read it; a receiver that has never seen a code
  * still knows its condition. `unauthenticated` and `conflict` are the two
  * distinctions gRPC's canonical codes draw that `refused` and `already` hid
  * (sign in, then retry; the state changed underneath); the 1:1 table against
- * gRPC is plan 4.2.
+ * gRPC is docs/contract.md 3.
  */
 export type Condition =
   | 'missing' | 'already' | 'conflict' | 'invalid' | 'refused' | 'unauthenticated'
   | 'limited' | 'timeout' | 'lost' | 'aborted' | 'exceeded' | 'failed' | 'unexpected' | 'unknown';
-/** What a site passes: `condition:subject`. The owner is the wiring's (plan 4.5). */
+/** What a site passes: `condition:subject`. The owner is the wiring's (docs/contract.md 5). */
 export type FailCode = `${Condition}:${string}`;
 /**
  * A whole code, `owner:condition:subject`: who raised it (set by the wiring,
@@ -85,7 +85,7 @@ export class BusError extends Error {
       console.warn(`[vapor-chamber] BusError code "${code}" is not condition:subject from the condition vocabulary (missing, invalid, refused, limited, timeout, failed, ...); conditionOf() and the async bus's retry cannot read it.`);
     }
     // Only a bug (`failed`) keeps its stack. An expected refusal is control
-    // flow, and V8's stack capture dominated its cost (plan settled item 4).
+    // flow, and V8's stack capture dominated its cost (docs/contract.md rule 4).
     const limit = (Error as any).stackTraceLimit;
     if (!code.startsWith('failed:')) (Error as any).stackTraceLimit = 0;
     // Restored right after, with no try/finally: Error's constructor cannot
@@ -97,7 +97,8 @@ export class BusError extends Error {
     this.action = opts.action;
     this.context = opts.context;
     // An abort is named as the platform names one (DOM `throwIfAborted`, Fetch),
-    // so `e.name === 'AbortError'` reads every abort. 'b' at index 1 is
+    // so `e.name === 'AbortError'` reads the platform's abort and every one the
+    // library builds. A custom Error reason keeps its own name. 'b' at index 1 is
     // `aborted` alone in the vocabulary. Measured against `startsWith`
     // (+12.5 ns) and a subclass (+10 ns): +1.3 ns, an aborted BusError only.
     this.name = code.charCodeAt(1) === 98 ? 'AbortError' : 'BusError';
@@ -107,8 +108,8 @@ export class BusError extends Error {
   get code(): BusErrorCode { return this.#code; }
 
   /**
-   * The failure as an RFC 9457 problem, with the members it needs (plan
-   * settled item 3): `type`, `detail`, and `code`, `action` and the context as
+   * The failure as an RFC 9457 problem, with the members it needs
+   * (docs/contract.md rule 3): `type`, `detail`, and `code`, `action` and the context as
    * extensions. `type` names the condition, a URI that resolves to its section
    * of docs/errors.md, because an RFC client identifies a problem by `type`
    * and ignores extensions it does not know (RFC 9457 3.1.1, 3.2); the exact
@@ -140,7 +141,7 @@ export const conditionOf = (e: unknown): Condition | undefined =>
   e instanceof BusError ? (e.code.split(':')[1] as Condition) : undefined;
 
 /**
- * The condition a status declares (the status table, plan 4.4), saying only
+ * The condition a status declares (the status table, docs/contract.md 4), saying only
  * what RFC 9110 says of it, plus 419 (Laravel's expired CSRF token). Every
  * reader of a backend's answer maps a status through it, here beside the
  * failure so the http client reads it without the bus.
@@ -168,7 +169,17 @@ export function conditionOfStatus(status: number): Condition {
 export const _isBug = (e: unknown): boolean => conditionOf(e) === 'failed' && !(e as BusError).code.startsWith('remote:');
 
 /**
- * The one retry rule's reading of a failure (plan 4.4), for the bus and the
+ * @internal - the caller's cancel: a failure named `AbortError`, or the
+ * command's own abort reason itself. The second is the platform's rule:
+ * `throwIfAborted()` and Fetch reject with `signal.reason`, and the bus
+ * returns an Error reason as itself. Identity, so a real failure that lands
+ * after an abort still counts. tests/abort-custom-reason.test.ts.
+ */
+export const _isCancel = (e: unknown, signal?: AbortSignal): boolean =>
+  (e as Error | null)?.name === 'AbortError' || (signal?.aborted === true && e === signal.reason);
+
+/**
+ * The one retry rule's reading of a failure (docs/contract.md 4), for the bus and the
  * http client alike: `transient` (held back, or a 408: the server never got
  * the whole request) may be sent again for any request; `uncertain` (the
  * first attempt may have landed: no reply, a gateway's 502 or 504, an
@@ -180,6 +191,21 @@ export const _isBug = (e: unknown): boolean => conditionOf(e) === 'failed' && !(
 export function retryClass(e: unknown, condition: Condition | undefined = conditionOf(e)): 'transient' | 'uncertain' | 'final' {
   if (condition === 'limited' || (condition === 'timeout' && !noReply(e))) return 'transient';
   return condition === 'timeout' || condition === 'lost' || condition === 'unexpected' || condition === 'unknown' || (condition === 'failed' && !_isBug(e)) ? 'uncertain' : 'final';
+}
+
+/** @internal - the retry's base and cap in ms: the async bus's default `baseDelay` and `maxDelay`, the http client's own. */
+export const _RETRY_BASE_MS = 200;
+export const _RETRY_MAX_MS = 20_000;
+
+/**
+ * @internal - the one retry schedule's wait before re-send `n` (0 for the
+ * first): full jitter, uniform under `base * 2^n`, capped at `max`, so
+ * clients that failed together do not come back together (docs/retry.md).
+ * The async bus's retry and the http client both wait it
+ * (tests/http-retry-schedule.test.ts).
+ */
+export function _backoff(n: number, base = _RETRY_BASE_MS, max = _RETRY_MAX_MS): number {
+  return Math.min(Math.random() * base * 2 ** n, max);
 }
 
 // Nothing that applies the request answered: our transport's timeout or lost

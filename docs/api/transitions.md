@@ -17,7 +17,7 @@ import { ... } from 'vapor-chamber/transitions';
 
 ### createTransitionBridge
 
-**Function** - [src/transitions.ts:323](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L323)
+**Function** - [src/transitions.ts:327](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L327)
 
 ```ts
 createTransitionBridge(options: TransitionBridgeOptions & { bus: BaseBus; }) => TransitionBridge
@@ -47,7 +47,7 @@ reported as vuejs/core#15727, a fix proposed in vuejs/core#11824. Vapor's
 
 ### useTransitionCommand
 
-**Function** - [src/transitions.ts:368](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L368)
+**Function** - [src/transitions.ts:372](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L372)
 
 ```ts
 useTransitionCommand(options?: TransitionBridgeOptions) => TransitionBridge
@@ -78,7 +78,7 @@ Your own hooks compose with the spread: `<Transition v-bind="modal"
 
 ### TransitionBridge
 
-**Type alias** - [src/transitions.ts:96](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L96)
+**Type alias** - [src/transitions.ts:95](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L95)
 
 ```ts
 export type TransitionBridge = TransitionHooks & {
@@ -91,7 +91,7 @@ export type TransitionBridge = TransitionHooks & {
 
 ### TransitionBridgeOptions
 
-**Type alias** - [src/transitions.ts:48](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L48)
+**Type alias** - [src/transitions.ts:49](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L49)
 
 ```ts
 export type TransitionBridgeOptions = {
@@ -114,7 +114,7 @@ export type TransitionBridgeOptions = {
 
 ### TransitionHooks
 
-**Type alias** - [src/transitions.ts:65](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L65)
+**Type alias** - [src/transitions.ts:66](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L66)
 
 ```ts
 export type TransitionHooks = {
@@ -134,16 +134,14 @@ export type TransitionHooks = {
   onAfterLeave: (el: Element) => void;
   onLeaveCancelled: (el: Element) => void;
   /**
-   * TransitionGroup-only: called when an element moves due to reorder.
+   * Dispatches `<namespace>Move` with `el` as the target. Vue never calls it:
+   * no Vue component has a move hook, on either renderer
+   * (tests/vue-no-move-hook.test.ts). Call it yourself, for example from your
+   * own FLIP code after a reorder. No `done()` callback.
    *
-   * NOT called for elements hidden by v-show (display:none): the `*Move`
-   * command is never dispatched for invisible list items. A skipped move does
-   * not drop the element's move hooks, so a later genuine reorder of that child
-   * dispatches `*Move` as normal.
-   *
-   * Fires for both Vapor and vDOM component moves inside a Vapor
-   * TransitionGroup, after all child updates have flushed - `el` is in its pre-move position, ready for the CSS
-   * move class to be applied. No `done()` callback; moves are CSS-only.
+   * It is kept out of a spread (see `assembleBridge`): Vue declares no
+   * `onMove` prop, so `v-bind="t"` would pass it on to the child as a `move`
+   * DOM listener that nothing fires, and Vue warns on a fragment child.
    */
   onMove: (el: Element) => void;
 };
@@ -151,7 +149,7 @@ export type TransitionHooks = {
 
 ### TransitionPhase
 
-**Type alias** - [src/transitions.ts:46](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L46)
+**Type alias** - [src/transitions.ts:47](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transitions.ts#L47)
 
 ```ts
 export type TransitionPhase = 'idle' | 'entering' | 'leaving';

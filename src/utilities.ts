@@ -49,19 +49,28 @@ export function createChamber(
   opts: ChamberOptions = {},
 ): Chamber {
   // camelCase namespace join ('cart' + 'add' -> 'cartAdd'). Inlined, NOT a shared
-  // helper - DO NOT consolidate, settled, do not re-evaluate. The per-dispatch sites
-  // (useCommandGroup / transitions) measured ~1% slower with a shared call; this site
-  // is setup-only but stays inline for one consistent shape. Keep in sync.
+  // helper - DO NOT consolidate, settled. Each join site keeps its own copy:
+  // the transition bridge resolves its names at construction (transitions.ts),
+  // useCommandGroup caches them per group (chamber.ts, `_nameCache`), and this
+  // site runs at setup. Keep the three in sync.
   function actionName(shortName: string): string {
     return namespace + shortName.charAt(0).toUpperCase() + shortName.slice(1);
   }
 
   function install(bus: BaseBus): () => void {
     const unsubs: Array<() => void> = [];
-    for (const [short, handler] of Object.entries(handlers)) {
-      const action = actionName(short);
-      const regOpts = opts.options?.[short];
-      unsubs.push(bus.register(action, handler, regOpts));
+    // A register that throws (a sealed bus, a naming rule, a `$` name) would
+    // leave the handlers before it on the bus, with no uninstall to remove
+    // them: remove them, then rethrow. tests/utilities.test.ts.
+    try {
+      for (const [short, handler] of Object.entries(handlers)) {
+        const action = actionName(short);
+        const regOpts = opts.options?.[short];
+        unsubs.push(bus.register(action, handler, regOpts));
+      }
+    } catch (e) {
+      disposeAll(unsubs);
+      throw e;
     }
     return () => { disposeAll(unsubs); };
   }
@@ -236,8 +245,8 @@ export function createReaction(
   function install(bus: BaseBus): () => void {
     // Statically detectable at install, so detect it at install.
     // `createReaction('cart*', 'cartRecalculate')` is the module's most
-    // natural composition, not a contrived one - and on an async bus it spins
-    // forever (see ReactionOptions.allowSelfMatch).
+    // natural composition, not a contrived one - and it re-triggers itself on
+    // every dispatch until a bound stops it (see ReactionOptions.allowSelfMatch).
     if (selfMatching && !allowSelfMatch) {
       console.error(
         `[vapor-chamber] Reaction "${sourcePattern}" -> "${targetAction}" matches its own target: ` +

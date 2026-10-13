@@ -60,6 +60,15 @@ describe('createChamber', () => {
     expect(bus.dispatch('cartAdd',  {}).value).toBe('cart');
     expect(bus.dispatch('orderAdd', {}).value).toBe('order');
   });
+
+  // An install that threw part way left the handlers it had registered on the
+  // bus, with no uninstall returned to remove them. `$` names are the
+  // library's, so `x$y` makes the second register throw.
+  it('an install that throws part way leaves nothing registered', ({ bus }) => {
+    const chamber = createChamber('cart', { add: () => 1, x$y: () => 2 });
+    expect(() => chamber.install(bus)).toThrow();
+    expect(bus.hasHandler('cartAdd')).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------

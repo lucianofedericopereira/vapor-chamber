@@ -7,7 +7,9 @@
  *   - Reactive values, errors, dirty, valid, and submitting state
  *   - Per-field validation rules
  *   - Full plugin pipeline on every form command (logger, throttle, authGuard, etc.)
- *   - Undo/redo via the history plugin
+ *
+ * `history()` records form commands, but its undo restores no field: the
+ * form registers no inverse (an undo without one only moves the stacks).
  *
  * @example
  * const form = createFormBus({
@@ -47,14 +49,14 @@ export type FormBusOptions<T extends Record<string, any>> = {
   /**
    * Create reactive signals for all form state (values, errors, isDirty, etc.).
    * Default: true. Set to false for headless / server-side / batch use cases
-   * where reactivity is not needed - avoids 7 signal allocations per form.
+   * where reactivity is not needed - avoids eight signal allocations per form.
    * When false, all Signal fields still work as plain get/set wrappers.
    */
   reactive?: boolean;
   /**
    * Inject an external command bus instead of creating an isolated one.
-   * When provided, form commands (formSet, formTouch, formReset, formValidate)
-   * flow through this bus - making them visible to DevTools, metrics, logger,
+   * When provided, form commands (formSet, formTouch, formReset, formValidate,
+   * formErrors) flow through this bus - making them visible to DevTools, metrics, logger,
    * and global listeners.
    *
    * @example
@@ -69,13 +71,11 @@ export type FormBusOptions<T extends Record<string, any>> = {
    * unchanged.
    *
    * REQUIRED FOR THE SECOND FORM ON A SHARED BUS, and the reason is not
-   * tidiness. The four action names are constants, so a second
-   * `createFormBus({ bus })` re-registered `formSet` over the first form's and
-   * every later `login.set(...)` wrote into the SIGNUP form's state. Measured:
-   * with a login and a signup form on one bus, `login.set('email', 'a@b.c')`
-   * left `login.values` empty and put the email in `signup.values`. The bus
-   * does warn on an overwrite, but only in dev, and only as a generic
-   * "handler already exists" - four times, once per action.
+   * tidiness. The five action names derive from it, so two forms with one id
+   * would register over each other: measured with a login and a signup form
+   * on one bus, `login.set('email', 'a@b.c')` left `login.values` empty and
+   * put the email in `signup.values`. So a second form whose id is already on
+   * the bus throws (tests/store-form-sharing.test.ts).
    *
    *   const login  = createFormBus({ fields: {...}, bus, id: 'login' });
    *   const signup = createFormBus({ fields: {...}, bus, id: 'signup' });
@@ -86,7 +86,7 @@ export type FormBusOptions<T extends Record<string, any>> = {
 
 /**
  * Errors from outside the form's rules, in the wire contract's one shape
- * (docs/plan-failures-and-contract.md 4.4): a problem's `errors`, each a
+ * (docs/contract.md 4): a problem's `errors`, each a
  * pointer into the envelope the client sent (`/payload/<field>`, RFC 6901)
  * and its sentence.
  */
@@ -254,22 +254,13 @@ export function createFormBus<T extends Record<string, any>>(
 
   // Claim the prefix on this bus, or say precisely what went wrong. An isolated
   // bus cannot collide with anything, so only an injected one is tracked.
-  // The claim set lives ON THE BUS, not in a module-level WeakMap. Two reasons,
-  // and the second is the one that decided it: the bus is exactly the scope a
-  // claim belongs to (it dies with the bus, no registry to leak), and a
-  // module-level declaration in this file shifts esbuild identifier allocation
-  // across the whole inlined barrel - measured at one byte over the tree-shake
-  // ceiling in a consumer that never calls createFormBus. Nothing here is
-  // retained by such a consumer; the byte was pure allocation noise, and the
-  // way to not pay it is to add no module scope.
+  // The claim set lives ON THE BUS, not in a module-level WeakMap: the bus is
+  // exactly the scope a claim belongs to (it dies with the bus, no registry to
+  // leak).
   const holder = options.bus as unknown as { __vcFormIds?: Set<string> };
   const claimed = options.bus ? (holder.__vcFormIds ??= new Set<string>()) : null;
   if (claimed?.has(id)) {
-    // SHORT ON PURPOSE. This string is inlined into `dist/index.js` with the
-    // rest of the barrel, and `esm-treeshake.test.ts` measures a consumer that
-    // never calls createFormBus - the fuller wording cost a byte over that
-    // ceiling. The explanation lives in the `id` docblock, which ships in src
-    // and costs the bundle nothing.
+    // The explanation lives in the `id` docblock.
     throw new Error(`[vapor-chamber] form id "${id}" already on this bus - pass a distinct id.`);
   }
   claimed?.add(id);
@@ -284,7 +275,7 @@ export function createFormBus<T extends Record<string, any>>(
   let outside: Partial<Record<keyof T, string>> = {};
 
   // When reactive: false, use plain get/set wrappers instead of Vue signals.
-  // Saves 7 signal allocations per form in headless/batch/SSR contexts.
+  // Saves eight signal allocations per form in headless/batch/SSR contexts.
   const sig: CreateSignal = useReactive ? signal : <V>(v: V): Signal<V> => {
     let _val = v;
     return { get value() { return _val; }, set value(v: V) { _val = v; } };

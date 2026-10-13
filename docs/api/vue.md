@@ -21,7 +21,7 @@ Also exports everything from [`vapor-chamber`](index.md), documented there.
 
 ### configureVue
 
-**Function** - [src/chamber.ts:256](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L256)
+**Function** - [src/chamber.ts:255](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L255)
 
 ```ts
 configureVue(vue: object) => void
@@ -76,7 +76,7 @@ Idempotent.
 
 ### isVaporAvailable
 
-**Function** - [src/chamber.ts:568](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L568)
+**Function** - [src/chamber.ts:567](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L567)
 
 ```ts
 isVaporAvailable() => boolean
@@ -86,7 +86,7 @@ Returns true if Vue 3.6+ with Vapor mode support is detected.
 
 ### untracked
 
-**Function** - [src/chamber.ts:320](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L320)
+**Function** - [src/chamber.ts:319](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L319)
 
 ```ts
 untracked<T>(fn: () => T) => T
@@ -115,7 +115,7 @@ suspending tracking around callbacks - this is that idea at the bus edge.
 
 ### useCommand
 
-**Function** - [src/chamber.ts:884](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L884)
+**Function** - [src/chamber.ts:883](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L883)
 
 ```ts
 useCommand<B extends BaseBus = CommandBus<CommandMap>>(options?: BusOption<B>) => { dispatch: <A extends keyof SharedCommandMap & string>(action: A, target: TargetOf<SharedCommandMap, A>, payload?: PayloadOf<SharedCommandMap, A>) => ResultOn<B, CommandResult<ResultOf<SharedCommandMap, A>>>; register: <A extends keyof SharedCommandMap & string>(action: A, handler: (cmd: Command<A, TargetOf<SharedCommandMap, A>, PayloadOf<SharedCommandMap, A>>) => ResultOf<SharedCommandMap, A> | Promise<ResultOf<SharedCommandMap, A>>, opts?: RegisterOptions) => () => void; on: (pattern: string, listener: (cmd: Command, result: CommandResult) => void) => () => void; emit: (event: string, data?: any) => void; loading: Signal<boolean>; lastError: Signal<Error | null>; dispose: () => void; }
@@ -140,7 +140,7 @@ dispatch('cartAdd', { id: product.id });
 
 ### useCommandError
 
-**Function** - [src/chamber.ts:1674](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1674)
+**Function** - [src/chamber.ts:1671](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1671)
 
 ```ts
 useCommandError(options?: { filter?: (cmd: Command) => boolean; maxSize?: number; } & BusOption) => { errors: Signal<{ cmd: Command; error: Error; timestamp: number; }[]>; latestError: Signal<Error | null>; clearErrors: () => void; dispose: () => void; }
@@ -160,7 +160,7 @@ const { latestError } = useCommandError({ filter: cmd => cmd.action.startsWith('
 
 ### useCommandGroup
 
-**Function** - [src/chamber.ts:1580](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1580)
+**Function** - [src/chamber.ts:1577](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1577)
 
 ```ts
 useCommandGroup<B extends BaseBus = CommandBus<CommandMap>>(namespace: string, options?: BusOption<B>) => { dispatch: (action: string, target: any, payload?: any) => ResultOn<B>; query: (action: string, target: any, payload?: any) => ResultOn<B>; emit: (event: string, data?: any) => void; register: (action: string, handler: Handler, opts?: RegisterOptions) => () => void; use: (plugin: Plugin) => () => void; on: (pattern: string, listener: Listener) => () => void; namespace: string; dispose: () => void; }
@@ -186,7 +186,7 @@ orders.dispatch('cancel', { id }) // dispatches 'ordersCancel'
 
 ### useCommandHistory
 
-**Function** - [src/chamber.ts:1458](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1458)
+**Function** - [src/chamber.ts:1455](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1455)
 
 ```ts
 useCommandHistory(options?: { maxSize?: number; filter?: (cmd: Command) => boolean; } & BusOption) => { past: Signal<Command[]>; future: Signal<Command[]>; canUndo: Signal<boolean>; canRedo: Signal<boolean>; undo: () => Command | undefined; redo: () => Command | undefined; clear: () => void; dispose: () => void; }
@@ -199,7 +199,7 @@ Undo dispatches `<action>$undo`, which runs the inverse registered via register(
 
 ### useCommandQuery
 
-**Function** - [src/chamber.ts:1539](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1539)
+**Function** - [src/chamber.ts:1536](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1536)
 
 ```ts
 useCommandQuery<B extends BaseBus = CommandBus<CommandMap>>(options?: BusOption<B>) => { query: (action: string, target: any, payload?: any) => ResultOn<B>; data: Signal<any>; loading: Signal<boolean>; lastError: Signal<Error | null>; }
@@ -222,7 +222,7 @@ const result = query('getUser', { id: 42 });
 
 ### useCommandState
 
-**Function** - [src/chamber.ts:1382](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1382)
+**Function** - [src/chamber.ts:1379](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1379)
 
 ```ts
 useCommandState<T>(initial: T, handlers: { [action: string]: (state: T, cmd: Command) => T; }, options?: UseCommandStateOptions) => { state: Signal<T>; dispose: () => void; }
@@ -244,7 +244,7 @@ const { state } = useCommandState([], { cartAdd: (s, cmd) => [...s, cmd.target] 
 
 ### useSharedCommandState
 
-**Function** - [src/chamber.ts:1134](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1134)
+**Function** - [src/chamber.ts:1133](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1133)
 
 ```ts
 useSharedCommandState<B extends BaseBus = CommandBus<CommandMap>>(options?: UseSharedCommandStateOptions<B>) => { dispatch: (action: string, target: any, payload?: any, opts?: { signal?: AbortSignal; }) => ResultOn<B>; isLoading: (action: string, target?: unknown) => Readonly<Signal<boolean>>; inFlight: Signal<number>; isAnyLoading: Signal<boolean>; lastError: Signal<Error | null>; errors: Signal<Error[]>; errorCount: Signal<number>; clear: () => void; dispose: () => void; }
@@ -270,14 +270,14 @@ await dispatch('cartAdd', product);
 ```ts
 // Disable an entire toolbar while any command is in flight.
 const { isAnyLoading } = useSharedCommandState();
-<Button :disabled="isAnyLoading.value">Save</Button>
+<Button :disabled="isAnyLoading">Save</Button>
 
 Auto-cleanup on Vue scope/component disposal via tryAutoCleanup.
 ```
 
 ### waitForVueDetection
 
-**Function** - [src/chamber.ts:552](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L552)
+**Function** - [src/chamber.ts:551](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L551)
 
 ```ts
 waitForVueDetection() => Promise<void>

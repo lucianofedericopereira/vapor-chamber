@@ -173,14 +173,15 @@ describe('installDomIntegration - hover preheat', () => {
     vi.useRealTimers();
   });
 
-  // The hover handler exists only when `preheat` was given, which is why it
-  // carries no "no preheat" branch of its own.
-  it('registers no hover listener at all when preheat is not provided', () => {
+  // The hover and focus handlers exist only when `preheat` was given, which is
+  // why they carry no "no preheat" branch of their own. The list of added types
+  // is read, not `toHaveBeenCalledWith`: every listener carries a third
+  // argument (the teardown signal), which a two-argument match never meets.
+  it('registers no hover or focus listener at all when preheat is not provided', () => {
     using addSpy = vi.spyOn(document, 'addEventListener');
     const teardown = installDomIntegration({ base: '/admin', canHandle: () => true, navigate: vi.fn() });
 
-    expect(addSpy).not.toHaveBeenCalledWith('mouseover', expect.anything());
-    expect(addSpy).not.toHaveBeenCalledWith('mouseout', expect.anything());
+    expect(addSpy.mock.calls.map((call) => call[0])).toEqual(['click']);
     teardown();
   });
 

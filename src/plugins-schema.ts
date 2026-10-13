@@ -8,7 +8,7 @@
  *
  * @example with Zod
  *   import { z } from 'zod';
- *   import { validateSchemas } from 'vapor-chamber';
+ *   import { validateSchemas } from 'vapor-chamber/standard-schema';
  *
  *   bus.use(validateSchemas({
  *     cartAdd: z.object({ id: z.number(), qty: z.number().min(1) }),
@@ -36,7 +36,7 @@
 import type { Command, CommandResult, Plugin, AsyncPlugin } from './command-bus';
 import { _errResult, _failures } from './command-bus';
 
-// The plugin's own failures; its declared name is their owner (plan 4.5).
+// The plugin's own failures; its declared name is their owner (docs/contract.md 5).
 const schemaFail = _failures('validateSchemas');
 
 // ---------------------------------------------------------------------------
@@ -84,12 +84,12 @@ export type SchemaValidatorOptions = {
    * What to do on validation failure:
    * - `'reject'` (default) - return `{ ok: false, error }`, a `validateSchemas:invalid:payload` BusError,
    *   without invoking the handler
-   * - `'warn'` - `console.warn` and continue to the handler with the
-   *   original (un-coerced) command
+   * - `'warn'` - `console.warn` and continue to the handler
    *
-   * Even in 'warn' mode, the schema's `.parse()` coercions are NOT
-   * applied - the original command flows through unchanged. To use
-   * coerced values, use `'reject'` mode and validate before dispatching.
+   * In both modes the handler gets the command as dispatched: the schema's
+   * output (a coerced or defaulted value) is never written back
+   * (tests/plugins-schema.test.ts). To use that output, validate before
+   * dispatching and dispatch the output.
    */
   onInvalid?: 'reject' | 'warn';
 };

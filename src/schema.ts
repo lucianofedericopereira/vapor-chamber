@@ -46,7 +46,7 @@ export type ActionSchema = {
    */
   authorize?: string;
   /**
-   * What the async bus's retry may do with this action (docs/plan-shape.md 4):
+   * What the async bus's retry may do with this action (docs/retry.md):
    * `'idempotent'` (running it twice is safe: an uncertain failure is re-sent
    * too, under one idempotency key), `false` (never re-sent) or an attempt
    * count. Unset, the bus default: a transient failure is re-sent.
@@ -185,11 +185,23 @@ function toCamel(s: string): string {
     .replace(/^[A-Z]/, c => c.toLowerCase());
 }
 
-/** Normalize all schema keys to camelCase. Write in any style, get camelCase on the bus. */
+/**
+ * Normalize all schema keys to camelCase. Write in any style, get camelCase on the bus.
+ * Two keys with one camel name (`cart.add`, `cart_add`) throw: the second would
+ * replace the first's definition (contract rule 8, a configuration mistake throws
+ * at setup). tests/schema-camel-keys.test.ts.
+ */
 function normalizeSchema(schema: BusSchema): BusSchema {
   const out: BusSchema = {};
+  // Keys are the app's strings: a Map, so none reads an inherited name (src/dict.ts).
+  const from = new Map<string, string>();
   for (const [key, def] of Object.entries(schema)) {
     const normalized = toCamel(key);
+    const first = from.get(normalized);
+    if (first !== undefined) {
+      throw schemaFail('already:action', `Schema keys "${first}" and "${key}" both name the action "${normalized}": one definition would be lost.${DEV ? ' Rename one.' : ''}`, { context: { keys: [first, key], action: normalized } });
+    }
+    from.set(normalized, key);
     // The one place the rename happens, so the one place it is reported.
     if (DEV && normalized !== key) {
       console.warn(`[vapor-chamber] Schema key "${key}" is "${normalized}" on the bus: register and dispatch it as "${normalized}", the name it validates and lists. "${key}" still compiles and runs unvalidated.`);
@@ -642,18 +654,13 @@ export type ErrorCodeEntry = {
 // The pure-call annotation just below lets bundlers tree-shake the whole
 // registry out of consumer bundles that never touch it (Object.freeze at
 // module level otherwise reads as a side effect and pins ~1 KB into every
-// barrel-import bundle).
+// barrel-import bundle, v1.8.0).
 export const ERROR_CODE_REGISTRY: readonly ErrorCodeEntry[] = /* @__PURE__ */ Object.freeze([
   // Core
   { code: 'core:missing:handler',       severity: 'error', retryable: false, category: 'internal',   message: 'No handler registered for action',                  fix: 'Register a handler with bus.register(action, handler) before dispatching.' },
-  // Not emitted by the bus - see the note on this code in command-bus.ts. The
-  // row stays because the code is public and a consumer may construct one, but
-  // its text must not promise a handler throw arrives as this code.
-  { code: 'core:failed:handler',     severity: 'error', retryable: false, category: 'general',    message: 'Declared for a handler throw; the bus rethrows those unwrapped instead', fix: 'The bus does not emit this. A handler throw arrives as the handler\'s own error in result.error - read that. Only a BusError you construct yourself carries this code; the async bus does not re-send it (a bug would fail again).' },
   { code: 'core:refused:hook',     severity: 'error', retryable: false, category: 'logic',      message: 'A beforeHook threw to cancel the dispatch',         fix: 'This is intentional cancellation. Check the beforeHook logic or remove the hook.' },
   { code: 'core:invalid:name',  severity: 'warn',  retryable: false, category: 'validation', message: 'Action name does not match the naming pattern, or carries a "$" (the library\'s names)',     fix: 'Rename the action: match the pattern, or adjust naming config in createCommandBus(); names with $ are the library\'s.' },
   { code: 'core:invalid:filter', severity: 'error', retryable: false, category: 'validation', message: 'An action filter is not a valid CloudEvents filter expression', fix: 'Use one dialect per expression (exact, prefix, suffix, all, any, not), the action attribute only, a non-empty string, and at least one expression in all or any.' },
-  { code: 'core:already:handler', severity: 'info',  retryable: false, category: 'internal',   message: 'A handler was overwritten without unregistering',   fix: 'Call the unregister function returned by register() before re-registering.' },
   { code: 'core:timeout:request',   severity: 'error', retryable: true,  category: 'network',    message: 'request() timed out waiting for a response',        fix: 'Increase the timeout option or check that respond() is registered for this action.' },
   { code: 'core:limited:handler',         severity: 'warn',  retryable: true,  category: 'general',    message: 'Handler throttled, too many calls in window',       fix: 'Wait for the throttle window to pass. Check context.retryIn for the remaining wait time.' },
   { code: 'core:aborted:dispatch',           severity: 'warn',  retryable: false, category: 'general',    message: 'Dispatch aborted via its AbortSignal before completion', fix: 'Intentional cancellation (ac.abort()). Re-dispatch explicitly if the abort was premature.' },
@@ -674,12 +681,14 @@ export const ERROR_CODE_REGISTRY: readonly ErrorCodeEntry[] = /* @__PURE__ */ Ob
   { code: 'transport:lost:reply',      severity: 'error', retryable: false, category: 'network',  message: 'The socket closed or was torn down before the reply arrived',  fix: 'Reconnect and dispatch again. The outcome is unknown, so the async bus re-sends it only for an idempotent action or a keyed command.' },
   { code: 'transport:missing:csrf', severity: 'error', retryable: false, category: 'logic', message: 'No CSRF token was found after refreshing it', fix: 'The csrfCookieUrl endpoint must set the XSRF-TOKEN cookie (Laravel Sanctum: /sanctum/csrf-cookie), or the page must carry the csrf-token meta tag.' },
   { code: 'transport:aborted:request', severity: 'warn', retryable: false, category: 'general', message: 'The caller aborted the request (its AbortSignal)', fix: 'Intentional cancellation. Send the request again if the abort was premature.' },
-  { code: 'remote:unexpected:json', severity: 'error', retryable: false, category: 'network', message: 'The response declared JSON and its body is not valid JSON', fix: 'The backend answered off-protocol: fix the body or its Content-Type. Re-sent only for an idempotent request.' },
+  { code: 'transport:invalid:json', severity: 'error', retryable: false, category: 'validation', message: 'The request holds a value JSON cannot encode: nothing was sent', fix: 'Send only what JSON holds: a BigInt or a cycle cannot be encoded. context.url names the request; the cause is the platform\'s TypeError. It is never re-sent.' },
+  { code: 'remote:unexpected:json', severity: 'error', retryable: false, category: 'network', message: 'The response is not valid JSON, or not the command envelope', fix: 'The backend answered off-protocol: fix the body, its Content-Type, or the envelope shape. Re-sent only for an idempotent request.' },
   { code: 'transport:timeout:reply',     severity: 'error', retryable: false, category: 'network',  message: 'No reply arrived within the transport\'s own timeout',          fix: 'Raise the bridge timeout option, or check the backend is answering. It may have landed, so the async bus re-sends it only for an idempotent action or a keyed command. Otherwise context.outcome is unknown: check its status on the server.' },
   // Functions that are not a plugin (owner: their feature)
   { code: 'ssr:invalid:bus',          severity: 'error', retryable: false, category: 'logic',    message: 'rehydrate() was given an async bus',         fix: 'Use await rehydrateAsync(bus, commands) on an AsyncCommandBus.' },
   { code: 'schema:missing:adapter',   severity: 'error', retryable: false, category: 'logic',    message: 'synthesize() was called without an adapter',  fix: 'Pass options.adapter, an LlmAdapter function that calls your LLM provider.' },
-  { code: 'store:already:member',     severity: 'error', retryable: false, category: 'logic',    message: 'A store action is named like a store member', fix: 'Rename the action: $id, state, url, $reset and $dispose are the store\'s own.' },
+  { code: 'schema:already:action',    severity: 'error', retryable: false, category: 'logic',    message: 'Two schema keys name one action on the bus', fix: 'Rename one key: each must give its own camelCase name (cart.add and cart_add are both cartAdd).' },
+  { code: 'store:already:member',     severity: 'error', retryable: false, category: 'logic',    message: 'A store action is named like a store member', fix: 'Rename the action: $id, state, url, $reset, $dispose and $onField are the store\'s own.' },
   { code: 'store:invalid:name',      severity: 'error', retryable: false, category: 'validation', message: 'A store id or action key carries a "$", which names the library\'s commands', fix: 'Rename it: names with $ are the library\'s ($reset, $undo).' },
   { code: 'store:missing:bus',        severity: 'error', retryable: false, category: 'logic',    message: 'useStore() was called without a bus',          fix: 'Pass the bus: useStore(bus). Stores are keyed per bus and never fall back to the shared one.' },
   { code: 'store:missing:router',     severity: 'error', retryable: false, category: 'logic',    message: 'A store with url fields was given no router',  fix: 'Pass the router: useStore(bus, router).' },
@@ -712,16 +721,9 @@ export const ERROR_CODE_REGISTRY: readonly ErrorCodeEntry[] = /* @__PURE__ */ Ob
   { code: 'router:failed:blade', severity: 'error', retryable: false, category: 'network', message: 'Fetching a blade route\'s server HTML failed', fix: 'error.cause is the fetch\'s failure; the default onError hard-navigates so the server renders the page.' },
   { code: 'router:invalid:component', severity: 'error', retryable: false, category: 'logic', message: 'The Vapor outlet was given a non-Vapor component', fix: 'Wrap it in defineVaporComponent (or compile the SFC in vapor mode); blade rows need the vDOM outlet.' },
   { code: 'router:missing:router', severity: 'error', retryable: false, category: 'logic', message: 'A router composable or outlet ran with no router installed', fix: 'Install the router: app.use(router).' },
-  // Workflow
-  { code: 'workflow:failed:step',       severity: 'error', retryable: false, category: 'logic',    message: 'A workflow step failed, running compensations',  fix: 'Check the step handler. Compensations run automatically for previous steps.' },
-  { code: 'workflow:failed:compensation', severity: 'error', retryable: false, category: 'internal', message: 'A compensation step also failed',               fix: 'Manual intervention needed. Check the compensation handler for errors.' },
-  // Hooks/Listeners
+  // The bus itself: a dispatch loop, a sealed bus
   { code: 'core:exceeded:depth',         severity: 'error', retryable: false, category: 'logic',      message: 'Recursive dispatch depth exceeded',                 fix: 'A listener or reaction is re-dispatching in a loop. Break the cycle or add a guard condition.' },
   { code: 'core:refused:bus',           severity: 'error', retryable: false, category: 'logic',      message: 'Mutation attempted on a sealed bus',                fix: 'The bus was sealed with bus.seal(). Register all handlers/plugins before calling seal().' },
-  { code: 'core:failed:hook',             severity: 'warn',  retryable: false, category: 'internal',   message: 'An afterHook threw (logged, not fatal)',            fix: 'Fix the error in your onAfter hook. Hook errors do not affect dispatch results.' },
-  { code: 'core:failed:listener',         severity: 'warn',  retryable: false, category: 'internal',   message: 'An on() listener threw (logged, not fatal)',        fix: 'Fix the error in your on() listener. Listener errors do not affect dispatch results.' },
-  // Generic
-  { code: 'core:unknown:error',                severity: 'error', retryable: false, category: 'general',    message: 'Unclassified error',                                fix: 'Check the error message and stack trace for details.' },
 ]);
 
 /**

@@ -13,10 +13,11 @@ import { _failures } from './failure';
 import { _asLibrary, _isLibraryAction } from './library-names';
 import { _appliedRemotely, _storeReceivers } from './applied-remotely';
 import { DEV } from './dev';
+import { isThenable } from './settled';
 
 // Coded like every library failure (owner:condition:subject); the owner is the
 // feature name. The core's shape: the message states the fact, every value in
-// it is also in `context`, and the advice is DEV only (plan settled item 5,
+// it is also in `context`, and the advice is DEV only (docs/contract.md rule 5,
 // 4.5). tests/store-review.test.ts.
 const storeFail = _failures('store');
 
@@ -134,6 +135,9 @@ type StoreEntry = {
   pinned?: boolean;
 };
 
+/** One `$onField` subscriber; `off` once it unsubscribed, as a bus listener's entry. */
+type FieldSub = { fn: (value: unknown) => void; off: boolean };
+
 /** One registry per bus, so a per-request bus gets a per-request store set -
  *  the SSR isolation the shared-bus module global cannot give. Weak, so a
  *  disposed bus takes its stores with it. */
@@ -207,7 +211,9 @@ function actionName(id: string, key: string): string {
  */
 export type StoreRuntime = {
   cell<T>(initial: T): { value: T };
-  /** Call `fn(next, prev)` after each write that changes the cell; returns the stop. */
+  /** Call `fn(next, prev)` after each write that changes the cell; returns the
+   *  stop. A write made during a call is delivered after it, in order, and the
+   *  last call is with the cell's value (tests/store-write-during-delivery.test.ts). */
   watch<T>(cell: { value: T }, fn: (next: T, prev: T) => void): () => void;
   scope?: { active(): boolean; onDispose(fn: () => void): void };
 };
@@ -306,15 +312,30 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
     // Keyed field events (`$onField`, log s35.125): one watch on the state,
     // started by the first subscriber. The handlers never change: any check in
     // them cost every store's writes.
-    let fieldSubs: Map<string, Array<(value: unknown) => void>> | null = null;
+    // A subscriber's throw is logged and the loop goes on, as a bus listener's
+    // (`fanOutListeners`): thrown out of the write, it failed a dispatch whose
+    // state had changed and starved the later subscribers.
+    // tests/store-field-subscriber-throw.test.ts.
+    // Subscribing and unsubscribing during a write follow `bus.on`: an
+    // unsubscribe marks its entry off and replaces the field's array, and a
+    // write walks the array it read, to the length it read. A splice of that
+    // array made the loop step past the subscriber after a removed one.
+    // tests/store-field-unsubscribe-during-write.test.ts.
+    let fieldSubs: Map<string, FieldSub[]> | null = null;
     let stopFields: (() => void) | null = null;
     const notify = (next: S, prev: S): void => {
-      const subs = fieldSubs as Map<string, Array<(value: unknown) => void>>;
+      const subs = fieldSubs as Map<string, FieldSub[]>;
       for (const k in next) {
         const v = (next as Record<string, unknown>)[k];
         if (v !== (prev as Record<string, unknown>)[k]) {
           const fns = subs.get(k);
-          if (fns !== undefined) for (let i = 0; i < fns.length; i++) fns[i](v);
+          if (fns !== undefined) {
+            for (let i = 0, n = fns.length; i < n; i++) {
+              const sub = fns[i];
+              if (sub.off) continue;
+              try { sub.fn(v); } catch (e) { console.error(`[vapor-chamber] Store "${id}": the $onField subscriber for "${k as string}" threw:`, e); }
+            }
+          }
         }
       }
     };
@@ -432,12 +453,23 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
     // A state a server answered is written as a step of the command that got
     // the reply, the way the action's reducer writes. With `version`, a state
     // older than the one held is dropped: the server's number orders its
-    // writes, as `share`'s orders tabs.
+    // writes, as `share`'s orders tabs. Only an object is a state, whether
+    // `answer` mapped it or a reply declared it under `stores`: anything else
+    // writes nothing. Written, `null` or `undefined` made every reader throw.
+    // tests/store-declared-by-server.test.ts, tests/store-answer-not-a-state.test.ts.
     const versionOf = options.version;
     let unversioned = false;
-    const fromServer = (cmd: { action: string; target: any; payload?: any }, next: S): void => {
+    let malformed = false;
+    const fromServer = (cmd: { action: string; target: any; payload?: any }, next: unknown): void => {
+      if (next === null || typeof next !== 'object') {
+        if (DEV && !malformed) {
+          malformed = true;
+          console.warn(`[vapor-chamber] Store "${id}": the server's state for "${cmd.action}" is not an object. It is not written.`);
+        }
+        return;
+      }
       if (versionOf) {
-        const v = versionOf(next);
+        const v = versionOf(next as S);
         if (Number.isFinite(v)) {
           const held = versionOf(state.value);
           if (Number.isFinite(held) && v <= held) return;
@@ -446,8 +478,8 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
           console.warn(`[vapor-chamber] Store "${id}": version() of the answer to "${cmd.action}" is ${v}, not a number. Answers without one are written in arrival order.`);
         }
       }
-      if (step) step(cmd, state.value, () => next);
-      else state.value = next;
+      if (step) step(cmd, state.value, () => next as S);
+      else state.value = next as S;
     };
     // The app maps a command's own answer (`answer`). An answer with no `state`
     // writes nothing.
@@ -488,21 +520,13 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
 
     // A state a server's reply declares for this store (`stores`, by id): the
     // async bus hands it over at the transport's level, a step of the command
-    // that got the reply. Only an object is a state: anything else writes
-    // nothing. This store removes only its own receiver (a takeover replaces
-    // it). tests/store-declared-by-server.test.ts.
+    // that got the reply (`fromServer` keeps only an object). This store
+    // removes only its own receiver (a takeover replaces it).
+    // tests/store-declared-by-server.test.ts.
     const receivers = _storeReceivers.get(bus);
     if (receivers) {
-      let malformed = false;
-      const receive = (cmd: { action: string; target: any; payload?: any }, value: unknown): void => {
-        if (value !== null && typeof value === 'object') fromServer(cmd, value as S);
-        else if (DEV && !malformed) {
-          malformed = true;
-          console.warn(`[vapor-chamber] Store "${id}": the reply to "${cmd.action}" declared a state that is not an object. It is not written.`);
-        }
-      };
-      receivers.set(id, receive);
-      offs.push(() => { if (receivers.get(id) === receive) receivers.delete(id); });
+      receivers.set(id, fromServer);
+      offs.push(() => { if (receivers.get(id) === fromServer) receivers.delete(id); });
     }
 
     // `share`: each local write goes out as `<id>$state` with a version; a
@@ -515,13 +539,18 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
       const syncAction = id + '$sync';
       const tab = Math.random().toString(36).slice(2);
       let version = 0;
-      let received: S | undefined;
+      // Each state received from another tab, from its message until its
+      // `$sync` settles, whatever the result: a write of one is not sent
+      // back. One slot for the last received was overwritten by the next
+      // message before a delayed `$sync` (an async plugin) landed, and that
+      // write went out as this tab's own. tests/store-share-held.test.ts.
+      const held = new Set<S>();
       const carried: StoreReducer<S> = (_s, target) => target;
       // A step like any write, so a rollback replays it rather than erasing it.
       offs.push(_asLibrary(() => bus.register(syncAction, (cmd: { target: S }) =>
         step ? step(cmd, state.value, carried) : (state.value = cmd.target))));
       offs.push(rt.watch(state, (next) => {
-        if (next === received) return; // a state from another tab is not sent back
+        if (held.size !== 0 && held.has(next)) return; // a state from another tab is not sent back
         version++;
         lane.emit(event, { state: next, version, tab });
       }));
@@ -538,8 +567,12 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
         // writing at once end on one state. An answer applies only if newer.
         if (m.version > version || (m.to === undefined && m.version === version && m.tab > tab)) {
           version = m.version;
-          received = m.state;
-          bus.dispatch(syncAction, m.state, { __origin: 'sync' });
+          const got = m.state;
+          held.add(got);
+          const r = bus.dispatch(syncAction, got, { __origin: 'sync' });
+          const drop = (): void => { held.delete(got); };
+          if (isThenable(r)) r.then(drop, drop);
+          else drop();
         }
       }));
       // Catch up on open: the writes made before this tab existed. Version -1
@@ -563,17 +596,28 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
           stopFields = rt.watch(state, notify);
         }
         const subs = fieldSubs;
-        let fns = subs.get(key);
-        if (fns === undefined) { fns = []; subs.set(key, fns); }
-        fns.push(fn);
-        const own = fns;
+        const sub: FieldSub = { fn, off: false };
+        const fns = subs.get(key);
+        if (fns === undefined) subs.set(key, [sub]);
+        else fns.push(sub);
         return () => {
-          const at = own.indexOf(fn);
-          if (at !== -1) own.splice(at, 1);
+          if (sub.off) return;
+          sub.off = true;
+          // After `$dispose` the map is gone (or a new one serves new
+          // subscribers): nothing of this one is left to remove.
+          if (fieldSubs !== subs) return;
+          const rest = (subs.get(key) as FieldSub[]).filter((s) => s !== sub);
+          if (rest.length === 0) subs.delete(key);
+          else subs.set(key, rest);
         };
       },
       $dispose() {
-        for (const off of offs) off();
+        // Each cleanup in its own try: one that threw stopped the loop before
+        // the registry line below, and the next useStore(bus) joined this
+        // disposed store. tests/store-dispose-cleanup-throw.test.ts.
+        for (const off of offs) {
+          try { off(); } catch (e) { console.error(`[vapor-chamber] Store "${id}": a cleanup threw during $dispose:`, e); }
+        }
         offs.length = 0;
         stopFields?.();
         stopFields = null;
@@ -609,8 +653,8 @@ export function createStoreDefiner(rt: StoreRuntime): DefineChamberStore {
     // Auto-dispose when the LAST holding scope ends; outside a scope the caller
     // owns `$dispose`, same contract as every composable here.
     // `getCurrentScope()` rather than an instance accessor - the rule
-    // `tryAutoCleanup` records, and the reason `getCurrentInstance()` is never
-    // used in this package.
+    // `tryAutoCleanup` records. `getCurrentInstance()` answers null in a Vapor
+    // setup; the package reads it only as tryKeepAliveHooks' fallback.
     const entry: StoreEntry = { store, offs, holders: 0, def: useStore };
     registry.set(id, entry);
     join(entry);

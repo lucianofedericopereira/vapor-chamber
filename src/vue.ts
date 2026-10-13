@@ -31,7 +31,7 @@
  *
  * SCOPE: named imports, and only the Vue 3.5-safe surface. A namespace import
  * (`import * as Vue`) would force the consumer's bundler to retain every Vue
- * export - measured at 3x bundle size on the vapor-sfc example - and the Vapor
+ * export - measured at 3x bundle size on the vapor-sfc example in v1.18.0 - and the Vapor
  * APIs do not exist on 3.5, where importing them by name is a link error. Vapor
  * wiring belongs in a 3.6-only subpath.
  *

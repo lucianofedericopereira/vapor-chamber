@@ -14,7 +14,8 @@
  *   - Event modifiers are honoured (.stop/.prevent/.self/.left/.middle/.right/
  *     .capture/.once/.passive).
  *   - `buildHandler()` skips dispatch on a disabled, aria-disabled or
- *     in-flight element, as Vue does for its own listeners (#14948).
+ *     in-flight element. Vue skips only a `disabled` node, and only in its
+ *     delegated handler (#14948). The other two are this directive's rule.
  *   - TEARDOWN IS KEYED TO WHAT WAS MOUNTED, never to the current binding. See
  *     the `beforeUnmount` note in the plugin below.
  *
@@ -45,11 +46,13 @@
  * the selector, so a wrong name fails to resolve loudly.
  */
 
+import { type Delay, delayOption } from './bounds';
 import { DEV } from './dev';
 import { announce } from './a11y';
 import { getCommandBus } from './chamber';
 import type { Command, CommandMap, CommandResult } from './command-bus';
 import { _errResult, _failures } from './command-bus';
+import { isThenable } from './settled';
 
 const directiveFail = _failures('directive');
 
@@ -75,7 +78,6 @@ type DirectiveState = {
   /** Vapor only: the binding's getter, read at dispatch time - see vcCommandVapor. */
   actionOf?: () => unknown;
   payload?: any;
-  target?: any;
   optimisticFn?: (cmd: Command) => (() => void) | null;
   /** Vapor only: the `v-vc-payload` binding's getter, read at dispatch time.
    *  Vapor has no `updated` hook, so the same rule `actionOf` follows applies -
@@ -91,9 +93,8 @@ type DirectiveState = {
   keys?: { down: (event: KeyboardEvent) => void; up: (event: KeyboardEvent) => void };
   /** The directive made the element focusable, so teardown takes it back. */
   addedTabindex?: boolean;
-  rollback?: (() => void) | null;
   /** Timeout in ms for async dispatch. Default: 30_000 */
-  timeout: number;
+  timeout: Delay;
   /** `.stop` - call event.stopPropagation() before dispatch. */
   stop?: boolean;
   /** `.prevent` - call event.preventDefault() before dispatch. */
@@ -152,7 +153,7 @@ const pending = new WeakMap<Element, PendingSlot>();
 // Opt-in delegation (.delegate modifier) - lib-side, not required by Vue
 // ---------------------------------------------------------------------------
 //
-// MEASURED (tests/perf.bench.ts, 5k elements), because the intuitive reading
+// MEASURED (tests/perf.bench.ts, 5k elements, v1.10.0), because the intuitive reading
 // is wrong: mount+unmount is ~1.3x SLOWER in delegate mode, not faster. The
 // payoff is the standing LISTENER COUNT while mounted (1 vs N), not attach or
 // detach speed. Do not reach for `.delegate` as a mount-cost optimization - it
@@ -197,30 +198,16 @@ function delegatedClickHandler(event: Event): void {
   // the shadow HOST - so the stateMap lookup never found the real element and
   // a delegated control inside a shadow root simply never dispatched.
   // `router/dom.ts` link interception documents this same fix; the delegated
-  // handler predates that lesson.
-  const path = event.composedPath?.();
-  if (path) {
-    for (const node of path) {
-      const state = stateMap.get(node as Element);
-      if (state?.delegate) {
-        state.handler(event);
-        return;
-      }
-      // Stop at the document - beyond it the path holds Window, and an
-      // ancestor match outside the event's tree is not ours to fire.
-      if ((node as Node).nodeType === 9 /* DOCUMENT_NODE */) break;
-    }
-    return;
-  }
-  // Fallback for environments without composedPath (same shape as dom.ts).
-  let node = event.target as Element | null;
-  while (node) {
-    const state = stateMap.get(node);
+  // handler predates that lesson. Every build target has composedPath.
+  for (const node of event.composedPath()) {
+    const state = stateMap.get(node as Element);
     if (state?.delegate) {
       state.handler(event);
       return;
     }
-    node = node.parentElement;
+    // Stop at the document - beyond it the path holds Window, and an
+    // ancestor match outside the event's tree is not ours to fire.
+    if ((node as Node).nodeType === 9 /* DOCUMENT_NODE */) break;
   }
 }
 
@@ -248,7 +235,9 @@ function removeDelegatedElement(doc: Document | null): void {
 // v-vc-command
 // ---------------------------------------------------------------------------
 //
-// Binding value: action name string (e.g. 'cartAdd')
+// Binding value: action name string (e.g. 'cartAdd'). A press while the value
+// is empty (undefined, null, '', false) dispatches nothing, and DEV warns once
+// per element - see buildHandler.
 // No argument. The selector is the NAME - `vc-command` - so there is nothing
 // here to read from Vue's argument slot and nothing for a dynamic argument to
 // switch. That slot is a PARAMETER in Vue's design (`v-bind:href`,
@@ -343,6 +332,19 @@ function markBusy(el: HTMLElement, event: Event): () => void {
   };
 }
 
+/** DEV only: elements already warned about, so a repeated press warns once. */
+let warnedNoAction: WeakSet<Element> | undefined;
+
+/** DEV only: name the element whose press had no action to dispatch. */
+function warnNoAction(el: Element): void {
+  if ((warnedNoAction ||= new WeakSet()).has(el)) return;
+  warnedNoAction.add(el);
+  console.warn(
+    `[vapor-chamber] v-vc-command on <${el.tagName.toLowerCase()}> has no action, so this press ` +
+    'dispatched nothing. Bind an action name, e.g. v-vc-command="\'cartAdd\'".'
+  );
+}
+
 function buildHandler(el: Element, state: DirectiveState): (event: Event) => void {
   return async (event: Event) => {
     // Event modifiers - mirror Vue's compiled withModifiers, which never reaches a
@@ -356,14 +358,15 @@ function buildHandler(el: Element, state: DirectiveState): (event: Event) => voi
     if (state.prevent) event.preventDefault();
 
     // Vue 3.6.0-beta.15 (runtime-vapor: skip disabled delegated direct handlers):
-    // mirror Vue's "don't run a handler on a disabled element" rule for the direct
-    // listener this directive attaches. Bail out on re-entrant clicks while a
-    // dispatch is in flight, or when the element is disabled via the DOM property
-    // or aria-disabled (the platform only suppresses clicks on disabled
+    // Vue's delegated handler skips a node whose `disabled` is set (rc.11
+    // runtime-vapor, delegatedEventHandler); its direct `on()` does not. This
+    // directive applies the rule to both of its listeners, and goes further:
+    // it bails out on re-entrant clicks while a dispatch is in flight, and on
+    // aria-disabled (the platform only suppresses clicks on disabled
     // <button>/<input>, not on <a>/<div>/aria-disabled).
     if (state.loading) return;
     if ((el as Partial<HTMLButtonElement>).disabled === true) return;
-    if (typeof el.getAttribute === 'function' && el.getAttribute('aria-disabled') === 'true') return;
+    if (attr(el, 'aria-disabled') === 'true') return;
 
     // Vapor: the bindings are getters and there is no `updated` hook, so they
     // are read here, at dispatch time - see vcCommandVapor. Writing them onto
@@ -371,7 +374,19 @@ function buildHandler(el: Element, state: DirectiveState): (event: Event) => voi
     // is renderer-agnostic, and the payload precedence (binding over
     // `data-vc-payload`) is identical on both by construction rather than by
     // being implemented twice.
-    if (state.actionOf) state.action = String(state.actionOf());
+    if (state.actionOf) {
+      const action = state.actionOf();
+      state.action = action ? String(action) : '';
+    }
+    // A press with no action does nothing, the shape Vue's own `@click=""`
+    // has. Checked here, at press time, because that is when the action is
+    // decided on both renderers: one set after mount then works, which a
+    // mount-time refusal would lose on Vapor (no `updated` hook).
+    // tests/directive-empty-action.test.ts.
+    if (!state.action) {
+      if (DEV) warnNoAction(el);
+      return;
+    }
     if (state.payloadOf) state.payload = state.payloadOf();
     if (state.optimisticOf) state.optimisticFn = state.optimisticOf() as DirectiveState['optimisticFn'];
 
@@ -383,16 +398,19 @@ function buildHandler(el: Element, state: DirectiveState): (event: Event) => voi
     el.classList.remove(ERROR_CLASS);
     // A button to assistive technology: native, or by role. A link is not -
     // its press is navigation - and keeps its own behaviour.
-    const busy = el instanceof HTMLButtonElement ||
-      (typeof el.getAttribute === 'function' && el.getAttribute('role') === 'button')
+    const busy = el instanceof HTMLButtonElement || attr(el, 'role') === 'button'
       ? markBusy(el as HTMLElement, event)
       : null;
 
     const payload = state.payload ?? parseJson((el as HTMLElement).dataset?.vcPayload);
-    const target = state.target ?? parseJson((el as HTMLElement).dataset?.vcTarget) ?? {};
+    const target = parseJson((el as HTMLElement).dataset?.vcTarget) ?? {};
 
     let rollback: (() => void) | null = null;
     let resolved: { ok: boolean; error?: Error; value?: any };
+    let result: unknown;
+    // The directive's own timeout result, when it won the race: a give-up,
+    // not the dispatch failing.
+    let gaveUp: CommandResult | undefined;
     try {
       // Apply optimistic update if provided. Inside the `try`: one that throws
       // is this press's failure, and the `finally` below still releases the
@@ -403,7 +421,6 @@ function buildHandler(el: Element, state: DirectiveState): (event: Event) => voi
         rollback = state.optimisticFn(cmd) ?? null;
       }
 
-      let result;
       try {
         result = bus.dispatch(state.action, target, payload);
       } catch (e) {
@@ -411,14 +428,14 @@ function buildHandler(el: Element, state: DirectiveState): (event: Event) => voi
       }
 
       // Handle result (may be a Promise if using async bus shim)
-      if (result && typeof (result as any).then === 'function') {
+      if (isThenable(result)) {
         // Race against timeout to prevent infinite loading states. Clear the
         // timer when the dispatch wins the race - otherwise every click leaves
         // a live timer (default 30s) pinning this closure.
         let timeoutId: ReturnType<typeof setTimeout> | undefined;
         const timeoutPromise = new Promise<CommandResult>((resolve) => {
           timeoutId = setTimeout(
-            () => resolve(_timedOut(state.action, state.timeout)),
+            () => resolve(gaveUp = _timedOut(state.action, state.timeout)),
             state.timeout
           );
         });
@@ -428,7 +445,7 @@ function buildHandler(el: Element, state: DirectiveState): (event: Event) => voi
           clearTimeout(timeoutId);
         }
       } else {
-        resolved = result;
+        resolved = result as CommandResult;
       }
     } catch (e) {
       resolved = _errResult(e as Error);
@@ -449,10 +466,29 @@ function buildHandler(el: Element, state: DirectiveState): (event: Event) => voi
       // that wants other words takes the announcing over (a11y.ts, setAnnouncer).
       if (state.error?.message) announce(state.error.message, { assertive: true });
       if (rollback) {
-        try { rollback(); } catch { /* ignore */ }
+        if (resolved !== gaveUp) undo(rollback);
+        else {
+          // The directive gave up, and the dispatch may still land: its late
+          // result decides. A failure or a rejection rolls back once, a
+          // success keeps. It touches no element, so after an unmount the
+          // rollback (the app's own state) still runs
+          // (tests/directive-timeout-optimistic.test.ts).
+          const late = rollback;
+          (result as PromiseLike<CommandResult>).then((r) => { if (!r.ok) undo(late); }, () => undo(late));
+        }
       }
     }
   };
+}
+
+/** An attribute of the bound element, or null for an `el` with no getAttribute (not an Element). */
+function attr(el: Element, name: string): string | null {
+  return typeof el.getAttribute === 'function' ? el.getAttribute(name) : null;
+}
+
+/** Run an optimistic rollback. One that throws stays inside the directive. */
+function undo(rollback: () => void): void {
+  try { rollback(); } catch { /* ignore */ }
 }
 
 /**
@@ -461,7 +497,7 @@ function buildHandler(el: Element, state: DirectiveState): (event: Event) => voi
  * natively activatable (a <button>, an <input>, a link with href, <summary>).
  */
 function needsKeyboard(el: Element): el is HTMLElement {
-  if (typeof el.getAttribute !== 'function' || el.getAttribute('role') !== 'button') return false;
+  if (attr(el, 'role') !== 'button') return false;
   if (typeof HTMLElement === 'undefined' || !(el instanceof HTMLElement)) return false;
   if (el instanceof HTMLButtonElement || el instanceof HTMLInputElement) return false;
   if (el instanceof HTMLAnchorElement && el.hasAttribute('href')) return false;
@@ -529,7 +565,8 @@ function mountCommand(
   const mods: Record<string, boolean | undefined> =
     (modifiers && typeof modifiers === 'object') ? modifiers : {};
 
-  const timeout = parseInt(Object.keys(mods).find(k => /^\d+$/.test(k)) ?? '', 10) || DEFAULT_DISPATCH_TIMEOUT;
+  // `.0` and no digits are the default; 10 or more digits are capped.
+  const timeout = delayOption(parseInt(Object.keys(mods).find(k => /^\d+$/.test(k)) ?? '', 10) || DEFAULT_DISPATCH_TIMEOUT, DEFAULT_DISPATCH_TIMEOUT);
 
   const buttons: number[] = [];
   if (mods.left) buttons.push(0);
@@ -537,10 +574,10 @@ function mountCommand(
   if (mods.right) buttons.push(2);
 
   // .delegate shares one document-level listener, so it has nowhere to
-  // hang per-element addEventListener options. Mirrors Vue's own
-  // compiler-vapor warning for the same incompatible combo (#15127):
-  // "delegate modifier is not supported... the listener will be
-  // attached directly."
+  // hang per-element addEventListener options. Vue's compiler-vapor attaches
+  // the same combo (`@click.delegate.once`) directly too, but silently: it
+  // warns only for a dynamic event name, an event it does not delegate, or a
+  // component (rc.11 compiler-vapor, warnDelegate). This one warns in DEV.
   let delegate = !!mods.delegate;
   if (delegate && (mods.capture || mods.once || mods.passive)) {
     if (DEV) {
@@ -592,11 +629,10 @@ function mountCommand(
     return;
   }
 
-  const listenerOpts: AddEventListenerOptions = {};
+  // false is each option's default, so one literal: the same object goes to
+  // add and to remove (see `listenerOpts` in the type).
+  const listenerOpts: AddEventListenerOptions = { capture: !!mods.capture, once: !!mods.once, passive: !!mods.passive };
   state.listenerOpts = listenerOpts;
-  if (mods.capture) listenerOpts.capture = true;
-  if (mods.once) listenerOpts.once = true;
-  if (mods.passive) listenerOpts.passive = true;
   el.addEventListener('click', state.handler, listenerOpts);
 }
 
@@ -647,10 +683,11 @@ function unmountCommand(el: Element): void {
  * action is read from it at dispatch time: a changed binding re-targets the
  * next click without the directive re-running
  * (tests/vapor-directives-fixture.test.ts pins that it does not). The getter is
- * read rather than tracked with an effect on purpose: tracking needs
- * `renderEffect`, which exists only in Vue's Vapor build, and a static import
- * of it would break this subpath for every Vue 3.5 consumer of the vDOM
- * plugin.
+ * read rather than tracked, on purpose. Tracking is possible - Vue's own Vapor
+ * directive tests use the public `watchEffect` - but it costs one effect per
+ * mounted control, literal actions included, and this subpath imports no Vue.
+ * Reading at press time needs none: an action set after mount is picked up,
+ * and a press with no action does nothing (see buildHandler).
  *
  * `v-vc-payload` and `v-vc-optimistic` WORK ON BOTH RENDERERS - see
  * {@link vcPayloadVapor} and {@link vcOptimisticVapor}.
@@ -792,7 +829,10 @@ export function vcPayloadVapor(el: Element, value?: () => unknown): () => void {
  *
  * The Vapor port of the vDOM `vc-optimistic` registration. The bound function
  * receives the `Command` and returns a rollback function (or null); the
- * rollback runs if the dispatch fails.
+ * rollback runs if the dispatch fails. A dispatch still running when the
+ * timeout modifier gives up is reported as `directive:timeout:dispatch` and
+ * the button released, and its late result decides: a failure rolls back, a
+ * success keeps.
  *
  * Without it a Vapor template has no optimistic update with rollback: the
  * alternative is to abandon `v-vc-command` for that button and hand-roll the
@@ -912,7 +952,9 @@ export function createDirectivePlugin(): { install(app: any): void } {
        * v-vc-optimistic="fn"
        *
        * Registers an optimistic update function alongside v-vc-command.
-       * `fn` receives the Command and returns a rollback function (or null).
+       * `fn` receives the Command and returns a rollback function (or null),
+       * run if the dispatch fails. After the timeout gives up, the late
+       * result decides (see vcOptimisticVapor).
        */
       app.directive('vc-optimistic', {
         // Same rule as `vc-payload` above, and the cost of getting it wrong is

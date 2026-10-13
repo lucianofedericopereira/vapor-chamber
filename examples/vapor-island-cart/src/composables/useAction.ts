@@ -5,8 +5,8 @@ import { untracked } from 'vapor-chamber/vue';
 import { bus } from '../store';
 
 // Pre-binds one action + tracks its error state. Named useAction to avoid
-// shadowing the library's useCommand(), which takes no arguments and uses
-// the shared bus.
+// shadowing the library's useCommand(), which takes options (`{ bus }`) and
+// uses the shared bus when given none.
 //
 // The sync bus never throws - a failure comes back as { ok: false, error }:
 // a missing handler as a BusError coded `core:missing:handler`, a handler's

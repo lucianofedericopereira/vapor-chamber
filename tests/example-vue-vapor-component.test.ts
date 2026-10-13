@@ -10,7 +10,8 @@ import { resolve } from 'node:path';
 import { compileScript, parse } from '@vue/compiler-sfc';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createApp, nextTick } from 'vue';
-import { resetCommandBus } from '../src/chamber';
+import { getCommandBus, resetCommandBus } from '../src/chamber';
+import { inspectBus } from '../src/command-bus';
 
 const root = resolve(import.meta.dirname, '..');
 const src = (p: string) => resolve(root, 'src', p);
@@ -76,5 +77,23 @@ describe('examples/vue-vapor-component.vue', () => {
     expect(items(el)).toEqual([]);
     expect(el.querySelector('.error')?.textContent).toContain('cannot be empty');
     app.unmount();
+  });
+
+  it('takes its validator off the shared bus on unmount, so mounts do not stack them (CU-7)', async () => {
+    resetCommandBus();
+    const plugins = () => inspectBus(getCommandBus()).pluginCount;
+    const base = plugins();
+    const counts: Array<{ mounted: number; unmounted: number }> = [];
+    for (let i = 0; i < 3; i++) {
+      const { el, app } = await mountExample();
+      // Positive control: while mounted, the validator refuses an empty todo.
+      (el.querySelector('form') as HTMLFormElement).dispatchEvent(new Event('submit'));
+      await nextTick();
+      expect(el.querySelector('.error')?.textContent).toContain('cannot be empty');
+      const mounted = plugins();
+      app.unmount();
+      counts.push({ mounted, unmounted: plugins() });
+    }
+    expect(counts).toEqual(Array(3).fill({ mounted: base + 1, unmounted: base }));
   });
 });

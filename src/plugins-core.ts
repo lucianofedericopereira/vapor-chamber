@@ -4,6 +4,7 @@
  * logger, validator, history, debounce, throttle, authGuard, optimistic, optimisticUndo
  */
 
+import { delayOption } from './bounds';
 import { DEV } from './dev';
 import { onSettled, isThenable } from './settled';
 import { createLedger } from './ledger';
@@ -210,8 +211,11 @@ const forList = (list: ActionList, plugin: Plugin): Plugin => (list.length === 0
  */
 export function debounce(
   list: ActionList,
-  wait: number
+  rawWait: number
 ): Plugin & { /** Cancel all pending debounce timers. */ dispose(): void } {
+  // Read once, as the throttle gate reads its wait: NaN is no delay, one past
+  // MAX_TIMEOUT_MS the maximum (tests/nan-options.test.ts, audit D9).
+  const wait = delayOption(rawWait, 0);
   // One entry per key: its timer and the latest next(), replaced together.
   const pending = new Map<string, { timer: ReturnType<typeof setTimeout>; next: () => unknown }>();
 

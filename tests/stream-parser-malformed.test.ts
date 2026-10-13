@@ -105,3 +105,26 @@ describe('StreamParser - keywords and numbers', () => {
     expect(values.map((v) => v.value)).toEqual([-0, -1.5, 0, 1000, -0.025]);
   });
 });
+
+// An input that ends inside a number agrees with JSON.parse, the control
+// (log 36.13): an unfinished number is an error and never a value.
+describe('StreamParser - an input that ends inside a number', () => {
+  function atEnd(json: string) {
+    const { parser, values, errors } = collect();
+    parser.write(json);
+    parser.end();
+    return { values: values.map((v) => v.value), errors };
+  }
+  const native = (json: string): unknown[] | 'error' => {
+    try { return [JSON.parse(json)]; } catch { return 'error'; }
+  };
+
+  it.each(['-', '1.', '1e', '1e+', '-1.5E-', '[1.', '{"a":1e'])('%s is an error and emits no value, as JSON.parse rejects it', (json) => {
+    const r = atEnd(json);
+    expect([r.values, r.errors[0], native(json)]).toEqual([[], 'Unexpected end: incomplete number', 'error']);
+  });
+
+  it.each(['0', '-0', '12', '1.5', '1e3', '-2.5E+2'])('control: %s is its number, as JSON.parse reads it', (json) => {
+    expect(atEnd(json)).toEqual({ values: native(json), errors: [] });
+  });
+});

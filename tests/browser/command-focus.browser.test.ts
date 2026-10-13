@@ -8,7 +8,7 @@
  * the top of the page for every in-flight command.
  *
  * Two facts, recorded rather than guessed: the engine's behaviour on its own,
- * then the directive's. docs/plan-failures-and-contract.md, section 7.2.
+ * then the directive's. docs/accessibility.md.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { page } from 'vitest/browser';

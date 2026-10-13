@@ -107,7 +107,21 @@ describe('validateSchemas - sync', () => {
     expect(r).toFailWith('validateSchemas:invalid:payload');
     expect(r.error?.message).toMatch(/async schema/);
   });
+
+  it.for(['reject', 'warn'] as const)('"%s" mode hands the handler the command as dispatched, never the schema output', (onInvalid, { bus }) => {
+    let seen: unknown;
+    bus.register('cartAdd', (cmd) => { seen = cmd.target; return 'ok'; });
+    bus.use(validateSchemas({ cartAdd: fakeCoerce }, { onInvalid }));
+
+    expect(bus.dispatch('cartAdd', { id: '7' }).ok).toBe(true);
+    expect(seen).toEqual({ id: '7' });
+  });
 });
+
+// Coerces a numeric string id to a number, as a schema's output may.
+const fakeCoerce: StandardSchemaV1 = {
+  '~standard': { version: 1, vendor: 'fake-coerce', validate: (v) => ({ value: { id: Number((v as { id: string }).id) } }) },
+};
 
 describe('validateSchemasAsync - async bus', () => {
   it('awaits async schemas and rejects on failure', async ({ asyncBus: bus }) => {
@@ -119,6 +133,13 @@ describe('validateSchemasAsync - async bus', () => {
 
     const bad = await bus.dispatch('act', -1);
     expect(bad).toFailWith('validateSchemas:invalid:payload');
+  });
+
+  it('hands the handler the command as dispatched, never the schema output', async ({ asyncBus: bus }) => {
+    bus.register('cartAdd', async (cmd) => cmd.target);
+    bus.use(validateSchemasAsync({ cartAdd: fakeCoerce }));
+
+    expect(await bus.dispatch('cartAdd', { id: '7' })).toSucceedWith({ id: '7' });
   });
 });
 

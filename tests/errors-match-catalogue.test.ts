@@ -3,7 +3,7 @@
  * each carries a catalogued code, and the owner in that code is the one the
  * wiring minted it for. Before the factory, every site filled code, emitter and
  * severity by hand and drifted from the catalogue (validator() refused with no
- * code at all). docs/plan-failures-and-contract.md, 2.1 and 4.5.
+ * code at all). CHANGELOG v1.25.0 and docs/contract.md 5.
  */
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -21,7 +21,7 @@ const entry = (code: string) => ERROR_CODE_REGISTRY.find((e) => e.code === code)
 
 function matchesCatalogue(error: unknown): void {
   // The catalogue documents every code the library raises; the owner in the
-  // code is the one the wiring stamped (plan 4.5).
+  // code is the one the wiring stamped (docs/contract.md 5).
   const e = error as BusError;
   expect(e.code, 'the error carries a catalogue code').toBeDefined();
   expect(entry(e.code), `${e.code} is catalogued`).toBeDefined();

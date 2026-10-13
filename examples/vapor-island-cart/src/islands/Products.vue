@@ -26,7 +26,7 @@ function add(p: (typeof products)[number]) {
           <div class="product-name">{{ p.name }}</div>
           <div class="product-price">${{ p.price.toFixed(2) }}</div>
         </div>
-        <button class="btn-add" @click="add(p)">Add to cart</button>
+        <button type="button" class="btn-add" @click="add(p)">Add to cart</button>
       </li>
     </ul>
   </section>

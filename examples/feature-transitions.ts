@@ -93,7 +93,7 @@ drawer.onEnter(el, () => console.log('Drawer enter done() - Vue can proceed'))
  * </script>
  *
  * <template>
- *   <!-- v-bind spreads all hooks onto <Transition> automatically -->
+ *   <!-- v-bind spreads the eight enter and leave hooks onto <Transition> -->
  *   <Transition v-bind="notification">
  *     <div v-if="showToast" class="toast">
  *       {{ message }}

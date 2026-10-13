@@ -1,4 +1,4 @@
-/** createReaction: maxHops counts across every reaction on a bus, so an indirect cycle stops (plan 1.27 section 10.1). Rationale at the end. */
+/** createReaction: maxHops counts across every reaction on a bus, so an indirect cycle stops (log s35.171). Rationale at the end. */
 import { describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { createReaction } from '../src/utilities';
@@ -85,6 +85,18 @@ describe('controls', () => {
     const settled = runs;
     await tick(100);
     expect([settled, runs]).toEqual([16, 16]);
+    vi.restoreAllMocks();
+  });
+
+  it('D12: a sync self loop stops at depth 16 too', () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const bus = createCommandBus();
+    let runs = 0;
+    bus.register('cartRecalculate', () => { runs++; });
+    createReaction('cart*', 'cartRecalculate', { allowSelfMatch: true, maxHops: 100_000 }).install(bus);
+    bus.dispatch('cartRecalculate', {});
+    expect(runs).toBe(16);
     vi.restoreAllMocks();
   });
 });

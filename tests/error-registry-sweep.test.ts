@@ -2,7 +2,7 @@
  * `ERROR_CODE_REGISTRY` calls itself "the single source of truth" for the
  * library's codes. This sweep checks that against what the source MINTS.
  *
- * Since the owner-by-wiring shape (docs/plan-failures-and-contract.md 4.5) a
+ * Since the owner-by-wiring shape (docs/contract.md 5) a
  * failure is built by a `fail`-shaped call whose first argument is a literal
  * `'condition:subject'`, so "which site mints this?" - the question the old
  * union sweep could not ask - is a scan. Both sides come from source: the
@@ -32,7 +32,7 @@ const CONDITIONS = VOCABULARY.join('|');
  * adding one is a decision rather than a way to silence this sweep.
  */
 const DECLARED_NOT_MINTED: Record<string, string> = {
-  'failed:handler': "a handler's throw reaches result.error raw (plan settled item 10)",
+  'failed:handler': "a handler's throw reaches result.error raw (docs/contract.md rule 8)",
   'already:handler': 'the overwrite notice is a DEV console line',
   'failed:hook': 'an after-hook throw is logged, not returned',
   'failed:listener': 'a listener throw is logged, not returned',

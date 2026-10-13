@@ -1,7 +1,8 @@
 # vapor-chamber/router
 
 A router for **Vue 3.6** over a server-owned catch-all, with Laravel Blade as
-the worked example. It needs Vue >= 3.6, by design. It ships in-box as a
+the worked example. Its entry and the vDOM outlet load on Vue 3.5 too
+(tests/vue35-entries.test.ts). The Vapor outlet needs 3.6. It ships in-box as a
 subpath of `vapor-chamber`. It uses an http client only if you hand it one (see
 the remote subpath below).
 
@@ -372,10 +373,18 @@ const crumbs = useBreadcrumbs(); // the matched parent chain, titled rows only,
   lifecycle). That allows an incremental Blade->Vue migration: flip
   `blade: true` to `component` per row.
 - **dom.ts** is the single DOM point. It does page.js-checklist link
-  interception (a composed-path scan that crosses shadow roots). It stamps
+  interception (a composed-path scan that crosses shadow roots, for a click,
+  a hover and focus alike). A link warms its page when the pointer rests on it
+  or when it takes focus. Both follow the links of an open shadow root, nested
+  roots included. It stamps
   `data-active` and `data-exact-active` on Blade anchors, plus
-  `aria-current="page"` on the exact one. It runs hover and idle preheat (the
-  `meta.preheat` column).
+  `aria-current="page"` on the exact one. It runs hover, focus and idle
+  preheat, set per route by `meta.preheat`. `true` warms the route's component
+  when the page is idle and on hover or focus. Absent, it warms on hover or
+  focus only. `false`: a link
+  to the route does not warm its component, though a route naming the same
+  component still does. No warm-up runs for a `download` link, or for a user
+  saving data where the browser reports it (Save-Data or 2G).
 - **Route changes reach assistive technology** (`announce.ts`). Each
   client-side navigation is announced in an assertive live region. The text is
   `document.title`, else the first `<h1>`, else the path. The initial load and
@@ -394,7 +403,8 @@ const crumbs = useBreadcrumbs(); // the matched parent chain, titled rows only,
 
 ## Vapor interop
 
-Measured against `vue@3.6.0-rc.5`, not inferred from the
+Measured on Vue <!-- vc:vueAligned -->3.6.0-rc.11<!-- /vc:vueAligned -->, the installed version the
+fixtures run on, not inferred from the
 [Vapor roadmap](https://github.com/vuejs/core/issues/13687). Two fixtures, and
 the split matters:
 
@@ -405,9 +415,9 @@ the split matters:
   It runs under `vitest.vapor.config.ts`, which aliases `vue` to the
   with-vapor dist.
 
-**provide/inject works in Vapor, at both levels.** The roadmap lists
-"Provide/Inject System" unchecked. But on a real `createVaporApp` app both
-levels resolve correctly. `app.provide(...)` -> `inject(...)` backs every
+**provide/inject works in Vapor, at both levels.** It did from rc.4, while the
+roadmap's "Provide/Inject System" box was still unchecked (checked by
+2026-10-12). On a real `createVaporApp` app both levels resolve correctly. `app.provide(...)` -> `inject(...)` backs every
 composable here. Component-level `provide(...)` -> `inject(...)` backs nested
 `<RouterOutlet>` depth. So the composable surface and outlet nesting are **not**
 blocked on that roadmap item.
@@ -416,7 +426,7 @@ blocked on that roadmap item.
 through the vDOM, but the router as a whole does not have to.
 `vapor-chamber/router/vapor` exports the same `RouterOutlet` name, built from
 Vapor's own helpers: `createDynamicComponent` for the branch, `createSlot` for
-the no-match fallback. So a pure-Vapor app renders routes with **no
+the no-match fallback, and `createIf` to switch between them. So a pure-Vapor app renders routes with **no
 `vaporInteropPlugin` installed at all**.
 
 ```ts
@@ -426,7 +436,7 @@ import { RouterOutlet } from 'vapor-chamber/router/vapor';  // Vapor, no interop
 
 What it costs, and what it needs:
 
-- **Measured saving: <!-- vc:outletSaving -->22.08<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->70.4<!-- /vc:outletSavingRaw --> KB raw** against the same app
+- **Measured saving: <!-- vc:outletSaving -->23.05<!-- /vc:outletSaving --> KB brotli / <!-- vc:outletSavingRaw -->73.8<!-- /vc:outletSavingRaw --> KB raw** against the same app
   rendering through the vDOM outlet plus interop.
   `tests/vapor/vapor-outlet-size.test.ts` re-derives it every test run from a
   Vite production build rather than quoting it. The same harness builds the
@@ -434,7 +444,7 @@ What it costs, and what it needs:
   limits. The saving stays >= <!-- vc:outletFloor -->15.0<!-- /vc:outletFloor --> KB.
   The Vapor outlet's own machinery over a router-without-outlet floor stays
   <= <!-- vc:outletOwnArmCeiling -->5.0<!-- /vc:outletOwnArmCeiling --> KB
-  (measured <!-- vc:outletOwnArm -->4.71<!-- /vc:outletOwnArm --> KB). The
+  (measured <!-- vc:outletOwnArm -->4.49<!-- /vc:outletOwnArm --> KB). The
   subpath's own cost is <!-- vc:sizeRouterVapor -->0.7<!-- /vc:sizeRouterVapor --> KB brotli.
 - **Route components must be `defineVaporComponent` output** (Vapor-compiled
   SFCs are). This is a real constraint, not a convention. With no interop
@@ -462,10 +472,10 @@ same component reuse the instance, by design, in both.
 
 Two constraints worth knowing before writing your own Vapor test or app:
 
-- Vapor ships as a **physically separate dist file**
-  (`vue/dist/vue.runtime-with-vapor.esm-*.js`). A bare `import 'vue'` never
-  resolves to it outside a bundler's per-app alias. See `probeVue` in
-  `chamber.ts` and whitepaper section 9.6.
+- In Node and on a no-build page, Vapor ships as a **separate dist file**
+  (`vue/dist/vue.runtime-with-vapor.esm-*.js`), and a bare `import 'vue'`
+  has no Vapor. In a bundler the `vue` entry re-exports `@vue/runtime-vapor`.
+  See `probeVue` in `chamber.ts`.
 - Never mix that build with a plain `import 'vue'` in the same context. Two
   separately-imported Vue dists are two disconnected reactivity instances, and
   the failure is silent. Import `provide`, `inject`, `defineVaporComponent` and
@@ -542,9 +552,9 @@ Still not usable here, though the reasons differ:
 
 Read the roadmap both ways. An unchecked box does not mean missing
 (provide/inject, above), and a checked box does not mean working. Still
-unchecked, and worth remembering when reading anything that cites the roadmap:
-Vue Router, Suspense (VaporSuspense pending), DevTools Integration, Nuxt,
-VitePress, Vue Test Utils.
+unchecked when read on 2026-10-12, and worth remembering when reading anything
+that cites the roadmap: Suspense (VaporSuspense pending), DevTools Integration,
+Vue Test Utils. Vue Router, Nuxt and VitePress are checked.
 
 ## Navigation as a command (optional)
 

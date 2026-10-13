@@ -20,12 +20,17 @@ route, not one-per-command**: the action name is in the JSON body.
 ```json
 { "command": "cartAdd", "target": { "id": 42 }, "payload": { "qty": 2 } }
 ```
+A keyed dispatch also carries `"meta": { "idempotencyKey": "..." }` (see
+Idempotency & double-submit protection). `meta` may also carry
+`correlationId` and `causationId`.
 
 **Response body** (success):
 ```json
 { "state": { "...whatever your action returns..." } }
 ```
-or `{ "redirect": "/login" }` for a navigation (see `onRedirect`).
+or `{ "state": ..., "stores": { "cart": { ... } } }` and `{ "stores": ... }`
+for store states the client applies by store id (see Inertia coexistence), or
+`{ "redirect": "/login" }` for a navigation (see `onRedirect`).
 
 **Response body** (failure): an [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457)
 problem, sent with the status and `Content-Type: application/problem+json`. It
@@ -47,8 +52,9 @@ answered. The condition is what your `status` declares, read through one table
 that says only what RFC 9110 says of a status. `detail` is the message.
 `code`, `status`, `errors` and any other member are in `error.context`.
 
-`errors` points into the envelope the client sent (`/payload/<field>`, RFC
-6901), which is what `FormBus` puts on its fields. There is no `ok` flag, no
+`errors` points into the envelope the client sent (`/payload/<field>`, or
+`/target/<field>` for a field of the target, RFC 6901). `FormBus` puts a
+`/payload/` error on its field. There is no `ok` flag, no
 `error` or `message`, no `type` or `title`: one member per fact.
 
 | Status | Condition |
@@ -162,12 +168,18 @@ class VaporChamberController extends Controller
             $state = app($handler)($target, $payload, $request->user());
             return response()->json(['state' => $state]);
         } catch (ValidationException $e) {
-            // Laravel's field map as the contract's errors: /payload/<field>,
-            // each segment escaped per RFC 6901 (~ -> ~0, / -> ~1).
+            // Laravel's field map as the contract's errors, each segment
+            // escaped per RFC 6901 (~ -> ~0, / -> ~1). An action validating
+            // $payload keys a field `qty`: /payload/qty. A generated stub
+            // validates the envelope, keys `payload.qty`, `target.id`, which
+            // already start at it: /payload/qty, /target/id.
+            $keys = array_keys($e->validator->getData());
+            sort($keys);
+            $prefix = $keys === ['payload', 'target'] ? '/' : '/payload/';
             $errors = [];
             foreach ($e->errors() as $field => $messages) {
                 $segments = array_map(fn ($s) => str_replace(['~', '/'], ['~0', '~1'], $s), explode('.', $field));
-                $errors[] = ['pointer' => '/payload/'.implode('/', $segments), 'detail' => $messages[0]];
+                $errors[] = ['pointer' => $prefix.implode('/', $segments), 'detail' => $messages[0]];
             }
             return $this->problem($e->getMessage(), 422, 'validation_failed', $errors);
         } catch (AuthorizationException $e) {
@@ -280,7 +292,8 @@ const { dispatch } = VaporChamber.connect({ endpoint: '/api/vc' });
 ```
 
 The lib reads the token from your meta tag and sends it as the `X-CSRF-TOKEN`
-request header, which Laravel's `VerifyCsrfToken` middleware reads.
+request header, which Laravel's CSRF middleware reads (`PreventRequestForgery` in
+Laravel 13).
 
 ### Flow B: Sanctum SPA cookie flow
 
@@ -498,9 +511,11 @@ Alpine controller, or a Filament/Livewire panel. It must tell the surrounding
 code when something happens inside it: a product added, a form submitted, a
 step completed.
 
-Vue's `emit(...)` cannot do this. It goes through Vue's component event system
-and does **not** bubble out as a DOM event, so Livewire, Alpine and vanilla
-`addEventListener` never see it.
+Vue's `emit(...)` cannot do this. A custom element's own `emit` reaches its
+host as a DOM event that does **not** bubble or cross the shadow root, so only a
+listener on the host element hears it. Alpine's `.window`, Livewire's
+`#[On(...)]` and any listener on a container never do. An `emit` from a
+component inside the widget stays in Vue's event system.
 
 `emitDOMEvent` (shipped in the `elements` and `full` IIFE variants) bridges
 that gap by dispatching a real `CustomEvent` on the host element. The event
@@ -847,7 +862,8 @@ Route::get('/jobs/{order}', fn (Order $order) => $order->status === 'queued'
 
 A batch result has no status of its own, so `accepted` works on the single
 endpoint. Cross-origin, list `Location` and `Retry-After` in `exposed_headers`
-(CORS, above). The browser hides any other response header from JS.
+(CORS, above). Cross-origin, JS reads only the CORS-safelisted response
+headers (`Content-Type` and a few more) and the ones listed there.
 
 ---
 
@@ -909,6 +925,25 @@ field's first message goes in `errors` as
 `{ pointer: '/payload/<field>', detail }`, which is what `FormBus.setErrors`
 puts on its fields.
 
+### Input as the client sent it
+
+Laravel's global `TrimStrings` and `ConvertEmptyStringsToNull` middleware turn
+`" a "` into `"a"` and `""` into `null` before an action sees them. The
+client's schema accepts both values as they are, so a generated rule and the
+client would disagree. Skip both middleware for the command routes, in
+`bootstrap/app.php`. The demo's `setup.sh` writes these lines:
+
+```php
+->withMiddleware(function (Middleware $middleware): void {
+    $vc = fn (\Illuminate\Http\Request $request) => $request->is('api/vc', 'api/vc/*');
+    $middleware->convertEmptyStringsToNull(except: [$vc]);
+    $middleware->trimStrings(except: [$vc]);
+})
+```
+
+The two patterns match `/api/vc` and every path under it, `/api/vc/batch`
+included. Any other route keeps Laravel's normalization.
+
 ---
 
 ## Idempotency & double-submit protection
@@ -954,14 +989,16 @@ Some commands must also never *interleave*, such as two writes to the same
 account. Add `serialize({ key: (cmd) => cmd.target.accountId })`: it orders
 same-key commands locally while `idempotent` collapses identical ones. `key` is
 a function of the command and defaults to `cmd.action`, which serializes each
-action against itself. Together they give exactly-once semantics on the client.
+action against itself. Together they are the client's half of exactly-once: a
+repeat inside one bus's `ttl` runs once. After a reload, in another tab or past
+the `ttl`, only the backend's half below stops a second run.
 
 The only backend contract has two parts. Honor `meta.idempotencyKey`: persist
 the key with its result, and return the stored result on a repeat. And never
 run the same key twice at once. A key belongs to the client that sent it: the
 plugin's default key is the command itself, the same for two users adding the
-same product, so the example scopes it to the user (else the session) before
-it reads the cache.
+same product, so the example scopes it to the user (else the session, else
+the address) before it reads the cache.
 
 A cache alone cannot guarantee the second part. It stores the result only after
 the action succeeds. A retry can arrive while the first attempt is still
@@ -973,7 +1010,8 @@ on the key before the cache read and holds it for the whole run. From
 abridged:
 
 ```php
-        // Scoped to who sent it (the user, else the session) and hashed, so
+        // Scoped to who sent it (the user, else the session, else the
+        // address) and hashed, so
         // it fits the cache table's 255-character key column.
         $slot = $idempotencyKey ? hash('sha256', $this->idempotencyScope($request, $user)."\0{$command}\0{$idempotencyKey}") : null;
         $cacheKey = $slot ? "vc:idem:{$slot}" : null;
@@ -1047,8 +1085,8 @@ plumbing: register the action class and add a line to
 
 ## What you don't need
 
-- **No middleware specific to vapor-chamber.** It rides on existing
-  `VerifyCsrfToken` + `Authenticate`.
+- **No middleware specific to vapor-chamber.** It rides on Laravel's own
+  CSRF middleware (`PreventRequestForgery`) and `Authenticate`.
 - **No PHP package / Composer dependency.** vapor-chamber is JS-only.
 - **No Echo / Reverb** unless you want push-based realtime. HTTP is enough
   for command dispatch.

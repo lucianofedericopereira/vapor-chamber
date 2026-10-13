@@ -8,7 +8,7 @@
  * would put a hard `vue` type dependency on the main barrel and break Vue-less
  * command-bus consumers, so callers opt in: `defineVaporComponent<MyComp>(opts)`.
  *
- * Separated from chamber.ts to keep the core composable module CDCC-compliant.
+ * Separated from chamber.ts to keep the core composable module smaller.
  */
 
 import {
@@ -150,7 +150,7 @@ export function defineVaporCustomElement<T = any>(options: object, extraOptions?
 /**
  * defineVaporComponent - define a Vapor component with proper type inference.
  *
- * Wraps Vue's `defineVaporComponent()` (typed since 3.6.0-alpha.5, #13831). Use this to get full
+ * Wraps Vue's `defineVaporComponent()` (typed since 3.6.0-alpha.7, #13831). Use this to get full
  * TypeScript inference for props, emits, and slots in Vapor components.
  * Pass-through - emits/$attrs routing, v-once interop, scope IDs, and the
  * compiler optimizations are Vue behavior (per-beta detail: CHANGELOG /
@@ -214,9 +214,11 @@ export function defineVaporAsyncComponent<T = any>(
 export type VaporCommandOptions<B extends BaseBus = BaseBus> = RegisterOptions & BusOption<B>;
 
 /**
- * defineVaporCommand - zero-overhead command for hot paths in Vapor mode.
+ * defineVaporCommand - a command for hot paths in Vapor mode, with no
+ * loading or error state.
  *
- * Unlike useCommand(), this skips reactive loading/error signal creation.
+ * Unlike useCommand(), this creates no loading/error signals, so a dispatch
+ * writes no loading or error state.
  * Ideal for high-frequency, fire-and-forget patterns where reactive
  * loading/error state isn't needed: scroll-position tracking, mousemove
  * sampling, telemetry / metrics events, debounced search, autosave.
@@ -298,7 +300,7 @@ export function useVaporAsyncCommand(asyncBus?: { dispatch: (action: string, tar
 
   // Intentionally hand-rolled, NOT routed through the shared runDispatch() that
   // useCommand / useCommandQuery use. A single async/await is
-  // ~1.2x leaner on the dispatch wrapper than runDispatch's .then-chain (measured);
+  // ~1.2x leaner on the dispatch wrapper than runDispatch's .then-chain (measured, v1.18.0);
   // this is the awaited HTTP/WS path, so keep it lean. Do not "consolidate" into
   // runDispatch - the consistency isn't worth the wrapper overhead here.
   async function dispatch(action: string, target: any, payload?: any): Promise<CommandResult> {

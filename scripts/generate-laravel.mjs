@@ -11,8 +11,9 @@
  * The stubs match examples/laravel-backend/ exactly: invokable classes with a
  * `__invoke($target, $payload, $user)` shape, resolved from the container by
  * VaporChamberController via config('vapor-chamber.handlers'). Field maps
- * become Validator::make() rules; the thrown ValidationException is mapped to
- * 422 + { ok: false, error } by the example controller.
+ * become Validator::make() rules; the example controller answers the thrown
+ * ValidationException with a 422 RFC 9457 problem whose `errors` point at
+ * each field (docs/contract.md section 4).
  *
  * Action stubs contain user logic after the first run, so they are NEVER
  * overwritten unless --force. The config file is a pure registry and is
@@ -31,27 +32,37 @@ import { pathToFileURL } from 'node:url';
 
 const FIELD_TYPES = new Set(['string', 'number', 'boolean', 'array', 'object', 'any']);
 
-// FieldType -> Laravel validation rule. 'any' means "no rule" (validated as null).
+// FieldType -> Laravel validation rule, the client's rule (src/schema.ts
+// runChecks) in Laravel's words. 'any' means "no rule" (validated as null).
 //
-// `object` and `array` both decode to a PHP array, so `required|array` alone
-// cannot tell a JSON object from a JSON list - and `schemaValidator` on the TS
-// side rejects an array for an `'object'` field (JSON Schema semantics). An
-// extra `array_is_list` check keeps the two sides of the SAME schema agreeing;
+// `present`, not `required`: the client refuses only a missing field, and
+// accepts `""`, `[]` and `{}`, which `required` refuses. The strict variants:
+// `numeric` accepts the string "5" and `boolean` accepts "1", which the client
+// refuses. `list` for `array`: `array` alone accepts a JSON object.
+//
+// `object` and `array` both decode to a PHP array, so `array` alone cannot
+// tell a JSON object from a JSON list - and `schemaValidator` on the TS side
+// rejects an array for an `'object'` field (JSON Schema semantics). An extra
+// `array_is_list` check keeps the two sides of the SAME schema agreeing;
 // without it a payload the browser refuses would sail through the server.
 const RULES = {
-  string: 'required|string',
-  number: 'required|numeric',
-  boolean: 'required|boolean',
-  array: 'required|array',
-  object: 'required|array',
+  string: 'present|string',
+  number: 'present|numeric:strict',
+  boolean: 'present|boolean:strict',
+  array: 'present|list',
+  object: 'present|array',
   any: null,
 };
 
-/** Field types needing a rule the string syntax can't express. */
+/**
+ * Field types needing a rule the string syntax can't express. Its message
+ * says `:attribute`, which Laravel replaces with the field's name from the
+ * stub's attribute map, as in its own messages.
+ */
 const OBJECT_SHAPE_RULE = [
-  "['required', 'array', function (string $attribute, mixed $value, \\Closure $fail): void {",
+  "['present', 'array', function (string $attribute, mixed $value, \\Closure $fail): void {",
   '    if (array_is_list($value)) {',
-  '        $fail("The {$attribute} field must be an object, not a list.");',
+  '        $fail("The :attribute field must be an object, not a list.");',
   '    }',
   '}]',
 ];
@@ -265,6 +276,13 @@ function renderActionClass(action, def, namespace) {
             ]
           : [`                ${phpString(key)} => ${phpString(rule)},`],
       ),
+      '            ],',
+      // No custom messages. Then each rule key's own name, so a message says
+      // "The qty field", not "The payload.qty field" (Validator::make()'s
+      // fourth argument, `$attributes`).
+      '            [],',
+      '            [',
+      ...rules.map(([key]) => `                ${phpString(key)} => ${phpString(key.slice(key.indexOf('.') + 1))},`),
       '            ],',
       '        )->validate();',
       '',

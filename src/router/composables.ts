@@ -292,10 +292,12 @@ export function usePagination<T = unknown>(options: PaginationOptions<T> = {}): 
 }
 
 /**
- * Page numbers for a pager, capped at `window` entries: always the first and
- * last page, a run around the current one, and `0` where numbers were elided
- * (render it as "..."). 0 is used rather than null so the array stays
- * `number[]` for `v-for` keys.
+ * Page numbers for a pager: every page when they fit in `window`, else the
+ * first and last page, a run around the current one, and a `0` on each side
+ * where numbers were elided (render it as "..."). Mid-range a window of 7
+ * gives seven numbers and two `0`s; a window below 5 still gives five
+ * numbers. 0 is used rather than null so the array stays `number[]` for
+ * `v-for` keys.
  */
 function buildPageRange(current: number, last: number, rawWindow: number): readonly number[] {
   // `window` is a caller option and reaches arithmetic that Math.max cannot

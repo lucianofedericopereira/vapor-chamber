@@ -27,9 +27,9 @@
 
   <div class="panel">
     <h2>Menu</h2>
-    <div class="row"><span>Coffee - $4.00</span><button data-add="1">Add</button></div>
-    <div class="row"><span>Tea - $3.00</span><button data-add="2">Add</button></div>
-    <div class="row"><span>Espresso - $5.00</span><button data-add="3">Add</button></div>
+    <div class="row"><span>Coffee - $4.00</span><button type="button" data-add="1">Add</button></div>
+    <div class="row"><span>Tea - $3.00</span><button type="button" data-add="2">Add</button></div>
+    <div class="row"><span>Espresso - $5.00</span><button type="button" data-add="3">Add</button></div>
   </div>
 
   <div class="panel">
@@ -37,7 +37,7 @@
     <div class="row"><span>Items</span><strong id="count">{{ session('vc.cart.count', 0) }}</strong></div>
     <div class="row"><span>Total</span><strong>$<span id="total">{{ number_format(session('vc.cart.cents', 0) / 100, 2) }}</span></strong></div>
     <div class="row"><span>Last added</span><span id="last">{{ session('vc.cart.last', '-') }}</span></div>
-    <button id="clear">Clear cart</button>
+    <button type="button" id="clear">Clear cart</button>
     <p id="status" role="status"></p>
   </div>
 

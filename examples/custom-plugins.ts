@@ -105,8 +105,9 @@ function transformPlugin(
   transforms: Record<string, (cmd: Command) => Command>
 ): Plugin {
   return (cmd, next) => {
-    const transform = transforms[cmd.action];
-    if (transform) {
+    // Own keys only: `transforms[cmd.action]` would find `toString`, `valueOf`.
+    if (Object.hasOwn(transforms, cmd.action)) {
+      const transform = transforms[cmd.action];
       const transformed = transform(cmd);
       // Modify the cmd object in place (plugins share the same cmd reference)
       Object.assign(cmd, transformed);
@@ -135,8 +136,6 @@ bus.use(authGuardPlugin(
   () => authenticated,
   ['admin', 'userDelete']
 ));
-
-bus.use(rateLimiterPlugin(3, 1000)); // Max 3 requests per second
 
 bus.use(transformPlugin({
   'itemAdd': (cmd) => ({
@@ -199,6 +198,9 @@ const incremented = bus.dispatch('counterIncrement', null);
 console.log(incremented.ok ? 'kept' : 'rolled back', '->', optimisticState.value);
 
 console.log('\n--- Rate limit test (4 rapid requests) ---');
+// Installed here, not with the others: it counts every dispatch, so the
+// demos above would fill its window and refuse all four.
+bus.use(rateLimiterPlugin(3, 1000)); // Max 3 requests per second
 for (let i = 0; i < 4; i++) {
   const result = bus.dispatch('publicInfo', null);
   console.log(`Request ${i + 1}:`, result.ok ? 'OK' : result.error?.message);

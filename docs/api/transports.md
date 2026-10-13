@@ -17,7 +17,7 @@ import { ... } from 'vapor-chamber/transports';
 
 ### createBatchingHttpBridge
 
-**Function** - [src/transports.ts:385](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L385)
+**Function** - [src/transports.ts:404](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L404)
 
 ```ts
 createBatchingHttpBridge(options: BatchingHttpBridgeOptions) => AsyncPlugin
@@ -26,15 +26,15 @@ createBatchingHttpBridge(options: BatchingHttpBridgeOptions) => AsyncPlugin
 createBatchingHttpBridge - coalescing fetch-based transport plugin.
 
 Same per-dispatch call shape and backend options as {@link createHttpBridge}
-(CSRF, retry, timeout, session-expiry are all reused via the same
-`postCommand`/`httpClient` path), but every command dispatched within the
-batching window is queued and sent as ONE POST:
+(CSRF, timeout and session expiry through the same `postCommand` /
+`httpClient` path, each command sent once), but every command dispatched
+within the batching window is queued and sent as ONE POST:
 
-  { commands: [{ id, command, target, payload }, ...] }
+  { commands: [{ id, command, target, payload, meta? }, ...] }
 
 matched back against:
 
-  { results: [{ id, state }, { id, redirect }, { id, problem }, ...] }
+  { results: [{ id, state, stores? }, { id, redirect }, { id, problem, headers? }, ...] }
 
 A failed result carries its problem with the command's own `status`. A
 result may carry its own `headers` (OData JSON batch): its `Retry-After`
@@ -54,7 +54,7 @@ bus.dispatch('cartAdd', product, { quantity: 2 })
 
 ### createEchoBridge
 
-**Function** - [src/transports.ts:978](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L978)
+**Function** - [src/transports.ts:1010](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L1010)
 
 ```ts
 createEchoBridge(options: EchoBridgeOptions) => { install(bus: BaseBus): void; dispose(): void; }
@@ -86,7 +86,7 @@ realtime.dispose();
 
 ### createHttpBridge
 
-**Function** - [src/transports.ts:249](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L249)
+**Function** - [src/transports.ts:282](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L282)
 
 ```ts
 createHttpBridge(options: HttpBridgeOptions) => AsyncPlugin
@@ -95,17 +95,17 @@ createHttpBridge(options: HttpBridgeOptions) => AsyncPlugin
 createHttpBridge - fetch-based transport plugin.
 
 Intercepts matching commands and forwards them to the backend as JSON.
-The backend receives `{ command, target, payload }` and answers `{ state }`
-(or `{ redirect }`) on success, and a non-2xx RFC 9457 problem on failure,
-read as `remote:<condition of its status>:<code>` (docs/plan-failures-and-
-contract.md 4.4).
+The backend receives `{ command, target, payload, meta? }` and answers
+`{ state, stores? }`, `{ stores }` or `{ redirect }` on success, and a
+non-2xx RFC 9457 problem on failure,
+read as `remote:<condition of its status>:<code>` (docs/contract.md 4).
 
 Features: multi-source CSRF token reading (meta tag / cookie / hidden input),
 automatic CSRF-expiry refresh on HTTP 419 (Laravel Sanctum convention by
 default, configurable for other frameworks), session-expiry detection on
 401, request timeout, per-call AbortSignal. It sends each command once and
 declares `transport: true`: the async bus re-sends through it by the
-failure's condition, after a declared Retry-After (docs/plan-shape.md 4).
+failure's condition, after a declared Retry-After (docs/retry.md).
 
 ```ts
 const bus = createAsyncCommandBus({ retry: { actionPolicies: { 'cart*': 'idempotent' } } })
@@ -116,7 +116,7 @@ await bus.dispatch('cartAdd', product, { quantity: 2 })
 
 ### createSseBridge
 
-**Function** - [src/transports.ts:870](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L870)
+**Function** - [src/transports.ts:902](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L902)
 
 ```ts
 createSseBridge(options: SseBridgeOptions) => { install(bus: BaseBus): void; dispose(): void; isConnected(): boolean; }
@@ -143,7 +143,7 @@ sse.dispose()
 
 ### createWsBridge
 
-**Function** - [src/transports.ts:551](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L551)
+**Function** - [src/transports.ts:576](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L576)
 
 ```ts
 createWsBridge(options: WsBridgeOptions) => AsyncPlugin & { connect(): void; disconnect(): void; isConnected(): boolean; connected: Signal<boolean>; }
@@ -182,14 +182,14 @@ export type BackendResponse = {
 };
 ```
 
-A command's answer, the same on every wire (docs/plan-failures-and-contract.md
-4.4): `state` on success, `redirect` for a navigation, `problem` on failure,
+A command's answer, the same on every wire (docs/contract.md 4):
+`state` on success, `redirect` for a navigation, `problem` on failure,
 one of the three. A batched result and a WebSocket frame carry `id` beside
 it; a single command's failure is its non-2xx response's body.
 
 ### BatchingHttpBridgeOptions
 
-**Type alias** - [src/transports.ts:331](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L331)
+**Type alias** - [src/transports.ts:349](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L349)
 
 ```ts
 export type BatchingHttpBridgeOptions = HttpBridgeOptions & {
@@ -221,13 +221,13 @@ export type CommandEnvelope = {
 };
 ```
 
-A command on every wire (docs/plan-failures-and-contract.md 4.4): `id` where
+A command on every wire (docs/contract.md 4): `id` where
 answers are multiplexed (a batch, a WebSocket), as on the answer side; `meta`
 only with a fact a backend can use. Log s35.138.
 
 ### EchoBridgeOptions
 
-**Type alias** - [src/transports.ts:931](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L931)
+**Type alias** - [src/transports.ts:963](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L963)
 
 ```ts
 export type EchoBridgeOptions = {
@@ -256,7 +256,7 @@ export type EchoBridgeOptions = {
 
 ### EchoChannelType
 
-**Type alias** - [src/transports.ts:920](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L920)
+**Type alias** - [src/transports.ts:952](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L952)
 
 ```ts
 export type EchoChannelType = 'public' | 'private' | 'presence';
@@ -264,7 +264,7 @@ export type EchoChannelType = 'public' | 'private' | 'presence';
 
 ### EchoSubscription
 
-**Type alias** - [src/transports.ts:922](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L922)
+**Type alias** - [src/transports.ts:954](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L954)
 
 ```ts
 export type EchoSubscription = {
@@ -289,7 +289,7 @@ The part of a command's meta that crosses the wire.
 
 ### HttpBridgeOptions
 
-**Type alias** - [src/transports.ts:141](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L141)
+**Type alias** - [src/transports.ts:174](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L174)
 
 ```ts
 export type HttpBridgeOptions = {
@@ -380,7 +380,7 @@ export type HttpBridgeOptions = {
 
 ### SseBridgeOptions
 
-**Type alias** - [src/transports.ts:828](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L828)
+**Type alias** - [src/transports.ts:860](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L860)
 
 ```ts
 export type SseBridgeOptions = {
@@ -409,7 +409,7 @@ export type SseBridgeOptions = {
 
 ### WsBridgeOptions
 
-**Type alias** - [src/transports.ts:500](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L500)
+**Type alias** - [src/transports.ts:525](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/transports.ts#L525)
 
 ```ts
 export type WsBridgeOptions = {

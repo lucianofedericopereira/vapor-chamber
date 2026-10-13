@@ -1,5 +1,5 @@
 /**
- * Step 5 of the RC alignment ritual, past "it builds".
+ * Step 2 of the RC alignment ritual (docs/rc-alignment.md), past "it builds".
  *
  * WHY THIS EXISTS. Rebuilding the examples proves they compile. Vue 3.6.0-rc.9
  * #15490 changed the compiled directive tuple and `v-vc-command` stopped

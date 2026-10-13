@@ -17,7 +17,7 @@ import { ... } from 'vapor-chamber/reactive';
 
 ### deepSignal
 
-**Function** - [src/reactive.ts:52](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/reactive.ts#L52)
+**Function** - [src/reactive.ts:53](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/reactive.ts#L53)
 
 ```ts
 deepSignal<T>(initial: T) => Signal<T>
@@ -33,7 +33,7 @@ component `setup()` Vue is always detected by the time this runs.
 
 ### useDeepCommandState
 
-**Function** - [src/reactive.ts:76](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/reactive.ts#L76)
+**Function** - [src/reactive.ts:77](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/reactive.ts#L77)
 
 ```ts
 useDeepCommandState<T>(initial: T, handlers: { [action: string]: (state: T, cmd: Command) => T; }, options?: UseCommandStateOptions) => { state: Signal<T>; dispose: () => void; }
@@ -60,7 +60,7 @@ const { state, dispose } = useDeepCommandState(
 
 ### UseCommandStateOptions
 
-**Type alias** - [src/chamber.ts:1349](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1349)
+**Type alias** - [src/chamber.ts:1346](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber.ts#L1346)
 
 ```ts
 export type UseCommandStateOptions = BusOption & {

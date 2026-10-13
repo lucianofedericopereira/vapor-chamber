@@ -8,7 +8,7 @@
  * registered in config/vapor-chamber.php and converts exceptions into an
  * RFC 9457 problem ({ status, code, detail, errors? }), answered as
  * `application/problem+json`. A success is { state } (or { redirect }). The
- * wire contract is docs/plan-failures-and-contract.md 4.4. Laravel's own
+ * wire contract is docs/contract.md 4. Laravel's own
  * ValidationException/AuthorizationException/AuthenticationException/
  * ModelNotFoundException and HTTP exceptions (`abort()`) are recognized by
  * type, with the status Laravel's own handler would answer; anything else
@@ -150,10 +150,11 @@ class VaporChamberController extends Controller
         // Replay the cached response for a key we've already processed so a
         // network retry can't double-write (e.g. duplicate orders).
         //
-        // A key is unique per client, not across clients: the `idempotent()`
-        // plugin's default key is the command itself (action, target and
-        // payload), the same for two users adding the same product. So the
-        // key is scoped to who sent it - the user, else the session - or the
+        // This controller scopes a key per client, not across clients: the
+        // `idempotent()` plugin's default key is the command itself (action,
+        // target and payload), the same for two users adding the same product.
+        // So the key is scoped to who sent it - the user, else the session,
+        // else the address - or the
         // second user's write never runs and is answered the first user's
         // state. Hashed, so a key carrying a payload fits the cache and lock
         // tables' 255-character key column (the `database` store, Laravel's
@@ -199,7 +200,7 @@ class VaporChamberController extends Controller
             return $result;
         } catch (ValidationException $e) {
             // Its own status: 422 unless the action set one (`->status(409)`).
-            return $this->problem($e->getMessage(), $e->status, 'validation_failed', $this->pointers($e->errors()));
+            return $this->problem($e->getMessage(), $e->status, 'validation_failed', $this->pointers($e->errors(), $e->validator->getData()));
         } catch (AuthorizationException $e) {
             // A policy's own status (`denyAsNotFound()`, `denyWithStatus()`),
             // as Laravel's handler answers it: a 404 hides that the resource
@@ -221,8 +222,9 @@ class VaporChamberController extends Controller
             return $headers === [] ? $result : $result + ['headers' => $headers];
         } catch (\Throwable $e) {
             // Any exception that declares its own render() (a package's own
-            // domain exception, or the host app's) gets its status/detail
-            // read from there instead
+            // domain exception, or the host app's) gets its status, detail,
+            // field errors, other members and `Retry-After` read from there
+            // instead
             // of collapsing onto a generic 500 - the controller stays
             // ignorant of specific exception types by design, the same way
             // Laravel's own handler would dispatch to render() if this
@@ -234,7 +236,15 @@ class VaporChamberController extends Controller
                     // Its own `code` extension member; without one it has no
                     // identity to send, and none is made up from `type`.
                     $code = is_string($data['code'] ?? null) ? $data['code'] : 'error';
-                    return $this->problem($data['detail'] ?? $e->getMessage(), $rendered->getStatusCode(), $code);
+                    $result = $this->problem($data['detail'] ?? $e->getMessage(), $rendered->getStatusCode(), $code, is_array($data['errors'] ?? null) ? $data['errors'] : []);
+                    $result['body'] += array_diff_key($data, array_flip(['status', 'code', 'detail', 'errors', 'type', 'title']));
+                    // `Retry-After` alone, as the abort() branch carries its
+                    // thrower's headers. Not the response's whole header bag:
+                    // it holds `content-type: application/json`, which would
+                    // replace the problem's media type, and `cache-control`
+                    // and `date`, which a batch result would repeat.
+                    $wait = $rendered->headers->get('Retry-After');
+                    return $wait === null ? $result : $result + ['headers' => ['Retry-After' => $wait]];
                 }
             }
 
@@ -275,7 +285,7 @@ class VaporChamberController extends Controller
 
     /**
      * The key from the envelope's `meta`, the one place the contract carries
-     * it on every transport (docs/plan-failures-and-contract.md 4.4). The
+     * it on every transport (docs/contract.md 4). The
      * `Idempotency-Key` header the client also sends is for other tooling.
      */
     private function idempotencyKey(mixed $meta): ?string
@@ -287,9 +297,10 @@ class VaporChamberController extends Controller
 
     /**
      * Who a key belongs to: the user, else the session, else the address a
-     * request with neither came from. Keys are unique per client
-     * (Idempotency-Key draft-07 2.2), so two clients sending the same key are
-     * two requests.
+     * request with neither came from. The draft leaves a key's uniqueness to
+     * the resource owner (Idempotency-Key draft-07 2.2). This controller makes
+     * it unique per client, so two clients sending the same key are two
+     * requests.
      */
     private function idempotencyScope(Request $request, mixed $user): string
     {
@@ -339,22 +350,30 @@ class VaporChamberController extends Controller
 
     /**
      * Laravel's field map as the contract's `errors`: one `{ pointer, detail }`
-     * per field, the pointer into the envelope the client sent
-     * (`/payload/<field>`, RFC 6901; a dotted key is a nested path), the
-     * field's first message.
+     * per field, the pointer into the envelope the client sent (RFC 6901; a
+     * dotted key is a nested path), the field's first message.
+     *
+     * An action that validates `$payload` keys its errors by field (`qty`):
+     * the pointer is `/payload/qty`. A generated stub validates the envelope,
+     * `['target' => ..., 'payload' => ...]`, so its keys already start at the
+     * envelope (`payload.qty`, `target.id`): the pointer is `/payload/qty` or
+     * `/target/id`. The validated data's own keys tell the two apart.
      *
      * @param array<string, array<int, string>> $fields
      * @return list<array{pointer: string, detail: string}>
      */
-    private function pointers(array $fields): array
+    private function pointers(array $fields, mixed $data): array
     {
+        $keys = is_array($data) ? array_keys($data) : [];
+        sort($keys);
+        $prefix = $keys === ['payload', 'target'] ? '/' : '/payload/';
         $errors = [];
         foreach ($fields as $field => $messages) {
             $segments = array_map(
                 static fn (string $s): string => str_replace(['~', '/'], ['~0', '~1'], $s),
                 explode('.', (string) $field),
             );
-            $errors[] = ['pointer' => '/payload/'.implode('/', $segments), 'detail' => (string) ($messages[0] ?? '')];
+            $errors[] = ['pointer' => $prefix.implode('/', $segments), 'detail' => (string) ($messages[0] ?? '')];
         }
 
         return $errors;

@@ -1,4 +1,4 @@
-/** A plugin's memory of a command ends when its undo lands, so a redo runs (plan 1.27 item 6 F6a). Rationale at the end. */
+/** A plugin's memory of a command ends when its undo lands, so a redo runs (log s35.181). Rationale at the end. */
 import { describe, expect, it } from 'vitest';
 import { type Command, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { history } from '../src/plugins-core';

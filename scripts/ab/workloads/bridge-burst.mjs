@@ -1,4 +1,4 @@
-// Workload for scripts/ab/ab.mjs (plan 1.28 item 1, log s35.212): what the
+// Workload for scripts/ab/ab.mjs (log s35.212): what the
 // mark on a bridged success (`_appliedRemotely`) costs, against an arm that
 // deletes its `set` line. Dense bridged successes, fetch stubbed as in
 // http-failures.mjs, so only the library's own work is timed. Measured at

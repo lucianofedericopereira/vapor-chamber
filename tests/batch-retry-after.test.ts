@@ -101,7 +101,7 @@ describe('a WebSocket frame with its own Retry-After', () => {
 /*
  * A single request declares its wait with a `Retry-After` header (RFC 9110
  * 10.2.3), and the contract reads it from the response, never from the body
- * (docs/plan-failures-and-contract.md 4.4). A batch answers 200 with one result
+ * (docs/contract.md 4). A batch answers 200 with one result
  * per command, so a command's failure has no response of its own. The standard
  * batch shape gives each result its own `headers`: OData's JSON batch response
  * (OData JSON Format 4.01, section 19), and Microsoft Graph's JSON batching,

@@ -1,4 +1,4 @@
-/** One spelling per request header name, merged as the Fetch Standard's "set": first spelling kept, last value wins (plan 1.27 item 4). Rationale at the end. */
+/** One spelling per request header name, merged as the Fetch Standard's "set": first spelling kept, last value wins (log s35.163). Rationale at the end. */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
 import { createHttpClient, invalidateCsrfCache, postCommand } from '../src/http';
@@ -162,5 +162,5 @@ describe('controls', () => {
  * the merge keeps the first spelling and the last value, and deleting a name
  * deletes every spelling. The library keeps writing its own names as it
  * did; lowercasing on the wire stays the platform's (RFC 9113 8.2). Plan
- * .probes/1.27-plan.md item 4 rev 2, audit S4 and D7, log s35.163.
+ * Log s35.163.
  */

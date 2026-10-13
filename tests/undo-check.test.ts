@@ -135,5 +135,5 @@ describe('a rollback does not read canUndo', () => {
  * it before each undo. A rollback (optimisticUndo, a transactional batch) is
  * wired once to reverse the step that failed and never reads it. A store's
  * rebase depends on that: its canUndo is false for an older step. Owner,
- * 2026-10-05, plan item 1 R7 (not built). Log s35.161.
+ * 2026-10-05 (not built). Log s35.161.
  */

@@ -17,7 +17,7 @@
 
 import type { ActionScope, AsyncCommandBus, AsyncPlugin, BusError, Command, CommandResult } from './command-bus';
 import type { ActionFilter } from './action-filter';
-import { countOption, isDelay } from './bounds';
+import { countOption, delayOption, isDelay } from './bounds';
 import { commandKey, failureCondition, _okResult, _errResult, ownerOf, _isLibraryAction } from './command-bus';
 import { _idbStore } from './idb';
 import { createSleeper } from './scheduler';
@@ -510,7 +510,7 @@ export function createOutbox(options: OutboxOptions = {}): Outbox {
       if (autoFlush && isDelay(retryIn)) {
         backoff = Math.max(retryIn, Math.min(30_000, Math.max(backoff * 2, 1000)));
         waits.wakeAll();
-        void waits.sleep(backoff).then((due) => { if (due) void flush(bus); });
+        void waits.sleep(delayOption(backoff, 1000)).then((due) => { if (due) void flush(bus); });
       }
       break;
     }

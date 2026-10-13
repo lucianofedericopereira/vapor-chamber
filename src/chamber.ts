@@ -125,12 +125,11 @@ function applyVueModule(vue: any): void {
     // errors.value = [...], past.value = [...]) - it never mutates nested fields
     // in place - so shallow tracking is semantically equivalent here while
     // avoiding the per-write proxy cost. Measured on the real dispatch path
-    // (`tests/signal-shallow-ab.test.ts`): array-state useCommandState
-    // ~2.9-3.0x faster, scalar signals ~1.2x. Re-measured on 3.6.0-rc.5, median
-    // of 3 full runs (each itself a median of 5 interleaved reps): array/100
-    // +196%, array/10 +179%, scalar +23%. Quote the runtime with the number,
-    // and prefer the harness's printed table over any figure copied into prose.
-    // Measure this with that harness, not with a raw shallowRef-vs-ref loop:
+    // with `npm run ab` (scripts/ab/workloads/signal-backend.mjs) on
+    // 3.6.0-rc.11, 2026-10-13: a 100-append array state 2.95-3.13x faster,
+    // scalar writes no counted difference (docs/performance.md). Quote the
+    // runtime and machine with the number.
+    // Measure this on the dispatch path, not with a raw shallowRef-vs-ref loop:
     // outside the dispatch path the two invert, because `ref(primitive)` never
     // builds a proxy and the gap there is a different phenomenon. Direct
     // nested mutation of a returned state (state.value.x = y) would bypass the
@@ -406,7 +405,7 @@ let _unwiredWarned = false;
 function warnUnwired(): void {
   // Every composable creation passes here, so the test that is false once Vue
   // is wired comes first and alone: the build flag's `typeof` of a global that
-  // is not defined is a slow lookup, and it cost useCommand() creation 7-8%
+  // is not defined is a slow lookup, and it cost useCommand() creation 7-9%
   // (perf-1.26 A/B, log s35.44). A wired build cannot be in this state; the
   // flag stays first INSIDE, so the inner block still folds there (see
   // __VC_WIRED_BUILD__) and the empty `if` goes with it.
@@ -435,10 +434,10 @@ function probeVue(): void {
     // 1. Synchronous probe. This is the only channel that can ever detect Vapor
     //    without a bundler (no-build IIFE / sprinkled-JS pages,
     //    docs/whitepaper.md section 9.6): the async probe below resolves a bare
-    //    `import('vue')`, which Vue 3.6 NEVER wires to the Vapor-enabled build
-    //    outside a bundler's alias magic (@vitejs/plugin-vue does this per-app
-    //    when it sees `<script setup vapor>`) - Vapor is a physically separate
-    //    dist file (vue.runtime-with-vapor.esm-*.js).
+    //    `import('vue')`. Without a bundler that reaches a build with no Vapor
+    //    (vue.esm-browser.js, or vue.cjs.js in Node), where Vapor ships as a
+    //    separate file (vue.runtime-with-vapor.esm-*.js). A bundler's `vue`
+    //    entry (vue.runtime.esm-bundler.js) re-exports @vue/runtime-vapor.
     //
     //    Only our own slot is read (`__VUE__` is Vue's: it holds a boolean once
     //    an app mounts); `configureVue()` bypasses it.
@@ -778,7 +777,7 @@ export function tryKeepAliveHooks(onPause: () => void, onResume: () => void): vo
 //
 // The counts are one record per composable, both fields set at creation
 // (docs/V8-RULES.md 1-2), made at its FIRST dispatch, not when it is created.
-// Measured (`npm run ab`, base 1.29 vs these builds, K 10, n and 4n):
+// Measured for v1.30.0 (`npm run ab`, base 1.29 vs these builds, K 10, n and 4n):
 // - the record made with the composable: useCommand creation +5.7 ns, a
 //   component's mix +13.6 ns, counted slower;
 // - made lazily from `let counts = null`: creation still +2.8 / +3.3 ns at both
@@ -1127,7 +1126,7 @@ export type UseSharedCommandStateOptions<B extends BaseBus = BaseBus> = BusOptio
  * @example
  * // Disable an entire toolbar while any command is in flight.
  * const { isAnyLoading } = useSharedCommandState();
- * <Button :disabled="isAnyLoading.value">Save</Button>
+ * <Button :disabled="isAnyLoading">Save</Button>
  *
  * Auto-cleanup on Vue scope/component disposal via tryAutoCleanup.
  */
@@ -1148,15 +1147,13 @@ export function useSharedCommandState<B extends BaseBus = CommandBus>(options: U
     // throw/reject, a before-hook's throw - or neither fires (a buffered miss).
     // Some exits settle with NO start: a pre-flight abort, a query, emit(), a
     // before-hook that threw ahead of ours. Matching by Command object ignores
-    // those rather than decrementing another dispatch's count. One exit starts
-    // and never settles: a PLUGIN that throws or rejects escapes the runner, so
-    // no listener fires and that key stays true. All pinned by
-    // tests/command-loading-fixture.test.ts. inFlight/isAnyLoading stay scoped
-    // to this composable's wrapper, which does catch that throw.
-    // That exit is closed now: the runners turn a plugin's throw into a
-    // <plugin>:failed:plugin result (pluginThrew), and the one throw left by contract,
-    // `onMissing: 'throw'`, is settled before it is re-thrown
-    // (syncRunSettling), so every start has a settle.
+    // those rather than decrementing another dispatch's count. Every start has
+    // a settle: the runners turn a plugin's throw into a
+    // <plugin>:failed:plugin result (pluginThrew), and the one throw left by
+    // contract, `onMissing: 'throw'`, is settled before it is re-thrown
+    // (syncRunSettling). Pinned by tests/command-loading-fixture.test.ts and
+    // tests/plugin-throw-fixture.test.ts. inFlight/isAnyLoading stay scoped
+    // to this composable's wrapper.
     // Declared ahead of `entry`, which it reads only when a command settles,
     // long after the literal below has run.
     const observe: Listener = (cmd, result) => {
@@ -1590,7 +1587,7 @@ export function useCommandGroup<B extends BaseBus = CommandBus>(namespace: strin
   // 'clear'), so the second and every later dispatch of a name is a Map hit
   // instead of two allocations plus a concat.
   //
-  // Measured, interleaved A/B, 200k calls: 3 distinct names 4.669ms -> 1.244ms
+  // Measured for v1.15.0, interleaved A/B, 200k calls: 3 distinct names 4.669ms -> 1.244ms
   // (**-73%**), 8 names 5.171ms -> 1.426ms (-72%). This replaces the old
   // "inlined, DO NOT consolidate, a shared call costs ~1%" note: the 1% was
   // real but it was the wrong thing to optimise - the join itself was the cost,

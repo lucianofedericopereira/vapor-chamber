@@ -349,7 +349,7 @@ const BUDGETS = {
   // single site, not the bytes). The ledger's own cost is its options object,
   // change callback and signal mirroring, which outweighed the lines it removed.
   //
-  // Unreleased, Phase 0 of docs/plan-failures-and-contract.md, and all three
+  // Unreleased, Phase 0 of the failures plan (CHANGELOG v1.25.0), and all three
   // budgets follow it DOWN. The fixes cost, measured one at a time on the core
   // IIFE: the Idempotency-Key as a Structured Field String +116 / +48 (one
   // regex pass was bigger, 6,479 on the ESM consumer, dropped), register()'s
@@ -358,7 +358,7 @@ const BUDGETS = {
   // catalogue's `warn` severity on three refusals +48 / +14, retry()'s
   // happy path -29 / -12. That put all three over (full 41,906 / 12,539).
   // Paid for by rule, not by a raise:
-  //   - Advice only in DEV (plan, settled item 5). Five core messages
+  //   - Advice only in DEV (docs/contract.md rule 5). Five core messages
   //     (sealed, max depth, request timeout, naming, no handler) and two
   //     elsewhere (createVaporChamberApp's VDOM tail, persist's "stale after
   //     a deploy") carried a fix sentence in production that the catalogue
@@ -371,8 +371,8 @@ const BUDGETS = {
   // MEASURED: full 41,172 / 12,303, core 27,164 / 7,992, elements
   // 28,928 / 8,499 - each below the budget it started from.
   //
-  // Unreleased, owner-by-wiring failures (docs/plan-failures-and-contract.md
-  // 4.5) and the IIFE target raised to a 2022 floor (Chrome 100, Firefox 100,
+  // Unreleased, owner-by-wiring failures (docs/contract.md 5) and the IIFE
+  // target raised to a 2022 floor (Chrome 100, Firefox 100,
   // Safari 16; owner). Measured on the SAME 2022 target, the target alone took
   // the old code to 39,351 / 11,835 full, 25,911 / 7,669 core, 27,617 / 8,169
   // elements, because `?.`, `??`, class fields and private fields stop being
@@ -384,7 +384,7 @@ const BUDGETS = {
   // removed; freezing or a non-writable `code` cost 10-30% on the refusal
   // path and was dropped for a private `#code` with a getter.
   //
-  // Unreleased, the wire contract and retries by it (plan 4.4, rev 21-22):
+  // Unreleased, the wire contract and retries by it (docs/contract.md 4):
   // the status table, `failureCondition`, the transport readers of one answer
   // shape, and `retrying()` on an engine shared with `retry()`, net of what
   // they replaced (the old readers, both bridges' re-wrapping catch paths,
@@ -392,9 +392,9 @@ const BUDGETS = {
   // 27,629 / 8,215 elements: +994 / +275, +1,162 / +344, +1,162 / +357.
   // Squeezed first: `Retry-After` parsed to undefined, not null (the
   // `?? undefined` at each site went), and the redirect's "no onRedirect
-  // handler" advice DEV-only (settled item 5): -91 / -32 core.
+  // handler" advice DEV-only (contract rule 5): -91 / -32 core.
   //
-  // Unreleased, retries back to what 1.24 shipped (docs/plan-shape.md 1):
+  // Unreleased, retries back to what 1.24 shipped (CHANGELOG v1.25.0):
   // re-sent unless a 4xx verdict, an abort, a depth bound or a plugin's own
   // throw (the owner check pulls ownerOf into the IIFEs), a declared
   // `Retry-After` honoured, 5xx retried again by the HTTP client, and
@@ -429,7 +429,7 @@ const BUDGETS = {
   // measured +22 brotli (brotli folds the duplicate for free), so the two
   // ceilings follow the measurement.
   //
-  // Unreleased, the retry model (docs/plan-shape.md 4): the policy is the
+  // Unreleased, the retry model (docs/retry.md): the policy is the
   // async bus's own, on by default, so every IIFE carries it (the bundles
   // create an async bus); `retry()` and `retrying()` are gone from them, and
   // the bridges declare `transport`. MEASURED: +163 / +129 full, +162 / +136
@@ -673,14 +673,98 @@ const BUDGETS = {
   // Then (1.30) composables count overlapping dispatches (the counts made at
   // the first dispatch) and keep the latest query's data; toTools builds its
   // schemas with the MCP generator: full only, +151/+1. Set to measured.
-  'vapor-chamber.iife.min.js':          { rawMax: 48_445, brotliMax: 15_169 },
+  // Then (audit D4, log s36.11) one cancel reader, `_isCancel`: a failure
+  // that IS the caller's abort reason reads as a cancel in failureCondition,
+  // the retry loop and circuitBreaker. Failure path only. raw +61 in all
+  // three (the reader and failureCondition's signal argument); brotli full
+  // +84 (circuitBreaker's call site rearranges its chunk), core +6, elements
+  // +17. Raised to measured.
+  // Then audit D7 (see the core IIFE's note): raw +54, brotli -51, raw raised.
+  // Then audit D8 (log s36.11): request()'s timeout and the ws bridge's read
+  // by countOption. Raw/brotli, each piece left out alone: the ws read
+  // +17/-1, request's reader +22/+13. Total +39/-2. Raw raised to measured,
+  // brotli kept.
+  // Then audit D9: the throttle gate reads its wait once by countOption, one
+  // piece, raw/brotli +17/-4. Raw raised to measured, brotli kept.
+  // Then debounce reads its wait the same way, one piece, +13/+17. Raw raised
+  // to measured, brotli kept.
+  // Then audit D10: every timer delay a checked `Delay` (delayOption), the
+  // http client's two hand-rolled readers replaced, the batching window and
+  // the directive's timeout read by the rule: +14/+31. Raw raised to
+  // measured, brotli kept.
+  // Then audit D11: a request JSON cannot encode is transport:invalid:json.
+  // Raw/brotli, each piece left out alone: the encoder and the http bridge
+  // through it +42/+9, the ws bridge +42/+13. Total +248/+66 (brotli is not
+  // additive). The registry row and the client's check are in no IIFE.
+  // Raised to measured.
+  // Then audit HT-24: a malformed XSRF-TOKEN cookie reads as no cookie (a
+  // try around its decode, the CSRF read path only): +33/+8. Raised to measured.
+  // Then complexity review F1 (log 36.13): two abort signals combine as
+  // `AbortSignal.any` does on every target, through one helper. Raw/brotli:
+  // the helper's fallback against the old one +59/+19 (of it, an input
+  // already aborted and its own detach, left out alone, +59/+20); the two
+  // http-bridge sites through it -64/-6; their per-request detach, left out
+  // alone, +22/+4. Total -5/+13 (brotli is not additive). Brotli raised to
+  // measured, raw kept.
+  // Then complexity review B3 (log 36.13): each request builds its own
+  // transport:missing:csrf after a shared refresh, marked by its own
+  // `silent`, one piece: +5/+4. Raised to measured.
+  // Then log 36.16 item 1: the http client waits the async bus's retry
+  // schedule, one function both loops call. Raw/brotli, each piece left out
+  // alone: the bus through it +55/+12, the client through it +18/0. Total
+  // -10/-7 (brotli is not additive). Kept.
+  // Then log 36.17: the http `retry` count read by the count rule, where a
+  // negative or NaN sent nothing, one piece (countOption at postCommand's
+  // read): +7/+16. Brotli raised to measured.
+  // Then complexity review F12 (log 36.17): runWithRetry's resend-or-leave
+  // written once, its timer and signal cleanup in one `send`: -117/-57.
+  // Lowered to measured, which locks it.
+  // Then complexity review F2 (log 36.17): the two HTTP bridges' send and
+  // answer steps written once. These bundles hold the single bridge only, so
+  // they carry the helpers without the second copy: `readAnswer` alone
+  // +13/+16, `httpSender` (one send, one bridge signal) the rest, total
+  // +45/+37. Bundles with both bridges are -343 min. Raised to measured.
+  'vapor-chamber.iife.min.js':          { rawMax: 48_849, brotliMax: 15_324 },
   // Then (log s35.107) BusError and its vocabulary moved to src/failure.ts so
   // the router raises the core's failure without importing the bus. A pure
   // move: raw bytes identical in all three IIFEs once the import sits where
   // the code was; brotli moves with the arrangement: full -8 (budget kept),
   // core +5, elements +7. Owner: raised to measured ("size no issue").
-  'vapor-chamber-core.iife.min.js':     { rawMax: 33_393, brotliMax: 10_508 },
-  'vapor-chamber-elements.iife.min.js': { rawMax: 35_045, brotliMax: 10_997 },
+  // Then audit D4 (see the full IIFE's note): core +61/+6, elements +61/+17.
+  // Then audit D7: maxBufferSize read once by countOption when the bus is
+  // made (a `bufferLimit` slot on both bus states), raw +54 in all three,
+  // brotli full -51 (budget kept), core +7, elements +6. Raised to measured.
+  // Then audit D8: request()'s timeout read by countOption, one piece (the
+  // ws bridge is in neither): core +22/+24, elements +22/+12. Raised to
+  // measured.
+  // Then audit D9: the throttle gate reads its wait once by countOption, one
+  // piece: core +17/0, elements +17/+1. Raised to measured.
+  // Then debounce reads its wait the same way, one piece: core +13/+14,
+  // elements +13/+22. Raised to measured.
+  // Then audit D10 (see the full IIFE's note): core +17/+11, elements
+  // +17/-4. Raised to measured, elements brotli kept.
+  // Then audit D11: the encoder and the http bridge through it, one piece
+  // (no ws bridge here): core +206/+62, elements +206/+73. Raised to measured.
+  // Then audit HT-24 (see the full IIFE's note): core +33/-2, elements +33/-2.
+  // Raw raised to measured, brotli kept.
+  // Then complexity review F1 (see the full IIFE's note), raw/brotli: the
+  // helper +59/+32 core, +59/+24 elements; the sites through it -64/-2 core,
+  // -64/+2 elements; the detach +22/+6 core, +22/+8 elements. Total -5/+30
+  // core, -5/+26 elements. Brotli raised to measured, raw kept.
+  // Then complexity review B3 (see the full IIFE's note): core +5/+2,
+  // elements +5/-1. Core brotli raised to measured.
+  // Then log 36.16 item 1 (see the full IIFE's note): the bus through it
+  // +51/+21 core, +51/+36 elements; the client +15/+6 core, +15/+2 elements.
+  // Total -12/+5 core, -12/-4 elements. Core brotli raised to measured.
+  // Then log 36.17, the http `retry` count (see the full IIFE's note): core
+  // +7/+7, elements +7/+19. Brotli raised to measured.
+  // Then complexity review F12 (see the full IIFE's note): core -118/-55,
+  // elements -118/-58. Lowered to measured, which locks it.
+  // Then complexity review F2 (see the full IIFE's note): `readAnswer` alone
+  // core +13/+9, elements +13/+3; total core +45/+47, elements +45/+47.
+  // Raised to measured.
+  'vapor-chamber-core.iife.min.js':     { rawMax: 33_738, brotliMax: 10_667 },
+  'vapor-chamber-elements.iife.min.js': { rawMax: 35_390, brotliMax: 11_151 },
 };
 
 const BR_OPTS = { params: { [constants.BROTLI_PARAM_QUALITY]: 11 } };

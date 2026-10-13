@@ -1,4 +1,4 @@
-/** Redo of a store step writes the state it recorded, not a second run of the reducer (plan 1.27 item 1, R5). Rationale at the end. */
+/** Redo of a store step writes the state it recorded, not a second run of the reducer (log s35.158). Rationale at the end. */
 import { describe, expect, it } from 'vitest';
 import { createCommandBus, type Command } from '../src/command-bus';
 import { history } from '../src/plugins-core';
@@ -94,7 +94,7 @@ describe('redo of a store step', () => {
  * Before this, redo re-dispatched the action (`ledger.ts`, origin 'redo') and
  * the handler ran the reducer again. A reducer that mints a value (an id, a
  * time) brought the item back with a new one: a new key, a remounted row
- * (plan 1.27 item 1, the repo's own Vue todo example until s35.149).
+ * (log s35.158; the repo's own Vue todo example until s35.149).
  *
  * Now the redo is still the same command, so plugins, listeners, persist and
  * devtools hear what they heard. Inside the store's handler, when the step

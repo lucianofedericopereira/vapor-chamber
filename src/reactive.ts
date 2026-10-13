@@ -5,8 +5,9 @@
  * state values wholesale (`state.value = handler(...)`) and never mutates nested
  * fields in place. Shallow tracking is therefore semantically identical for the
  * command-driven flow while avoiding the deep reactive Proxy (`toReactive()`)
- * that `ref()` wraps around object/array values - measured ~3.4x faster on the
- * `useCommandState` array path (see docs/performance.md, tests/signal-shallow-ab).
+ * that `ref()` wraps around object/array values - measured faster on the
+ * `useCommandState` array path (tests/signal-shallow-ab; the dated figure is in
+ * docs/performance.md).
  *
  * Import THIS module only when you genuinely need nested reactivity - e.g. a
  * state object two-way bound with `v-model` whose fields you mutate in place

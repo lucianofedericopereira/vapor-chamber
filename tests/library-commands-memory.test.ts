@@ -132,7 +132,7 @@ describe('controls: refusing a $ command stays allowed and visible', () => {
 });
 
 /*
- * Plan .probes/1.27-plan.md item 6, as written. A `$` name is the library's
+ * Log s35.150. A `$` name is the library's
  * own command (src/library-names.ts): `<id>$reset`, `<id>$sync`,
  * `<action>$undo`. Each is a state change. A plugin may refuse one (35.114:
  * throttle, rateLimit, circuitBreaker; the caller sees it), but cache()

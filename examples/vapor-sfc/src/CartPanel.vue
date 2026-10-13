@@ -73,10 +73,10 @@ function bumpOptimistically(cmd: { payload?: { qty?: number } }) {
     <div class="row">
       <!-- aria-disabled, not :disabled: disabling the pressed button would
            send keyboard focus to <body>. A press in flight is ignored. -->
-      <button :aria-disabled="loading" @click="!loading && addToCart(1)">
+      <button type="button" :aria-disabled="loading" @click="!loading && addToCart(1)">
         {{ loading ? 'Adding...' : 'Add product #1' }}
       </button>
-      <button :aria-disabled="loading" @click="!loading && addToCart(-1)">
+      <button type="button" :aria-disabled="loading" @click="!loading && addToCart(-1)">
         {{ loading ? 'Adding...' : 'Add invalid product (errors)' }}
       </button>
     </div>
@@ -90,7 +90,7 @@ function bumpOptimistically(cmd: { payload?: { qty?: number } }) {
       directive tuple, #15490, once made it inert in every one).
     -->
     <div class="row">
-      <button v-vc-command="'cartAdd'" data-vc-target='{"id":2}' data-vc-payload='{"qty":1}'>
+      <button type="button" v-vc-command="'cartAdd'" data-vc-target='{"id":2}' data-vc-payload='{"qty":1}'>
         Add product #2 (v-vc-command, no handler)
       </button>
     </div>
@@ -102,7 +102,7 @@ function bumpOptimistically(cmd: { payload?: { qty?: number } }) {
     -->
     <div class="row">
       <label>qty <input type="number" v-model.number="qty" min="1" max="99" style="width:5rem"></label>
-      <button v-vc-payload="richPayload()" v-vc-command="'cartAdd'" v-vc-optimistic="bumpOptimistically"
+      <button type="button" v-vc-payload="richPayload()" v-vc-command="'cartAdd'" v-vc-optimistic="bumpOptimistically"
               data-vc-target='{"id":3}'>
         Add product #3 (v-vc-payload + v-vc-optimistic)
       </button>

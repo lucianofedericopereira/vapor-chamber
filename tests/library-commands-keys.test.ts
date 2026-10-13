@@ -1,4 +1,4 @@
-/** A `$` command never meets an app's memory: not through a custom key, not through a run in flight (plan 1.27 item 6 F6b, F6c). Rationale at the end. */
+/** A `$` command never meets an app's memory: not through a custom key, not through a run in flight (log s35.182). Rationale at the end. */
 import { describe, expect, it } from 'vitest';
 import { type Command, createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { cache, idempotent } from '../src/plugins-extra';

@@ -100,14 +100,10 @@ separate array. Each entry carries its prefix, computed once in `on()`, so
 dispatch tests it with one `startsWith`, with no `matchesPattern` call on the
 dispatch path.
 
-Real-world impact, listener fan-out with 50 exact + 5 wildcards. The ops/sec
-are one earlier run on one host. The ratio is the median of the latest
-`npm run bench:bands`.
-- emit: ~750 ops/sec
-- dispatch: ~600 ops/sec. Emit runs <!-- vc:benchEmitVsDispatchFanout -->1.33<!-- /vc:benchEmitVsDispatchFanout -->x the dispatch rate (no plugin chain / `meta` stamp / depth tracking)
-
-The bucketing gain scales with listener count: silent for fewer than 5
-listeners, larger beyond about 50.
+With 50 exact and 5 wildcard listeners, emit runs
+<!-- vc:benchEmitVsDispatchFanout -->1.44<!-- /vc:benchEmitVsDispatchFanout -->x
+the dispatch rate (no plugin chain, `meta` stamp or depth tracking), the median
+of the latest `npm run bench:bands`.
 
 ### Counter-based `meta.id`
 
@@ -119,10 +115,9 @@ reps): ~12 ns per call vs ~104 ns for `crypto.randomUUID()`, about 8x.**
 entropy, so `randomUUID`'s cost moves between runtimes while the counter's
 does not.
 
-The **ratio at the dispatch level is bench-backed and unaffected**: <!-- vc:benchUidCounterVsUuid -->3.14<!-- /vc:benchUidCounterVsUuid -->x on the
+The **ratio at the dispatch level is bench-backed and unaffected**: <!-- vc:benchUidCounterVsUuid -->2.90<!-- /vc:benchUidCounterVsUuid -->x on the
 10k-dispatch hot path. That is the median of the latest `npm run bench:bands`, from the
-`meta overhead - uid generator comparison` bench in `tests/perf.bench.ts`. One
-earlier run on one host read counter ~1,850 vs `randomUUID` ~750 ops/sec. Note the gap between ~8x per call and <!-- vc:benchUidCounterVsUuid -->3.14<!-- /vc:benchUidCounterVsUuid -->x per dispatch.
+`meta overhead - uid generator comparison` bench in `tests/perf.bench.ts`. Note the gap between ~8x per call and <!-- vc:benchUidCounterVsUuid -->2.90<!-- /vc:benchUidCounterVsUuid -->x per dispatch.
 The rest of the dispatch dilutes it, which is why per-call absolutes should
 never be quoted as if they were end-to-end wins.
 
@@ -145,7 +140,7 @@ bundle (`createCommandBus` + `createHttpBridge` + `logger`):
 
 | | Bundle |
 |--|--|
-| Brotli | **<!-- vc:sizeConsumer -->8.2<!-- /vc:sizeConsumer --> KB** |
+| Brotli | **<!-- vc:sizeConsumer -->8.4<!-- /vc:sizeConsumer --> KB** |
 | Vapor probing references | 0 |
 
 That number is measured, not retyped. `scripts/measure-size.mjs` builds this
@@ -184,11 +179,9 @@ bus.use(persist({
 Trade-off: 1 microtask of latency before the save lands. Storage reads right
 after a burst of dispatches see the pre-burst state until the next tick.
 
-Measured on 100 rapid dispatches x 50-item array state. The ops/sec are one
-earlier run on one host, and the ratio is the median of the latest
-`npm run bench:bands`:
-- Default: ~4,100 ops/sec
-- `coalesce: true`: ~97,000 ops/sec (**<!-- vc:benchPersistCoalesce -->17.89<!-- /vc:benchPersistCoalesce -->x**)
+On 100 rapid dispatches over a 50-item array state, `coalesce: true` runs
+**<!-- vc:benchPersistCoalesce -->18.27<!-- /vc:benchPersistCoalesce -->x** the default, the median of the latest
+`npm run bench:bands`.
 
 Use it when you're measurably bottlenecked on persist. Leave the default
 otherwise, to keep storage in lockstep with bus state.
@@ -232,32 +225,11 @@ millisecond share a `Date.now()` value whether the clock is cached or not, so
 it never gives **ordering**. Order comes from `meta.id`, whose default
 generator is a monotonic counter.
 
-**Measured** (`tests/clock-source-ab.test.ts`, real dispatch path, interleaved
-A/B, median of 5 reps, macOS / Node 24.19 where `Date.now()` is ~33 ns
-isolated):
-
-| Path | cached vs default |
-|---|---|
-| `bus.dispatch` / `bus.query` - bare bus | 1.42-1.67x |
-| `dispatchBatch` | 1.42-1.57x |
-| dispatch with an ordinary handler | 1.38-1.50x |
-| dispatch - 3 plugins + 1 listener | 1.18-1.24x |
-| dispatch - 50 listeners + 5 wildcards | 1.04-1.07x - **no gain** |
-| `emit` (control: never stamps) | 1.02-1.06x - the noise floor |
-
-The cache saves roughly **15-25 ns per command**, a fixed amount. So its share
-shrinks as the dispatch does more, and vanishes once listener fan-out
-dominates. The `emit` control row sets the noise floor, which is why the
-fan-out row reads "no gain" rather than a small one.
-
-Confirmed end to end on the bench: `bus.dispatch` moved from **197.7x** slower
-than a direct function call to **140.0x**. `bus.emit` is unchanged, which is
-the control: it never stamped meta.
-
-Both figures are hand-written and frozen: one interleaved run, where the claim
-is the DIRECTION of the change rather than either absolute. Do not read them
-against the `vc:benchFloorVsDispatch` marker further down, which measures the
-same two rows from a different run.
+The cache saved roughly **15-25 ns per command** when it landed (v1.6.0,
+macOS, Node 24), a fixed amount. So its share shrinks as the dispatch does
+more, and it vanishes once listener fan-out dominates.
+`tests/clock-source-ab.test.ts` measures it on the real dispatch path, with
+`emit` as the control, and prints its table.
 
 **The trade.** Every command in one synchronous burst shares a
 `ts`. Ordering is unaffected: `meta.id` is monotonic and unique, and it is what
@@ -294,16 +266,16 @@ states) and ref-counted (auto-dropped when the last subscriber disposes). It
 exposes a ring-buffered errors list capped at `maxSize` (default 10).
 
 ```ts
-import { useSharedCommandState } from 'vapor-chamber';
+import { useSharedCommandState } from 'vapor-chamber/vue';
 
 // In any number of components - all see the same isAnyLoading / errors / lastError.
 const { dispatch, isAnyLoading, lastError, errors, errorCount, clear } = useSharedCommandState();
 
 // Bind to button disabled across the whole UI:
-//   <button :disabled="isAnyLoading.value">Save</button>
+//   <button :disabled="isAnyLoading">Save</button>
 //
 // Show a top-of-page error toast:
-//   <Toast v-if="lastError.value">{{ lastError.value.message }}</Toast>
+//   <Toast v-if="lastError">{{ lastError.message }}</Toast>
 
 await dispatch('cartAdd', product);
 ```
@@ -378,9 +350,13 @@ Behavior:
   handler is responsible for stopping its own work: the bus does not forcibly
   terminate it. A handler or plugin that rethrows the signal's reason
   (`cmd.signal.throwIfAborted()`, a `fetch` with `cmd.signal`) gets the same
-  `core:aborted:dispatch` as a pre-aborted signal.
-- **One shape for every abort**: a `BusError` named `AbortError`, the signal's
-  reason as `cause`. `e.name === 'AbortError'`, `e instanceof BusError` and
+  error as a pre-aborted signal: an `Error` reason as itself, otherwise
+  `core:aborted:dispatch`.
+- **One shape for every abort the bus builds**: a `BusError` named
+  `AbortError`, the signal's reason as `cause`. An `Error` reason is not
+  wrapped: it comes back as itself, and `failureCondition(e, signal)` reads it
+  as `aborted`, as the retry and circuitBreaker do. For the bus's own shape,
+  `e.name === 'AbortError'`, `e instanceof BusError` and
   `failureCondition(e) === 'aborted'` all read it. The client's
   `transport:aborted:request` and the router's `router:aborted:navigation`
   have the same name.
@@ -438,21 +414,10 @@ configureAlienSignals(alienSignal);
 // observe the same underlying instances.
 ```
 
-**Performance note (v1.5.0 bench, beta.14):**
-
-| Signal path (isolated scalar write loop) | ops/sec | Notes |
-|---|---|---|
-| Plain `{ value }` object (default fallback) | ~371,000 | Zero overhead, not reactive |
-| **Vue `shallowRef()` through `signal()`, auto-detected** | **~40,000-62,000** | The default since v1.5.0 - ~4-7x the old deep-`ref()` path |
-| alien-signals through `configureAlienSignals` | ~10,400 | Opt-in reactive (non-Vue contexts) |
-| Vue deep `ref()` (the old v1.4 `signal()` default) | ~9,000 | Replaced by shallowRef - see "Reactive runtime notes", finding 5 |
-
-The `shallowRef()` range spans runs. The absolute is machine-state sensitive,
-and the **ratio to the deep `ref()` it replaced is the robust claim**. It is
-also the signal-write cost only. End to end through the command bus the scalar
-gain is ~+12%, because dispatch dominates (see the reactive-runtime-notes
-section). For push-pull reactivity *without* Vue, `configureAlienSignals`
-remains the right choice.
+In a Vue app keep the auto-detected `shallowRef()`: Vue's reactivity already
+runs alien-signals' algorithm (above). For push-pull reactivity *without* Vue,
+`configureAlienSignals` is the right choice. The plain `{ value }` fallback is
+not reactive.
 
 **How it is wired:** the connector takes alien-signals' `signal` function as an
 argument, so vapor-chamber never imports it. `alien-signals` is an optional
@@ -500,19 +465,19 @@ audience, not by feature checklist.
 
 | Variant     | Audience                                                      | Brotli |
 |-------------|---------------------------------------------------------------|--------|
-| `core`      | Sprinkled JS on server-rendered pages (Blade / Rails / Django)| <!-- vc:sizeIifeCore -->10.3<!-- /vc:sizeIifeCore --> KB |
-| `elements`  | Embeddable widgets through custom elements                    | <!-- vc:sizeIifeElements -->10.7<!-- /vc:sizeIifeElements --> KB |
-| `full`      | SPAs that grew big enough to want everything                  | <!-- vc:sizeIifeFull -->14.8<!-- /vc:sizeIifeFull --> KB |
+| `core`      | Sprinkled JS on server-rendered pages (Blade / Rails / Django)| <!-- vc:sizeIifeCore -->10.4<!-- /vc:sizeIifeCore --> KB |
+| `elements`  | Embeddable widgets through custom elements                    | <!-- vc:sizeIifeElements -->10.9<!-- /vc:sizeIifeElements --> KB |
+| `full`      | SPAs that grew big enough to want everything                  | <!-- vc:sizeIifeFull -->15.0<!-- /vc:sizeIifeFull --> KB |
 
 _(Always-current measured sizes for every export: [BUNDLE-SIZES.md](./BUNDLE-SIZES.md), generated by `npm run size:doc` and CI-verified fresh.)_
 
 **Decision tree:**
 
 ```
-Does your page register custom elements via defineWidget()?
-|- Yes -> elements
-`- No  -> Does your page use WebSocket/SSE, persistence, or undo/redo?
-         |- Yes -> full
+Does your page use WebSocket/SSE, persistence, or undo/redo?
+|- Yes -> full (elements and core carry none of them)
+`- No  -> Does your page register custom elements via defineWidget()?
+         |- Yes -> elements
          `- No  -> core
 ```
 
@@ -545,29 +510,35 @@ const onPriceTick = lane.compile('priceTick', (tick) => updateChart(tick));
 onPriceTick(tick);   // pure function call, no allocations on hot path
 ```
 
-**Measured throughput** (10k iterations, single handler):
+**Measured cost per call** (10k calls, single handler):
 
-| Lib / Path                               | Relative to floor |
-|------------------------------------------|-------------------|
-| direct function call (theoretical floor) | 1.0x              |
-| **vapor-chamber `fast-lane`**            | <!-- vc:benchFloorVsCompile -->13.96<!-- /vc:benchFloorVsCompile -->x |
-| mitt emit                                | <!-- vc:benchFloorVsMitt -->69.14-80.07<!-- /vc:benchFloorVsMitt -->x |
-| vapor-chamber `bus.dispatch` (general)   | <!-- vc:benchFloorVsDispatch -->151.80<!-- /vc:benchFloorVsDispatch -->x |
+| Path                                   | Time per call | Calls in one 60 fps frame |
+|----------------------------------------|---------------|---------------------------|
+| **vapor-chamber `fast-lane`**          | <!-- vc:benchCompileNs -->8.7<!-- /vc:benchCompileNs --> ns | about <!-- vc:benchCompilePerFrame -->1,900,000<!-- /vc:benchCompilePerFrame --> |
+| mitt emit                              | <!-- vc:benchMittNs -->44.7<!-- /vc:benchMittNs --> ns | about <!-- vc:benchMittPerFrame -->370,000<!-- /vc:benchMittPerFrame --> |
+| vapor-chamber `bus.dispatch` (general) | <!-- vc:benchDispatchNs -->92.7<!-- /vc:benchDispatchNs --> ns | about <!-- vc:benchDispatchPerFrame -->180,000<!-- /vc:benchDispatchPerFrame --> |
 
-The "Relative to floor" column is stamped from the latest `npm run bench:bands`
-(`scripts/bench-bands.mjs`). It is the median for this library's rows and the
-range over the runs for mitt's. A ratio against another library is a fact about
-one host (docs/V8-RULES.md rule 15, <!-- vc:benchProvenance -->Node 24.21.0, vitest 5.0.1, mitt 3.0.1, eventemitter3 5.0.4, 5 runs<!-- /vc:benchProvenance -->).
+Stamped from the latest `npm run bench:bands` (`scripts/bench-bands.mjs`), the
+median over its runs, on <!-- vc:benchProvenance -->Intel Core i7-8650U, Linux, Node 24.21.0, vitest 5.0.3, mitt 3.0.1, eventemitter3 5.0.4, 5 runs<!-- /vc:benchProvenance -->.
+The times belong to that machine, so read them as an order of magnitude. A
+ratio between two of this library's rows moved 2-9% between the two machines
+measured, and one against another library is a band for one host
+(docs/V8-RULES.md rule 15).
 
-Fast lane runs **<!-- vc:benchCompileVsDispatch -->10.57<!-- /vc:benchCompileVsDispatch -->x the ops/sec of `bus.dispatch`** and
-**<!-- vc:benchCompileVsMitt -->5.34-5.76<!-- /vc:benchCompileVsMitt -->x that of mitt's emit** on single-handler dispatch. Its <!-- vc:benchFloorVsCompile -->13.96<!-- /vc:benchFloorVsCompile -->x gap to the theoretical floor of a direct function call is
-the cost of one Map lookup + one closure call. The closure is what supports
-`remove()` + `clear()`.
+This table used to give each row as a multiple of a direct function call. That
+multiple doubled between two machines (the fast lane 13.96x on an Apple M3,
+30.63x on an Intel i7-8650U), because V8 reduces the bare call to almost
+nothing, so it was retired (docs/decisions.md, 2026-10-13).
+
+Fast lane runs **<!-- vc:benchCompileVsDispatch -->10.33<!-- /vc:benchCompileVsDispatch -->x the ops/sec of `bus.dispatch`** and
+**<!-- vc:benchCompileVsMitt -->4.83-5.83<!-- /vc:benchCompileVsMitt -->x that of mitt's emit** on single-handler dispatch. What
+it costs over a direct function call is one Map lookup + one closure call. The
+closure is what supports `remove()` + `clear()`.
 
 Take multi-listener fan-out (3 listeners). The latest `npm run bench:bands`
 reads the default `'live'` fast lane at
-**<!-- vc:benchFastLaneVsMitt -->1.84-1.95<!-- /vc:benchFastLaneVsMitt -->x mitt** and
-**<!-- vc:benchFastLaneVsEventEmitter3 -->0.94-1.04<!-- /vc:benchFastLaneVsEventEmitter3 -->x eventemitter3**
+**<!-- vc:benchFastLaneVsMitt -->1.88-2.32<!-- /vc:benchFastLaneVsMitt -->x mitt** and
+**<!-- vc:benchFastLaneVsEventEmitter3 -->0.91-0.96<!-- /vc:benchFastLaneVsEventEmitter3 -->x eventemitter3**
 (level with it where the range spans 1). In v1.12.0 the emit loop gained the
 unsub-during-emit identity guard. A listener removed mid-emit, by itself or a
 peer, no longer skips or double-invokes a neighbor. That guard is the default
@@ -615,7 +586,7 @@ object reads ahead there and falls behind once the names vary (log s35.57).
 
 The rows below compare against mitt and eventemitter3, the peers with a
 migration guide here. Each ratio against them is the range over the latest
-`npm run bench:bands` (<!-- vc:benchProvenance -->Node 24.21.0, vitest 5.0.1, mitt 3.0.1, eventemitter3 5.0.4, 5 runs<!-- /vc:benchProvenance -->).
+`npm run bench:bands` (<!-- vc:benchProvenance -->Intel Core i7-8650U, Linux, Node 24.21.0, vitest 5.0.3, mitt 3.0.1, eventemitter3 5.0.4, 5 runs<!-- /vc:benchProvenance -->).
 That range is a fact about that host (docs/V8-RULES.md rule 15). The numbers
 this library stands on are its own paths, measured against each other.
 
@@ -624,7 +595,7 @@ this library stands on are its own paths, measured against each other.
 This is the most common emit shape in real apps. Many lifecycle, debug and
 conditional events have zero subscribers. It should be effectively free.
 
-vapor-chamber's no-listener fast path runs **<!-- vc:benchEmitNoListenersVsMitt -->1.81-1.92<!-- /vc:benchEmitNoListenersVsMitt -->x the ops/sec of mitt** (the range over the
+vapor-chamber's no-listener fast path runs **<!-- vc:benchEmitNoListenersVsMitt -->1.85-1.88<!-- /vc:benchEmitNoListenersVsMitt -->x the ops/sec of mitt** (the range over the
 latest `npm run bench:bands`). Per emit, with pre-built buses and a sink, it
 costs 3.2 ns for one repeated event name and 3.8 ns over four varying names. It
 was the same in v1.25.0 (log s35.57). The cost is a `Map.has()` and an
@@ -634,8 +605,8 @@ was the same in v1.25.0 (log s35.57). The cost is a `Map.has()` and an
 ### Emit fan-out (3 listeners)
 
 vapor-chamber `emit` runs
-**<!-- vc:benchEmitVsMittFanout -->1.44-1.54<!-- /vc:benchEmitVsMittFanout -->x mitt**
-and **<!-- vc:benchEmitVsEventEmitter3Fanout -->0.78-0.82<!-- /vc:benchEmitVsEventEmitter3Fanout -->x eventemitter3**
+**<!-- vc:benchEmitVsMittFanout -->1.53-1.63<!-- /vc:benchEmitVsMittFanout -->x mitt**
+and **<!-- vc:benchEmitVsEventEmitter3Fanout -->0.76-0.78<!-- /vc:benchEmitVsEventEmitter3Fanout -->x eventemitter3**
 (the range over the latest `npm run bench:bands`): ahead of mitt, behind
 eventemitter3. Where fan-out speed against eventemitter3 matters, the fast lane
 is level with it (above).
@@ -656,7 +627,7 @@ any middleware-chained bus.
 mitt's `emit` calls the subscribed functions and returns nothing.
 `bus.dispatch` resolves the handler, runs the plugin chain, stamps the meta and
 returns a `CommandResult`. mitt's emit runs
-**<!-- vc:benchMittEmitVsDispatch -->1.64-2.04<!-- /vc:benchMittEmitVsDispatch -->x**
+**<!-- vc:benchMittEmitVsDispatch -->1.89-2.08<!-- /vc:benchMittEmitVsDispatch -->x**
 the ops/sec of `bus.dispatch` (the range over the latest `npm run bench:bands`).
 
 The gap reflects the work `dispatch` does per call. It allocates the meta object
@@ -695,269 +666,65 @@ Inspiration: similar tricks ship in [splice](https://github.com/lucianofedericop
 
 ## Reactive runtime notes (Vue 3.6)
 
-> **Where this record stops.** The per-release notes below run to beta.17. The
-> library has since aligned through rc.3 to <!-- vc:vueAligned -->3.6.0-rc.10<!-- /vc:vueAligned --> (v1.14.0 onward). No full
-> bench re-run is recorded here, so read every absolute below as a beta-era
-> snapshot. The per-release alignment findings for the RC window live in
-> CHANGELOG.md.
->
-> The guards that actually catch a regression are same-process:
-> `tests/signal-shallow-ab.test.ts`, `tests/clock-source-ab.test.ts`, the
-> wildcard and router-stamp A/Bs. Their equivalence checks run in every suite,
-> which is why nothing here silently rotted. Their timing tables print on
-> `npm run test:timing` (log s35.55).
->
-> **One cross-version guard is NOT in that list, and the rc.7 cycle found out
-> why.** `tests/vue-version-ab.test.ts` (driven by `npm run ab:vue`) compares
-> two Vue dists in one process. Two workloads build a persistent dependency
-> graph: watcher notify and computed read-after-write. On those it cannot
-> resolve a version difference at all. Two byte-identical copies of the SAME
-> dist differ by up to 1.425x through it, in opposite directions per workload,
-> because each module instance carries its own reactivity state. Its printed
-> `0.87-1.15` band holds for the two workloads that build no graph. Treat a
-> "faster" or "slower" verdict on the other two as unmeasured until that
-> harness grows a self-A/B control pass.
+The guards that catch a regression are same-process:
+`tests/signal-shallow-ab.test.ts`, `tests/clock-source-ab.test.ts`, the
+wildcard and router-stamp A/Bs. Their equivalence checks run in every suite.
+Their timing tables print on `npm run test:timing` (log s35.55).
 
-Findings from the v1.5.0 bench run (June 2026, Vue beta.14, confirmed numbers).
-The bench comment block in `tests/perf.bench.ts` holds them. This is the single,
-current reactive-perf section. Where a number shifted across betas, the
-prior-beta baseline is cited inline, so the superseded per-beta notes need no
-section of their own.
+**One cross-version guard is NOT in that list, and the rc.7 cycle found out
+why.** `tests/vue-version-ab.test.ts` (driven by `npm run ab:vue`) compares
+two Vue dists in one process. Two workloads built a persistent dependency
+graph: watcher notify and computed read-after-write. On those it could not
+resolve a version difference at all. Two byte-identical copies of the SAME
+dist differed by up to 1.425x through it, in opposite directions per
+workload, because each module instance carries its own reactivity state. The
+harness now runs a self-comparison control, and those two workloads are
+removed (their control spread 68% and 35%). It reports shallowRef writes and
+effectScope only (`tests/vue-version-ab.test.ts`).
 
-> **beta.15 (v1.6.0):** no perf-affecting change on these paths. The beta.15
-> alignment was documentation plus one guard on the (non-hot) `v-vc-command`
-> click path. Nothing in a measured hot loop changed.
->
-> A 3-run beta.15 set was recorded on a dev host (see the baseline blocks in
-> `tests/perf.bench.ts`). The stable rows (command bus, transition bridge,
-> `useCommandState`, `effectScope` lifecycle) land about 3-8% under the
-> beta.14 *reference-host* numbers **uniformly**. That **includes the
-> Vue-independent raw `bus.dispatch` path**, which Vue's version cannot touch.
-> So that shift is host/load variance, not a regression.
->
-> The Vue-reactive rows (`shallowRef`, `watchEffect`) swing 20-30% run-to-run
-> by machine state and are recorded as ranges. The same-process
-> `signal-shallow-ab` A/B remains the trustworthy regression guard, and still
-> shows `shallowRef` faster. The beta.14 numbers below remain the cross-beta
-> reference. An apples-to-apples cross-beta delta needs beta.14 re-run on the
-> same host. Bench labels now read the running Vue version dynamically
-> (`VUE_VERSION`), so they self-track.
+### `signal()` wires `shallowRef`, not `ref`
 
-> **beta.16:** no lib code change, so no path moved on our side. The full bench
-> was re-run against beta.16 on a dev host and is **green**. The Vue-independent
-> rows land on the recorded baselines: plain `{ value }` ~368k ops/s, fast-lane
-> ~28.6k, `bus.dispatch` ~1.83k. That confirms no regression. The Vue-reactive
-> rows stay inside their recorded ranges.
->
-> No controlled cross-beta delta is claimed. That needs beta.15 re-measured on
-> the *same* host. Single-host numbers swing 20-30% by machine state, so a
-> same-process A/B is the only honest comparison.
->
-> **Opportunity logged, not acted on:** Vue's #14969 (skip `SlotFragment` for
-> stable slot fallback) shows a pattern: a compile-time proof, then a one-bit
-> flag, then a lighter runtime object. It is a candidate for our own
-> allocation-on-the-uncertain-branch hot paths. It lands only with a measured
-> same-host A/B, after the Vapor-first/bus-first decision at 3.6 stable, and
-> not on a guess.
-
-> **beta.17:** no lib code change again. Every beta.17 fix sits in one of three
-> places. Compiler-vapor fixes are compile-time, below us. Runtime
-> slot/hydration/interop fixes are below the command-replay, or inherited
-> through the `getVaporInteropPlugin()` pass-through. Reactivity/scheduler
-> fixes touch nothing the lib uses.
->
-> The full bench was re-run against beta.17 on a dev host and is **green**. The
-> Vue-independent rows land on the recorded baselines: plain `{ value }` floor
-> ~368k ops/s, fast-lane ~28.7k, `bus.dispatch` ~1.78k, `emit` with no
-> listeners ~25.4k. That confirms no regression. The Vue-reactive rows stay
-> inside their recorded ranges. No controlled cross-beta delta is claimed.
->
-> **Pattern worth noting:** Vue's #14984 (*preserve render-effect creation order
-> when updating*) had to add creation order as a scheduler tiebreaker behind
-> component id. The bus already gets that insertion-order invariant **for
-> free**, from JS's stable `Array.prototype.sort` on equal-priority plugins
-> (`byPriority`). The `equal priority preserves registration order` regression
-> test already pins it. Nothing to act on, since the lib's ordering was
-> already correct by construction. The parallel is a good reminder of why that
-> test stays.
-
-**1. The plain `{ value }` fallback remains the fastest write path at ~372,000 ops/sec.**
-It is essentially unchanged from beta.13 (~368k), within normal run-to-run
-variance. The fallback is not reactive. For push-pull reactivity without Vue,
-use `configureAlienSignals(alienSignal)` (~10,400 ops/sec).
-
-**2. With `signal()` now wired to `shallowRef`, the Vue path is several times the alien-signals adapter, not equivalent to it.**
-The beta.13 docs reported `signal()` (then deep `ref()`) at ~9k, *converging*
-with the `alienSignalAdapter` (~10k). That comparison is obsolete. Since v1.5.0
-`signal()` wires **`shallowRef`**. On an isolated scalar write loop it measures
-**~40,000-62,000 ops/sec** across runs. That is roughly **4-7x the deep `ref()`
-it replaced**, and about 4-6x the alien adapter (~10,400).
-
-The absolute is machine-state sensitive: 37k on a busy machine, 62k on an idle
-one. The ratio is the robust claim. So for Vue apps the auto-detected `signal()`
-is now clearly the fastest reactive path. `configureAlienSignals` is for non-Vue
-contexts, not a throughput upgrade. This figure is isolated. End to end through
-the bus the scalar gain is ~+12% (finding 5 has the real-path numbers).
-
-**3. beta.14 scheduler improvements lift `effectScope` lifecycle throughput ~9% above beta.13.**
-`effectScope.run(() => onScopeDispose(fn))` with no tracked reactive state now
-runs at ~173,000 ops/sec, against ~165k in beta.13. The "reset job queue length
-after flush" fix reduces teardown overhead. Every vapor-chamber composable that
-calls `tryAutoCleanup` benefits automatically.
-
-**4. `useCommandState` throughput improves ~24% in beta.14, and `{ coalesce: true }` remains neutral.**
-It measures ~2,093 ops/sec immediate and ~2,105 ops/sec coalesced, with 100
-dispatches. Both are +24% above the beta.13 ~1,700 ops/sec baseline, and the
-scheduler flush improvement accounts for the lift. The rule is unchanged. Use
-`coalesce: true` for correctness (at most 1 reactive write per burst), not
-throughput. The two paths are within noise of each other.
-
-**5. `signal()` wires `shallowRef`, not `ref`, and the difference is large for object/array state.**
 The alien-signals rewrite changed dependency *tracking*. But
 `ref(anObjectOrArray)` still wraps the value in a deep reactive Proxy through
 `toReactive()`. The library replaces signal values wholesale and never mutates
 nested fields. So `shallowRef` is semantically equivalent for every internal
 signal, and it skips that proxy cost.
 
-It was measured as an **interleaved same-process A/B** on the real
-`useCommandState` dispatch path. The coarse vitest-bench harness cannot resolve
-this. Its ~480 us/iteration setup floor compresses array and scalar cases to the
-same ~2,100 ops/sec.
+`tests/signal-shallow-ab.test.ts` measures it as an **interleaved
+same-process A/B** on the real `useCommandState` dispatch path (median of 5
+interleaved reps, `process.hrtime`). The coarse vitest-bench harness cannot
+resolve this: its per-iteration setup floor compresses array and scalar cases
+to one rate.
 
-| `useCommandState` dispatch path | `ref` | `shallowRef` | delta |
-|---|---|---|---|
-| 100 array appends (v-for source) | ~3,300 | ~11,300 | **+245%** |
-| 10 array appends | ~122,000 | ~285,000 | **+134%** |
-| 100 scalar increments | ~123,000 | ~146,000 | **+12%** |
-
-These are not hand-measured one-offs. `tests/signal-shallow-ab.test.ts` runs
-this exact A/B (median of 7 interleaved reps, `process.hrtime`). It **prints the
-table** on `npm run test:timing`, and that printed output is the evidence. It
-has been opt-in since log s35.55, because a timing loop sets the suite's floor
-and asserts nothing.
+The same-process test swings up to 2x between runs, so it is a lead; its table prints on
+`npm run test:timing`. The figure comes from `npm run ab` (docs/V8-RULES.md
+rule 16), workload `scripts/ab/workloads/signal-backend.mjs`: arm A the shipped
+build, arm B the same source built with `signal()` wired to `ref`. Measured
+2026-10-13 on an Intel Core i7-8650U, Linux, Node 24.21.0, Vue 3.6.0-rc.11,
+10 processes. A state that appends to an array, rebuilt every 100 dispatches,
+cost 1.94-1.98 us per dispatch on `shallowRef` and 5.72-6.34 us on `ref`:
+2.95-3.13x, counted at both call lengths. With 10 appends per state (3.8-4.2x)
+and on a number (1.42-1.44x), `ref` read slower too, but both rows failed the
+tool's interference gates, so they are leads, not results. The control, a
+dispatch with no state, read 1.001 and 0.997.
 
 It deliberately does not assert a timing *threshold*. Ratios are unstable under
 parallel load and coverage instrumentation. The test also compares Vue's
 `ref`/`shallowRef` directly, so it couldn't catch a library regression anyway.
 The actual regression guard is `chamber.test.ts` > "signal() factory - shallow
-reactivity", which asserts `signal()` stays a `shallowRef`. The array/10 and
-scalar deltas are the noisier cases (run-to-run +/-10-20%). The array/100 case
-is consistently ~3.4x.
+reactivity", which asserts `signal()` stays a `shallowRef`.
 
 Why not an isolated `ref`-vs-`shallowRef` micro-bench in `perf.bench.ts`?
 Because pure deterministic signal loops are constant-foldable. V8
 dead-code-eliminates the shallowRef path, which has no observable effect, while
-keeping `ref`'s Proxy-trap side effects. That yields inflated 800x+ ratios with
-+/-100% rme: garbage. The real dispatch path defeats constant-folding, since the
-command bus is opaque indirection. That is why the interleaved real-path test
-above is the only trustworthy source for these ratios.
-
-Methodology note: these absolute numbers are far higher than the
-`perf.bench.ts` `useCommandState` table. The manual harness strips
-vitest-bench's per-iteration setup floor. Use them for the **ref-vs-shallowRef
-ratio only**, not as standalone throughput figures. The takeaway: deep-proxy
-creation on every object/array signal write was real, avoidable overhead, and
-it is now avoided by default.
+keeping `ref`'s Proxy-trap side effects. The ratios that yields are garbage.
+The real dispatch path defeats constant-folding, since the command bus is
+opaque indirection.
 
 If you genuinely need deep reactivity (nested-mutation tracking for a
 `v-model`-bound state object), opt back in per state. Use `useDeepCommandState`
 or `deepSignal` from `vapor-chamber/reactive`. It pays the `ref` cost only where
 you ask for it, and every other signal stays on the fast shallow path.
-
----
-
-## Benchmark snapshot
-
-Run on a current Apple Silicon dev machine, June 2026 (v1.5.0, Vue beta.14).
-Your numbers will differ. What matters is the **ratios** and how they shift
-after your changes.
-
-Reproduce with:
-
-```bash
-npx vitest bench --run tests/perf.bench.ts
-```
-
-| Bench                                                              | ops/sec     |
-|--------------------------------------------------------------------|-------------|
-| `syncDispatch` - bare handler, no plugins                          | ~2,316      |
-| `syncDispatch` - 3 plugins + 1 listener                            | ~1,267      |
-| `asyncDispatch` - bare handler                                     | ~3,391      |
-| `dispatch` - default uid                                           | ~1,874      |
-| `dispatch` - `crypto.randomUUID` through `configureUid`            | ~747        |
-| `dispatch` - 50 exact + 5 wildcard listeners                       | ~602        |
-| `emit` - 50 exact + 5 wildcard listeners                           | ~756        |
-| `persist` - default mode (100 dispatches x 50-item state)          | ~3,894      |
-| `persist` - `coalesce: true` (100 dispatches x 50-item state)      | ~98,292     |
-| `rehydrate` - 1000 commands, single handler                        | ~16,192     |
-| `rehydrate` - 1000 commands, ignoreUnhandled skip path             | ~107,016    |
-| **Vue reactive integration (beta.14, needs vue devDep)**           |             |
-| `signal()` fallback - plain `{ value }` object (no Vue, no alien-signals) | ~372,198 |
-| alien-signals through `configureAlienSignals` (opt-in reactive)    | ~10,400     |
-| `signal()` write - Vue **shallowRef** auto-detected (v1.5.0 default)| ~40,000-62,000 |
-| `signal()` write - Vue deep `ref()` (old v1.4 default, for reference)| ~9,000     |
-| `effectScope` + `onScopeDispose` x 1k - no reactive state (lazy job) | ~173,462 |
-| `effectScope` + reactive signal + `onScopeDispose` x 1k (full path)| ~21,287    |
-| `useCommandState` 100 dispatches - Vue ref signal writes (beta.14) | ~2,100      |
-| `useCommandState coalesced` 100 dispatches - 1 reactive write      | ~2,115      |
-
----
-
-## What we measured but did not ship
-
-Documented here so future contributors don't repeat the investigation.
-
-### HTTP envelope shape
-
-We considered making the HTTP envelope `{ command, target, payload }` always
-include all fields, rather than omitting `payload` when undefined, for
-hidden-class consistency. **Already done in production code.** The bench showed
-no meaningful difference (~5%, within noise). JSON.stringify pays a tiny cost to
-skip undefined slots. That cancels the IC consistency win for write-once ->
-serialize-once -> discard workloads. Not actionable.
-
-**Lesson:** monomorphic shape advice applies to read-many paths (result, meta,
-command). For serialize-once paths, write idiomatic code. V8's JSON.stringify
-has its own fast paths that don't benefit from shape preservation tricks.
-
-### Copy-on-write listener buckets (fast-lane emit): shipped as an opt-in
-
-v1.12.0 considered it to recover the fan-out throughput the unsub-during-emit
-identity guard cost. It was first rejected because it changes removal
-semantics: a listener removed mid-emit still runs once (snapshot semantics).
-Silently swapping semantics for a bench row is not a trade this lib makes.
-
-**Resolution: shipped as `createFastLane({ removal: 'snapshot' })`.** It is off
-by default (`'live'` keeps bus parity). The mode is chosen at factory time, so
-the hot path carries zero mode-branching. Each mode's mid-emit-unsubscribe
-contract is pinned by its own test. The consumer who opts in has read the trade
-at the option's doc comment, and nobody gets snapshot semantics by accident. See
-the fan-out table above for the gap between the two modes.
-
-### Parallel after-hooks
-
-We considered `Promise.all`-style parallel execution of registered after-hooks.
-It was skipped because most real hook pipelines have hidden order dependencies
-(logger before metrics, audit before publish). An opt-in `{ parallel: true }`
-registration option was floated for v1.3 and never built. It is not in
-ROADMAP.md and nothing is scheduled. The default stays sequential, and this
-entry records the reasoning rather than a plan.
-
-### Property mangling
-
-We considered Terser's `mangle.properties` for internal `_*` prefixed names. It
-was skipped, since it breaks debugging without measurable real-world gain on
-bundles of this size. It is reconsidered if a measured profile shows it's worth
-it.
-
-### Closure Compiler ADVANCED
-
-Considered. It would save another 10-15% on top of current Vite output. But it
-needs `@export` on every API, externs files, and no dynamic property access
-(`obj[runtimeKey]`, `Symbol.toStringTag`, runtime
-`vue.defineVaporCustomElement` probes). The library's runtime
-feature-detection patterns are fundamentally incompatible with Closure's
-static-world assumptions. Friction far exceeds gain.
 
 ---
 
@@ -1028,16 +795,13 @@ it measures nothing, and the figure is withdrawn. The change stands at
 
 If you want to know whether vapor-chamber is a bottleneck in your app:
 
-1. **Hot-path dispatch count.** Wrap a sample window around your
-   highest-frequency dispatch sites and count. Under ~10k dispatches/sec per
-   page, the bus is not your bottleneck. Look at the work the handlers
-   themselves do.
+1. **Hot-path dispatch cost.** Time your highest-frequency dispatch sites
+   with `performance.now()` over a sample window, in a DevTools profile or
+   around the call. If the bus's own share is small next to the handlers', look
+   at the work the handlers do.
 2. **Persist save frequency.** Count `setItem` calls in DevTools' Storage
    panel. If you see more than 100/sec, enable `coalesce: true`.
-3. **Listener fan-out.** `inspectBus(bus)` returns the registered listener
-   patterns. If `listenerPatterns.length > 50`, you're getting the bucketing
-   benefit. If it's 1-5, the bucketing is silent.
-4. **HTTP envelope cost.** Profile the `JSON.stringify(envelope)` site only if
+3. **HTTP envelope cost.** Profile the `JSON.stringify(envelope)` site only if
    your endpoint is hot. The lib's envelope is already minimal.
 
 For a full bench run against your own dispatch shapes, copy

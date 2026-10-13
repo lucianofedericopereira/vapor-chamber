@@ -32,14 +32,6 @@
  * Both disappear here: `Math.trunc(Infinity)` is `Infinity` and `Math.min`
  * carries it through, so the unbounded case needs no branch of its own.
  *
- * ONE SITE DELIBERATELY DOES NOT USE THIS, and saying so here is the point of
- * saying it at all - an exception nobody records is just a gap. `command-bus.ts`
- * keeps its inline `| 0` for `maxBufferSize`, because importing this module into
- * the one file every consumer pulls costs 50 B brotli in the minimal Blade
- * bundle `esm-treeshake.test.ts` gates, which breaches that ceiling on its own.
- * `| 0` already handles the NaN case there; what it gives up is `Infinity`,
- * recorded at that call site.
- *
  * WHY A BAD OPTION FALLS BACK TO THE DEFAULT rather than to zero. The five
  * hand-clamped sites folded NaN to 0 on the argument that storing nothing is
  * "bounded, and loud rather than silent". Written out per site, that argument
@@ -58,7 +50,9 @@ export const MAX_TIMEOUT_MS = 2_147_483_647;
 /**
  * Normalize a caller-supplied count, size, depth, attempt cap or delay.
  *
- * - NaN, or anything that is not a number -> `fallback`, the documented default
+ * - NaN, or a value `Number()` reads as NaN (undefined, a non-numeric string,
+ *   an object) -> `fallback`, the documented default. A numeric string is its
+ *   number, and `null` and `false` read 0
  * - below `min`  -> `min`, which catches negatives and -Infinity together
  * - above `max`  -> `max`; left at `Infinity`, "no bound" passes through intact
  * - fractional   -> truncated toward zero
@@ -73,6 +67,28 @@ export function countOption(value: unknown, fallback: number, min = 0, max = Num
   return Number.isNaN(n) ? fallback : Math.min(max, Math.max(min, Math.trunc(n)));
 }
 
+declare const delayBrand: unique symbol;
+
+/**
+ * A wait a timer keeps: a whole number from 0 to MAX_TIMEOUT_MS. Only
+ * `delayOption` and `isDelay` make one. Every setTimeout and setInterval in
+ * src takes a Delay or a number literal, and no file but this one casts to
+ * it (tests/timer-delays.test.ts).
+ */
+export type Delay = number & { readonly [delayBrand]: true };
+
+/**
+ * A caller-supplied delay, by countOption's rule with MAX_TIMEOUT_MS as the
+ * ceiling: NaN is `fallback`, a larger value the maximum. The fallback is the
+ * library's own default. `undefined` as the default means "no timer" (the
+ * batching bridge's microtask).
+ */
+export function delayOption(value: unknown, fallback: number, min?: number): Delay;
+export function delayOption(value: unknown, fallback: undefined, min?: number): Delay | undefined;
+export function delayOption(value: unknown, fallback: number | undefined, min = 0): Delay | undefined {
+  return countOption(value, fallback as number, min, MAX_TIMEOUT_MS) as Delay | undefined;
+}
+
 /**
  * True for a wait a timer can keep: a number from 0 to MAX_TIMEOUT_MS. The
  * rule every reader of a declared `retryIn` applies (the async bus's retry,
@@ -81,6 +97,6 @@ export function countOption(value: unknown, fallback: number, min = 0, max = Num
  * fires at once on both, and the outbox re-flushed in a loop on either
  * (tests/retry-in-unusable.test.ts).
  */
-export function isDelay(value: unknown): value is number {
+export function isDelay(value: unknown): value is Delay {
   return typeof value === 'number' && value >= 0 && value <= MAX_TIMEOUT_MS;
 }

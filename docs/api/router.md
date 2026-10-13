@@ -77,7 +77,7 @@ In-memory history - tests and SSR. Same contract as createWebHistory.
 
 ### createRouter
 
-**Function** - [src/router/index.ts:188](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/index.ts#L188)
+**Function** - [src/router/index.ts:189](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/index.ts#L189)
 
 ```ts
 createRouter<TName extends string = string>(options: RouterOptions) => Router<TName>
@@ -112,7 +112,7 @@ Decode one raw query value through its declaration; falls back to
 
 ### defaultAffects
 
-**Function** - [src/router/loaders.ts:166](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/loaders.ts#L166)
+**Function** - [src/router/loaders.ts:167](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/loaders.ts#L167)
 
 ```ts
 defaultAffects(record: TableRecord, keys: readonly string[], handlers: LoaderHandlers) => boolean
@@ -137,7 +137,7 @@ DROPPED - values equal to the declared default never pollute the URL.
 
 ### interpolateLoad
 
-**Function** - [src/router/loaders.ts:80](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/loaders.ts#L80)
+**Function** - [src/router/loaders.ts:81](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/loaders.ts#L81)
 
 ```ts
 interpolateLoad(template: string, location: RouteLocation, queryDefs: Record<string, QueryParamDef>) => string
@@ -204,7 +204,7 @@ Trailing-slash tolerant. exact = same path; active = exact or path prefix
 
 ### preheatIdle
 
-**Function** - [src/router/dom.ts:248](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/dom.ts#L248)
+**Function** - [src/router/dom.ts:324](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/dom.ts#L324)
 
 ```ts
 preheatIdle(factories: ReadonlyArray<() => Promise<unknown>>, options?: IdlePreheatOptions) => () => void
@@ -217,7 +217,7 @@ One-shot per call; returns a cancel function.
 
 ### readRoutesPayload
 
-**Function** - [src/router/index.ts:159](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/index.ts#L159)
+**Function** - [src/router/index.ts:160](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/index.ts#L160)
 
 ```ts
 readRoutesPayload(raw: unknown) => RoutesPayload
@@ -308,7 +308,7 @@ bus.on('routerNavigated', (cmd) => track(cmd.target.to.fullPath));
 
 ### runLoaders
 
-**Function** - [src/router/loaders.ts:121](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/loaders.ts#L121)
+**Function** - [src/router/loaders.ts:122](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/loaders.ts#L122)
 
 ```ts
 runLoaders(handlers: LoaderHandlers, records: readonly TableRecord[], location: RouteLocation, signal: AbortSignal, onRevalidate?: (recordName: string, revalidation: Promise<unknown>, location: RouteLocation) => void, refresh?: boolean) => Promise<Map<string, unknown>>
@@ -319,7 +319,7 @@ failures throw coded RouterErrors (cause attached, abort -> `aborted:navigation`
 
 ### stampActiveLinks
 
-**Function** - [src/router/dom.ts:218](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/dom.ts#L218)
+**Function** - [src/router/dom.ts:294](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/dom.ts#L294)
 
 ```ts
 stampActiveLinks(base: string, currentPath: string, root?: ParentNode) => void
@@ -458,7 +458,7 @@ useRouter() => Router
 
 ### AfterEachHook
 
-**Type alias** - [src/router/types.ts:166](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L166)
+**Type alias** - [src/router/types.ts:169](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L169)
 
 ```ts
 export type AfterEachHook = (to: RouteLocation, from: RouteLocation) => void;
@@ -485,7 +485,7 @@ export type Breadcrumb = {
 
 ### ComponentEntry
 
-**Type alias** - [src/router/types.ts:170](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L170)
+**Type alias** - [src/router/types.ts:173](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L173)
 
 ```ts
 export type ComponentEntry = unknown | (() => Promise<unknown>);
@@ -496,7 +496,7 @@ Component map entry: a component, or a lazy loader returning one
 
 ### ComponentMap
 
-**Type alias** - [src/router/types.ts:171](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L171)
+**Type alias** - [src/router/types.ts:174](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L174)
 
 ```ts
 export type ComponentMap = Record<string, ComponentEntry>;
@@ -529,7 +529,7 @@ for tests and SSR. Link handling lives in router/dom.ts, not here.
 
 ### IdlePreheatOptions
 
-**Type alias** - [src/router/dom.ts:235](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/dom.ts#L235)
+**Type alias** - [src/router/dom.ts:311](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/dom.ts#L311)
 
 ```ts
 export type IdlePreheatOptions = {
@@ -542,7 +542,7 @@ export type IdlePreheatOptions = {
 
 ### LoaderContext
 
-**Type alias** - [src/router/loaders.ts:27](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/loaders.ts#L27)
+**Type alias** - [src/router/loaders.ts:28](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/loaders.ts#L28)
 
 ```ts
 export type LoaderContext = {
@@ -572,7 +572,7 @@ against the four-argument signature keep working untouched.
 
 ### LoaderHandlers
 
-**Type alias** - [src/router/loaders.ts:66](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/loaders.ts#L66)
+**Type alias** - [src/router/loaders.ts:67](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/loaders.ts#L67)
 
 ```ts
 export type LoaderHandlers = {
@@ -614,7 +614,7 @@ export type MenuItem = {
 
 ### NavigationGuard
 
-**Type alias** - [src/router/types.ts:161](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L161)
+**Type alias** - [src/router/types.ts:164](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L164)
 
 ```ts
 export type NavigationGuard = (
@@ -688,7 +688,7 @@ Cast applied to a path param or scalar query param.
 
 ### PrefixHandler
 
-**Type alias** - [src/router/loaders.ts:48](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/loaders.ts#L48)
+**Type alias** - [src/router/loaders.ts:49](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/loaders.ts#L49)
 
 ```ts
 export type PrefixHandler = (
@@ -747,7 +747,7 @@ lookalike object with a `value` accessor would not unwrap).
 
 ### QueryPatch
 
-**Type alias** - [src/router/types.ts:69](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L69)
+**Type alias** - [src/router/types.ts:72](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L72)
 
 ```ts
 export type QueryPatch = Record<string, unknown | null | undefined>;
@@ -757,7 +757,7 @@ Writable query patch: null/undefined removes a key.
 
 ### QueryValues
 
-**Type alias** - [src/router/types.ts:66](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L66)
+**Type alias** - [src/router/types.ts:69](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L69)
 
 ```ts
 export type QueryValues = Record<string, string | string[]>;
@@ -767,7 +767,7 @@ Raw query values as parsed from the URL string.
 
 ### RenderEntry
 
-**Type alias** - [src/router/types.ts:125](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L125)
+**Type alias** - [src/router/types.ts:128](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L128)
 
 ```ts
 export type RenderEntry = {
@@ -837,7 +837,7 @@ export type RevalidatePlugin = ((cmd: BusCommand, next: () => unknown) => unknow
 
 ### RouteLocation
 
-**Type alias** - [src/router/types.ts:107](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L107)
+**Type alias** - [src/router/types.ts:110](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L110)
 
 ```ts
 export type RouteLocation = {
@@ -861,7 +861,7 @@ A resolved, normalized location - what guards and useRoute() see.
 
 ### RouteLocationRaw
 
-**Type alias** - [src/router/types.ts:144](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L144)
+**Type alias** - [src/router/types.ts:147](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L147)
 
 ```ts
 export type RouteLocationRaw<TName extends string = string> =
@@ -882,7 +882,7 @@ as `createRouter<AdminRouteName>(...)` - typos become compile errors.
 
 ### RouteParams
 
-**Type alias** - [src/router/types.ts:72](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L72)
+**Type alias** - [src/router/types.ts:75](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L75)
 
 ```ts
 export type RouteParams = Record<string, string | number | boolean>;
@@ -958,7 +958,8 @@ export type Router<TName extends string = string> = {
 export type RouteRecord = {
   name: string;
   /** Pattern relative to the router base. `:param`, `:param(regex)`,
-   *  `:param?`, trailing `*` splat (-> params.pathMatch). */
+   *  `:param?`, trailing `*` splat (-> params.pathMatch, decoded segment by
+   *  segment and encoded back the same way, its slashes kept). */
   path: string;
   parent?: string | null;
   /** Key into the client component map. null/absent + !blade = group record:
@@ -981,7 +982,9 @@ export type RouteRecord = {
    *  fit falls through to the next row; the matched value is cast. */
   params?: Record<string, ParamType>;
   query?: Record<string, QueryParamDef>;
-  /** Server data: permissions, titles, `preheat` flag, ... */
+  /** Server data: permissions, titles, ... `preheat: true` also warms the
+   *  route's component when the page is idle. `preheat: false`: a link to the
+   *  route does not warm it, though a route sharing the component still does. */
   meta?: Record<string, unknown>;
 };
 ```
@@ -1051,7 +1054,7 @@ The data of `routerNavigated`.
 
 ### RouterOptions
 
-**Type alias** - [src/router/index.ts:109](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/index.ts#L109)
+**Type alias** - [src/router/index.ts:110](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/index.ts#L110)
 
 ```ts
 export type RouterOptions = {
@@ -1069,7 +1072,7 @@ export type RouterOptions = {
    *  unused otherwise. `routerHttp()` from `vapor-chamber/router/remote` is the
    *  preconfigured one, and any `HttpClient` works. */
   http?: HttpClient;
-  /** Document-level link interception + active stamping + hover preheat.
+  /** Document-level link interception + active stamping + hover and focus warm-up.
    *  Default: true in the browser. */
   links?: boolean;
   /** Selector scoping data-active stamping (e.g. the admin shell) - stamping
@@ -1102,7 +1105,7 @@ export type RouterOptions = {
 
 ### RouteSnapshot
 
-**Type alias** - [src/router/types.ts:133](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L133)
+**Type alias** - [src/router/types.ts:136](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L136)
 
 ```ts
 export type RouteSnapshot = {
@@ -1120,7 +1123,7 @@ so a page never renders with the previous page's data.
 
 ### RoutesPayload
 
-**Type alias** - [src/router/types.ts:58](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L58)
+**Type alias** - [src/router/types.ts:61](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L61)
 
 ```ts
 export type RoutesPayload = {
@@ -1135,7 +1138,7 @@ Envelope for a delivered route table.
 
 ### RoutesSource
 
-**Type alias** - [src/router/index.ts:103](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/index.ts#L103)
+**Type alias** - [src/router/index.ts:104](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/index.ts#L104)
 
 ```ts
 export type RoutesSource =
@@ -1163,7 +1166,7 @@ export type RouteTable = {
 
 ### TableRecord
 
-**Type alias** - [src/router/types.ts:76](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L76)
+**Type alias** - [src/router/types.ts:79](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/types.ts#L79)
 
 ```ts
 export type TableRecord = {
@@ -1196,7 +1199,7 @@ identity of these drives reuse-vs-remount classification.
 
 ### UrlHandler
 
-**Type alias** - [src/router/loaders.ts:58](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/loaders.ts#L58)
+**Type alias** - [src/router/loaders.ts:59](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/router/loaders.ts#L59)
 
 ```ts
 export type UrlHandler = (
@@ -1221,7 +1224,7 @@ interpolation (interpolateLoad) is the handler's choice.
 HARD_NAV_CODES: ReadonlySet<"router:missing:route" | "router:refused:guard" | "router:aborted:navigation" | "router:missing:routes" | "router:missing:record" | "router:exceeded:redirects" | "router:failed:guard" | "router:failed:history" | "router:already:route" | "router:missing:parent" | "router:invalid:parent" | "router:missing:param" | "router:invalid:menu" | "router:invalid:path" | "router:unexpected:routes" | "router:failed:routes" | "router:missing:inline" | "router:missing:url" | "router:missing:component" | "router:failed:component" | "router:failed:loader" | "router:missing:loader" | "router:missing:fetchBlade" | "router:missing:http" | "router:failed:blade" | "router:invalid:component" | "router:missing:router">
 ```
 
-Codes where the server gets the last word, plan 8d.2's rule: a route,
+Codes where the server gets the last word, docs/contract.md 6's rule: a route,
 component or server HTML that is missing or failed. The default onError
 handler hard-navigates - an unmatched URL renders server-side, a failed
 lazy chunk (stale hashes after a deploy) recovers via a full page load.

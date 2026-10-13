@@ -19,24 +19,25 @@
  * @example
  * // Vue composable:
  * const t = useTransitionCommand({ namespace: 'drawer' });
- * // <Transition v-bind="t"> - all hooks wired automatically
+ * // <Transition v-bind="t"> - the eight enter and leave hooks wired automatically
  */
 
 import type { BaseBus } from './command-bus';
-import { MAX_TIMEOUT_MS, countOption } from './bounds';
+import { type Delay, delayOption } from './bounds';
 import { signal as chamberSignal, tryAutoCleanup } from './chamber';
 import { resolveBus } from './shared-bus';
 import type { Signal } from './chamber';
 import { DEV } from './dev';
 
 /**
- * `| 0` folds NaN and Infinity to 0, which the floor of 1 then lifts, so a
- * bad option degrades to "call done() almost immediately" rather than to the
- * stuck element this timeout exists to prevent. Same treatment the other
- * numeric options in this library get - see `serveMcpStdio`.
+ * A missing or NaN timeout takes the 30 s default, below 1 lifts to 1, and
+ * Infinity or more than MAX_TIMEOUT_MS clamps to it (`delayOption`,
+ * ./bounds, tests/bounds.test.ts). A bad option keeps the default rather than
+ * skipping the animation or stranding the element
+ * (tests/transitions.test.ts:297).
  */
-function resolveTimeout(value: number | undefined): number {
-  return countOption(value, 30_000, 1, MAX_TIMEOUT_MS);
+function resolveTimeout(value: number | undefined): Delay {
+  return delayOption(value, 30_000, 1);
 }
 
 // ---------------------------------------------------------------------------
@@ -79,16 +80,14 @@ export type TransitionHooks = {
   onAfterLeave: (el: Element) => void;
   onLeaveCancelled: (el: Element) => void;
   /**
-   * TransitionGroup-only: called when an element moves due to reorder.
+   * Dispatches `<namespace>Move` with `el` as the target. Vue never calls it:
+   * no Vue component has a move hook, on either renderer
+   * (tests/vue-no-move-hook.test.ts). Call it yourself, for example from your
+   * own FLIP code after a reorder. No `done()` callback.
    *
-   * NOT called for elements hidden by v-show (display:none): the `*Move`
-   * command is never dispatched for invisible list items. A skipped move does
-   * not drop the element's move hooks, so a later genuine reorder of that child
-   * dispatches `*Move` as normal.
-   *
-   * Fires for both Vapor and vDOM component moves inside a Vapor
-   * TransitionGroup, after all child updates have flushed - `el` is in its pre-move position, ready for the CSS
-   * move class to be applied. No `done()` callback; moves are CSS-only.
+   * It is kept out of a spread (see `assembleBridge`): Vue declares no
+   * `onMove` prop, so `v-bind="t"` would pass it on to the child as a `move`
+   * DOM listener that nothing fires, and Vue warns on a fragment child.
    */
   onMove: (el: Element) => void;
 };
@@ -106,9 +105,9 @@ export type TransitionBridge = TransitionHooks & {
 
 // camelCase namespace join ('modal' + 'enter' -> 'modalEnter'). Off the
 // dispatch path: `buildHooks` resolves all nine names once at construction
-// (see there). useCommandGroup / createChamber keep their own copies until each
-// is shown to be off its hot path the same way (createChamber is setup-only;
-// useCommandGroup is not yet checked).
+// (see there). createChamber (setup-only) and useCommandGroup keep their own
+// joins: useCommandGroup's short names arrive at dispatch, so it caches them
+// per group instead (chamber.ts, `_nameCache`).
 function prefixed(namespace: string | undefined, hook: string): string {
   if (!namespace) return hook;
   return namespace + hook.charAt(0).toUpperCase() + hook.slice(1);
@@ -122,13 +121,13 @@ function buildHooks(
   bus: BaseBus,
   namespace: string | undefined,
   phase: Signal<TransitionPhase>,
-  timeout: number,
+  timeout: Delay,
 ): TransitionHooks {
   // Action names are built ONCE per bridge, not once per hook dispatch. Both
   // inputs are fixed here: `namespace` is captured at construction and every
   // `hook` below is a string literal, so the concatenation could never produce a
   // different answer on a later call - it was pure repeated work on the hot
-  // path. Isolating that segment (120k hook calls, interleaved A/B): building
+  // path. Isolating that segment (120k hook calls, interleaved A/B, v1.15.0): building
   // per dispatch 3.668ms vs precomputed 0.237ms, i.e. the string work is gone
   // (~15x on the segment; far less end-to-end, where bus.dispatch dominates -
   // see the transition-bridge rows in tests/perf.bench.ts).
@@ -249,14 +248,16 @@ function buildHooks(
 // ---------------------------------------------------------------------------
 
 /**
- * Return the nine hooks as ENUMERABLE own keys, and `phase` / `dispose` as
- * NON-ENUMERABLE ones.
+ * Return eight hooks as ENUMERABLE own keys, and `onMove`, `phase` and
+ * `dispose` as NON-ENUMERABLE ones.
  *
  * This exists because of the usage this module documents and the README
  * repeats: `<Transition v-bind="t">`. `v-bind="obj"` spreads an object's own
- * ENUMERABLE keys into the component's props. Vue matches the nine `on*` hooks
- * to `<Transition>`'s declared props and passes the rest through as
- * fallthrough ATTRIBUTES, which are stringified onto the transitioned element.
+ * ENUMERABLE keys into the component's props. Vue matches the eight enter and
+ * leave hooks to `<Transition>`'s declared props and passes the rest through
+ * as fallthrough ATTRIBUTES, which are stringified onto the transitioned
+ * element. `onMove` matches no prop either (see its docblock), so it is
+ * hidden the same way (tests/transition-bind-fixture.test.ts).
  * `phase` (a signal object) and `dispose` (a function) match no declared prop,
  * so enumerable, both would land in the DOM (on a real mounted
  * `<Transition v-bind="bridge">`):
@@ -290,6 +291,9 @@ function assembleBridge(
   });
   Object.defineProperty(bridge, 'dispose', {
     value: dispose, enumerable: false, writable: true, configurable: true,
+  });
+  Object.defineProperty(bridge, 'onMove', {
+    value: hooks.onMove, enumerable: false, writable: true, configurable: true,
   });
   return bridge;
 }

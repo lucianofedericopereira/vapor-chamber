@@ -1,7 +1,8 @@
 /**
  * vapor-chamber - Built-in plugins
  *
- * Re-exports all plugins from split modules:
+ * Re-exports the core and I/O plugins. The extras (plugins-extra) ship from
+ * the root entry, not from here:
  *  - plugins-core: logger, validator, history, debounce, throttle, authGuard, optimistic, optimisticUndo
  *  - plugins-io:   persist, createChannel
  */

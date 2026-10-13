@@ -750,8 +750,8 @@ describe('createEchoBridge broadcast error logging', () => {
 // ---------------------------------------------------------------------------
 // Signal-merging fallbacks + the per-dispatch header/retry arms
 //
-// Every merge site is `typeof AbortSignal.any === 'function' ? any([...]) :
-// fallback`. Node has AbortSignal.any, so the fallback arms - the ones that run
+// Every merge site goes through http.ts's _combineSignals, `AbortSignal.any`
+// or its fallback. Node has AbortSignal.any, so the fallback - the one that runs
 // on older Safari/Firefox - had no coverage. Removed the same way
 // tests/plugins-extra-gaps.test.ts drives supersede's equivalent branch.
 // ---------------------------------------------------------------------------
@@ -760,7 +760,7 @@ describe('bridge signal merging - AbortSignal.any fallbacks', () => {
   const okFetch = () =>
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({ ok: true, json: async () => ({ state: 1 }) , text: async () => JSON.stringify(({ state: 1 }))}));
 
-  it('prefers the caller signal when AbortSignal.any is missing', async () => {
+  it('combines the bridge signal and the scope when AbortSignal.any is missing', async () => {
     const origAny = AbortSignal.any;
     // @ts-expect-error deliberate removal to drive the fallback arm
     AbortSignal.any = undefined;
@@ -781,7 +781,7 @@ describe('bridge signal merging - AbortSignal.any fallbacks', () => {
     }
   });
 
-  it('prefers the per-dispatch signal when AbortSignal.any is missing', async () => {
+  it('combines the bridge signal and the dispatch signal when AbortSignal.any is missing', async () => {
     const origAny = AbortSignal.any;
     // @ts-expect-error deliberate removal to drive the fallback arm
     AbortSignal.any = undefined;
@@ -797,7 +797,7 @@ describe('bridge signal merging - AbortSignal.any fallbacks', () => {
     }
   });
 
-  it('batching bridge falls back the same way', async () => {
+  it('batching bridge combines the same way', async () => {
     const origAny = AbortSignal.any;
     // @ts-expect-error deliberate removal to drive the fallback arm
     AbortSignal.any = undefined;

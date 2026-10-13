@@ -1,8 +1,9 @@
 /**
  * vapor-chamber/router - router for Vue 3.6 over a server-owned catch-all.
  *
- * Hard requirement by design: Vue >= 3.6. Rows come from a server-side route
- * generator emitting the RouteRecord schema (types.ts).
+ * It follows the package peer range: the entry loads on Vue 3.5
+ * (tests/vue35-entries.test.ts), and only ./router/vapor needs 3.6. Rows come
+ * from a server-side route generator emitting the RouteRecord schema (types.ts).
  * The server owns one catch-all (`/admin/{any?}` -> Blade shell -> one island);
  * this router owns every URL inside it. Path = navigation, query = state.
  *
@@ -121,7 +122,7 @@ export type RouterOptions = {
    *  unused otherwise. `routerHttp()` from `vapor-chamber/router/remote` is the
    *  preconfigured one, and any `HttpClient` works. */
   http?: HttpClient;
-  /** Document-level link interception + active stamping + hover preheat.
+  /** Document-level link interception + active stamping + hover and focus warm-up.
    *  Default: true in the browser. */
   links?: boolean;
   /** Selector scoping data-active stamping (e.g. the admin shell) - stamping
@@ -228,7 +229,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
    * blade row - and the primary documented setup, a generated route module with
    * no blade rows, uses neither. Building it here would put the whole client
    * (CSRF, interceptors, retry, cache) in every consumer's graph: 8.5 KB raw /
-   * 3.4 KB brotli, about a quarter of this subpath, for code most apps never
+   * 3.4 KB brotli (v1.18.0), about a quarter of this subpath, for code most apps never
    * execute - and a dynamic import would still charge a bundler that does not
    * code split, with `createRouter` choosing a dependency for its caller.
    *
@@ -250,6 +251,14 @@ export function createRouter<TName extends string = string>(options: RouterOptio
   // ---- render resolution (component cache + blade wrapping) ------------------
 
   const componentCache = new Map<string, unknown>();
+  // A lazy component's load in flight, by key: the promise the app's loader
+  // returned, shared until it settles. Each caller awaits it in its own `try`,
+  // so a failure carries that caller's `to`. Sharing loadComponent's own
+  // promise would give a click the warm-up's `to`, the page on screen. When the
+  // load settles, `drop` and the first caller's `await` run back to back, so
+  // nobody starts a second load before the cache is written. A failed load
+  // leaves, and the next caller loads again. tests/router/load-once.test.ts.
+  const componentLoads = new Map<string, Promise<unknown>>();
 
   async function loadComponent(record: TableRecord, to: RouteLocation): Promise<unknown> {
     const key = record.component as string;
@@ -267,7 +276,15 @@ export function createRouter<TName extends string = string>(options: RouterOptio
     if (typeof entry === 'function' && !isComponentLike(entry)) {
       let mod: unknown;
       try {
-        mod = await (entry as () => Promise<unknown>)();
+        let load = componentLoads.get(key);
+        if (load === undefined) {
+          // `Promise.resolve`: an entry may hand back a plain module object.
+          load = Promise.resolve((entry as () => Promise<unknown>)());
+          componentLoads.set(key, load);
+          const drop = () => componentLoads.delete(key);
+          load.then(drop, drop);
+        }
+        mod = await load;
       } catch (cause) {
         // Stale chunk after a deploy - default handler hard-navigates.
         throw routerError('failed:component', `failed to load component "${key}"`, { to, cause });
@@ -439,7 +456,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
     const hit = tableRef.value?.resolve(path);
     if (!hit) return;
     for (const record of hit.record.renderChain) {
-      if (record.component && !componentCache.has(record.component)) {
+      if (record.component && record.meta.preheat !== false && !componentCache.has(record.component)) {
         void loadComponent(record, engine.snapshot.value.location).catch(() => {});
       }
     }
@@ -509,6 +526,12 @@ export function createRouter<TName extends string = string>(options: RouterOptio
         teardowns.push(stampOnCommit);
       }
 
+      await engine.navigate(history.location(), { replace: true });
+
+      if (disposed) return;
+      // After the initial navigation has settled, committed or not: the page
+      // the browser loaded is never announced, and every later commit is, the
+      // first one included (tests/router/announce.test.ts, audit RA-3).
       if (hasWindow) {
         teardowns.push(
           installRouteAnnouncer((hook) => engine.afterEach(hook), {
@@ -517,10 +540,7 @@ export function createRouter<TName extends string = string>(options: RouterOptio
           }),
         );
       }
-
-      await engine.navigate(history.location(), { replace: true });
-
-      if (!disposed) armIdlePreheat();
+      armIdlePreheat();
     })();
     started.catch((error) => dispatchError(error, engine.snapshot.value.location));
     return started;

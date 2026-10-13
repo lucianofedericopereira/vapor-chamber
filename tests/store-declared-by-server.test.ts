@@ -1,4 +1,4 @@
-/** A server reply declares store states (`stores`, by store id): each named store takes its state, with no client option (plan 1.27 D3 rev 3). Rationale at the end. */
+/** A server reply declares store states (`stores`, by store id): each named store takes its state, with no client option (log s35.186). Rationale at the end. */
 import { describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
 import { history } from '../src/plugins-core';

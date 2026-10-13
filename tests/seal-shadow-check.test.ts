@@ -44,15 +44,15 @@ describe('seal() and a bridge that answers an action with a local handler', () =
 });
 
 /*
- * Decision 9 of the 1.26 list (.probes/1.26-remaining.md): a bridge whose
+ * Decision 9 of the 1.26 list (log s35.75): a bridge whose
  * `actions` match an action that also has a local handler sends it to the
  * server, and the handler never runs, with no error. The check lands with P1,
  * the plugin manifest, as one general rule (any wrapper that claims an action
  * with a local handler), at seal() and not at use(): at use() the handlers may
  * not be registered yet. `it.fails` passes while the check is absent and turns
  * RED the day seal() throws, so P1 cannot land without flipping it to `it`
- * (and deleting TODAY). The plan's probe was `.probes/p126-ext13-15-18-d2`
- * arm 15; this one injects the HTTP client instead of stubbing fetch. An
+ * (and deleting TODAY). The first probe stubbed fetch. This one injects the
+ * HTTP client. An
  * intended shadow exists (a handler registered only to carry `undo`, F2 of
  * the panel round): P1 needs an exemption or a home for undo that is not a
  * handler, and this test is where that case is added.

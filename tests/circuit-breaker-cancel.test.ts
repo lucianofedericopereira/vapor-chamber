@@ -1,4 +1,4 @@
-/** circuitBreaker: a cancel is not a backend failure (plan 1.27 section 10.3). Rationale at the end. */
+/** circuitBreaker: a cancel is not a backend failure (log s35.170). Rationale at the end. */
 import { describe, expect, it } from 'vitest';
 import { BusError, createAsyncCommandBus, type Command } from '../src/command-bus';
 import { circuitBreaker, supersede } from '../src/plugins-extra';
@@ -47,6 +47,28 @@ describe('every abort shape', () => {
     await bus.dispatch('upload', {});
     await bus.dispatch('upload', {});
     expect([n, cb.getState('upload')]).toEqual([2, 'closed']);
+  });
+
+  it("the caller's abort with its own Error reason does not count", async () => {
+    const bus = createAsyncCommandBus({ retry: false });
+    bus.register('search', search);
+    const cb = circuitBreaker({ threshold: 1, actions: ['search'] });
+    bus.use(cb);
+    const ac = new AbortController();
+    const p = bus.dispatch('search', {}, undefined, { signal: ac.signal });
+    ac.abort(new Error('user cancelled'));
+    expect((await p).ok).toBe(false);
+    expect(cb.getState('search')).toBe('closed');
+  });
+
+  it('control: a real failure that lands after the abort still counts', async () => {
+    const bus = createAsyncCommandBus({ retry: false });
+    const ac = new AbortController();
+    bus.register('save', async () => { ac.abort(new Error('user cancelled')); throw new Error('HTTP 500'); });
+    const cb = circuitBreaker({ threshold: 1, actions: ['save'] });
+    bus.use(cb);
+    await bus.dispatch('save', {}, undefined, { signal: ac.signal });
+    expect(cb.getState('save')).toBe('open');
   });
 });
 

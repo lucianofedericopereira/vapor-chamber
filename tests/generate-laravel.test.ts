@@ -102,24 +102,38 @@ describe('generate-laravel - schema -> Laravel backend codegen', () => {
   it('derives Validator rules from target/payload field maps', () => {
     const cartAdd = readFileSync(actionPath('CartAdd'), 'utf8');
     expect(cartAdd).toContain('Validator::make(');
-    expect(cartAdd).toContain("'target.id' => 'required|numeric',");
-    expect(cartAdd).toContain("'target.name' => 'required|string',");
-    expect(cartAdd).toContain("'payload.qty' => 'required|numeric',");
-    expect(cartAdd).toContain("'payload.gift' => 'required|boolean',");
+    // The client's rules, in Laravel's: present (only a missing field fails,
+    // as schema.ts reads `undefined`), and the strict variants, so "5" is not
+    // a number and "1" not a boolean (D13 G3).
+    expect(cartAdd).toContain("'target.id' => 'present|numeric:strict',");
+    expect(cartAdd).toContain("'target.name' => 'present|string',");
+    expect(cartAdd).toContain("'payload.qty' => 'present|numeric:strict',");
+    expect(cartAdd).toContain("'payload.gift' => 'present|boolean:strict',");
     // 'any' fields get no rule
     expect(cartAdd).not.toContain("'payload.meta'");
     expect(cartAdd).toContain(')->validate();');
 
     const orderCreate = readFileSync(actionPath('OrderCreate'), 'utf8');
-    expect(orderCreate).toContain("'payload.items' => 'required|array',");
-    // An 'object' field gets more than `required|array`: a decoded JSON list
+    expect(orderCreate).toContain("'payload.items' => 'present|list',");
+    // An 'object' field gets more than `present|array`: a decoded JSON list
     // and a decoded JSON object are BOTH PHP arrays, and schemaValidator on
     // the TS side rejects a list for an 'object' field - so without the extra
     // check a payload the browser refuses would pass on the server. The two
     // sides of one schema have to agree.
-    expect(orderCreate).toContain("'payload.options' => ['required', 'array', function");
+    expect(orderCreate).toContain("'payload.options' => ['present', 'array', function");
     expect(orderCreate).toContain('array_is_list($value)');
-    expect(orderCreate).toContain('must be an object, not a list');
+    expect(orderCreate).toContain('The :attribute field must be an object, not a list.');
+  });
+
+  it('names each field in its messages, not the rule key (D13 G1, R73, R76)', () => {
+    const cartAdd = readFileSync(actionPath('CartAdd'), 'utf8');
+    // Validator::make()'s third argument (messages) stays empty, its fourth
+    // maps each rule key to the field's own name.
+    expect(cartAdd).toMatch(/\],\n {12}\[\],\n {12}\[\n {16}'target\.id' => 'id',\n {16}'target\.name' => 'name',\n {16}'payload\.qty' => 'qty',\n {16}'payload\.gift' => 'gift',\n {12}\],\n {8}\)->validate\(\);/);
+    // The closure writes `:attribute`, which Laravel replaces with that name.
+    const orderCreate = readFileSync(actionPath('OrderCreate'), 'utf8');
+    expect(orderCreate).toContain("'payload.options' => 'options',");
+    expect(orderCreate).not.toContain('{$attribute}');
   });
 
   it('emits a Gate::forUser($user)->authorize(...) call ahead of validation when "authorize" is set', () => {
@@ -192,7 +206,7 @@ describe('generate-laravel - schema -> Laravel backend codegen', () => {
     expect(r.status, r.stderr).toBe(0);
     expect(readFileSync(join(jsonOut, 'config', 'vapor-chamber.php'), 'utf8')).toContain("'cartClear'");
     expect(readFileSync(join(jsonOut, 'app', 'Actions', 'CartClear.php'), 'utf8')).toContain(
-      "'target.id' => 'required|numeric',",
+      "'target.id' => 'present|numeric:strict',",
     );
   });
 

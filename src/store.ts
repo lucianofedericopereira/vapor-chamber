@@ -54,7 +54,8 @@
  *
  * SHALLOW, REPLACED WHOLESALE. State is a `shallowRef` and every action returns
  * a NEW state object. Measured on the real dispatch path, wholesale replacement
- * over a deep `ref` is ~3.4x on array state (tests/signal-shallow-ab.test.ts).
+ * beats a deep `ref` on array state (tests/signal-shallow-ab.test.ts; the dated
+ * figure is in docs/performance.md).
  * A reducer that mutates and returns the same object is a no-op to the signal,
  * which is why `$reset` and every action build fresh objects.
  */
@@ -68,12 +69,18 @@ const vueRuntime: StoreRuntime = {
   cell: (initial) => shallowRef(initial),
   // One sync effect in a detached scope (not the calling component's), so a
   // watch lives with the store, not with whoever subscribed first.
+  // `fn` runs inside the effect's run, so what it reads tracks into this
+  // effect, not into the effect that wrote. A running effect does not re-run
+  // for a write it causes, so a write `fn` makes is read back here and
+  // delivered after it, in order (a scheduler that called `fn` after the run
+  // delivered out of order and leaked `fn`'s reads into the writer's effect).
+  // tests/store-write-during-delivery.test.ts.
   watch(cell, fn) {
     const scope = effectScope(true);
     let prev = cell.value;
     scope.run(() => effect(() => {
-      const next = cell.value;
-      if (next !== prev) { const was = prev; prev = next; fn(next, was); }
+      let next = cell.value;
+      while (next !== prev) { const was = prev; prev = next; fn(next, was); next = cell.value; }
     }));
     return () => scope.stop();
   },

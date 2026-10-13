@@ -27,7 +27,8 @@ export type QueryParamDef = {
 export type RouteRecord = {
   name: string;
   /** Pattern relative to the router base. `:param`, `:param(regex)`,
-   *  `:param?`, trailing `*` splat (-> params.pathMatch). */
+   *  `:param?`, trailing `*` splat (-> params.pathMatch, decoded segment by
+   *  segment and encoded back the same way, its slashes kept). */
   path: string;
   parent?: string | null;
   /** Key into the client component map. null/absent + !blade = group record:
@@ -50,7 +51,9 @@ export type RouteRecord = {
    *  fit falls through to the next row; the matched value is cast. */
   params?: Record<string, ParamType>;
   query?: Record<string, QueryParamDef>;
-  /** Server data: permissions, titles, `preheat` flag, ... */
+  /** Server data: permissions, titles, ... `preheat: true` also warms the
+   *  route's component when the page is idle. `preheat: false`: a link to the
+   *  route does not warm it, though a route sharing the component still does. */
   meta?: Record<string, unknown>;
 };
 

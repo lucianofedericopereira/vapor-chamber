@@ -413,6 +413,7 @@ describe('usePagination', () => {
       expect(range).toContain(10); // the current page
       expect(range).toContain(0); // elision marker
       expect(range.length).toBeLessThanOrEqual(9);
+      expect(range).toEqual([1, 0, 8, 9, 10, 11, 12, 0, 20]); // seven numbers, two elisions
     });
     router.dispose();
   });
@@ -522,6 +523,8 @@ describe('usePagination - extractor fallbacks and pageRange elisions', () => {
       expect(range[range.length - 1]).toBe(50);
       expect(range.filter((n) => n === 0)).toHaveLength(2); // '...' both sides
       expect(range).toContain(25);
+      // Below 5 the run around the current page stays three pages.
+      expect(usePagination({ window: 3 }).pageRange.value).toEqual([1, 0, 24, 25, 26, 0, 50]);
     });
     router.dispose();
   });

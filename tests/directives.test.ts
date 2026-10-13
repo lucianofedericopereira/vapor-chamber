@@ -3,7 +3,7 @@
  */
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createDirectivePlugin } from '../src/directives';
-import { createCommandBus } from '../src/command-bus';
+import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';
 import { setCommandBus, resetCommandBus } from '../src/chamber';
 
 // Stub HTMLButtonElement for Node environment (vitest runs in node, not jsdom)
@@ -33,9 +33,12 @@ function createMockDocument() {
     addEventListener(type: string, fn: Function) { listeners.set(type, fn); },
     removeEventListener(type: string) { listeners.delete(type); },
     // Simulate the browser invoking the delegated listener after an event
-    // bubbled all the way to document.
+    // bubbled all the way to document, with the path a browser gives.
     dispatchClick(target: any, evt?: any) {
-      listeners.get('click')?.(evt ?? { type: 'click', target, stopPropagation() {}, preventDefault() {} });
+      const path: any[] = [];
+      for (let n = target; n; n = n.parentElement) path.push(n);
+      path.push(this);
+      listeners.get('click')?.(evt ?? { type: 'click', target, composedPath: () => path, stopPropagation() {}, preventDefault() {} });
     },
     hasClickListener() { return listeners.has('click'); },
   };
@@ -234,6 +237,31 @@ describe('createDirectivePlugin', () => {
         vcDir.mounted(el, { value: 'tAction', modifiers: { '5000': true, stop: true } });
         el.triggerClick({ type: 'click', target: el, stopPropagation() {}, preventDefault() {} });
         expect(calls).toBe(1);
+      });
+
+      it('a .timeout modifier past the timer maximum is capped, never 1 ms (audit D10)', async () => {
+        vi.useFakeTimers();
+        try {
+          const slow = createAsyncCommandBus({ retry: false });
+          setCommandBus(slow as any);
+          slow.register('slowSave', () => new Promise((r) => setTimeout(() => r('saved'), 100)));
+          const vcDir = app.getDirective('vc-command');
+          /** Whether the press shows vc-error 50 ms in, before the handler answers. */
+          const failedEarly = async (ms: string) => {
+            const el = createElement();
+            vcDir.mounted(el, { value: 'slowSave', modifiers: { [ms]: true } });
+            el.triggerClick({ type: 'click', target: el, stopPropagation() {}, preventDefault() {} });
+            await vi.advanceTimersByTimeAsync(50);
+            const failed = el.classList.has('vc-error');
+            await vi.advanceTimersByTimeAsync(100);
+            vcDir.beforeUnmount(el);
+            return failed;
+          };
+          expect(await failedEarly('20')).toBe(true); // control: a 20 ms timeout fires
+          expect(await failedEarly('9999999999')).toBe(false);
+        } finally {
+          vi.useRealTimers();
+        }
       });
     });
 

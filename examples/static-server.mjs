@@ -26,6 +26,7 @@ const TYPES = {
   '.json': 'application/json; charset=utf-8',
   '.map': 'application/json; charset=utf-8',
   '.svg': 'image/svg+xml',
+  '.ico': 'image/x-icon',
 };
 
 /**
@@ -61,9 +62,19 @@ function api(req, res) {
     // A failure is an RFC 9457 problem, as the reference controller answers it.
     const problem = (status, code, detail) =>
       json(status, { status, code, detail }, 'application/problem+json');
+    // A body that does not parse carries no command. The reference controller
+    // answers a missing command with 400 `missing_command`: the request is at
+    // fault, not the server.
+    let parsed;
+    try { parsed = JSON.parse(body); } catch {}
+    const { command, target, payload } = parsed ?? {};
+    if (command == null || command === '') {
+      problem(400, 'missing_command', 'Missing "command" field');
+      return;
+    }
     try {
-      const { command, target, payload } = JSON.parse(body || '{}');
-      const fn = commands[command];
+      // Own keys only: `commands[command]` would find `toString`, `constructor`.
+      const fn = Object.hasOwn(commands, command) ? commands[command] : undefined;
       if (!fn) {
         problem(404, 'unknown_command', `Unknown command: ${command}`);
         return;
@@ -168,7 +179,8 @@ createServer((req, res) => {
     if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return; }
     if (req.method === 'POST') { api(req, res); return; }
   }
-  const target = join(repo, normalize(url));
+  // A browser asks for /favicon.ico at the root. The project icon lives in assets/favicon/.
+  const target = join(repo, normalize(url === '/favicon.ico' ? '/assets/favicon/favicon.ico' : url));
   // The repo itself or a path INSIDE it - a sibling directory whose name
   // merely starts with the repo's is outside.
   if (target !== repo && !target.startsWith(repo + sep)) {

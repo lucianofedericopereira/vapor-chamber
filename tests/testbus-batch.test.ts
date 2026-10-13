@@ -1,4 +1,4 @@
-/** createTestBus().dispatchBatch runs the real bus's batch rule: transactional rolls back, continueOnError continues (plan 1.27 section 10.13, T2). Rationale at the end. */
+/** createTestBus().dispatchBatch runs the real bus's batch rule: transactional rolls back, continueOnError continues (log s35.176). Rationale at the end. */
 import { describe, expect, it } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
 import { createTestBus } from '../src/testing';

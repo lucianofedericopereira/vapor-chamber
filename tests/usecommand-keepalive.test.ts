@@ -8,8 +8,8 @@
  * and B's handler answered while A was on screen. Now a deactivated page
  * releases its handlers (register()'s cleanup removes only its own) and takes
  * them back when it is activated. Listeners (on()) are unchanged: whether a
- * cached page keeps listening is an open decision (docs/plan-failures-and-
- * contract.md, 7.1).
+ * cached page keeps listening is an open decision (ROADMAP.md, "Open
+ * work, to discuss", `KeepAlive` listeners).
  */
 import { expect, vi } from 'vitest';
 import { configureVue, getCommandBus, setCommandBus, useCommand } from '../src/chamber';

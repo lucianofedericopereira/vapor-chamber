@@ -1,4 +1,4 @@
-/** A shared store opened later asks for the current state, so its writes build on it (plan 1.27 item 8). Rationale at the end. */
+/** A shared store opened later asks for the current state, so its writes build on it (log s35.164). Rationale at the end. */
 import { afterEach, describe, expect, it } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
 import { createFastLane } from '../src/fast-lane';
@@ -120,7 +120,7 @@ describe('the ask', () => {
  * tie goes to the higher tab id). A tab opened after another wrote three
  * times started at 0: its first write (version 1) was ignored by the older
  * tab, and the older tab's next write (version 4) replaced it everywhere.
- * The later tab's write was lost (plan item 8, probe P4).
+ * The later tab's write was lost (log s35.164).
  *
  * Shape: the tab catches up when it opens. It sends one message on the same
  * `<id>$state` event, `{ ask: true, version: -1, tab }`. A peer that has

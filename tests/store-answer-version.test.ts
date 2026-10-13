@@ -1,4 +1,4 @@
-/** A store orders server answers by the version the server sends; an answer with no state writes nothing (plan 1.27 D3, rev 2). Rationale at the end. */
+/** A store orders server answers by the version the server sends; an answer with no state writes nothing (log s35.185). Rationale at the end. */
 import { describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
 import { defineChamberStore } from '../src/store';

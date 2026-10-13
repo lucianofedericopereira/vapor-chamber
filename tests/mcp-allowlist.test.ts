@@ -1,4 +1,4 @@
-/** createMcpHandler's one selection is `actionFilter`, an allowlist (plan 1.27 item 9, MCP allowlist). Rationale at the end. */
+/** createMcpHandler's one selection is `actionFilter`, an allowlist (log s35.180). Rationale at the end. */
 import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { createActionFilter } from '../src/action-filter';
 import { createMcpHandler } from '../src/mcp';

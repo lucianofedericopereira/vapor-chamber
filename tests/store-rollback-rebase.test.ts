@@ -1,4 +1,4 @@
-/** An `undo: true` store rolls back any step it holds and keeps every later write (plan 1.27 item 1, R1-R4). Rationale at the end. */
+/** An `undo: true` store rolls back any step it holds and keeps every later write (log s35.157). Rationale at the end. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus, createCommandBus, type Command, type CommandResult } from '../src/command-bus';
 import { createFastLane } from '../src/fast-lane';

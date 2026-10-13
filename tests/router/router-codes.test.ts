@@ -109,7 +109,7 @@ describe('the catalogue', () => {
 });
 
 /*
- * Log s35.108 (plan 8d.1, 8d.2; shape rules 2 and 3; todo-router 1 and 2).
+ * Log s35.108 (docs/contract.md 6; shape rules 2 and 3; todo-router 1 and 2).
  * The router had its own failure: a plain Error named RouterError with a
  * snake_case code, none of them in ERROR_CODE_REGISTRY, read by none of the
  * core's readers (`failureCondition` saw `failed` in all of them), a stack
@@ -117,8 +117,8 @@ describe('the catalogue', () => {
  * included - and a guard's throw reported as `component_load_failed`, a
  * hard-navigation code. Now each is the core's BusError, minted by
  * `_failures('router')` from src/failure.ts (no bus in the router's graph,
- * plan 8d): one shape, the stack only for `failed`, the RFC 9457 `toJSON` at a
+ * docs/contract.md 6): one shape, the stack only for `failed`, the RFC 9457 `toJSON` at a
  * boundary, the navigation target in `context.to`. The mapping is the owner's
  * (todo-router 1, with invalid_routes_payload as `unexpected`: the server's
- * payload off-protocol); HARD_NAV_CODES follows plan 8d.2's rule.
+ * payload off-protocol); HARD_NAV_CODES follows docs/contract.md 6's rule.
  */

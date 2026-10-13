@@ -58,7 +58,7 @@ export function renderSegments(
     }
     if (segment.kind === 'splat') {
       const value = params.pathMatch;
-      if (value !== undefined && value !== '') path += `/${String(value)}`;
+      if (value !== undefined && value !== '') path += `/${encodeSplat(String(value))}`;
       continue;
     }
     const value = params[segment.name];
@@ -148,6 +148,8 @@ function castParam(value: string, type: ParamType | undefined): string | number 
 export function createRouteTable(rows: readonly RouteRecord[]): RouteTable {
   const records: TableRecord[] = [];
   const byName = new Map<string, TableRecord>();
+  // Each record's own row's query declarations, by record: pass 3 merges them down the chain.
+  const ownQuery = new Map<TableRecord, RouteRecord['query']>();
 
   // Pass 1 - compile rows.
   for (const row of rows) {
@@ -181,6 +183,7 @@ export function createRouteTable(rows: readonly RouteRecord[]): RouteTable {
     if (DEV) freezeDeep(record.meta);
     records.push(record);
     byName.set(record.name, record);
+    ownQuery.set(record, row.query);
   }
 
   // Pass 2 - link parents.
@@ -197,7 +200,6 @@ export function createRouteTable(rows: readonly RouteRecord[]): RouteTable {
   });
 
   // Pass 3 - precompute chains + merged query defs (leaf wins).
-  const rowByName = new Map(rows.map((row) => [row.name, row]));
   for (const record of records) {
     const chain: TableRecord[] = [];
     // A cyclic parent chain (`a.parent = b`, `b.parent = a`) would spin a
@@ -227,7 +229,7 @@ export function createRouteTable(rows: readonly RouteRecord[]): RouteTable {
     );
     (record as { loadChain: readonly TableRecord[] }).loadChain = Object.freeze(chain.filter((r) => r.load));
     const queryDefs: TableRecord['queryDefs'] = {};
-    for (const link of chain) Object.assign(queryDefs, rowByName.get(link.name)?.query);
+    for (const link of chain) Object.assign(queryDefs, ownQuery.get(link));
     (record as { queryDefs: TableRecord['queryDefs'] }).queryDefs = queryDefs;
   }
 
@@ -272,7 +274,7 @@ export function createRouteTable(rows: readonly RouteRecord[]): RouteTable {
         const raw = m[i + 1];
         if (raw === undefined) continue; // optional param not present
         if (key === 'pathMatch') {
-          params[key] = raw;
+          params[key] = raw.split('/').map(decodePathPart).join('/');
           continue;
         }
         const value = castParam(decodePathPart(raw), record.paramTypes[key]);
@@ -300,6 +302,14 @@ function staticKey(path: string): string {
   const lower = path.toLowerCase();
   return lower.length > 1 ? lower.replace(/\/$/, '') : lower;
 }
+
+/**
+ * @internal - a `*` splat is a path, as vue-router reads it: each segment is
+ * encoded on its own and the slashes stay. `resolve` decodes it the same way,
+ * segment by segment. buildPath and interpolateLoad both write it through
+ * this. tests/router/splat-encoding.test.ts.
+ */
+export const encodeSplat = (value: string): string => value.split('/').map(encodeURIComponent).join('/');
 
 function decodePathPart(part: string): string {
   try {

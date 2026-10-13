@@ -14,7 +14,7 @@
  * and fetching a blade row's HTML. Both are optional, and the primary
  * documented setup - a generated route module with no blade rows - uses
  * neither. A client built by the router would cost every consumer 8.5 KB raw /
- * 3.4 KB brotli, about a quarter of the subpath, for code most apps never
+ * 3.4 KB brotli (v1.18.0), about a quarter of the subpath, for code most apps never
  * execute; a dynamic `import()` would still charge a bundler that does not code
  * split. An import graph is the honest place to express "this costs extra",
  * as `./vdom` and `./vapor` already do.

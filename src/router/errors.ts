@@ -2,11 +2,11 @@
  * vapor-chamber-router - the single error taxonomy.
  *
  * Every router failure is the core's `BusError` (src/failure.ts, which keeps
- * the bus out of the router's graph, plan 8d), coded `router:condition:subject`
+ * the bus out of the router's graph, docs/contract.md 6), coded `router:condition:subject`
  * (shape rules 2 and 3) and listed in ERROR_CODE_REGISTRY. Handlers switch on
  * `code` or read the condition with `conditionOf`, never the message text; the
  * navigation target is `context.to`, the original error `cause`. Only `failed`
- * keeps a stack (plan 8d.1), as everywhere in the library.
+ * keeps a stack (docs/contract.md 6), as everywhere in the library.
  *
  * This is ALSO the navigation result: `navigate()` resolves to
  * `RouterError | null` - null means committed. Refusals that are normal flow
@@ -87,7 +87,7 @@ export function isRouterError(error: unknown, code?: RouterErrorCode): error is 
   return error instanceof BusError && (code === undefined ? error.code.startsWith('router:') : error.code === code);
 }
 
-/** Codes where the server gets the last word, plan 8d.2's rule: a route,
+/** Codes where the server gets the last word, docs/contract.md 6's rule: a route,
  *  component or server HTML that is missing or failed. The default onError
  *  handler hard-navigates - an unmatched URL renders server-side, a failed
  *  lazy chunk (stale hashes after a deploy) recovers via a full page load.

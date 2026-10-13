@@ -30,13 +30,22 @@ export function _idbStore(dbName: string, storeName: string) {
     return dbPromise;
   }
 
-  /** Run one request in its own transaction; resolve with `request.result`. */
+  /**
+   * Run one request in its own transaction; resolve with `request.result`. A
+   * read resolves on the request's success. A write resolves only when its
+   * transaction commits: the transaction can still abort after the request
+   * succeeded, and the write is then gone (tests/browser/idb-commit.browser.test.ts).
+   */
   function run<T>(mode: IDBTransactionMode, op: (store: IDBObjectStore) => IDBRequest): Promise<T> {
     return open().then(db => new Promise<T>((resolve, reject) => {
-      const store = db.transaction(storeName, mode).objectStore(storeName);
-      const req = op(store);
-      req.onsuccess = () => resolve(req.result as T);
+      const tx = db.transaction(storeName, mode);
+      const req = op(tx.objectStore(storeName));
       req.onerror = () => reject(req.error ?? new Error('indexedDB request failed'));
+      if (mode === 'readonly') req.onsuccess = () => resolve(req.result as T);
+      else {
+        tx.oncomplete = () => resolve(req.result as T);
+        tx.onabort = () => reject(tx.error ?? new Error(`indexedDB write to "${storeName}" did not commit`));
+      }
     }));
   }
 

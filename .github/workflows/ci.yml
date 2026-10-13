@@ -93,8 +93,8 @@ jobs:
     # The questions only a browser engine answers: focus (HTML's focus fixup
     # rule), keyboard activation, live regions, the accessibility tree.
     # happy-dom implements none of them. Accessibility is a requirement, and an
-    # opt-in suite erodes, so it runs on every push (docs/plan-failures-and-
-    # contract.md, 8e). Both builds: production is what users ship,
+    # opt-in suite erodes, so it runs on every push (docs/accessibility.md,
+    # definition of done). Both builds: production is what users ship,
     # development is what they debug.
     name: browser (Chromium, production + development)
     runs-on: ubuntu-latest

@@ -17,9 +17,10 @@
  * focus is an option naming an element THE APP provides, since it changes what
  * a sighted keyboard user sees.
  *
- * Not announced: the initial load (the browser already read the page), and a
- * query-only change (sorting or paging is not a new page). Read one frame after
- * the commit, so the new view and any title it sets are in place.
+ * Not announced: the initial load (the browser already read the page; the
+ * router installs this once that navigation has settled), and a query-only
+ * change (sorting or paging is not a new page). Read one frame after the
+ * commit, so the new view and any title it sets are in place.
  */
 import { announce as speak } from '../a11y';
 import type { AfterEachHook, RouteLocation } from './types';
@@ -51,17 +52,12 @@ export function installRouteAnnouncer(
   const { announce = true, focusOnNavigate } = options;
   if (typeof document === 'undefined' || (announce === false && !focusOnNavigate)) return () => {};
 
-  let first = true;
   let frame = 0;
 
   // A query-only change never reaches here: the engine's afterEach fires only
   // after a committed PATH navigation (engine.ts), so paging or sorting is
   // not announced without a check of this module's own.
   const off = afterEach((to) => {
-    if (first) {
-      first = false;
-      return;
-    }
     cancelAnimationFrame(frame);
     frame = requestAnimationFrame(() => {
       if (announce !== false) {
@@ -72,9 +68,11 @@ export function installRouteAnnouncer(
         const target = document.querySelector<HTMLElement>(focusOnNavigate);
         if (target) {
           // The platform knows what is focusable: anything that is not reports
-          // tabIndex -1 with no attribute (a heading); links, buttons, summary,
-          // editable content report 0. No hand-kept selector list.
-          if (target.tabIndex < 0 && !target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+          // tabIndex -1 with no attribute (a heading); links, buttons, summary
+          // report 0. Editable content is the exception: Chromium reports it -1
+          // though it is in the tab order, so `isContentEditable` is read too
+          // (tests/browser/route-announce.browser.test.ts). No hand-kept list.
+          if (target.tabIndex < 0 && !target.hasAttribute('tabindex') && !target.isContentEditable) target.setAttribute('tabindex', '-1');
           target.focus({ preventScroll: true });
         }
       }

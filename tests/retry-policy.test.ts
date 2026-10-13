@@ -1,5 +1,5 @@
 /**
- * The async bus's retry policy (docs/plan-shape.md 4): the runner re-sends the
+ * The async bus's retry policy (docs/retry.md): the runner re-sends the
  * call that produced the outcome - a handler's execute, or a plugin declaring
  * `transport: true` - by the class rule, bounded, jittered and budgeted per
  * bus, and the plugins outside see one dispatch.

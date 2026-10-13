@@ -71,15 +71,17 @@ const AsyncPanel = defineVaporAsyncComponent(() => import('./Panel.vue'));
 
 ### defineVaporCommand
 
-**Function** - [src/chamber-vapor.ts:231](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L231)
+**Function** - [src/chamber-vapor.ts:233](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L233)
 
 ```ts
 defineVaporCommand<B extends BaseBus = CommandBus<import("./command-bus").CommandMap>>(action: string, handler: Handler, options?: VaporCommandOptions<B>) => { dispatch: (target: any, payload?: any) => ResultOn<B>; dispose: () => void; }
 ```
 
-defineVaporCommand - zero-overhead command for hot paths in Vapor mode.
+defineVaporCommand - a command for hot paths in Vapor mode, with no
+loading or error state.
 
-Unlike useCommand(), this skips reactive loading/error signal creation.
+Unlike useCommand(), this creates no loading/error signals, so a dispatch
+writes no loading or error state.
 Ideal for high-frequency, fire-and-forget patterns where reactive
 loading/error state isn't needed: scroll-position tracking, mousemove
 sampling, telemetry / metrics events, debounced search, autosave.
@@ -102,7 +104,7 @@ defineVaporComponent<T = any>(options: object) => T | null
 
 defineVaporComponent - define a Vapor component with proper type inference.
 
-Wraps Vue's `defineVaporComponent()` (typed since 3.6.0-alpha.5, #13831). Use this to get full
+Wraps Vue's `defineVaporComponent()` (typed since 3.6.0-alpha.7, #13831). Use this to get full
 TypeScript inference for props, emits, and slots in Vapor components.
 Pass-through - emits/$attrs routing, v-once interop, scope IDs, and the
 compiler optimizations are Vue behavior (per-beta detail: CHANGELOG /
@@ -181,7 +183,7 @@ if (plugin) createApp(App).use(plugin).mount('#app');
 
 ### useVaporAsyncCommand
 
-**Function** - [src/chamber-vapor.ts:291](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L291)
+**Function** - [src/chamber-vapor.ts:293](https://github.com/lucianofedericopereira/vapor-chamber/blob/main/src/chamber-vapor.ts#L293)
 
 ```ts
 useVaporAsyncCommand(asyncBus?: { dispatch: (action: string, target: any, payload?: any) => Promise<CommandResult>; }) => { dispatch: (action: string, target: any, payload?: any) => Promise<CommandResult>; loading: import("./signal").Signal<boolean>; lastError: import("./signal").Signal<Error | null>; dispose: () => void; }

@@ -128,7 +128,7 @@ function writeMetrics(key: string, value: Record<string, string>): void {
  * (`./blade-DYzLD6BH.js`), and that hash follows the ENTRY's file name, which
  * here is the arm's label. Eight characters that say nothing about the outlet
  * moved the own arm's brotli size by tens of bytes between namings; with them
- * fixed the three namings of `.probes/outlet-naming-noise.mjs` read the same
+ * fixed the three namings the log measured read the same
  * (log s35.24). Throws when a lazy chunk's name is not the hashed shape or is
  * not in the entry: a normalization that quietly did nothing would put the
  * noise back unseen.

@@ -15,7 +15,7 @@
  */
 import { type ActionScope, type AsyncPlugin, type BaseBus, type Command, type CommandResult, _errResult, _failures, _okResult } from './command-bus';
 import type { ActionFilter } from './action-filter';
-import { MAX_TIMEOUT_MS, countOption, isDelay } from './bounds';
+import { type Delay, countOption, delayOption, isDelay } from './bounds';
 import { retryClass } from './failure';
 import { type HttpClient, _parseRetryAfter, _remoteProblem, createHttpClient } from './http';
 
@@ -39,7 +39,7 @@ export type PollDone = { command: Command; result: CommandResult };
 
 const fail = _failures('pollWith');
 
-const sleep = (ms: number, signal: AbortSignal): Promise<void> => new Promise((resolve) => {
+const sleep = (ms: Delay, signal: AbortSignal): Promise<void> => new Promise((resolve) => {
   const t = setTimeout(resolve, ms);
   signal.addEventListener('abort', () => { clearTimeout(t); resolve(); }, { once: true });
 });
@@ -47,12 +47,12 @@ const sleep = (ms: number, signal: AbortSignal): Promise<void> => new Promise((r
 export function pollWith(options: PollWithOptions): AsyncPlugin & { dispose(): void } {
   const { bus } = options;
   // A NaN behaves like a missing option (bounds.ts): never a hot loop or an endless wait.
-  const interval = countOption(options.interval, 1000, 0, MAX_TIMEOUT_MS);
+  const interval = delayOption(options.interval, 1000);
   const maxWait = countOption(options.maxWait, 300_000);
   const http = options.httpClient ?? createHttpClient({ retry: 0 });
   const live = new Set<AbortController>();
 
-  async function follow(cmd: Command, url: string, firstWait: number): Promise<void> {
+  async function follow(cmd: Command, url: string, firstWait: Delay): Promise<void> {
     const ctrl = new AbortController();
     live.add(ctrl);
     cmd.signal?.addEventListener('abort', () => ctrl.abort(), { once: true });
@@ -86,7 +86,7 @@ export function pollWith(options: PollWithOptions): AsyncPlugin & { dispose(): v
           result = r.data?.problem ? _errResult(_remoteProblem(r.data.problem as never)) : _okResult(r.data?.state);
           break;
         }
-        wait = _parseRetryAfter(r.headers['retry-after']) ?? interval;
+        wait = delayOption(_parseRetryAfter(r.headers['retry-after']) ?? interval, interval);
       }
     } catch (e) {
       if (ctrl.signal.aborted) return;
@@ -103,7 +103,7 @@ export function pollWith(options: PollWithOptions): AsyncPlugin & { dispose(): v
     const location = res?.status === 202 ? res.headers.location : undefined;
     if (result.ok && location) {
       const url = res!.url ? new URL(location, res!.url).href : location;
-      void follow(cmd, url, _parseRetryAfter(res!.headers['retry-after']) ?? interval);
+      void follow(cmd, url, delayOption(_parseRetryAfter(res!.headers['retry-after']) ?? interval, interval));
     }
     return result;
   };

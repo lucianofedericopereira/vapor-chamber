@@ -22,12 +22,13 @@
 //   - The page already includes <meta name="csrf-token" content="{{ csrf_token() }}">
 //
 // Place this in routes/web.php so the 'web' middleware group applies
-// (session, VerifyCsrfToken, etc.).
+// (session, PreventRequestForgery, etc.).
 //
 // Client tip: without Sanctum there is no /sanctum/csrf-cookie endpoint, so
-// pass `csrfCookieUrl: ''` to createHttpBridge/postCommand - the default 419
-// auto-refresh would otherwise re-read the (stale) meta tag and retry with
-// the same expired token.
+// pass `csrfCookieUrl: ''` to createHttpBridge/postCommand. The 419
+// auto-refresh then skips that fetch, which would answer 404. Either way the
+// retry reads the XSRF-TOKEN cookie first, and the meta tag only when there
+// is no cookie (readCsrfAfterRefresh in src/http.ts).
 
 \Illuminate\Support\Facades\Route::post('/api/vc', \App\Http\Controllers\VaporChamberController::class)
     ->middleware(['web'])

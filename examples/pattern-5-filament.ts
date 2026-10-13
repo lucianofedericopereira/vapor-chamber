@@ -19,9 +19,9 @@ import { ref } from 'vue'
 // Livewire and Vapor Chamber manage separate DOM scopes - no conflict.
 //
 // NOTE: register and dispatch directly on the LOCAL bus. useCommandGroup()
-// always attaches to the shared getCommandBus() instance, which would defeat
-// the per-island isolation this pattern is about - namespace by naming the
-// actions instead ('analytics*').
+// attaches to the shared getCommandBus() unless it is given `{ bus }`, which
+// would defeat the per-island isolation this pattern is about - so either pass
+// the island's bus, or namespace by naming the actions ('analytics*').
 function mountAnalyticsIsland(el: HTMLElement, endpoint: string) {
   const bus = createAsyncCommandBus()
   // `csrf: true` sends Laravel's token: the raw bridge leaves it off, where

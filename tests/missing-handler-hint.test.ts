@@ -60,7 +60,7 @@ describe('core:missing:handler message', () => {
     expect(result.error?.message).toBe(SHIPPED);
   });
 
-  it('production: the fact alone, the fix is the catalogue\'s (plan, settled item 5)', async () => {
+  it('production: the fact alone, the fix is the catalogue\'s (docs/contract.md rule 5)', async () => {
     vi.stubEnv('NODE_ENV', 'production');
     const { result } = await bridgedMiss();
     expect(result.error?.message).toBe(FACT);

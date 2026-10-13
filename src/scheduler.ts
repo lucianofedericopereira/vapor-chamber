@@ -12,6 +12,7 @@
  * lane like one that succeeds, so a failure cannot deadlock the lane. A lane's
  * entry is reclaimed once it drains, so the map never grows unbounded.
  */
+import type { Delay } from './bounds';
 
 export type Lanes = {
   /** Run `fn` after every earlier run in lane `key` has settled. */
@@ -41,14 +42,14 @@ export function createLanes(): Lanes {
  * hanging. A wait that ends removes itself.
  */
 export type Sleeper = {
-  sleep(ms: number, signal?: AbortSignal): Promise<boolean>;
+  sleep(ms: Delay, signal?: AbortSignal): Promise<boolean>;
   wakeAll(): void;
 };
 
 export function createSleeper(): Sleeper {
   const sleeping = new Set<() => void>();
   return {
-    sleep(ms: number, signal?: AbortSignal): Promise<boolean> {
+    sleep(ms: Delay, signal?: AbortSignal): Promise<boolean> {
       return new Promise<boolean>((resolve) => {
         if (signal?.aborted) return resolve(false);
         const end = (due: boolean): void => {

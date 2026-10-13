@@ -11,7 +11,9 @@
  *   - a `peer` ratio (one row another library) as the band "min-max", because
  *     one value of it is a fact about one host on one day (docs/V8-RULES.md
  *     rule 15: fast lane vs mitt stamped 2.33, 1.79-1.92 five runs later);
- *   - `benchProvenance`: Node, vitest and the peers' versions, and N.
+ *   - a `cost` (ns per call) as the median, with `<name>PerFrame`, the calls
+ *     that fit in one 60 fps frame;
+ *   - `benchProvenance`: CPU, OS, Node, vitest and the peers' versions, and N.
  *
  * Fewer than MIN_RUNS runs, or a ratio missing from a run, writes nothing and
  * exits 1: a band from two draws or a renamed row would publish a wrong value
@@ -27,13 +29,22 @@
 
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { cpus, platform, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { RATIOS } from './bench-ratios-reporter.mjs';
+import { COSTS, RATIOS } from './bench-ratios-reporter.mjs';
 
 export const MIN_RUNS = 3;
 export const PEERS = ['mitt', 'eventemitter3'];
+const ALL = { ...RATIOS, ...COSTS };
+const FRAME_NS = 1e9 / 60;
+
+/** Calls that fit in one 60 fps frame at `ns` per call, to two significant figures. */
+export function perFrame(ns) {
+  const n = FRAME_NS / ns;
+  const step = 10 ** Math.max(0, Math.floor(Math.log10(n)) - 1);
+  return (Math.round(n / step) * step).toLocaleString('en-US');
+}
 
 const median = (xs) => {
   const s = [...xs].sort((a, b) => a - b);
@@ -48,30 +59,41 @@ const median = (xs) => {
  * @param {Record<string, { kind: string }>} [ratios]
  * @returns {Record<string, string>}
  */
-export function bands(runs, ratios = RATIOS) {
+export function bands(runs, ratios = ALL) {
   if (runs.length < MIN_RUNS) throw new Error(`bench-bands: ${runs.length} run(s), at least ${MIN_RUNS} needed for a band`);
   const out = {};
   for (const [name, { kind }] of Object.entries(ratios)) {
     const xs = runs.map((r) => Number(r[name]));
     const lost = xs.filter((x) => !Number.isFinite(x)).length;
     if (lost) throw new Error(`bench-bands: ${name} missing from ${lost} of ${runs.length} runs`);
-    out[name] = kind === 'peer'
-      ? `${Math.min(...xs).toFixed(2)}-${Math.max(...xs).toFixed(2)}`
-      : median(xs).toFixed(2);
+    if (kind === 'cost') {
+      const ns = median(xs);
+      out[name] = ns.toFixed(1);
+      out[name.replace(/Ns$/, 'PerFrame')] = perFrame(ns);
+    } else {
+      out[name] = kind === 'peer'
+        ? `${Math.min(...xs).toFixed(2)}-${Math.max(...xs).toFixed(2)}`
+        : median(xs).toFixed(2);
+    }
   }
   return out;
 }
 
-export function provenance({ node, vitest, peers, runs }) {
+/** `os.cpus()[0].model` without trademarks and clock: "Intel Core i7-8650U", "Apple M1". */
+export function cpuName(model) {
+  return model.replace(/\((R|TM)\)/gi, '').replace(/\s+CPU\b.*$/, '').replace(/\s+/g, ' ').trim();
+}
+
+export function provenance({ node, vitest, peers, cpu, os, runs }) {
   const libs = Object.entries(peers).map(([name, v]) => `${name} ${v}`).join(', ');
-  return `Node ${node}, vitest ${vitest}, ${libs}, ${runs} runs`;
+  return `${cpu}, ${os}, Node ${node}, vitest ${vitest}, ${libs}, ${runs} runs`;
 }
 
 /**
  * The `-t` pattern that selects exactly the describe groups the ratios read.
  * @param {Record<string, { group: string }>} [ratios]
  */
-export function groupPattern(ratios = RATIOS) {
+export function groupPattern(ratios = ALL) {
   const groups = [...new Set(Object.values(ratios).map((r) => r.group))];
   return `^(${groups.map((g) => g.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')}) `;
 }
@@ -112,7 +134,7 @@ function main(argv) {
     writeFileSync(join(out, `ratios-${k}.json`), `${JSON.stringify(run, null, 2)}\n`);
     console.log(`run ${k}: rc ${r.status}, ${Math.round((Date.now() - t0) / 1000)} s, ${Object.keys(run).length} ratios`);
     // Stop at the first bad run instead of spending the other N - 1 on it.
-    const want = Object.keys(RATIOS).length;
+    const want = Object.keys(ALL).length;
     if (r.status !== 0 || Object.keys(run).length !== want) {
       console.error(`bench-bands: run ${k} failed (rc ${r.status}, ${Object.keys(run).length} of ${want} ratios), see ${join(out, `run-${k}.txt`)}`);
       return 1;
@@ -131,6 +153,8 @@ function main(argv) {
     node: process.versions.node,
     vitest: versionOf(root, 'vitest'),
     peers: Object.fromEntries(PEERS.map((p) => [p, versionOf(root, p)])),
+    cpu: cpuName(cpus()[0]?.model ?? 'unknown CPU'),
+    os: { darwin: 'macOS', linux: 'Linux', win32: 'Windows' }[platform()] ?? platform(),
     runs: n,
   });
   const metrics = readMetrics(metricsFile);

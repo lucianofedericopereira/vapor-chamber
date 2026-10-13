@@ -277,7 +277,7 @@ type ChannelMessage = { __vc: true; event: string; data: any };
  *
  * IT ALSO LEAVES THE DISPATCH CHAIN. As a plugin this cost more than half the
  * bus's dispatch throughput, on every dispatch of every action, whether or not
- * it synced. Measured over 11 shuffled rounds of 200,000 dispatches with
+ * it synced. Measured for v1.22.0 over 11 shuffled rounds of 200,000 dispatches with
  * `gc()` per round, against a byte-identical self-control arm: bare bus 1.000,
  * as a plugin 0.459 (control 0.454), as an `onAfter` listener 0.538, and on the
  * fast lane 0.867. The correctness fix and the performance fix are the same
@@ -341,16 +341,17 @@ export function createChannel(options: ChannelOptions): {
       try {
         bc?.postMessage({ __vc: true, event: name, data } satisfies ChannelMessage);
       } catch (e) {
-        // A payload that cannot be structured-cloned (a function, a class
-        // instance with methods, a DOM node) throws DataCloneError here. The
-        // local tab has already applied its own fact by now, so this is a
+        // A payload that cannot be structured-cloned (a function, a DOM node)
+        // throws DataCloneError here. A class instance does clone, as a plain
+        // object without its methods (tests/browser/platform-facts.browser.test.ts).
+        // The local tab has already applied its own fact by now, so this is a
         // remote-only failure and must not take the local emit down with it -
         // a listener that throws would stop the rest of the lane's fan-out.
-        // DEV-gated like the call-site warnings above and unlike persist's
-        // storage warnings: a non-cloneable payload is an authoring mistake
-        // fixed at build time, not a condition a deployed app runs into.
+        // DEV-gated, unlike persist's storage warnings: a non-cloneable payload
+        // is an authoring mistake fixed at build time, not a condition a
+        // deployed app runs into.
         if (DEV) {
-          console.warn(`[vapor-chamber] createChannel: "${name}" did not cross - its payload is not structured-cloneable (no functions, class instances or DOM nodes):`, e);
+          console.warn(`[vapor-chamber] createChannel: "${name}" did not cross - its payload is not structured-cloneable (no functions or DOM nodes):`, e);
         }
       }
     }));

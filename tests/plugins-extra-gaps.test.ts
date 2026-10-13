@@ -8,7 +8,7 @@
  *  - idempotent: stampMeta:false, TTL expiry drop, and the
  *    rejection arm clearing inflight without caching.
  *  - supersede: merging a caller-supplied signal via AbortSignal.any
- *    and the ctrl-signal fallback when AbortSignal.any is unavailable.
+ *    and the same without AbortSignal.any (tests/combine-signals.test.ts).
  */
 import { describe, expect, vi, afterEach } from 'vitest';
 import { createCommandBus, createAsyncCommandBus } from '../src/index';
@@ -214,7 +214,7 @@ describe('supersede signal merging', () => {
     expect(observed!.aborted).toBe(true);
   });
 
-  it('falls back to the controller signal when AbortSignal.any is unavailable', async () => {
+  it('combines a caller-supplied signal when AbortSignal.any is unavailable', async () => {
     const origAny = AbortSignal.any;
     // @ts-expect-error deliberate removal to drive the fallback arm
     AbortSignal.any = undefined;

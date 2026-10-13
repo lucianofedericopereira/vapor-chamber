@@ -53,8 +53,8 @@
 <div id="app" class="panel">
   <h2>Cart</h2>
   <div class="row">
-    <button id="add-btn">Add to cart</button>
-    <button id="clear-btn">Clear</button>
+    <button type="button" id="add-btn">Add to cart</button>
+    <button type="button" id="clear-btn">Clear</button>
     <span id="cart-count">0 items</span>
   </div>
   <p id="error-msg" role="status"></p>
@@ -84,9 +84,10 @@
   })
 
   // Persist cart count across page reloads. persist() is used here only for
-  // its load()/save() storage helpers - we save explicitly below, because the
-  // HTTP transport handles matching commands itself (it does not fall through
-  // to local plugins/handlers).
+  // its load()/save() storage helpers - we save explicitly below. The HTTP
+  // transport answers matching commands itself: no handler runs, and no plugin
+  // installed after it sees them. A plugin in createApp's `plugins` is
+  // installed before it and does see each dispatch.
   const cartPersist = VaporChamber.persist({
     key: 'vc:cart',
     getState: () => ({ count: parseInt(document.getElementById('cart-count').textContent) }),

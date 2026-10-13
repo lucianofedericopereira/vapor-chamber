@@ -10,8 +10,9 @@
  * - `ProblemDetails` - the failure's shape at the boundary (RFC 9457): what a
  *   backend answers, and what the HTTP client's `safe` helpers return.
  * - `classifyError(error)` - can a retained cache entry stand in for this
- *   failure (`cache.serveStaleOnError`), RFC 9111's stale-if-error: a timeout,
- *   no response at all, or a 5xx. A different question from a retry, so a
+ *   failure (`cache.serveStaleOnError`): a timeout, no response at all, or a
+ *   5xx. Modelled on RFC 5861's stale-if-error, which names 500, 502, 503 and
+ *   504; this takes every 5xx. A different question from a retry, so a
  *   different rule.
  */
 
@@ -34,7 +35,7 @@ export type ProblemDetails = {
 /**
  * The backend's RFC 9457 problem behind a failure, or `undefined` when no
  * backend answered. Walks the `cause` chain (a router failure's cause, a
- * plugin's wrap), so a consumer reads it once instead of digging (plan 8d.2):
+ * plugin's wrap), so a consumer reads it once instead of digging (docs/contract.md 6):
  * a `remote:` failure (from the http client or a bridge, the same failure
  * since log s35.131) gives its problem members. Log s35.121.
  *
@@ -46,8 +47,9 @@ export function problemOf(error: unknown): ProblemDetails | undefined {
   let e = error as { name?: unknown; code?: unknown; message?: string; context?: Record<string, unknown>; cause?: unknown } | null | undefined;
   for (let depth = 0; e && depth < 8; depth++, e = e.cause as typeof e) {
     if (e.name === 'BusError' && typeof e.code === 'string' && e.code.startsWith('remote:')) {
-      // A `remote:` failure always carries the problem's members as context.
-      const { retryIn: _retryIn, ...members } = e.context as Record<string, unknown>;
+      // A `remote:` failure carries the problem's members as context, except a
+      // bridge's 2xx reply that is not the envelope (transports.ts): no members.
+      const { retryIn: _retryIn, ...members } = (e.context ?? {}) as Record<string, unknown>;
       return { ...members, detail: e.message } as ProblemDetails;
     }
   }

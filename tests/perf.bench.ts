@@ -590,10 +590,10 @@ describe('SSR rehydrate throughput', () => {
 // Transition bridge throughput - current-Vue baseline (running version is shown
 // in each bench label via VUE_VERSION; recorded baseline blocks below stay literal)
 //
-// Beta.13 fixed two silent-skip bugs: onMove was never called for Vapor or
-// VDOM component moves inside a Vapor TransitionGroup. These benches lock the
-// JS-layer dispatch cost of the transition bridge so any future regression in
-// the hook-dispatch path is visible regardless of Vue version.
+// These benches lock the JS-layer dispatch cost of the transition bridge so
+// any future regression in the hook-dispatch path is visible regardless of Vue
+// version. onMove is called by hand here, as an app calls it: Vue has no move
+// hook (tests/vue-no-move-hook.test.ts).
 //
 // Reading these numbers:
 //   - "all 9 hooks" covers the full enter+leave lifecycle in one sequence.
@@ -1115,8 +1115,8 @@ describe('signal path comparison - fallback vs alien-signals add-on vs Vue ref',
 // keeping ref's Proxy-trap side effects - producing inflated, unstable ratios
 // (observed 800x+ with ±100% rme). The honest, DCE-safe measurement lives in
 // tests/signal-shallow-ab.test.ts, which runs the REAL dispatch path (the bus
-// indirection defeats constant-folding) interleaved in-process and asserts the
-// ratio (~3.4x / +245% on the array path). Use that as the source of truth.
+// indirection defeats constant-folding) interleaved in-process and prints the
+// ratio on `npm run test:timing`. Use that as the source of truth.
 
 describe('command.meta', () => {
   it('command.meta.id is populated', () => {

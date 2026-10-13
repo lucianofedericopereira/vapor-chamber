@@ -1,4 +1,4 @@
-/** An idempotency key names one request payload: idempotent keys the payload, the outbox keys each record (plan 1.27 section 10.5). Rationale at the end. */
+/** An idempotency key names one request payload: idempotent keys the payload, the outbox keys each record (log s35.166). Rationale at the end. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { commandKey, createAsyncCommandBus } from '../src/command-bus';
 import { createOutbox, type OutboxRecord } from '../src/outbox';

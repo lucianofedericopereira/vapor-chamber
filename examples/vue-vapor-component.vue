@@ -13,7 +13,7 @@
 -->
 
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, onScopeDispose, ref } from 'vue';
 // One entry for a Vue app: `vapor-chamber/vue` carries the bus and its
 // plugins too, and wires Vue at build time.
 import { getCommandBus, validator, useCommand, useCommandHistory } from 'vapor-chamber/vue';
@@ -42,10 +42,12 @@ const useTodos = defineChamberStore('todo', {
   undo: true,
 });
 
+// The shared bus outlives this component: the validator leaves with it, or
+// each mount would add one more.
 const bus = getCommandBus();
-bus.use(validator({
+onScopeDispose(bus.use(validator({
   todoAdd: (cmd) => (String(cmd.target ?? '').trim() ? null : 'Todo text cannot be empty'),
-}));
+})));
 
 const todos = useTodos(bus);
 const cmd = useCommand();
@@ -92,18 +94,18 @@ function addTodo() {
     <p class="error" role="alert">{{ cmd.lastError.value?.message }}</p>
 
     <div class="controls">
-      <button @click="hist.canUndo.value && hist.undo()" :aria-disabled="!hist.canUndo.value">Undo</button>
-      <button @click="hist.canRedo.value && hist.redo()" :aria-disabled="!hist.canRedo.value">Redo</button>
+      <button type="button" @click="hist.canUndo.value && hist.undo()" :aria-disabled="!hist.canUndo.value">Undo</button>
+      <button type="button" @click="hist.canRedo.value && hist.redo()" :aria-disabled="!hist.canRedo.value">Redo</button>
     </div>
 
     <div class="filters">
-      <button @click="filter = 'all'" :class="{ active: filter === 'all' }" :aria-pressed="filter === 'all'">
+      <button type="button" @click="filter = 'all'" :class="{ active: filter === 'all' }" :aria-pressed="filter === 'all'">
         All ({{ stats.total }})
       </button>
-      <button @click="filter = 'active'" :class="{ active: filter === 'active' }" :aria-pressed="filter === 'active'">
+      <button type="button" @click="filter = 'active'" :class="{ active: filter === 'active' }" :aria-pressed="filter === 'active'">
         Active ({{ stats.active }})
       </button>
-      <button @click="filter = 'completed'" :class="{ active: filter === 'completed' }" :aria-pressed="filter === 'completed'">
+      <button type="button" @click="filter = 'completed'" :class="{ active: filter === 'completed' }" :aria-pressed="filter === 'completed'">
         Completed ({{ stats.completed }})
       </button>
     </div>
@@ -114,11 +116,11 @@ function addTodo() {
           <input type="checkbox" :checked="todo.done" @change="todos.toggle(todo.id)" />
           {{ todo.text }}
         </label>
-        <button @click="todos.remove(todo.id)" class="remove" :aria-label="`Remove ${todo.text}`">&times;</button>
+        <button type="button" @click="todos.remove(todo.id)" class="remove" :aria-label="`Remove ${todo.text}`">&times;</button>
       </li>
     </ul>
 
-    <button v-if="stats.completed > 0" @click="todos.clearCompleted()" class="clear-completed">
+    <button type="button" v-if="stats.completed > 0" @click="todos.clearCompleted()" class="clear-completed">
       Clear completed ({{ stats.completed }})
     </button>
   </div>

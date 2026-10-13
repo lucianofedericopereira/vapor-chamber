@@ -1,4 +1,4 @@
-/** ActionSchema.annotations: MCP ToolAnnotations on the action, read by tools/list and by the retry (plan 1.27 item 9, B3). Rationale at the end. */
+/** ActionSchema.annotations: MCP ToolAnnotations on the action, read by tools/list and by the retry (log s35.178). Rationale at the end. */
 import { describe, expect, it } from 'vitest';
 import { BusError } from '../src/command-bus';
 import { createActionFilter } from '../src/action-filter';

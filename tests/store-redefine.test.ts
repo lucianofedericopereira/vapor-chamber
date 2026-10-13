@@ -90,7 +90,7 @@ describe('another definition of a held id', () => {
  * already fine; a store created at module load (pinned) kept the first
  * definition through every edit.
  *
- * The rule is the core's for `register()` (plan settled item 8): last wins,
+ * The rule is the core's for `register()` (docs/contract.md rule 7): last wins,
  * with ownership. The new definition builds its own store and registers its
  * actions over the old ones - `register()` warns per action in DEV, the
  * signal that two definitions claim one id - and the old store's `$dispose`

@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
+import { delayOption } from '../src/bounds';
 import { createLanes, createSleeper } from '../src/scheduler';
+
+// A sleep takes a Delay (tests/timer-delays.test.ts).
+const ten = delayOption(10, 10);
 
 describe('scheduler', () => {
   it('runs a lane in order, and a run that fails releases the lane', async () => {
@@ -16,10 +20,10 @@ describe('scheduler', () => {
     vi.useFakeTimers();
     try {
       const waits = createSleeper();
-      const due = waits.sleep(10);
+      const due = waits.sleep(ten);
       vi.advanceTimersByTime(10);
       expect(await due).toBe(true);
-      const woken = waits.sleep(10);
+      const woken = waits.sleep(ten);
       waits.wakeAll();
       expect(await woken).toBe(false);
     } finally {
@@ -32,13 +36,13 @@ describe('scheduler', () => {
     try {
       const waits = createSleeper();
       const ac = new AbortController();
-      const mine = waits.sleep(10, ac.signal);
-      const other = waits.sleep(10);
+      const mine = waits.sleep(ten, ac.signal);
+      const other = waits.sleep(ten);
       ac.abort();
       expect(await mine).toBe(false);
       vi.advanceTimersByTime(10);
       expect(await other).toBe(true);
-      expect(await waits.sleep(10, ac.signal)).toBe(false);
+      expect(await waits.sleep(ten, ac.signal)).toBe(false);
     } finally {
       vi.useRealTimers();
     }

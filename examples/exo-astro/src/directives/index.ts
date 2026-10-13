@@ -6,8 +6,9 @@
  *   v-scope='{"open":false}'   declare reactive LOCAL state (inline JSON)
  *   v-bind-text="cart.count"   reactive textContent via dot-path
  *   v-show="cart.hasItems"     toggle display:none on path truthiness
- *   v-each="cart.items"        repeat the element's <template> child per entry,
- *                              each clone scoped to its item
+ *   v-each="cart.items"        repeat the element's <template> child (or, in a
+ *                              table section, its first element child) per
+ *                              entry, each clone scoped to its item
  *   v-command="cart.add"       dispatch a named bus command on click,
  *                              with optional v-target / v-payload JSON
  *
@@ -79,10 +80,16 @@ export function reactive<T extends object>(obj: T): T {
   return proxy;
 }
 
-/** Register an effect against a reactive object: runs now, re-runs on mutation. */
-export function addEffect(obj: object, run: Effect): void {
-  effectsOf.get(obj)?.add(run);
+const noop: Effect = () => {};
+
+/** Register an effect against a reactive object: runs now, re-runs on mutation.
+ *  Returns a disposer that takes it off again (a no-op for a non-reactive object,
+ *  where nothing was registered). */
+export function addEffect(obj: object, run: Effect): () => void {
+  const fx = effectsOf.get(obj);
+  fx?.add(run);
   run();
+  return fx ? () => { fx.delete(run); } : noop;
 }
 
 /** Global bus-managed state - the "atmosphere" sections read from. */
@@ -110,7 +117,9 @@ function resolveFor(el: Element, path: string): object {
   let cur: Element | null = el;
   while (cur) {
     const scope = scopeMap.get(cur);
-    if (scope && head in scope) return scope;
+    // Own keys only: `in` also sees `valueOf`, `toString` from Object.prototype.
+    // hasOwn reads through the Proxy, which defines no trap for own keys.
+    if (scope && Object.hasOwn(scope, head)) return scope;
     cur = cur.parentElement;
   }
   return busState;
@@ -171,30 +180,41 @@ function pick(root: ParentNode, selector: string): Element[] {
   return found;
 }
 
-function wire(bus: BaseBus, root: ParentNode): void {
+/**
+ * Wire every directive under `root`. `owned`, when given, collects a disposer
+ * for each effect registered here: a v-each row passes its list's array, so
+ * the next rebuild can take the row's effects off again.
+ */
+function wire(bus: BaseBus, root: ParentNode, owned?: Array<() => void>): void {
+  const track = (off: () => void) => { owned?.push(off); };
+
   for (const el of pick(root, '[v-bind-text]')) {
     if (!claim(el, 'v-bind-text')) continue;
     const path = el.getAttribute('v-bind-text')!;
     const scope = resolveFor(el, path);
-    addEffect(scope, () => {
+    track(addEffect(scope, () => {
       const v = getPath(scope, path);
       el.textContent = v == null ? '' : String(v);
-    });
+    }));
   }
 
   for (const el of pick(root, '[v-show]')) {
     if (!claim(el, 'v-show')) continue;
     const path = el.getAttribute('v-show')!;
     const scope = resolveFor(el, path);
-    addEffect(scope, () => {
+    track(addEffect(scope, () => {
       (el as HTMLElement).style.display = getPath(scope, path) ? '' : 'none';
-    });
+    }));
   }
 
   // v-each="items" - repeat the element's <template> child once per array
   // entry, each clone scoped to its entry (`v-bind-text="name"` reads the item).
   // The list is rebuilt wholesale on any change: for the row counts a static
-  // page carries, that beats keeping a keyed diff honest.
+  // page carries, that beats keeping a keyed diff honest. A row binding that
+  // falls through to busState or an enclosing scope registers an effect there,
+  // so each rebuild first disposes what the previous rows registered: one
+  // Set.delete per such binding. Item bindings register nothing (a nested
+  // object has no effect set of its own) and cost nothing to dispose.
   for (const el of pick(root, '[v-each]')) {
     if (!claim(el, 'v-each')) continue;
     const path = el.getAttribute('v-each')!;
@@ -204,7 +224,9 @@ function wire(bus: BaseBus, root: ParentNode): void {
     // <template> is not universally safe inside table sections - the HTML spec
     // allows it, but parsers disagree, and a dropped template silently turns
     // the prototype into a real row. Authoring the row directly always works.
-    const tpl = el.querySelector('template') as HTMLTemplateElement | null;
+    // A direct child only: querySelector would also find a nested list's
+    // <template> and take it as this list's row.
+    const tpl = (Array.from(el.children).find((c) => c.tagName === 'TEMPLATE') ?? null) as HTMLTemplateElement | null;
     let clone: (() => Element[]) | null = null;
     if (tpl) {
       clone = () =>
@@ -219,7 +241,13 @@ function wire(bus: BaseBus, root: ParentNode): void {
     if (!clone) continue;
 
     const scope = resolveFor(el, path);
-    addEffect(scope, () => {
+    let rows: Array<() => void> = [];
+    const disposeRows = () => {
+      for (const off of rows) off();
+      rows = [];
+    };
+    const off = addEffect(scope, () => {
+      disposeRows();
       for (const old of Array.from(el.children)) {
         if (old !== tpl) old.remove();
       }
@@ -229,10 +257,12 @@ function wire(bus: BaseBus, root: ParentNode): void {
         for (const row of clone()) {
           if (item !== null && typeof item === 'object') scopeMap.set(row, item);
           el.appendChild(row);
-          wire(bus, row);
+          wire(bus, row, rows);
         }
       }
     });
+    // Inside an outer row: the outer rebuild removes this list and its rows.
+    track(() => { off(); disposeRows(); });
   }
 
   for (const el of pick(root, '[v-command]')) {

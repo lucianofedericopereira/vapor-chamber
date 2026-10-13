@@ -61,7 +61,8 @@ short-lived cache (TTL 60s): a second POST with the same key replays the cached
 response instead of running the action again, so a re-send can't create a
 duplicate order. A re-send that arrives while the first is still running gets
 409 with `Retry-After: 1`, and the bus comes back for the finished answer. A
-key belongs to whoever sent it - the user, else the session - so two users
+key belongs to whoever sent it - the user, else the session, else the
+address - so two users
 sending the same key (the plugin's default key is the command itself) each run
 their own. No setup is needed beyond a working Laravel cache store.
 

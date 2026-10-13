@@ -331,12 +331,12 @@ describe.skipIf(!esbuild)('ESM tree-shake regression', () => {
       // 6_363 after v1.24.0's RFC 9457 problem documents (+7 against the
       // published v1.23.0, one build each: the `+json` test, `detail` in
       // responseError, the wider Accept). Ceiling unchanged, 17 B of headroom.
-      // Ceiling 6_380 -> 6_280 (Unreleased, Phase 0 of
-      // docs/plan-failures-and-contract.md). The fixes first measured 6_413
+      // Ceiling 6_380 -> 6_280 (Unreleased, Phase 0 of the failures plan,
+      // CHANGELOG v1.25.0). The fixes first measured 6_413
       // (register()'s ownership-checked cleanup, the catalogue's severity on
       // the throttled and aborted refusals, the Idempotency-Key as a
       // Structured Field String), over the old ceiling. Not raised: advice
-      // moved to DEV (plan, settled item 5 - the fix text is the catalogue's)
+      // moved to DEV (docs/contract.md rule 5, the fix text is the catalogue's)
       // and register({ throttle }) and throttle() share one gate. Measured
       // 6_260, below v1.24.0's 6_363. This LOWER ceiling locks it; 20 B of
       // headroom.
@@ -348,14 +348,14 @@ describe.skipIf(!esbuild)('ESM tree-shake regression', () => {
       // `remote` refusal. Squeezed first: a shared `failsFor`, `pluginThrew`
       // taking the runner's `fail`, `backendError` losing its dead `emitter`
       // (-37 raw, 0 brotli: brotli already folded the repeats). 12 B headroom.
-      // Ceiling 6_340 -> 6_425 (Unreleased, the wire contract, plan 4.4 rev
-      // 21-22): the status table, the transport readers of one answer shape,
+      // Ceiling 6_340 -> 6_425 (Unreleased, the wire contract, docs/contract.md 4):
+      // the status table, the transport readers of one answer shape,
       // net of the readers and catch paths they replaced. Measured 6_412
       // against 6_328, after the redirect advice moved to DEV and
       // `Retry-After` parsing lost its null. 13 B headroom.
       // Ceiling 6_425 -> 6_440: the HTTP client's retry back to 1.24 (5xx
       // retried, `X-RateLimit-Reset` as the wait's fallback). Measured 6_427.
-      // Ceiling 6_440 -> 6_460: the retry model (docs/plan-shape.md 4). The
+      // Ceiling 6_440 -> 6_460: the retry model (docs/retry.md). The
       // policy lives in the async bus, not in this bundle; what reaches it is
       // the bridges' `transport` declaration and the status table's new home
       // in the core. Measured 6_445 (+18).
@@ -377,7 +377,7 @@ describe.skipIf(!esbuild)('ESM tree-shake regression', () => {
       // Ceiling 6_671 -> 6_765, to the measured size (owner: "no sweat size
       // increase", log s35.80): a problem's RFC 9457 `type`, the docs URL of
       // its condition (+93: the 83-character prefix barely compresses; plan
-      // 7.2 item 16 measured 77 for a code-level URL in 2026-09).
+      // the ownership prototype measured 77 for a code-level URL in 2026-09).
       // Ceiling 6_765 -> 6_770, to the measured size (log s35.81): meta's
       // `idempotencyKey` slot, present from stampMeta (one meta map), +4.
       // Ceiling 6_770 -> 6_779, to the measured size (log s35.82): the
@@ -409,7 +409,17 @@ describe.skipIf(!esbuild)('ESM tree-shake regression', () => {
       // Raised to measured for a batched result's or a frame's own `headers`, their Retry-After read as a response's (s35.205): the reader +54, the single bridge passing its response's -3, each left out alone; total +51. The two-copies hint 0 (DEV), the route table not in this bundle.
       // Raised to measured for hooks removed during a dispatch by the listeners' rule (s35.209): 8_346 -> 8_374, +28.
       // Raised to measured for commandKey keeping a BigInt or a circular target apart (1.30): the BigInt tag and the identity fallback 8_374 -> 8_434, +60. The ':' naming warning 0 (DEV).
-      expect(viteBr.length, `vite production brotli grew unexpectedly (${viteBr.length} bytes)`).toBeLessThan(8_435);
+      // Raised to measured for maxBufferSize read by countOption (audit D7, s36.11): read once when the bus is made, countOption's body enters this bundle, 8_434 -> 8_472, +38. Owner: the right fix over the size trade.
+      // Raised to measured for request()'s timeout read by countOption (audit D8, s36.11): the sync bus's read, in its timer branch, 8_472 -> 8_519, +47. The async bus and the ws bridge are not in this bundle: 0 each, left out alone.
+      // Raised to measured for every timer delay as a checked Delay (audit D10, s36.11): the http client's two hand-rolled readers, the directive's timeout and the throttle gate through delayOption, 8_518 -> 8_521, +3.
+      // Raised to measured for a request JSON cannot encode, transport:invalid:json (audit D11, s36.11): the encoder and the http bridge encoding through it, 8_521 -> 8_586, +65 (+64 left out alone). The registry row and the client's check are not in this bundle: 0 each.
+      // Raised to measured for a malformed XSRF-TOKEN cookie read as no cookie (audit HT-24, s36.11): a try around the cookie's decode, 8_586 -> 8_592, +6.
+      // Raised to measured for two abort signals combined as AbortSignal.any does on every target, one helper (complexity review F1, log 36.13): the helper's fallback +21 (an input already aborted and its own detach +20 left out alone), the bridge's two sites through it +6, the per-request detach +8 left out alone; 8_592 -> 8_619, +27.
+      // Raised to measured for each request building its own transport:missing:csrf after a shared refresh, marked by its own silent (complexity review B3, log 36.13): one piece, 8_619 -> 8_621, +2.
+      // Raised to measured for the HTTP `retry` count read by the count rule, where a negative or NaN sent nothing (log 36.17): one piece, `countOption` at postCommand's read, 8_617 -> 8_627, +10.
+      // Then runWithRetry's resend-or-leave written once and its cleanup in one `send` (complexity review F12, log 36.17): 8_627 -> 8_566, -61. This LOWER ceiling locks it.
+      // Raised to measured for the two HTTP bridges' send and answer steps written once (complexity review F2, log 36.17). This bundle has the single bridge only, so it carries the helpers without the second copy they replace: `readAnswer` alone +20, `httpSender` (one send, one bridge signal) the rest; 8_566 -> 8_623, +57. Bundles with both bridges are 340 B smaller (min).
+      expect(viteBr.length, `vite production brotli grew unexpectedly (${viteBr.length} bytes)`).toBeLessThan(8_624);
 
       // Symbol budget. These are all chamber.ts-only - should NOT appear in a
       // consumer bundle that doesn't import Vue composables.

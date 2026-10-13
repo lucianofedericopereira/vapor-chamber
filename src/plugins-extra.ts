@@ -9,25 +9,22 @@
  *
  * Two pairs look extractable: the bounded eviction in `cache()` and
  * `idempotent()`, and the "compact when more than half the buffer is dead"
- * block in `rateLimit()` and `metrics()`. Both extractions were built and
- * MEASURED rather than argued about, and both were rejected:
+ * block in `rateLimit()` and `metrics()`. Both extractions were built,
+ * measured and rejected (v1.19, 2026-09-10).
  *
- *   - Cost: shared `evictOldest` + `compactHead` helpers made the `.` ESM entry
- *     +66 bytes minified / +24 gzip. The generic parameters they need - an
- *     optional remove callback, a container object for the head buffer - cost
- *     more than the ~15 duplicated lines they save, because a minifier already
- *     handles small repeated patterns well. Nothing else moved: these plugins
- *     are absent from all three IIFE variants (`plugins.ts` re-exports only
- *     plugins-core and plugins-io), so `check-size.mjs` cannot even see them,
- *     and the treeshake ceiling scenario does not include them either.
- *   - Correctness: the two evictions are not the same operation. `cache()`
- *     evicts DOWN TO the bound; `idempotent()` evicts ONE oldest entry before
- *     inserting. Unifying them silently changed behaviour at `maxSize: 0`, and
- *     plugins-extra-gaps.test.ts caught it.
+ * Shared `evictOldest` + `compactHead` helpers made the `.` ESM entry +66
+ * bytes minified / +24 gzip. The generic parameters they need - an optional
+ * remove callback, a container object for the head buffer - cost more than
+ * the ~15 duplicated lines they save, because a minifier already handles
+ * small repeated patterns well. Nothing else moved: these plugins are absent
+ * from all three IIFE variants (`plugins.ts` re-exports only plugins-core and
+ * plugins-io), so `check-size.mjs` cannot see them, and the treeshake
+ * ceiling scenario does not include them either.
  *
- * The second point is now less sharp than it was - the two were aligned, see
- * `idempotent`'s eviction - but the measurement stands: extracting costs bytes
- * on the only entry that ships this code.
+ * The two evictions follow one rule: oldest first, down to the bound, after
+ * the insert, so `idempotent({ maxSize: 0 })` remembers nothing
+ * (tests/plugins-extra-gaps.test.ts). An extraction changes bytes only, on
+ * the one entry that ships this code.
  */
 
 import { DEV } from './dev';
@@ -36,8 +33,10 @@ import { MAX_TIMEOUT_MS, countOption } from './bounds';
 import type { ActionScope, Command, CommandResult, Plugin, AsyncPlugin } from './command-bus';
 import type { ActionFilter } from './action-filter';
 import { abortedResult, commandKey, _isBug, _errResult, _isLibraryAction } from './command-bus';
+import { _isCancel } from './failure';
 import { freezeCached } from './freeze';
 import { createLanes } from './scheduler';
+import { _combineSignals } from './http';
 
 
 // ---------------------------------------------------------------------------
@@ -303,15 +302,16 @@ export function circuitBreaker(options: CircuitBreakerOptions = {}): Plugin & {
       } else {
         c.failCount = 0;
       }
-    } else if (!_isBug(result.error) && (result.error as Error)?.name !== 'AbortError') {
+    } else if (!_isBug(result.error) && !_isCancel(result.error, cmd.signal)) {
       // A plugin that threw (converted by the runner) is a pipeline bug, not
       // the server failing - a redeploy fixes it, and letting three of them
       // lock the action out is the wrong failure mode. A cancel (supersede,
       // the caller's abort) is not the server failing either: Polly's breaker
-      // skips OperationCanceledException. Every abort is named AbortError, a
-      // raw one and the library's `aborted:` codes (failure.ts), so the name
-      // reads them all without importing the status table. Neither counts
-      // nor resets the run of real failures. A backend's failure counts.
+      // skips OperationCanceledException. `_isCancel` reads every cancel: a
+      // raw AbortError, the library's `aborted:` codes, and the caller's own
+      // Error reason, which the bus returns as itself (failure.ts). Neither
+      // counts nor resets the run of real failures. A backend's failure
+      // counts, even one that lands after an abort.
       // tests/circuit-breaker-cancel.test.ts.
       // A failed half-open probe opens it again at once: left half-open,
       // every later dispatch went through (tests/circuit-breaker-half-open-fail.test.ts).
@@ -870,14 +870,14 @@ export function supersede(options: SupersedeOptions = {}): AsyncPlugin {
     const ctrl = new AbortController();
     controllers.set(k, ctrl);
 
-    // Merge with any caller-supplied signal - same AbortSignal.any-with-
-    // fallback pattern used throughout transports.ts.
-    cmd.signal = cmd.signal
-      ? (typeof AbortSignal.any === 'function' ? AbortSignal.any([cmd.signal, ctrl.signal]) : ctrl.signal)
-      : ctrl.signal;
+    // With a caller's own signal, either one aborts the dispatch: one helper,
+    // as the bridges combine. Detached when the dispatch settles.
+    const combined = cmd.signal ? _combineSignals(cmd.signal, ctrl.signal) : undefined;
+    cmd.signal = combined?.signal ?? ctrl.signal;
 
     const result = Promise.resolve(next());
     result.finally(() => {
+      combined?.detach();
       // Only clear the map entry if we're still the current controller for
       // this key - a newer dispatch may already have replaced us.
       if (controllers.get(k) === ctrl) controllers.delete(k);

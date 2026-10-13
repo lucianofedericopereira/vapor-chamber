@@ -1,0 +1,125 @@
+/** A request JSON cannot encode fails as transport:invalid:json, alone, with nothing sent and no re-send. Rationale at the end. */
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { BusError, createAsyncCommandBus } from '../src/command-bus';
+import { createHttpClient, postCommand } from '../src/http';
+import { createBatchingHttpBridge, createHttpBridge, createWsBridge } from '../src/transports';
+
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+/** A backend that answers every POST; counts them. */
+function backend() {
+  const seen = { posts: 0 };
+  vi.stubGlobal('fetch', async (_u: string, init: { body: string }) => {
+    seen.posts++;
+    const ids = (JSON.parse(init.body) as { commands?: Array<{ id: string }> }).commands?.map((c) => c.id);
+    const body = ids ? { results: ids.map((id) => ({ id, state: 'ok' })) } : { state: 'ok' };
+    return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } });
+  });
+  return seen;
+}
+
+const cycle = (): Record<string, unknown> => { const o: Record<string, unknown> = {}; o.self = o; return o; };
+const code = (r: { ok: boolean; error?: unknown }) => (r.ok ? 'ok' : (r.error as BusError).code);
+
+describe('the http client', () => {
+  it('post() rejects with transport:invalid:json, the TypeError its cause, nothing sent', async () => {
+    const seen = backend();
+    const http = createHttpClient();
+    await expect(http.post('/x', { n: 1 })).resolves.toMatchObject({ status: 200 }); // control
+    const error = await http.post('/x', { n: 1n }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(BusError);
+    expect(error).toMatchObject({ code: 'transport:invalid:json', context: { url: '/x' } });
+    expect((error as BusError).cause).toBeInstanceOf(TypeError);
+    expect(seen.posts).toBe(1);
+  });
+
+  it('safe.post() returns that BusError, status 0', async () => {
+    backend();
+    const r = await createHttpClient().safe.post('/x', cycle());
+    expect(r.error).toBeInstanceOf(BusError);
+    expect(r).toMatchObject({ error: { code: 'transport:invalid:json' }, status: 0 });
+  });
+
+  it('postCommand rejects the same way', async () => {
+    const seen = backend();
+    await expect(postCommand('/x', { n: 1n })).rejects.toMatchObject({ code: 'transport:invalid:json' });
+    expect(seen.posts).toBe(0);
+  });
+});
+
+describe('the bridges', () => {
+  /** An async bus that re-sends `save` as idempotent, through `plugin`. */
+  const bus = (plugin: Parameters<ReturnType<typeof createAsyncCommandBus>['use']>[0]) => {
+    const b = createAsyncCommandBus({ retry: { actionPolicies: { save: 'idempotent' }, baseDelay: 1 } });
+    b.use(plugin);
+    return b;
+  };
+
+  for (const [name, make] of [
+    ['createHttpBridge', () => createHttpBridge({ endpoint: '/vc' })],
+    ['createHttpBridge with an httpClient', () => createHttpBridge({ endpoint: '/vc', httpClient: createHttpClient() })],
+  ] as const) {
+    it(`${name}: invalid:json, never re-sent, nothing sent`, async () => {
+      const seen = backend();
+      expect(code(await bus(make()).dispatch('save', {}, { n: 1 }))).toBe('ok'); // control
+      const r = await bus(make()).dispatch('save', {}, { n: 1n });
+      expect(r.error).toMatchObject({ code: 'transport:invalid:json', action: 'save' });
+      expect((r.error as BusError).context).not.toHaveProperty('attempts');
+      expect(seen.posts).toBe(1);
+    });
+  }
+
+  for (const [name, make] of [
+    ['createBatchingHttpBridge', () => createBatchingHttpBridge({ endpoint: '/b' })],
+    ['createBatchingHttpBridge with an httpClient', () => createBatchingHttpBridge({ endpoint: '/b', httpClient: createHttpClient() })],
+  ] as const) {
+    it(`${name}: the bad command fails alone, its neighbour is sent`, async () => {
+      const seen = backend();
+      const b = bus(make());
+      const [good, bad] = await Promise.all([b.dispatch('good', {}, { n: 1 }), b.dispatch('save', {}, { n: 1n })]);
+      expect([code(good), code(bad)]).toEqual(['ok', 'transport:invalid:json']);
+      expect(seen.posts).toBe(1);
+      const [a, c] = await Promise.all([b.dispatch('good', {}, { n: 1 }), b.dispatch('save', {}, { n: 2 })]); // control
+      expect([code(a), code(c)]).toEqual(['ok', 'ok']);
+    });
+  }
+
+  it('createWsBridge: invalid:json, not a plugin failure', async () => {
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
+    class EchoWs {
+      static CONNECTING = 0; static OPEN = 1; static CLOSED = 3;
+      static last: EchoWs;
+      readyState = 0;
+      onopen: (() => void) | null = null; onmessage: ((e: { data: string }) => void) | null = null; onclose = null; onerror = null;
+      constructor() { EchoWs.last = this; }
+      send(d: string) { const { id } = JSON.parse(d) as { id: string }; queueMicrotask(() => this.onmessage?.({ data: JSON.stringify({ id, state: 'ok' }) })); }
+      close() {}
+    }
+    vi.stubGlobal('WebSocket', EchoWs);
+    const ws = createWsBridge({ url: 'ws://x', reconnect: false });
+    const b = bus(ws);
+    ws.connect();
+    EchoWs.last.readyState = 1;
+    EchoWs.last.onopen!();
+    expect(code(await b.dispatch('save', {}, { n: 1 }))).toBe('ok'); // control
+    const r = await b.dispatch('save', {}, { n: 1n });
+    expect(r.error).toMatchObject({ code: 'transport:invalid:json', action: 'save' });
+    expect(errors).not.toHaveBeenCalled();
+    ws.disconnect();
+  });
+});
+
+/*
+ * Audit D11 (owner 2026-10-12). A request holding a value JSON cannot encode
+ * (a BigInt, a cycle) never leaves, and each path said something else:
+ * the http and batching bridges answered `transport:lost:reply`, "no
+ * response", so the bus re-sent an idempotent action twice for nothing and
+ * a batch failed its encodable neighbour too; the ws bridge answered
+ * `transport:failed:plugin` and told the developer to fix the plugin; the
+ * client threw a raw TypeError, and `safe` returned it where its type says
+ * BusError. Now one code, at the one place each path encodes:
+ * `transport:invalid:json` (condition `invalid`: final, never re-sent; the
+ * pair of `remote:unexpected:json`), the TypeError its cause. The batching
+ * bridge encodes each command when it is dispatched, so a bad one fails
+ * before it is queued, and the batch body is joined from the encoded parts.
+ */

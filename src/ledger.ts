@@ -9,7 +9,8 @@
  * or signals).
  *
  * Recording keeps successes only, skips what an undo or a redo dispatched
- * (origin 'undo' / 'redo', scoped), applies the filter, caps at
+ * (origin 'undo' / 'redo', scoped) and a state another tab shared (origin
+ * 'sync', tests/store-share.test.ts), applies the filter, caps at
  * `maxSize` and clears the redo stack. Undo and redo move the stacks first, so
  * observers inside the call see the result, and move them BACK when the call
  * does not land (settled.ts, moveUnlessRefused). While one is in flight,
@@ -101,7 +102,7 @@ export function createLedger(options: {
   };
 
   // The top step can be undone: there is one, a bridge did not carry it out
-  // (undo is local: plan item 1, R8, R9), and its `canUndo` allows it.
+  // (undo is local: log s35.159), and its `canUndo` allows it.
   const can = (): boolean => {
     const cmd = past[past.length - 1];
     return cmd !== undefined && !_appliedRemotely.has(cmd) && checked()?.(cmd) !== false;

@@ -1,4 +1,4 @@
-// A dispatch's own abort has one shape wherever it lands (plan item 7).
+// A dispatch's own abort has one shape wherever it lands (log s35.154).
 import { describe, expect, vi } from 'vitest';
 import { createAsyncCommandBus, BusError, conditionOf, failureCondition, type Command } from '../src/command-bus';
 import { _failures } from '../src/failure';

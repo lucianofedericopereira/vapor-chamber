@@ -325,7 +325,7 @@ describe('createHttpClient - timeout retry', () => {
 // ---------------------------------------------------------------------------
 
 describe('createHttpClient - silent flag', () => {
-  it('stamps error.silent when config.silent is true', async () => {
+  it('stamps error.context.silent when config.silent is true', async () => {
     (globalThis.fetch as any).mockImplementation(async () => jsonResponse(500, { message: 'boom' }));
 
     const http = createHttpClient();

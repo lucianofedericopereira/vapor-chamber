@@ -7,7 +7,7 @@
  * <button> does all of it; a <div role="button"> does none of it unless code
  * does, and the directive owns the element's interaction. Guards pinned here:
  * a native button still dispatches once, and a key the app already handled
- * (defaultPrevented) is not handled twice. docs/plan-failures-and-contract.md 8e.
+ * (defaultPrevented) is not handled twice. docs/accessibility.md.
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import { userEvent } from 'vitest/browser';

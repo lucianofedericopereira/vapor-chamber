@@ -76,6 +76,11 @@ const EMPTY_DATA: ReadonlyMap<string, unknown> = new Map();
  *  legitimate chain (auth -> locale -> onboarding is three). */
 const MAX_REDIRECTS = 10;
 
+/** A navigation a newer one replaced, at any of its checks. */
+function superseded(to: RouteLocation): RouterError {
+  return routerError('aborted:navigation', `navigation to "${to.fullPath}" superseded`, { to });
+}
+
 /** Absent, '' and [] are the same query value; ['a'] and 'a' are the same
  *  query value; ['a','b'] and 'a,b' are NOT. */
 function sameQueryValue(a: string | string[] | undefined, b: string | string[] | undefined): boolean {
@@ -291,6 +296,7 @@ export function createEngine(ctx: EngineContext) {
     redirects = 0,
   ): Promise<RouterError | null> {
     const from = snapshot.value.location;
+    const popstate = opts.popstate === true;
 
     let to: RouteLocation;
     try {
@@ -313,7 +319,7 @@ export function createEngine(ctx: EngineContext) {
     }
 
     if (to.matched.length && isQueryOnlyChange(to)) {
-      commitQueryLocation(to, opts.replace ? 'replace' : 'push', opts.popstate === true);
+      commitQueryLocation(to, opts.replace ? 'replace' : 'push', popstate);
       refetchAffected(to, changedKeys(from.query, to.query));
       return null;
     }
@@ -353,7 +359,7 @@ export function createEngine(ctx: EngineContext) {
           // navigation (the server cannot fix it), the throw as its cause.
           throw routerError('failed:guard', `guard threw navigating to "${to.fullPath}"`, { to, cause });
         }
-        if (cancelled()) return routerError('aborted:navigation', `navigation to "${to.fullPath}" superseded`, { to });
+        if (cancelled()) return superseded(to);
         if (verdict === false) return revert(routerError('refused:guard', `navigation to "${to.fullPath}" refused by guard`, { to }), opts);
         if (verdict && verdict !== true) {
           // Bounded: two guards that redirect at each other would otherwise
@@ -380,11 +386,13 @@ export function createEngine(ctx: EngineContext) {
           // the entry being redirected away from, so pushing would leave that
           // entry behind and Back would land on it again - the redirect fires
           // once more and the user is stuck. Replacing consumes it.
-          const result = await navigate(verdict, { replace: opts.replace || opts.popstate === true }, redirects + 1);
-          // Unwound through every frame, so the ORIGINAL popstate frame - the
-          // only one holding the delta - still compensates the history walk.
-          // Inner frames carry no delta, so their revert() is a no-op.
-          return isRouterError(result, 'router:exceeded:redirects') ? revert(result, opts) : result;
+          const result = await navigate(verdict, { replace: opts.replace || popstate }, redirects + 1);
+          // Only this frame holds a popstate's delta: inner frames carry none,
+          // so their revert() is a no-op. A chain that committed no page
+          // (refused, failed, or back to the page on screen) and was not
+          // superseded walks the history back here.
+          // tests/router/popstate-redirect-revert.test.ts.
+          return snapshot.value.location === from && !isRouterError(result, 'router:aborted:navigation') ? revert(result, opts) : result;
         }
       }
 
@@ -395,7 +403,7 @@ export function createEngine(ctx: EngineContext) {
         ctx.resolveRender(leaf.renderChain, to),
         leaf.loadChain.length ? ctx.runLoaders(leaf.loadChain, to, own.signal) : Promise.resolve(EMPTY_DATA as Map<string, unknown>),
       ]);
-      if (cancelled()) return routerError('aborted:navigation', `navigation to "${to.fullPath}" superseded`, { to });
+      if (cancelled()) return superseded(to);
 
       const next: RouteSnapshot = Object.freeze({ location: to, render: Object.freeze(render), data });
       if (!opts.popstate) {
@@ -415,7 +423,7 @@ export function createEngine(ctx: EngineContext) {
       try {
         snapshot.value = next;
       } finally {
-        ctx.onCommit?.(next, from, { popstate: opts.popstate === true });
+        ctx.onCommit?.(next, from, { popstate });
         runAfterHooks(to, from);
       }
       return null;
@@ -433,7 +441,7 @@ export function createEngine(ctx: EngineContext) {
         return null;
       }
       if (cancelled() || isRouterError(error, 'router:aborted:navigation')) {
-        return routerError('aborted:navigation', `navigation to "${to.fullPath}" superseded`, { to });
+        return superseded(to);
       }
       const wrapped = isRouterError(error)
         ? error

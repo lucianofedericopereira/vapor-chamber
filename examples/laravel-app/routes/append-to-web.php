@@ -13,7 +13,7 @@ Illuminate\Support\Facades\Route::get('/cart', fn () => view('cart'));
 Illuminate\Support\Facades\Route::get('/widget', fn () => view('widget'));
 
 // ONE endpoint for every command - the action name travels in the JSON body.
-// 'web' middleware = session + VerifyCsrfToken (the IIFE sends X-CSRF-TOKEN
+// 'web' middleware = session + PreventRequestForgery (the IIFE sends X-CSRF-TOKEN
 // from the Blade meta tag).
 Illuminate\Support\Facades\Route::post('/api/vc', App\Http\Controllers\VaporChamberController::class)
     ->middleware(['web'])

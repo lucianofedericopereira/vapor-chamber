@@ -13,7 +13,7 @@ pass locally, CI will too.
 
 - [ ] `npm run typecheck` passes
 - [ ] `npm run lint:check` passes
-- [ ] `npm run test:run` passes (558+ tests)
+- [ ] `npm run test:run` passes
 - [ ] `npm run build` succeeds
 - [ ] `npm run size:check` passes (or BUDGETS bumped + reasoned in summary)
 
@@ -21,14 +21,14 @@ pass locally, CI will too.
 
 <!--
 For any change in src/command-bus.ts, src/transports.ts, src/chamber.ts,
-src/plugins-*.ts: add a bench in tests/perf.bench.ts and report numbers.
-"Only keep changes that benches confirm" - if there's no bench delta to show,
-this PR shouldn't claim a perf improvement.
+src/plugins-*.ts: run `npm run ab` base against head on a workload that
+runs the changed path (CONTRIBUTING.md, "Performance work"). Keep a perf claim only
+when a path that runs it reads faster and none reads slower.
 -->
 
-| Bench                            | Before     | After      | Δ      |
-|----------------------------------|------------|------------|--------|
-|                                  |            |            |        |
+| ab workload, row                 | Base (ns)  | Head (ns)  | Verdict |
+|----------------------------------|------------|------------|---------|
+|                                  |            |            |         |
 
 ## API impact (delete if not applicable)
 

@@ -5,7 +5,9 @@
  * want every feature in a single `<script>` tag drop-in. For smaller bundles,
  * see `vapor-chamber-core.iife.js` and `vapor-chamber-elements.iife.js`.
  *
- * Includes: command bus, transports, all plugins, Vapor custom elements,
+ * Includes: command bus, transports, the core and I/O plugins (logger,
+ * validator, history, debounce, throttle, authGuard, optimistic, persist,
+ * createChannel), Vapor custom elements,
  * Vapor sync + async (Suspense-aware) composables.
  *
  * Usage:
@@ -60,7 +62,8 @@ import type { AsyncPlugin } from './command-bus';
 export type CreateAppOptions = {
   /**
    * An async transport plugin (e.g. createHttpBridge) to install on the bus.
-   * Commands without a local handler are forwarded through this transport.
+   * It sends every command its `actions` match (all of them by default), a
+   * local handler or not. The rest fall through to the bus.
    */
   transport?: AsyncPlugin;
   /**
@@ -71,7 +74,7 @@ export type CreateAppOptions = {
    * Dead-letter mode. Default: 'error'
    */
   onMissing?: CommandBusOptions['onMissing'];
-  /** The bus's retry (on by default); `{ actions: { cartAdd: 'idempotent' } }` declares, `false` turns it off. */
+  /** The bus's retry, on by default. `{ actionPolicies: { cartAdd: 'idempotent' } }` declares a policy, `false` turns it off. */
   retry?: AsyncCommandBusOptions['retry'];
 };
 

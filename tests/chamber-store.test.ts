@@ -65,6 +65,7 @@ import { getCommandBus, resetCommandBus, setCommandBus, signal } from '../src/ch
 import { history } from '../src/plugins-core';
 import { persist } from '../src/plugins-io';
 import { it } from '../src/vitest';
+import { requireDist } from './require-dist';
 
 /**
  * The surface the store will compose. Real assertions today: each one is a
@@ -130,7 +131,8 @@ describe('composition surface - what the store is built from', () => {
     // the assertion below could never fail. It was written, it passed, and it
     // was inert - the exact shape this suite has a rule against.
     const built = resolve(process.cwd(), 'dist/store.js');
-    if (!existsSync(built)) return; // 8 test files skip without dist/; this is one
+    const builtBase = resolve(process.cwd(), 'dist/store-base.js');
+    requireDist(existsSync(built) && existsSync(builtBase));
     const src = readFileSync(built, 'utf8');
     const imports = [...src.matchAll(/^import[^;]*?from\s*["']([^"']+)["']/gm)].map((m) => m[1]);
     // `./failure.js` mints the store's coded refusals (`store:missing:bus`):
@@ -140,7 +142,7 @@ describe('composition surface - what the store is built from', () => {
     // The implementation both store entries share (log s35.130): the failure
     // module, and one chunk holding the library's names and the set of
     // commands a transport carried out (log s35.184), no bus, no probe.
-    const base = readFileSync(resolve(process.cwd(), 'dist/store-base.js'), 'utf8');
+    const base = readFileSync(builtBase, 'utf8');
     const baseImports = [...base.matchAll(/^import[^;]*?from\s*["']([^"']+)["']/gm)].map((m) => m[1]);
     expect(baseImports.sort()).toEqual(['./applied-remotely.js', './failure.js']);
   });

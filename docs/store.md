@@ -2,7 +2,7 @@
 
 **Experimental.** State whose every mutation is a command.
 
-<!-- vc:sizeStore -->2.2<!-- /vc:sizeStore --> KB brotli. Imports `vue`, the failure module and one chunk holding the library's `$` names and the commands a transport carried out: no bus, no probe.
+<!-- vc:sizeStore -->2.4<!-- /vc:sizeStore --> KB brotli. Imports `vue`, the failure module and one chunk holding the library's `$` names and the commands a transport carried out: no bus, no probe.
 
 ```ts
 import { createCommandBus } from 'vapor-chamber';
@@ -169,14 +169,20 @@ const useCart = defineChamberStore('cart', {
 ```
 
 Both write as a step of the command that got the reply, inside the dispatch,
-so `persist` saves it and a listener reads it. The command's own `answer`
+so an unscoped `persist` saves it and a listener reads it. A `persist` scoped
+by `actions` saves after those actions only. A state that `checkout`'s reply
+declares for the cart is saved only with `checkout` in that list, or with no
+list. `tests/store-persist-declared.test.ts`. The command's own `answer`
 runs first and the states the server named last, so what the server named
 wins. History records the command once and cannot undo it, since only the
-server can reverse what it applied. A failed command writes nothing.
+server can reverse what it applied. A failed command writes nothing. Only an
+object is a state: an `answer` result or a declared state that is anything
+else, `null` included, is not written, and development warns once.
 `optimisticUndo`'s `predict` still answers the caller at once, and the store
 changes when the reply lands. A store id is an external string: only the
 reply's own keys are read (src/dict.ts), and an id with no store is ignored.
-`tests/store-bridged-answer.test.ts`, `tests/store-declared-by-server.test.ts`.
+`tests/store-bridged-answer.test.ts`, `tests/store-declared-by-server.test.ts`,
+`tests/store-answer-not-a-state.test.ts`.
 
 Two writes in flight can be answered in any order. The server may apply them
 in either order, and the replies may arrive in either order. Only the server
@@ -246,8 +252,8 @@ for two deliberate reasons:
 
 The first draft defaulted the argument and paid both costs while claiming not
 to. It measured 16.7 KB raw against a design estimate of 1-2 KB. With the bus
-a mandatory argument, it is <!-- vc:sizeStoreRaw -->5.1<!-- /vc:sizeStoreRaw --> KB minified
-(<!-- vc:sizeStore -->2.2<!-- /vc:sizeStore --> KB brotli), the `./store` row of
+a mandatory argument, it is <!-- vc:sizeStoreRaw -->5.5<!-- /vc:sizeStoreRaw --> KB minified
+(<!-- vc:sizeStore -->2.4<!-- /vc:sizeStore --> KB brotli), the `./store` row of
 [BUNDLE-SIZES.md](./BUNDLE-SIZES.md). `tests/chamber-store.test.ts` asserts the
 built entry imports only `vue` and the store's base, and the base only
 `./failure.js` and `./applied-remotely.js`. The failure module mints the store's
@@ -266,12 +272,10 @@ reducers: {
 }
 ```
 
-State is a `shallowRef`. The number behind that choice is a dispatch rate, not
-a property of the ref. On the real dispatch path, 100 array appends run at
-about 3.4x a deep `ref`. A `ref` wraps an array in a deep reactive proxy that
-wholesale replacement never needs. The A/B is
-`tests/signal-shallow-ab.test.ts`, and the absolute figures live in finding 5
-of [performance.md](./performance.md#reactive-runtime-notes-vue-36). A reducer
+State is a `shallowRef`. A `ref` wraps an array in a deep reactive proxy that
+wholesale replacement never needs, and on the real dispatch path array state
+runs faster without it. The A/B is `tests/signal-shallow-ab.test.ts`, and the
+dated figure is in [performance.md](./performance.md#reactive-runtime-notes-vue-36). A reducer
 that mutates and returns the same object does not notify, which is why
 `$reset` and every action build fresh objects. `state` is exposed with a
 getter and no setter, so `cart.state.value = x` throws in strict mode: the bus
@@ -296,7 +300,15 @@ starts one synchronous Vue effect on the store's state, stopped by
 `fieldRef` costs the writes the same however many fields are read. With one
 reader a `computed` is a little faster, and with several `fieldRef` is (log
 section 35.125). `$reset` and an undo notify like any action.
-`tests/store-field-events.test.ts`.
+`tests/store-field-events.test.ts`. A subscriber that throws is logged, and
+the write and the other subscribers go on. Subscribing or unsubscribing
+during a write works as for a `bus.on` listener. One removed is not called
+again, and one added is called from the next write. A write made in a
+subscriber is delivered after the current write, in order, so every
+subscriber ends on the store's state.
+`tests/store-field-subscriber-throw.test.ts`,
+`tests/store-field-unsubscribe-during-write.test.ts`,
+`tests/store-write-during-delivery.test.ts`.
 
 ## Across tabs
 
@@ -314,7 +326,9 @@ tab applies a newer one through the `cart$sync` command, marked
 `origin: 'sync'`. Its plugins and listeners hear it and `persist` saves it.
 `history` does not record it: a change made in another tab is not undone here.
 The newer version wins and a tie goes to one tab's id, so two tabs writing at
-once end on the same state. A state received is not sent back. A store
+once end on the same state. A state received is not sent back, even when an
+async plugin delays its `cart$sync` past the next message
+(`tests/store-share-held.test.ts`). A store
 without `share` writes exactly as without it. A shared one pays an effect and
 the send on each write (log section 35.129).
 
@@ -326,8 +340,9 @@ it caught up a median 1.2 ms after opening, 9.3 ms at most (30 runs, measured
 ends on one state. A tab of 1.26 never applies the ask, since its version is
 below every tab's. `tests/store-share-late-tab.test.ts`.
 
-What it does not do: the state crosses by structured clone, so it holds data,
-not functions or class instances. With no `BroadcastChannel` (SSR) nothing is
+What it does not do: the state crosses by structured clone, so it carries data.
+A function fails to send, and a class instance arrives as a plain object
+without its methods. With no `BroadcastChannel` (SSR) nothing is
 sent. Undo is per tab. Undoing in one tab changes its state, which then
 reaches the others as a write. A rollback of an older step keeps the states
 the tab received. `tests/store-share.test.ts`,
@@ -378,6 +393,11 @@ same store and the first to unmount does not take it away from the second.
 
 Called outside a scope there is no lifetime to hook and nothing is counted.
 The caller owns `$dispose()`, the same contract as every other composable here.
+
+`$dispose()` always finishes. A cleanup that throws, such as a `share` lane's
+unsubscribe, is logged. The other cleanups still run and the store leaves the
+registry, so the next `useCart(bus)` builds a new one.
+`tests/store-dispose-cleanup-throw.test.ts`.
 
 One id is one store per bus for one definition. A second `defineChamberStore`
 with the same id takes over, the rule `register()` follows for a handler. That

@@ -1,4 +1,4 @@
-/** In development an `undo: true` store runs each reducer twice and warns once when the two differ (plan 1.27 item 1, R6). Rationale at the end. */
+/** In development an `undo: true` store runs each reducer twice and warns once when the two differ (log s35.160). Rationale at the end. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createCommandBus } from '../src/command-bus';
 import { defineChamberStore } from '../src/store';

@@ -30,8 +30,9 @@ re-sync after an edit. The library `dist/` builds itself: the repo root has a
 `prepare` script, and this example's `predev`/`prebuild` hooks build it on demand
 if `dist/` is missing.
 
-CI installs the root project alone (`npm ci --workspaces=false
---include-workspace-root`), since no CI job builds an example.
+Most CI jobs install the root project alone (`npm ci --workspaces=false
+--include-workspace-root`). The `examples` job installs the workspaces, builds
+the library and runs `npm run check:example`, which builds every example.
 
 ## What to look for
 
@@ -52,9 +53,9 @@ CI installs the root project alone (`npm ci --workspaces=false
 
 ```
 examples/vapor-sfc/
-├── package.json          # workspace member - vue@<!-- vc:vueAligned -->3.6.0-rc.10<!-- /vc:vueAligned -->, vite@^8
+├── package.json          # workspace member - vue@<!-- vc:vueAligned -->3.6.0-rc.11<!-- /vc:vueAligned -->, vite@^8
 ├── vite.config.ts        # @vitejs/plugin-vue + vaporChamberHMR
-├── tsconfig.json         # strict TS, ES2022, vue:client types
+├── tsconfig.json         # strict TS, ES2022, vite/client types
 ├── index.html            # mount point + minimal styles
 └── src/
     ├── main.ts           # createVaporChamberApp(App).mount('#app')
@@ -78,9 +79,9 @@ npm run preview    # serve the production build locally
 
 - This example uses the **local checkout** of vapor-chamber via
   `"file:../.."` in `package.json`. To run against a published version,
-  swap to `"vapor-chamber": "^<!-- vc:version -->1.30.0<!-- /vc:version -->"`.
+  swap to `"vapor-chamber": "^<!-- vc:version -->1.31.0<!-- /vc:version -->"`.
 - Vue 3.6 is in **release candidate**. The example pins the RC the library is
-  aligned to, `^<!-- vc:vueAligned -->3.6.0-rc.10<!-- /vc:vueAligned -->`, and
+  aligned to, `^<!-- vc:vueAligned -->3.6.0-rc.11<!-- /vc:vueAligned -->`, and
   that pin is owned by the root `devDependencies.vue` - `npm run docs:stamp`
   rewrites it, and `lint:check` fails when the two disagree. When Vue 3.6 ships
   stable, bump the root and re-stamp. Nothing here is retyped by hand.

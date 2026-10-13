@@ -1,4 +1,4 @@
-/** History never undoes or redoes locally a command a bridge carried out (plan 1.27 item 1, R9). Rationale at the end. */
+/** History never undoes or redoes locally a command a bridge carried out (log s35.159). Rationale at the end. */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
 import { history } from '../src/plugins-core';
@@ -115,7 +115,7 @@ describe('a step a bridge carried out', () => {
  * Idempotency-Key (plan P1). The client was then off by one and the server
  * held the write twice.
  *
- * Undo is local (plan item 1, R8): undoing a remote write is the app's
+ * Undo is local (log s35.159): undoing a remote write is the app's
  * compensating command, sent with the write's identity. So a step a bridge
  * carried out reads canUndo false, undo() does nothing, and with nothing
  * undone there is nothing to redo. The bridges mark such a command where they

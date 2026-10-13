@@ -1,4 +1,4 @@
-/** One name for a cap on retained entries, `maxSize`, and one for teardown, `dispose` (plan 1.27 D4.N8). Rationale at the end. */
+/** One name for a cap on retained entries, `maxSize`, and one for teardown, `dispose` (log s35.188, s35.189). Rationale at the end. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { resetCommandBus, setCommandBus, useCommandError, useSharedCommandState } from '../src/chamber';
 import { createAsyncCommandBus, createCommandBus } from '../src/command-bus';

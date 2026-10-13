@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { createFormBus } from '../src/form';
 import { createCommandBus } from '../src/command-bus';
-import { logger } from '../src/plugins';
+import { history, logger } from '../src/plugins';
 
 // ---------------------------------------------------------------------------
 // createFormBus
@@ -423,5 +423,32 @@ describe('rule/values mismatch and optional onSubmit', () => {
     const form = createFormBus({ fields: { name: 'x' } });
     await expect(form.submit()).resolves.toBe(true);
     expect(form.isSubmitting.value).toBe(false);
+  });
+});
+
+describe('reactive option', () => {
+  it('a form makes eight signals, none with reactive: false', async () => {
+    vi.resetModules();
+    const { configureSignal } = await import('../src/signal');
+    const { createFormBus: make } = await import('../src/form');
+    let made = 0;
+    configureSignal(<T>(value: T) => { made++; return { value }; });
+    make({ fields: { a: '' } });
+    const reactive = made;
+    make({ fields: { a: '' }, reactive: false });
+    expect([reactive, made - reactive]).toEqual([8, 0]);
+  });
+});
+
+describe('history on a form bus', () => {
+  it('records formSet, and its undo moves the stacks but restores no field', () => {
+    const bus = createCommandBus();
+    const h = history({ bus });
+    bus.use(h);
+    const form = createFormBus({ fields: { email: '' }, bus });
+    form.set('email', 'a@x');
+    form.set('email', 'b@x');
+    expect(h.undo()?.action).toBe('formSet');
+    expect([h.getState().past.length, form.values.value.email]).toEqual([1, 'b@x']);
   });
 });

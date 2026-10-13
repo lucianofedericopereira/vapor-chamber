@@ -3,13 +3,13 @@
 Runnable demos and copy-paste snippets for vapor-chamber. Each full-project app
 has its own README; each single-file snippet is self-contained. The apps
 consume the library via `file:../..` and auto-build `dist/` on demand. Aligned with
-**Vue <!-- vc:vueAligned -->3.6.0-rc.10<!-- /vc:vueAligned -->**.
+**Vue <!-- vc:vueAligned -->3.6.0-rc.11<!-- /vc:vueAligned -->**.
 
 Two shared helpers sit here rather than in each example:
 
 | Helper | Role |
 |--------|------|
-| [`ensure-lib.mjs`](./ensure-lib.mjs) | Run by every app's `predev`/`prebuild`. A `file:` dep with a `prepare` script is installed as a **frozen copy**, not a symlink - this mirrors the freshly built `dist/` into it and drops Vite's pre-bundle cache, so an example can never run stale library code. Under the root workspace install the entry is a symlink to the working tree, and there is nothing to mirror. |
+| [`ensure-lib.mjs`](./ensure-lib.mjs) | Run by every app's `predev`/`prebuild`. A `file:` dep with a `prepare` script is installed as a **frozen copy**, not a symlink - this mirrors the repo's `dist/` (built first only when it is missing) into it and drops Vite's pre-bundle cache, so an example never runs an older copy than that `dist/`. After a change under `src/`, run `npm run build` first. Under the root workspace install the entry is a symlink to the working tree, and there is nothing to mirror. |
 | [`static-server.mjs`](./static-server.mjs) | Static host for the no-build pages (serves the repo root so `../../dist/...` resolves), with `Cache-Control: no-store` and a mock `POST /api/vc` so a dispatching page actually completes. |
 
 ## Full-project apps (runnable)
@@ -36,7 +36,7 @@ Two shared helpers sit here rather than in each example:
 | [`feature-retry.ts`](./feature-retry.ts) | The async bus's retry - the default by condition, per-action declarations (`'idempotent'`, `false`, a count), on a schema too |
 | [`feature-transitions.ts`](./feature-transitions.ts) | Transition-dispatched commands (the transitions bridge) |
 | [`feature-transports.ts`](./feature-transports.ts) | HTTP / WebSocket / SSE transport plugins |
-| [`feature-vite-hmr.ts`](./feature-vite-hmr.ts) | `vaporChamberHMR` - state-preserving Vite hot reload |
+| [`feature-vite-hmr.ts`](./feature-vite-hmr.ts) | `vaporChamberHMR` - Vite hot reload that keeps the bus |
 | [`feature-vite-wire.ts`](./feature-vite-wire.ts) | `vaporChamberWire` - build-time Vue wiring, `entry` and `profile` |
 | [`feature-directives.html`](./feature-directives.html) | `v-vc-command` / `v-vc-payload` / `v-vc-optimistic` - **runnable**, no build step (ESM + import map): `node examples/static-server.mjs` |
 

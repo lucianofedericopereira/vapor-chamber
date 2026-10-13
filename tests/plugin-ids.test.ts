@@ -142,7 +142,7 @@ describe('plugin ids', () => {
 });
 
 /*
- * Shape rule 3 (.probes/1.26-remaining.md, owner 2026-10-02): one producer, one
+ * Shape rule 3 (owner 2026-10-02, log s35.77): one producer, one
  * owner name, used for the plugin's id, the owner part of every failure code it
  * mints (`<id>:condition:subject`, command-bus.ts failsFor) and, with P1, the
  * pipeline's inspection. The id is the factory's name without `create`; where a

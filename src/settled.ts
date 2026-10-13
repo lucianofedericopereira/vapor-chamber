@@ -35,9 +35,10 @@ export type MaybeAsyncResult = CommandResult | Promise<CommandResult>;
  * false - `typeof x.then === 'function'` on a value with no `then` is the same
  * `false` as a misspelled property, and both read as "this was synchronous".
  *
- * `command-bus.ts` keeps its own copy of the predicate on purpose: it is in the
- * budgeted Blade consumer bundle and importing this module measured +22 brotli
- * there, which is not a price worth paying to deduplicate one expression.
+ * `command-bus.ts` writes the test inline at its own sites. It imports
+ * `onSettled` from this module already, so the import costs nothing; the
+ * sites are on the dispatch path, where a change is decided by `npm run ab`
+ * (docs/V8-RULES.md rule 13), and none has been run.
  */
 export function isThenable(value: unknown): value is PromiseLike<unknown> {
   // Optional chaining rather than `value != null && typeof ...`: it
@@ -52,21 +53,15 @@ export function isThenable(value: unknown): value is PromiseLike<unknown> {
  * stays sync, so a plugin on the sync bus is byte-for-byte the same behaviour
  * it had before. Only the async arm is new.
  *
- * THERE IS NO REJECTION ARM, and that is a budget decision rather than a
- * design one. Two call sites in `chamber.ts` still hand-roll the check because
- * of it: a dispatch promise that REJECTS never reaches `fn`, and both of them
- * have cleanup that must run anyway (clearing a loading flag, recording the
- * error), so each spells out `.then(onOk, onErr)` plus a duplicate of the whole
- * success body for the sync path.
- *
- * An optional third parameter handed straight to `.then` fixes that and costs
- * nothing for existing callers, since `then(fn, undefined)` is `then(fn)`. It
- * was built and both sites converted; the whole suite passed. What it cost is
- * the edge: `chamber.ts` is in the budgeted Blade consumer bundle and did not
- * previously import this module, so pulling it in measured 6393 brotli against
- * a 6380 ceiling. Thirteen bytes to remove two duplicated bodies is a ceiling
- * question for the owner, not something to take silently, so it is not here.
- * Reinstate the parameter and convert those two sites together with the raise.
+ * THERE IS NO REJECTION ARM. Two call sites in `chamber.ts` (runDispatch and
+ * useSharedCommandState) hand-roll the check instead: a dispatch promise that
+ * REJECTS never reaches `fn`, and both have cleanup that must run anyway
+ * (clearing a loading flag, recording the error), so each spells out
+ * `.then(onOk, onErr)` plus the success body again for the sync path. Through
+ * `onSettled` with a rejection arm, the sync path would build its two
+ * callbacks on every dispatch, since they capture that dispatch's state: a
+ * closure per call on a hot path (docs/V8-RULES.md rule 4). The duplicated
+ * bodies stay until an `npm run ab` says the closures cost nothing.
  */
 export function onSettled<R extends MaybeAsyncResult>(
   result: R,
@@ -77,7 +72,7 @@ export function onSettled<R extends MaybeAsyncResult>(
   // budgeted Blade consumer bundle (it reaches it through `logger`), and
   // `isThenable` is not: no consumer of that bundle calls the predicate
   // directly. Calling it from here would anchor it into the import graph and
-  // it measured +3 brotli there - paid by every consumer, to save a line in a
+  // it measured +3 brotli there in v1.22.0 - paid by every consumer, to save a line in a
   // file that already has the rule at the top of it. Keeping the call site
   // free lets the export tree-shake away for anyone who does not use it.
   return (result != null && typeof (result as PromiseLike<CommandResult>).then === 'function')

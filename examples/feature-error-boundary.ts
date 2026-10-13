@@ -77,13 +77,13 @@ console.log('Auth errors:', authErrors.errors.value.length)    // -> 1
  * <template>
  *   <div>
  *     <!-- aria-disabled, not :disabled: keyboard focus stays on the button -->
- *     <button @click="!cmd.loading.value && cmd.dispatch('checkoutSubmit', formData)" :aria-disabled="cmd.loading.value">
+ *     <button type="button" @click="!cmd.loading.value && cmd.dispatch('checkoutSubmit', formData)" :aria-disabled="cmd.loading.value">
  *       {{ cmd.loading.value ? 'Processing...' : 'Pay now' }}
  *     </button>
  *
  *     <div v-if="errs.latestError.value" class="error-banner" role="alert">
  *       <p>{{ errs.latestError.value.message }}</p>
- *       <button @click="errs.clearErrors()">Dismiss</button>
+ *       <button type="button" @click="errs.clearErrors()">Dismiss</button>
  *     </div>
  *   </div>
  * </template>

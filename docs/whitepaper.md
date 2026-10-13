@@ -3,7 +3,7 @@
 *Luciano Federico Pereira - ORCID 0009-0002-4591-6568 - luciano-pereira.pages.dev*
 
 This document describes the library as it is now, aligned with Vue
-<!-- vc:vueAligned -->3.6.0-rc.10<!-- /vc:vueAligned -->. How it got here is in the appendix, Notes and
+<!-- vc:vueAligned -->3.6.0-rc.11<!-- /vc:vueAligned -->. How it got here is in the appendix, Notes and
 history. It holds the original header and abstract, the per-release Vue
 alignment log, and this document's corrections to itself. The body points to it
 and does not repeat it.
@@ -12,7 +12,7 @@ and does not repeat it.
 
 ## Abstract
 
-Vapor Chamber is a command bus built for Vue Vapor, with a <!-- vc:sizeCore -->4.7<!-- /vc:sizeCore --> KB brotli dispatch core.
+Vapor Chamber is a command bus built for Vue Vapor, with a <!-- vc:sizeCore -->4.8<!-- /vc:sizeCore --> KB brotli dispatch core.
 Every user action gets a name and one handler, runs through a plugin pipeline,
 and returns a structured result. The bus owns no state and imposes no
 framework, build system or backend. The same core runs in a Vue app (vDOM or
@@ -96,7 +96,7 @@ dispatch surface, and each concern is a plugin.
 **Core:** Framework-agnostic - documented as a reusable foundation for similar tools
 
 Vue is an optional peer: `>=3.5.0` for the composables, and
-<!-- vc:vueAligned -->3.6.0-rc.10<!-- /vc:vueAligned --> or later on the 3.6 line for the full Vapor surface
+<!-- vc:vueAligned -->3.6.0-rc.11<!-- /vc:vueAligned --> or later on the 3.6 line for the full Vapor surface
 (`package.json` `peerDependencies`). The core bus runs without Vue entirely.
 
 **Out of scope:** React, Svelte, Angular and other frontend frameworks. vapor-chamber is not
@@ -141,7 +141,7 @@ Two honesty rules keep this from drifting into not-invented-here.
 Bundle sizes are left out of this table. The three peers' sizes were never
 measured here, and a size is a fact of a version and a build. This library's
 own are generated in [BUNDLE-SIZES.md](./BUNDLE-SIZES.md): the dispatch core is
-<!-- vc:sizeCore -->4.7<!-- /vc:sizeCore --> KB brotli.
+<!-- vc:sizeCore -->4.8<!-- /vc:sizeCore --> KB brotli.
 
 ---
 
@@ -248,7 +248,7 @@ every mutation of the store arrives as a dispatch. So the plugin catalogue
 code of the store's own. Undo takes one option, `undo: true`: an inverse
 belongs to the action, and only the store knows the state it replaced. That is
 why the store is
-<!-- vc:sizeStore -->2.2<!-- /vc:sizeStore --> KB. Appendix A.3 says which half of the original "no state"
+<!-- vc:sizeStore -->2.4<!-- /vc:sizeStore --> KB. Appendix A.3 says which half of the original "no state"
 argument that reversed, and why.
 
 ---
@@ -383,16 +383,17 @@ unused one `undefined`). One of two factories builds it, so every reader sees
 one shape ([V8-RULES](./V8-RULES.md) rule 1). A handler's return value becomes
 `value`. Its throw becomes `error`, unwrapped.
 
-Every failure the library, a plugin or a transport raises is a `BusError`. Its
-code is `owner:condition:subject`: who raised it, what went wrong, and what it
+Every failure a dispatch or a bridge returns is a `BusError`, except someone
+else's error (below). Its code is `owner:condition:subject`: who raised it, what went wrong, and what it
 is about (`core:missing:handler`, `throttle:limited:handler`). The bus sets the
 owner, never the raiser. `ownerOf()` and `conditionOf()` read the parts. A
 backend's problem is `remote:<condition of its status>:<its code>`, inside a
 2xx `{ problem }` too.
 
 Every failure the library builds is coded. A plain `Error` passes through only
-when it is someone else's: a handler's throw or the network's `TypeError`
-(`tests/errors-match-catalogue.test.ts` rejects any other). The owner is the
+when it is someone else's: a handler's throw, an `Error` given as the abort
+reason, or the network's `TypeError` (`tests/errors-match-catalogue.test.ts`
+rejects any other). The owner is the
 producer's one name:
 
 - a plugin's `id`. Every built-in plugin declares one
@@ -414,7 +415,7 @@ A status maps to one: 404/410 `missing`, 409/412 `conflict`, 401/419
 
 Each reads 1:1 against gRPC's canonical codes, with one addition gRPC lacks.
 `lost` is an outcome that may or may not have happened, re-sent only when the
-command is idempotent ([plan-failures-and-contract.md](./plan-failures-and-contract.md) 4.2).
+command is idempotent ([contract.md](./contract.md) 3).
 `ERROR_CODE_REGISTRY` lists every code with a fix. `getErrorEntry()` reads it
 (and answers any `<id>:failed:plugin`), and so does `describeErrorCodes()`.
 `tests/error-registry-sweep.test.ts` holds the registry and the code union to
@@ -422,7 +423,7 @@ each other in both directions.
 
 ### 4.7 The async bus's retry
 
-One rule, in one place (docs/plan-shape.md 4). The async bus re-sends the call
+One rule, in one place (docs/retry.md). The async bus re-sends the call
 that produced the outcome, a handler or a bridge (`transport: true`), so the
 plugins outside see one dispatch. It reads the failure's condition and keeps a
 per-bus budget.
@@ -628,7 +629,7 @@ every command in the window shares one POST. A command the backend fails INSIDE
 the batch arrives in a 200 as `{ id, problem }`. Its problem carries the status
 the backend computed for that command. The client reads the failure's condition
 from it through the same status table as a single response (the wire contract,
-docs/plan-failures-and-contract.md 4.4). So a batched 503 is `limited` and a
+docs/contract.md 4). So a batched 503 is `limited` and a
 batched 422 is `invalid`, exactly as they would be alone. The bus re-sends just
 the transient ones, each joining the next batch:
 
@@ -659,9 +660,9 @@ Key behaviours:
 - **401 = session expiry**: fires `onSessionExpired` and dispatches a `session-expired` CustomEvent. 419 does NOT
 - A failure is the core's `BusError`, the same one a bridge returns. An answer is `remote:<condition>:<code>` (the body's `code`, `problemOf` for its problem). The rest are `transport:timeout:reply`, `transport:lost:reply`, `transport:aborted:request`
 - A declared wait sets when to re-send, never whether. It is `Retry-After` (RFC 9110, read by its grammar, digits or an HTTP-date). Else the `RateLimit` field's `t` seconds for a policy with `r=0` (draft-ietf-httpapi-ratelimit-headers-11). Else `X-RateLimit-Reset`
-- Jittered exponential backoff (avoids thundering herd)
+- With no declared wait, the async bus's schedule: random under 200 ms x 2^n, capped at 20 s (full jitter)
 - `AbortSignal.any` with manual fallback for older environments
-- Retried by the bus's one rule. A transient failure (408, 429, 503) is re-sent for any request. An uncertain one, or an answer with a declared wait, only for an idempotent method or an `Idempotency-Key`. An abort never. An unidentified request with no reply, a 502 or a 504 fails with `context.outcome: 'unknown'`
+- Retried by the bus's one rule. A transient failure (408, 429, 503) is re-sent for any request. An uncertain one, or an answer with a declared wait, only for an idempotent method or an `Idempotency-Key`. An abort never. With `retry` above 0, an unidentified request with no reply, a 502 or a 504 fails with `context.outcome: 'unknown'`
 
 `createHttpClient` is the full client on the same machinery: GET, POST, PUT,
 PATCH, DELETE, interceptors, caching, dedupe, `safe` mode, download. Three
@@ -688,8 +689,11 @@ invalidation fetches again instead of joining it
 A GET that joins one already in flight for the same URL shares its outcome,
 never its abort. Each caller's own `signal` rejects only its own promise. The
 shared fetch is cancelled only when every holder has aborted
-(`tests/http-dedupe-signal.test.ts`). The cache and the dedupe map belong to
-one client, which is why server rendering needs a client per request (12.2).
+(`tests/http-dedupe-signal.test.ts`). A `silent` read and one without `silent`
+are two requests, even at the same moment: joined, they would share one
+failure, and one caller's `silent` mark would reach the other
+(`tests/silent-dedupe.test.ts`). The cache and the dedupe map belong to one
+client, which is why server rendering needs a client per request (12.2).
 
 ---
 
@@ -697,18 +701,14 @@ one client, which is why server rendering needs a client per request (12.2).
 
 ### 7.1 Signals: Vue 3.6's reactivity, wired shallow
 
-Vue 3.6 replaces Proxy-based reactivity with [alien-signals](https://github.com/stackblitz/alien-signals).
-The public API is unchanged: `ref()`, `computed()`, `watch()` work identically. A `ref()`
-holding a **primitive** IS a signal now, not a Proxy wrapper around one. A `ref()` holding an
-**object or array** is still a signal *wrapping a deep reactive Proxy* (`toReactive()`). The
-rewrite changed dependency tracking, not object wrapping.
-
-| Aspect | Proxy-based (Vue 3.0-3.5) | Alien-signals (Vue 3.6+) |
-|--------|--------------------------|--------------------------|
-| Tracking mechanism | Proxy `get`/`set` traps | Signal dependency graph |
-| Granularity | Property-level on objects | Value-level on primitives |
-| Memory overhead | Proxy + handler per reactive object | Lightweight signal node |
-| Update propagation | Full component re-evaluation | Only affected signal consumers |
+Vue 3.6 rebuilt its reactivity core as a port of
+[alien-signals](https://github.com/stackblitz/alien-signals) (vuejs/core#12349, from
+3.6.0-alpha.1). The public API is unchanged: `ref()`, `computed()`, `watch()` work as
+before, and a `reactive()` object is still a Proxy whose traps feed the new graph. A `ref()`
+holding a **primitive** was never a Proxy and still is not: it is a signal node. A `ref()`
+holding an **object or array** still wraps the value in a deep reactive Proxy
+(`toReactive()`). The rewrite changed how dependencies are tracked and propagated, not how
+values are wrapped.
 
 Vue reports the gains that came with it (reference 2):
 
@@ -721,7 +721,7 @@ Those are Vue's figures, not measured here.
 
 The library wires `signal()` to **`shallowRef()`**, not `ref()`. `ref(0)` is a pure signal.
 But `ref([])` is a signal *plus* a deep Proxy, and every read or spread of that value pays
-Proxy-trap cost. The "value-level granularity" in the table holds **for primitives only**.
+Proxy-trap cost. A signal's value-level granularity holds **for primitives only**.
 
 The library never mutates a signal's value in place. It replaces it wholesale
 (`state.value = handler(...)`, `errors.value = [...]`, `past.value = [...]`). That is
@@ -729,9 +729,10 @@ precisely the pattern where shallow tracking is semantically identical to deep t
 `shallowRef` is correct here and skips the deep-Proxy tax.
 
 It was measured on the real `useCommandState` dispatch path, interleaved,
-`shallowRef` against `ref()`. Array-state dispatch ran about 3.4x faster, scalar
-about 1.2x (`tests/signal-shallow-ab.test.ts`, its table printed by
-`npm run test:timing`, and [performance.md, finding 5](./performance.md#reactive-runtime-notes-vue-36)).
+`shallowRef` against `ref()`. Array-state dispatch runs faster, and scalar state
+shows no measurable difference (`tests/signal-shallow-ab.test.ts`, its table
+printed by `npm run test:timing`; the dated figure is in
+[performance.md](./performance.md#reactive-runtime-notes-vue-36)).
 The regression guard is the assertion that `signal()` stays a `shallowRef`
 (`chamber.test.ts`). Direct nested mutation of a returned state
 (`state.value.x = y`) would bypass the command bus regardless. This library
@@ -764,14 +765,16 @@ static entry that hands Vue to the library at build time:
   `defineVaporAsyncComponent` statically. That costs +<!-- vc:sizeVaporEntryRaw -->4.5<!-- /vc:sizeVaporEntryRaw --> KB raw over hand-wiring
   `createVaporApp` (BUNDLE-SIZES' Vapor wiring table). It leaves out
   `defineVaporCustomElement` (+<!-- vc:sizeVaporCustomElementRaw -->6.8<!-- /vc:sizeVaporCustomElementRaw --> KB raw) and `vaporInteropPlugin`
-  (+<!-- vc:sizeVaporInteropRaw -->89.4<!-- /vc:sizeVaporInteropRaw --> KB raw), since a static import is retained whether the app
+  (+<!-- vc:sizeVaporInteropRaw -->92.6<!-- /vc:sizeVaporInteropRaw --> KB raw), since a static import is retained whether the app
   calls it or not. `configureVue({ ... })` adds either, and merges with what the
   entry wired.
 - **`vaporChamberWire()`**, a Vite plugin, makes the root import correct
   instead. In a build it resolves the bare `vapor-chamber` specifier to the
   root plus a side-effect import of `/vue` (or `/vapor`). It also defines
   `__VC_WIRED_BUILD__`, which removes the root's runtime lookup from the
-  bundle. In dev it only defines `__VC_WIRED__` (`tests/vite-wire-plugin.test.ts`).
+  bundle. In dev it does not redirect and defines `__VC_WIRED__`
+  (`tests/vite-wire-plugin.test.ts`). In both it defines `__VC_LEAN__` from its
+  `profile` option, unless the app defines it.
   On esbuild or webpack an app imports from the subpath and adds
   `define: { __VC_WIRED_BUILD__: 'true' }` (`tests/root-probe-builds.test.ts`).
 
@@ -824,13 +827,14 @@ app.use(vaporInteropPlugin)
 ```
 
 A pure Vapor app does not carry the vDOM interop renderer a mixed tree
-installs. That renderer is +<!-- vc:sizeVaporInteropRaw -->89.4<!-- /vc:sizeVaporInteropRaw --> KB raw on a Vue-bundled build
+installs. That renderer is +<!-- vc:sizeVaporInteropRaw -->92.6<!-- /vc:sizeVaporInteropRaw --> KB raw on a Vue-bundled build
 (BUNDLE-SIZES' Vapor wiring table).
 
 ### 7.5 Lifecycle cleanup
 
 Composables use `onScopeDispose` (Vue 3.5+), never `onUnmounted`, and gate on
-`hasInjectionContext()`, never `getCurrentInstance()`.
+`hasInjectionContext()`. `getCurrentInstance()` is only the fallback for a
+partially-supplied Vue namespace without it (`tryKeepAliveHooks`).
 
 **`getCurrentInstance()` returns `null` inside a Vapor `setup()`.** It reads
 VDOM's `currentInstance`, and a Vapor component is not stored there, by design
@@ -849,7 +853,8 @@ How the library handles it:
 - `tryAutoCleanup()` registers with `onScopeDispose` only.
 - In development a console warning fires when no scope is found at all. The composable ran
   outside `setup()`/`effectScope()`, so its cleanup will not run automatically.
-- `useCommand()` and `defineVaporCommand()` use no `getCurrentInstance()`.
+- `defineVaporCommand()` uses no `getCurrentInstance()`. `useCommand()` reaches
+  it only through that fallback.
   `tests/vapor-composables-fixture.test.ts` pins every public composable running
   inside a real mounted Vapor app, including that unmount really disposes.
 
@@ -861,7 +866,7 @@ const { dispatch, register, on, emit, loading, lastError, dispose } = useCommand
 register('cartAdd', (cmd) => addToCart(cmd.target))
 on('cart*', (cmd, result) => console.log('Cart event:', cmd.action))
 
-// Zero-overhead hot path - no signals, no alien-signals graph nodes
+// Hot path - no signals, no alien-signals graph nodes
 const { dispatch: track } = defineVaporCommand('scrollSample', (cmd) => {
   // forward to whatever metrics / telemetry sink you use
   sendMetric('scroll', { depth: cmd.target.depth })
@@ -914,8 +919,8 @@ and is the complete list.
 | `useCommandQuery()` | `data`, `loading`, `lastError` | CQRS read-side (skips onBefore) |
 | `useTransitionCommand()` | `phase` | `<Transition>` hook -> bus dispatch |
 
-`useCommand()` never calls `getCurrentInstance()`, so it is safe in both Vapor
-and vDOM components, and cleanup runs automatically on scope disposal. Fewer
+`useCommand()` gates on `hasInjectionContext()`, not `getCurrentInstance()`, so
+it is safe in both Vapor and vDOM components, and cleanup runs automatically on scope disposal. Fewer
 signals is less memory: 3.6's alien-signals node is lighter than 3.5's Proxy
 plus its dep, and `defineVaporCommand()` creates none. That direction is the
 claim. No heap is measured here.
@@ -977,8 +982,10 @@ VDOM    { mounted(el, binding), updated(el, binding), beforeUnmount(el) }
 Vapor   (el, value, argument, modifiers) => cleanup | void
 ```
 
-Vapor calls the function once per element inside a detached `EffectScope`. It
-registers a returned function through `onScopeDispose`, and has **no `updated`
+Vapor calls the function once per element. On an element it runs in the
+current scope, and only a component or fragment root gets a detached
+`EffectScope`. It registers a returned function through `onScopeDispose`, and
+has **no `updated`
 hook**: the value arrives as a getter (`tests/vapor-directives-fixture.test.ts`).
 So the Vapor directives read their bindings at dispatch time. A changed binding
 re-targets the next click without the directive re-running. On both renderers
@@ -1040,7 +1047,7 @@ guards and no remount, refetching only the loaders whose keys changed.
 The core subpath binds no vDOM API, and each outlet is a subpath of its own. A
 pure-Vapor app renders routes through `vapor-chamber/router/vapor`, built from
 Vapor's own helpers, and needs no `vaporInteropPlugin`. Its startup chunk is
-<!-- vc:outletSaving -->22.08<!-- /vc:outletSaving --> KB brotli smaller than the same app through the vDOM outlet
+<!-- vc:outletSaving -->23.05<!-- /vc:outletSaving --> KB brotli smaller than the same app through the vDOM outlet
 plus interop (`tests/vapor/vapor-outlet-size.test.ts`). A non-Vapor route
 component throws a coded `router:invalid:component` there rather than silently
 re-installing interop, and blade rows still need the vDOM outlet. The full
@@ -1086,8 +1093,8 @@ replacement, frozen snapshots, on every path:
 
 - The router commits one frozen `RouteSnapshot` per navigation, and an outlet
   reads `render[depth]`: one shallowRef read, one array index.
-- The store keeps state as one shallow ref swapped wholesale, measured at about
-  3.4x faster than deep refs on array-state dispatch (7.1).
+- The store keeps state as one shallow ref swapped wholesale, measured faster
+  than deep refs on array-state dispatch (7.1).
 - The Vapor outlet turns a navigation into a keyless `DynamicFragment` update.
   Reuse follows resolved-component identity. The same record resolves to the
   same component and the update no-ops: reuse rather than remount on
@@ -1212,9 +1219,9 @@ Three IIFE variants ship under `dist/`, split by **audience / deployment shape**
 
 | Variant   | Audience                                                  | Brotli |
 |-----------|-----------------------------------------------------------|--------|
-| core      | Sprinkled JS on server-rendered pages - Blade / Rails / Django | <!-- vc:sizeIifeCore -->10.3<!-- /vc:sizeIifeCore --> KB |
-| elements  | Embeddable widgets through custom elements                | <!-- vc:sizeIifeElements -->10.7<!-- /vc:sizeIifeElements --> KB |
-| full      | SPAs that grew big (realtime + undo/redo + persistence)   | <!-- vc:sizeIifeFull -->14.8<!-- /vc:sizeIifeFull --> KB |
+| core      | Sprinkled JS on server-rendered pages - Blade / Rails / Django | <!-- vc:sizeIifeCore -->10.4<!-- /vc:sizeIifeCore --> KB |
+| elements  | Embeddable widgets through custom elements                | <!-- vc:sizeIifeElements -->10.9<!-- /vc:sizeIifeElements --> KB |
+| full      | SPAs that grew big (realtime + undo/redo + persistence)   | <!-- vc:sizeIifeFull -->15.0<!-- /vc:sizeIifeFull --> KB |
 
 _(Generated, always-current per-export sizes: [BUNDLE-SIZES.md](./BUNDLE-SIZES.md).)_
 
@@ -1283,8 +1290,10 @@ So the IIFEs leave `untracked()` out, and a composable's dispatch there does
 not suspend tracking. Measured on the full IIFE and on import-map pages, with
 `configureVue()` and without (log s35.231).
 
-`window.__VUE__` is not read: it is Vue's key, and Vue writes `true` to it when
-the first app is created (`tests/vue-global-detection.test.ts`). A failed
+`window.__VUE__` is read, and used only when it holds a `shallowRef` or `ref`
+function (`src/signal.ts`). It is Vue's key, and Vue writes `true` to it when
+the first app is created (`tests/vue-global-detection.test.ts`). That `true` is
+never taken for Vue itself. A failed
 detection throws a message that names `configureVue()`. It tells three cases
 apart: "no Vue here", "Vue here without the Vapor build" and "Vue here but its
 namespace could not be reached".
@@ -1396,13 +1405,13 @@ The composable counterpart `useTransitionCommand()` uses the shared bus and auto
 
 ```ts
 const hooks = useTransitionCommand({ namespace: 'drawer' });
-// <Transition v-bind="hooks"> - all nine hooks wired automatically.
+// <Transition v-bind="hooks"> - the eight enter and leave hooks wired automatically.
 // Add your own @enter beside it and both run (Vapor: Vue 3.6.0-rc.8+;
 // vDOM's mergeProps always merged them).
 ```
 
-`phase` and `dispose` are non-enumerable, so `v-bind` spreads only the nine
-hooks (`tests/transition-bind-fixture.test.ts`).
+`onMove`, `phase` and `dispose` are non-enumerable, so `v-bind` spreads only the
+eight enter and leave hooks (`tests/transition-bind-fixture.test.ts`).
 
 ### 10.4 `createReaction`
 
@@ -1471,7 +1480,7 @@ createVaporChamberApp(App).mount('#app')
 // No vDOM runtime and no interop renderer (7.4)
 ```
 
-Dropping `vaporInteropPlugin` drops the vDOM interop renderer, +<!-- vc:sizeVaporInteropRaw -->89.4<!-- /vc:sizeVaporInteropRaw --> KB
+Dropping `vaporInteropPlugin` drops the vDOM interop renderer, +<!-- vc:sizeVaporInteropRaw -->92.6<!-- /vc:sizeVaporInteropRaw --> KB
 raw on a Vue-bundled build. Routes then render through the Vapor outlet (8.1).
 
 ---
@@ -1494,7 +1503,7 @@ composable, and every composable takes `bus`:
 ```ts
 import { createSSRApp, inject } from 'vue'
 import { renderToString } from 'vue/server-renderer'
-import { createCommandBus, useCommand } from 'vapor-chamber'
+import { createCommandBus, useCommand } from 'vapor-chamber/vue'
 
 export async function handleRequest(req, res) {
   const bus = createCommandBus()
@@ -1517,9 +1526,12 @@ dispatch.
 **The same rule applies to `createHttpClient()`, and it is the sharper edge of
 the two.** Its response cache and in-flight dedupe map live in the client's own
 closure, not module scope. A fresh bus per request needs a fresh cache too.
-The cache key is `responseType:fullUrl`, with **no auth, header or cookie
-dimension**. So a client hoisted to module scope and shared across concurrent
-renders means:
+The cache and the in-flight dedupe key by `responseType`, the merged request
+headers and `fullUrl` (`tests/http-cache-headers.test.ts`). Two users whose
+requests differ in a header, such as `Authorization`, get separate slots.
+Users told apart by anything else, such as a cookie the runtime adds on its
+own, **share them**. For those users, a client hoisted to module scope and
+shared across concurrent renders means:
 
 - a `cache: true` GET to an authenticated endpoint stores user A's payload
   under a key user B's identical URL hits, and
@@ -1545,18 +1557,19 @@ with no `cache` option never stores anything.
 ### 12.3 Dehydrate on the server, rehydrate on the client
 
 `vapor-chamber/ssr` records the commands that ran on the server and replays
-them on the client. `rehydrate()` runs above Vue's DOM hydration, after it
-completes, and holds no DOM references, so Vue's hydration fixes land below it.
+them on the client. `rehydrate()` runs above Vue's DOM hydration and holds no
+DOM references, so Vue's hydration fixes land below it. It replays when
+called: the client entry calls it before mount.
 
 ```ts
 // server-entry.ts
-import { createSSRPlugin } from 'vapor-chamber/ssr'
+import { createSSRPlugin, serializeForScript } from 'vapor-chamber/ssr'
 
 const ssr = createSSRPlugin()        // records successful commands; `filter` to skip some
 bus.use(ssr.plugin)
 // ... render app, dispatch commands ...
 const html = renderToString(app)
-const serialized = ssr.dehydrate()   // embed: window.__VAPOR_COMMANDS__ = JSON.stringify(serialized)
+const serialized = ssr.dehydrate()   // embed: window.__VAPOR_COMMANDS__ = ${serializeForScript(serialized)}
 ssr.dropped()                        // commands dropped at the `maxSize` cap: check it, non-zero is a truncated record
 ```
 
@@ -1781,7 +1794,7 @@ so it does not measure the async bus's dispatch path (log s35.67).
 The core (`command-bus.ts` + `testing.ts`) will remain:
 - **Zero runtime dependencies** - always
 - **Framework-agnostic** - always
-- **<!-- vc:sizeCore -->4.7<!-- /vc:sizeCore --> KB brotli dispatch core** - measured ([BUNDLE-SIZES.md](./BUNDLE-SIZES.md))
+- **<!-- vc:sizeCore -->4.8<!-- /vc:sizeCore --> KB brotli dispatch core** - measured ([BUNDLE-SIZES.md](./BUNDLE-SIZES.md))
 - **`command-bus.ts` at 100% statement, branch, function and line coverage** - measured, the [vitest.config](../vitest.config.ts) gate. No line of `src/` is excluded by a pragma. *(`testing.ts` is the test harness, excluded from coverage by design.)*
 
 Optional layers may add dependencies. The core never will.
@@ -1869,7 +1882,7 @@ src/
     vapor.ts        - RouterOutlet (Vapor-native, experimental)
     blade.ts        - blade rows as ordinary components
     remote.ts       - routerHttp, bladeFetcher (opts into the http client)
-    errors.ts       - the router's one error taxonomy (a snake_case `code`)
+    errors.ts       - the router's one error taxonomy (codes `router:condition:subject`)
     types.ts, router-type.ts, keys.ts - public types, the Router shape, injection keys
   router-fetch/     - in-box loader preset for plain-JSON backends
   testing.ts        - createTestBus, snapshot, time-travel
@@ -1878,7 +1891,7 @@ src/
   iife-elements.ts  - CDN entry, elements variant
   index.ts          - public ESM barrel
 
-tests/                           (<!-- vc:testFiles -->349<!-- /vc:testFiles --> files, <!-- vc:tests -->3657<!-- /vc:tests --> tests)
+tests/                           (<!-- vc:testFiles -->383<!-- /vc:testFiles --> files, <!-- vc:tests -->3932<!-- /vc:tests --> tests)
 ```
 
 Where the current numbers live, both generated and CI-verified fresh:
@@ -1919,9 +1932,9 @@ The core is open for anyone building similar coordination layers.*
 
 Everything below is moved here from earlier revisions of this document. It holds
 the origins, the per-release Vue alignment log, and the body's records of its
-own corrections. Parts A, B and D were since edited to the writing rules, their
+own corrections. Parts A and B were since edited to the writing rules, their
 facts unchanged. Part C quotes each passage as it stood, its non-ASCII marks
-written in ASCII. Part D notes the sections removed outright. The body
+written in ASCII. The body
 above describes the library as it is and may point here. It does not repeat
 what is here.
 
@@ -1937,7 +1950,7 @@ was reread.
 
 #### A.2 The v1.0 abstract
 
-Vapor Chamber is a command bus built for Vue Vapor, with a <!-- vc:sizeCore -->4.7<!-- /vc:sizeCore --> KB brotli dispatch core. It gives a semantic,
+Vapor Chamber is a command bus built for Vue Vapor, with a <!-- vc:sizeCore@1.26 -->3.7<!-- /vc:sizeCore@1.26 --> KB brotli dispatch core. It gives a semantic,
 middleware-aware dispatch layer that connects any frontend pattern to any backend. It imposes
 no framework, no build system and no opinion about your stack. v1.0 adds
 e-commerce-grade features: transactional batch dispatch with undo rollback, automatic
@@ -1960,7 +1973,7 @@ lines inside itself (4.0.3, read 2026-10-06: `action()` 44 lines, its
 `$onAction` subscriptions 15). It gives actions the observability that
 plugins, undo, cross-tab sync and a devtools timeline need, because no bus
 existed underneath it. Here one does, so the store is
-<!-- vc:sizeStore -->2.2<!-- /vc:sizeStore --> KB rather than a competitor. It is the existing plugin
+<!-- vc:sizeStore -->2.4<!-- /vc:sizeStore --> KB rather than a competitor. It is the existing plugin
 catalogue applied to state, with every capability in it already written and
 tested. A fourth source of truth would be a store that rebuilds persistence,
 history and sync. This one cannot, because it has none of its own.
@@ -1990,7 +2003,7 @@ the bus, normalized entity storage. The wall held every time.
 That wall still holds with `vapor-chamber/store` shipped: the store owns state,
 the bus does not, and a store's actions reach it only as dispatches.
 
-### B. The Vue 3.6 alignment log, beta.8 to rc.10 (was section 9.2)
+### B. The Vue 3.6 alignment log, beta.8 to rc.11 (was section 9.2)
 
 
 Every Vue 3.6 release gets an alignment cycle. Read each commit at source and
@@ -2034,6 +2047,7 @@ assumptions is what surfaced them.
 | rc.8 (Sep 11) | 25 commits | adopt / retire / copy | 2128 + 24 | 11.3 / 7.7 / 8.2 |
 | rc.9 (Sep 21) | 89 commits, 16 in full | rc.9 broke a directive here, the fix reshaped it | 2431 | 12.1 / 8.2 / 8.7 |
 | rc.10 (Sep 30) | 85 commits, 83 in full | no code change, rc.10 fixed a directive case we had never tested, one defect of ours and one of Vue's found | 2632 + 25 | 12.0 / 8.0 / 8.5 |
+| rc.11 (Oct 10) | 65 commits, 65 in full | no code change, three tests rc.11 makes pass, two defects of ours found | 3662 + 38 | 14.8 / 10.3 / 10.7 |
 
 Coverage has been 100% on all four axes since rc.6. The two test numbers are the
 two vitest projects. "Pass-through" means Vue's change lands below this
@@ -2085,8 +2099,8 @@ normalization. SSR unresolved-tag fallback. Pass-through. Lib-side this cycle,
 unrelated to Vue: AbortController extensions, `useSharedCommandState`, and
 TestBus snapshot / time-travel.
 
-**beta.13** (May): `onMove` fires for Vapor and VDOM component moves in a Vapor
-`<TransitionGroup>`, having been silently skipped. Moves defer until child
+**beta.13** (May): Vapor and vDOM component moves in a Vapor `<TransitionGroup>`
+are animated, having been silently skipped. Moves defer until child
 updates flush. Slot-fallback transition hooks. v-for key preservation. 5 SSR
 hydration fixes. Interop CSS scope IDs on Vapor roots. Lazy lifecycle update
 jobs. Compiler optimizations (inline `v-bind` spreads, single-use
@@ -2097,7 +2111,7 @@ when no reactive state is tracked in the scope.
 
 **beta.14** (Jun): HMR child/parent reload alignment, parent-reload dedup,
 setup-effect preservation, context restore on error, app-instance refresh on
-root reload. Transitions: `onMove` suppressed for v-show-hidden children. Custom
+root reload. Transitions: no move animation for v-show-hidden children. Custom
 elements: no hook retention on shared definitions, children update from reactive
 props. Async: `loadingComponent` receives props and slots.
 `defineVaporAsyncComponent` becomes a main `vue` export. Interop: bridge no
@@ -2568,10 +2582,9 @@ rather than assumed:
 idempotent by construction.** `buildHooks` resolves all nine hook identities once
 per bridge and never rebuilds the object. So `d3fde91`'s re-application
 re-registers the same nine functions. Re-registration is not invocation, so a
-prop change dispatches no extra `*Move` or `*Enter`. `f2fa54d` is a straight
-unblock in our favour. `onMove` dispatches per move. An interop child whose
-pending callbacks were flushed against the block instead of the element is
-exactly the shape that strands one.
+prop change dispatches no extra `*Enter`. `f2fa54d` is a straight unblock in
+our favour: an interop child whose pending enter callback was flushed against
+the block instead of the element is exactly the shape that strands an enter.
 
 **Two upstream commits converge on decisions this repo already made
 independently**, recorded because corroboration is worth as much as a diff.
@@ -2957,10 +2970,10 @@ unchanged.
 cycle:
 
 - the saving stays >= <!-- vc:outletFloor -->15.0<!-- /vc:outletFloor --> KB
-  (today <!-- vc:outletSaving -->22.08<!-- /vc:outletSaving -->)
+  (today <!-- vc:outletSaving -->23.05<!-- /vc:outletSaving -->)
 - the Vapor outlet's own machinery over the router-without-outlet floor stays <=
   <!-- vc:outletOwnArmCeiling -->5.0<!-- /vc:outletOwnArmCeiling --> KB (today
-  <!-- vc:outletOwnArm -->4.71<!-- /vc:outletOwnArm -->)
+  <!-- vc:outletOwnArm -->4.49<!-- /vc:outletOwnArm -->)
 
 It is deliberately written to fail when a later RC erodes either. Growth in
 `DynamicFragment` or `SlotFragment` lands in the second, and that failure is a
@@ -3246,8 +3259,8 @@ upstream clarity buys us nothing here, and bytes are not free.
 - `vaporChamberWire()`, a build-only Vite plugin that wires Vue into an app
   importing the root with no import changed.
 - `vcCommandVapor`, `v-vc:command` for Vapor components, reading its binding
-  getter at dispatch. The `renderEffect` a tracked port needs would break the
-  subpath on Vue 3.5.
+  getter at dispatch. Tracking it would cost an effect per mounted control
+  (corrected in the rc.11 cycle, see appendix C).
 - A marker guard on a Vapor consumer's Vite bundle. It asserts no vDOM binding,
   one chamber module, and a runtime probe that stays a bare `import("vue")` even
   with Vue bundled.
@@ -3980,6 +3993,63 @@ Every vapor-chamber export row is unchanged.
 - Server and client must be on the same RC: rc.10 changed the markers the server
   writes around a slot fallback and inside a Vapor `<TransitionGroup>`.
 
+#### rc.11 (Oct 10): no code change, and two of our own claims that no real mount had tested
+
+**Expected.** Interop, v-show and Transition carried the weight, and a
+feature landed: a vDOM `<Transition>` around Vapor slot content. The
+forecast was the rc.10 one, inherited improvements and no code change. It
+held. The reading surfaced two defects of ours, neither caused by rc.11.
+
+**Landed.** 65 commits in `v3.6.0-rc.10..v3.6.0-rc.11`, all read in full at
+source. No file under `packages/reactivity/src` changed. The peer range
+narrows to `>=3.5.0 || >=3.6.0-rc.11`. Both Vapor examples repinned and
+rebuilt.
+
+**Decided: no code change, three tests.** Seven probes ran on rc.10 before
+the bump and on rc.11 after it. Three became committed tests, each failing
+on rc.10 in a clean worktree and passing on rc.11:
+
+- `v-vc-command` on a component follows its root through an HMR rerender,
+  in a Vapor and in a vDOM parent (`e6f62259`). On rc.10 the new root was
+  dead and the replaced one still dispatched. Dev only.
+- The transition bridge on a vDOM `<Transition>` around Vapor slot content
+  dispatches its six commands (`e656425e`). On rc.10 it dispatched none.
+- A `useCommand().on()` listener in a vDOM component nested in Vapor
+  components stops when a vDOM `v-if` removes them (`daf7004e`). On rc.10
+  both listeners kept firing and neither scope was disposed.
+
+**Measured.** The reactivity dist is byte-identical to rc.10 once the
+version string is masked, so the A/B had nothing to measure. Sizes:
+
+- the Vapor outlet's own machinery 4.71 -> 4.47 KB brotli against its 5.0
+  ceiling, because rc.11 tree-shakes the KeepAlive input scope (`936d1d70`)
+- its saving over interop 22.08 -> 23.08
+- the hand-wired `createVaporApp` minimum 16.2 -> 16.6 KB brotli
+- `+ vaporInteropPlugin` 27.9 -> 28.9
+
+**Still watching.**
+
+- Fixed after the cycle: `v-vc-command=""` dispatched. rc.11 compiles the
+  empty expression to a getter returning `undefined`, which passed the check
+  that refuses a bare `v-vc-command`, so Vapor dispatched the action
+  "undefined", and vDOM dispatched `undefined` for both forms. A press with an
+  empty action now does nothing on both renderers, as Vue's own `@click=""`
+  does, and an action set after mount still works
+  (tests/directive-empty-action.test.ts).
+- Fixed after the cycle: the bridge's `*Move` never fired. No Vue component
+  has an `onMove` hook, in 3.5 or any 3.6 tag checked, so `v-bind="t"` passed
+  it on as a dead fallthrough listener, and Vue warned on a fragment child.
+  Every test had called the hook by hand. The bridge now keeps `onMove` out of
+  a spread, and the app calls it (tests/vue-no-move-hook.test.ts). Three
+  entries above said otherwise. They are corrected, and appendix C keeps them
+  as they stood.
+- vuejs/core#15727, the vDOM out-in throw on a synchronous `done()`, is not
+  fixed in rc.11.
+- A `vc-loading` re-assert after a bound update still has no public hook:
+  rc.11's `<select>` re-sync queue (`db5ab78a`) is internal.
+
+The cycle record is docs/rc-alignment-log.md, section 36.
+
 ---
 
 
@@ -4172,16 +4242,7 @@ namespace could not be reached", and names `configureVue()`.
 
 #### From 19 Core Guarantee
 
-- **<!-- vc:sizeCore -->4.7<!-- /vc:sizeCore --> KB brotli dispatch core** - measured ([BUNDLE-SIZES.md](./BUNDLE-SIZES.md)); this line read "~4 KB gzipped" while every other size in this document is brotli, which is a different number for the same artifact
-
-#### From 21 File Map
-
-The per-file test inventory that used to sit here was removed rather than
-re-synced. It drifted four times (13 -> 40 -> 47 -> 85 files) because it is a
-third copy of something two other places already track, and the project has
-made this call before: v1.10.0 deleted the README's size table instead of
-re-syncing it, and v1.11.0 did the same to `ROADMAP.md`'s version table. A
-third copy is a third thing to keep true.
+- **<!-- vc:sizeCore@1.26 -->3.7<!-- /vc:sizeCore@1.26 --> KB brotli dispatch core** - measured ([BUNDLE-SIZES.md](./BUNDLE-SIZES.md)); this line read "~4 KB gzipped" while every other size in this document is brotli, which is a different number for the same artifact
 
 #### From 17 Comparison (its peer sizes were never verified here, and naming is opt-in, not enforced)
 
@@ -4191,7 +4252,7 @@ third copy is a third thing to keep true.
 | Build required | no | no | no | no (IIFE available) |
 | Reactivity model | server-driven | x-data | hypermedia | Vue Vapor signals |
 | Transport | AJAX/WS (built-in) | none | AJAX (built-in) | plugin |
-| Bundle size | ~50KB | ~15KB | ~14KB | <!-- vc:sizeCore -->4.7<!-- /vc:sizeCore --> KB brotli core |
+| Bundle size | ~50KB | ~15KB | ~14KB | <!-- vc:sizeCore@1.26 -->3.7<!-- /vc:sizeCore@1.26 --> KB brotli core |
 | TypeScript | partial | no | no | full |
 | Vue DevTools | no | no | no | yes |
 | Undo/redo | no | no | no | built-in |
@@ -4202,7 +4263,7 @@ third copy is a third thing to keep true.
 
 #### From 7 Comparative Analysis, the positioning table
 
-### Vue has Pinia and vue-router: positioning, stated plainly
+**Vue has Pinia and vue-router: positioning, stated plainly**
 
 Both official libraries are good and are the right default for a generic Vue SPA. This repo ships its own router and its own store anyway, so the
 justification has to stay sharp or the honest answer is "use theirs".
@@ -4222,7 +4283,7 @@ vue-router and Pinia, and these docs must keep saying so.
 
 #### From 6 Design Decisions, why no state in the bus (its first paragraph, before the reversal in A.3)
 
-### Why no state in the bus?
+**Why no state in the bus?**
 
 Every tool that owns state also owns the responsibility for invalidation, hydration, persistence,
 and synchronization. Pinia, TanStack Query, and Inertia already solve these problems well within
@@ -4231,7 +4292,7 @@ truth and a competition problem. The bus coordinates state transitions. It does 
 
 #### From 6 Design Decisions, why commandKey
 
-### Why `commandKey`?
+**Why `commandKey`?**
 
 A stable `action:target` string key enables cache invalidation integration with TanStack Query.
 It was already internal (used by the throttle plugin). Making it public is a one-line export
@@ -4260,7 +4321,7 @@ reactive state, ~40% less CPU on complex visualizations, ~100k components mounte
 
 #### From 9.5 Memory: useCommand vs defineVaporCommand (estimates, never measured)
 
-### 9.5 Memory: useCommand vs defineVaporCommand
+**9.5 Memory: useCommand vs defineVaporCommand**
 
 Each `useCommand()` call creates 2 signals (`loading`, `lastError`):
 
@@ -4315,7 +4376,7 @@ makes a stale-while-revalidate commit expressible.
 
 #### From 14.3 Dehydrate on server, rehydrate on client (the hand-written recipe, before the library's createSSRPlugin and rehydrate)
 
-### 14.3 Dehydrate on server, rehydrate on client
+**14.3 Dehydrate on server, rehydrate on client**
 
 ```ts
 // server-entry.ts
@@ -4344,7 +4405,7 @@ createVaporChamberApp(App).mount('#app')
 
 #### From 21 File Map (the map before it was completed: five modules, transitions/vapor.ts and ten router modules missing; the shared bus listed in chamber.ts)
 
-#### 21. File Map
+**21. File Map**
 
 ```
 src/
@@ -4408,7 +4469,7 @@ src/
   iife-elements.ts  - CDN entry, elements variant
   index.ts          - public ESM barrel
 
-tests/                           (<!-- vc:testFiles -->349<!-- /vc:testFiles --> files, <!-- vc:tests -->3657<!-- /vc:tests --> tests)
+tests/                           (<!-- vc:testFiles@1.26 -->189<!-- /vc:testFiles@1.26 --> files, <!-- vc:tests@1.26 -->2615<!-- /vc:tests@1.26 --> tests)
 ```
 
 The per-file test inventory that used to sit here was removed rather than
@@ -4434,7 +4495,7 @@ seconds, which is faster than reading a list that might be wrong.
 
 #### From 22 References (two replaced: Vite 7.0, and the vuejs/vue-vapor repository; Vapor lives in vuejs/core)
 
-#### 22. References
+**22. References**
 
 1. Pereira, L. F. (2026). *Empirical Validation of Cognitive-Derived Coding Constraints and
    Tokenization Asymmetries in LLM-Assisted Software Engineering*. Zenodo.
@@ -4449,7 +4510,7 @@ seconds, which is faster than reading a list that might be wrong.
 
 #### From 4.3 Build optional (unbacked: no measurement of the 30 seconds exists here)
 
-##### 4.3 Build optional
+**4.3 Build optional**
 
 Vapor Chamber ships as an ES module and as an IIFE. Load it from a CDN inside a Blade template
 and a reactive command bus runs in under 30 seconds, with no npm involved.
@@ -4462,30 +4523,28 @@ receive **3.3x more LLM output per input token** than functions that violate tha
 function sizes throughout the codebase, and handler design encourages small, single-responsibility
 functions: one action, one function, one outcome.
 
-### D. Removed sections
+#### From B. The Vue 3.6 alignment log (onMove, corrected in the rc.11 cycle)
 
-#### 18. Roadmap
+Vue has no `onMove` hook (tests/vue-no-move-hook.test.ts). The beta.13 entry
+read Vue's "animate vapor component moves in TransitionGroup" as a hook
+firing. As they stood:
 
-This section used to carry a per-version feature list. It was a frozen snapshot
-from the v1.0 era and had stopped being true. Twelve minor releases later, it
-still presented **v0.8.0** and **v0.9.0** as *upcoming* and **v1.0.0** as
-*current*. It listed `createEchoBridge` as unshipped when it landed in
-**v1.5.0**.
+> **beta.13** (May): `onMove` fires for Vapor and VDOM component moves in a Vapor
+> `<TransitionGroup>`, having been silently skipped.
+>
+> beta.14: Transitions: `onMove` suppressed for v-show-hidden children.
+>
+> rc.5: prop change dispatches no extra `*Move` or `*Enter`. `f2fa54d` is a straight
+> unblock in our favour. `onMove` dispatches per move. An interop child whose
+> pending callbacks were flushed against the block instead of the element is
+> exactly the shape that strands one.
 
-Removed rather than re-synced, on the rule the old file map applied (part C,
-"From 21 File Map"): a third copy is a third thing to keep true. Forward-looking
-plans and the version policy live in [`ROADMAP.md`](../ROADMAP.md). What each
-release actually changed lives in [`CHANGELOG.md`](../CHANGELOG.md). Per-release
-Vue alignment detail is part B's table above.
+#### From B. The Vue 3.6 alignment log (the rc.8 entry, corrected in the rc.11 cycle)
 
-#### 20. Implementation Status
+A tracked Vapor directive needs no `renderEffect`: Vue's own Vapor directive
+tests use the public `watchEffect`, which Vue 3.5 also has. What decides against
+tracking is its cost, one effect per mounted control. As it stood:
 
-Removed for the same reason as section 18 above, and with the same evidence. It
-was headed "Implemented (v0.6.0)" / "Implemented (v1.0)". Its "Remaining" list
-still had `createEchoBridge` (shipped v1.5.0) and the `vapor-chamber/rx` bridge.
-The shipped `vapor-chamber/observable` subpath superseded that bridge: it is the
-`Symbol.observable` interop RxJS reads natively through `from()`.
-
-Per-module status with test coverage now lives in exactly one place:
-[`ROADMAP.md`](../ROADMAP.md)'s feature-matrix appendix, beside the generated
-[`docs/COVERAGE.md`](./COVERAGE.md).
+> `vcCommandVapor`, `v-vc:command` for Vapor components, reading its binding
+> getter at dispatch. The `renderEffect` a tracked port needs would break the
+> subpath on Vue 3.5.

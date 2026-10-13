@@ -1,4 +1,4 @@
-/** The batching bridge: a dispatch's abort settles that dispatch, before or after the flush (plan 1.27 section 10.6). Rationale at the end. */
+/** The batching bridge: a dispatch's abort settles that dispatch, before or after the flush (log s35.168). Rationale at the end. */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createAsyncCommandBus } from '../src/command-bus';
 import { createBatchingHttpBridge } from '../src/transports';
@@ -99,7 +99,7 @@ describe('an aborted dispatch', () => {
     expect(posts.map((x) => x.aborted)).toEqual([true]);
   });
 
-  it('without AbortSignal.any: the command settles at once, the request keeps the bridge signal', async () => {
+  it('without AbortSignal.any: the command settles at once, and the request of one is cancelled too (log 36.13)', async () => {
     const any = AbortSignal.any;
     (AbortSignal as { any?: unknown }).any = undefined;
     try {
@@ -111,7 +111,7 @@ describe('an aborted dispatch', () => {
       setTimeout(() => ac.abort(), 5);
       expect(code(await p)).toBe('core:aborted:dispatch');
       await new Promise((r) => setTimeout(r, 40));
-      expect(posts.map((x) => x.aborted)).toEqual([false]);
+      expect(posts.map((x) => x.aborted)).toEqual([true]);
     } finally {
       AbortSignal.any = any;
     }

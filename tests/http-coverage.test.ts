@@ -5,7 +5,7 @@
  *  - readCsrfFromDom hidden-input fallback
  *  - refreshCsrfOnce coalescing + failure paths
  *  - parseRetryAfter HTTP-date branch
- *  - combineSignals AbortSignal.any fallback
+ *  - _combineSignals AbortSignal.any fallback
  *  - sleepMs abort path
  *  - doClientFetch json content-type fallback
  *  - clientRequest 419 CSRF retry + session-expiry-after-retry
@@ -247,10 +247,10 @@ describe('parseRetryAfter - HTTP-date Retry-After', () => {
 });
 
 // ---------------------------------------------------------------------------
-// combineSignals - AbortSignal.any fallback
+// _combineSignals - AbortSignal.any fallback
 // ---------------------------------------------------------------------------
 
-describe('combineSignals - fallback without AbortSignal.any', () => {
+describe('_combineSignals - fallback without AbortSignal.any', () => {
   it('uses the manual fallback and still propagates a user abort', async () => {
     const realAny = (AbortSignal as any).any;
     // Force the fallback branch by removing AbortSignal.any.
@@ -265,7 +265,7 @@ describe('combineSignals - fallback without AbortSignal.any', () => {
         }),
       );
 
-      // A user signal present means combineSignals(userSignal, timeoutSignal) runs.
+      // A user signal present means _combineSignals(userSignal, timeoutSignal) runs.
       const promise = postCommand('/api/cmd', {}, { signal: ctrl.signal });
       ctrl.abort();
 
@@ -282,6 +282,9 @@ describe('combineSignals - fallback without AbortSignal.any', () => {
 
 describe('sleepMs - abort during retry backoff', () => {
   it("rejects the backoff sleep with the caller's abort code when the user signal fires mid-wait", async () => {
+    // A draw under 1/200 makes the first backoff 0 ms, which
+    // advanceTimersByTimeAsync(0) runs before the abort: pinned mid-range.
+    using _random = vi.spyOn(Math, 'random').mockReturnValue(0.5);
     const ctrl = new AbortController();
     // A 503 is re-sent for any method, so the loop schedules sleepMs(backoff,
     // userSignal); the abort lands while that sleep is pending.
@@ -294,11 +297,13 @@ describe('sleepMs - abort during retry backoff', () => {
     // Let the first fetch reject and enter the backoff sleep.
     await vi.advanceTimersByTimeAsync(0);
     ctrl.abort(); // fires the sleepMs abort listener -> clearTimeout + reject
+    expect(vi.getTimerCount()).toBe(0); // the sleep ended at the abort, not at its timer
     await vi.runAllTimersAsync();
     await assertion;
   });
 
   it('the same after a thrown failure: a GET with no response, aborted in its backoff', async () => {
+    using _random = vi.spyOn(Math, 'random').mockReturnValue(0.5);
     const ctrl = new AbortController();
     (globalThis.fetch as any).mockRejectedValue(new TypeError('Failed to fetch'));
 
@@ -308,6 +313,7 @@ describe('sleepMs - abort during retry backoff', () => {
 
     await vi.advanceTimersByTimeAsync(0);
     ctrl.abort();
+    expect(vi.getTimerCount()).toBe(0);
     await vi.runAllTimersAsync();
     await assertion;
     expect((globalThis.fetch as any).mock.calls.length).toBe(1);
