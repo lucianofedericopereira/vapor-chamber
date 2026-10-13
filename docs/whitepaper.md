@@ -1891,7 +1891,7 @@ src/
   iife-elements.ts  - CDN entry, elements variant
   index.ts          - public ESM barrel
 
-tests/                           (<!-- vc:testFiles -->383<!-- /vc:testFiles --> files, <!-- vc:tests -->3932<!-- /vc:tests --> tests)
+tests/                           (<!-- vc:testFiles -->383<!-- /vc:testFiles --> files, <!-- vc:tests -->3931<!-- /vc:tests --> tests)
 ```
 
 Where the current numbers live, both generated and CI-verified fresh:

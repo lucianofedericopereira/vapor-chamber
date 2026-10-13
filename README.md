@@ -43,7 +43,7 @@ so each action has one place to read and to test.
 - **Vue <!-- vc:vueAligned -->3.6.0-rc.11<!-- /vc:vueAligned --> aligned**: signals, `onScopeDispose`, `getCurrentScope`, alien-signals internals. Tracked per release in the [CHANGELOG](CHANGELOG.md)
 - **No runtime dependency**. `alien-signals` is an optional peer, installed only by apps that use the `vapor-chamber/alien-signals` connector. Unimported modules tree-shake to zero
 - **ESM-only**, plus three IIFE `<script>` drop-ins for no-bundler pages
-- **<!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% coverage on all four axes** - statements, branches, functions and lines, across **<!-- vc:tests -->3932<!-- /vc:tests --> tests** in <!-- vc:testFiles -->383<!-- /vc:testFiles --> files ([full table](docs/COVERAGE.md)). Every branch in the measured surface is taken by a test
+- **<!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% coverage on all four axes** - statements, branches, functions and lines, across **<!-- vc:tests -->3931<!-- /vc:tests --> tests** in <!-- vc:testFiles -->383<!-- /vc:testFiles --> files ([full table](docs/COVERAGE.md)). Every branch in the measured surface is taken by a test
 
 ## Contents
 
@@ -1411,7 +1411,7 @@ Three `<script>`-tag drop-ins. Pick by audience, not feature checklist.
 
 | Variant | Audience | Min | Brotli | Gzip |
 |---|---|--:|--:|--:|
-| **core** | Sprinkled JS on server-rendered pages (Blade, Rails, Django, WordPress). You dispatch user actions to a backend over HTTP. | <!-- vc:sizeIifeCoreRaw -->32.9<!-- /vc:sizeIifeCoreRaw --> KB | <!-- vc:sizeIifeCore -->10.4<!-- /vc:sizeIifeCore --> KB | <!-- vc:sizeIifeCoreGzip -->11.5<!-- /vc:sizeIifeCoreGzip --> KB |
+| **core** | Sprinkled JS on server-rendered pages (Blade, Rails, Django, WordPress). You dispatch user actions to a backend over HTTP. | <!-- vc:sizeIifeCoreRaw -->32.9<!-- /vc:sizeIifeCoreRaw --> KB | <!-- vc:sizeIifeCore -->10.4<!-- /vc:sizeIifeCore --> KB | <!-- vc:sizeIifeCoreGzip -->11.4<!-- /vc:sizeIifeCoreGzip --> KB |
 | **elements** | Embeddable widgets (chat bubbles, checkout buttons, third-party drop-ins). You ship a `<vc-widget>` custom element. | <!-- vc:sizeIifeElementsRaw -->34.6<!-- /vc:sizeIifeElementsRaw --> KB | <!-- vc:sizeIifeElements -->10.9<!-- /vc:sizeIifeElements --> KB | <!-- vc:sizeIifeElementsGzip -->12.0<!-- /vc:sizeIifeElementsGzip --> KB |
 | **full** | SPAs that grew big enough to want everything (realtime, undo/redo, persistence, full Vapor surface). | <!-- vc:sizeIifeFullRaw -->47.7<!-- /vc:sizeIifeFullRaw --> KB | <!-- vc:sizeIifeFull -->15.0<!-- /vc:sizeIifeFull --> KB | <!-- vc:sizeIifeFullGzip -->16.5<!-- /vc:sizeIifeFullGzip --> KB |
 
@@ -1532,7 +1532,7 @@ Everything else is optional and tree-shaken when unimported.
    form.ts, schema.ts, devtools.ts, directives.ts, vite-hmr.ts
 ```
 
-**Coverage:** <!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% statements, <!-- vc:covBranches -->100.0<!-- /vc:covBranches -->% branches, <!-- vc:covFunctions -->100.0<!-- /vc:covFunctions -->% functions, <!-- vc:covLines -->100.0<!-- /vc:covLines -->% lines across **<!-- vc:tests -->3932<!-- /vc:tests --> tests**
+**Coverage:** <!-- vc:covStatements -->100.0<!-- /vc:covStatements -->% statements, <!-- vc:covBranches -->100.0<!-- /vc:covBranches -->% branches, <!-- vc:covFunctions -->100.0<!-- /vc:covFunctions -->% functions, <!-- vc:covLines -->100.0<!-- /vc:covLines -->% lines across **<!-- vc:tests -->3931<!-- /vc:tests --> tests**
 (<!-- vc:testFiles -->383<!-- /vc:testFiles --> files). Per-file table:
 [docs/COVERAGE.md](docs/COVERAGE.md). Run `npm run test:coverage` for live numbers.
 
