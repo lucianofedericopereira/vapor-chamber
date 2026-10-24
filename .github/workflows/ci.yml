@@ -28,7 +28,7 @@ jobs:
       - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: '22'
+          node-version: '24'
           cache: npm
       - run: npm ci --workspaces=false --include-workspace-root
       - run: npm run typecheck
@@ -43,9 +43,7 @@ jobs:
       - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: '22'
-          # Astro's engines floor can pass the runner's cached 22.x.
-          check-latest: true
+          node-version: '24'
           cache: npm
       - run: npm ci
       - run: npm run build
@@ -59,7 +57,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        node: ['22', '24']
+        node: ['24']
     steps:
       - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -76,7 +74,7 @@ jobs:
       - run: npm run loc
       
       - name: Auto-update documentation (Sizes & Coverage)
-        if: github.event_name == 'push' && matrix.os == 'ubuntu-latest' && matrix.node == '22'
+        if: github.event_name == 'push' && matrix.os == 'ubuntu-latest' && matrix.node == '24'
         run: |
           # Generate new metrics
           npm run size:doc
@@ -110,7 +108,7 @@ jobs:
       - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: '22'
+          node-version: '24'
           cache: npm
       - run: npm ci --workspaces=false --include-workspace-root
       # The headless shell only, with its system libraries.
@@ -128,7 +126,7 @@ jobs:
       - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: '22'
+          node-version: '24'
           cache: npm
       - run: npm ci --workspaces=false --include-workspace-root
       - run: set -o pipefail; npx vitest bench --run tests/perf.bench.ts --reporter=default 2>&1 | tee bench.txt
@@ -190,7 +188,7 @@ jobs:
       - uses: actions/checkout@9f698171ed81b15d1823a05fc7211befd50c8ae0 # v6.0.3
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: '22'
+          node-version: '24'
           cache: npm
       - run: npm ci --workspaces=false --include-workspace-root
 

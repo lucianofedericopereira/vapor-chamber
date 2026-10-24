@@ -7,7 +7,7 @@ Thanks for considering a contribution.
 ## Setup
 
 You need:
-- Node.js >= 22.12.0 (matches `engines.node` in [package.json](./package.json))
+- Node.js >= 24.5.0 (matches `engines.node` in [package.json](./package.json))
 - npm 10+ (ships with the Node version above)
 
 ```bash
@@ -171,8 +171,8 @@ rather than what it does, which a test cannot:
 - `stamp-docs --check`: fails on a stale generated number, or on a pinned range
   no version satisfies or that starts above the current version.
 
-CI runs these guards and the typecheck on Node 22, on Linux. It runs the build,
-both test projects and the size check on Node 22 and 24, on Linux and macOS
+CI runs these guards and the typecheck on Node 24, on Linux. It runs the build,
+both test projects and the size check on Node 24, on Linux and macOS
 (.github/workflows/ci.yml). The split is deliberate: every check on every cell
 takes too long and races on GitHub. A push that changes only files no check
 reads (`paths-ignore` in ci.yml: the funding file, the issue and PR templates)
@@ -185,7 +185,7 @@ Run `test:vapor` after `build`, since its size guard measures a real production
 bundle.
 
 The `examples/` workspaces sit outside that gate. They build against the
-working tree on demand. `examples/exo-astro` needs Node >= 22.23.4 (Astro 7.4's own
+working tree on demand. `examples/exo-astro` needs Node >= 24.5.0 (the library's
 floor). Its directive scanner is covered by the repo suite, so `npm test` from
 the root does exercise that example's code.
 

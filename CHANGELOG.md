@@ -248,6 +248,7 @@ All notable changes to this project will be documented in this file.
 - Removed `createSSRPlugin`, `rehydrate`, `rehydrateAsync`, `SSRPlugin`, `SSRPluginOptions`, `RehydrateOptions`, `DehydratedCommand` and the `ssr:invalid:bus` failure. State a plain handler built moves into a store.
 - Changed the example Laravel controller to run the middleware an action declares (`#[Middleware]` or `HasMiddleware`), as a route runs a controller's. Rate limits are an action's `throttle` middleware: the example config's `rate_limits` map is gone. Copy the controller again.
 - Changed the example Laravel controller to answer a command from an old page with `{ redirect }`: the page sends its build as `X-App-Version`, the controller compares it with `config('vapor-chamber.app_version')` and sends back the page's own path, which the page's `onRedirect` loads. A server with no `app_version` checks nothing. Copy the controller and `config/vapor-chamber.php` again, and send the header from the page.
+- Changed the Node floor to 24.5.0 (`engines.node` `>=22.12.0` -> `>=24.5.0`): the stores and the outbox shared across tabs, and `exclusive` across tabs, take Web Locks from `navigator.locks`, which Node has from 24.5.0. CI runs Node 24 only. Migrate: run Node 24.5.0 or later.
 
 ## v1.31.0 - 2026-10-13
 

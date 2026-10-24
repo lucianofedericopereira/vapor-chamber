@@ -58,8 +58,8 @@ reached. A display bound before its store is a development warning
 
 ## Run
 
-Needs **Node 22.23.4 or later**, which is Astro 7.4's floor. The library's own
-floor is 22.12.
+Needs **Node 24.5.0 or later**, the library's floor. Astro 7.4's own floor,
+22.23.4, is below it.
 
 ```bash
 cd examples/exo-astro
