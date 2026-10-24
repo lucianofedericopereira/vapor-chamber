@@ -185,7 +185,7 @@ Run `test:vapor` after `build`, since its size guard measures a real production
 bundle.
 
 The `examples/` workspaces sit outside that gate. They build against the
-working tree on demand. `examples/exo-astro` needs Node >= 22.12 (Astro 7's own
+working tree on demand. `examples/exo-astro` needs Node >= 22.23.4 (Astro 7.4's own
 floor). Its directive scanner is covered by the repo suite, so `npm test` from
 the root does exercise that example's code.
 

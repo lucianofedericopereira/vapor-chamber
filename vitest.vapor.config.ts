@@ -46,6 +46,8 @@ export default defineConfig({
       // regex is what makes that true - a string key also rewrites `vue/...`
       // (Vite's `matches()`: `=== find || startsWith(find + '/')`).
       { find: /^vue$/, replacement: WITH_VAPOR },
+      // The island-cart example imports this by package name; CI installs without the workspace self-link.
+      { find: /^vapor-chamber\/vue$/, replacement: fileURLToPath(new URL('./src/vue.ts', import.meta.url)) },
       // Tests import the router's source as `@router/...`; tsconfig.tests.json maps the same.
       { find: /^@router\//, replacement: fileURLToPath(new URL('./src/router/', import.meta.url)) },
     ],
